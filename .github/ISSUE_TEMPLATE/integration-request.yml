@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+name: Integration request
+description: An alert source or a messenger Muster should talk to.
+labels: [integration-request]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Alert source (an input that sends alerts to Muster)
+        - Destination (a messenger or another place where Alert Groups are delivered)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: The name and the version of the system.
+    validations:
+      required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: What you want to do with it through Muster, and how you do it today.
+    validations:
+      required: true
+  - type: textarea
+    id: api
+    attributes:
+      label: API documentation
+      description: Links to the documentation of the system's API, webhooks or bot interface.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Help
+      options:
+        - label: I can test the integration against a real installation of this system.

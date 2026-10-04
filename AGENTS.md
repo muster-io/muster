@@ -159,17 +159,20 @@ A false positive is fixed in the lint, never worked around in the code.
 ## Make targets
 
 The Makefile is the only entry point. Targets appear as the stories that define them land; the Makefile is
-authoritative.
+authoritative, and `make help`, its default goal, lists them. Pinned tools (golangci-lint, go-test-coverage) are built
+with the project's Go toolchain into `bin/tools/` on first use.
 
 | Target | Does | From |
 |---|---|---|
-| `make fmt` | gofmt and goimports, later oxfmt | S-001 |
-| `make lint` | golangci-lint and the licence headers; later Redocly on the spec, oxlint and translations | S-001 |
+| `make help` | list the targets | S-001 |
+| `make fmt` | gofmt and goimports through `golangci-lint fmt`, later oxfmt | S-001 |
+| `make lint` | the licence headers (`internal/tools/licensecheck`, skipping the paths listed in `NOTICE`) and golangci-lint; later Redocly on the spec, oxlint and translations | S-001 |
 | `make lint-arch` | the architecture lints | S-001 |
-| `make test`, `make test-race` | unit tests with the coverage gate; the same with the race detector | S-001 |
-| `make generate`, `make generate-check` | run every generator; fail on stale generated files | S-001, S-002 |
+| `make test`, `make test-race` | unit tests with the coverage gate of `.testcoverage.yml`; the same with the race detector | S-001 |
+| `make generate`, `make generate-check` | run every generator (none before S-002); fail on stale generated files | S-001, S-002 |
 | `make build` | the SPA, then `bin/muster` with version and commit | S-001, S-002 |
-| `make ci` | the pull-request tier, locally | S-001 |
+| `make ci` | the pull-request tier, locally: `lint`, `lint-arch`, `test-race`, `build`, and what later stories add | S-001 |
+| `make clean` | remove `bin/`: the binary, the coverage profile and the installed tools | S-001 |
 | `make licenses` | the dependency licence check | S-002 |
 | `make helm-check`, `make compose-check` | render and validate the chart; check the compose example | S-003 |
 | `make dev-db`, `make dev` | the development PostgreSQL; PostgreSQL, build and `muster dev` | S-004 |

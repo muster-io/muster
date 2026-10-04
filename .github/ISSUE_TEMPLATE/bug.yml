@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+name: Bug
+description: Something in Muster does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Remove secrets, tokens and URLs that carry them from everything you paste below.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, including error messages.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What should have happened instead, and where it is documented if you know.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps, configuration or Alertmanager payload that shows the problem.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Muster version
+      description: The output of `muster version`.
+      placeholder: muster 0.0.0-dev (commit 0123456789ab)
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: How Muster runs (Helm chart, docker-compose, binary), and the versions of PostgreSQL, Alertmanager and the messenger involved.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log lines of Muster.
+      render: text

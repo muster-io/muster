@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright The Muster Authors
 -- Reverts 0001_init.up.sql. Dropping a partitioned table drops every partition Muster created at runtime.
 -- Downgrades are not supported in production (back up before upgrading); this file exists for the
 -- `up -> down -> up` acceptance check and for development.

@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+name: Feature
+description: A change in Muster's behaviour you would like to see.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The planned work is described in the roadmap of README.md and in design/prd/. Please check it first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How Muster could behave instead.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other ways to solve the problem, including what you do today.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
