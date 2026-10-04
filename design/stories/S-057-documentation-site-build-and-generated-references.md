@@ -29,7 +29,7 @@ acceptance:
   - "[C-21.FR-5] The site is in English and renders Mermaid diagrams."
 verify: "make ci docs-check"
 operator_attention: true
-issue: null
+issue: 57
 ---
 
 # S-057. Documentation site, its build and the generated references

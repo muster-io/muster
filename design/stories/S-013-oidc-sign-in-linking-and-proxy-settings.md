@@ -56,7 +56,7 @@ acceptance:
   - "[C-03.FR-17] docs/sign-in/oidc-keycloak.md covers the Keycloak client, the groups mapper and claim, both redirect URIs, allowing `offline_access` and what happens without it, and local users with TOTP for an IdP Muster cannot reach."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 13
 ---
 
 # S-013. OIDC sign-in, account linking, background re-checks and the proxy settings (BE)

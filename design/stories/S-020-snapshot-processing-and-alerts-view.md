@@ -60,7 +60,7 @@ acceptance:
   - "[C-01.FR-13] The fake Alertmanager reproduces each Alertmanager fact F-033 to F-053 that processing relies on, and a table-driven test runs every one of them through processing with a manual clock."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 20
 ---
 
 # S-020. Snapshot processing: Alerts, resolves, Gone, truncation, Continuation, staleness bookkeeping and the Alerts view (BE)

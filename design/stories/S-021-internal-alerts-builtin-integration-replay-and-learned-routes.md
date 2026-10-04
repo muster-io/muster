@@ -42,7 +42,7 @@ acceptance:
   - "[C-06.FR-19] Alerts resolved longer than `retention.alert_details` ago leave the Alerts view: the Leader deletes them in batches."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 21
 ---
 
 # S-021. Internal alert mechanism, built-in Integration, replay, Integration deletion and learned Alertmanager routes (BE)

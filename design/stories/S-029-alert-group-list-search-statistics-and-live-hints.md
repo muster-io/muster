@@ -40,7 +40,7 @@ acceptance:
   - "[C-09.FR-21] Every Integration carries `open_alert_group_count`, the open Alert Groups with an Alert from it."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 29
 ---
 
 # S-029. Alert Group list, search, counts, related Alert Groups, statistics, retention and live hints (BE)

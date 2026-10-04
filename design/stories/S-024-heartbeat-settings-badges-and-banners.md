@@ -24,7 +24,7 @@ acceptance:
   - "[C-07.FR-6] With the Heartbeat on, the token dialog also shows the Heartbeat snippet with a copy button, once; with it off, the dialog says how to get it."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 24
 ---
 
 # S-024. Heartbeat settings, badges and banners (FE)

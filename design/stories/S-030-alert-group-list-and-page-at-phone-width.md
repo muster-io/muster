@@ -45,7 +45,7 @@ acceptance:
   - "[C-09.FR-24, C-09.AC-19] In a browser 360 CSS pixels wide the list shows compact rows (status, `#N`, title, Urgent mark, duration) with the filters in a panel, the page shows the header first, and neither scrolls horizontally; a responder picks the Firing tab, opens an Alert Group and reads its Alerts and Timeline."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 30
 ---
 
 # S-030. Alert Group list and Alert Group page at phone width (FE)

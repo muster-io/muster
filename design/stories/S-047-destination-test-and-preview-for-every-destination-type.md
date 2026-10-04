@@ -38,7 +38,7 @@ acceptance:
   - "[C-16.FR-5] Every test writes one Audit log entry `destination.tested` with the source and each step's error class."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 47
 ---
 
 # S-047. Destination test and preview for every Destination type (BE)

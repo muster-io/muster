@@ -49,7 +49,7 @@ acceptance:
   - "[C-18.AC-7, C-12.FR-12] After Alice links the Telegram account `@alice_t` and no Mattermost account, an Alert Group she acknowledged shows \"Acknowledged by @alice_t\" in the Telegram Root message and \"Acknowledged by Alice Smith\" in the Mattermost one, and a Telegram Destination that mentions her for new Alert Groups mentions `@alice_t`."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 51
 ---
 
 # S-051. Account links: Telegram deep links, Mattermost codes, press attribution and Audit log (BE)

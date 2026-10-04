@@ -65,7 +65,7 @@ acceptance:
   - "[C-15.AC-11] With an events-mode outgoing webhook Destination on the Route, the running timers produce exactly one events-mode request per timer row — `ack_timeout`, `unclaimed`, `reminder`, `auto_unacknowledged`, `notices_missed`, and `reminder_answered` from \"Still on it\" — with the row's name as `event` and its loudness as `notify` (`test/e2e/timers_test.go`)."
 verify: "make ci test-integration e2e"
 operator_attention: true
-issue: null
+issue: 49
 ---
 
 # S-049. Ack timeouts, Unclaimed, Reminders, auto-unacknowledge and "Still on it" (BE)

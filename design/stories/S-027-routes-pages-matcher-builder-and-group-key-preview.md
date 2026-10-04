@@ -37,7 +37,7 @@ acceptance:
   - "[C-08.FR-1] Without `routes:write` the list and the editor are read-only: no drag handles, no \"Create route\", no suggestion actions, no Save or Delete."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 27
 ---
 
 # S-027. Routes list, Route editor, Matcher builder, Group key preview and suggestions (FE)

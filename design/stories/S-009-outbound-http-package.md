@@ -37,7 +37,7 @@ acceptance:
   - "[C-02.FR-1] With `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` set, no request goes through a proxy that the client's own settings do not name."
 verify: "make ci test-integration"
 operator_attention: false
-issue: null
+issue: 9
 ---
 
 # S-009. Outbound HTTP package with the outbound address policy and proxies (BE)

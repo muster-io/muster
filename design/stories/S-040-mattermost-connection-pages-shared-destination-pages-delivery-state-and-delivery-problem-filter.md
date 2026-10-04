@@ -51,7 +51,7 @@ acceptance:
   - "[C-08.FR-1] The Route editor shows \"Storm since HH:MM: N new Alert Groups. Destinations receive a Storm summary.\" from `Route.storm` while the Route's Storm is active."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 40
 ---
 
 # S-040. Mattermost Connection pages, shared Destination pages, delivery state and Delivery problem filter (FE)

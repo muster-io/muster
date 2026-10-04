@@ -26,7 +26,7 @@ acceptance:
   - "[C-16.FR-2] After a successful test of a Broken Destination the page shows it healthy without a reload."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 48
 ---
 
 # S-048. Test and Preview panels on the Destination page (FE)

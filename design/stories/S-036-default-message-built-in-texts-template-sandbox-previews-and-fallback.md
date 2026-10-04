@@ -56,7 +56,7 @@ acceptance:
   - "[C-12.FR-13] `muster_template_render_duration_seconds{template}` is observed for every rendered template."
 verify: "make ci test-integration"
 operator_attention: true
-issue: null
+issue: 36
 ---
 
 # S-036. Default message, built-in texts, template sandbox, previews and the Fallback template (BE)

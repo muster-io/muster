@@ -54,7 +54,7 @@ acceptance:
   - "[C-11.FR-9] An outgoing webhook has no Destination check: `checkDestination` answers 422 `check_not_supported`, and the Broken probe attempts the oldest waiting event, or — with nothing waiting — attempts the next event at once when it comes due."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 44
 ---
 
 # S-044. Outgoing webhook events mode, Signing secret, Secrets and error mapping (BE)

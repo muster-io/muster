@@ -28,7 +28,7 @@ acceptance:
   - "[C-08.FR-11] Dismissing a suggestion hides it for the calling user only; a Service account token gets 403 `service_account_not_allowed`."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 26
 ---
 
 # S-026. Group key preview and Route suggestions (BE)

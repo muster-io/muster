@@ -35,7 +35,7 @@ acceptance:
   - "[C-01.FR-15] The nightly load-test job runs the load test against `muster dev` with the fake servers, then starts the compose example, runs the load test against it and reports the peak memory working set of the Muster and PostgreSQL containers."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 4
 ---
 
 # S-004. `muster dev` with fake servers, end-to-end and load-test harness

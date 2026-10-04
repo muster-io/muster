@@ -52,7 +52,7 @@ acceptance:
   - "[C-01.FR-14] The root holds README.md with a roadmap section, CONTRIBUTING.md, CLA.md, CHANGELOG.md, NOTICE, LICENSE, CONTEXT.md and AGENTS.md, and CLAUDE.md is one line that points to AGENTS.md; issue forms exist for bugs, features, integration requests and story proposals; the pull request template has an evidence table per acceptance statement; the wiki and Discussions are off."
 verify: "make ci"
 operator_attention: true
-issue: null
+issue: 1
 ---
 
 # S-001. Go module, Makefile, CI gates, architecture lints and contributor files

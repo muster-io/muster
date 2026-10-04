@@ -58,7 +58,7 @@ acceptance:
   - "[C-01.FR-7] The nightly load test against `muster dev` brings 10,000 Alerts into 1,000 open Alert Groups with 50 webhooks per second for one minute, delivered to the fake Mattermost server, and fails when a webhook is rejected or lost, when ingestion's 99th percentile exceeds 1 s (P-44) or when the delivery latency's 95th percentile exceeds 5 s (NFR-2)."
 verify: "make ci test-integration e2e"
 operator_attention: true
-issue: null
+issue: 61
 ---
 
 # S-061. Mattermost adapter: posts, Threads, buttons, callbacks, the Delivery problem filter and the Internal alerts suggestion (BE)

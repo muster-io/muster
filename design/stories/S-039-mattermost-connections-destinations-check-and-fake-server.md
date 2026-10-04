@@ -39,7 +39,7 @@ acceptance:
   - "[C-01.FR-13] The fake Mattermost server reproduces the facts F-022 to F-032 and F-054 to F-058 one by one, and `muster dev` starts with the demo Connection \"Dev Mattermost\"."
 verify: "make ci test-integration"
 operator_attention: false
-issue: null
+issue: 39
 ---
 
 # S-039. Mattermost Connections and Destinations, the Destination check and the fake Mattermost server (BE)

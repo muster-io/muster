@@ -42,7 +42,7 @@ acceptance:
   - "[C-12.FR-12] A user target is rendered with the user's messenger username when the user has an Account link in that Destination's identity space, and with the Muster display name otherwise, which mentions nobody; the footer names users the same way."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 37
 ---
 
 # S-037. Lookup tables, Link rules and Mention settings (BE)

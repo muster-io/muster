@@ -31,7 +31,7 @@ acceptance:
   - "[C-14.AC-16] The Delivery section of an Alert Group whose Thread lost its copy shows \"Thread not attached to the post\" for that Destination."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 43
 ---
 
 # S-043. Telegram Connection pages with the step-by-step check and the Telegram Destination form (FE)

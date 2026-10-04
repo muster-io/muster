@@ -42,7 +42,7 @@ acceptance:
   - "[C-01.FR-15, C-01.AC-5] The compose example sets a memory limit on the PostgreSQL container, and PostgreSQL started from it reports the example's `shared_buffers`, `work_mem` and `max_connections` instead of its built-in defaults."
 verify: "make ci helm-check compose-check"
 operator_attention: true
-issue: null
+issue: 3
 ---
 
 # S-003. Release pipeline, container image, Helm chart and compose example

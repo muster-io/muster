@@ -38,7 +38,7 @@ acceptance:
   - "[C-03.FR-18] A user without the Permissions of these pages sees none of their navigation entries, and opening one of their addresses shows \"You do not have permission to see this page.\""
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 15
 ---
 
 # S-015. Users, OIDC settings, Organization security and Audit log pages (FE)

@@ -45,7 +45,7 @@ acceptance:
   - "[C-09.FR-25, C-09.AC-24] `GET /api/v1/live-updates` starts with `retry: 3000`, sends a `system-notices` hint within 5 seconds of a notice starting or ending and an `organization` hint after an Organization update, and closes when the session ends; the reconnect answers 401."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 12
 ---
 
 # S-012. TOTP, the TOTP policy, system notices and live updates (BE)

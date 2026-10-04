@@ -48,7 +48,7 @@ acceptance:
   - "[C-01.FR-13] The fake Alertmanager sends Heartbeat signals at an interval, on request or not at all, and reproduces F-045 and F-047, which a test runs through the Stale scan."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 23
 ---
 
 # S-023. Heartbeat endpoint, states, Leader checks, Internal alert and staleness pause (BE)

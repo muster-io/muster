@@ -42,7 +42,7 @@ acceptance:
   - "[NFR-13] `PUT /api/v1/users/{user_id}` with a stale `If-Match` answers 412 and without one 428; lists answer `next_cursor` and never use `OFFSET`."
 verify: "make ci test-integration"
 operator_attention: false
-issue: null
+issue: 11
 ---
 
 # S-011. User administration, password setup links and the Audit log (BE)

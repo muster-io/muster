@@ -24,7 +24,7 @@ acceptance:
   - "[C-19.FR-7] Without an outgoing heartbeat URL the page shows \"Set up an outgoing heartbeat so that a stopped Muster is noticed.\" with a link to Organization → Outgoing heartbeat, whose form takes the URL as a write-only secret field and the proxy form, and shows the last result."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 54
 ---
 
 # S-054. System status page and outgoing heartbeat settings (FE)

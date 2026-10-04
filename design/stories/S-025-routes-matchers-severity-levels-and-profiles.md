@@ -38,7 +38,7 @@ acceptance:
   - "[C-08.FR-12] `/metrics` exports `muster_route_info{route,name}` for every Route that is not deleted, the Default route included."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 25
 ---
 
 # S-025. Routes, Matchers, evaluation order, Severity levels and Route profiles (BE)

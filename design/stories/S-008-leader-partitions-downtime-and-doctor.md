@@ -45,7 +45,7 @@ acceptance:
   - "[C-02.FR-14, C-02.FR-15] `muster doctor` prints one line per check, takes no `--actor` and changes nothing in the database."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 8
 ---
 
 # S-008. Leader, partitions and retention, downtime recovery, clock skew and `muster doctor` (BE)

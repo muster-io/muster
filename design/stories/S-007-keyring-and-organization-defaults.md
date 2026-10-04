@@ -38,7 +38,7 @@ acceptance:
   - "[C-02.FR-7] A secret encrypted with AES-256-GCM decrypts only for the field it was written for, and the lint-5 probe finds neither the key material nor a decrypted secret in any log line or error."
 verify: "make ci test-integration"
 operator_attention: false
-issue: null
+issue: 7
 ---
 
 # S-007. Keyring, key canary, replica key records and Organization defaults (BE)

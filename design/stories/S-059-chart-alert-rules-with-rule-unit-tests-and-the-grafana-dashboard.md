@@ -30,7 +30,7 @@ acceptance:
   - "[C-19.FR-4] Every query of the dashboard uses only metrics of the catalogue, checked by `make helm-check`."
 verify: "make ci helm-check rules-test docs-check"
 operator_attention: true
-issue: null
+issue: 59
 ---
 
 # S-059. Chart alert rules with rule unit tests and the Grafana dashboard

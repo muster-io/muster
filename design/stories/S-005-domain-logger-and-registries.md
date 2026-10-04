@@ -29,7 +29,7 @@ acceptance:
   - "[C-01.FR-12] The `/metrics` handler writes `muster_build_info{version=\"…\",commit=\"…\"} 1` together with process and Go runtime metrics."
 verify: "make ci"
 operator_attention: false
-issue: null
+issue: 5
 ---
 
 # S-005. Domain logger, log event and metric registries (BE)

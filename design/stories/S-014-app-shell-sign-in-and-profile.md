@@ -52,7 +52,7 @@ acceptance:
   - "[NFR-8] Every text exists in English and Russian, Russian plural forms included, and `make lint` fails on a missing translation."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 14
 ---
 
 # S-014. Application shell, sign-in, password setup, TOTP and profile (FE)

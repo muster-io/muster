@@ -32,7 +32,7 @@ acceptance:
   - "[C-05.FR-7] Without `stored-snapshots:read` the Stored Snapshot section is not shown, and without `integrations:write` no create, edit, token or delete control is shown."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 19
 ---
 
 # S-019. Integrations list, form, token dialog, Stored Snapshot viewer and delete dialog (FE)

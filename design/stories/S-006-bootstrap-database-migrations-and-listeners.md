@@ -52,7 +52,7 @@ acceptance:
   - "[C-01.FR-13] `muster dev` runs Muster in the same process against the development database, migrating it on start."
 verify: "make ci test-integration"
 operator_attention: false
-issue: null
+issue: 6
 ---
 
 # S-006. Bootstrap settings, database connections, migrations, listeners and health (BE)

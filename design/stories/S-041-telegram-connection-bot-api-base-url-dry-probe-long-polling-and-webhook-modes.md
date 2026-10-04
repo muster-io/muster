@@ -46,7 +46,7 @@ acceptance:
   - "[C-02.FR-14] `muster doctor` prints one line per Telegram Connection with the result of its check."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 41
 ---
 
 # S-041. Telegram Connection: Bot API base URL, dry probe, long polling and webhook modes (BE)

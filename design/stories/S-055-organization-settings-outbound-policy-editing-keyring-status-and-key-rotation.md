@@ -43,7 +43,7 @@ acceptance:
   - "[C-17.FR-6] After an activation and the removal of the old key from every replica, a press on a Reminder button sent before the activation is answered \"This button has expired; use the buttons on the Alert Group's message\" (end-to-end test)."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 55
 ---
 
 # S-055. Organization settings, outbound policy editing, Keyring status and key rotation (BE)

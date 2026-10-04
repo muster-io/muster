@@ -32,7 +32,7 @@ acceptance:
   - "[C-09.FR-14] The Timeline shows the timer entries: \"Ack timeout notice {n} of 3\", \"Unclaimed\", \"Reminder {n}\", \"Still on it\", \"{count} notices missed\" and \"Unacknowledged automatically: No answer to the last two Reminders\", each with its loudness and Mentions."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 50
 ---
 
 # S-050. Route policy fields, Unclaimed filter and badge, next notice and "Still on it" (FE)

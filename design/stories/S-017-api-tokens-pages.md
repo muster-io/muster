@@ -30,7 +30,7 @@ acceptance:
   - "[C-04.FR-6] The Audit log page shows an action made with a token as \"{user} via token {name}\", and one made with a Service account token with the Service account and the token."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 17
 ---
 
 # S-017. Personal access tokens and Service accounts pages (FE)

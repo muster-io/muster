@@ -51,7 +51,7 @@ acceptance:
   - "[C-11.FR-17] `muster_delivery_attempts_total{destination,kind,outcome}`, `muster_delivery_latency_seconds{destination}` (from the receipt of the Snapshot behind a change to the adapter call) and the Leader gauge `muster_delivery_queue{destination}` are exported; every attempt writes one `delivery_attempt` line."
 verify: "make ci test-integration"
 operator_attention: false
-issue: null
+issue: 34
 ---
 
 # S-034. Delivery reconciliation, limiters, interactive path and Threads (BE)

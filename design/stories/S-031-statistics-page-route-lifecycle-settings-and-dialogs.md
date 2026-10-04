@@ -30,7 +30,7 @@ acceptance:
   - "[C-06.FR-19] The Integration's Alerts view shows the Alert Group of each Alert as `#N`, linked to its page."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 31
 ---
 
 # S-031. Statistics page, Route lifecycle settings and the delete dialog additions (FE)

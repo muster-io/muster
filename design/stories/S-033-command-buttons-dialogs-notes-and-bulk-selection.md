@@ -44,7 +44,7 @@ acceptance:
   - "[C-09.FR-24] At 360 CSS pixels the page shows the commands right under the header, the dialogs and the Note box fit the screen, and nothing scrolls horizontally."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 33
 ---
 
 # S-033. Command buttons, dialogs, Note box, bulk selection, Owner filters and Snooze durations (FE)

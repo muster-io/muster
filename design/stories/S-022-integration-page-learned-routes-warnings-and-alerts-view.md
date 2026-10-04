@@ -26,7 +26,7 @@ acceptance:
   - "[C-06.FR-19] An invalid Matcher in the filter shows the server's error under the field and keeps the previous results."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 22
 ---
 
 # S-022. Integration page: learned Alertmanager routes, warnings and Alerts view (FE)

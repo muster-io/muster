@@ -42,7 +42,7 @@ acceptance:
   - "[C-01.FR-5, NFR-13] `make lint` lints api/openapi.yaml with Redocly CLI and reports no errors, so the spec that generation reads is valid."
 verify: "make ci licenses"
 operator_attention: true
-issue: null
+issue: 2
 ---
 
 # S-002. SPA skeleton, code generation, dependency licences and security scanning

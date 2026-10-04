@@ -58,7 +58,7 @@ acceptance:
   - "[NFR-13, C-02.FR-19] Every response of the implemented operations validates against the spec in tests, every API request is counted in `muster_api_requests_total` and `muster_api_request_duration_seconds`, and an operation that no story has implemented yet answers 501 with a `Problem`."
 verify: "make ci test-integration e2e"
 operator_attention: true
-issue: null
+issue: 10
 ---
 
 # S-010. API server, local sign-in, sessions and the bootstrap Admin (BE)

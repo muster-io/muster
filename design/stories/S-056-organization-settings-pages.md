@@ -33,7 +33,7 @@ acceptance:
   - "[C-20.FR-1, C-04.FR-8] Security also edits the token grace for OIDC accounts without an offline token, in days, next to the TOTP policy of S-015."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 56
 ---
 
 # S-056. Organization settings pages (FE)

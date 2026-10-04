@@ -33,7 +33,7 @@ acceptance:
   - "[C-15.FR-12] Deleting an outgoing webhook Destination says what happens: in events mode \"Queued events will not be sent. The Signing secret and the Secrets are deleted now.\", in template mode \"Open messages get a last update, then the secrets are deleted.\""
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 46
 ---
 
 # S-046. Outgoing webhook Destination form, request builders, Secrets and Signing secret actions (FE)

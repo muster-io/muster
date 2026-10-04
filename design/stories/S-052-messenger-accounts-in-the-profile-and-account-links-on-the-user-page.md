@@ -25,7 +25,7 @@ acceptance:
   - "[C-18.FR-6] \"Unlink\" removes one of the user's own links after a confirmation; an Admin's user page lists that user's Account links with \"Remove\" and offers no way to create one."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 52
 ---
 
 # S-052. Messenger accounts in the profile and Account links on the user page (FE)

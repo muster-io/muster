@@ -44,7 +44,7 @@ acceptance:
   - "[C-19.AC-2] A Broken Mattermost Destination raises `MusterDestinationBroken`, whose Alert Group reaches another Destination through the Route of the `internal_alerts` suggestion."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 53
 ---
 
 # S-053. OIDC secret expiry alert, outgoing heartbeat, System status, runbook URLs and the metric catalogue check (BE)

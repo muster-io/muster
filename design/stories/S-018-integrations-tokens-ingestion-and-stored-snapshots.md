@@ -50,7 +50,7 @@ acceptance:
   - "[C-05.FR-5, C-05.FR-11] The snippet's route sets `repeat_interval` to `snippet.repeat_interval` and its comment explains the 5–15 minute range and that noise is controlled in Muster; docs/integrations/alertmanager.md covers one Integration per Alertmanager cluster, the receiver and route, `--dispatch.start-delay` of at least about 2.5 minutes and a persistent volume for HA pairs."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 18
 ---
 
 # S-018. Integrations, Integration tokens, the ingestion endpoint and Stored Snapshots (BE)

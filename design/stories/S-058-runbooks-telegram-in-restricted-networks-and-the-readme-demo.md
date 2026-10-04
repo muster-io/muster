@@ -39,7 +39,7 @@ acceptance:
   - "[C-01.FR-14] `make demo` records a short animation of the web UI in `muster dev` — an Alert Group arriving, acknowledged from its page and resolving — and the README and the home page of the site show it."
 verify: "make ci docs-check"
 operator_attention: true
-issue: null
+issue: 58
 ---
 
 # S-058. Runbooks, Telegram in restricted networks and the README demo

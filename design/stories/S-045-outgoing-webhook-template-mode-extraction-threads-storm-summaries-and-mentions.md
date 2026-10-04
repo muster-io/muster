@@ -44,7 +44,7 @@ acceptance:
   - "[C-15.FR-9] The documentation has template recipes for a chat with one-step threads and one with two-step threads, and for Storm summaries."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 45
 ---
 
 # S-045. Outgoing webhook template mode: extraction, threads, Storm summaries and Mentions as data (BE)

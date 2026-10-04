@@ -42,7 +42,7 @@ acceptance:
   - "[C-04.FR-8, C-03.AC-22, C-04.AC-9] For an OIDC user with an offline token, the token keeps working past the grace period while re-checks succeed, and answers 401 `oidc_recheck_required` within one `auth.oidc_recheck_interval` after the IdP refuses the user; after the next OIDC sign-in the same token works."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 16
 ---
 
 # S-016. Personal access tokens, Service accounts, token authentication and rate limits (BE)

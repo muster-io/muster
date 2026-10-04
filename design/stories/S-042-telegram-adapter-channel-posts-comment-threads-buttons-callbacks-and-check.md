@@ -58,7 +58,7 @@ acceptance:
   - "[C-14.FR-9] The documentation covers creating the bot, enabling comments, adding the bot as an admin to the channel and to the discussion group, long polling versus webhook, joining the discussion group and muting the channel for on-call people, and the limitation that a Quiet Root message rings members of the discussion group."
 verify: "make ci test-integration e2e"
 operator_attention: true
-issue: null
+issue: 42
 ---
 
 # S-042. Telegram adapter: channel posts, comment Threads, buttons, callbacks and Destination check (BE)

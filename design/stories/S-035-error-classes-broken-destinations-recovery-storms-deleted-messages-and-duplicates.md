@@ -50,7 +50,7 @@ acceptance:
   - "[C-09.FR-19, C-11.FR-14, C-11.FR-20, C-11.AC-10] An Alert Group moved to the Default route gets the final edit in the Destinations it leaves and a Quiet Publication in the Default route's Destinations; every row of the Loud/Quiet table of delivery events produces the new message, edit or nothing it names (a table-driven test)."
 verify: "make ci test-integration"
 operator_attention: false
-issue: null
+issue: 35
 ---
 
 # S-035. Error classes, Broken Destinations and recovery, Storms, deleted messages and duplicates (BE)

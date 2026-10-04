@@ -39,7 +39,7 @@ acceptance:
   - "[C-12.FR-9] Without `link-rules:write` or `lookup-tables:write` the pages are read-only: no create, edit or delete."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 38
 ---
 
 # S-038. Route message editors, Lookup tables and Link rules pages, links block (FE)

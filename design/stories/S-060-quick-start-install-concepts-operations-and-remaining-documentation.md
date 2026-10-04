@@ -39,7 +39,7 @@ acceptance:
   - "[C-21.FR-5] Every new page is in English and draws its diagrams as Mermaid."
 verify: "make ci docs-check"
 operator_attention: false
-issue: null
+issue: 60
 ---
 
 # S-060. Remaining documentation sections: Quick start, Install, Alertmanager, Sign-in, Concepts and Operations

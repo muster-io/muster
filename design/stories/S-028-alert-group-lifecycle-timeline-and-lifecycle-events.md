@@ -57,7 +57,7 @@ acceptance:
   - "[C-09.FR-12] Reopen window and Grace period ends are timer rows that any replica claims; after downtime each overdue one fires once."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 28
 ---
 
 # S-028. Alert Group lifecycle: grouping, state machine, system transitions, Timeline and lifecycle events (BE)
