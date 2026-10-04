@@ -34,8 +34,16 @@ lint: $(GOLANGCI_LINT) ## Check licence headers and run golangci-lint
 	$(GO) run ./internal/tools/licensecheck
 	$(GOLANGCI_LINT) run ./...
 
+# Rules 1-4 on the tree, the fixtures of all eight rules with the rule 5 probes, then rules 6-8 on the tree. Every
+# step runs even when an earlier one fails, so one run names every broken rule.
 lint-arch: $(GOLANGCI_LINT) ## Run the architecture lints
-	$(GOLANGCI_LINT) run --enable-only=depguard,forbidigo ./...
+	@failed=0; \
+	for step in "$(GO) run -tags lint ./cmd/muster-archlint" \
+		"GOLANGCI_LINT=$(abspath $(GOLANGCI_LINT)) $(GO) test -tags lint -count=1 ./internal/archlint/..." \
+		"$(GOLANGCI_LINT) run --enable-only=depguard,forbidigo ./..."; do \
+		echo "$$step"; sh -c "$$step" || failed=1; \
+	done; \
+	exit $$failed
 
 test: $(GO_TEST_COVERAGE) ## Run unit tests with the coverage gate
 	@mkdir -p $(BIN)
