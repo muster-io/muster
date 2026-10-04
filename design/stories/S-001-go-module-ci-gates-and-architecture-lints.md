@@ -20,6 +20,10 @@ files_touched:
   - internal/archlint/secretleak.go
   - internal/archlint/archlint_test.go
   - internal/archlint/testdata/**
+  - internal/tools/licensecheck/main.go
+  - internal/tools/licensecheck/main_test.go
+  - design/db/migrations/0001_init.up.sql
+  - design/db/migrations/0001_init.down.sql
   - Makefile
   - .golangci.yml
   - .testcoverage.yml
@@ -95,7 +99,10 @@ issue: 1
 - **Licence header** (C-01.FR-2, ADR-0001): every `*.go`, `*.sql`, `*.ts`, `*.tsx`, `*.js`, `*.mjs`, `*.css`, `*.sh`,
   `Makefile`, `Dockerfile`, chart template and workflow file starts with `SPDX-License-Identifier: AGPL-3.0-only` and
   `Copyright The Muster Authors`. Markdown, JSON, lock files, generated files and fixtures are exempt; third-party files
-  keep their own header and are excluded by path, and NOTICE lists those paths.
+  keep their own header and are excluded by path, and NOTICE lists those paths. The check is
+  `internal/tools/licensecheck`, run by `make lint`; it reads the excluded paths from NOTICE, so the list has one
+  home. The designed migration under `design/db/migrations/` is SQL that S-006 moves unchanged into the binary, so it
+  gets the header now (a comment only; the schema does not change).
 - **Architecture lints** (ADR-0016), code behind the `lint` build tag:
 
   | # | Rule | Mechanism |
@@ -106,7 +113,7 @@ issue: 1
   | 4 | HTTP clients and transports only in `internal/outbound` | Go analyzer: `http.Client` or `http.Transport` values, `http.DefaultClient`, `http.Get`, `http.Post`, `http.Head`, `http.PostForm` outside `internal/outbound`, `internal/fakes`, `internal/devmode`, the load test `test/load`, the generated client `pkg/apiclient` and tests |
   | 5 | No known secret value in a log line or returned error | A test harness (`go test -tags lint ./internal/archlint/...`) with probes that push known secrets through code paths and scan logs and errors; each later story registers probes for its paths |
   | 6 | `context.Background()` only in `cmd/`, the wiring packages `internal/runtime` and `internal/cli`, the load test `test/load/main.go`, and tests | `forbidigo` with path exceptions |
-  | 7 | Logging only through the domain logger | `depguard` denies `log` and `log/slog` outside `internal/logging`; `forbidigo` denies `fmt.Print*` and direct writes to `os.Stdout`/`os.Stderr` outside `internal/logging`, `internal/cli`, `internal/devmode` (the addresses `muster dev` prints) and `test/load` (its report) |
+  | 7 | Logging only through the domain logger | `depguard` denies `log` and `log/slog` outside `internal/logging`; `forbidigo` denies `fmt.Print*` and direct writes to `os.Stdout`/`os.Stderr` outside `internal/logging`, `internal/cli`, `internal/devmode` (the addresses `muster dev` prints), `test/load` (its report), and the build tooling that is never part of the binary and prints its own report: `cmd/muster-archlint` and `internal/tools` |
   | 8 | Only Prometheus-compatible `le` histograms | `forbidigo` denies the `vmrange` histogram constructors of VictoriaMetrics/metrics (`NewHistogram`, `GetOrCreateHistogram` and the `Set` methods of the same names) |
 
 - **Coverage gate** (C-01.FR-8): `.testcoverage.yml` sets 95 % for `internal/groups`, `internal/routing`,

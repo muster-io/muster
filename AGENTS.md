@@ -151,7 +151,7 @@ The full table, with every domain package and the list of generated paths, is
 | 4 | an `http.Client` or `http.Transport`, `http.DefaultClient` or `http.Get`/`Post`/`Head`/`PostForm` is used outside `internal/outbound` (fakes, dev mode, the load test, the generated client and tests excepted) |
 | 5 | a known secret value reaches a log line or a returned error |
 | 6 | `context.Background()` is used outside `cmd/`, `internal/runtime`, `internal/cli`, `test/load/main.go` and tests |
-| 7 | `log`, `log/slog`, `fmt.Print*` or direct writes to stdout and stderr appear outside `internal/logging` (`internal/cli`, `internal/devmode` and `test/load` may print) |
+| 7 | `log`, `log/slog`, `fmt.Print*` or direct writes to stdout and stderr appear outside `internal/logging` (`internal/cli`, `internal/devmode`, `test/load` and the build tooling `cmd/muster-archlint` and `internal/tools` may print) |
 | 8 | a VictoriaMetrics `vmrange` histogram is constructed; only Prometheus `le` histograms are allowed |
 
 A false positive is fixed in the lint, never worked around in the code.
