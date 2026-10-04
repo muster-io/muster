@@ -11,8 +11,10 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -30,10 +32,16 @@ var (
 	httpFuncs    = []string{"Get", "Post", "Head", "PostForm"}
 )
 
-// checkGo runs rule 3 (messenger sends and edits) and rule 4 (HTTP clients and transports) over the non-test files
-// of the module, the code behind the lint build tag included.
+// checkGo runs the Go part of rule 2 (imports of the generated groups queries), rule 3 (messenger sends and edits)
+// and rule 4 (HTTP clients and transports) over the non-test files of the module, the code behind the lint build tag
+// included.
 func checkGo(root string, cfg Config) ([]Diagnostic, error) {
-	pkgs, err := packages.Load(&packages.Config{Mode: loadMode, Dir: root, BuildFlags: []string{"-tags=lint"}}, "./...")
+	pkgs, err := packages.Load(&packages.Config{
+		Mode:       loadMode,
+		Dir:        root,
+		Env:        append(os.Environ(), "GOWORK=off"),
+		BuildFlags: []string{"-tags=lint"},
+	}, "./...")
 	if err != nil {
 		return nil, fmt.Errorf("load packages: %w", err)
 	}
@@ -58,6 +66,9 @@ func checkGo(root string, cfg Config) ([]Diagnostic, error) {
 				continue
 			}
 			c := &goFile{pkg: p, rel: rel}
+			if !inDir(rel, cfg.GroupsDir) {
+				c.checkGroupImports(f, cfg)
+			}
 			if adapter != nil && !slices.Contains(cfg.Messenger.AllowedFiles, rel) {
 				c.adapter = adapter
 			}
@@ -78,8 +89,8 @@ func relPath(root, name string) (string, bool) {
 }
 
 type adapter struct {
-	iface   *types.Interface
-	methods []string
+	// sigs maps the name of each send and edit method to its signature.
+	sigs    map[string]string
 	allowed []string
 }
 
@@ -100,30 +111,29 @@ func findAdapter(pkgs []*packages.Package, cfg Config) (*adapter, error) {
 	if !ok {
 		return nil, fmt.Errorf("rule 3: %s.%s is not an interface", cfg.Messenger.Package, cfg.Messenger.Interface)
 	}
-	return &adapter{iface: iface, methods: cfg.Messenger.Methods, allowed: cfg.Messenger.AllowedFiles}, nil
-}
-
-// matches reports whether a method selected on t reaches a messenger adapter: t implements the adapter interface, or
-// t is a narrower interface that the adapter implements.
-func (a *adapter) matches(t types.Type) bool {
-	if implements(t, a.iface) {
-		return true
-	}
-	view, ok := t.Underlying().(*types.Interface)
-	return ok && view.NumMethods() > 0 && implements(a.iface, view)
-}
-
-// implements compares method signatures as strings, because packages are type-checked one at a time and the same
-// named type may be two distinct objects.
-func implements(t types.Type, iface *types.Interface) bool {
+	sigs := map[string]string{}
 	for m := range iface.Methods() {
-		obj, _, _ := types.LookupFieldOrMethod(t, true, m.Pkg(), m.Name())
-		fn, ok := obj.(*types.Func)
-		if !ok || signatureKey(fn.Signature()) != signatureKey(m.Signature()) {
-			return false
-		}
+		sigs[m.Name()] = signatureKey(m.Signature())
 	}
-	return true
+	a := &adapter{sigs: map[string]string{}, allowed: cfg.Messenger.AllowedFiles}
+	for _, name := range cfg.Messenger.Methods {
+		sig, ok := sigs[name]
+		if !ok {
+			return nil, fmt.Errorf("rule 3: %s.%s has no method %s; update the messenger adapter in the lint configuration",
+				cfg.Messenger.Package, cfg.Messenger.Interface, name)
+		}
+		a.sigs[name] = sig
+	}
+	return a, nil
+}
+
+// matches reports whether fn is a messenger send or edit: a method with the name and the signature of one of the
+// adapter's, whatever type it is selected on, so that an interface the caller declares cannot hide the call. The
+// signatures are compared as strings, because packages are type-checked one at a time and the same named type may be
+// two distinct objects.
+func (a *adapter) matches(fn *types.Func) bool {
+	sig, ok := a.sigs[fn.Name()]
+	return ok && signatureKey(fn.Signature()) == sig
 }
 
 func signatureKey(sig *types.Signature) string {
@@ -152,6 +162,19 @@ type goFile struct {
 func (c *goFile) report(rule int, pos token.Pos, format string, args ...any) {
 	p := c.pkg.Fset.Position(pos)
 	c.diags = append(c.diags, Diagnostic{Rule: rule, Path: c.rel, Line: p.Line, Col: p.Column, Message: fmt.Sprintf(format, args...)})
+}
+
+// checkGroupImports reports imports of the generated groups queries, or of a package below them, so that the queries
+// that write Alert Group tables are called only from the groups package.
+func (c *goFile) checkGroupImports(f *ast.File, cfg Config) {
+	queries := cfg.Module + "/" + cfg.GroupQueries
+	for _, imp := range f.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err == nil && (path == queries || strings.HasPrefix(path, queries+"/")) {
+			c.report(2, imp.Path.Pos(), "imports %s outside %s; Alert Group tables change only through the groups dispatcher",
+				strings.TrimPrefix(path, cfg.Module+"/"), cfg.GroupsDir)
+		}
+	}
 }
 
 func (c *goFile) inspect(f *ast.File) {
@@ -211,7 +234,7 @@ func (c *goFile) selector(n *ast.SelectorExpr, sel *types.Selection) {
 		return
 	}
 	name := sel.Obj().Name()
-	if c.adapter != nil && slices.Contains(c.adapter.methods, name) && c.adapter.matches(sel.Recv()) {
+	if fn, ok := sel.Obj().(*types.Func); ok && c.adapter != nil && c.adapter.matches(fn) {
 		recv := types.TypeString(sel.Recv(), (*types.Package).Name)
 		if strings.HasPrefix(recv, "*") {
 			recv = "(" + recv + ")"

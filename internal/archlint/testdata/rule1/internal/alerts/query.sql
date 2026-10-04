@@ -107,3 +107,56 @@ WHERE a.integration_id = i.id AND i.org_id = @org_id AND a.org_id = i.org_id;
 -- name: DeleteAlertsOfIntegration :exec
 DELETE FROM alerts a USING integrations i
 WHERE a.integration_id = i.id AND a.org_id = @org_id AND i.org_id = a.org_id;
+
+-- name: ListAlertsOfOrganizationByPublicID :many
+SELECT id FROM alerts WHERE org_id = (SELECT id FROM organizations WHERE public_id = $1);
+
+-- name: ListAlertsInOrganizationOfOpenGroups :many
+WITH open_groups AS (SELECT id, org_id FROM alert_groups WHERE org_id = @org_id AND state = 'open')
+SELECT id FROM alerts WHERE org_id IN (SELECT org_id FROM open_groups) AND group_id IN (SELECT id FROM open_groups);
+
+-- name: GetAlertByRow :one
+SELECT id FROM alerts WHERE (org_id, id) = ($1, $2);
+
+-- name: GetAlertNotDistinct :one
+SELECT id FROM alerts WHERE org_id IS NOT DISTINCT FROM @org_id AND id = @id;
+
+-- name: ListAlertsWithOptionalGroups :many
+SELECT a.id, g.state
+FROM alerts a
+LEFT JOIN alert_groups g ON g.id = a.group_id AND g.org_id = a.org_id
+WHERE a.org_id = @org_id;
+
+-- name: ListGroupsWithOptionalAlerts :many
+SELECT g.id, a.id
+FROM alerts a
+RIGHT JOIN alert_groups g ON a.group_id = g.id AND a.org_id = g.org_id
+WHERE g.org_id = @org_id;
+
+-- name: ListGroupChain :many
+WITH RECURSIVE chain AS (
+    SELECT id, org_id, parent_id FROM alert_groups WHERE org_id = @org_id AND id = @id
+    UNION ALL
+    SELECT g.id, g.org_id, g.parent_id FROM alert_groups g JOIN chain c ON g.id = c.parent_id AND g.org_id = c.org_id
+)
+SELECT id FROM chain;
+
+-- name: ListOpenAlerts :many
+SELECT id FROM open_alerts WHERE org_id = @org_id;
+
+-- name: ListRoleNames :many
+SELECT name FROM role_names;
+
+-- name: ResetRoles :exec
+TRUNCATE roles;
+
+-- name: ClaimDeliveries :many
+UPDATE deliveries SET state = 'sending', lease_until = @lease_until
+WHERE org_id = @org_id AND id IN (
+    SELECT id FROM deliveries
+    WHERE org_id = @org_id AND state = 'pending'
+    ORDER BY id
+    LIMIT @n
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id;

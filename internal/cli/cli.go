@@ -33,6 +33,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "version":
+		if len(args) > 1 {
+			fmt.Fprintf(stderr, "muster: version takes no arguments\n\n%s", usage)
+			return exitUsage
+		}
 		return runVersion(stdout)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)

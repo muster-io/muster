@@ -44,10 +44,19 @@ linters:
           files:
             - $all
             - "!**/internal/logging/**"
+          # Prefix match: log/ covers log/slog and log/syslog, and each third-party entry covers its subpackages.
           deny:
             - pkg: log$
               desc: "archlint rule 7: log only through the domain logger in internal/logging"
-            - pkg: log/slog$
+            - pkg: log/
+              desc: "archlint rule 7: log only through the domain logger in internal/logging"
+            - pkg: go.uber.org/zap
+              desc: "archlint rule 7: log only through the domain logger in internal/logging"
+            - pkg: github.com/rs/zerolog
+              desc: "archlint rule 7: log only through the domain logger in internal/logging"
+            - pkg: github.com/sirupsen/logrus
+              desc: "archlint rule 7: log only through the domain logger in internal/logging"
+            - pkg: github.com/hashicorp/go-hclog
               desc: "archlint rule 7: log only through the domain logger in internal/logging"
 
     exhaustive:
@@ -56,14 +65,18 @@ linters:
     forbidigo:
       analyze-types: true
       forbid:
-        - pattern: ^context\.Background$
+        - pattern: ^context\.(Background|TODO)$
           pkg: ^context$
-          msg: "archlint rule 6: context.Background() is allowed only in cmd/, internal/runtime, internal/cli, test/load/main.go and tests; take a context.Context from the caller"
+          msg: "archlint rule 6: context.Background() and context.TODO() are allowed only in cmd/, internal/runtime, internal/cli, test/load/main.go and tests; take a context.Context from the caller"
         - pattern: ^fmt\.Print(f|ln)?$
           pkg: ^fmt$
           msg: "archlint rule 7: log only through the domain logger in internal/logging"
         - pattern: ^os\.(Stdout|Stderr)$
           pkg: ^os$
+          msg: "archlint rule 7: log only through the domain logger in internal/logging"
+        # The builtins have no package; a function of the same name declared in a package does not match.
+        - pattern: ^(print|println)$
+          pkg: ^$
           msg: "archlint rule 7: log only through the domain logger in internal/logging"
         - pattern: ^metrics\.(NewHistogram|GetOrCreateHistogram)$
           pkg: ^github\.com/VictoriaMetrics/metrics$

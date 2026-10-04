@@ -3,9 +3,11 @@
 package probes
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 )
 
 // LogsSecret is bad: it writes the first secret to the log.
@@ -32,6 +34,24 @@ func FormatsSecret(secrets []string, _ io.Writer) error {
 // JoinsSecret is bad: one of the joined errors hides the second secret in its cause.
 func JoinsSecret(secrets []string, _ io.Writer) error {
 	return errors.Join(errors.New("first attempt failed"), &opaqueError{cause: errors.New(secrets[1])})
+}
+
+// LogsBasicAuth is bad: the first secret is the password inside a base64-encoded Basic authorization header.
+func LogsBasicAuth(secrets []string, log io.Writer) error {
+	auth := base64.StdEncoding.EncodeToString([]byte("muster:" + secrets[0]))
+	_, err := fmt.Fprintf(log, "level=debug msg=request authorization=\"Basic %s\"\n", auth)
+	return err
+}
+
+// EscapesSecretInURL is bad: the second secret is URL-escaped into a query parameter of the URL in the error.
+func EscapesSecretInURL(secrets []string, _ io.Writer) error {
+	return fmt.Errorf("get https://hooks.example.org/?token=%s: %w", url.QueryEscape(secrets[1]), io.ErrUnexpectedEOF)
+}
+
+// LogsSecretInHex is bad: the third secret is logged as hex bytes.
+func LogsSecretInHex(secrets []string, log io.Writer) error {
+	_, err := fmt.Fprintf(log, "level=debug msg=key key=%x\n", secrets[2])
+	return err
 }
 
 // Redacts is good: it writes and returns the placeholder instead of the secret.

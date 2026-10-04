@@ -3,8 +3,8 @@
 Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager. It turns Alertmanager's
 notifications into Alert Groups — one problem with a number, a status and an Owner — and shows each Alert Group as one
 editable message in Mattermost, in Telegram or through an outgoing webhook. People acknowledge, resolve and snooze an
-Alert Group from the chat or the web UI, and Muster keeps its message current, rings phones only when someone has to
-react and records everything in a Timeline and an Audit log.
+Alert Group from the chat or the web UI, and Muster keeps its message current, sends a Loud update only when someone
+has to react and records everything in a Timeline and an Audit log.
 
 Muster is an open alternative to Grafana IRM for teams that run Prometheus-style monitoring and want their alerting
 path to keep working inside their own network. One binary and one PostgreSQL database are a complete installation.

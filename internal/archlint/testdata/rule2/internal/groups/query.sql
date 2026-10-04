@@ -22,3 +22,7 @@ UPDATE alert_group_counters SET next = next + 1 WHERE org_id = @org_id RETURNING
 MERGE INTO alert_group_alerts t
 USING alerts a ON t.alert_id = a.id AND t.org_id = @org_id AND a.org_id = @org_id
 WHEN MATCHED THEN UPDATE SET last_seen_at = @at;
+
+-- name: ResetCounters :exec
+-- archlint:org-exempt a reset of the whole table
+TRUNCATE alert_group_counters;

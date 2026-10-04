@@ -30,3 +30,7 @@ SELECT next FROM bumped;
 MERGE INTO alert_group_alerts t -- want: 2
 USING alerts a ON t.alert_id = a.id AND t.org_id = @org_id AND a.org_id = @org_id
 WHEN MATCHED THEN DELETE;
+
+-- name: ResetTimeline :exec
+-- archlint:org-exempt the exemption covers rule 1 only, never rule 2
+TRUNCATE timeline_entries; -- want: 2

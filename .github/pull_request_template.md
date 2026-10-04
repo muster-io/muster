@@ -14,7 +14,7 @@ output, or a Playwright trace or screenshot. Unit tests alone do not prove a sto
 ## `verify` output
 
 ```text
-$ make ci
+$ <verify>
 …
 ```
 

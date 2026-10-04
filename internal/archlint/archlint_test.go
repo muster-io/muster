@@ -145,6 +145,9 @@ func testSecretLeak(t *testing.T) {
 		{Probe{"hides_secret_in_cause", probes.HidesSecretInCause}, []string{"secret 3 of 3 reached the returned error"}},
 		{Probe{"formats_secret", probes.FormatsSecret}, []string{"secret 1 of 3 reached the returned error"}},
 		{Probe{"joins_secret", probes.JoinsSecret}, []string{"secret 2 of 3 reached the returned error"}},
+		{Probe{"logs_basic_auth", probes.LogsBasicAuth}, []string{"secret 1 of 3 reached the log output (base64)"}},
+		{Probe{"escapes_secret_in_url", probes.EscapesSecretInURL}, []string{"secret 2 of 3 reached the returned error (URL-escaped)"}},
+		{Probe{"logs_secret_in_hex", probes.LogsSecretInHex}, []string{"secret 3 of 3 reached the log output (hex)"}},
 		{Probe{"redacts", probes.Redacts}, nil},
 		{Probe{"silent", probes.Silent}, nil},
 	}
@@ -202,6 +205,15 @@ func TestRunErrors(t *testing.T) {
 				"internal/delivery/adapter.go": "package delivery\n\ntype Messenger interface{}\n",
 			},
 			want: "rule 3: internal/delivery has no type Adapter",
+		},
+		{
+			name: "adapter method renamed",
+			files: map[string]string{
+				"go.mod": goMod,
+				"internal/delivery/adapter.go": "package delivery\n\ntype Adapter interface {\n" +
+					"\tPublish(text string) error\n\tUpdate(id, text string) error\n\tAnswer(id, text string) error\n}\n",
+			},
+			want: "rule 3: internal/delivery.Adapter has no method Reply",
 		},
 	}
 	for _, tt := range tests {

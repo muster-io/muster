@@ -3,7 +3,7 @@
 
 // Command licensecheck fails when a source file lacks the licence header. It checks the files git knows about,
 // tracked or untracked but not ignored, and skips generated files, fixtures under testdata and the third-party
-// paths listed in NOTICE.
+// paths listed in NOTICE. A source file has one of the source extensions or names, or starts with a shebang line.
 package main
 
 import (
@@ -34,9 +34,18 @@ const (
 )
 
 var (
-	sourceExts      = []string{".go", ".sql", ".ts", ".tsx", ".js", ".mjs", ".css", ".sh"}
+	sourceExts      = []string{".go", ".sql", ".ts", ".tsx", ".js", ".mjs", ".css", ".sh", ".py"}
 	sourceBasenames = []string{"Makefile", "Dockerfile"}
 	sourceGlobs     = []string{"deploy/helm/*/templates/**", ".github/workflows/*.yml", ".github/workflows/*.yaml"}
+	// generatedGlobs are the generated paths that AGENTS.md lists; their files need no "Code generated" line.
+	generatedGlobs = []string{
+		"internal/*/dbgen/**",
+		"internal/api/gen/**",
+		"pkg/apiclient/**",
+		"web/src/api/gen/**",
+		"web/src/routeTree.gen.ts",
+		"docs/reference/**",
+	}
 
 	generatedRe = regexp.MustCompile(`^(//|--|#) Code generated .* DO NOT EDIT\.$`)
 )
@@ -177,10 +186,10 @@ func isFixture(name string) bool {
 func check(fsys fs.FS, files, excluded []string) ([]string, error) {
 	var problems []string
 	for _, name := range slices.Sorted(slices.Values(files)) {
-		if !isSource(name) || isFixture(name) || matchAny(excluded, name) {
+		if isFixture(name) || matchAny(generatedGlobs, name) || matchAny(excluded, name) {
 			continue
 		}
-		missing, err := checkFile(fsys, name)
+		missing, err := checkFile(fsys, name, isSource(name))
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -194,15 +203,23 @@ func check(fsys fs.FS, files, excluded []string) ([]string, error) {
 	return problems, nil
 }
 
-func checkFile(fsys fs.FS, name string) ([]string, error) {
+// checkFile returns the markers missing from the header of name. A file that is not a source by its name counts as
+// one when it starts with a shebang line.
+func checkFile(fsys fs.FS, name string, source bool) ([]string, error) {
 	f, err := fsys.Open(name)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	if info, err := f.Stat(); err != nil || info.IsDir() {
+		return nil, err
+	}
 	head, err := io.ReadAll(io.LimitReader(f, readLimit))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", name, err)
+	}
+	if !source && !bytes.HasPrefix(head, []byte("#!")) {
+		return nil, nil
 	}
 	lines := strings.Split(string(bytes.ReplaceAll(head, []byte("\r\n"), []byte("\n"))), "\n")
 	if slices.ContainsFunc(lines[:min(len(lines), generatedLines)], generatedRe.MatchString) {

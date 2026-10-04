@@ -28,21 +28,24 @@ then covers every Contribution You Submit to the Project, before and after signi
 
 ## 2. Copyright licence
 
-You grant the Project, and every recipient of software the Project distributes, a perpetual, worldwide,
-non-exclusive, no-charge, royalty-free, irrevocable copyright licence to reproduce, prepare derivative works of,
-publicly display, publicly perform, sublicense and distribute Your Contributions and such derivative works.
+You grant the Project and its successors and assigns, and every recipient of software the Project distributes, a
+perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright licence to reproduce, prepare
+derivative works of, publicly display, publicly perform, sublicense and distribute Your Contributions and such
+derivative works.
 
 This licence includes the right to distribute Your Contributions, as part of the Work or on their own, under licence
 terms other than those under which the Project is distributed when You make the Contribution, including commercial
 terms, in addition to or instead of those terms.
 
+The Project may transfer or assign the rights granted to it under this agreement, in whole or in part.
+
 ## 3. Patent licence
 
-You grant the Project, and every recipient of software the Project distributes, a perpetual, worldwide,
-non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent licence to make, have
-made, use, offer to sell, sell, import and otherwise transfer the Work. The licence applies only to the patent claims
-that You can license and that Your Contribution infringes on its own, or in combination with the Work to which You
-submitted it.
+You grant the Project and its successors and assigns, and every recipient of software the Project distributes, a
+perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent
+licence to make, have made, use, offer to sell, sell, import and otherwise transfer the Work. The licence applies only
+to the patent claims that You can license and that Your Contribution infringes on its own, or in combination with the
+Work to which You submitted it.
 
 If any entity starts patent litigation against You or any other entity (including a cross-claim or counterclaim in a
 lawsuit) alleging that Your Contribution, or the Work to which You contributed, directly or contributorily infringes a

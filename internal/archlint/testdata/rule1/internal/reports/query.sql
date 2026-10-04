@@ -96,3 +96,76 @@ SELECT id -- want: 1
 FROM integrations WHERE token_hash = $1; -- want: 1
 
 SELECT id FROM alerts WHERE state = 'firing'; -- want: 1
+
+-- name: ListAlertsOfEveryOrganization :many
+SELECT id FROM alerts WHERE org_id IN (SELECT id FROM organizations); -- want: 1
+
+-- name: ListAlertsOfFirstOrganization :many
+SELECT id FROM alerts WHERE org_id = (SELECT id FROM organizations LIMIT 1); -- want: 1
+
+-- name: ListAlertsJoinedToOrganizations :many
+WITH o AS (SELECT id AS org_id FROM organizations)
+SELECT a.id FROM alerts a JOIN o ON a.org_id = o.org_id; -- want: 1
+
+-- name: ListAlertsOfConstantOrganization :many
+SELECT id FROM alerts WHERE org_id = 1; -- want: 1
+
+-- name: ListAlertsIsDistinct :many
+SELECT id FROM alerts WHERE org_id IS DISTINCT FROM $1; -- want: 1
+
+-- name: ListAlertsFilteredOnlyInLeftJoin :many
+SELECT a.id
+FROM alerts a -- want: 1
+LEFT JOIN alert_groups g ON g.id = a.group_id AND g.org_id = $1 AND a.org_id = $1;
+
+-- name: ListAlertsLinkedFromLeftJoinedSide :many
+SELECT a.id
+FROM alerts a -- want: 1
+LEFT JOIN alert_groups g ON g.id = a.group_id AND g.org_id = $1 AND a.org_id = g.org_id;
+
+-- name: ListAlertsFilteredOnlyInRightJoin :many
+SELECT a.id
+FROM alert_groups g
+RIGHT JOIN alerts a ON g.id = a.group_id AND g.org_id = $1 AND a.org_id = $1; -- want: 1
+
+-- name: ListAlertsFilteredOnlyInFullJoin :many
+SELECT a.id
+FROM alerts a -- want: 1
+FULL JOIN alert_groups g ON g.id = a.group_id AND g.org_id = $1 AND a.org_id = $1; -- want: 1
+
+-- name: ListGroupChainOfEveryOrganization :many
+WITH RECURSIVE chain AS (
+    SELECT id, org_id, parent_id FROM alert_groups WHERE id = @id -- want: 1
+    UNION ALL
+    SELECT g.id, g.org_id, g.parent_id FROM alert_groups g JOIN chain c ON g.id = c.parent_id AND g.org_id = c.org_id -- want: 1
+)
+SELECT id FROM chain;
+
+-- name: ListOpenAlertsOfEveryOrganization :many
+SELECT id FROM open_alerts; -- want: 1
+
+-- name: ListEveryAlert :many
+SELECT id FROM every_alert; -- want: 1
+
+-- name: ListAlertsByOrg :many
+SELECT alert_id FROM alerts_by_org; -- want: 1
+
+-- name: TruncateAlerts :exec
+TRUNCATE alerts; -- want: 1
+
+-- name: GetIntegrationExemptedOnItsLine :one
+SELECT id FROM integrations WHERE token_hash = $1; -- archlint:org-exempt by-hash lookup // want: 1
+
+-- name: ListAlertsAfterAnExemptLine :many
+SELECT id FROM alerts; -- want: 1
+
+-- name: ClaimDeliveriesOfEveryOrganization :many
+UPDATE deliveries SET state = 'sending', lease_until = @lease_until -- want: 1
+WHERE id IN (
+    SELECT id FROM deliveries
+    WHERE org_id = @org_id AND state = 'pending'
+    ORDER BY id
+    LIMIT @n
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id;

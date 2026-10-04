@@ -4,8 +4,8 @@
 //go:build lint
 
 // Package archlint holds the architecture lints of ADR-0016 that golangci-lint cannot express: the SQL rules over the
-// query files (1, 2), the Go call-site rules (3, 4) and the secret leak harness (5). Rules 6 to 8 are forbidigo and
-// depguard settings in .golangci.yml. The fixtures of all eight rules live under testdata.
+// query files (1, 2), the Go rules over imports and call sites (2, 3, 4) and the secret leak harness (5). Rules 6 to 8
+// are forbidigo and depguard settings in .golangci.yml. The fixtures of all eight rules live under testdata.
 package archlint
 
 import (
@@ -41,9 +41,11 @@ type Config struct {
 	// QueryGlob selects the sqlc query files; "**" matches any number of directories.
 	QueryGlob string
 
-	// GroupsDir is the only directory whose query files may write GroupTables (rule 2).
-	GroupsDir   string
-	GroupTables []string
+	// GroupsDir is the only directory whose query files may write GroupTables and whose packages may import
+	// GroupQueries, the code sqlc generates from its queries, or a package below it (rule 2).
+	GroupsDir    string
+	GroupTables  []string
+	GroupQueries string
 
 	Messenger MessengerConfig
 
@@ -67,6 +69,7 @@ func DefaultConfig() Config {
 		QueryGlob:     "internal/**/query.sql",
 		GroupsDir:     "internal/groups",
 		GroupTables:   []string{"alert_groups", "alert_group_alerts", "timeline_entries", "notes", "alert_group_counters"},
+		GroupQueries:  "internal/groups/dbgen",
 		Messenger: MessengerConfig{
 			Package:   "internal/delivery",
 			Interface: "Adapter",

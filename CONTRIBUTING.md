@@ -38,7 +38,9 @@ The Makefile is the only entry point:
 | `make ci` | runs the pull-request tier locally: `lint`, `lint-arch`, `test-race`, `build` |
 | `make clean` | removes `bin/`: the binary, the coverage profile and the installed tools |
 
-A push to any branch runs the fast tier in CI (without the race detector); a pull request runs the full tier.
+In CI, a pull request runs the full tier (`lint`, `lint-arch`, `test-race`, `build`), and a push to `master` runs the
+fast tier, the same jobs with `test` instead of `test-race`. Pushes to other branches run nothing: open a pull request,
+a draft one if the work is not ready, to get the checks.
 
 ## Working a story
 
@@ -67,18 +69,19 @@ and live checks advance the development clock.
 
 ## Licence header
 
-Every source file — `*.go`, `*.sql`, `*.ts`, `*.tsx`, `*.js`, `*.mjs`, `*.css`, `*.sh`, `Makefile`, `Dockerfile`, chart
-templates and workflow files — starts with these two lines in its own comment syntax, after a shebang line if it has
-one:
+Every source file — `*.go`, `*.sql`, `*.ts`, `*.tsx`, `*.js`, `*.mjs`, `*.css`, `*.sh`, `*.py`, `Makefile`,
+`Dockerfile`, chart templates, workflow files and any script that starts with a shebang line — starts with these two
+lines in its own comment syntax, after the shebang line if it has one:
 
 ```go
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 ```
 
-Markdown, JSON, lock files, generated files and test fixtures under `testdata` are exempt. A file copied from another
-project under a permissive licence keeps its own header, and its path is added to the list in [`NOTICE`](NOTICE), which
-the check reads. `make lint` names every file that lacks the header.
+Markdown, JSON, lock files, generated files (marked `Code generated … DO NOT EDIT.`, or under a generated path that
+AGENTS.md lists) and test fixtures under `testdata` are exempt. A file copied from another project under a permissive
+licence keeps its own header, and its path is added to the list in [`NOTICE`](NOTICE), which the check reads.
+`make lint` names every file that lacks the header.
 
 ## Dependencies and third-party code
 

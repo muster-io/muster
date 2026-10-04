@@ -2,6 +2,7 @@ package groups
 
 import (
 	"context"
+	"io"
 
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/messengers/telegram"
@@ -40,4 +41,17 @@ func (f forwarder) Forward(ctx context.Context, msg delivery.Message) error {
 
 func Edit(ctx context.Context, a delivery.Adapter, msg delivery.Message) error {
 	return delivery.Adapter.Update(a, ctx, "1", msg) // want: 3
+}
+
+// sender is wider than the adapter's Publish alone, so the adapter does not implement it and it does not implement the
+// adapter; the method still is the adapter's send.
+type sender interface {
+	Publish(ctx context.Context, msg delivery.Message) (string, error)
+	io.Closer
+}
+
+func Send(ctx context.Context, s sender, msg delivery.Message) error {
+	defer s.Close()
+	_, err := s.Publish(ctx, msg) // want: 3
+	return err
 }

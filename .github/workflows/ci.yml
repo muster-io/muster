@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright The Muster Authors
 
-# A push runs the fast tier (tests without the race detector); a pull request runs the full tier (with it).
+# A push to master runs the fast tier (tests without the race detector); a pull request runs the full tier (with it).
+# Pushes to other branches run nothing, so the required checks of a pull request come from one run only.
 name: ci
 
 on:
   push:
-    branches: ['**']
+    branches: [master]
   pull_request:
 
 permissions:
@@ -14,12 +15,13 @@ permissions:
 
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
     name: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,6 +34,7 @@ jobs:
   lint-arch:
     name: lint-arch
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -44,6 +47,7 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,6 +60,7 @@ jobs:
   build:
     name: build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

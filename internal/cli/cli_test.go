@@ -28,6 +28,12 @@ func TestRun(t *testing.T) {
 			wantCode:   0,
 			wantStdout: "muster 1.2.3 (commit 0123456789ab)\n",
 		},
+		{
+			name:       "version with arguments",
+			args:       []string{"version", "extra"},
+			wantCode:   2,
+			wantStderr: "muster: version takes no arguments\n\n" + usage,
+		},
 		{name: "help", args: []string{"help"}, wantCode: 0, wantStdout: usage},
 		{name: "short help flag", args: []string{"-h"}, wantCode: 0, wantStdout: usage},
 		{name: "long help flag", args: []string{"--help"}, wantCode: 0, wantStdout: usage},

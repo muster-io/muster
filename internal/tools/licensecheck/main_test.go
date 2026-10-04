@@ -35,8 +35,21 @@ func TestCheck(t *testing.T) {
 		".github/ISSUE_TEMPLATE/bug.yml":               {Data: []byte("name: Bug\n")},
 		"README.md":                                    {Data: []byte("# Muster\n")},
 		"api/openapi.yaml":                             {Data: []byte("openapi: 3.1.0\n")},
+		"scripts/sync.py":                              {Data: []byte("import sys\n")},
+		"scripts/stories-sync":                         {Data: []byte("#!/usr/bin/env python3\n# SPDX-License-Identifier: AGPL-3.0-only\n# Copyright The Muster Authors\n")},
+		"scripts/release":                              {Data: []byte("#!/bin/sh\nexit 0\n")},
+		"docs/notes.txt":                               {Data: []byte("no shebang, no header\n")},
+		"internal/groups/dbgen/queries.sql.go":         {Data: []byte("package dbgen\n")},
+		"internal/groups/dbgenx/queries.go":            {Data: []byte("package dbgenx\n")},
+		"internal/api/gen/server.go":                   {Data: []byte("package gen\n")},
+		"pkg/apiclient/client.go":                      {Data: []byte("package apiclient\n")},
+		"web/src/api/gen/schemas.ts":                   {Data: []byte("export {}\n")},
+		"web/src/routeTree.gen.ts":                     {Data: []byte("export {}\n")},
+		"docs/reference/build.sh":                      {Data: []byte("#!/bin/sh\n")},
+		"third_party/module/main.go":                   {Data: []byte(goodHeader + "package module\n")},
 	}
-	files := append(slices.Collect(maps.Keys(fsys)), "internal/deleted.go")
+	// A git submodule is listed as a path that is a directory.
+	files := append(slices.Collect(maps.Keys(fsys)), "internal/deleted.go", "third_party/module")
 
 	got, err := check(fsys, files, []string{"web/src/components/ui/**"})
 	if err != nil {
@@ -55,8 +68,14 @@ func TestCheck(t *testing.T) {
 		`internal/cli/none.go: missing "SPDX-License-Identifier: AGPL-3.0-only"`,
 		`internal/cli/none.go: missing "Copyright The Muster Authors"`,
 		`internal/cli/nospdx.go: missing "SPDX-License-Identifier: AGPL-3.0-only"`,
+		`internal/groups/dbgenx/queries.go: missing "SPDX-License-Identifier: AGPL-3.0-only"`,
+		`internal/groups/dbgenx/queries.go: missing "Copyright The Muster Authors"`,
 		`scripts/noheader.sh: missing "SPDX-License-Identifier: AGPL-3.0-only"`,
 		`scripts/noheader.sh: missing "Copyright The Muster Authors"`,
+		`scripts/release: missing "SPDX-License-Identifier: AGPL-3.0-only"`,
+		`scripts/release: missing "Copyright The Muster Authors"`,
+		`scripts/sync.py: missing "SPDX-License-Identifier: AGPL-3.0-only"`,
+		`scripts/sync.py: missing "Copyright The Muster Authors"`,
 		`web/src/main.tsx: missing "SPDX-License-Identifier: AGPL-3.0-only"`,
 		`web/src/main.tsx: missing "Copyright The Muster Authors"`,
 	}

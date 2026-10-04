@@ -8,4 +8,5 @@ import (
 // Good: tests may create contexts.
 func TestDetached(t *testing.T) {
 	_ = context.Background()
+	_ = context.TODO()
 }
