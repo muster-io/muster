@@ -195,6 +195,34 @@ unused and the story map says what replaced it. The slug in the file name may ch
 5. **Done.** Merging closes the issue, and the project board moves it to Done. Splitting or dropping a story happens in
    a pull request; the script closes the issue of a dropped story as not planned.
 
+### 7.1 The sync script
+
+`scripts/stories-sync` is the script of step 2, and it keeps the issues in step with the files afterwards. It needs
+Python 3 (standard library only) and an authenticated `gh`. It reads the frontmatter of every `S-NNN` file and the
+title of every capability in `design/prd/l1/`, then:
+
+- creates the labels `story`, `capability`, `be`, `fe`, `infra`, `docs` and `operator-attention` and the milestone
+  `L1` when they are missing;
+- keeps one issue per capability, `C-NN: <title>`, and one per story, `S-NNN: <title>`, labelled with its kind and,
+  when set, `operator-attention`, with the acceptance statements as a task list and `verify`; each issue links to its
+  file at the HEAD commit, each story issue is a sub-issue of its capability issue, and each `depends_on` entry is a
+  "blocked by" link;
+- finds existing issues by their title prefix, open or closed, and changes only what differs, so it can run again
+  after any change to the files; it closes the issue of a story whose file is gone as not planned, with a comment;
+- writes each issue number into the `issue:` line of the story file; that change is then committed.
+
+| Flag | Effect |
+|---|---|
+| `--dry-run` | The default: reads GitHub and prints the plan with its counts; changes nothing. |
+| `--apply` | Makes the changes. Refuses to run when a story or capability file differs from HEAD (apart from `issue:` lines) or HEAD is not on GitHub, because issue bodies link to HEAD. |
+| `--only S-001,S-002` | Limits the run to these stories and their capability issues; no issue is closed. |
+| `--repo OWNER/NAME` | Another repository; the default is the `origin` remote. |
+| `--delay SECONDS` | The pause between write requests, 1 by default; a rate-limit answer is retried after the wait GitHub asks for. |
+| `--show-body` | Prints the body of every issue the run creates or updates. |
+
+Issue titles and bodies are generated, and the next run overwrites edits made on GitHub; a ticked acceptance box
+stays ticked while its statement is unchanged. Edit the files, not the issues.
+
 ## 8. Story map
 
 All of L1, in phase order. Contracts were written in batches, and every story of the map now has its contract file; a
