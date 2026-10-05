@@ -37,8 +37,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   C-12.FR-1: the attachment's title is `#N` and the Alert Group's title, linked (`title_link`) to the Alert Group page;
   its text is the body, and under the Alerts one line of links starts with "Open in Muster" and goes on with the links
   of C-12.FR-9, such as the runbook when there is one; the footer of C-12.FR-1 (item 11) is the last line of the text;
-  the attachment's own `footer` is "Muster v<version>", with `footer_icon` set to the Muster logo served at
-  `MUSTER_PUBLIC_URL` (the logo itself comes later); and the buttons of
+  the attachment's own `footer` is "Muster v<version>", with `footer_icon` set to the Muster mark that the server
+  serves at `<MUSTER_PUBLIC_URL>/muster-mark-256.png`; and the buttons of
   [reference.md](reference.md#buttons-and-links-by-status) follow. The Mentions of a Loud post go into its `message`,
   after the summary line, never into the attachment: a Mention inside an attachment notifies, but the notification
   shows nothing when `message` is empty (F-056). An edit rewrites the summary line and the attachment; like every
