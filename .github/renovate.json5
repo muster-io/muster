@@ -75,6 +75,11 @@
       prBodyNotes:
         "Generated code must be regenerated with `make generate` and committed.",
     },
+    // `.node-version` pins Node.js; the `engines` floor in web/package.json is raised by hand, never pinned.
+    {
+      matchDepTypes: ["engines"],
+      enabled: false,
+    },
     // release-please sets the Muster image tag in the compose example on every release.
     {
       matchManagers: ["docker-compose"],
