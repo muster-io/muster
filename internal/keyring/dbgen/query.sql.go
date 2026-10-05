@@ -194,7 +194,7 @@ const recordReplica = `-- name: RecordReplica :exec
 INSERT INTO replicas (replica_id, hostname, version, key_ids, started_at, refreshed_at)
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (replica_id) DO UPDATE
-SET key_ids = EXCLUDED.key_ids, refreshed_at = EXCLUDED.refreshed_at
+SET key_ids = EXCLUDED.key_ids, started_at = EXCLUDED.started_at, refreshed_at = EXCLUDED.refreshed_at
 `
 
 type RecordReplicaParams struct {
@@ -206,7 +206,8 @@ type RecordReplicaParams struct {
 	RefreshedAt time.Time
 }
 
-// RecordReplica writes the replica's record at start and refreshes it; a pruned record comes back.
+// RecordReplica writes the replica's record at start and refreshes it; a pruned record comes back. started_at moves
+// when the replica re-registers after it lost the database.
 func (q *Queries) RecordReplica(ctx context.Context, arg RecordReplicaParams) error {
 	_, err := q.db.Exec(ctx, recordReplica,
 		arg.ReplicaID,

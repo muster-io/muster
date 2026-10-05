@@ -358,7 +358,7 @@ func (s *fakeStore) RecordReplica(_ context.Context, arg dbgen.RecordReplicaPara
 		r = dbgen.Replica{ReplicaID: arg.ReplicaID, Hostname: arg.Hostname, Version: arg.Version,
 			StartedAt: arg.StartedAt}
 	}
-	r.KeyIds, r.RefreshedAt = arg.KeyIds, arg.RefreshedAt
+	r.KeyIds, r.StartedAt, r.RefreshedAt = arg.KeyIds, arg.StartedAt, arg.RefreshedAt
 	s.replicas[arg.ReplicaID] = r
 	return nil
 }
@@ -705,5 +705,58 @@ func TestPruneReplicas(t *testing.T) {
 	if err := PruneReplicas(t.Context(), p, logger, now); err == nil ||
 		!strings.Contains(err.Error(), "prune the replica records: conn closed") {
 		t.Errorf("PruneReplicas = %v", err)
+	}
+}
+
+// TestRecorderReregistersAfterLosingTheDatabase: a replica that could not refresh its record for longer than
+// ReregisterAfter re-registers with a new start time; shorter gaps keep it.
+func TestRecorderReregistersAfterLosingTheDatabase(t *testing.T) {
+	ctx := t.Context()
+	s := &fakeStore{}
+	k := newKeyring(t, 'a')
+	st, _ := k.Establish(ctx, s, time.Now())
+	if err := k.Open(ctx, logging.New(&bytes.Buffer{}, logging.LevelInfo), st); err != nil {
+		t.Fatal(err)
+	}
+	realClock := clock.NewManual(time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC))
+	started := realClock.Now()
+	r := NewRecorder(k, s, realClock, logging.New(&bytes.Buffer{}, logging.LevelInfo), "r-1", "r", "1.2.3")
+	if err := r.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	startedAt := func() time.Time {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.replicas["r-1"].StartedAt
+	}
+
+	// Refreshes that fail for exactly ReregisterAfter keep the start time.
+	s.err = errors.New("connection refused")
+	for range int(ReregisterAfter / KeyRecordRefresh) {
+		realClock.Advance(KeyRecordRefresh)
+		if err := r.Refresh(ctx); err == nil {
+			t.Fatal("a refresh without the database succeeded")
+		}
+	}
+	s.err = nil
+	if err := r.Refresh(ctx); err != nil || !startedAt().Equal(started) {
+		t.Fatalf("after a gap of ReregisterAfter: %v, started %v, want %v", err, startedAt(), started)
+	}
+
+	// A longer gap makes the replica re-register.
+	s.err = errors.New("connection refused")
+	realClock.Advance(ReregisterAfter + time.Second)
+	if err := r.Refresh(ctx); err == nil {
+		t.Fatal("a refresh without the database succeeded")
+	}
+	s.err = nil
+	if err := r.Refresh(ctx); err != nil || !startedAt().Equal(realClock.Now()) {
+		t.Fatalf("after a longer gap: %v, started %v, want %v", err, startedAt(), realClock.Now())
+	}
+	// The next refreshes keep the new start time.
+	back := realClock.Now()
+	realClock.Advance(KeyRecordRefresh)
+	if err := r.Refresh(ctx); err != nil || !startedAt().Equal(back) {
+		t.Fatalf("a regular refresh moved the start time: %v, %v", err, startedAt())
 	}
 }

@@ -536,7 +536,9 @@ Serves C-02, C-03.FR-2, C-20.FR-6–7; [ADR-0007](../adr/0007-active-replicas-wi
 - **`replicas`** — one row per running replica: the key ids it holds and `refreshed_at`, refreshed every
   `replica.key_record_refresh`; a replica is live while the row is younger than `replica.live_expiry`. Activation
   refuses when a live replica lacks the key; the System status page lists live replicas. Rows not refreshed for
-  `replica.prune_after` are pruned by the Leader.
+  `replica.prune_after` are pruned by the Leader. `started_at` is the start of the replica, or of its latest
+  registration: a replica that could not refresh its row for longer than `leader.absence_notice` (it lost the database)
+  re-registers with a new `started_at` when it reaches the database again.
 - **`runtime_state`** (singleton) — the Leader's alive mark (`alive_at`, every `leader.alive_mark_interval`), who leads,
   and `recovery_until`, the end of the "recovering after downtime" notice. The "no replica is leading" notice is derived
   from `alive_at` older than `leader.absence_notice`. `dev_clock_offset_seconds` is the offset of the development clock
@@ -544,8 +546,9 @@ Serves C-02, C-03.FR-2, C-20.FR-6–7; [ADR-0007](../adr/0007-active-replicas-wi
   development mode and stays 0 elsewhere.
 - **`downtime_periods`** — each period without an alive mark, recorded by the next Leader (C-02.FR-12): the source of
   the downtime log event, the recovery window and the "Muster was unavailable" Timeline entries (C-09.FR-18). A period
-  starts at the later of the last alive mark and the last record refresh of another replica that ran across it, so
-  that time while replicas ran without a Leader is not downtime; `started_at` is that start, not always the mark.
+  starts at the later of the last alive mark and the last record refresh of another replica that ran across it (whose
+  `replicas.started_at` is no later than `leader.absence_notice` after the mark), so that time while replicas ran
+  without a Leader is not downtime; `started_at` is that start, not always the mark.
 
 ### 4.2 Organization
 

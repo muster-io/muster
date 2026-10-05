@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 )
@@ -398,5 +399,13 @@ func TestLockSession(t *testing.T) {
 	if _, err := Dial(func(context.Context) (*pgx.Conn, error) { return nil, errors.New("refused") },
 		ServerBound)(t.Context()); err == nil {
 		t.Error("Dial without a connection succeeded")
+	}
+}
+
+// TestReregisterAfterIsTheAbsenceNotice: a replica re-registers after losing the database for longer than
+// leader.absence_notice, the gap that the downtime rule counts from.
+func TestReregisterAfterIsTheAbsenceNotice(t *testing.T) {
+	if keyring.ReregisterAfter != AbsenceNotice {
+		t.Errorf("keyring.ReregisterAfter = %v, want leader.absence_notice %v", keyring.ReregisterAfter, AbsenceNotice)
 	}
 }

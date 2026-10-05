@@ -25,6 +25,10 @@ const (
 	LiveExpiry = 2 * time.Minute
 	// PruneAfter is replica.prune_after: the Leader removes a record not refreshed for this long.
 	PruneAfter = time.Hour
+	// ReregisterAfter is leader.absence_notice: a replica that could not refresh its record for longer, because it
+	// lost the database, re-registers with a new start time, so that it does not count as having run across the
+	// outage and the next Leader records the downtime. internal/leader checks that the two agree.
+	ReregisterAfter = 2 * time.Minute
 
 	replicaSuffixLength = 8
 )
@@ -73,6 +77,8 @@ type Recorder struct {
 	hostname string
 	version  string
 	started  time.Time
+	// refreshed is the real time of the last record written, kept in memory.
+	refreshed time.Time
 }
 
 // NewRecorder prepares the record of the replica id; Start writes it.
@@ -90,18 +96,25 @@ func (r *Recorder) Start(ctx context.Context) error {
 	return r.record(ctx, r.started)
 }
 
+// record writes the record at now. After a gap of more than ReregisterAfter since the last record written, the
+// replica re-registers: its start time becomes now, as if it had just started.
 func (r *Recorder) record(ctx context.Context, now time.Time) error {
+	started := r.started
+	if !r.refreshed.IsZero() && now.Sub(r.refreshed) > ReregisterAfter {
+		started = now
+	}
 	err := r.store.RecordReplica(ctx, dbgen.RecordReplicaParams{
 		ReplicaID:   r.id,
 		Hostname:    pgtype.Text{String: r.hostname, Valid: r.hostname != ""},
 		Version:     r.version,
 		KeyIds:      r.keyring.KeyIDs(),
-		StartedAt:   r.started,
+		StartedAt:   started,
 		RefreshedAt: now,
 	})
 	if err != nil {
 		return fmt.Errorf("record the keys of replica %s: %w", r.id, err)
 	}
+	r.started, r.refreshed = started, now
 	return nil
 }
 

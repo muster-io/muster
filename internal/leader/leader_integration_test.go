@@ -8,6 +8,7 @@ package leader
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"net"
 	"net/url"
@@ -350,6 +351,120 @@ func TestIntegrationOverlappingLeaders(t *testing.T) {
 			"SELECT extract(epoch FROM ended_at - started_at)::float8 FROM downtime_periods").Scan(&duration); err != nil ||
 			duration < 600 || duration > 601 {
 			t.Errorf("the downtime lasted %v s (%v), want about 600", duration, err)
+		}
+	})
+}
+
+// lostStore is a replica's view of the database: while down is set, every call fails as without the database.
+type lostStore struct {
+	keyring.Store
+	down *atomic.Bool
+}
+
+var errNoDatabase = errors.New("connect to the database: connection refused")
+
+func (s lostStore) RecordReplica(ctx context.Context, arg kdb.RecordReplicaParams) error {
+	if s.down.Load() {
+		return errNoDatabase
+	}
+	return s.Store.RecordReplica(ctx, arg)
+}
+
+func (s lostStore) GetActiveKeyID(ctx context.Context) (string, error) {
+	if s.down.Load() {
+		return "", errNoDatabase
+	}
+	return s.Store.GetActiveKeyID(ctx)
+}
+
+// TestIntegrationDatabaseOutageIsDowntime: every replica stays up while the database is gone for ten minutes. When it
+// comes back, replica b refreshes its record before a takes over again; b re-registers, so it does not count as having
+// run across the outage, and a records the downtime. A replica that kept the database throughout still hides the gap.
+func TestIntegrationDatabaseOutageIsDowntime(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		for _, tt := range []struct {
+			name         string
+			bLosesTheDB  bool
+			wantDowntime int
+		}{
+			{name: "every replica loses the database", bLosesTheDB: true, wantDowntime: 1},
+			{name: "replica b keeps the database", bLosesTheDB: false, wantDowntime: 0},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				d, _ := migrated(t, s)
+				realClock := clock.NewManual(time.Now())
+				business := clock.NewManual(realClock.Now())
+				clocks := clock.Clocks{Business: business, Real: realClock}
+				var log syncBuffer
+				logger := logging.New(&log, logging.LevelInfo)
+				key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{'k'}, keyring.KeySize))
+				k, err := keyring.Load(t.Context(), keyring.Env{Keys: logging.Secret(key), Source: keyring.SecretKeysVar},
+					false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				st, err := k.Establish(t.Context(), keyring.NewStore(d.Pool), business.Now())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := k.Open(t.Context(), logger, st); err != nil {
+					t.Fatal(err)
+				}
+				var aDown, bDown atomic.Bool
+				recorder := func(id string, down *atomic.Bool) *keyring.Recorder {
+					return keyring.NewRecorder(k, lostStore{Store: keyring.NewStore(d.Pool), down: down}, realClock,
+						logger, id, id, "test")
+				}
+				a, b := recorder("a", &aDown), recorder("b", &bDown)
+				for _, r := range []*keyring.Recorder{a, b} {
+					if err := r.Start(t.Context()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				alive := NewAlive(NewStore(d.Pool), clocks, logger, "a")
+				if err := alive.TakeOver(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+
+				// Ten minutes without the database: the refreshes fail, and no Leader marks alive.
+				aDown.Store(true)
+				bDown.Store(tt.bLosesTheDB)
+				for range int(10 * time.Minute / keyring.KeyRecordRefresh) {
+					realClock.Advance(keyring.KeyRecordRefresh)
+					business.Advance(keyring.KeyRecordRefresh)
+					_ = a.Refresh(t.Context())
+					_ = b.Refresh(t.Context())
+				}
+
+				// The database is back: b refreshes first, then a takes over again.
+				aDown.Store(false)
+				bDown.Store(false)
+				if err := b.Refresh(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if err := a.Refresh(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if err := alive.TakeOver(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				var periods int
+				var duration float64
+				if err := d.Pool.QueryRow(t.Context(), `SELECT count(*),
+					coalesce(max(extract(epoch FROM ended_at - started_at)), 0)::float8 FROM downtime_periods`,
+				).Scan(&periods, &duration); err != nil {
+					t.Fatal(err)
+				}
+				if periods != tt.wantDowntime {
+					t.Fatalf("%d downtime periods, want %d; log:\n%s", periods, tt.wantDowntime, log.String())
+				}
+				if tt.wantDowntime == 1 && (duration < 600 || duration > 601) {
+					t.Errorf("the downtime lasted %v s, want about 600", duration)
+				}
+				if tt.wantDowntime == 1 && !strings.Contains(log.String(), `"event":"downtime_recorded"`) {
+					t.Errorf("downtime_recorded was not logged: %s", log.String())
+				}
+			})
 		}
 	})
 }

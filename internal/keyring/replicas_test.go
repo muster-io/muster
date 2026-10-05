@@ -129,7 +129,8 @@ func TestIntegrationReplicaRecords(t *testing.T) {
 			t.Errorf("record %+v", mine)
 		}
 
-		// Two minutes after its last refresh the first replica no longer counts as live; a refresh brings it back.
+		// Two minutes after its last refresh the first replica no longer counts as live; a refresh brings it back. It
+		// could not refresh for longer than ReregisterAfter, so it re-registers with a new start time.
 		realClock.Advance(LiveExpiry - time.Minute)
 		if live, _ := LiveReplicas(ctx, store, realClock.Now()); len(live) != 1 || live[0].ID != other.ID() {
 			t.Errorf("live after LiveExpiry: %+v", live)
@@ -141,7 +142,7 @@ func TestIntegrationReplicaRecords(t *testing.T) {
 		live, _ = LiveReplicas(ctx, store, realClock.Now())
 		if i := slices.IndexFunc(live, func(x Replica) bool { return x.ID == r.ID() }); len(live) != 2 || i < 0 ||
 			!live[i].RefreshedAt.Equal(realClock.Now()) ||
-			!live[i].StartedAt.Equal(time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)) {
+			!live[i].StartedAt.Equal(realClock.Now()) {
 			t.Errorf("live after the refresh: %+v", live)
 		}
 

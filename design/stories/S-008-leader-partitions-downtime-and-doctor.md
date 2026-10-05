@@ -28,6 +28,7 @@ files_touched:
   - internal/keyring/replicas.go
   - internal/keyring/query.sql
   - internal/keyring/keyring_test.go
+  - internal/keyring/replicas_test.go
   - internal/doctor/doctor.go
   - internal/doctor/doctor_test.go
   - internal/doctor/doctor_integration_test.go
@@ -111,7 +112,9 @@ issue: 8
   `leader.absence_notice` records the gap in `downtime_periods`. The gap starts at the later of that mark and the last
   key-record refresh of any other replica that ran across it (started no later than `leader.absence_notice` after the
   mark, so that replicas starting together after an outage do not hide it), so that a period while replicas ran
-  without a Leader is not downtime, and is recorded only when it is longer than `leader.absence_notice`. The new Leader logs `downtime_recorded` (WARN: `started_at`, `ended_at`, `duration_seconds`) and sets
+  without a Leader is not downtime, and is recorded only when it is longer than `leader.absence_notice`. A replica that
+  could not refresh its record for longer than `leader.absence_notice` re-registers with a new start time when it
+  reaches the database again, so that an outage of the database is downtime too. The new Leader logs `downtime_recorded` (WARN: `started_at`, `ended_at`, `duration_seconds`) and sets
   `runtime_state.recovery_until` to now plus `recovery.banner_duration`: until the longest repeat interval learned in
   `alertmanager_routes` has passed, at most 1 h, or 15 min when nothing is learned (P-01).
 - **Notices** (C-02.FR-24, `internal/organization/notices.go`): `recovering_after_downtime` (audience all; `since` the
@@ -225,10 +228,11 @@ curl -s localhost:8082/metrics | grep '^muster_leader '        # muster_leader 1
   waits for that lock at most `lock_timeout` and is retried at the next run; a start takes the lock only when a
   partition is missing. A partition that was detached and not dropped is dropped by the next run.
 - `muster doctor` accepts the published development key only as `muster dev doctor`, as the server does.
-- Known limit of the downtime rule: after an outage of the database itself, while the replicas kept running, a
-  replica whose first refresh after the outage comes before the new Leader's takeover hides the outage, because one
-  `refreshed_at` cannot tell a replica that ran throughout from one that came back. Raised with the maintainer in the
-  pull request.
+- A replica keeps in memory the real time of its last successful record refresh. When a refresh succeeds after it
+  could not refresh for longer than `leader.absence_notice` (it lost the database), it re-registers: its record's
+  `started_at` becomes now, as if it had just started. After an outage of the database itself, while every replica
+  stayed up, no replica counts as having run across the gap, and the next Leader records the downtime (decided by the
+  maintainer; no migration).
 - `muster doctor` sets both of its connections to read-only transactions (`SET SESSION CHARACTERISTICS AS TRANSACTION
   READ ONLY`), so every statement it runs is read-only. When the database is unreachable it prints only the
   `database` line, since no other check can run. The "no replica is leading" notice is also active, without a
