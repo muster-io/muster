@@ -8,7 +8,7 @@ require (
 	github.com/VictoriaMetrics/metrics v1.44.1
 	github.com/oapi-codegen/nullable v1.2.0
 	github.com/oapi-codegen/runtime v1.7.0
-	github.com/pganalyze/pg_query_go/v6 v6.2.2
+	github.com/pganalyze/pg_query_go/v6 v6.2.5
 	github.com/wasilibs/go-pgquery v0.0.0-20260915022521-81f99195012b
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/tools v0.51.0
