@@ -6,10 +6,11 @@
 version: "2"
 
 run:
-  # lint: the architecture lints; e2e: the end-to-end harness.
+  # lint: the architecture lints; e2e: the end-to-end harness; integration: the tests on PostgreSQL.
   build-tags:
     - lint
     - e2e
+    - integration
   relative-path-mode: gomod
 
 linters:

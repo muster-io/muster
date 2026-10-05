@@ -7,12 +7,10 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/runtime"
 )
 
 const devUsage = `Usage: muster dev [--replica]
@@ -22,9 +20,10 @@ Development mode. Every MUSTER_* variable with a development default takes it un
 variable replaces its default.
 
   muster dev             start the fake Alertmanager, Mattermost and Telegram servers
-                         on 127.0.0.1:19093, 127.0.0.1:18065 and 127.0.0.1:18081
+                         on 127.0.0.1:19093, 127.0.0.1:18065 and 127.0.0.1:18081, then Muster against the
+                         development database (make dev-db), migrated on start
   muster dev --replica   run an additional replica on :9080, :9081 and :9082, without fake servers
-  muster dev <command>   run another command with the development defaults, such as muster dev version
+  muster dev <command>   run another command with the development defaults, such as muster dev migrate
 `
 
 // devMode holds what `muster dev` takes from the process, so tests can replace it.
@@ -32,14 +31,17 @@ type devMode struct {
 	env    devmode.Env
 	fakes  devmode.Addresses
 	notify func() (context.Context, context.CancelFunc)
+	// server runs Muster with the development defaults, writing its log lines to stdout.
+	server func(ctx context.Context, stdout io.Writer) error
 }
 
 func runDev(args []string, stdout, stderr io.Writer) int {
 	return devMode{
-		env:   devmode.OSEnv{},
-		fakes: devmode.FakeAddresses(),
-		notify: func() (context.Context, context.CancelFunc) {
-			return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		env:    devmode.OSEnv{},
+		fakes:  devmode.FakeAddresses(),
+		notify: signals,
+		server: func(ctx context.Context, stdout io.Writer) error {
+			return runServer(ctx, runtime.Options{Environ: environ(), Stdout: stdout, Development: true})
 		},
 	}.run(args, stdout, stderr)
 }
@@ -78,10 +80,11 @@ func (d devMode) serve(replica bool, stdout, stderr io.Writer) int {
 	printApplied(stdout, applied)
 	ctx, stop := d.notify()
 	defer stop()
+	serve := func(ctx context.Context) error { return d.server(ctx, stdout) }
 	if replica {
-		err = devmode.RunReplica(ctx, stdout)
+		err = devmode.RunReplica(ctx, stdout, serve)
 	} else {
-		err = devmode.Run(ctx, stdout, d.fakes)
+		err = devmode.Run(ctx, stdout, d.fakes, serve)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "muster dev: %v\n", err)

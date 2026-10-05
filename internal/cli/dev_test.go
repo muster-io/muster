@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -64,7 +65,13 @@ func started(t *testing.T, env devmode.Env, addrs devmode.Addresses, args ...str
 ) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
-	d := devMode{env: env, fakes: addrs, notify: func() (context.Context, context.CancelFunc) { return ctx, cancel }}
+	d := devMode{
+		env: env, fakes: addrs, notify: func() (context.Context, context.CancelFunc) { return ctx, cancel },
+		server: func(ctx context.Context, _ io.Writer) error {
+			<-ctx.Done()
+			return nil
+		},
+	}
 	stdout, stderr = &syncBuffer{}, &syncBuffer{}
 	code := make(chan int, 1)
 	go func() { code <- d.run(args, stdout, stderr) }()

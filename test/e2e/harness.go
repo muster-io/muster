@@ -4,22 +4,29 @@
 //go:build e2e
 
 // Package e2e is the end-to-end suite: it runs the muster binary in development mode and drives it over HTTP. make e2e
-// builds the binary and runs the suite with MUSTER_E2E_BINARY pointing to it; E2E_REPLICAS=2 runs two replicas.
+// starts the development PostgreSQL, builds the binary and runs the suite with MUSTER_E2E_BINARY pointing to it;
+// E2E_REPLICAS=2 runs two replicas. Each harness gets a fresh database on the development PostgreSQL, or on the server
+// of MUSTER_E2E_DATABASE_URL, and drops it at the end.
 package e2e
 
 import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/rand"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/muster-io/muster/internal/devmode"
 )
@@ -53,6 +60,8 @@ type FakeURLs struct {
 type Harness struct {
 	t      *testing.T
 	binary string
+	// DatabaseURL is the fresh database that every replica of the harness uses.
+	DatabaseURL string
 
 	Fakes FakeURLs
 	// InProcess holds the fake servers in the mode FakesInProcess, for their Go accessors.
@@ -66,6 +75,7 @@ type Harness struct {
 func Start(t *testing.T, mode Mode) *Harness {
 	t.Helper()
 	h := &Harness{t: t, binary: binary(t)}
+	h.DatabaseURL = freshDatabase(t)
 	switch mode {
 	case DevProcess:
 		h.startDevProcess(replicaCount(t))
@@ -85,9 +95,8 @@ func (h *Harness) startDevProcess(replicas int) {
 		Mattermost:   "http://" + a.Mattermost,
 		Telegram:     "http://" + a.Telegram,
 	}
-	first := h.newReplica([]string{"dev"}, nil, ":8080", ":8081", ":8082", fakesReadyLine)
+	first := h.newReplica([]string{"dev"}, h.databaseEnv(), ":8080", ":8081", ":8082", fakesReadyLine)
 	first.Start(h.t)
-	// Muster itself joins this wait, through /health/ready, once the server command exists.
 	first.waitFor(h.t, "the fake servers to answer", func() bool {
 		for _, u := range []string{h.Fakes.Alertmanager, h.Fakes.Mattermost, h.Fakes.Telegram} {
 			if !answers(h.t.Context(), u+"/_fake/requests") {
@@ -98,8 +107,8 @@ func (h *Harness) startDevProcess(replicas int) {
 	})
 	h.Replicas = append(h.Replicas, first)
 	if replicas == 2 {
-		second := h.newReplica([]string{"dev", "--replica"}, nil, devmode.ReplicaListenApp, devmode.ReplicaListenIngest,
-			devmode.ReplicaListenInternal, devmode.ReplicaLine)
+		second := h.newReplica([]string{"dev", "--replica"}, h.databaseEnv(), devmode.ReplicaListenApp,
+			devmode.ReplicaListenIngest, devmode.ReplicaListenInternal, devmode.ReplicaLine)
 		second.Start(h.t)
 		h.Replicas = append(h.Replicas, second)
 	}
@@ -131,9 +140,9 @@ type ReplicaOptions struct {
 	ListenApp, ListenIngest, ListenInternal string
 }
 
-// StartReplica starts a `muster dev --replica` child process in the mode FakesInProcess and waits until it is up; the
-// process lives until the test that started the harness ends. A fresh database per replica joins it once Muster runs
-// on one.
+// StartReplica starts a `muster dev --replica` child process in the mode FakesInProcess on the harness's database and
+// waits until it is ready; the process lives until the test that started the harness ends. Env may replace the
+// database.
 func (h *Harness) StartReplica(t testing.TB, opts ReplicaOptions) *Replica {
 	t.Helper()
 	if h.InProcess == nil {
@@ -142,7 +151,7 @@ func (h *Harness) StartReplica(t testing.TB, opts ReplicaOptions) *Replica {
 	app := cmp.Or(opts.ListenApp, devmode.ReplicaListenApp)
 	ingest := cmp.Or(opts.ListenIngest, devmode.ReplicaListenIngest)
 	internal := cmp.Or(opts.ListenInternal, devmode.ReplicaListenInternal)
-	env := make([]string, 0, len(opts.Env)+3)
+	env := h.databaseEnv()
 	for name, value := range opts.Env {
 		env = append(env, name+"="+value)
 	}
@@ -219,6 +228,9 @@ func (r *Replica) Start(t testing.TB) {
 		close(exited)
 	}(r.exited)
 	r.waitFor(t, "the line "+r.readyLine, func() bool { return strings.Contains(r.out.String(), r.readyLine) })
+	r.waitFor(t, "Muster to be ready at "+r.Internal+"/health/ready", func() bool {
+		return answers(r.owner.Context(), r.Internal+"/health/ready")
+	})
 }
 
 // Stop interrupts the process and waits for it to exit; after stopTimeout it kills it.
@@ -298,6 +310,44 @@ func (r *Replica) waitFor(t testing.TB, what string, cond func() bool) {
 		case <-time.After(pollInterval):
 		}
 	}
+}
+
+func (h *Harness) databaseEnv() []string {
+	return []string{"MUSTER_DATABASE_URL=" + h.DatabaseURL}
+}
+
+// freshDatabase creates an empty database on the development PostgreSQL, or on the server of MUSTER_E2E_DATABASE_URL,
+// and drops it when the test ends; it returns the database's URL.
+func freshDatabase(t *testing.T) string {
+	t.Helper()
+	admin := cmp.Or(os.Getenv("MUSTER_E2E_DATABASE_URL"), devmode.DatabaseURL)
+	u, err := url.Parse(admin)
+	if err != nil {
+		t.Fatalf("MUSTER_E2E_DATABASE_URL: %v", err)
+	}
+	name := "muster_e2e_" + strings.ToLower(rand.Text()[:12])
+	exec := func(ctx context.Context, sql string) error {
+		conn, err := pgx.Connect(ctx, admin)
+		if err != nil {
+			return fmt.Errorf("connect to the PostgreSQL of the end-to-end suite (start it with make dev-db): %w", err)
+		}
+		defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+		_, err = conn.Exec(ctx, sql)
+		return err
+	}
+	if err := exec(t.Context(), "CREATE DATABASE "+name); err != nil {
+		t.Fatalf("create the database %s: %v", name, err)
+	}
+	// Registered first, so it runs after the cleanups that stop the replicas.
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 30*time.Second)
+		defer cancel()
+		if err := exec(ctx, "DROP DATABASE "+name+" WITH (FORCE)"); err != nil {
+			t.Errorf("drop the database %s: %v", name, err)
+		}
+	})
+	u.Path = "/" + name
+	return u.String()
 }
 
 func binary(t *testing.T) string {

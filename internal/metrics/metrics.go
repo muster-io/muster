@@ -137,6 +137,13 @@ func (c Counter) Float(values ...string) *vm.FloatCounter {
 	return s.GetOrCreateFloatCounter(name)
 }
 
+// Func makes the series of c read f at every scrape, for a count that a library keeps, such as the acquires of the
+// database pool; f must never decrease. A series keeps the first f it gets.
+func (c Counter) Func(f func() float64, values ...string) {
+	name, s := series(c.def, values)
+	s.GetOrCreateGauge(name, f)
+}
+
 // With returns the series of g with the label values in declaration order, to be set by the caller.
 func (g Gauge) With(values ...string) *vm.Gauge {
 	name, s := series(g.def, values)

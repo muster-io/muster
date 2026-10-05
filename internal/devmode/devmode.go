@@ -2,7 +2,8 @@
 // Copyright The Muster Authors
 
 // Package devmode is the development mode of `muster dev`: its published defaults, the rule that lets the environment
-// replace them, and the fake Alertmanager, Mattermost and Telegram servers on fixed loopback addresses.
+// replace them, the fake Alertmanager, Mattermost and Telegram servers on fixed loopback addresses, and Muster itself
+// in the same process, against the development database and migrated on start.
 package devmode
 
 import (
@@ -173,8 +174,9 @@ func closeAll(ctx context.Context, servers []*fakeserver.Server) error {
 	return errors.Join(errs...)
 }
 
-// Run starts the fake servers at addrs, prints their addresses and serves until ctx ends.
-func Run(ctx context.Context, w io.Writer, addrs Addresses) error {
+// Run starts the fake servers at addrs, prints their addresses, then runs Muster in the same process with serve until
+// ctx ends or serve fails; the fake servers stop after it.
+func Run(ctx context.Context, w io.Writer, addrs Addresses, serve func(context.Context) error) error {
 	f, err := StartFakes(ctx, addrs)
 	if err != nil {
 		return err
@@ -182,16 +184,16 @@ func Run(ctx context.Context, w io.Writer, addrs Addresses) error {
 	for _, s := range f.servers() {
 		fmt.Fprintf(w, "muster dev: fake %s %s\n", s.Name(), s.URL())
 	}
-	<-ctx.Done()
+	serveErr := serve(ctx)
 	if err := f.Close(context.WithoutCancel(ctx)); err != nil {
-		return fmt.Errorf("stop the fake servers: %w", err)
+		return errors.Join(serveErr, fmt.Errorf("stop the fake servers: %w", err))
 	}
-	return nil
+	return serveErr
 }
 
-// RunReplica is `muster dev --replica`: it starts no fake server and waits until ctx ends.
-func RunReplica(ctx context.Context, w io.Writer) error {
+// RunReplica is `muster dev --replica`: it starts no fake server and runs Muster with serve, an additional replica
+// against the same database.
+func RunReplica(ctx context.Context, w io.Writer, serve func(context.Context) error) error {
 	fmt.Fprintln(w, ReplicaLine)
-	<-ctx.Done()
-	return nil
+	return serve(ctx)
 }

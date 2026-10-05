@@ -16,9 +16,13 @@ const (
 	exitUsage   = 2
 )
 
-const usage = `Usage: muster <command>
+const usage = `Usage: muster [command]
+
+Without a command, muster runs the server: settings from the MUSTER_* variables, the database checks, the migrations
+when MUSTER_MIGRATE_ON_START is true, then the app, ingest and internal listeners until SIGTERM.
 
 Commands:
+  migrate   Apply the database migrations under the migration lock
   dev       Development mode: fake servers and development defaults (muster dev [--replica] | muster dev <command>)
   version   Print the version and commit
   help      Show this help
@@ -30,10 +34,15 @@ func Main() int {
 
 func Run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprint(stderr, usage)
-		return exitUsage
+		return runServe(stdout, stderr)
 	}
 	switch args[0] {
+	case "migrate":
+		if len(args) > 1 {
+			fmt.Fprintf(stderr, "muster: migrate takes no arguments\n\n%s", usage)
+			return exitUsage
+		}
+		return runMigrateCommand(stdout, stderr)
 	case "dev":
 		return runDev(args[1:], stdout, stderr)
 	case "version":

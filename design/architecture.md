@@ -140,7 +140,7 @@ flowchart LR
     class ingress,pgb,proxy optional
 ```
 
-**Listeners** ([C-02].FR-2, FR-3; addresses _provisional_, P-03):
+**Listeners** ([C-02].FR-2, FR-3):
 
 | Listener | Default (`MUSTER_LISTEN_*`) | Serves | Reached through |
 |---|---|---|---|

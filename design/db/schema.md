@@ -1,10 +1,11 @@
 # Muster L1 — database schema
 
-- Status: Draft (design artifact; no product code yet)
+- Status: Draft; the first migration is embedded in the binary and applied by `muster migrate`
 - Date: 2026-10-03
-- Migrations: [`migrations/0001_init.up.sql`](migrations/0001_init.up.sql) and
-  [`migrations/0001_init.down.sql`](migrations/0001_init.down.sql) — golang-migrate format, hand-written SQL, the same
-  directory `sqlc` reads ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md))
+- Migrations: [`0001_init.up.sql`](../../internal/db/migrations/0001_init.up.sql) and
+  [`0001_init.down.sql`](../../internal/db/migrations/0001_init.down.sql) in `internal/db/migrations/` — golang-migrate
+  format, hand-written SQL, embedded in the binary, the same directory `sqlc` reads
+  ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md))
 - PostgreSQL 14 or newer; one extension, `pg_trgm`
 
 This document explains the physical schema of L1: every table group with its purpose, key columns, invariants, indexes,

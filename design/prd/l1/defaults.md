@@ -16,13 +16,13 @@ table in the same pull request.
 | `MUSTER_DATABASE_URL` | unset; required unless the `MUSTER_DATABASE_*` fields are set; wins over them, with a warning | environment | C-02 | decided |
 | `MUSTER_DATABASE_HOST`, `_NAME`, `_USER`, `_PASSWORD` / `_PASSWORD_FILE` | unset | environment | C-02 | decided |
 | `MUSTER_DATABASE_PORT` | `5432` | environment | C-02 | decided |
-| `MUSTER_DATABASE_SSLMODE` | `prefer`; `muster doctor` and the startup log report whether each connection is encrypted | environment | C-02 | P-04 |
+| `MUSTER_DATABASE_SSLMODE` | `prefer`; `muster doctor` and the startup log report whether each connection is encrypted | environment | C-02 | decided |
 | `MUSTER_DATABASE_SESSION_URL`, or `MUSTER_DATABASE_SESSION_HOST` and `_PORT` | the main connection; other fields inherited | environment | C-02 | decided |
 | `MUSTER_SECRET_KEYS` / `_FILE` | none (required) | environment | C-02 | decided |
 | `MUSTER_PUBLIC_URL` | none (required) | environment | C-02 | decided |
 | `MUSTER_INGEST_URL` | `MUSTER_PUBLIC_URL` | environment | C-02 | decided |
-| `MUSTER_LISTEN_APP` / `MUSTER_LISTEN_INGEST` / `MUSTER_LISTEN_INTERNAL` | `:8080` / `:8081` / `:8082` (not `:9090`, which Prometheus uses by default); the compose example sets ingest to the app address | environment | C-02 | P-03 |
-| `MUSTER_LOG_LEVEL` | `info` | environment | C-02 | decided |
+| `MUSTER_LISTEN_APP` / `MUSTER_LISTEN_INGEST` / `MUSTER_LISTEN_INTERNAL` | `:8080` / `:8081` / `:8082` (not `:9090`, which Prometheus uses by default); the compose example sets ingest to the app address | environment | C-02 | decided |
+| `MUSTER_LOG_LEVEL` | `info`; one of `info`, `warn` and `error`, the levels of the log event registry | environment | C-02 | decided |
 | `MUSTER_MIGRATE_ON_START` | off; on in the compose example; the chart migrates in an init container | environment | C-02 | decided |
 | `MUSTER_BOOTSTRAP_ADMIN_EMAIL`, `MUSTER_BOOTSTRAP_ADMIN_PASSWORD` / `_FILE` | unset; the email is also the bootstrap Admin's login | environment | C-02, C-03 | decided |
 | `MUSTER_TRUSTED_PROXIES` | empty: a request's client address is its socket address; with CIDR networks listed (comma-separated), a request whose socket address is inside them takes the first address of `X-Forwarded-For`, read from the right, that is outside them | environment | C-02, C-03, C-04 | decided |
@@ -39,7 +39,7 @@ table in the same pull request.
 | `replica.prune_after` | 1 h without a refresh; then the Leader removes the replica's record | built in | C-02 | decided |
 | `recovery.banner_duration` | from startup until the longest learned repeat interval has passed, at most 1 h; 15 min when nothing is learned | built in | C-02 | P-01 |
 | `process.clock_skew_warning` | 2 s | built in | C-02 | decided |
-| `process.shutdown_grace` | 20 s (the chart's termination grace period is 30 s) | built in | C-02 | P-02 |
+| `process.shutdown_grace` | 20 s (the chart's termination grace period is 30 s) | built in | C-02 | decided |
 | Helm `replicas` | 1 | Helm chart | C-01 | decided |
 
 ## Sign-in and tokens

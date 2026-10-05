@@ -31,8 +31,8 @@ same pull request, or raise it there when the fix belongs in an ADR or the PRD.
    maps every FR and AC to its stories.
 5. [`api/openapi.yaml`](api/openapi.yaml), **spec-first**: the API changes in the spec, then code is generated from it.
    Conventions and the `public_id` format are in [`api/README.md`](api/README.md).
-6. The designed migration [`0001_init`](design/db/migrations/0001_init.up.sql), explained in
-   [`schema.md`](design/db/schema.md). S-006 moves it unchanged to `internal/db/migrations/`.
+6. The migrations in [`internal/db/migrations/`](internal/db/migrations/), starting with
+   [`0001_init`](internal/db/migrations/0001_init.up.sql), explained in [`schema.md`](design/db/schema.md).
 
 [`architecture.md`](design/architecture.md) draws the system from these documents and adds no decisions; read it for
 the flows and state machines.

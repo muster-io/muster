@@ -10,5 +10,18 @@ the event.
 
 | Event | Level | Fields | Capability | Description |
 |---|---|---|---|---|
+| `database_connection_security` | INFO or WARN | connection, sslmode, encrypted | C-02 | Whether a database connection (main or session) is encrypted, with the sslmode in effect; WARN when it is not encrypted, which prefer allows without an error. |
+| `database_settings_conflict` | WARN | used, ignored | C-02 | A database connection is set both as a URL and as fields: the URL is used and the fields are ignored. |
 | `library_message` | WARN | message | C-02 | A third-party library wrote a line of its own, such as a failed read of the process metrics. |
+| `listener_failed` | ERROR | listener, error | C-02 | A listener stopped serving with an error; the process stops so that it is restarted. |
+| `listeners_started` | INFO | app, ingest, internal | C-02 | The listeners serve and the process is ready; app and ingest are the same address when one port serves both. |
+| `migrations_applied` | INFO | from, to | C-02 | Migrations were applied under the migration lock, from one schema version to another. |
+| `migrations_current` | INFO | version | C-02 | No migration was applied: the schema already has the newest version this binary knows. |
 | `process_started` | INFO | version, commit | C-02 | The server process started, with the version and commit of the binary. |
+| `process_stopped` | INFO | — | C-02 | The server process stopped after a graceful shutdown. |
+| `schema_dirty` | ERROR | database_version | C-02 | A migration failed halfway and the schema is marked dirty at its version: repair the schema from a backup or by hand, then clear the dirty flag in schema_migrations. |
+| `schema_too_new` | ERROR | database_version, known_version | C-02 | The database schema is newer than this binary knows, after an upgrade was rolled back: run a release that knows the schema version. |
+| `schema_too_old` | ERROR | database_version, known_version | C-02 | The database schema is older than this binary needs: run muster migrate or set MUSTER_MIGRATE_ON_START. |
+| `shutdown_grace_exceeded` | WARN | grace_seconds | C-02 | Requests were still running when the shutdown grace period ended; their connections were closed. |
+| `shutdown_requested` | WARN | grace_seconds | C-02 | The server received SIGTERM or an interrupt: readiness answers 503, work in progress finishes and the listeners drain within the grace period, in seconds. |
+| `startup_failed` | ERROR | error | C-02 | Startup stopped: the database cannot be reached or fails a check, a migration failed, or a listener cannot listen. The error says what to fix. |

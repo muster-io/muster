@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/runtime"
 )
 
 const (
@@ -40,6 +41,33 @@ type Probe struct {
 // messenger adapters, ...) adds a probe for that path here.
 var registry = []Probe{
 	{Name: "domain_logger", Run: probeDomainLogger},
+	{Name: "bootstrap_settings", Run: probeBootstrapSettings},
+}
+
+// probeBootstrapSettings gives the secrets to the bootstrap settings — inside database URLs that are refused, as the
+// database password, the master keys and the bootstrap Admin password — and runs the server and muster migrate
+// against an address where nothing listens: the startup log and the startup errors must not carry them.
+func probeBootstrapSettings(ctx context.Context, secrets []string, log io.Writer) error {
+	base := []string{
+		"MUSTER_PUBLIC_URL=http://localhost:8080",
+		"MUSTER_SECRET_KEYS=" + secrets[1],
+		"MUSTER_BOOTSTRAP_ADMIN_EMAIL=admin@example.org",
+		"MUSTER_BOOTSTRAP_ADMIN_PASSWORD=" + secrets[2],
+		"MUSTER_LISTEN_APP=127.0.0.1:0",
+		"MUSTER_LISTEN_INGEST=127.0.0.1:0",
+		"MUSTER_LISTEN_INTERNAL=127.0.0.1:0",
+	}
+	refused := append(slices.Clone(base),
+		"MUSTER_DATABASE_URL=mysql://muster:"+url.QueryEscape(secrets[0])+"@db.example/muster",
+		"MUSTER_DATABASE_SESSION_URL=http://muster:"+secrets[1]+"@db.example/muster")
+	unreachable := append(slices.Clone(base),
+		"MUSTER_DATABASE_HOST=127.0.0.1", "MUSTER_DATABASE_PORT=1", "MUSTER_DATABASE_NAME=muster",
+		"MUSTER_DATABASE_USER=muster", "MUSTER_DATABASE_PASSWORD="+secrets[0], "MUSTER_DATABASE_SSLMODE=disable")
+	return errors.Join(
+		runtime.Run(ctx, runtime.Options{Environ: refused, Stdout: log}),
+		runtime.Run(ctx, runtime.Options{Environ: unreachable, Stdout: log}),
+		runtime.Migrate(ctx, runtime.Options{Environ: unreachable, Stdout: log}),
+	)
 }
 
 // probeDomainLogger logs the secrets as logging.Secret values through the domain logger: as a field, inside a value

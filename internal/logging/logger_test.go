@@ -166,6 +166,34 @@ func TestRefusedInTests(t *testing.T) {
 	})
 }
 
+func TestLogAt(t *testing.T) {
+	var out bytes.Buffer
+	l := New(&out, LevelInfo)
+	l.LogAt(t.Context(), DatabaseConnectionSecurity, LevelWarn,
+		F("connection", "main"), F("sslmode", "prefer"), F("encrypted", false))
+	l.LogAt(t.Context(), DatabaseConnectionSecurity, LevelInfo,
+		F("connection", "session"), F("sslmode", "require"), F("encrypted", true))
+	New(&out, LevelWarn).LogAt(t.Context(), DatabaseConnectionSecurity, LevelInfo,
+		F("connection", "main"), F("sslmode", "require"), F("encrypted", true))
+	lines := decodeLines(t, &out)
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2: %s", len(lines), out.String())
+	}
+	if lines[0]["level"] != "WARN" || lines[0]["connection"] != "main" || lines[0]["encrypted"] != false ||
+		lines[1]["level"] != "INFO" || lines[1]["connection"] != "session" || lines[1]["encrypted"] != true {
+		t.Errorf("lines %v", lines)
+	}
+	mustPanic(t, "event database_connection_security is not declared at the level ERROR", func() {
+		l.LogAt(t.Context(), DatabaseConnectionSecurity, LevelError)
+	})
+	mustPanic(t, "event process_started is not declared at the level WARN", func() {
+		l.LogAt(t.Context(), ProcessStarted, LevelWarn)
+	})
+	mustPanic(t, "the event is not registered", func() {
+		l.LogAt(t.Context(), Event{}, LevelInfo)
+	})
+}
+
 func TestRefusedAtAnyThreshold(t *testing.T) {
 	l := New(&bytes.Buffer{}, LevelError)
 	mustPanic(t, `does not declare the field "user"`, func() {
@@ -229,6 +257,11 @@ func TestRegistry(t *testing.T) {
 	if !found {
 		t.Errorf("process_started is not registered as INFO with version and commit: %+v", events)
 	}
+	for _, e := range events {
+		if e.Name == DatabaseConnectionSecurity.Name() && fmt.Sprint(e.Levels) != "[INFO WARN]" {
+			t.Errorf("database_connection_security has the levels %v, want [INFO WARN]", e.Levels)
+		}
+	}
 	if (Event{}).Name() != "" {
 		t.Error("the zero event has a name")
 	}
@@ -250,6 +283,8 @@ func TestRegistryValidation(t *testing.T) {
 		{"field case", func(d *eventDef) { d.fields = []string{"routeID"} }, `field "routeID" is not snake_case`},
 		{"reserved field", func(d *eventDef) { d.fields = []string{"level"} }, `field "level" is reserved`},
 		{"repeated field", func(d *eventDef) { d.fields = []string{"route", "route"} }, `field "route" is declared twice`},
+		{"other level", func(d *eventDef) { d.also = []Level{Level(3)} }, "level 3 is not INFO, WARN or ERROR"},
+		{"repeated level", func(d *eventDef) { d.also = []Level{LevelWarn} }, "level WARN is declared twice"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
