@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+-- Copyright The Muster Authors
 -- Muster L1 — initial schema.
 --
 -- PostgreSQL 14 or newer. golang-migrate format; this directory is also the schema that sqlc reads.

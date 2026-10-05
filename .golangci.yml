@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# golangci-lint v2. Architecture rules 6, 7 and 8 of ADR-0016 live here as depguard and forbidigo entries; every
+# message starts with "archlint rule N:" so that the path exceptions below can target one rule by its text.
+version: "2"
+
+run:
+  build-tags:
+    - lint
+  relative-path-mode: gomod
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - copyloopvar
+    - depguard
+    - errcheck
+    - errorlint
+    - exhaustive
+    - forbidigo
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - intrange
+    - misspell
+    - nilerr
+    - noctx
+    - nolintlint
+    - revive
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - wastedassign
+
+  settings:
+    depguard:
+      rules:
+        archlint-rule-7:
+          files:
+            - $all
+            - "!**/internal/logging/**"
+          # Prefix match: log/ covers log/slog and log/syslog, and each third-party entry covers its subpackages.
+          deny:
+            - pkg: log$
+              desc: "archlint rule 7: log only through the domain logger in internal/logging"
+            - pkg: log/
+              desc: "archlint rule 7: log only through the domain logger in internal/logging"
+            - pkg: go.uber.org/zap
+              desc: "archlint rule 7: log only through the domain logger in internal/logging"
+            - pkg: github.com/rs/zerolog
+              desc: "archlint rule 7: log only through the domain logger in internal/logging"
+            - pkg: github.com/sirupsen/logrus
+              desc: "archlint rule 7: log only through the domain logger in internal/logging"
+            - pkg: github.com/hashicorp/go-hclog
+              desc: "archlint rule 7: log only through the domain logger in internal/logging"
+
+    exhaustive:
+      default-signifies-exhaustive: true
+
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^context\.(Background|TODO)$
+          pkg: ^context$
+          msg: "archlint rule 6: context.Background() and context.TODO() are allowed only in cmd/, internal/runtime, internal/cli, test/load/main.go and tests; take a context.Context from the caller"
+        - pattern: ^fmt\.Print(f|ln)?$
+          pkg: ^fmt$
+          msg: "archlint rule 7: log only through the domain logger in internal/logging"
+        - pattern: ^os\.(Stdout|Stderr)$
+          pkg: ^os$
+          msg: "archlint rule 7: log only through the domain logger in internal/logging"
+        # The builtins have no package; a function of the same name declared in a package does not match.
+        - pattern: ^(print|println)$
+          pkg: ^$
+          msg: "archlint rule 7: log only through the domain logger in internal/logging"
+        - pattern: ^metrics\.(NewHistogram|GetOrCreateHistogram)$
+          pkg: ^github\.com/VictoriaMetrics/metrics$
+          msg: "archlint rule 8: only Prometheus le histograms (NewPrometheusHistogram, GetOrCreatePrometheusHistogram)"
+        - pattern: ^metrics\.Set\.(NewHistogram|GetOrCreateHistogram)$
+          pkg: ^github\.com/VictoriaMetrics/metrics$
+          msg: "archlint rule 8: only Prometheus le histograms (NewPrometheusHistogram, GetOrCreatePrometheusHistogram)"
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+  exclusions:
+    generated: strict
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      - linters: [forbidigo]
+        text: "archlint rule 6"
+        path: ^(cmd/|internal/(runtime|cli)/|test/load/main\.go$)
+      - linters: [forbidigo]
+        text: "archlint rule 6"
+        path: _test\.go$
+      - linters: [forbidigo]
+        text: "archlint rule 7"
+        path: ^(internal/(logging|cli|devmode|tools)/|test/load/|cmd/muster-archlint/)
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      rewrite-rules:
+        - pattern: interface{}
+          replacement: any
+    goimports:
+      local-prefixes:
+        - github.com/muster-io/muster

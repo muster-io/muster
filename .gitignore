@@ -1,4 +1,5 @@
-# Local working material (Russian mirror of docs, grilling, research) — never published
+# Local, unpublished files of the maintainer
 .thoughts/
-# Operator-local Claude Code instructions
 CLAUDE.local.md
+# Build output, installed tools and coverage profiles
+/bin/

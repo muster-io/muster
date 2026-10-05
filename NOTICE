@@ -1,0 +1,29 @@
+Muster
+Copyright The Muster Authors
+
+Muster is licensed under the GNU Affero General Public License, version 3 only
+(SPDX-License-Identifier: AGPL-3.0-only). The full text is in LICENSE.
+
+
+Third-party code
+================
+
+Muster contains no code copied from copyleft projects. Code ported from permissively
+licensed projects is attributed in this file, with the project it comes from, its
+licence and its copyright notice. Files copied into the repository unchanged keep their
+own licence header and are listed below, so that the licence header check skips them.
+
+Third-party files excluded from the licence header check:
+  (none)
+
+The list above is read by `make lint` (internal/tools/licensecheck). It runs from its
+heading to the next blank line. Each entry is a line "  - <glob>  <origin and licence>":
+<glob> is a path relative to the repository root, matched segment by segment with Go's
+path.Match patterns, and a trailing "/**" matches every file below a directory; the text
+after the glob is for readers. A single line "  (none)" stands for an empty list.
+
+
+Ported code
+===========
+
+None yet.

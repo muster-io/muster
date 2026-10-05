@@ -145,13 +145,13 @@ The full table, with every domain package and the list of generated paths, is
 
 | # | Fails when |
 |---|---|
-| 1 | a query on a table with `org_id` does not filter by it |
-| 2 | `alert_groups`, `alert_group_alerts`, `timeline_entries`, `notes` or `alert_group_counters` is written outside `internal/groups` |
+| 1 | a query on a table with `org_id` does not filter by it, at every query level, with a value from a parameter or an outer query |
+| 2 | `alert_groups`, `alert_group_alerts`, `timeline_entries`, `notes` or `alert_group_counters` is written outside `internal/groups`, or `internal/groups/dbgen` is imported outside it |
 | 3 | a messenger send or edit is called outside the delivery worker and the interactive path |
 | 4 | an `http.Client` or `http.Transport`, `http.DefaultClient` or `http.Get`/`Post`/`Head`/`PostForm` is used outside `internal/outbound` (fakes, dev mode, the load test, the generated client and tests excepted) |
 | 5 | a known secret value reaches a log line or a returned error |
-| 6 | `context.Background()` is used outside `cmd/`, `internal/runtime`, `internal/cli`, `test/load/main.go` and tests |
-| 7 | `log`, `log/slog`, `fmt.Print*` or direct writes to stdout and stderr appear outside `internal/logging` (`internal/cli`, `internal/devmode` and `test/load` may print) |
+| 6 | `context.Background()` or `context.TODO()` is used outside `cmd/`, `internal/runtime`, `internal/cli`, `test/load/main.go` and tests |
+| 7 | `log` and its subpackages, a third-party logger, `fmt.Print*`, `print`, `println` or direct writes to stdout and stderr appear outside `internal/logging` (`internal/cli`, `internal/devmode`, `test/load` and the build tooling `cmd/muster-archlint` and `internal/tools` may print) |
 | 8 | a VictoriaMetrics `vmrange` histogram is constructed; only Prometheus `le` histograms are allowed |
 
 A false positive is fixed in the lint, never worked around in the code.
@@ -159,17 +159,20 @@ A false positive is fixed in the lint, never worked around in the code.
 ## Make targets
 
 The Makefile is the only entry point. Targets appear as the stories that define them land; the Makefile is
-authoritative.
+authoritative, and `make help`, its default goal, lists them. Pinned tools (golangci-lint, go-test-coverage) are built
+with the project's Go toolchain into `bin/tools/` on first use.
 
 | Target | Does | From |
 |---|---|---|
-| `make fmt` | gofmt and goimports, later oxfmt | S-001 |
-| `make lint` | golangci-lint and the licence headers; later Redocly on the spec, oxlint and translations | S-001 |
+| `make help` | list the targets | S-001 |
+| `make fmt` | gofmt and goimports through `golangci-lint fmt`, later oxfmt | S-001 |
+| `make lint` | the licence headers (`internal/tools/licensecheck`, skipping the paths listed in `NOTICE`) and golangci-lint; later Redocly on the spec, oxlint and translations | S-001 |
 | `make lint-arch` | the architecture lints | S-001 |
-| `make test`, `make test-race` | unit tests with the coverage gate; the same with the race detector | S-001 |
-| `make generate`, `make generate-check` | run every generator; fail on stale generated files | S-001, S-002 |
+| `make test`, `make test-race` | unit tests with the coverage gate of `.testcoverage.yml`; the same with the race detector | S-001 |
+| `make generate`, `make generate-check` | run every generator (none before S-002); fail on stale generated files | S-001, S-002 |
 | `make build` | the SPA, then `bin/muster` with version and commit | S-001, S-002 |
-| `make ci` | the pull-request tier, locally | S-001 |
+| `make ci` | the pull-request tier, locally: `lint`, `lint-arch`, `test-race`, `build`, and what later stories add | S-001 |
+| `make clean` | remove `bin/`: the binary, the coverage profile and the installed tools | S-001 |
 | `make licenses` | the dependency licence check | S-002 |
 | `make helm-check`, `make compose-check` | render and validate the chart; check the compose example | S-003 |
 | `make dev-db`, `make dev` | the development PostgreSQL; PostgreSQL, build and `muster dev` | S-004 |

@@ -20,6 +20,10 @@ files_touched:
   - internal/archlint/secretleak.go
   - internal/archlint/archlint_test.go
   - internal/archlint/testdata/**
+  - internal/tools/licensecheck/main.go
+  - internal/tools/licensecheck/main_test.go
+  - design/db/migrations/0001_init.up.sql
+  - design/db/migrations/0001_init.down.sql
   - Makefile
   - .golangci.yml
   - .testcoverage.yml
@@ -93,27 +97,32 @@ issue: 1
 - **golangci-lint**: `default: none` with an explicit list of enabled linters; `nolintlint` requires an explanation on
   every `//nolint`.
 - **Licence header** (C-01.FR-2, ADR-0001): every `*.go`, `*.sql`, `*.ts`, `*.tsx`, `*.js`, `*.mjs`, `*.css`, `*.sh`,
-  `Makefile`, `Dockerfile`, chart template and workflow file starts with `SPDX-License-Identifier: AGPL-3.0-only` and
-  `Copyright The Muster Authors`. Markdown, JSON, lock files, generated files and fixtures are exempt; third-party files
-  keep their own header and are excluded by path, and NOTICE lists those paths.
+  `*.py`, `Makefile`, `Dockerfile`, chart template, workflow file and script that starts with a shebang line starts with `SPDX-License-Identifier: AGPL-3.0-only` and
+  `Copyright The Muster Authors`. Markdown, JSON, lock files, generated files (the `Code generated … DO NOT EDIT.` line, or a
+  generated path listed in AGENTS.md) and fixtures are exempt; third-party files
+  keep their own header and are excluded by path, and NOTICE lists those paths. The check is
+  `internal/tools/licensecheck`, run by `make lint`; it reads the excluded paths from NOTICE, so the list has one
+  home. The designed migration under `design/db/migrations/` is SQL that S-006 moves unchanged into the binary, so it
+  gets the header now (a comment only; the schema does not change).
 - **Architecture lints** (ADR-0016), code behind the `lint` build tag:
 
   | # | Rule | Mechanism |
   |---|---|---|
-  | 1 | A query on a table with `org_id` filters by it | SQL analyzer over `internal/**/query.sql`; tables with `org_id` are read from the migrations. A query may be exempt only with an `-- archlint:org-exempt <reason>` comment, used for the lookups by hash and by Connection that `design/db/schema.md` names. Background queries — worker claims, Leader scans, retention and pruning — are not exempt: they run per Organization and pass `org_id` |
-  | 2 | Only `internal/groups` writes Alert Group tables | SQL analyzer: `INSERT`, `UPDATE` or `DELETE` on `alert_groups`, `alert_group_alerts`, `timeline_entries`, `notes` or `alert_group_counters` in a query file outside `internal/groups` |
+  | 1 | A query on a table with `org_id` filters by it | SQL analyzer over `internal/**/query.sql`; tables with `org_id` are read from the migrations. A query may be exempt only with an `-- archlint:org-exempt <reason>` comment, used for the lookups by hash and by Connection that `design/db/schema.md` names. Background queries — worker claims, Leader scans, retention and pruning — are not exempt: they run per Organization and pass `org_id`. The filter is checked at every query level (a subquery that filters does not cover the outer statement), compares with a value that comes from a parameter or an outer query (not a constant, not an unfiltered read of `organizations`), and a condition in the `ON` of an outer join covers only the side that join can make null; `TRUNCATE` of such a table is reported |
+  | 2 | Only `internal/groups` writes Alert Group tables | SQL analyzer: `INSERT`, `UPDATE` or `DELETE` on `alert_groups`, `alert_group_alerts`, `timeline_entries`, `notes` or `alert_group_counters` in a query file outside `internal/groups` (`TRUNCATE` included); a Go analyzer reports an import of the generated `internal/groups/dbgen` from outside `internal/groups`, so a write query is called only from there |
   | 3 | Messenger sends and edits only from the delivery worker and the interactive path | Go analyzer over call sites of the adapter's send and edit methods; the adapter package and the two allowed packages are configured in the lint (they arrive with C-11) |
   | 4 | HTTP clients and transports only in `internal/outbound` | Go analyzer: `http.Client` or `http.Transport` values, `http.DefaultClient`, `http.Get`, `http.Post`, `http.Head`, `http.PostForm` outside `internal/outbound`, `internal/fakes`, `internal/devmode`, the load test `test/load`, the generated client `pkg/apiclient` and tests |
   | 5 | No known secret value in a log line or returned error | A test harness (`go test -tags lint ./internal/archlint/...`) with probes that push known secrets through code paths and scan logs and errors; each later story registers probes for its paths |
-  | 6 | `context.Background()` only in `cmd/`, the wiring packages `internal/runtime` and `internal/cli`, the load test `test/load/main.go`, and tests | `forbidigo` with path exceptions |
-  | 7 | Logging only through the domain logger | `depguard` denies `log` and `log/slog` outside `internal/logging`; `forbidigo` denies `fmt.Print*` and direct writes to `os.Stdout`/`os.Stderr` outside `internal/logging`, `internal/cli`, `internal/devmode` (the addresses `muster dev` prints) and `test/load` (its report) |
+  | 6 | `context.Background()` and `context.TODO()` only in `cmd/`, the wiring packages `internal/runtime` and `internal/cli`, the load test `test/load/main.go`, and tests | `forbidigo` with path exceptions |
+  | 7 | Logging only through the domain logger | `depguard` denies `log` with its subpackages (`log/slog`, `log/syslog`) and the common third-party loggers outside `internal/logging`; `forbidigo` denies `fmt.Print*`, the builtins `print` and `println`, and direct writes to `os.Stdout`/`os.Stderr` outside `internal/logging`, `internal/cli`, `internal/devmode` (the addresses `muster dev` prints), `test/load` (its report), and the build tooling that is never part of the binary and prints its own report: `cmd/muster-archlint` and `internal/tools` |
   | 8 | Only Prometheus-compatible `le` histograms | `forbidigo` denies the `vmrange` histogram constructors of VictoriaMetrics/metrics (`NewHistogram`, `GetOrCreateHistogram` and the `Set` methods of the same names) |
 
 - **Coverage gate** (C-01.FR-8): `.testcoverage.yml` sets 95 % for `internal/groups`, `internal/routing`,
   `internal/delivery` and `internal/timers` (the core: Alert Group lifecycle, grouping, routing, delivery, timers) and
   80 % for every other package; `cmd/`, `internal/fakes/`, `internal/tools/` and generated code are excluded.
-- **CI** (C-01.FR-7): `.github/workflows/ci.yml`. On push: `lint`, `lint-arch`, `test` (no race), `build`. On pull
-  request: the same jobs with `test-race`; S-004 and S-006 add the end-to-end and integration jobs. Actions are pinned
+- **CI** (C-01.FR-7): `.github/workflows/ci.yml`. On push to `master`: `lint`, `lint-arch`, `test` (no race), `build`. On pull
+  request: the same jobs with `test-race` (pushes to other branches run nothing, so a pull request's required checks
+  come from one run only); S-004 and S-006 add the end-to-end and integration jobs. Actions are pinned
   by commit SHA.
 - **Contributor files** (C-01.FR-14): README.md (what Muster is, the development status, a roadmap section with the
   layers L1–L4, links to the design), CONTRIBUTING.md (Makefile targets, conventional commits, the CLA, the story
@@ -177,7 +186,10 @@ On GitHub (operator, with evidence in the pull request):
 1. cla-assistant.io reads the agreement from a GitHub Gist, while C-01.FR-3 names `CLA.md` as the text. The gist must
    stay identical to CLA.md; decide who owns the gist and whether CI compares the two.
 2. Lints 1 and 2 need a PostgreSQL parser. A pure-Go parser is preferred so the lint step needs no cgo; it is tooling
-   behind the `lint` tag, never part of the binary, so the tooling licence rule of ADR-0001 applies.
+   behind the `lint` tag, never part of the binary, so the tooling licence rule of ADR-0001 applies. _Resolved:_
+   `github.com/wasilibs/go-pgquery` (MIT), PostgreSQL's own parser (libpg_query, BSD-3-Clause) compiled to WebAssembly
+   and run by wazero (Apache-2.0), so no cgo; it returns the AST types of `github.com/pganalyze/pg_query_go/v6`
+   (BSD-3-Clause), the parser sqlc uses.
 
 ## Notes
 

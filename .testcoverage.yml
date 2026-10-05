@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# Coverage gate of `make test` and `make test-race` (vladopajic/go-test-coverage). Paths are relative to the module
+# root. A package without tests counts as 0 %; a package without statements is not counted.
+profile: bin/cover.out
+
+threshold:
+  package: 80
+
+override:
+  # The core: Alert Group lifecycle, grouping, routing, delivery and timers.
+  - path: ^internal/(groups|routing|delivery|timers)$
+    threshold: 95
+
+exclude:
+  paths:
+    - ^cmd/
+    - ^internal/fakes/
+    - ^internal/tools/
+    # Generated code.
+    - /dbgen/
+    - ^internal/api/gen/
+    - ^pkg/apiclient/
+    - \.gen\.go$

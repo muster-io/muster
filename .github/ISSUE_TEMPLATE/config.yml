@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+blank_issues_enabled: false
+contact_links:
+  - name: Contributing guide
+    url: https://github.com/muster-io/muster/blob/master/CONTRIBUTING.md
+    about: How work is proposed and built, and the Contributor License Agreement.
