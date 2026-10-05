@@ -7,6 +7,14 @@
   rangeStrategy: "pin",
   postUpdateOptions: ["gomodTidy"],
   dependencyDashboard: true,
+  // Version policy: routine updates arrive once a week, grouped per ecosystem, and merge themselves when every
+  // required check passes. Major updates never open a pull request on their own: they wait in the Dependency
+  // Dashboard until a maintainer ticks them, because the stack's major versions (Go, Node LTS, PostgreSQL,
+  // msw and others) are decisions recorded in the ADRs. Security fixes are not held by the schedule.
+  schedule: ["before 6am on Monday"],
+  minimumReleaseAge: "3 days",
+  prConcurrentLimit: 4,
+  prHourlyLimit: 2,
   // A version pinned on the line under a `# renovate:` comment: `NAME_VERSION := v1.2.3` in the Makefile,
   // `NAME_VERSION: v1.2.3` in a workflow's env.
   customManagers: [
@@ -20,8 +28,23 @@
   ],
   packageRules: [
     {
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
+    },
+    {
+      matchUpdateTypes: ["minor", "patch", "pin", "pinDigest", "digest"],
+      automerge: true,
+      automergeType: "pr",
+      platformAutomerge: true,
+    },
+    {
       matchDatasources: ["github-actions"],
       groupName: "GitHub Actions",
+    },
+    {
+      matchDatasources: ["docker"],
+      matchUpdateTypes: ["minor", "patch", "digest", "pinDigest"],
+      groupName: "Container images (non-major)",
     },
     {
       matchDatasources: ["go"],
@@ -51,10 +74,6 @@
       matchDatasources: ["npm", "go"],
       prBodyNotes:
         "Generated code must be regenerated with `make generate` and committed.",
-    },
-    {
-      matchDatasources: ["npm"],
-      minimumReleaseAge: "3 days",
     },
     // release-please sets the Muster image tag in the compose example on every release.
     {
