@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# Redocly CLI lints api/openapi.yaml with the recommended ruleset. The warnings that api/README.md explains are
+# accepted one by one in .redocly.lint-ignore.yaml, next to this file, so that any new warning still shows.
+extends:
+  - recommended
+telemetry: off

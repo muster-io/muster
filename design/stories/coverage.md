@@ -52,7 +52,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-01.FR-2 | S-001 | complete |  |
 | C-01.FR-3 | S-001 | complete |  |
 | C-01.FR-4 | S-002 | complete |  |
-| C-01.FR-5 | S-001 (part), S-002 (part), S-007 (part) | complete |  |
+| C-01.FR-5 | S-001 (part), S-002 (part), S-007 (part) | complete | the binary links the SPA when the app listener serves it, in S-006 |
 | C-01.FR-6 | S-001 | complete |  |
 | C-01.FR-7 | S-001 (part), S-002 (part), S-004 (part), S-061 (part) | complete | the load test's full profile and thresholds come with delivery to a messenger, in S-061 |
 | C-01.FR-8 | S-001 | complete |  |

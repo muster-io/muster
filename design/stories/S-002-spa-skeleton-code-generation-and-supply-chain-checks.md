@@ -16,13 +16,19 @@ files_touched:
   - web/src/routes/index.tsx
   - web/orval.config.ts
   - web/.oxlintrc.json
+  - web/.oxfmtrc.json
+  - web/pnpm-workspace.yaml
   - web/embed.go
   - web/embed_test.go
   - web/dist/.gitkeep
   - web/scripts/check-licenses.mjs
+  - web/scripts/check-licenses.test.mjs
   - api/codegen-server.yaml
   - api/codegen-client.yaml
   - .redocly.yaml
+  - .redocly.lint-ignore.yaml
+  - .node-version
+  - .gitignore
   - go.mod
   - Makefile
   - .github/workflows/ci.yml
@@ -32,10 +38,15 @@ files_touched:
   - .github/renovate.json5
   - .gremlins.yaml
   - SECURITY.md
+  - AGENTS.md
+  - CONTRIBUTING.md
+  - README.md
+  - api/README.md
+  - design/stories/coverage.md
 acceptance:
   - "[C-01.FR-4, C-01.AC-1] Adding a GPL-licensed Go module to the binary's imports, or a GPL-licensed npm package to the SPA's production dependencies, makes `make licenses` and the CI `licenses` job fail, naming the package and its licence; a package licensed `MPL-2.0 OR Apache-2.0` passes."
   - "[C-01.FR-4] A build-tool dependency under an OSI-approved licence outside the shipped list, or a data-only package under CC-BY-4.0, is reported by `make licenses` and does not fail it."
-  - "[C-01.FR-5] `make build` builds the SPA and embeds it in the binary; the embedded file system of a binary built from a clean checkout contains the SPA's index.html."
+  - "[C-01.FR-5] `make build` builds the SPA before the binary, and package `web` embeds it: built from a clean checkout, its embedded file system contains the SPA's index.html; the binary links it when the app listener serves it (S-006)."
   - "[C-01.FR-5] `make generate` regenerates the Go server, the Go client, the TypeScript client and the route tree; a change to api/openapi.yaml without regenerating makes `make generate-check` and CI fail, naming the stale files."
   - "[C-01.FR-7] The nightly workflow produces the mutation-testing report of the core packages as an artifact and does not block anything."
   - "[C-01.FR-11] SECURITY.md describes private vulnerability reporting and the supported release; CI runs govulncheck, pnpm audit, CodeQL and OpenSSF Scorecard; Renovate opens dependency update pull requests."
@@ -87,22 +98,28 @@ issue: 2
   everything and fails on any difference; it is part of `make ci` and of CI.
 - **Spec checks**: Redocly CLI lints `api/openapi.yaml` with the recommended ruleset in `make lint`; `.redocly.yaml`
   accepts the warnings that `api/README.md` explains (the redirect-only and health operations, the unused
-  `AlertmanagerWebhook`). oasdiff `breaking` compares the spec with the base branch on every pull request and posts a
-  report; it does not block before 1.0 (ADR-0008).
+  `AlertmanagerWebhook`). `make generate` runs oapi-codegen, orval and the route tree generator. oasdiff `breaking`
+  runs on every pull request in the `oasdiff` job: it compares the spec with the base branch and writes the report to
+  the job summary; on a pull request from this repository it also posts the report as a comment, updated on every run.
+  It does not block before 1.0 (ADR-0008): a failure of the tool shows in its step and leaves the job green.
 - **Dependency licences** (C-01.FR-4, ADR-0001), `make licenses` and the CI job `licenses`:
   - shipped artifacts, blocking: `go-licenses check ./cmd/muster` against MIT, MIT-0, BSD-2-Clause, BSD-3-Clause,
     Apache-2.0, ISC, 0BSD, Unlicense, CC0-1.0 and MPL-2.0; the SPA's production dependencies from
     `pnpm licenses list --prod --json` checked by `web/scripts/check-licenses.mjs` against the same list, reading SPDX
     expressions so that `A OR B` passes when either side is allowed;
-  - tooling — Go tools, SPA dev dependencies, later the documentation site — reported only: any OSI-approved licence,
-    and CC-BY-4.0 for packages that contain only data.
+  - tooling — Go tools (the tool directives of go.mod and the tools the Makefile installs, resolved in a throwaway
+    module), SPA dev dependencies, later the documentation site — reported only, classified by
+    `web/scripts/check-licenses.mjs`: any OSI-approved licence, and CC-BY-4.0 for packages that contain only data; any
+    other licence, or one go-licenses cannot identify, is reported as needing review.
+  - `pnpm licenses list --prod` leaves out `optionalDependencies`, so the script fails when `web/package.json`
+    declares any: shipped code belongs in `dependencies`.
 - **Security** (C-01.FR-11): SECURITY.md (private vulnerability reporting through GitHub; the latest minor release is
-  supported); govulncheck (fails on a vulnerability in code that is called) and `pnpm audit --prod` (fails on high and
-  critical) in CI and nightly; CodeQL for Go and TypeScript; the OpenSSF Scorecard workflow; Renovate with pinned
-  versions, action digests and grouped updates.
-- **Nightly tier** (C-01.FR-7): `.github/workflows/nightly.yml` runs mutation testing (gremlins, `.gremlins.yaml`) over
-  the core packages that exist and uploads the report as an artifact; S-004 adds the load test and the two-replica
-  end-to-end run.
+  supported); `make vulncheck` runs govulncheck (fails on a vulnerability in code that is called) and `pnpm audit --prod`
+  (fails on high and critical) in the `vulncheck` CI job and on nightly; CodeQL (`codeql.yml`) for Go and TypeScript;
+  the OpenSSF Scorecard workflow (`scorecard.yml`); Renovate with pinned versions, action digests and grouped updates.
+- **Nightly tier** (C-01.FR-7): `.github/workflows/nightly.yml` runs `make mutation` (mutation testing with gremlins,
+  configured in `.gremlins.yaml`) over the core packages that exist and uploads the report as an artifact; S-004 adds
+  the load test and the two-replica end-to-end run.
 
 ## Steps
 
@@ -119,7 +136,7 @@ issue: 2
 ## Verification
 
 ```sh
-make build && go test ./web/... -run TestEmbeddedIndex -v
+make build && WEB_DIST_REQUIRED=1 go test ./web/... -run TestEmbeddedIndex -v
 # --- PASS: TestEmbeddedIndex
 
 make generate && git status --porcelain
@@ -127,32 +144,39 @@ make generate && git status --porcelain
 
 sed -i.bak 's/which is always shown/which is always shown here/' api/openapi.yaml
 make generate-check; echo "exit=$?"
-# stale generated files: internal/api/gen/... pkg/apiclient/... web/src/api/gen/...
+# stale generated files:
+#   internal/api/gen/...
+#   pkg/apiclient/...
+#   web/src/api/gen/...
 # exit=2
 mv api/openapi.yaml.bak api/openapi.yaml
 
 # GPL experiments on a scratch branch; the pull request records the packages used
-go get github.com/sagernet/sing-box@latest   # GPL-3.0-or-later; add a blank import to cmd/muster
+go get github.com/Morganamilo/go-srcinfo@latest   # GPL-3.0; add a blank import to cmd/muster
 make licenses; echo "exit=$?"
-# github.com/sagernet/sing-box ... GPL-3.0 ... not in the allowed list
+# Not allowed license 'GPL-3.0' found for library 'github.com/Morganamilo/go-srcinfo'
 # exit=2
-pnpm --dir web add ckeditor5                 # GPL-2.0-or-later, production dependency
+pnpm --dir web add flickity@3.0.0                # GPL-3.0, production dependency
 make licenses; echo "exit=$?"
-# ckeditor5@... GPL-2.0-or-later is not allowed for shipped artifacts
+# flickity@3.0.0 GPL-3.0 is not allowed for shipped artifacts
 # exit=2
 ```
 
 In the browser, after `make build` and serving `web/dist` with `pnpm --dir web preview`: the page shows "Muster".
 
-On GitHub (operator): the CodeQL and Scorecard workflows are green, Renovate's onboarding pull request is open, and a
-manual run of the nightly workflow has a mutation report artifact.
+On GitHub (operator): the CodeQL and Scorecard workflows are green, Renovate's Dependency Dashboard issue is open and
+it opens update pull requests, and a manual run of the nightly workflow has a mutation report artifact.
 
 ## Open questions
 
 1. Blocking thresholds of the scanners: govulncheck fails on called vulnerabilities, pnpm audit on high and critical
    advisories in production dependencies; everything else is reported. Confirm.
+   Implemented as proposed; awaiting the maintainer's confirmation.
 2. The SPA licence check is a small script because the common npm licence checkers do not evaluate SPDX `OR`
    expressions the way ADR-0001 requires. If a maintained tool that does is found, it replaces the script.
+   The script stays. For a package that declares `SEE LICENSE IN …`, `pnpm licenses list` guesses the licence from
+   the licence file and reported a GPL package as `ISC OR MIT`, so the script takes the package list from pnpm and
+   reads each package's declared licence from its own `package.json`.
 
 ## Notes
 
@@ -161,13 +185,16 @@ manual run of the nightly workflow has a mutation report artifact.
   are repository settings.
 - The first full generation of the strict server is also the first build of every handler interface; from S-010 on,
   an operation that no story has implemented yet answers `501` (`not-implemented`).
+- `github.com/oapi-codegen/nullable` ships a short Apache-2.0 notice for which `go-licenses check` reports "Did not
+  find license"; the story that first links `internal/api/gen` into the binary adds a reviewed exception for it in
+  `make licenses`.
 
 ## Coverage
 
 | ID | Covered | Note |
 |---|---|---|
 | C-01.FR-4 | full | the Helm chart has no chart dependencies (S-003) |
-| C-01.FR-5 | partial | SPA build and generated code; `sqlc` joins in S-007 |
+| C-01.FR-5 | partial | SPA build and generated code; the binary links the SPA when the app listener serves it (S-006); `sqlc` joins in S-007 |
 | C-01.FR-7 | partial | nightly mutation report; load test and two-replica run are S-004 |
 | C-01.FR-11 | partial | everything except Trivy on the image (S-003) |
 | C-01.AC-1 | partial | the GPL dependency part; the header part is S-001 |

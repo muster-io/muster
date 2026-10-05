@@ -1,8 +1,8 @@
 # Muster API
 
 `openapi.yaml` is the source of truth for the HTTP API (OpenAPI 3.1.2). It is written before the code it describes, reviewed
-like code, and served by the binary at `/api/v1/openapi.yaml`. Generated code is **not committed until implementation
-starts**; the spec is a design artifact until then.
+like code, and served by the binary at `/api/v1/openapi.yaml`. Generated code (`internal/api/gen/`, `pkg/apiclient/`,
+`web/src/api/gen/`) is checked in, `make generate` regenerates it, and CI's `generate` job fails on stale output.
 
 ## How the spec is organised
 
@@ -105,13 +105,15 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 
 ## Tooling
 
-```sh
-npx @redocly/cli@latest lint api/openapi.yaml
-oapi-codegen -config server.yaml api/openapi.yaml   # std-http-server + strict-server + models
-oapi-codegen -config client.yaml api/openapi.yaml   # client + models
-```
+- **make lint** runs Redocly with `.redocly.yaml`, which applies the recommended ruleset; accepted warnings are listed
+  in `.redocly.lint-ignore.yaml` and explained here under "Spike result".
+- **make generate** runs oapi-codegen with `api/codegen-server.yaml` (std-http-server + strict-server + models) and
+  `api/codegen-client.yaml` (client + models), and orval for the TypeScript client. It regenerates the route tree and
+  the Go and TypeScript clients.
+- **oasdiff** compares the spec with the base branch on every pull request. The report goes to the job summary and, on a
+  pull request from this repository, into a comment; it does not block before 1.0 (ADR-0008).
 
-Configuration that worked in the spike, for both files:
+Configuration that worked in the spike, for both oapi-codegen files:
 
 ```yaml
 output-options:

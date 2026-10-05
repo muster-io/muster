@@ -48,8 +48,8 @@ Muster is built in four layers. Each layer is usable on its own and is the base 
 
 ## Building
 
-You need Go 1.27, GNU make and git. With the default `GOTOOLCHAIN=auto`, the `go` command fetches the toolchain that
-`go.mod` asks for.
+You need Go 1.27, Node 24 (see `.node-version`), pnpm 12 (`packageManager` in `web/package.json`), GNU make and git.
+With the default `GOTOOLCHAIN=auto`, the `go` command fetches the toolchain that `go.mod` asks for.
 
 ```sh
 make help                          # list the targets

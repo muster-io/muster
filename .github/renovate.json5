@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright The Muster Authors
+
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:best-practices"],
+  rangeStrategy: "pin",
+  postUpdateOptions: ["gomodTidy"],
+  dependencyDashboard: true,
+  // A version pinned on the line under a `# renovate:` comment: `NAME_VERSION := v1.2.3` in the Makefile,
+  // `NAME_VERSION: v1.2.3` in a workflow's env.
+  customManagers: [
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^Makefile$/", "/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s*[A-Z_]+_VERSION(?: :=|:) (?<currentValue>\\S+)",
+      ],
+    },
+  ],
+  packageRules: [
+    {
+      matchDatasources: ["github-actions"],
+      groupName: "GitHub Actions",
+    },
+    {
+      matchDatasources: ["go"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "Go modules (non-major)",
+    },
+    {
+      matchDatasources: ["npm"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "npm (non-major)",
+    },
+    {
+      matchPackageNames: ["/^@tanstack\\//"],
+      groupName: "TanStack",
+    },
+    // react and react-dom fail at run time when their versions differ; the types follow them.
+    {
+      matchPackageNames: ["react", "react-dom", "@types/react", "@types/react-dom"],
+      groupName: "React",
+    },
+    {
+      matchPackageNames: ["oxlint", "oxfmt"],
+      groupName: "oxlint/oxfmt",
+    },
+    {
+      matchPackageNames: ["/oapi-codegen/", "/orval/"],
+      matchDatasources: ["npm", "go"],
+      prBodyNotes:
+        "Generated code must be regenerated with `make generate` and committed.",
+    },
+    {
+      matchDatasources: ["npm"],
+      minimumReleaseAge: "3 days",
+    },
+  ],
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ["before 3am on Monday"],
+  },
+  vulnerabilityAlerts: {
+    enabled: true,
+    labels: ["security"],
+  },
+}
