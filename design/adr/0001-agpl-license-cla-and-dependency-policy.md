@@ -2,6 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-10-02
+- Amended: 2026-10-05 — the base layer of the container image (the distroless static image: Debian data packages such
+  as `base-files`, `netbase`, `tzdata` and `ca-certificates`) is aggregated with Muster, not linked into it, and is outside
+  the list below; its packages and licenses appear in the image SBOM
 
 ## Context
 
@@ -49,7 +52,9 @@ SPA bundle and the Helm chart — may depend, directly or transitively, only on 
 | MPL-2.0 | only while Muster does not modify the MPL-covered files |
 
 Anything else — GPL, LGPL, AGPL, SSPL, BSL, source-available terms, or no license at all — needs its own ADR before it
-is used. CI enforces the list and blocks the merge: `go-licenses` over the Go binary and an equivalent scanner over the
+is used. The base layer of the container image is the one exception: the distroless static image contains only data files and
+configuration from Debian packages, which are aggregated with Muster rather than linked into it; the image SBOM lists
+them. CI enforces the list and blocks the merge: `go-licenses` over the Go binary and an equivalent scanner over the
 SPA's production dependencies. The scanner must understand SPDX expressions with `OR`; a package licensed
 `MPL-2.0 OR Apache-2.0` is used under Apache-2.0.
 
