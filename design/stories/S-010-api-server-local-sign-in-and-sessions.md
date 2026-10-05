@@ -8,6 +8,9 @@ depends_on: [S-008]
 covers: [C-03.FR-1, C-03.FR-2, C-03.FR-3, C-03.FR-4, C-03.FR-9, C-03.FR-12, C-03.FR-14, C-03.FR-16, C-03.FR-22, C-03.FR-23, C-03.FR-24, C-03.FR-27, C-03.AC-3, C-03.AC-10, C-03.AC-11, C-03.AC-12, C-02.FR-19]
 files_touched:
   - api/embed.go
+  - api/embed_test.go
+  - api/openapi.yaml
+  - api/README.md
   - internal/api/server.go
   - internal/api/problem.go
   - internal/api/middleware.go
@@ -24,6 +27,7 @@ files_touched:
   - internal/auth/identity.go
   - internal/auth/query.sql
   - internal/auth/auth_test.go
+  - internal/auth/auth_integration_test.go
   - internal/users/users.go
   - internal/users/bootstrap.go
   - internal/users/query.sql
@@ -31,16 +35,23 @@ files_touched:
   - internal/audit/audit.go
   - internal/audit/query.sql
   - internal/audit/audit_test.go
+  - internal/server/server.go
   - internal/server/spa.go
   - internal/server/server_test.go
   - internal/runtime/runtime.go
   - internal/runtime/bootstrap.go
-  - internal/devmode/devmode.go
+  - internal/runtime/runtime_test.go
+  - internal/runtime/bootstrap_test.go
   - internal/logging/events.go
   - internal/metrics/catalogue.go
+  - internal/archlint/secretleak.go
   - sqlc.yaml
+  - go.mod
+  - Makefile
   - design/prd/l1/defaults.md
+  - design/prd/l1/reference.md
   - design/prd/L1.md
+  - design/db/schema.md
 acceptance:
   - "[C-03.FR-22, C-03.AC-11] On a new database with `MUSTER_BOOTSTRAP_ADMIN_EMAIL=ops@example.org` and a password from `MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE`, one local Admin is created with that value as login and email and the name `ops`, and signs in with that login and password; the Audit log stores `user.created` by the actor `bootstrap` and copies it to stdout; on the next start no user is created and `bootstrap_admin_ignored` is logged at WARN."
   - "[C-03.FR-3, C-03.FR-24] `POST /api/v1/sessions` with the right login in any letter case and the right password answers 201 with a `Session` in the state `active` and sets `muster_session` with `HttpOnly`, `Secure` and `SameSite=Lax`; a wrong login and a wrong password both answer 401 `invalid_credentials` with identical bodies."
@@ -110,12 +121,16 @@ issue: 10
   (`golang.org/x/crypto/argon2`; the parameters are recorded in the code). A wrong login or password, a disabled or a
   deleted account all answer `401 invalid_credentials` with the same body; an unknown login still runs a dummy hash so
   the timing does not tell. `getSignInOptions` is public and answers `{"oidc":{"enabled":false}}` until S-013.
-- **Throttling** (C-03.FR-4, P-07, `sign_in_throttles`): per lowercased login and per source address. After 3
+- **Throttling** (C-03.FR-4, P-07, `sign_in_throttles`): per account — the row keeps the SHA-256 of the lowercased
+  login, so that a long login cannot break the key — and per source address — an IPv4 address or the /64 of an IPv6
+  address. After 3
   consecutive failures the next attempt is allowed after 1 s, then 2, 4, … up to 60 s (`auth.signin_throttle`); an
   earlier attempt answers `429` with `Retry-After` and is not evaluated. A success resets both. Each evaluated failure
   increments `muster_login_failures_total{method="local"}`. The source address is the client address of C-02.FR-1,
   derived once per request by the middleware: the TCP peer, or — when the peer is inside `MUSTER_TRUSTED_PROXIES` — the
-  first address of `X-Forwarded-For`, read from the right, outside those networks.
+  first address of `X-Forwarded-For`, read from the right, outside those networks. A wrong current password in
+  `changePassword` counts in the same throttle and metric, so that a stolen session cannot guess the password faster
+  than a sign-in.
 - **Profile** (C-03.FR-12, FR-27): `getMe` returns `Me`; `updateMe` changes `name`, `time_zone` (IANA name or `null`
   for the browser's) and `language` (`en`, `ru` or `null`); `changePassword` needs the current password (`401
   invalid_credentials` otherwise) and a new one of at least `auth.password_min_length` characters (P-06; `422`
@@ -134,6 +149,9 @@ issue: 10
   where something was configured, and details. Every entry is also logged as `audit_entry` (INFO). Actions added here:
   `user.created`, `session.signed_in`, `session.sign_in_failed`, `session.signed_out`, `session.ended_all`,
   `user.profile_updated`, `user.password_changed`.
+- **Request hardening**: an API request body is at most 1 MiB (`413` `payload-too-large`), and a mutating request a
+  browser marks as cross-site (`Sec-Fetch-Site: cross-site`) answers `403` `csrf_invalid`, which also keeps the public
+  `createSession` out of reach of login CSRF; the spec lists `403` for `createSession`.
 - **SPA and spec** (C-03.FR-16, FR-23): the app listener serves the embedded SPA for every path outside `/api/` with
   the index as fallback, and an unknown path under `/api/v1` answers a `404` `Problem`. Every SPA response carries
   `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;
@@ -144,7 +162,8 @@ issue: 10
 - **Metrics**: `muster_api_requests_total{route_pattern,method,code}` and `muster_api_request_duration_seconds
   {route_pattern,method}`, where `route_pattern` is the spec's path template; `muster_login_failures_total{method}`
   with the value set of the catalogue: `local`, `oidc`, `totp`.
-- **Log events**: `audit_entry`, `bootstrap_admin_ignored`, `bootstrap_admin_missing`.
+- **Log events**: `audit_entry`, `bootstrap_admin_ignored`, `bootstrap_admin_missing`, and `api_request_failed`
+  (ERROR) for an API request that fails with an unexpected error and answers `500` `internal`.
 
 ## Steps
 
@@ -222,7 +241,7 @@ Bootstrap on a fresh database (C-03.AC-11):
 kill %1; wait %1    # stop `make dev`: this check runs the plain server, which needs its own settings
 psql "$MUSTER_DATABASE_URL" -qc 'DROP SCHEMA public CASCADE; CREATE SCHEMA public'
 printf 'ops-bootstrap-pass' > /tmp/admin-pw
-export MUSTER_PUBLIC_URL=http://localhost:8080 MUSTER_SECRET_KEYS="$(openssl rand -base64 32)"
+export MUSTER_PUBLIC_URL=http://localhost:8080 MUSTER_SECRET_KEYS="$(openssl rand -base64 32)" MUSTER_MIGRATE_ON_START=true
 MUSTER_BOOTSTRAP_ADMIN_EMAIL=ops@example.org MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE=/tmp/admin-pw ./bin/muster \
   > /tmp/bootstrap.log 2>&1 &
 sleep 5; grep -m1 '"action":"user.created"' /tmp/bootstrap.log

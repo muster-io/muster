@@ -21,6 +21,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/auth"
+	adb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
@@ -30,6 +32,7 @@ import (
 	odb "github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/users"
 )
 
 type fakeDB struct {
@@ -119,6 +122,23 @@ func (f *fakeDB) WithMigrationLock(ctx context.Context, fn func(context.Context)
 func (f *fakeDB) KeyringStore() keyring.Store { return &f.keys }
 
 func (f *fakeDB) OrganizationStore() organization.Store { return &f.org }
+
+func (f *fakeDB) UsersStore() users.Store { return fakeUsersStore{} }
+
+func (f *fakeDB) AuthStore() auth.Store { return fakeAuthStore{} }
+
+// fakeUsersStore has an Admin, so the bootstrap step creates nothing.
+type fakeUsersStore struct{ users.Store }
+
+func (fakeUsersStore) CountAdmins(context.Context, int64) (int64, error) { return 1, nil }
+
+// fakeAuthStore holds the allocation of Permissions to Roles.
+type fakeAuthStore struct{ auth.Store }
+
+func (fakeAuthStore) ListRolePermissions(context.Context) ([]adb.RolePermission, error) {
+	return []adb.RolePermission{{Role: "admin", Permission: "users:read"}, {Role: "responder", Permission: "alerts:read"},
+		{Role: "viewer", Permission: "alerts:read"}}, nil
+}
 
 // fakeKeyringStore keeps keyring_state and replicas in memory; err fails every call, recordErr the replica records.
 type fakeKeyringStore struct {

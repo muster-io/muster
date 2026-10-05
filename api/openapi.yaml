@@ -104,7 +104,8 @@ paths:
         TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required`
         and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`.
         A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts
-        slow down per account and per source address (`429` with `Retry-After`).
+        slow down per account and per source address (`429` with `Retry-After`). A request a browser marks as cross-site
+        (`Sec-Fetch-Site` set to `cross-site`) is refused with `403` (`csrf_invalid`).
       x-permission: none
       x-listener: app
       security: []
@@ -125,6 +126,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
   /sessions/current:
@@ -7437,7 +7440,8 @@ components:
         in: code
         codes:
         - code: csrf_invalid
-          description: The `X-CSRF-Token` header is missing or wrong on a mutating request made with the session cookie.
+          description: The `X-CSRF-Token` header is missing or wrong on a mutating request made with the session cookie,
+            or a browser marked a mutating request as cross-site (`Sec-Fetch-Site` set to `cross-site`).
         - code: session_required
           description: The operation changes the caller's own account and accepts the web session only.
         - code: service_account_not_allowed

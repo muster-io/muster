@@ -9295,7 +9295,7 @@ type ClientInterface interface {
 
 	// CreateSessionWithBody Sign in with a local account
 	//
-	// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`).
+	// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`). A request a browser marks as cross-site (`Sec-Fetch-Site` set to `cross-site`) is refused with `403` (`csrf_invalid`).
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -9304,7 +9304,7 @@ type ClientInterface interface {
 
 	// CreateSession Sign in with a local account
 	//
-	// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`).
+	// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`). A request a browser marks as cross-site (`Sec-Fetch-Site` set to `cross-site`) is refused with `403` (`csrf_invalid`).
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -12446,7 +12446,7 @@ func (c *Client) RevokeServiceAccountToken(ctx context.Context, serviceAccountId
 
 // CreateSessionWithBody Sign in with a local account
 //
-// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`).
+// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`). A request a browser marks as cross-site (`Sec-Fetch-Site` set to `cross-site`) is refused with `403` (`csrf_invalid`).
 //
 // Takes any type of body and a specified content type.
 //
@@ -12465,7 +12465,7 @@ func (c *Client) CreateSessionWithBody(ctx context.Context, contentType string, 
 
 // CreateSession Sign in with a local account
 //
-// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`).
+// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`). A request a browser marks as cross-site (`Sec-Fetch-Site` set to `cross-site`) is refused with `403` (`csrf_invalid`).
 //
 // Takes a body of the `application/json` content type.
 //
@@ -21564,7 +21564,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateSessionWithBodyWithResponse Sign in with a local account
 	//
-	// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`).
+	// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`). A request a browser marks as cross-site (`Sec-Fetch-Site` set to `cross-site`) is refused with `403` (`csrf_invalid`).
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21573,7 +21573,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateSessionWithResponse Sign in with a local account
 	//
-	// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`).
+	// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`). A request a browser marks as cross-site (`Sec-Fetch-Site` set to `cross-site`) is refused with `403` (`csrf_invalid`).
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -32018,6 +32018,8 @@ type CreateSessionResponse struct {
 	ApplicationproblemJSON400 *BadRequest
 	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
 	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
 	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
 	ApplicationproblemJSON429 *TooManyRequests
 	// Headers429 the parsed response headers for an HTTP 429 response
@@ -32037,6 +32039,11 @@ func (r CreateSessionResponse) GetApplicationproblemJSON400() *BadRequest {
 // GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
 func (r CreateSessionResponse) GetApplicationproblemJSON401() *Unauthorized {
 	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r CreateSessionResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
 }
 
 // GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
@@ -36347,7 +36354,7 @@ func (c *ClientWithResponses) RevokeServiceAccountTokenWithResponse(ctx context.
 
 // CreateSessionWithBodyWithResponse Sign in with a local account
 //
-// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`).
+// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`). A request a browser marks as cross-site (`Sec-Fetch-Site` set to `cross-site`) is refused with `403` (`csrf_invalid`).
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36362,7 +36369,7 @@ func (c *ClientWithResponses) CreateSessionWithBodyWithResponse(ctx context.Cont
 
 // CreateSessionWithResponse Sign in with a local account
 //
-// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`).
+// Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`). A request a browser marks as cross-site (`Sec-Fetch-Site` set to `cross-site`) is refused with `403` (`csrf_invalid`).
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -46076,6 +46083,13 @@ func ParseCreateSessionResponse(rsp *http.Response) (*CreateSessionResponse, err
 			return nil, err
 		}
 		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
 		var dest TooManyRequests

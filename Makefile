@@ -66,6 +66,9 @@ GENERATED := internal/api/gen pkg/apiclient web/src/api/gen web/src/routeTree.ge
 
 # The licences shipped artifacts may depend on (ADR-0001).
 SHIPPED_LICENSES := MIT,MIT-0,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,0BSD,Unlicense,CC0-1.0,MPL-2.0
+# Modules whose licence go-licenses cannot classify, checked by hand: oapi-codegen/nullable is Apache-2.0, but its
+# LICENSE file holds only the short Apache notice. Re-check an entry when its version changes.
+LICENSES_CHECKED_BY_HAND := github.com/oapi-codegen/nullable
 
 # The core packages of the mutation report; those that do not exist yet are skipped.
 MUTATION_PKGS ?= internal/groups internal/routing internal/delivery internal/timers
@@ -173,7 +176,7 @@ build: $(WEB_DEPS) ## Build the SPA, then bin/muster with the version and commit
 # with the project's toolchain. A failure there is shown and never fails the target.
 licenses: $(GO_LICENSES) $(WEB_DEPS) ## Check dependency licences: shipped artifacts block, build tools are reported
 	@failed=0; \
-	for step in "$(GO_LICENSES) check ./cmd/muster --ignore $(MODULE) --allowed_licenses=$(SHIPPED_LICENSES)" \
+	for step in "$(GO_LICENSES) check ./cmd/muster --ignore $(MODULE) $(addprefix --ignore ,$(LICENSES_CHECKED_BY_HAND)) --allowed_licenses=$(SHIPPED_LICENSES)" \
 		"$(PNPM) --dir web run test:scripts" \
 		"$(PNPM) --dir web run licenses"; do \
 		echo "$$step"; sh -c "$$step" || failed=1; \

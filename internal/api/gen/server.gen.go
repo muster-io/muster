@@ -26980,6 +26980,22 @@ func (response CreateSession401ApplicationProblemPlusJSONResponse) VisitCreateSe
 	return err
 }
 
+type CreateSession403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response CreateSession403ApplicationProblemPlusJSONResponse) VisitCreateSessionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreateSession429ApplicationProblemPlusJSONResponse struct {
 	TooManyRequestsApplicationProblemPlusJSONResponse
 }

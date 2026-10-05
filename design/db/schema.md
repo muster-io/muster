@@ -527,8 +527,8 @@ Serves C-02, C-03.FR-2, C-20.FR-6–7; [ADR-0007](../adr/0007-active-replicas-wi
 - **`roles`, `permissions`, `role_permissions`** — the three fixed Roles, the closed Permission set of the API
   specification and the default allocation of [reference.md](../prd/l1/reference.md#roles-and-permissions), seeded by
   the migration. Permission checks are made against Permissions, never Roles (C-03.FR-2); the application loads the
-  allocation at startup and a test compares the seed with the reference matrix. The allocation is provisional (P-42):
-  changing it is a new migration. `users.role`, `service_accounts.role` and `api_token_permissions.permission` are
+  allocation at startup and a test compares the seed with the reference matrix. The allocation was confirmed with the
+  C-03 sign-in story (P-42); changing it is a new migration. `users.role`, `service_accounts.role` and `api_token_permissions.permission` are
   foreign keys into these tables, so an unknown Role or Permission cannot be stored.
 - **`keyring_state`** (singleton) — the active key id and the key canary. `CHECK (canary_key_id = active_key_id)`
   encodes the rule that activation re-encrypts the canary in the same transaction, so removing an old key never breaks
@@ -611,7 +611,8 @@ Serves C-03 (FR-3–FR-27), C-18.FR-8; [ADR-0008](../adr/0008-spec-first-openapi
   without a live session or a usable Personal access token is skipped without calling the IdP. Deleting the user, or
   wiping the offline token, removes the row.
 - **`sign_in_throttles`** — consecutive failures and `blocked_until` per account and per source address
-  (`auth.signin_throttle`), shared by all replicas.
+  (`auth.signin_throttle`), shared by all replicas. The account subject is the SHA-256 of the lowercased login in hex,
+  so that its key has a fixed size; the address subject is an IPv4 address or the /64 network of an IPv6 address.
 - **`password_setups`** — single-use setup links: token hash, expiry (`auth.password_setup_link_ttl`), `used_at`, and
   `superseded_at` when a newer link replaced it (both answer `410 link_used`).
 - **`oidc_auth_requests`** — in-flight OIDC redirects, keyed by the hash of `state` and valid for

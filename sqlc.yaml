@@ -39,3 +39,24 @@ sql:
       go:
         <<: *go
         out: internal/partitions/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/audit/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/audit/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/auth/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/auth/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/users/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/users/dbgen

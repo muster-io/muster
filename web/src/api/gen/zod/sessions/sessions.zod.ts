@@ -32,7 +32,7 @@ export const GetSignInOptionsResponse = zod.object({
 }).describe('What the sign-in page offers besides the local form, which is always shown.')
 
 /**
- * Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`).
+ * Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`). A request a browser marks as cross-site (`Sec-Fetch-Site` set to `cross-site`) is refused with `403` (`csrf_invalid`).
  * @summary Sign in with a local account
  */
 export const CreateSessionBody = zod.object({

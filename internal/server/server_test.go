@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -279,5 +280,44 @@ func TestSPA(t *testing.T) {
 	if code, body := get(t, "http://"+empty.Addrs().App+"/"); code != http.StatusServiceUnavailable ||
 		body != "the web interface is not built\n" {
 		t.Errorf("an unbuilt SPA: %d %q", code, body)
+	}
+}
+
+// TestApp is C-03.FR-16: the app listener sends /api/ paths to the API and every other path to the SPA, and every
+// answer carries the Content Security Policy and the security headers; Strict-Transport-Security only for https.
+func TestApp(t *testing.T) {
+	dist := fstest.MapFS{"index.html": {Data: []byte("<html>index</html>")}}
+	for _, hsts := range []bool{false, true} {
+		h := App(stub("api"), dist, hsts)
+		for path, want := range map[string]string{
+			"/":                   "<html>index</html>",
+			"/alert-groups/AG1":   "<html>index</html>",
+			"/api/v1/nothing":     "api /api/v1/nothing",
+			"/api":                "api /api",
+			"/apiary":             "<html>index</html>",
+			"/api/v1/sign-in-opt": "api /api/v1/sign-in-opt",
+		} {
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+			if w.Body.String() != want {
+				t.Errorf("%s = %q, want %q", path, w.Body.String(), want)
+			}
+			for name, value := range map[string]string{
+				"Content-Security-Policy": ContentSecurityPolicy, "X-Content-Type-Options": "nosniff",
+				"Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
+				"Cross-Origin-Opener-Policy": "same-origin",
+			} {
+				if got := w.Header().Get(name); got != value {
+					t.Errorf("%s: %s = %q", path, name, got)
+				}
+			}
+			if got := w.Header().Get("Strict-Transport-Security"); (got != "") != hsts {
+				t.Errorf("hsts %v: Strict-Transport-Security = %q", hsts, got)
+			}
+		}
+	}
+	if !strings.Contains(ContentSecurityPolicy, "frame-ancestors 'none'") ||
+		!strings.HasPrefix(ContentSecurityPolicy, "default-src 'self'; script-src 'self';") {
+		t.Errorf("CSP = %s", ContentSecurityPolicy)
 	}
 }

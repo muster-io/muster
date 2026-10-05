@@ -10,10 +10,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net"
 	"net/http"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -183,27 +181,4 @@ func shutdown(ctx context.Context, listeners []*listener) error {
 	}
 	wg.Wait()
 	return errors.Join(errs...)
-}
-
-// SPA serves the single-page application in dist: a file that exists as itself, any other path as index.html, so
-// that the SPA's router handles it. Without a built index.html it answers 503.
-func SPA(dist fs.FS) http.Handler {
-	files := http.FileServerFS(dist)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
-		if name != "" && name != "index.html" {
-			if fi, err := fs.Stat(dist, name); err == nil && !fi.IsDir() {
-				files.ServeHTTP(w, r)
-				return
-			}
-		}
-		index, err := fs.ReadFile(dist, "index.html")
-		if err != nil {
-			http.Error(w, "the web interface is not built", http.StatusServiceUnavailable)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache")
-		_, _ = w.Write(index)
-	})
 }

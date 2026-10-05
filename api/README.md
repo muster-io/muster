@@ -172,7 +172,7 @@ them when a story touches the operation.
   `alerts:read`, `templates:preview`, `destinations:test`, `organization:read` (the Admin-only reads of the outbound
   policy, the Keyring and severity values; the basic read of `organization` needs no Permission); answering "Still on it"
   uses `alert-groups:acknowledge`; listing a Connection's channels uses `connections:write` because it calls out with the
-  bot token. The allocation to Roles stays provisional.
+  bot token. The allocation to Roles is confirmed (P-42).
 - The outgoing heartbeat stays on `organization`, readable by every signed-in identity with the URL masked.
 - Integration tokens have an optional `name`; OIDC settings have a `display_name` for "Sign in with {provider}" (default:
   the host of the issuer); an Integration carries `open_alert_group_count` for the delete dialog.

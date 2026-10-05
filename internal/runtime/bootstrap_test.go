@@ -9,7 +9,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -143,6 +146,120 @@ func TestIntegrationStartup(t *testing.T) {
 		}
 		if got := names(out.events(t)); !strings.Contains(strings.Join(got, " "), "key_canary_failed startup_failed") {
 			t.Errorf("events %v", got)
+		}
+	})
+}
+
+// TestIntegrationBootstrapAdmin is C-03.FR-22 and C-03.AC-11 on the running server: on a new database the bootstrap
+// variables, the password from its _FILE variable, create one local Admin named ops, recorded by the actor bootstrap
+// in the Audit log and on stdout, who signs in with the email as login in any case; a wrong login and a wrong password
+// answer identical 401 bodies. The next start creates no user and logs bootstrap_admin_ignored.
+func TestIntegrationBootstrapAdmin(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		url := s.NewDatabase(t)
+		pwFile := filepath.Join(t.TempDir(), "admin-pw")
+		if err := os.WriteFile(pwFile, []byte("ops-bootstrap-pass"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		env := dbEnv(url, "MUSTER_SECRET_KEYS="+testKey, "MUSTER_BOOTSTRAP_ADMIN_EMAIL=ops@example.org",
+			"MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE="+pwFile)
+		var out syncBuffer
+		addrs, cancel, done := running(t, Options{Environ: env, Stdout: &out})
+		var created map[string]any
+		for _, l := range out.events(t) {
+			if l["event"] == "audit_entry" && l["action"] == "user.created" {
+				created = l
+			}
+		}
+		if created == nil || created["actor_kind"] != "bootstrap" || created["resource_name"] != "ops" {
+			t.Errorf("audit_entry of user.created = %v", created)
+		}
+		if got := query(t, url, `SELECT concat_ws('|', count(*), min(login), min(email), min(name), min(role),
+			min(source), min(status)) FROM users`); got != "1|ops@example.org|ops@example.org|ops|admin|bootstrap|active" {
+			t.Errorf("users: %s", got)
+		}
+		if got := query(t, url, `SELECT concat_ws('|', actor_kind, transport, resource_type, resource_name)
+			FROM audit_log WHERE action = 'user.created'`); got != "bootstrap|system|user|ops" {
+			t.Errorf("audit log: %s", got)
+		}
+
+		post := func(login, password string) (int, string, http.Header) {
+			body := `{"login":"` + login + `","password":"` + password + `"}`
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+addrs.App+"/api/v1/sessions",
+				strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			b, _ := io.ReadAll(resp.Body)
+			return resp.StatusCode, string(b), resp.Header
+		}
+		status, body, h := post("OPS@example.org", "ops-bootstrap-pass")
+		if status != http.StatusCreated || !strings.Contains(body, `"state":"active"`) ||
+			!strings.Contains(body, `"name":"ops"`) || !strings.Contains(body, `"role":"admin"`) {
+			t.Errorf("sign-in = %d %s", status, body)
+		}
+		if c := h.Get("Set-Cookie"); !strings.Contains(c, "muster_session=") || !strings.Contains(c, "HttpOnly") ||
+			!strings.Contains(c, "Secure") || !strings.Contains(c, "SameSite=Lax") {
+			t.Errorf("Set-Cookie = %q", c)
+		}
+		s1, wrongPassword, _ := post("ops@example.org", "wrong password")
+		s2, wrongLogin, _ := post("nobody@example.org", "ops-bootstrap-pass")
+		if s1 != http.StatusUnauthorized || s2 != http.StatusUnauthorized || wrongPassword != wrongLogin ||
+			!strings.Contains(wrongLogin, `"code":"invalid_credentials"`) {
+			t.Errorf("refusals = %d %s / %d %s", s1, wrongPassword, s2, wrongLogin)
+		}
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+
+		var again syncBuffer
+		_, cancel, done = running(t, Options{Environ: env, Stdout: &again})
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		var ignored map[string]any
+		for _, l := range again.events(t) {
+			if l["event"] == "bootstrap_admin_ignored" {
+				ignored = l
+			}
+		}
+		if ignored == nil || ignored["level"] != "WARN" {
+			t.Errorf("no bootstrap_admin_ignored at WARN: %v", names(again.events(t)))
+		}
+		if got := query(t, url, "SELECT count(*)::text FROM users"); got != "1" {
+			t.Errorf("%s users after the second start", got)
+		}
+	})
+}
+
+// TestIntegrationBootstrapAdminMissing: without an Admin and without the variables, the start logs
+// bootstrap_admin_missing; a password shorter than auth.password_min_length stops the start, naming the variable.
+func TestIntegrationBootstrapAdminMissing(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		url := s.NewDatabase(t)
+		var out syncBuffer
+		_, cancel, done := running(t, Options{Environ: dbEnv(url, "MUSTER_SECRET_KEYS="+testKey), Stdout: &out})
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(names(out.events(t)), "bootstrap_admin_missing") {
+			t.Errorf("events %v", names(out.events(t)))
+		}
+		err := Run(t.Context(), Options{Environ: dbEnv(url, "MUSTER_SECRET_KEYS="+testKey,
+			"MUSTER_BOOTSTRAP_ADMIN_EMAIL=ops@example.org", "MUSTER_BOOTSTRAP_ADMIN_PASSWORD=too-short"),
+			Stdout: io.Discard})
+		if err == nil || !strings.Contains(err.Error(), "MUSTER_BOOTSTRAP_ADMIN_PASSWORD") ||
+			strings.Contains(err.Error(), "too-short") {
+			t.Errorf("a short password: %v", err)
 		}
 	})
 }

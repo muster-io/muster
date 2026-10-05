@@ -108,8 +108,8 @@ included, is a link in the post, never a button (C-13.FR-3).
 ## Roles and Permissions
 
 Permissions are named `<resource>:<verb>`. The list below is final and is the `Permission` schema of the API
-specification; every operation names the Permission it needs. The allocation to Roles is the L1 default
-(_provisional_, P-42).
+specification; every operation names the Permission it needs. The allocation to Roles is the L1 default, confirmed
+with the C-03 sign-in story (P-42).
 
 | Permission | Allows | Admin | Responder | Viewer |
 |---|---|---|---|---|
