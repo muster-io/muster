@@ -28,6 +28,7 @@ files_touched:
   - .github/workflows/ci.yml
   - .github/workflows/nightly.yml
   - CONTRIBUTING.md
+  - AGENTS.md
 acceptance:
   - "[C-01.FR-13] `muster dev` starts the fake Alertmanager, Mattermost and Telegram servers on 127.0.0.1:19093, 127.0.0.1:18065 and 127.0.0.1:18081, prints their addresses and runs until interrupted."
   - "[C-01.FR-13] Every fake server records each request and answers scripted faults (status, Retry-After, delay) set through its `/_fake/` control endpoints."
@@ -82,11 +83,13 @@ issue: 4
   key `MUSTER_SECRET_KEYS=bXVzdGVyLWRldi1vbmx5LWtleS1ub3QtYS1zZWNyZXQ=` (the base64 of
   `muster-dev-only-key-not-a-secret`, a published constant of `internal/devmode`; the server command refuses it outside
   development mode, S-007), and the bootstrap Admin `admin@example.org` with the password `muster-dev-password`
-  (S-010). A `MUSTER_*` variable that is set replaces its default and never adds to it — the database default gives way
-  to `MUSTER_DATABASE_URL` or to any `MUSTER_DATABASE_*` field, and the key and the Admin password to their `_FILE`
-  variables too: a `MUSTER_SECRET_KEYS` given to `muster dev` is the whole Keyring, so it must list the development key
-  for as long as the database's key canary needs it (S-055 sets both keys explicitly). The demo configuration —
-  Integrations, Routes and Destinations wired to the fakes — is added by the capabilities that own those resources.
+  (S-010). A `MUSTER_*` variable that is set — present in the environment, even empty — replaces its default and
+  never adds to it; the database default yields to `MUSTER_DATABASE_URL` or to any field of the main connection
+  (`MUSTER_DATABASE_HOST`, `_PORT`, `_NAME`, `_USER`, `_PASSWORD`, `_PASSWORD_FILE`, `_SSLMODE`), and the key and the
+  Admin password to their `_FILE` variables too. A `MUSTER_SECRET_KEYS` given to `muster dev` is the whole Keyring, so
+  it must list the development key for as long as the database's key canary needs it (S-055 sets both keys
+  explicitly). The demo configuration — Integrations, Routes and Destinations wired to the fakes — is added by the
+  capabilities that own those resources.
 - **CLI against the development database** (C-01.FR-13): `muster dev <subcommand>` runs another subcommand of the
   binary — `muster dev doctor`, `muster dev admin reset-password --actor …`, `muster dev ingest replay …`,
   `muster dev secrets rotate-key …` — with the same development defaults and the same replacement rule, the development
