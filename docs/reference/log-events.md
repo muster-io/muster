@@ -11,19 +11,27 @@ the event.
 | Event | Level | Fields | Capability | Description |
 |---|---|---|---|---|
 | `active_key_not_held` | ERROR | active_key_id, key_ids, error | C-02 | The active master key is not in this replica's MUSTER_SECRET_KEYS, which happens when a key was activated while this replica's record had expired. The replica stops; add the key to its environment. |
+| `clock_skew` | WARN | skew_seconds, warning_seconds | C-02 | This replica's clock differs from the database clock by more than process.clock_skew_warning; skew_seconds is positive when the replica's clock is ahead. Synchronise the clocks with NTP. |
 | `database_connection_security` | INFO or WARN | connection, sslmode, encrypted | C-02 | Whether a database connection (main or session) is encrypted, with the sslmode in effect; WARN when it is not encrypted, which prefer allows without an error. |
 | `database_settings_conflict` | WARN | used, ignored | C-02 | A database connection is set both as a URL and as fields: the URL is used and the fields are ignored. |
+| `downtime_recorded` | WARN | started_at, ended_at, duration_seconds | C-02 | Muster was unavailable: no Leader wrote the alive mark and no replica refreshed its record for the period between started_at and ended_at. The new Leader recorded it and opened the recovery window (recovery.banner_duration). |
 | `key_canary_failed` | ERROR | active_key_id, key_ids, error | C-02 | The master keys cannot decrypt the key canary: the active key is missing from MUSTER_SECRET_KEYS, or the keys belong to another database. The replica stops; set the keys this database was written with. |
 | `keyring_loaded` | INFO | key_ids, active_key_id | C-02 | The master keys of MUSTER_SECRET_KEYS were loaded and decrypt the key canary; the ids are derived from the keys and never reveal them. |
+| `leader_task_failed` | WARN | task, error | C-02 | A run of a Leader task failed, usually because the database was unavailable; it runs again at its next interval. |
+| `leadership_acquired` | INFO | replica | C-02 | This replica took the Leader lock and runs the Leader tasks: partition maintenance, the alive mark and the pruning of replica records. |
+| `leadership_lost` | WARN | replica, error | C-02 | The Leader could not confirm its lock within leader.fencing_timeout, or its lock session failed: it stopped every Leader task, closed the lock connection and competes for the lock again. |
 | `library_message` | WARN | message | C-02 | A third-party library wrote a line of its own, such as a failed read of the process metrics. |
 | `listener_failed` | ERROR | listener, error | C-02 | A listener stopped serving with an error; the process stops so that it is restarted. |
 | `listeners_started` | INFO | app, ingest, internal | C-02 | The listeners serve and the process is ready; app and ingest are the same address when one port serves both. |
 | `migrations_applied` | INFO | from, to | C-02 | Migrations were applied under the migration lock, from one schema version to another. |
 | `migrations_current` | INFO | version | C-02 | No migration was applied: the schema already has the newest version this binary knows. |
 | `organization_created` | INFO | organization | C-02 | The first start created the Organization with the defaults of its settings and its outbound address policy. |
+| `partition_maintenance_failed` | WARN | error | C-02 | Partition maintenance failed, for example because a lock was not granted within 2 seconds; the Leader retries at the next hourly run. A partition that is still missing when its day or month begins makes writes to its table fail. |
+| `partitions_maintained` | INFO | created, dropped | C-02 | Partition maintenance created the partitions Muster will need (daily for Stored Snapshots and their bodies, monthly for Timeline entries, delivery events and the Audit log) or dropped partitions whose whole range is older than their retention period; the fields list the partitions by name. |
 | `process_started` | INFO | version, commit | C-02 | The server process started, with the version and commit of the binary. |
 | `process_stopped` | INFO | — | C-02 | The server process stopped after a graceful shutdown. |
 | `replica_record_failed` | WARN | replica, error | C-02 | A replica could not refresh its record of the keys it holds, usually because the database is unavailable; it retries at the next refresh and stops counting as live once the record is older than replica.live_expiry. At shutdown, the record could not be deleted; it stops counting as live after replica.live_expiry. |
+| `replicas_pruned` | INFO | replicas | C-02 | The Leader removed the records of replicas that had not refreshed them for replica.prune_after. |
 | `schema_dirty` | ERROR | database_version | C-02 | A migration failed halfway and the schema is marked dirty at its version: repair the schema from a backup or by hand, then clear the dirty flag in schema_migrations. |
 | `schema_too_new` | ERROR | database_version, known_version | C-02 | The database schema is newer than this binary knows, after an upgrade was rolled back: run a release that knows the schema version. |
 | `schema_too_old` | ERROR | database_version, known_version | C-02 | The database schema is older than this binary needs: run muster migrate or set MUSTER_MIGRATE_ON_START. |

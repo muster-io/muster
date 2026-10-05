@@ -12,6 +12,40 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countEncryptedValuesByKey = `-- name: CountEncryptedValuesByKey :many
+SELECT key_id, count(*) AS encrypted
+FROM encrypted_values
+WHERE org_id = $1
+GROUP BY key_id
+ORDER BY key_id
+`
+
+type CountEncryptedValuesByKeyRow struct {
+	KeyID     pgtype.Text
+	Encrypted int64
+}
+
+// CountEncryptedValuesByKey counts the Organization's encrypted values by the key that encrypted them.
+func (q *Queries) CountEncryptedValuesByKey(ctx context.Context, orgID int64) ([]CountEncryptedValuesByKeyRow, error) {
+	rows, err := q.db.Query(ctx, countEncryptedValuesByKey, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountEncryptedValuesByKeyRow{}
+	for rows.Next() {
+		var i CountEncryptedValuesByKeyRow
+		if err := rows.Scan(&i.KeyID, &i.Encrypted); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createKeyringState = `-- name: CreateKeyringState :execrows
 INSERT INTO keyring_state (active_key_id, activated_at, canary_ciphertext, canary_key_id)
 VALUES ($1, $2, $3, $1)
@@ -114,6 +148,46 @@ func (q *Queries) ListLiveReplicas(ctx context.Context, liveSince time.Time) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+const listOrganizationIDs = `-- name: ListOrganizationIDs :many
+SELECT id
+FROM organizations
+ORDER BY id
+`
+
+func (q *Queries) ListOrganizationIDs(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listOrganizationIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pruneReplicas = `-- name: PruneReplicas :execrows
+DELETE FROM replicas
+WHERE refreshed_at < $1
+`
+
+// PruneReplicas deletes the records of replicas not refreshed since refreshed_before, on the real clock.
+func (q *Queries) PruneReplicas(ctx context.Context, refreshedBefore time.Time) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneReplicas, refreshedBefore)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const recordReplica = `-- name: RecordReplica :exec

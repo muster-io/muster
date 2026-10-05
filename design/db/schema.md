@@ -543,7 +543,9 @@ Serves C-02, C-03.FR-2, C-20.FR-6–7; [ADR-0007](../adr/0007-active-replicas-wi
   of `muster dev`, kept here so that every replica of a development database runs on one clock; it is written only in
   development mode and stays 0 elsewhere.
 - **`downtime_periods`** — each period without an alive mark, recorded by the next Leader (C-02.FR-12): the source of
-  the downtime log event, the recovery window and the "Muster was unavailable" Timeline entries (C-09.FR-18).
+  the downtime log event, the recovery window and the "Muster was unavailable" Timeline entries (C-09.FR-18). A period
+  starts at the later of the last alive mark and the last record refresh of another replica that ran across it, so
+  that time while replicas ran without a Leader is not downtime; `started_at` is that start, not always the mark.
 
 ### 4.2 Organization
 

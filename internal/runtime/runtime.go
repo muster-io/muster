@@ -3,8 +3,9 @@
 
 // Package runtime wires the process: the server command, `muster migrate` and Muster inside `muster dev`. It owns the
 // start-up order — settings, logger, the Keyring, connections and checks, migrations when enabled, the schema version
-// check, the key canary and the start-up ensure steps under the migration lock, the replica key record, the
-// listeners — and the graceful shutdown on SIGTERM (C-02.FR-16).
+// check, the key canary and the start-up ensure steps (the partitions among them) under the migration lock, the
+// replica key record, the listeners, then the Leader lock keeper and the clock skew check — and the graceful shutdown
+// on SIGTERM (C-02.FR-16).
 package runtime
 
 import (
@@ -13,6 +14,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/muster-io/muster/internal/buildinfo"
@@ -20,9 +22,12 @@ import (
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/keyring"
+	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
+	"github.com/muster-io/muster/internal/leader"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/web"
 )
@@ -45,6 +50,8 @@ type Options struct {
 	grace            time.Duration
 	serving          func(server.Addresses)
 	keyRecordRefresh time.Duration
+	// every makes the ticks of the Leader lock keeper and the clock skew check.
+	every func(time.Duration) (<-chan time.Time, func())
 }
 
 // database is what the runtime needs of internal/db; tests give a fake.
@@ -58,6 +65,13 @@ type database interface {
 	WithMigrationLock(ctx context.Context, f func(context.Context) error) error
 	KeyringStore() keyring.Store
 	OrganizationStore() organization.Store
+	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
+	LeaderSession(ctx context.Context) (leader.Session, error)
+	PartitionSession(ctx context.Context) (partitions.Session, error)
+	LeaderStore() leader.Store
+	ReplicaPruner() keyring.Pruner
+	// Clock reads the database clock, for the clock skew check.
+	Clock() rowQuerier
 }
 
 // pgDatabase is internal/db with the stores of the domain packages over its main pool.
@@ -68,6 +82,28 @@ type pgDatabase struct {
 func (d pgDatabase) KeyringStore() keyring.Store { return keyring.NewStore(d.Pool) }
 
 func (d pgDatabase) OrganizationStore() organization.Store { return organization.NewStore(d.Pool) }
+
+func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
+	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
+}
+
+func (d pgDatabase) PartitionSession(ctx context.Context) (partitions.Session, error) {
+	c, err := d.ConnectSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := leader.BoundSession(ctx, c, leader.ServerBound); err != nil {
+		_ = c.Close(ctx)
+		return nil, err
+	}
+	return c, nil
+}
+
+func (d pgDatabase) LeaderStore() leader.Store { return leader.NewStore(d.Pool) }
+
+func (d pgDatabase) ReplicaPruner() keyring.Pruner { return kdb.New(d.Pool) }
+
+func (d pgDatabase) Clock() rowQuerier { return d.Pool }
 
 func openDB(ctx context.Context, cfg config.Config) (database, error) {
 	d, err := db.Open(ctx, cfg.Database, cfg.Session)
@@ -110,13 +146,15 @@ func Migrate(ctx context.Context, opts Options) error {
 }
 
 type process struct {
-	opts    Options
-	cfg     config.Config
-	log     *logging.Logger
-	db      database
-	clocks  clock.Clocks
-	keyring *keyring.Keyring
-	replica *keyring.Recorder
+	opts       Options
+	cfg        config.Config
+	log        *logging.Logger
+	db         database
+	clocks     clock.Clocks
+	keyring    *keyring.Keyring
+	replica    *keyring.Recorder
+	partitions *partitions.Maintainer
+	keeper     *leader.Keeper
 }
 
 func setup(ctx context.Context, opts Options) (config.Config, *logging.Logger, error) {
@@ -180,6 +218,7 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 	}
 	clocks, _ := clock.System()
 	p := &process{opts: opts, cfg: cfg, log: log, db: d, clocks: clocks, keyring: k}
+	p.partitions = partitions.New(d.PartitionSession, clocks.Business, log)
 	if err := p.bootstrap(ctx); err != nil {
 		d.Close()
 		return nil, failed(ctx, log, err)
@@ -195,6 +234,8 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 func (p *process) serve(ctx context.Context) error {
 	defer p.db.Close()
 	p.db.RegisterMetrics()
+	p.keeper = p.newKeeper()
+	leader.Register(p.keeper)
 	health := server.NewHealth(p.db.Ping)
 	// Requests keep their context through the shutdown, so that the drain lets them finish.
 	srv, err := server.Start(context.WithoutCancel(ctx), server.Addresses{
@@ -202,7 +243,7 @@ func (p *process) serve(ctx context.Context) error {
 	}, server.Handlers{
 		App:      server.SPA(web.Dist()),
 		Ingest:   http.NotFoundHandler(), // the ingestion routes arrive with C-05, C-07, C-13 and C-14
-		Internal: server.Internal(health, metrics.Handler(nil)),
+		Internal: server.Internal(health, metrics.Handler(p.keeper.Leading)),
 	})
 	if err != nil {
 		p.stopReplica(ctx)
@@ -219,6 +260,7 @@ func (p *process) serve(ctx context.Context) error {
 	defer stopWatch()
 	keys := make(chan error, 1)
 	go func() { keys <- p.watchKeys(watchCtx) }()
+	stopWork := p.startWork(ctx)
 
 	grace := cmp.Or(p.opts.grace, ShutdownGrace)
 	var stopped error
@@ -237,18 +279,21 @@ func (p *process) serve(ctx context.Context) error {
 		}
 	}
 	stopWatch()
+	// The grace period counts from here: stopping the Leader work, the replica record and the drain all fit in it.
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
+	defer cancel()
 	if watching {
 		// A key watch that stopped the replica just as ctx ended still decides the exit.
 		if err := <-keys; errors.Is(err, keyring.ErrKeyMismatch) {
 			stopped = err
 		}
 	}
+	// The Leader tasks stop and the lock goes at once, so that another replica takes over without waiting for a bound.
+	stopWork(shutdownCtx)
 	// The record goes before the drain, so that a refresh never writes it back.
 	p.stopReplica(ctx)
 	health.ShuttingDown()
 	// Workers that later stories register stop claiming here and finish or release their rows within the grace.
-	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
-	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		p.log.Log(ctx, logging.ShutdownGraceExceeded, logging.F("grace_seconds", grace.Seconds()))
 	}
@@ -282,4 +327,52 @@ func failed(ctx context.Context, log *logging.Logger, err error) error {
 	}
 	log.Log(ctx, logging.StartupFailed, logging.F("error", err.Error()))
 	return err
+}
+
+// newKeeper is the Leader lock keeper of this replica with the Leader tasks of tasks.go.
+func (p *process) newKeeper() *leader.Keeper {
+	id := p.replica.ID()
+	return leader.NewKeeper(p.db.LeaderSession, p.clocks.Real, p.log, id, leader.Tasks(leader.Work{
+		Alive:              leader.NewAlive(p.db.LeaderStore(), p.clocks, p.log, id),
+		MaintainPartitions: p.partitions.Maintain,
+		PruneReplicas: func(ctx context.Context) error {
+			return keyring.PruneReplicas(ctx, p.db.ReplicaPruner(), p.log, p.clocks.Real.Now())
+		},
+	}))
+}
+
+// startWork starts the Leader lock keeper and the clock skew check; the function it returns stops both and waits for
+// them until its context ends.
+func (p *process) startWork(ctx context.Context) func(context.Context) {
+	every := p.opts.every
+	if every == nil {
+		every = func(d time.Duration) (<-chan time.Time, func()) {
+			t := time.NewTicker(d)
+			return t.C, t.Stop
+		}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	leaderTicks, stopLeaderTicks := every(leader.PingInterval)
+	skewTicks, stopSkewTicks := every(SkewInterval)
+	wg.Go(func() {
+		defer stopLeaderTicks()
+		p.keeper.Run(ctx, leaderTicks)
+	})
+	wg.Go(func() {
+		defer stopSkewTicks()
+		skewCheck{q: p.db.Clock(), real: p.clocks.Real, log: p.log}.run(ctx, skewTicks)
+	})
+	return func(wait context.Context) {
+		cancel()
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-wait.Done():
+		}
+	}
 }

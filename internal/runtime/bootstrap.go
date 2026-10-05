@@ -24,10 +24,14 @@ type ensureStep struct {
 }
 
 // ensureSteps grow with the capabilities: the bootstrap Admin (S-010), the built-in Integration (S-021), the
-// Default route (S-025) and the built-in Link rule (S-037) follow the Organization.
+// Default route (S-025) and the built-in Link rule (S-037) follow the Organization. The partitions that the next
+// days and months need are created before serving, so that no write finds its partition missing.
 var ensureSteps = []ensureStep{
 	{name: "organization", run: func(ctx context.Context, p *process) error {
 		return organization.Ensure(ctx, p.db.OrganizationStore(), p.log, p.clocks.Business.Now())
+	}},
+	{name: "partitions", run: func(ctx context.Context, p *process) error {
+		return p.partitions.Create(ctx)
 	}},
 }
 

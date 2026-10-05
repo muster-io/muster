@@ -68,7 +68,7 @@ func (d devMode) run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "muster dev: %v\n", err)
 		return exitFailure
 	}
-	return Run(args, stdout, stderr)
+	return run(args, stdout, stderr, true)
 }
 
 func (d devMode) serve(replica bool, stdout, stderr io.Writer) int {

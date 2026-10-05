@@ -23,6 +23,8 @@ const (
 	KeyRecordRefresh = 30 * time.Second
 	// LiveExpiry is replica.live_expiry: a replica is live while its record is younger.
 	LiveExpiry = 2 * time.Minute
+	// PruneAfter is replica.prune_after: the Leader removes a record not refreshed for this long.
+	PruneAfter = time.Hour
 
 	replicaSuffixLength = 8
 )
@@ -147,6 +149,24 @@ func (r *Recorder) Run(ctx context.Context, ticks <-chan time.Time) error {
 func (r *Recorder) Stop(ctx context.Context) error {
 	if err := r.store.DeleteReplica(ctx, r.id); err != nil {
 		return fmt.Errorf("delete the record of replica %s: %w", r.id, err)
+	}
+	return nil
+}
+
+// Pruner deletes old replica records; *dbgen.Queries implements it.
+type Pruner interface {
+	PruneReplicas(ctx context.Context, refreshedBefore time.Time) (int64, error)
+}
+
+// PruneReplicas is the Leader task that removes the records not refreshed for PruneAfter at now, on the real clock,
+// and logs replicas_pruned when it removed any. Running it twice removes nothing more.
+func PruneReplicas(ctx context.Context, p Pruner, log *logging.Logger, now time.Time) error {
+	n, err := p.PruneReplicas(ctx, now.Add(-PruneAfter))
+	if err != nil {
+		return fmt.Errorf("prune the replica records: %w", err)
+	}
+	if n > 0 {
+		log.Log(ctx, logging.ReplicasPruned, logging.F("replicas", n))
 	}
 	return nil
 }

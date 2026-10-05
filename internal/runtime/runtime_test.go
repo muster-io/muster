@@ -18,13 +18,17 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
+	"github.com/muster-io/muster/internal/leader"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
 	odb "github.com/muster-io/muster/internal/organization/dbgen"
+	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/server"
 )
 
@@ -36,6 +40,69 @@ type fakeDB struct {
 	closed, locked                     int
 	keys                               fakeKeyringStore
 	org                                fakeOrgStore
+	// partitionErr fails the partition maintenance session; ddl counts its statements.
+	partitionErr error
+	ddl          int
+}
+
+func (f *fakeDB) LeaderSession(context.Context) (leader.Session, error) {
+	return nil, errors.New("the fake database has no Leader lock")
+}
+
+func (f *fakeDB) PartitionSession(context.Context) (partitions.Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.partitionErr != nil {
+		return nil, f.partitionErr
+	}
+	return fakeSession{f}, nil
+}
+
+func (f *fakeDB) LeaderStore() leader.Store { return nil }
+
+func (f *fakeDB) ReplicaPruner() keyring.Pruner { return nil }
+
+func (f *fakeDB) Clock() rowQuerier { return fakeClockRow{} }
+
+// fakeSession is a partition maintenance session on a database without partitions: every query returns no rows.
+type fakeSession struct{ db *fakeDB }
+
+func (s fakeSession) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	s.db.mu.Lock()
+	defer s.db.mu.Unlock()
+	s.db.ddl++
+	return pgconn.CommandTag{}, nil
+}
+
+func (fakeSession) Query(context.Context, string, ...any) (pgx.Rows, error) { return noRows{}, nil }
+
+func (fakeSession) QueryRow(context.Context, string, ...any) pgx.Row { return nil }
+
+func (fakeSession) Close(context.Context) error { return nil }
+
+type noRows struct{}
+
+func (noRows) Close()                                       {}
+func (noRows) Err() error                                   { return nil }
+func (noRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (noRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (noRows) Next() bool                                   { return false }
+func (noRows) Scan(...any) error                            { return errors.New("no rows") }
+func (noRows) Values() ([]any, error)                       { return nil, nil }
+func (noRows) RawValues() [][]byte                          { return nil }
+func (noRows) Conn() *pgx.Conn                              { return nil }
+func (noRows) TypeMap() *pgtype.Map                         { return nil }
+
+// fakeClockRow is a database clock that agrees with the system clock.
+type fakeClockRow struct{}
+
+func (fakeClockRow) QueryRow(context.Context, string, ...any) pgx.Row { return clockRow{} }
+
+type clockRow struct{}
+
+func (clockRow) Scan(dest ...any) error {
+	*dest[0].(*time.Time) = time.Now()
+	return nil
 }
 
 func (f *fakeDB) WithMigrationLock(ctx context.Context, fn func(context.Context) error) error {
@@ -314,9 +381,15 @@ func TestRunAndShutdown(t *testing.T) {
 	if code, _ := get(t, internal+"/health/live"); code != http.StatusOK {
 		t.Errorf("live = %d", code)
 	}
+	// The clock skew check runs at once in the background.
 	_, metrics := get(t, internal+"/metrics")
-	if !strings.Contains(metrics, "muster_build_info{") {
-		t.Errorf("/metrics lacks muster_build_info:\n%s", metrics)
+	for deadline := time.Now().Add(5 * time.Second); !strings.Contains(metrics, "\nmuster_clock_skew_seconds ") &&
+		time.Now().Before(deadline); _, metrics = get(t, internal+"/metrics") {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(metrics, "muster_build_info{") || !strings.Contains(metrics, "\nmuster_leader 0\n") ||
+		!strings.Contains(metrics, "\nmuster_clock_skew_seconds ") {
+		t.Errorf("/metrics lacks muster_build_info, muster_leader or muster_clock_skew_seconds:\n%s", metrics)
 	}
 	if code, _ := get(t, "http://"+addrs.App+"/api/v1/ingest"); code != http.StatusNotFound {
 		t.Errorf("the ingest handler answered %d, want 404 until the ingestion route exists", code)
@@ -345,12 +418,12 @@ func TestRunAndShutdown(t *testing.T) {
 	}
 	lines := out.events(t)
 	want := []string{"process_started", "database_settings_conflict", "keyring_loaded", "organization_created",
-		"listeners_started", "shutdown_requested", "process_stopped"}
+		"partitions_maintained", "listeners_started", "shutdown_requested", "process_stopped"}
 	if strings.Join(names(lines), " ") != strings.Join(want, " ") {
 		t.Fatalf("events %v, want %v", names(lines), want)
 	}
 	if lines[1]["used"] != "MUSTER_DATABASE_URL" || lines[1]["level"] != "WARN" ||
-		lines[5]["level"] != "WARN" || lines[5]["grace_seconds"] != float64(2) {
+		lines[6]["level"] != "WARN" || lines[6]["grace_seconds"] != float64(2) {
 		t.Errorf("lines %v", lines)
 	}
 	d := net.Dialer{Timeout: time.Second}
@@ -740,6 +813,7 @@ func TestBootstrapFailures(t *testing.T) {
 		{"organization", &fakeDB{org: fakeOrgStore{err: errors.New("boom")}},
 			"start-up step organization: read the organization: boom"},
 		{"replica record", &fakeDB{keys: fakeKeyringStore{recordErr: errors.New("boom")}}, "record the keys of replica"},
+		{"partitions", &fakeDB{partitionErr: errors.New("boom")}, "start-up step partitions: boom"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
