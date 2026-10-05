@@ -97,8 +97,8 @@ issue: 61
   its Mentions — and `props.attachments` of exactly one attachment: `color` by status (firing `#d32f2f`, acknowledged
   `#f57c00`, resolved `#388e3c`, snoozed `#9e9e9e`), `title` `#N` and the title, `title_link` the Alert Group page,
   `text` the sections 3 to 8 of S-036, then one line of links starting with "[Open in Muster](…)" followed by the links
-  of S-037, then the notices, then the footer line as the last line; `footer` "Muster v<version>", `footer_icon` the
-  logo under `MUSTER_PUBLIC_URL` (the image arrives later); `actions` the buttons of the status, each `type: button`
+  of S-037, then the notices, then the footer line as the last line; `footer` "Muster v<version>", `footer_icon`
+  `<MUSTER_PUBLIC_URL>/muster-mark-256.png` (the mark in `web/public/`); `actions` the buttons of the status, each `type: button`
   with a stable `id` (`ack`, `unack`, `resolve`, `unsnooze`, `snooze0`…) and `integration` `{url:
   <MUSTER_INGEST_URL>/api/v1/callbacks/mattermost/<connection public_id>, context: {action, key_id}}`. Mentions never
   go into the attachment: there they would notify with an empty notification (F-056). The adapter declares `Markup()`
