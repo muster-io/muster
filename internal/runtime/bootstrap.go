@@ -9,10 +9,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/buildinfo"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/users"
 )
 
 // ensureStep is one start-up "ensure" step: it creates the runtime rows of a capability when they are missing and
@@ -23,15 +25,25 @@ type ensureStep struct {
 	run  func(context.Context, *process) error
 }
 
-// ensureSteps grow with the capabilities: the bootstrap Admin (S-010), the built-in Integration (S-021), the
-// Default route (S-025) and the built-in Link rule (S-037) follow the Organization. The partitions that the next
-// days and months need are created before serving, so that no write finds its partition missing.
+// ensureSteps grow with the capabilities: the built-in Integration (S-021), the Default route (S-025) and the
+// built-in Link rule (S-037) follow the Organization. The partitions that the next days and months need are created
+// before serving, so that no write finds its partition missing; the bootstrap Admin comes after them, because its
+// creation writes the Audit log.
 var ensureSteps = []ensureStep{
 	{name: "organization", run: func(ctx context.Context, p *process) error {
 		return organization.Ensure(ctx, p.db.OrganizationStore(), p.log, p.clocks.Business.Now())
 	}},
 	{name: "partitions", run: func(ctx context.Context, p *process) error {
 		return p.partitions.Create(ctx)
+	}},
+	{name: "bootstrap admin", run: func(ctx context.Context, p *process) error {
+		orgID, err := p.organizationID(ctx)
+		if err != nil {
+			return err
+		}
+		return users.EnsureBootstrapAdmin(ctx, p.db.UsersStore(), audit.NewWriter(p.log, p.clocks.Business), p.log,
+			orgID, users.Bootstrap{Email: p.cfg.BootstrapAdminEmail, Password: p.cfg.BootstrapAdminPassword},
+			p.clocks.Business.Now())
 	}},
 }
 
@@ -83,4 +95,13 @@ func (p *process) stopReplica(ctx context.Context) {
 	if err := p.replica.Stop(ctx); err != nil {
 		p.log.Log(ctx, logging.ReplicaRecordFailed, logging.F("replica", p.replica.ID()), logging.F("error", err.Error()))
 	}
+}
+
+// organizationID is the internal id of the single Organization, which the ensure step created.
+func (p *process) organizationID(ctx context.Context) (int64, error) {
+	org, err := p.db.OrganizationStore().GetOrganization(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("read the organization: %w", err)
+	}
+	return org.ID, nil
 }

@@ -190,6 +190,32 @@ var OutboundUnverifiedAddress = newEvent("outbound_unverified_address", LevelInf
 		"was checked against the allowed and denied lists, not its addresses.",
 	"client", "scheme", "host")
 
+// AuditEntry is the copy of every Audit log entry on stdout.
+var AuditEntry = newEvent("audit_entry", LevelInfo, "C-03",
+	"An Audit log entry, as written to audit_log: the actor (its kind, the public_id of the user or Service account, "+
+		"or the --actor name of a CLI command), the token used, the Transport, the action <resource>.<verb>, the "+
+		"resource, the before/after diff of what was configured (a Secret shows only that it changed) and details.",
+	"entry", "at", "actor_kind", "actor", "actor_name", "token_name", "transport", "action", "resource_type",
+	"resource", "resource_name", "source_address", "diff", "details")
+
+// BootstrapAdminIgnored is logged at startup when the bootstrap variables are set but the Organization has an Admin.
+var BootstrapAdminIgnored = newEvent("bootstrap_admin_ignored", LevelWarn, "C-03",
+	"The bootstrap Admin variables are set, but the Organization already has an Admin, so they were ignored and no "+
+		"user was created; remove them from the environment.",
+	"variables")
+
+// BootstrapAdminMissing is logged at startup when the Organization has no Admin and no bootstrap variables.
+var BootstrapAdminMissing = newEvent("bootstrap_admin_missing", LevelWarn, "C-03",
+	"The Organization has no Admin and the bootstrap variables are not set, so nobody can sign in to administer "+
+		"Muster: set MUSTER_BOOTSTRAP_ADMIN_EMAIL and MUSTER_BOOTSTRAP_ADMIN_PASSWORD (or _FILE) and restart, or run "+
+		"muster admin reset-password.")
+
+// APIRequestFailed is logged when an API request fails with an unexpected error and answers 500.
+var APIRequestFailed = newEvent("api_request_failed", LevelError, "C-03",
+	"An API request failed with an unexpected error, usually because the database was unavailable, and answered "+
+		"500 internal; operation is the operationId of the specification.",
+	"operation", "error")
+
 // Event is a registered log event. Its zero value is not registered, and the logger refuses it.
 type Event struct {
 	def *eventDef

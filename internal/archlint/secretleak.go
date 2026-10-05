@@ -16,13 +16,20 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/api"
+	"github.com/muster-io/muster/internal/audit"
+	adb "github.com/muster-io/muster/internal/audit/dbgen"
+	"github.com/muster-io/muster/internal/auth"
+	authdb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/doctor"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
@@ -31,6 +38,8 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/runtime"
+	"github.com/muster-io/muster/internal/users"
+	udb "github.com/muster-io/muster/internal/users/dbgen"
 )
 
 const (
@@ -56,6 +65,7 @@ var registry = []Probe{
 	{Name: "keyring", Run: probeKeyring},
 	{Name: "doctor", Run: probeDoctor},
 	{Name: "outbound_http", Run: probeOutbound},
+	{Name: "sign_in", Run: probeSignIn},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -271,6 +281,214 @@ func probeDomainLogger(ctx context.Context, secrets []string, log io.Writer) err
 		logging.F("version", fmt.Errorf("dial with %v: %w", logging.Secret(secrets[2]), io.ErrUnexpectedEOF)))
 	return nil
 }
+
+// probeSignIn sends the secrets through sign-in and the profile: the first as the bootstrap Admin's password, which
+// then signs in; the second as a wrong password of a known and an unknown login and as a wrong current password; the
+// third as a session cookie, a CSRF token and the new password, and the second again while the throttle blocks. It
+// also posts the second as a password to the API, once while the database fails and once with a value of the wrong
+// type, and sends the third to the API as a cookie and as the CSRF token of a real session. Neither the log, the
+// errors nor the API's answers, which the probe returns as its error, may carry them.
+func probeSignIn(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	business := clock.NewManual(now)
+	w := audit.NewWriter(logger, business)
+	us := &probeUsers{}
+	errs := []error{
+		users.EnsureBootstrapAdmin(ctx, us, w, logger, 1, users.Bootstrap{Email: "probe@example.org",
+			Password: logging.Secret(secrets[0])}, now),
+	}
+	if len(us.created) != 1 {
+		return errors.Join(append(errs, errors.New("the bootstrap Admin was not created"))...)
+	}
+	us.admins = 1
+	errs = append(errs, users.EnsureBootstrapAdmin(ctx, us, w, logger, 1, users.Bootstrap{Email: "probe@example.org",
+		Password: logging.Secret(secrets[0])}, now))
+
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	errs = append(errs, k.Open(ctx, logger, st))
+	as := &probeAuth{hash: us.created[0].PasswordHash.String}
+	roles := auth.Roles{auth.RoleAdmin: {"users:read"}, auth.RoleResponder: {"alerts:read"},
+		auth.RoleViewer: {"alerts:read"}}
+	svc := auth.NewService(1, as, k, w, business, roles)
+	addr := netip.MustParseAddr("192.0.2.1")
+	for _, login := range []string{"probe@example.org", "nobody@example.org"} {
+		_, err := svc.SignIn(ctx, auth.SignInRequest{Login: login, Password: secrets[1], Address: addr})
+		errs = append(errs, err)
+	}
+	sess, err := svc.SignIn(ctx, auth.SignInRequest{Login: "probe@example.org", Password: secrets[0], Address: addr})
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	_, err = svc.Authenticate(ctx, secrets[2])
+	svc.CheckCSRF(sess, secrets[2])
+	errs = append(errs, err,
+		svc.ChangePassword(ctx, sess, auth.PasswordChange{Current: secrets[1], New: secrets[2], Address: addr}),
+		svc.ChangePassword(ctx, sess, auth.PasswordChange{Current: secrets[0], New: secrets[2], Address: addr}))
+
+	as.blocked = true
+	_, err = svc.SignIn(ctx, auth.SignInRequest{Login: "probe@example.org", Password: secrets[1], Address: addr})
+	errs = append(errs, err)
+	as.blocked = false
+
+	h, err := api.New(api.Config{Sessions: svc, Users: users.NewService(1, us, w, business), Log: logger,
+		Real: clock.Real{}})
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	var answers []string
+	send := func(method, path, body, cookie, csrf string) error {
+		r, err := http.NewRequestWithContext(ctx, method, path, strings.NewReader(body))
+		if err != nil {
+			return err
+		}
+		r.Header.Set("Content-Type", "application/json")
+		if cookie != "" {
+			r.Header.Set("Cookie", auth.CookieName+"="+cookie)
+		}
+		if csrf != "" {
+			r.Header.Set(auth.CSRFHeader, csrf)
+		}
+		rec := &probeRecorder{header: http.Header{}}
+		h.ServeHTTP(rec, r)
+		answers = append(answers, rec.body.String())
+		return nil
+	}
+	for _, req := range [][5]string{
+		{http.MethodGet, "/api/v1/me", "", secrets[2], ""},
+		{http.MethodPut, "/api/v1/me", `{"name":"probe"}`, sess.Cookie(), secrets[2]},
+		{http.MethodDelete, "/api/v1/me/sessions", "", sess.Cookie(), secrets[2]},
+	} {
+		if err := send(req[0], req[1], req[2], req[3], req[4]); err != nil {
+			return err
+		}
+	}
+	as.fail = errors.New("the database is unavailable")
+	for _, body := range []string{
+		`{"login":"probe@example.org","password":"` + secrets[1] + `"}`,
+		`{"login":"probe@example.org","password":["` + secrets[1] + `"]}`,
+	} {
+		if err := send(http.MethodPost, "/api/v1/sessions", body, "", ""); err != nil {
+			return err
+		}
+	}
+	errs = append(errs, fmt.Errorf("answers: %s", strings.Join(answers, " | ")))
+	return errors.Join(errs...)
+}
+
+// probeRecorder is an http.ResponseWriter that keeps the body.
+type probeRecorder struct {
+	header http.Header
+	body   bytes.Buffer
+}
+
+func (r *probeRecorder) Header() http.Header         { return r.header }
+func (r *probeRecorder) Write(b []byte) (int, error) { return r.body.Write(b) }
+func (r *probeRecorder) WriteHeader(int)             {}
+
+// probeUsers is the users of probeSignIn in memory.
+type probeUsers struct {
+	users.Store
+	admins  int64
+	created []udb.CreateUserParams
+}
+
+func (s *probeUsers) InTx(_ context.Context, f func(users.Queries) error) error { return f(s) }
+
+func (s *probeUsers) CountAdmins(context.Context, int64) (int64, error) { return s.admins, nil }
+
+func (s *probeUsers) CreateUser(_ context.Context, arg udb.CreateUserParams) (int64, error) {
+	s.created = append(s.created, arg)
+	return 1, nil
+}
+
+func (s *probeUsers) GetUser(context.Context, udb.GetUserParams) (udb.GetUserRow, error) {
+	return udb.GetUserRow{ID: 1, PublicID: "SR0000000000P1", Login: "probe@example.org", Name: "probe",
+		Role: auth.RoleAdmin, Source: "bootstrap", Status: "active", HasPassword: true}, nil
+}
+
+func (s *probeUsers) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error { return nil }
+
+// probeAuth is the sign-in tables of probeSignIn in memory; fail makes the account lookup fail.
+type probeAuth struct {
+	auth.Store
+	hash     string
+	fail     error
+	blocked  bool
+	sessions []authdb.CreateSessionParams
+}
+
+func (s *probeAuth) InTx(_ context.Context, f func(auth.Queries) error) error { return f(s) }
+
+func (s *probeAuth) GetThrottles(context.Context, authdb.GetThrottlesParams) ([]authdb.GetThrottlesRow, error) {
+	if !s.blocked {
+		return nil, nil
+	}
+	return []authdb.GetThrottlesRow{{SubjectKind: "account", ConsecutiveFailures: 9,
+		BlockedUntil: pgtype.Timestamptz{Time: time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC), Valid: true}}}, nil
+}
+
+func (s *probeAuth) GetSignInUser(_ context.Context, arg authdb.GetSignInUserParams) (authdb.GetSignInUserRow, error) {
+	if s.fail != nil {
+		return authdb.GetSignInUserRow{}, s.fail
+	}
+	if arg.Login != "probe@example.org" {
+		return authdb.GetSignInUserRow{}, pgx.ErrNoRows
+	}
+	return authdb.GetSignInUserRow{ID: 1, PublicID: "SR0000000000P1", Name: "probe", Role: auth.RoleAdmin,
+		Status: "active", PasswordHash: pgtype.Text{String: s.hash, Valid: true}}, nil
+}
+
+func (s *probeAuth) RecordSignInFailure(context.Context, authdb.RecordSignInFailureParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *probeAuth) ResetSignInThrottles(context.Context, authdb.ResetSignInThrottlesParams) error {
+	return nil
+}
+
+func (s *probeAuth) CreateSession(_ context.Context, arg authdb.CreateSessionParams) (int64, error) {
+	s.sessions = append(s.sessions, arg)
+	return int64(len(s.sessions)), nil
+}
+
+func (s *probeAuth) MarkSignedIn(context.Context, authdb.MarkSignedInParams) error { return nil }
+
+func (s *probeAuth) GetSessionByToken(_ context.Context, arg authdb.GetSessionByTokenParams) (
+	authdb.GetSessionByTokenRow, error) {
+	for i, ss := range s.sessions {
+		if bytes.Equal(ss.TokenHash, arg.TokenHash) {
+			return authdb.GetSessionByTokenRow{ID: int64(i + 1), PublicID: ss.PublicID, UserID: 1, State: ss.State,
+				Method: ss.Method, CreatedAt: ss.CreatedAt, LastUsedAt: ss.CreatedAt, IdleExpiresAt: ss.IdleExpiresAt,
+				ExpiresAt: ss.ExpiresAt, UserPublicID: "SR0000000000P1", UserName: "probe", UserRole: auth.RoleAdmin,
+				UserStatus: "active"}, nil
+		}
+	}
+	return authdb.GetSessionByTokenRow{}, pgx.ErrNoRows
+}
+
+func (s *probeAuth) GetUserPassword(context.Context, authdb.GetUserPasswordParams) (authdb.GetUserPasswordRow,
+	error) {
+	return authdb.GetUserPasswordRow{PasswordHash: pgtype.Text{String: s.hash, Valid: true}}, nil
+}
+
+func (s *probeAuth) SetPassword(context.Context, authdb.SetPasswordParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *probeAuth) EndOtherUserSessions(context.Context, authdb.EndOtherUserSessionsParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *probeAuth) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error { return nil }
 
 func Probes() []Probe {
 	return slices.Clone(registry)

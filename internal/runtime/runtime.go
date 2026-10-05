@@ -17,6 +17,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/muster-io/muster/internal/api"
+	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/buildinfo"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
@@ -29,6 +32,7 @@ import (
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/users"
 	"github.com/muster-io/muster/web"
 )
 
@@ -65,6 +69,8 @@ type database interface {
 	WithMigrationLock(ctx context.Context, f func(context.Context) error) error
 	KeyringStore() keyring.Store
 	OrganizationStore() organization.Store
+	UsersStore() users.Store
+	AuthStore() auth.Store
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
 	LeaderSession(ctx context.Context) (leader.Session, error)
 	PartitionSession(ctx context.Context) (partitions.Session, error)
@@ -82,6 +88,10 @@ type pgDatabase struct {
 func (d pgDatabase) KeyringStore() keyring.Store { return keyring.NewStore(d.Pool) }
 
 func (d pgDatabase) OrganizationStore() organization.Store { return organization.NewStore(d.Pool) }
+
+func (d pgDatabase) UsersStore() users.Store { return users.NewStore(d.Pool) }
+
+func (d pgDatabase) AuthStore() auth.Store { return auth.NewStore(d.Pool) }
 
 func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
 	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
@@ -155,6 +165,7 @@ type process struct {
 	replica    *keyring.Recorder
 	partitions *partitions.Maintainer
 	keeper     *leader.Keeper
+	api        http.Handler
 }
 
 func setup(ctx context.Context, opts Options) (config.Config, *logging.Logger, error) {
@@ -223,6 +234,10 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 		d.Close()
 		return nil, failed(ctx, log, err)
 	}
+	if p.api, err = p.newAPI(ctx); err != nil {
+		d.Close()
+		return nil, failed(ctx, log, err)
+	}
 	if err := p.startReplica(ctx); err != nil {
 		d.Close()
 		return nil, failed(ctx, log, err)
@@ -241,7 +256,7 @@ func (p *process) serve(ctx context.Context) error {
 	srv, err := server.Start(context.WithoutCancel(ctx), server.Addresses{
 		App: p.cfg.ListenApp, Ingest: p.cfg.ListenIngest, Internal: p.cfg.ListenInternal,
 	}, server.Handlers{
-		App:      server.SPA(web.Dist()),
+		App:      server.App(p.api, web.Dist(), p.cfg.PublicURL.Scheme == "https"),
 		Ingest:   http.NotFoundHandler(), // the ingestion routes arrive with C-05, C-07, C-13 and C-14
 		Internal: server.Internal(health, metrics.Handler(p.keeper.Leading)),
 	})
@@ -327,6 +342,27 @@ func failed(ctx context.Context, log *logging.Logger, err error) error {
 	}
 	log.Log(ctx, logging.StartupFailed, logging.F("error", err.Error()))
 	return err
+}
+
+// newAPI builds the API of the app listener for the Organization, with the Roles loaded from role_permissions.
+func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
+	orgID, err := p.organizationID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	authStore := p.db.AuthStore()
+	roles, err := auth.LoadRoles(ctx, authStore)
+	if err != nil {
+		return nil, err
+	}
+	w := audit.NewWriter(p.log, p.clocks.Business)
+	return api.New(api.Config{
+		Sessions:       auth.NewService(orgID, authStore, p.keyring, w, p.clocks.Business, roles),
+		Users:          users.NewService(orgID, p.db.UsersStore(), w, p.clocks.Business),
+		TrustedProxies: p.cfg.TrustedProxies,
+		Log:            p.log,
+		Real:           p.clocks.Real,
+	})
 }
 
 // newKeeper is the Leader lock keeper of this replica with the Leader tasks of tasks.go.

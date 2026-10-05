@@ -215,6 +215,11 @@ export type createSessionResponse401 = {
   status: 401
 }
 
+export type createSessionResponse403 = {
+  data: ForbiddenResponse
+  status: 403
+}
+
 export type createSessionResponse429 = {
   data: TooManyRequestsResponse
   status: 429
@@ -223,7 +228,7 @@ export type createSessionResponse429 = {
 export type createSessionResponseSuccess = (createSessionResponse201) & {
   headers: Headers;
 };
-export type createSessionResponseError = (createSessionResponse400 | createSessionResponse401 | createSessionResponse429) & {
+export type createSessionResponseError = (createSessionResponse400 | createSessionResponse401 | createSessionResponse403 | createSessionResponse429) & {
   headers: Headers;
 };
 
@@ -238,7 +243,7 @@ export const getCreateSessionUrl = () => {
 }
 
 /**
- * Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`).
+ * Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`). A request a browser marks as cross-site (`Sec-Fetch-Site` set to `cross-site`) is refused with `403` (`csrf_invalid`).
  * @summary Sign in with a local account
  */
 export const createSession = async (sessionCreate: SessionCreate, options?: RequestInit): Promise<createSessionResponse> => {
@@ -279,7 +284,7 @@ const res = await fetch(getCreateSessionUrl(),
 
 export const getCreateSessionMutationKey = () => ['createSession'] as const;
 
-export const getCreateSessionMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | TooManyRequestsResponse,
+export const getCreateSessionMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSession>>, TError,CreateSessionMutationVariables, TContext>, fetch?: RequestInit}
 ): UseMutationOptions<Awaited<ReturnType<typeof createSession>>, TError,CreateSessionMutationVariables, TContext> => {
 
@@ -308,13 +313,13 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
 
     export type CreateSessionMutationResult = NonNullable<Awaited<ReturnType<typeof createSession>>>
     export type CreateSessionMutationBody = SessionCreate
-    export type CreateSessionMutationError = BadRequestResponse | UnauthorizedResponse | TooManyRequestsResponse
+    export type CreateSessionMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse
     export type CreateSessionMutationVariables = {data: SessionCreate}
 
     /**
  * @summary Sign in with a local account
  */
-export const useCreateSession = <TError = BadRequestResponse | UnauthorizedResponse | TooManyRequestsResponse,
+export const useCreateSession = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSession>>, TError,CreateSessionMutationVariables, TContext>, fetch?: RequestInit}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createSession>>,
