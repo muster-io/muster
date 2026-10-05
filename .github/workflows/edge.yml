@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# Every push to master publishes a development image, ghcr.io/muster-io/muster:sha-<7 hex digits>, and moves the
+# floating tag edge to it, so a test cluster can run any merged commit. These images are not releases: no git tag, no
+# signature, no chart, and only the newest 30 sha- images are kept. Releases come from release.yml.
+name: edge
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edge
+  cancel-in-progress: true
+
+jobs:
+  edge:
+    name: edge
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/muster-io/muster
+      KEEP: "30"
+      # renovate: datasource=github-releases depName=goreleaser/goreleaser
+      GORELEASER_VERSION: v2.18.2
+      # renovate: datasource=github-releases depName=anchore/syft
+      SYFT_VERSION: v1.54.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          syft-version: ${{ env.SYFT_VERSION }}
+      # The snapshot build of CI: one image per platform, loaded into the local Docker as v<version>-<arch>.
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          args: release --snapshot --clean --skip=sign
+      - name: push sha- and edge
+        run: |
+          version=$(jq -r .version dist/metadata.json)
+          tag="sha-${GITHUB_SHA::7}"
+          for arch in amd64 arm64; do
+            docker tag "${IMAGE}:v${version}-${arch}" "${IMAGE}:${tag}-${arch}"
+            docker push --quiet "${IMAGE}:${tag}-${arch}"
+          done
+          docker buildx imagetools create -t "${IMAGE}:${tag}" -t "${IMAGE}:edge" \
+            "${IMAGE}:${tag}-amd64" "${IMAGE}:${tag}-arm64"
+          echo "pushed ${IMAGE}:${tag} (muster ${version}) and moved edge to it" >>"$GITHUB_STEP_SUMMARY"
+      # Deletes the package versions tagged only sha-<x> or sha-<x>-<arch> whose sha-<x> is not among the newest KEEP;
+      # release images and untagged versions (signatures, attestations) are never touched.
+      - name: delete old sha- images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          versions=$(gh api --paginate "/orgs/muster-io/packages/container/muster/versions?per_page=100" |
+            jq -s 'add')
+          keep=$(jq -c --argjson n "$KEEP" '[.[] | select(any(.metadata.container.tags[]; test("^sha-[0-9a-f]{7}$")))]
+            | sort_by(.created_at) | reverse | .[:$n]
+            | map(.metadata.container.tags[] | select(test("^sha-[0-9a-f]{7}$")))' <<<"$versions")
+          jq -r --argjson keep "$keep" '.[]
+            | select((.metadata.container.tags | length) > 0)
+            | select(all(.metadata.container.tags[]; test("^sha-[0-9a-f]{7}(-amd64|-arm64)?$")))
+            | select(.metadata.container.tags[0][0:11] as $t | $keep | index($t) | not)
+            | "\(.id) \(.metadata.container.tags | join(","))"' <<<"$versions" |
+          while read -r id tags; do
+            echo "delete ${tags}"
+            gh api -X DELETE "/orgs/muster-io/packages/container/muster/versions/${id}"
+          done
