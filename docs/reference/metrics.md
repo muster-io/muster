@@ -12,10 +12,12 @@ replica that is the Leader. The capability is the one that exports the metric.
 | Metric | Type | Labels | Capability | Leader only | Description |
 |---|---|---|---|---|---|
 | `muster_build_info` | gauge | version, commit | C-02 | no | Always 1; the labels carry the version and commit of the running binary. |
+| `muster_clock_skew_seconds` | gauge | — | C-02 | no | This replica's clock minus the database clock, corrected by half the round trip; positive when the replica is ahead. |
 | `muster_db_pool_acquire_wait_seconds_total` | counter | — | C-02 | no | Seconds spent waiting for a connection of the main database pool of this replica, summed over every acquire. |
 | `muster_db_pool_acquires_total` | counter | — | C-02 | no | Connections taken from the main database pool of this replica. |
 | `muster_db_pool_connections` | gauge | state | C-02 | no | Connections of the main database pool of this replica, by state. |
 | `muster_db_pool_max_connections` | gauge | — | C-02 | no | The most connections the main database pool of this replica opens. |
+| `muster_leader` | gauge | — | C-02 | no | 1 while this replica is the Leader and runs the Leader tasks, 0 otherwise. |
 
 ## Label values
 

@@ -13,27 +13,38 @@ files_touched:
   - internal/leader/query.sql
   - internal/leader/leader_test.go
   - internal/leader/alive_test.go
+  - internal/leader/leader_integration_test.go
   - internal/partitions/partitions.go
   - internal/partitions/query.sql
   - internal/partitions/partitions_test.go
+  - internal/partitions/partitions_integration_test.go
   - internal/organization/notices.go
   - internal/organization/notices_test.go
   - internal/runtime/skew.go
   - internal/runtime/skew_test.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/runtime/bootstrap.go
   - internal/keyring/replicas.go
   - internal/keyring/query.sql
+  - internal/keyring/keyring_test.go
+  - internal/keyring/replicas_test.go
   - internal/doctor/doctor.go
   - internal/doctor/doctor_test.go
+  - internal/doctor/doctor_integration_test.go
   - internal/cli/cli.go
+  - internal/cli/cli_test.go
+  - internal/cli/dev.go
   - internal/cli/doctor.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
+  - internal/archlint/secretleak.go
   - test/e2e/harness.go
   - test/e2e/leader_test.go
+  - sqlc.yaml
   - design/prd/l1/defaults.md
   - design/prd/L1.md
+  - design/db/schema.md
 acceptance:
   - "[C-02.FR-10, C-02.AC-3] With two replicas, cutting the Leader's database traffic makes the other replica export `muster_leader 1` within 60 seconds, and the old Leader logs `leadership_lost` and stops its Leader tasks within `leader.fencing_timeout`."
   - "[C-02.FR-10] Only the Leader runs the Leader tasks, whose list is closed in code; two Leaders overlapping in a test leave no duplicate partitions, marks or downtime records."
@@ -76,8 +87,8 @@ issue: 8
 - **Lock keeper** (C-02.FR-10, ADR-0007): a dedicated session connection sets `idle_session_timeout` to
   `leader.server_bound` and TCP keepalive parameters, so that PostgreSQL ends a silent session within that bound. A
   replica tries `pg_try_advisory_lock` with a constant key every `leader.ping_interval`. The Leader pings over the same
-  session every `leader.ping_interval`; when no ping has succeeded for `leader.fencing_timeout`, it cancels every Leader
-  task at once, closes the connection, logs `leadership_lost` (WARN) and competes again later. `leadership_acquired`
+  session every `leader.ping_interval`; when a ping fails, or none has succeeded for `leader.fencing_timeout`, it
+  cancels every Leader task at once, closes the connection, logs `leadership_lost` (WARN) and competes again later. `leadership_acquired`
   (INFO) on taking the lock. `muster_leader` is 1 on the Leader and 0 on other replicas. The lease's intervals run on the
   real clock of S-006, so the development clock never fences a Leader.
 - **Leader tasks** (`internal/leader/tasks.go`, closed list): started when the lock is taken, cancelled when it is lost,
@@ -97,8 +108,13 @@ issue: 8
   `retention.audit_log` (Audit log). `partitions_maintained` (INFO: created, dropped); a failure is logged as
   `partition_maintenance_failed` (WARN) and retried next run.
 - **Alive mark and downtime** (C-02.FR-12): the Leader writes `runtime_state.alive_at`, `leader_replica_id` and
-  `leader_since` on the business clock of S-006, which downtime and the recovery window use too. A new Leader whose predecessor's mark is older than `leader.absence_notice` records the gap in
-  `downtime_periods`, logs `downtime_recorded` (WARN: `started_at`, `ended_at`, `duration_seconds`) and sets
+  `leader_since` on the business clock of S-006, which downtime and the recovery window use too. A new Leader whose predecessor's mark is older than
+  `leader.absence_notice` records the gap in `downtime_periods`. The gap starts at the later of that mark and the last
+  key-record refresh of any other replica that ran across it (started no later than `leader.absence_notice` after the
+  mark, so that replicas starting together after an outage do not hide it), so that a period while replicas ran
+  without a Leader is not downtime, and is recorded only when it is longer than `leader.absence_notice`. A replica that
+  could not refresh its record for longer than `leader.absence_notice` re-registers with a new start time when it
+  reaches the database again, so that an outage of the database is downtime too. The new Leader logs `downtime_recorded` (WARN: `started_at`, `ended_at`, `duration_seconds`) and sets
   `runtime_state.recovery_until` to now plus `recovery.banner_duration`: until the longest repeat interval learned in
   `alertmanager_routes` has passed, at most 1 h, or 15 min when nothing is learned (P-01).
 - **Notices** (C-02.FR-24, `internal/organization/notices.go`): `recovering_after_downtime` (audience all; `since` the
@@ -193,10 +209,11 @@ curl -s localhost:8082/metrics | grep '^muster_leader '        # muster_leader 1
 
 ## Open questions
 
-1. The alive mark shows only that no Leader wrote it. If replicas keep running without a Leader for longer than
+1. Resolved: the downtime starts at the later of the last alive mark and the last key-record refresh of any other
+   replica, so a period with live replicas is not downtime (the maintainer accepted the proposal). The question was:
+   the alive mark shows only that no Leader wrote it; if replicas keep running without a Leader for longer than
    `leader.absence_notice`, the next Leader would record that as downtime although ingestion and delivery never
-   stopped. Proposal: the downtime starts at the later of the last alive mark and the last key-record refresh of any
-   other replica, so a period with live replicas is not downtime. Confirm.
+   stopped.
 
 ## Notes
 
@@ -204,6 +221,22 @@ curl -s localhost:8082/metrics | grep '^muster_leader '        # muster_leader 1
 - P-01 (`recovery.banner_duration`) is confirmed or changed here. Until C-06 learns repeat intervals the window is
   always the 15-minute fallback; the rule already reads the learned intervals, so nothing changes when they appear.
 - Every Leader task must stay safe to run twice; a task that cannot be is a design error, not a lock problem.
+- P-01 is confirmed. Replica records are on the real clock and the alive mark on the business clock: the takeover
+  shifts a replica's refresh time by the business clock's offset before comparing them.
+- Partition maintenance runs on its own session connection, bounded like the Leader's lock session, under a session
+  advisory lock, so that a starting replica and the Leader, or two overlapping Leaders, take turns. The Leader's run
+  waits for that lock at most `lock_timeout` and is retried at the next run; a start takes the lock only when a
+  partition is missing. A partition that was detached and not dropped is dropped by the next run.
+- `muster doctor` accepts the published development key only as `muster dev doctor`, as the server does.
+- A replica keeps in memory the real time of its last successful record refresh. When a refresh succeeds after it
+  could not refresh for longer than `leader.absence_notice` (it lost the database), it re-registers: its record's
+  `started_at` becomes now, as if it had just started. After an outage of the database itself, while every replica
+  stayed up, no replica counts as having run across the gap, and the next Leader records the downtime (decided by the
+  maintainer; no migration).
+- `muster doctor` sets both of its connections to read-only transactions (`SET SESSION CHARACTERISTICS AS TRANSACTION
+  READ ONLY`), so every statement it runs is read-only. When the database is unreachable it prints only the
+  `database` line, since no other check can run. The "no replica is leading" notice is also active, without a
+  `since`, on a database that never had a Leader.
 
 ## Coverage
 

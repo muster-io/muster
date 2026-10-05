@@ -25,3 +25,17 @@ sql:
       go:
         <<: *go
         out: internal/organization/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/leader/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/leader/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/partitions/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/partitions/dbgen

@@ -126,6 +126,58 @@ var OrganizationCreated = newEvent("organization_created", LevelInfo, "C-02",
 	"The first start created the Organization with the defaults of its settings and its outbound address policy.",
 	"organization")
 
+// PartitionsMaintained is logged when partition maintenance created or dropped partitions.
+var PartitionsMaintained = newEvent("partitions_maintained", LevelInfo, "C-02",
+	"Partition maintenance created the partitions Muster will need (daily for Stored Snapshots and their bodies, "+
+		"monthly for Timeline entries, delivery events and the Audit log) or dropped partitions whose whole range is "+
+		"older than their retention period; the fields list the partitions by name.",
+	"created", "dropped")
+
+// PartitionMaintenanceFailed is logged when partition maintenance failed; it is retried at the next run.
+var PartitionMaintenanceFailed = newEvent("partition_maintenance_failed", LevelWarn, "C-02",
+	"Partition maintenance failed, for example because a lock was not granted within 2 seconds; the Leader retries "+
+		"at the next hourly run. A partition that is still missing when its day or month begins makes writes to its "+
+		"table fail.",
+	"error")
+
+// LeadershipAcquired is logged when this replica takes the Leader lock and starts the Leader tasks.
+var LeadershipAcquired = newEvent("leadership_acquired", LevelInfo, "C-02",
+	"This replica took the Leader lock and runs the Leader tasks: partition maintenance, the alive mark and the "+
+		"pruning of replica records.",
+	"replica")
+
+// LeadershipLost is logged when the Leader stops leading because its lock session failed or went silent.
+var LeadershipLost = newEvent("leadership_lost", LevelWarn, "C-02",
+	"The Leader could not confirm its lock within leader.fencing_timeout, or its lock session failed: it stopped "+
+		"every Leader task, closed the lock connection and competes for the lock again.",
+	"replica", "error")
+
+// LeaderTaskFailed is logged when a run of a Leader task failed; the task runs again at its next interval.
+var LeaderTaskFailed = newEvent("leader_task_failed", LevelWarn, "C-02",
+	"A run of a Leader task failed, usually because the database was unavailable; it runs again at its next "+
+		"interval.",
+	"task", "error")
+
+// DowntimeRecorded is logged when a new Leader finds that no replica was running for longer than
+// leader.absence_notice and records the period.
+var DowntimeRecorded = newEvent("downtime_recorded", LevelWarn, "C-02",
+	"Muster was unavailable: no Leader wrote the alive mark and no replica refreshed its record for the period "+
+		"between started_at and ended_at. The new Leader recorded it and opened the recovery window "+
+		"(recovery.banner_duration).",
+	"started_at", "ended_at", "duration_seconds")
+
+// ReplicasPruned is logged when the Leader removed the records of replicas gone for longer than replica.prune_after.
+var ReplicasPruned = newEvent("replicas_pruned", LevelInfo, "C-02",
+	"The Leader removed the records of replicas that had not refreshed them for replica.prune_after.",
+	"replicas")
+
+// ClockSkew is logged when this replica's clock differs from the database clock by more than
+// process.clock_skew_warning.
+var ClockSkew = newEvent("clock_skew", LevelWarn, "C-02",
+	"This replica's clock differs from the database clock by more than process.clock_skew_warning; skew_seconds is "+
+		"positive when the replica's clock is ahead. Synchronise the clocks with NTP.",
+	"skew_seconds", "warning_seconds")
+
 // Event is a registered log event. Its zero value is not registered, and the logger refuses it.
 type Event struct {
 	def *eventDef

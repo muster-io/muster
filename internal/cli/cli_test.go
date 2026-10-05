@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/muster-io/muster/internal/buildinfo"
+	"github.com/muster-io/muster/internal/doctor"
 	"github.com/muster-io/muster/internal/runtime"
 )
 
@@ -45,6 +46,12 @@ func TestRun(t *testing.T) {
 			args:       []string{"migrate", "--actor", "alice"},
 			wantCode:   2,
 			wantStderr: "muster: migrate takes no arguments\n\n" + usage,
+		},
+		{
+			name:       "doctor takes no --actor",
+			args:       []string{"doctor", "--actor", "alice"},
+			wantCode:   2,
+			wantStderr: "muster: doctor takes no arguments\n\n" + usage,
 		},
 		{
 			name:       "unknown command",
@@ -126,4 +133,50 @@ func TestMigrateCommand(t *testing.T) {
 		stderr.String() != "muster: database schema version 999 is newer than this binary knows (1)\n" {
 		t.Errorf("muster migrate on a newer schema = %d, stderr %q", code, stderr.String())
 	}
+}
+
+func TestDoctorCommand(t *testing.T) {
+	fakeRuntime(t, nil, nil)
+	orig := runDoctorChecks
+	t.Cleanup(func() { runDoctorChecks = orig })
+	for _, tt := range []struct {
+		name       string
+		ok         bool
+		err        error
+		wantCode   int
+		wantStderr string
+	}{
+		{name: "every check passes", ok: true, wantCode: exitOK},
+		{name: "a check fails", ok: false, wantCode: exitFailure},
+		{name: "the settings cannot be read", err: errors.New("MUSTER_PUBLIC_URL is required"), wantCode: exitFailure,
+			wantStderr: "muster: MUSTER_PUBLIC_URL is required\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var got doctor.Options
+			runDoctorChecks = func(_ context.Context, o doctor.Options) (bool, error) {
+				got = o
+				return tt.ok, tt.err
+			}
+			var stdout, stderr bytes.Buffer
+			if code := Run([]string{"doctor"}, &stdout, &stderr); code != tt.wantCode || stderr.String() != tt.wantStderr {
+				t.Errorf("muster doctor = %d, stderr %q", code, stderr.String())
+			}
+			if got.Out != &stdout || len(got.Environ) != 1 || got.Development {
+				t.Errorf("options %+v", got)
+			}
+		})
+	}
+
+	t.Run("muster dev doctor accepts the development key", func(t *testing.T) {
+		clearDevEnv(t)
+		var got doctor.Options
+		runDoctorChecks = func(_ context.Context, o doctor.Options) (bool, error) {
+			got = o
+			return true, nil
+		}
+		var stdout, stderr bytes.Buffer
+		if code := Run([]string{"dev", "doctor"}, &stdout, &stderr); code != exitOK || !got.Development {
+			t.Errorf("muster dev doctor = %d, options %+v, stderr %q", code, got, stderr.String())
+		}
+	})
 }

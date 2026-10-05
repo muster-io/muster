@@ -37,7 +37,7 @@ table in the same pull request.
 | `leader.absence_notice` | 2 min without a Leader | built in | C-02 | decided |
 | `replica.key_record_refresh` / `replica.live_expiry` | 30 s / 2 min | built in | C-02 | decided |
 | `replica.prune_after` | 1 h without a refresh; then the Leader removes the replica's record | built in | C-02 | decided |
-| `recovery.banner_duration` | from startup until the longest learned repeat interval has passed, at most 1 h; 15 min when nothing is learned | built in | C-02 | P-01 |
+| `recovery.banner_duration` | from the takeover of the Leader that records the downtime until the longest learned repeat interval has passed, at most 1 h; 15 min when nothing is learned | built in | C-02 | decided |
 | `process.clock_skew_warning` | 2 s | built in | C-02 | decided |
 | `process.shutdown_grace` | 20 s (the chart's termination grace period is 30 s) | built in | C-02 | decided |
 | Helm `replicas` | 1 | Helm chart | C-01 | decided |

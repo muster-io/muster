@@ -48,3 +48,17 @@ var DBPoolAcquireWait = newCounter(Definition{
 	Help:       "Seconds spent waiting for a connection of the main database pool of this replica, summed over every acquire.",
 	Capability: "C-02",
 })
+
+// Leader is 1 on the replica that holds the Leader lock and 0 on the others (ADR-0007).
+var Leader = newGauge(Definition{
+	Name:       "muster_leader",
+	Help:       "1 while this replica is the Leader and runs the Leader tasks, 0 otherwise.",
+	Capability: "C-02",
+})
+
+// ClockSkew is this replica's clock against the database clock.
+var ClockSkew = newGauge(Definition{
+	Name:       "muster_clock_skew_seconds",
+	Help:       "This replica's clock minus the database clock, corrected by half the round trip; positive when the replica is ahead.",
+	Capability: "C-02",
+})

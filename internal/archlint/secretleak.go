@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/doctor"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
@@ -49,6 +50,7 @@ var registry = []Probe{
 	{Name: "domain_logger", Run: probeDomainLogger},
 	{Name: "bootstrap_settings", Run: probeBootstrapSettings},
 	{Name: "keyring", Run: probeKeyring},
+	{Name: "doctor", Run: probeDoctor},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -83,6 +85,22 @@ func probeBootstrapSettings(ctx context.Context, secrets []string, log io.Writer
 		runtime.Run(ctx, runtime.Options{Environ: unreachable, Stdout: log}),
 		runtime.Migrate(ctx, runtime.Options{Environ: unreachable, Stdout: log}),
 	)
+}
+
+// probeDoctor runs muster doctor with the secrets as the database password, inside the master keys and as an entry
+// of MUSTER_SECRET_KEYS that is not a key, against an address where nothing listens and with refused database URLs:
+// the lines it prints and the error it returns must not carry them.
+func probeDoctor(ctx context.Context, secrets []string, log io.Writer) error {
+	base := []string{"MUSTER_PUBLIC_URL=http://localhost:8080"}
+	unreachable := append(slices.Clone(base),
+		"MUSTER_SECRET_KEYS="+masterKey(secrets[1])+","+secrets[2],
+		"MUSTER_DATABASE_HOST=127.0.0.1", "MUSTER_DATABASE_PORT=1", "MUSTER_DATABASE_NAME=muster",
+		"MUSTER_DATABASE_USER=muster", "MUSTER_DATABASE_PASSWORD="+secrets[0], "MUSTER_DATABASE_SSLMODE=disable")
+	refused := append(slices.Clone(base), "MUSTER_SECRET_KEYS="+masterKey(secrets[1]),
+		"MUSTER_DATABASE_URL=mysql://muster:"+url.QueryEscape(secrets[0])+"@db.example/muster")
+	_, errUnreachable := doctor.Run(ctx, doctor.Options{Environ: unreachable, Out: log})
+	_, errRefused := doctor.Run(ctx, doctor.Options{Environ: refused, Out: log})
+	return errors.Join(errUnreachable, errRefused)
 }
 
 // probeKeyring loads master keys made of the secrets — also as an entry that is not a key, from the variable and from

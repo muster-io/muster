@@ -10,10 +10,12 @@
 package e2e
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -23,6 +25,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -419,4 +422,136 @@ func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+// Metric is the value of the series name, such as muster_leader, on the replica's /metrics; empty when it is absent.
+func (r *Replica) Metric(t testing.TB, name string) string {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, r.Internal+"/metrics", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := pollClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 64<<10), 1<<20)
+	for scanner.Scan() {
+		if value, ok := strings.CutPrefix(scanner.Text(), name+" "); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+// LogLine is the first log line of the event in the current run's output, and the time it carries.
+func (r *Replica) LogLine(event string) (map[string]any, time.Time, bool) {
+	for line := range strings.Lines(r.Output()) {
+		var m map[string]any
+		if json.Unmarshal([]byte(line), &m) != nil || m["event"] != event {
+			continue
+		}
+		at, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(m["time"]))
+		return m, at, true
+	}
+	return nil, time.Time{}, false
+}
+
+// Blackhole is a TCP proxy to the harness's database that a test can cut: after Cut it forwards nothing more in
+// either direction and connects no new connection, while every connection stays open, like a network that drops
+// every packet.
+type Blackhole struct {
+	ln     net.Listener
+	target string
+	cut    atomic.Bool
+	mu     sync.Mutex
+	conns  []net.Conn
+}
+
+// Blackhole starts a proxy to the database of the harness; Close, or the end of the test, stops it.
+func (h *Harness) Blackhole(t testing.TB) *Blackhole {
+	t.Helper()
+	u, err := url.Parse(h.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &Blackhole{ln: ln, target: u.Host}
+	t.Cleanup(b.Close)
+	go b.accept(t.Context())
+	return b
+}
+
+// DatabaseURL is the harness's database reached through the proxy.
+func (b *Blackhole) DatabaseURL(h *Harness) string {
+	u, _ := url.Parse(h.DatabaseURL) // parsed by Blackhole
+	u.Host = b.ln.Addr().String()
+	return u.String()
+}
+
+// Cut stops forwarding.
+func (b *Blackhole) Cut() { b.cut.Store(true) }
+
+// Close stops the proxy and closes every connection, so that what used it fails at once.
+func (b *Blackhole) Close() {
+	_ = b.ln.Close()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, c := range b.conns {
+		_ = c.Close()
+	}
+	b.conns = nil
+}
+
+func (b *Blackhole) accept(ctx context.Context) {
+	for {
+		c, err := b.ln.Accept()
+		if err != nil {
+			return
+		}
+		b.track(c)
+		if b.cut.Load() {
+			continue
+		}
+		var d net.Dialer
+		up, err := d.DialContext(ctx, "tcp", b.target)
+		if err != nil {
+			_ = c.Close()
+			continue
+		}
+		b.track(up)
+		go b.pipe(up, c)
+		go b.pipe(c, up)
+	}
+}
+
+func (b *Blackhole) track(c net.Conn) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.conns = append(b.conns, c)
+}
+
+// pipe copies src to dst until src fails; after the cut it drops what it reads and closes nothing.
+func (b *Blackhole) pipe(dst, src net.Conn) {
+	buf := make([]byte, 32<<10)
+	for {
+		n, err := src.Read(buf)
+		if err != nil {
+			if !b.cut.Load() {
+				_ = dst.Close()
+			}
+			return
+		}
+		if !b.cut.Load() {
+			if _, err := dst.Write(buf[:n]); err != nil {
+				return
+			}
+		}
+	}
 }

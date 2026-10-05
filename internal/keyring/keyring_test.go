@@ -358,7 +358,7 @@ func (s *fakeStore) RecordReplica(_ context.Context, arg dbgen.RecordReplicaPara
 		r = dbgen.Replica{ReplicaID: arg.ReplicaID, Hostname: arg.Hostname, Version: arg.Version,
 			StartedAt: arg.StartedAt}
 	}
-	r.KeyIds, r.RefreshedAt = arg.KeyIds, arg.RefreshedAt
+	r.KeyIds, r.StartedAt, r.RefreshedAt = arg.KeyIds, arg.StartedAt, arg.RefreshedAt
 	s.replicas[arg.ReplicaID] = r
 	return nil
 }
@@ -655,5 +655,108 @@ func TestRecorderStoreErrors(t *testing.T) {
 	}
 	if NewStore(nil) == nil {
 		t.Error("NewStore returned nil")
+	}
+}
+
+type fakePruner struct {
+	before  time.Time
+	pruned  int64
+	err     error
+	records map[string]time.Time
+}
+
+func (p *fakePruner) PruneReplicas(_ context.Context, before time.Time) (int64, error) {
+	p.before = before
+	if p.err != nil {
+		return 0, p.err
+	}
+	var n int64
+	for id, at := range p.records {
+		if at.Before(before) {
+			delete(p.records, id)
+			n++
+		}
+	}
+	p.pruned += n
+	return n, nil
+}
+
+func TestPruneReplicas(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	p := &fakePruner{records: map[string]time.Time{"gone": now.Add(-PruneAfter - time.Second),
+		"quiet": now.Add(-PruneAfter + time.Second), "live": now}}
+	var log bytes.Buffer
+	logger := logging.New(&log, logging.LevelInfo)
+	if err := PruneReplicas(t.Context(), p, logger, now); err != nil {
+		t.Fatal(err)
+	}
+	if !p.before.Equal(now.Add(-time.Hour)) || p.pruned != 1 || len(p.records) != 2 {
+		t.Errorf("pruned %d records before %v; left %v", p.pruned, p.before, p.records)
+	}
+	if !strings.Contains(log.String(), `"level":"INFO","event":"replicas_pruned","replicas":1`) {
+		t.Errorf("log %s", log.String())
+	}
+	// A second run, as an overlapping Leader would make it, removes nothing and logs nothing.
+	log.Reset()
+	if err := PruneReplicas(t.Context(), p, logger, now); err != nil || p.pruned != 1 || log.Len() != 0 {
+		t.Errorf("second run: %v, pruned %d, log %s", err, p.pruned, log.String())
+	}
+	p.err = errors.New("conn closed")
+	if err := PruneReplicas(t.Context(), p, logger, now); err == nil ||
+		!strings.Contains(err.Error(), "prune the replica records: conn closed") {
+		t.Errorf("PruneReplicas = %v", err)
+	}
+}
+
+// TestRecorderReregistersAfterLosingTheDatabase: a replica that could not refresh its record for longer than
+// ReregisterAfter re-registers with a new start time; shorter gaps keep it.
+func TestRecorderReregistersAfterLosingTheDatabase(t *testing.T) {
+	ctx := t.Context()
+	s := &fakeStore{}
+	k := newKeyring(t, 'a')
+	st, _ := k.Establish(ctx, s, time.Now())
+	if err := k.Open(ctx, logging.New(&bytes.Buffer{}, logging.LevelInfo), st); err != nil {
+		t.Fatal(err)
+	}
+	realClock := clock.NewManual(time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC))
+	started := realClock.Now()
+	r := NewRecorder(k, s, realClock, logging.New(&bytes.Buffer{}, logging.LevelInfo), "r-1", "r", "1.2.3")
+	if err := r.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	startedAt := func() time.Time {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.replicas["r-1"].StartedAt
+	}
+
+	// Refreshes that fail for exactly ReregisterAfter keep the start time.
+	s.err = errors.New("connection refused")
+	for range int(ReregisterAfter / KeyRecordRefresh) {
+		realClock.Advance(KeyRecordRefresh)
+		if err := r.Refresh(ctx); err == nil {
+			t.Fatal("a refresh without the database succeeded")
+		}
+	}
+	s.err = nil
+	if err := r.Refresh(ctx); err != nil || !startedAt().Equal(started) {
+		t.Fatalf("after a gap of ReregisterAfter: %v, started %v, want %v", err, startedAt(), started)
+	}
+
+	// A longer gap makes the replica re-register.
+	s.err = errors.New("connection refused")
+	realClock.Advance(ReregisterAfter + time.Second)
+	if err := r.Refresh(ctx); err == nil {
+		t.Fatal("a refresh without the database succeeded")
+	}
+	s.err = nil
+	if err := r.Refresh(ctx); err != nil || !startedAt().Equal(realClock.Now()) {
+		t.Fatalf("after a longer gap: %v, started %v, want %v", err, startedAt(), realClock.Now())
+	}
+	// The next refreshes keep the new start time.
+	back := realClock.Now()
+	realClock.Advance(KeyRecordRefresh)
+	if err := r.Refresh(ctx); err != nil || !startedAt().Equal(back) {
+		t.Fatalf("a regular refresh moved the start time: %v, %v", err, startedAt())
 	}
 }

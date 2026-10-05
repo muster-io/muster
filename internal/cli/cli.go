@@ -23,6 +23,7 @@ when MUSTER_MIGRATE_ON_START is true, then the app, ingest and internal listener
 
 Commands:
   migrate   Apply the database migrations under the migration lock
+  doctor    Check the database, its connections, the master keys and the clock; only reads
   dev       Development mode: fake servers and development defaults (muster dev [--replica] | muster dev <command>)
   version   Print the version and commit
   help      Show this help
@@ -33,6 +34,11 @@ func Main() int {
 }
 
 func Run(args []string, stdout, stderr io.Writer) int {
+	return run(args, stdout, stderr, false)
+}
+
+// run runs a command; development is set when `muster dev <command>` runs it with the development defaults.
+func run(args []string, stdout, stderr io.Writer, development bool) int {
 	if len(args) == 0 {
 		return runServe(stdout, stderr)
 	}
@@ -43,6 +49,12 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return exitUsage
 		}
 		return runMigrateCommand(stdout, stderr)
+	case "doctor":
+		if len(args) > 1 {
+			fmt.Fprintf(stderr, "muster: doctor takes no arguments\n\n%s", usage)
+			return exitUsage
+		}
+		return runDoctor(stdout, stderr, development)
 	case "dev":
 		return runDev(args[1:], stdout, stderr)
 	case "version":
