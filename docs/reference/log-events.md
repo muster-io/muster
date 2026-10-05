@@ -22,7 +22,7 @@ the event.
 | `key_canary_failed` | ERROR | active_key_id, key_ids, error | C-02 | The master keys cannot decrypt the key canary: the active key is missing from MUSTER_SECRET_KEYS, or the keys belong to another database. The replica stops; set the keys this database was written with. |
 | `keyring_loaded` | INFO | key_ids, active_key_id | C-02 | The master keys of MUSTER_SECRET_KEYS were loaded and decrypt the key canary; the ids are derived from the keys and never reveal them. |
 | `leader_task_failed` | WARN | task, error | C-02 | A run of a Leader task failed, usually because the database was unavailable; it runs again at its next interval. |
-| `leadership_acquired` | INFO | replica | C-02 | This replica took the Leader lock and runs the Leader tasks: partition maintenance, the alive mark and the pruning of replica records. |
+| `leadership_acquired` | INFO | replica | C-02 | This replica took the Leader lock and runs the Leader tasks: partition maintenance, the alive mark, the pruning of replica records and the pruning of short-lived state. |
 | `leadership_lost` | WARN | replica, error | C-02 | The Leader could not confirm its lock within leader.fencing_timeout, or its lock session failed: it stopped every Leader task, closed the lock connection and competes for the lock again. |
 | `library_message` | WARN | message | C-02 | A third-party library wrote a line of its own, such as a failed read of the process metrics. |
 | `listener_failed` | ERROR | listener, error | C-02 | A listener stopped serving with an error; the process stops so that it is restarted. |
@@ -41,6 +41,7 @@ the event.
 | `schema_dirty` | ERROR | database_version | C-02 | A migration failed halfway and the schema is marked dirty at its version: repair the schema from a backup or by hand, then clear the dirty flag in schema_migrations. |
 | `schema_too_new` | ERROR | database_version, known_version | C-02 | The database schema is newer than this binary knows, after an upgrade was rolled back: run a release that knows the schema version. |
 | `schema_too_old` | ERROR | database_version, known_version | C-02 | The database schema is older than this binary needs: run muster migrate or set MUSTER_MIGRATE_ON_START. |
+| `short_lived_pruned` | INFO | table, rows | C-02 | The hourly short-lived pruning of the Leader deleted, in batches, rows of a short-lived table that can no longer be used, such as sessions that ended or expired auth.session_prune_after ago and sign-in throttles without a failure for auth.signin_throttle_prune_after; rows is how many it deleted from the table. |
 | `shutdown_grace_exceeded` | WARN | grace_seconds | C-02 | Requests were still running when the shutdown grace period ended; their connections were closed. |
 | `shutdown_requested` | WARN | grace_seconds | C-02 | The server received SIGTERM or an interrupt: readiness answers 503, work in progress finishes and the listeners drain within the grace period, in seconds. |
 | `startup_failed` | ERROR | error | C-02 | Startup stopped: the database cannot be reached or fails a check, a migration failed, or a listener cannot listen. The error says what to fix. |

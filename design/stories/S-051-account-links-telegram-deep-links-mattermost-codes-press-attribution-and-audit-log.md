@@ -28,6 +28,8 @@ files_touched:
   - internal/fakes/faketelegram/updates.go
   - internal/fakes/faketelegram/faketelegram_test.go
   - internal/runtime/runtime.go
+  - internal/leader/tasks.go
+  - internal/metrics/catalogue.go
   - internal/logging/events.go
   - internal/archlint/secretleak.go
   - docs/messengers/account-links.md
@@ -85,7 +87,11 @@ issue: 51
   code, never saying which) and `messenger_user_not_found` (no such username on the Mattermost server) are the
   `x-problem-codes` of the Mattermost operations below.
 - **Tables**: `account_links`, `account_link_requests` (`secret_hash`, `target_external_id`, `target_username`,
-  `attempts`, `expires_at`, `consumed_at`, `voided_at`), `users`, `audit_log`.
+  `attempts`, `expires_at`, `consumed_at`, `voided_at`), `users`, `audit_log`. The story adds
+  `account_link_requests` to the `short_lived_pruning` Leader task (a `PruneAccountLinks` field of `leader.Work` and
+  the table in `metrics.ShortLivedTables`): a request is deleted once its `expires_at` is more than 24 h past, consumed
+  and voided ones included, which keeps the last hour that `account_link.mattermost_code_requests` counts and answers
+  a late `/start` with `token_expired` for a day.
 - **Telegram** (C-18.FR-2, C-14.FR-8; `accountlinks/telegram.go`, `telegram/start.go`, ADR-0013):
   - `startTelegramLink {connection_id}`: a Telegram Connection that is not deleted. The token is 32 bytes from
     `crypto/rand` in base64url without padding (43 characters); its SHA-256 is stored with the User, the Connection

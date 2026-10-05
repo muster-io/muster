@@ -1081,7 +1081,7 @@ bumping `next_probe_at` by `delivery.broken_probe_interval` as the lease. **OIDC
 | Alert Group summary rows | `alert_groups` | — | `retention.alert_group_summaries`, 2 years after resolution | batched `DELETE` (cascades Notes, deliveries, timers, queues) |
 | Notes | `notes` | — | as long as their summary row | the cascade from the summary row; never the details purge |
 | Queue rows | `thread_replies`, `webhook_events`, `deliveries` of long-resolved Alert Groups | — | while needed, then `retention.alert_details` | batched `DELETE` |
-| Short-lived state | sessions, OIDC requests, setup links, link requests, throttles, Telegram copies, stale replicas | — | until expiry | batched `DELETE` |
+| Short-lived state | sessions, OIDC requests, setup links, link requests, throttles, Telegram copies, stale replicas | — | until expiry; sessions `auth.session_prune_after` after they ended, throttles `auth.signin_throttle_prune_after` after the last failure | batched `DELETE`; the hourly Leader task `short_lived_pruning` for sessions and throttles, each later short-lived table added by its story |
 
 **Partition maintenance** is runtime work, never a migration ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md),
 C-02.FR-11). At startup, under the migration advisory lock and before serving, and then hourly on the Leader, Muster

@@ -65,6 +65,8 @@ func (f *fakeDB) LeaderStore() leader.Store { return nil }
 
 func (f *fakeDB) ReplicaPruner() keyring.Pruner { return nil }
 
+func (f *fakeDB) AuthPruner() auth.PruneQueries { return nil }
+
 func (f *fakeDB) Clock() rowQuerier { return fakeClockRow{} }
 
 // fakeSession is a partition maintenance session on a database without partitions: every query returns no rows.

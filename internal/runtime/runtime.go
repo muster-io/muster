@@ -20,6 +20,7 @@ import (
 	"github.com/muster-io/muster/internal/api"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
+	authdb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/buildinfo"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
@@ -76,6 +77,7 @@ type database interface {
 	PartitionSession(ctx context.Context) (partitions.Session, error)
 	LeaderStore() leader.Store
 	ReplicaPruner() keyring.Pruner
+	AuthPruner() auth.PruneQueries
 	// Clock reads the database clock, for the clock skew check.
 	Clock() rowQuerier
 }
@@ -112,6 +114,8 @@ func (d pgDatabase) PartitionSession(ctx context.Context) (partitions.Session, e
 func (d pgDatabase) LeaderStore() leader.Store { return leader.NewStore(d.Pool) }
 
 func (d pgDatabase) ReplicaPruner() keyring.Pruner { return kdb.New(d.Pool) }
+
+func (d pgDatabase) AuthPruner() auth.PruneQueries { return authdb.New(d.Pool) }
 
 func (d pgDatabase) Clock() rowQuerier { return d.Pool }
 
@@ -368,11 +372,21 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 // newKeeper is the Leader lock keeper of this replica with the Leader tasks of tasks.go.
 func (p *process) newKeeper() *leader.Keeper {
 	id := p.replica.ID()
+	authPruner := auth.NewPruner(p.db.AuthPruner())
 	return leader.NewKeeper(p.db.LeaderSession, p.clocks.Real, p.log, id, leader.Tasks(leader.Work{
 		Alive:              leader.NewAlive(p.db.LeaderStore(), p.clocks, p.log, id),
 		MaintainPartitions: p.partitions.Maintain,
 		PruneReplicas: func(ctx context.Context) error {
 			return keyring.PruneReplicas(ctx, p.db.ReplicaPruner(), p.log, p.clocks.Real.Now())
+		},
+		Organizations: func(ctx context.Context) ([]int64, error) {
+			return p.db.LeaderStore().ListOrganizationIDs(ctx)
+		},
+		Business: p.clocks.Business,
+		Log:      p.log,
+		PruneAuth: []leader.PruneTable{
+			{Name: "sessions", Delete: authPruner.Sessions},
+			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},
 		},
 	}))
 }

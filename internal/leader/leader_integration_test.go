@@ -21,6 +21,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/muster-io/muster/internal/auth"
+	authdb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
@@ -283,6 +285,12 @@ func TestIntegrationOverlappingLeaders(t *testing.T) {
 				PruneReplicas: func(ctx context.Context) error {
 					return keyring.PruneReplicas(ctx, kdb.New(d.Pool), logger, realClock.Now())
 				},
+				Organizations: NewStore(d.Pool).ListOrganizationIDs,
+				Business:      business,
+				Log:           logger,
+				PruneAuth: []PruneTable{
+					{Name: "sign_in_throttles", Delete: auth.NewPruner(authdb.New(d.Pool)).SignInThrottles},
+				},
 			})()
 		}
 		// The first Leader marks alive, then everything stops for ten minutes.
@@ -294,6 +302,11 @@ func TestIntegrationOverlappingLeaders(t *testing.T) {
 		business.Advance(10 * time.Minute)
 		if _, err := d.Pool.Exec(t.Context(), `INSERT INTO replicas (replica_id, version, key_ids, started_at, refreshed_at)
 			VALUES ('gone', 'test', '{}', $1, $1)`, realClock.Now().Add(-2*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Pool.Exec(t.Context(), `INSERT INTO sign_in_throttles (org_id, subject_kind, subject,
+			consecutive_failures, last_failure_at) SELECT id, 'address', '192.0.2.1', 3, $1 FROM organizations`,
+			business.Now().Add(-48*time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 
@@ -332,6 +345,7 @@ func TestIntegrationOverlappingLeaders(t *testing.T) {
 			"SELECT count(*) FROM downtime_periods":                                                     1,
 			"SELECT count(*) FROM runtime_state":                                                        1,
 			"SELECT count(*) FROM replicas":                                                             0,
+			"SELECT count(*) FROM sign_in_throttles":                                                    0,
 			"SELECT count(*) FROM pg_inherits WHERE inhparent = 'stored_snapshots'::regclass":           8,
 			"SELECT count(*) FROM pg_inherits WHERE inhparent = 'snapshot_bodies'::regclass":            8,
 			"SELECT count(*) FROM pg_inherits WHERE inhparent = 'audit_log'::regclass":                  3,
@@ -342,6 +356,9 @@ func TestIntegrationOverlappingLeaders(t *testing.T) {
 			if got := count(sql); got != want {
 				t.Errorf("%s = %d, want %d", sql, got, want)
 			}
+		}
+		if n := strings.Count(log.String(), `"event":"short_lived_pruned"`); n != 1 {
+			t.Errorf("short_lived_pruned logged %d times: %s", n, log.String())
 		}
 		if n := strings.Count(log.String(), `"event":"downtime_recorded"`); n != 1 {
 			t.Errorf("downtime_recorded logged %d times: %s", n, log.String())

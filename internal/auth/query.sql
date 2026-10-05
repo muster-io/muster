@@ -101,3 +101,28 @@ WHERE org_id = @org_id AND subject_kind = @subject_kind AND subject = @subject;
 DELETE FROM sign_in_throttles
 WHERE org_id = @org_id
   AND ((subject_kind = 'account' AND subject = @account) OR (subject_kind = 'address' AND subject = @address));
+
+-- PruneSessions deletes up to batch_size sessions that could no longer be used before @before: ended, past their idle
+-- timeout or past their lifetime. A session row being used is skipped and taken at the next run.
+-- name: PruneSessions :execrows
+DELETE FROM sessions s
+WHERE s.org_id = @org_id AND s.id IN (
+    SELECT e.id FROM sessions e
+    WHERE e.org_id = @org_id AND LEAST(e.ended_at, e.idle_expires_at, e.expires_at) < @before::timestamptz
+    ORDER BY e.id
+    LIMIT @batch_size
+    FOR UPDATE SKIP LOCKED
+);
+
+-- PruneSignInThrottles deletes up to batch_size throttle rows whose last failure, and whose block, are older than
+-- @before. A row being counted is skipped and taken at the next run.
+-- name: PruneSignInThrottles :execrows
+DELETE FROM sign_in_throttles t
+WHERE t.org_id = @org_id AND (t.subject_kind, t.subject) IN (
+    SELECT o.subject_kind, o.subject FROM sign_in_throttles o
+    WHERE o.org_id = @org_id AND o.last_failure_at < @before::timestamptz
+      AND (o.blocked_until IS NULL OR o.blocked_until < @before::timestamptz)
+    ORDER BY o.subject_kind, o.subject
+    LIMIT @batch_size
+    FOR UPDATE SKIP LOCKED
+);
