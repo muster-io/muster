@@ -56,7 +56,7 @@ COVER_PROFILE := $(BIN)/cover.out
 WEB_DEPS := web/node_modules/.modules.yaml
 
 # The output of make generate, checked in.
-GENERATED := internal/api/gen pkg/apiclient web/src/api/gen web/src/routeTree.gen.ts
+GENERATED := internal/api/gen pkg/apiclient web/src/api/gen web/src/routeTree.gen.ts docs/reference
 
 # The licences shipped artifacts may depend on (ADR-0001).
 SHIPPED_LICENSES := MIT,MIT-0,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,0BSD,Unlicense,CC0-1.0,MPL-2.0
@@ -122,12 +122,15 @@ test-race: $(GO_TEST_COVERAGE) ## Run unit tests with the race detector and the 
 	$(GO) test -race -coverprofile=$(COVER_PROFILE) -covermode=atomic ./...
 	$(GO_TEST_COVERAGE) --config=.testcoverage.yml
 
-# The Go outputs are removed first, as orval cleans its own, so that a file the generators no longer write goes away.
+# The Go outputs and the reference pages are removed first, as orval cleans its own, so that a file the generators no
+# longer write goes away.
 generate: $(WEB_DEPS) ## Run every code generator
 	rm -f internal/api/gen/*.gen.go pkg/apiclient/*.gen.go
 	$(GO) tool oapi-codegen -config api/codegen-server.yaml api/openapi.yaml
 	$(GO) tool oapi-codegen -config api/codegen-client.yaml api/openapi.yaml
 	$(PNPM) --dir web run generate
+	rm -f docs/reference/*.md
+	$(GO) run ./internal/tools/refgen -out docs/reference
 
 # Copies the generated paths aside, regenerates and compares file by file, so that changed, added and removed files
 # are all named, whatever the state of git.
