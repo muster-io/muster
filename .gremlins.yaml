@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# Mutation testing with gremlins, run by `make mutation` over the core packages and published by the nightly workflow.
+# The report informs and never blocks: the thresholds stay at 0, so a score never fails the run. The mutators are the
+# gremlins defaults.
+unleash:
+  workers: 0 # one per CPU
+  test-cpu: 0 # each test run may use every CPU
+  # A mutant times out after this multiple of the coverage run's duration; shared CI runners vary in speed.
+  timeout-coefficient: 5
+  integration: false
+  exclude-files: # generated code, as regular expressions
+    - '/dbgen/'
+    - '\.gen\.go$'
+  threshold:
+    efficacy: 0
+    mutant-coverage: 0

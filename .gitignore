@@ -3,3 +3,8 @@
 CLAUDE.local.md
 # Build output, installed tools and coverage profiles
 /bin/
+# SPA dependencies and build output; dist/.gitkeep keeps the go:embed pattern valid before the first build
+/web/node_modules/
+/web/dist/*
+!/web/dist/.gitkeep
+*.tsbuildinfo

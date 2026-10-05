@@ -19,28 +19,38 @@ request that delivers one observable behaviour; its issue, titled `S-NNN: <title
 
 ## Development setup
 
-You need Go 1.27, GNU make and git. With the default `GOTOOLCHAIN=auto`, the `go` command fetches the toolchain that
-`go.mod` asks for. The Makefile installs its pinned tools (golangci-lint, go-test-coverage) into `bin/tools/` on first
-use, built with the project's toolchain; nothing else needs to be installed.
+You need Go 1.27, Node 24 (see `.node-version`), pnpm 12, GNU make and git. With the default `GOTOOLCHAIN=auto`, the
+`go` command fetches the toolchain that `go.mod` asks for. Install pnpm with `npm install -g pnpm@12`: it switches to
+the exact version that `packageManager` in `web/package.json` pins. The Makefile runs pnpm from the repository root,
+which has no `package.json`, so with corepack also run `corepack install -g pnpm@<that version>`; otherwise corepack
+starts its default pnpm, which refuses the project. The Makefile installs its pinned tools (golangci-lint,
+go-test-coverage, go-licenses, govulncheck, gremlins) into `bin/tools/` on first use, built with the project's
+toolchain; nothing else needs to be installed.
 
 The Makefile is the only entry point:
 
 | Target | Does |
 |---|---|
 | `make help` | lists the targets (the default goal) |
-| `make fmt` | formats Go code (gofmt and goimports through golangci-lint) |
-| `make lint` | checks the licence header of every source file, then runs golangci-lint |
+| `make fmt` | formats Go code (gofmt and goimports through golangci-lint) and the SPA (oxfmt) |
+| `make lint` | checks licence headers, runs golangci-lint, Redocly on the spec, TypeScript type check, oxlint and oxfmt check |
 | `make lint-arch` | runs the architecture lints (see AGENTS.md) |
 | `make test` | runs the unit tests and the coverage gate: 95 % for `internal/groups`, `routing`, `delivery` and `timers`, 80 % for every other package |
 | `make test-race` | the same with the race detector |
-| `make generate` | runs every code generator (none yet) |
-| `make build` | builds `bin/muster` with the version and the commit |
-| `make ci` | runs the pull-request tier locally: `lint`, `lint-arch`, `test-race`, `build` |
+| `make generate` | runs code generators for the OpenAPI server and clients and the route tree |
+| `make generate-check` | regenerates and fails if generated files are not current |
+| `make build` | builds the SPA, then `bin/muster` with the version and the commit |
+| `make licenses` | checks dependency licences for shipped artifacts and reports tooling licences |
+| `make vulncheck` | finds vulnerable Go code and high SPA advisories |
+| `make mutation` | runs mutation testing over the core packages |
+| `make ci` | runs the pull-request tier locally: `lint`, `lint-arch`, `generate-check`, `licenses`, `test-race`, `build` |
 | `make clean` | removes `bin/`: the binary, the coverage profile and the installed tools |
 
-In CI, a pull request runs the full tier (`lint`, `lint-arch`, `test-race`, `build`), and a push to `master` runs the
-fast tier, the same jobs with `test` instead of `test-race`. Pushes to other branches run nothing: open a pull request,
-a draft one if the work is not ready, to get the checks.
+In CI, the `ci` workflow runs the jobs `lint`, `lint-arch`, `test`, `build`, `generate` (`make generate-check`),
+`licenses` and `vulncheck` on every pull request, with `make test-race` in `test`, and on every push to `master`, with
+`make test`. A pull request also gets the non-blocking `oasdiff` report of breaking changes to the API spec, and the
+`codeql` workflow analyses the Go and TypeScript code. Pushes to other branches run nothing: open a pull request, a
+draft one if the work is not ready, to get the checks.
 
 ## Working a story
 

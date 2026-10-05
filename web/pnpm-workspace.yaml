@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+packages:
+  - .
+
+# pnpm refuses to install while a dependency's build script is neither allowed nor denied. None is needed:
+# esbuild (used by orval) finds its binary through its platform package, and msw's postinstall only copies the
+# service worker when package.json sets msw.workerDirectory, which it does not.
+allowBuilds:
+  esbuild: false
+  msw: false

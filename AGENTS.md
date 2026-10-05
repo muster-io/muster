@@ -159,21 +159,24 @@ A false positive is fixed in the lint, never worked around in the code.
 ## Make targets
 
 The Makefile is the only entry point. Targets appear as the stories that define them land; the Makefile is
-authoritative, and `make help`, its default goal, lists them. Pinned tools (golangci-lint, go-test-coverage) are built
-with the project's Go toolchain into `bin/tools/` on first use.
+authoritative, and `make help`, its default goal, lists them. Pinned tools — golangci-lint, go-test-coverage, go-licenses,
+govulncheck and gremlins — are built with the project's Go toolchain into `bin/tools/` on first use. Go version (go.mod),
+Node version (`.node-version`) and pnpm version (`packageManager` in `web/package.json`) are pinned.
 
 | Target | Does | From |
 |---|---|---|
 | `make help` | list the targets | S-001 |
-| `make fmt` | gofmt and goimports through `golangci-lint fmt`, later oxfmt | S-001 |
-| `make lint` | the licence headers (`internal/tools/licensecheck`, skipping the paths listed in `NOTICE`) and golangci-lint; later Redocly on the spec, oxlint and translations | S-001 |
+| `make fmt` | gofmt and goimports through `golangci-lint fmt` and oxfmt on the SPA | S-001, S-002 |
+| `make lint` | the licence headers (`internal/tools/licensecheck`, skipping the paths listed in `NOTICE`), golangci-lint, Redocly on the spec, the TypeScript type check, oxlint and the oxfmt check; later translations | S-001, S-002 |
 | `make lint-arch` | the architecture lints | S-001 |
 | `make test`, `make test-race` | unit tests with the coverage gate of `.testcoverage.yml`; the same with the race detector | S-001 |
-| `make generate`, `make generate-check` | run every generator (none before S-002); fail on stale generated files | S-001, S-002 |
+| `make generate`, `make generate-check` | run the code generators (the OpenAPI server and clients, the route tree); fail on stale generated files, naming them | S-001, S-002 |
 | `make build` | the SPA, then `bin/muster` with version and commit | S-001, S-002 |
-| `make ci` | the pull-request tier, locally: `lint`, `lint-arch`, `test-race`, `build`, and what later stories add | S-001 |
+| `make ci` | the pull-request tier, locally: `lint`, `lint-arch`, `generate-check`, `licenses`, `test-race`, `build`, and what later stories add | S-001, S-002 |
 | `make clean` | remove `bin/`: the binary, the coverage profile and the installed tools | S-001 |
-| `make licenses` | the dependency licence check | S-002 |
+| `make licenses` | check dependency licences for shipped artifacts (binary, SPA bundle) and report tooling licences | S-002 |
+| `make vulncheck` | find vulnerable Go code that is called (govulncheck) and high and critical advisories in the SPA's production dependencies (pnpm audit) | S-002 |
+| `make mutation` | run mutation testing over the core packages; the nightly workflow uploads the report as an artifact | S-002 |
 | `make helm-check`, `make compose-check` | render and validate the chart; check the compose example | S-003 |
 | `make dev-db`, `make dev` | the development PostgreSQL; PostgreSQL, build and `muster dev` | S-004 |
 | `make e2e` | the end-to-end suite; `E2E_REPLICAS=2` runs two replicas | S-004 |

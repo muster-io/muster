@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# oapi-codegen: the Go client of the API, with its models (make generate).
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.8.0/configuration-schema.json
+package: apiclient
+output: pkg/apiclient/client.gen.go
+generate:
+  client: true
+  models: true
+output-options:
+  skip-prune: true # schemas reachable only from `webhooks` would be dropped otherwise
+  nullable-type: true # tells an omitted optional field from an explicit null
+  exclude-tags: # hand-written handlers; Outgoing webhooks are requests Muster sends
+    - Outgoing webhooks
+    - Health and metrics
