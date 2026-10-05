@@ -1,0 +1,27 @@
+{{- /*
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright The Muster Authors
+*/ -}}
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "muster.fullname" . }}
+  labels:
+    {{- include "muster.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "muster.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from: []
+      ports:
+        - protocol: TCP
+          port: app
+        - protocol: TCP
+          port: ingest
+        - protocol: TCP
+          port: internal
+{{- end }}

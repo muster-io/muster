@@ -1,0 +1,32 @@
+{{- /*
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright The Muster Authors
+*/ -}}
+{{- $app := printf "%s-app" (include "muster.fullname" .) -}}
+Muster {{ .Chart.AppVersion }} is installed as {{ .Release.Name }} in the namespace {{ .Release.Namespace }}.
+
+Open the app:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.app.hosts }}
+  http{{ if $.Values.ingress.app.tls }}s{{ end }}://{{ .host }}{{ .path | default "/" }}
+{{- end }}
+{{- else if .Values.httpRoute.enabled }}
+{{- range .Values.httpRoute.app.hostnames }}
+  {{ . }}, through the Gateway
+{{- end }}
+{{- else if eq .Values.service.app.type "NodePort" }}
+  NODE_PORT=$(kubectl -n {{ .Release.Namespace }} get svc {{ $app }} -o jsonpath='{.spec.ports[0].nodePort}')
+  NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+  echo "http://$NODE_IP:$NODE_PORT"
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $app }} {{ .Values.service.app.port }}
+  then http://127.0.0.1:{{ .Values.service.app.port }}
+{{- end }}
+{{- if not .Values.publicURL }}
+
+WARNING: publicURL is not set. Muster requires MUSTER_PUBLIC_URL at startup: set publicURL to the address users open.
+{{- end }}
+{{- if and (not .Values.database.host) (not .Values.database.urlKey) }}
+
+WARNING: no database is configured: set database.host, or database.urlKey for a whole MUSTER_DATABASE_URL.
+{{- end }}

@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+apiVersion: v2
+name: muster
+description: Self-hosted alert grouping and on-call service
+type: application
+version: 0.0.0
+appVersion: "0.0.0-dev"
+home: https://github.com/muster-io/muster
+sources:
+  - https://github.com/muster-io/muster
+kubeVersion: ">=1.28.0-0"
+annotations:
+  artifacthub.io/license: AGPL-3.0-only

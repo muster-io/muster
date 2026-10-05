@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# Paths left out of the packaged chart.
+.DS_Store
+.git/
+.gitignore
+.bzr/
+.bzrignore
+.hg/
+.hgignore
+.svn/
+*.swp
+*.swo
+*.bak
+*.tmp
+*.orig
+*~
+.idea/
+*.iml
+.vscode/
+ci/

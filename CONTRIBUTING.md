@@ -24,8 +24,9 @@ You need Go 1.27, Node 24 (see `.node-version`), pnpm 12, GNU make and git. With
 the exact version that `packageManager` in `web/package.json` pins. The Makefile runs pnpm from the repository root,
 which has no `package.json`, so with corepack also run `corepack install -g pnpm@<that version>`; otherwise corepack
 starts its default pnpm, which refuses the project. The Makefile installs its pinned tools (golangci-lint,
-go-test-coverage, go-licenses, govulncheck, gremlins) into `bin/tools/` on first use, built with the project's
-toolchain; nothing else needs to be installed.
+go-test-coverage, go-licenses, govulncheck, gremlins, helm, kubeconform) into `bin/tools/` on first use, built with the
+project's toolchain. Only `make compose-check` needs more: the Docker CLI with the compose plugin, but no running
+daemon.
 
 The Makefile is the only entry point:
 
@@ -43,14 +44,25 @@ The Makefile is the only entry point:
 | `make licenses` | checks dependency licences for shipped artifacts and reports tooling licences |
 | `make vulncheck` | finds vulnerable Go code and high SPA advisories |
 | `make mutation` | runs mutation testing over the core packages |
+| `make helm-check` | lints the chart, renders it with default and all-options values, validates both with kubeconform |
+| `make compose-check` | checks the compose example with `docker compose config` |
 | `make ci` | runs the pull-request tier locally: `lint`, `lint-arch`, `generate-check`, `licenses`, `test-race`, `build` |
 | `make clean` | removes `bin/`: the binary, the coverage profile and the installed tools |
 
 In CI, the `ci` workflow runs the jobs `lint`, `lint-arch`, `test`, `build`, `generate` (`make generate-check`),
-`licenses` and `vulncheck` on every pull request, with `make test-race` in `test`, and on every push to `master`, with
-`make test`. A pull request also gets the non-blocking `oasdiff` report of breaking changes to the API spec, and the
-`codeql` workflow analyses the Go and TypeScript code. Pushes to other branches run nothing: open a pull request, a
-draft one if the work is not ready, to get the checks.
+`licenses`, `vulncheck`, `helm-check`, `compose-check` (`make compose-check`, then the example's PostgreSQL settings)
+and `image-scan` (a snapshot release whose images are checked and scanned with Trivy) on every pull request, with
+`make test-race` in `test`, and on every push to `master`, with `make test`. A pull request also gets the non-blocking
+`oasdiff` report of breaking changes to the API spec, and the `codeql` workflow analyses the Go and TypeScript code.
+Pushes to other branches run nothing: open a pull request, a draft one if the work is not ready, to get the checks.
+
+## Releases
+
+release-please keeps a release pull request open, with the changelog written from the conventional commits on
+`master`. Merging it creates a draft release and the `vX.Y.Z` tag. The tag starts the `release` workflow: goreleaser
+builds the binaries, the archives with their SBOMs and the checksums, and the multi-arch image
+`ghcr.io/muster-io/muster`, signed keylessly with cosign; the workflow then pushes the chart to
+`oci://ghcr.io/muster-io/charts/muster` and publishes the release.
 
 ## Working a story
 

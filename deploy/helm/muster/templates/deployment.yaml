@@ -1,0 +1,165 @@
+{{- /*
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright The Muster Authors
+*/ -}}
+{{- $secret := include "muster.existingSecret" . }}
+{{- $secretKeys := list .Values.masterKeysKey }}
+{{- if and (not .Values.database.urlKey) .Values.database.passwordKey }}
+{{- $secretKeys = append $secretKeys .Values.database.passwordKey }}
+{{- end }}
+{{- if .Values.bootstrapAdmin.passwordKey }}
+{{- $secretKeys = append $secretKeys .Values.bootstrapAdmin.passwordKey }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "muster.fullname" . }}
+  labels:
+    {{- include "muster.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "muster.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "muster.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "muster.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: muster
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ include "muster.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: app
+              containerPort: {{ .Values.service.app.port }}
+              protocol: TCP
+            - name: ingest
+              containerPort: {{ .Values.service.ingest.port }}
+              protocol: TCP
+            - name: internal
+              containerPort: {{ .Values.service.internal.port }}
+              protocol: TCP
+          env:
+            - name: MUSTER_LISTEN_APP
+              value: ":{{ .Values.service.app.port }}"
+            - name: MUSTER_LISTEN_INGEST
+              value: ":{{ .Values.service.ingest.port }}"
+            - name: MUSTER_LISTEN_INTERNAL
+              value: ":{{ .Values.service.internal.port }}"
+            {{- if .Values.database.urlKey }}
+            - name: MUSTER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: {{ .Values.database.urlKey | quote }}
+            {{- else }}
+            {{- if .Values.database.host }}
+            - name: MUSTER_DATABASE_HOST
+              value: {{ .Values.database.host | quote }}
+            {{- end }}
+            {{- if .Values.database.port }}
+            - name: MUSTER_DATABASE_PORT
+              value: {{ .Values.database.port | quote }}
+            {{- end }}
+            {{- if .Values.database.name }}
+            - name: MUSTER_DATABASE_NAME
+              value: {{ .Values.database.name | quote }}
+            {{- end }}
+            {{- if .Values.database.user }}
+            - name: MUSTER_DATABASE_USER
+              value: {{ .Values.database.user | quote }}
+            {{- end }}
+            {{- if .Values.database.sslmode }}
+            - name: MUSTER_DATABASE_SSLMODE
+              value: {{ .Values.database.sslmode | quote }}
+            {{- end }}
+            {{- if .Values.database.passwordKey }}
+            - name: MUSTER_DATABASE_PASSWORD_FILE
+              value: /etc/muster/secrets/{{ .Values.database.passwordKey }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.database.sessionHost }}
+            - name: MUSTER_DATABASE_SESSION_HOST
+              value: {{ .Values.database.sessionHost | quote }}
+            {{- end }}
+            {{- if .Values.database.sessionPort }}
+            - name: MUSTER_DATABASE_SESSION_PORT
+              value: {{ .Values.database.sessionPort | quote }}
+            {{- end }}
+            - name: MUSTER_SECRET_KEYS_FILE
+              value: /etc/muster/secrets/{{ .Values.masterKeysKey }}
+            {{- if .Values.publicURL }}
+            - name: MUSTER_PUBLIC_URL
+              value: {{ .Values.publicURL | quote }}
+            {{- end }}
+            {{- if .Values.ingestURL }}
+            - name: MUSTER_INGEST_URL
+              value: {{ .Values.ingestURL | quote }}
+            {{- end }}
+            {{- if .Values.bootstrapAdmin.email }}
+            - name: MUSTER_BOOTSTRAP_ADMIN_EMAIL
+              value: {{ .Values.bootstrapAdmin.email | quote }}
+            {{- end }}
+            {{- if .Values.bootstrapAdmin.passwordKey }}
+            - name: MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE
+              value: /etc/muster/secrets/{{ .Values.bootstrapAdmin.passwordKey }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: secrets
+              mountPath: /etc/muster/secrets
+              readOnly: true
+      volumes:
+        - name: secrets
+          secret:
+            secretName: {{ $secret }}
+            defaultMode: 0440
+            items:
+              {{- range $secretKeys }}
+              - key: {{ . | quote }}
+                path: {{ . | quote }}
+              {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}

@@ -160,8 +160,8 @@ A false positive is fixed in the lint, never worked around in the code.
 
 The Makefile is the only entry point. Targets appear as the stories that define them land; the Makefile is
 authoritative, and `make help`, its default goal, lists them. Pinned tools — golangci-lint, go-test-coverage, go-licenses,
-govulncheck and gremlins — are built with the project's Go toolchain into `bin/tools/` on first use. Go version (go.mod),
-Node version (`.node-version`) and pnpm version (`packageManager` in `web/package.json`) are pinned.
+govulncheck, gremlins, helm and kubeconform — are built with the project's Go toolchain into `bin/tools/` on first use.
+Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageManager` in `web/package.json`) are pinned.
 
 | Target | Does | From |
 |---|---|---|

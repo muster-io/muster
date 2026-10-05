@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# Muster with its PostgreSQL. Copy .env.example to .env next to this file and replace its placeholders first.
+name: muster
+
+services:
+  postgres:
+    image: postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_USER: muster
+      POSTGRES_DB: muster
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Provisional starting values, sized for the 256 MB footprint of the minimal installation; the nightly load test
+    # confirms them.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - max_connections=30
+    mem_limit: 160m
+    healthcheck:
+      test:
+        - CMD
+        - pg_isready
+        - -U
+        - muster
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  muster:
+    image: ghcr.io/muster-io/muster:v0.0.0 # x-release-please-version
+    environment:
+      MUSTER_DATABASE_HOST: postgres
+      MUSTER_DATABASE_NAME: muster
+      MUSTER_DATABASE_USER: muster
+      MUSTER_DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      MUSTER_DATABASE_SSLMODE: disable
+      MUSTER_SECRET_KEYS: ${MUSTER_SECRET_KEYS}
+      MUSTER_PUBLIC_URL: ${MUSTER_PUBLIC_URL}
+      MUSTER_BOOTSTRAP_ADMIN_EMAIL: ${MUSTER_BOOTSTRAP_ADMIN_EMAIL}
+      MUSTER_BOOTSTRAP_ADMIN_PASSWORD: ${MUSTER_BOOTSTRAP_ADMIN_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
