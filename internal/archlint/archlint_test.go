@@ -153,7 +153,7 @@ func testSecretLeak(t *testing.T) {
 	}
 	for _, f := range fixtures {
 		var got []string
-		for _, d := range CheckProbe(f.probe) {
+		for _, d := range CheckProbe(t.Context(), f.probe) {
 			if d.Rule != 5 || d.Path != f.probe.Name {
 				t.Errorf("probe %s: unexpected diagnostic %s", f.probe.Name, d)
 			}
@@ -165,14 +165,19 @@ func testSecretLeak(t *testing.T) {
 	}
 }
 
-// TestProbes runs the registered probes; it passes while the registry is empty.
+// TestProbes runs the registered probes: the code paths that carry secrets must not leak them.
 func TestProbes(t *testing.T) {
+	names := map[string]bool{}
 	for _, p := range Probes() {
+		names[p.Name] = true
 		t.Run(p.Name, func(t *testing.T) {
-			for _, d := range CheckProbe(p) {
+			for _, d := range CheckProbe(t.Context(), p) {
 				t.Error(d)
 			}
 		})
+	}
+	if !names["domain_logger"] {
+		t.Error("the probe of the domain logger is not registered")
 	}
 }
 

@@ -7,6 +7,7 @@ package archlint
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -16,6 +17,8 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/muster-io/muster/internal/logging"
 )
 
 const (
@@ -27,15 +30,33 @@ const (
 )
 
 // Probe pushes known secrets through one code path. Run hands the secrets to the code under test, sends its log
-// output to log and returns the error the code path returned.
+// output to log and returns the error the code path returned; ctx is the context of the test that runs it.
 type Probe struct {
 	Name string
-	Run  func(secrets []string, log io.Writer) error
+	Run  func(ctx context.Context, secrets []string, log io.Writer) error
 }
 
 // registry holds the probes of rule 5. A story whose code carries secrets (the logger, outbound HTTP, the keyring, the
 // messenger adapters, ...) adds a probe for that path here.
-var registry = []Probe{}
+var registry = []Probe{
+	{Name: "domain_logger", Run: probeDomainLogger},
+}
+
+// probeDomainLogger logs the secrets as logging.Secret values through the domain logger: as a field, inside a value
+// encoded as JSON and inside an error.
+func probeDomainLogger(ctx context.Context, secrets []string, log io.Writer) error {
+	type credentials struct {
+		User     string         `json:"user"`
+		Password logging.Secret `json:"password"`
+	}
+	logger := logging.New(log, logging.LevelInfo)
+	logger.Log(ctx, logging.ProcessStarted,
+		logging.F("version", logging.Secret(secrets[0])),
+		logging.F("commit", credentials{User: "muster", Password: logging.Secret(secrets[1])}))
+	logger.Log(ctx, logging.ProcessStarted,
+		logging.F("version", fmt.Errorf("dial with %v: %w", logging.Secret(secrets[2]), io.ErrUnexpectedEOF)))
+	return nil
+}
 
 func Probes() []Probe {
 	return slices.Clone(registry)
@@ -43,13 +64,13 @@ func Probes() []Probe {
 
 // CheckProbe runs p with fresh random secrets and reports every secret found, verbatim or encoded (see leakForms), in
 // its log output or in the returned error, its %+v form and every error it wraps.
-func CheckProbe(p Probe) []Diagnostic {
+func CheckProbe(ctx context.Context, p Probe) []Diagnostic {
 	secrets := make([]string, probeSecrets)
 	for i := range secrets {
 		secrets[i] = rand.Text() + secretSuffix
 	}
 	var log bytes.Buffer
-	err := p.Run(slices.Clone(secrets), &log)
+	err := p.Run(ctx, slices.Clone(secrets), &log)
 	sinks := []struct{ name, text string }{
 		{"the log output", log.String()},
 		{"the returned error", strings.Join(errorTexts(err, 0), "\n")},
