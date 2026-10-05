@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
@@ -23,9 +25,11 @@ import (
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/doctor"
+	"github.com/muster-io/muster/internal/fakes/fakeproxy"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/runtime"
 )
 
@@ -51,6 +55,7 @@ var registry = []Probe{
 	{Name: "bootstrap_settings", Run: probeBootstrapSettings},
 	{Name: "keyring", Run: probeKeyring},
 	{Name: "doctor", Run: probeDoctor},
+	{Name: "outbound_http", Run: probeOutbound},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -181,6 +186,74 @@ func (s *probeStore) DeleteReplica(context.Context, string) error { return nil }
 
 func (s *probeStore) ListLiveReplicas(context.Context, time.Time) ([]dbgen.Replica, error) {
 	return nil, nil
+}
+
+// probeOutbound registers the secrets with outbound clients and sends them: in the path and the query of a request
+// that fails with a network error, of a request the outbound address policy blocks and of a request whose answer is
+// a redirect to a URL that carries them; in an error text the provider answers with; as the password of a SOCKS5
+// proxy that refuses it and of an HTTP proxy that cannot be reached; and in a proxy address that does not parse.
+// Neither the log output nor the returned errors may carry them.
+func probeOutbound(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	registered := []logging.Secret{logging.Secret(secrets[0]), logging.Secret(secrets[1])}
+	client := func(proxy *outbound.Proxy) (*outbound.Client, error) {
+		return outbound.New(outbound.Config{Class: outbound.ClassDelivery, ConnectTimeout: 2 * time.Second,
+			Timeout: 5 * time.Second, Proxy: proxy, Secrets: registered, Policy: outbound.StaticPolicy(policy),
+			Logger: logger, Clock: clock.Real{}})
+	}
+
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/answer" {
+				http.Error(w, "unknown token "+secrets[0]+" "+url.QueryEscape(secrets[1]), http.StatusBadRequest)
+				return
+			}
+			http.Redirect(w, r, "/bot"+url.PathEscape(secrets[0])+"/x?token="+url.QueryEscape(secrets[1]),
+				http.StatusFound)
+		})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	socks, err := fakeproxy.Start(ctx, fakeproxy.SOCKS5, "127.0.0.1:0", fakeproxy.Options{Username: "muster",
+		Password: "other"})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = socks.Close() }()
+
+	var errs []error
+	path := "/bot" + secrets[0] + "/getMe?token=" + url.QueryEscape(secrets[1])
+	direct, err := client(nil)
+	if err != nil {
+		return err
+	}
+	for _, target := range []string{"http://127.0.0.1:1" + path, "http://169.254.169.254" + path,
+		"http://" + ln.Addr().String() + path, "http://" + ln.Addr().String() + "/answer"} {
+		_, err := direct.Do(ctx, outbound.Request{URL: target})
+		errs = append(errs, err)
+	}
+	for _, proxy := range []*outbound.Proxy{
+		{Type: outbound.ProxySOCKS5, Address: socks.Addr(), Username: "muster", Password: logging.Secret(secrets[2])},
+		{Type: outbound.ProxyHTTP, Address: "127.0.0.1:1", Username: "muster", Password: logging.Secret(secrets[2])},
+	} {
+		c, err := client(proxy)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		_, err = c.Do(ctx, outbound.Request{URL: "http://127.0.0.1:1" + path})
+		errs = append(errs, err)
+	}
+	_, err = client(&outbound.Proxy{Type: outbound.ProxyHTTP, Address: secrets[1]})
+	return errors.Join(append(errs, err)...)
 }
 
 // probeDomainLogger logs the secrets as logging.Secret values through the domain logger: as a field, inside a value

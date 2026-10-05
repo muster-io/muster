@@ -26,6 +26,8 @@ the event.
 | `migrations_applied` | INFO | from, to | C-02 | Migrations were applied under the migration lock, from one schema version to another. |
 | `migrations_current` | INFO | version | C-02 | No migration was applied: the schema already has the newest version this binary knows. |
 | `organization_created` | INFO | organization | C-02 | The first start created the Organization with the defaults of its settings and its outbound address policy. |
+| `outbound_blocked` | WARN | client, rule, scheme, host | C-02 | The outbound address policy refused a request, which fails without retry; rule names the rule and the address or proxy it refused. Correct the configured address, or change the policy and its allowed networks. |
+| `outbound_unverified_address` | INFO | client, scheme, host | C-02 | A request went through the client's proxy to a host name that Muster cannot resolve itself, so only the name was checked against the allowed and denied lists, not its addresses. |
 | `partition_maintenance_failed` | WARN | error | C-02 | Partition maintenance failed, for example because a lock was not granted within 2 seconds; the Leader retries at the next hourly run. A partition that is still missing when its day or month begins makes writes to its table fail. |
 | `partitions_maintained` | INFO | created, dropped | C-02 | Partition maintenance created the partitions Muster will need (daily for Stored Snapshots and their bodies, monthly for Timeline entries, delivery events and the Audit log) or dropped partitions whose whole range is older than their retention period; the fields list the partitions by name. |
 | `process_started` | INFO | version, commit | C-02 | The server process started, with the version and commit of the binary. |
