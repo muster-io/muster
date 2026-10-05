@@ -186,12 +186,13 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 ### Development mode
 
 - `make dev` starts PostgreSQL on `127.0.0.1:55432` with Docker Compose, builds the binary and runs `muster dev`: app
-  on `:8080`, ingest on `:8081`, internal on `:8082` (health, `/metrics`, `/_dev/`). The fake Alertmanager, Mattermost
-  and Telegram servers listen on `127.0.0.1:19093`, `:18065` and `:18081`; each records requests at
-  `/_fake/requests` and takes scripted faults at `/_fake/faults`.
+  on `:8080`, ingest on `:8081`, internal on `:8082` (health, `/metrics`, `/_dev/`) from S-006, which adds the runtime.
+  The fake Alertmanager, Mattermost and Telegram servers listen on `127.0.0.1:19093`, `:18065` and `:18081`; each
+  records requests at `/_fake/requests` and takes scripted faults at `/_fake/faults`.
 - Development defaults: the bootstrap Admin `admin@example.org` with the password `muster-dev-password`, and a fixed,
-  published master key that the server refuses outside development mode. A `MUSTER_*` variable that is set replaces
-  its default.
+  published master key that the server refuses outside development mode. A `MUSTER_*` variable that is set, even
+  empty, replaces its default; the database default also yields to any field of the main connection, and the key and
+  the Admin password to their `_FILE` variables.
 - `muster dev <subcommand>` runs any CLI subcommand with the same defaults, for example `./bin/muster dev doctor`. A
   bare `muster <subcommand>` has no development defaults. `muster dev --replica` adds a replica on `:9080`, `:9081` and
   `:9082` without fakes.

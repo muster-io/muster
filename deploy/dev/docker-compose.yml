@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# The development PostgreSQL of make dev and make dev-db, on 127.0.0.1:55432 with user, password and database muster.
+# Never use it for production: its password is published. Remove it with its data:
+# docker compose -f deploy/dev/docker-compose.yml down -v
+name: muster-dev
+
+services:
+  postgres:
+    image: postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    environment:
+      POSTGRES_USER: muster
+      POSTGRES_PASSWORD: muster
+      POSTGRES_DB: muster
+    ports:
+      - "127.0.0.1:55432:5432"
+    # Over TCP: while the image initialises the database, its temporary server listens on the socket only, so it does
+    # not count as ready.
+    healthcheck:
+      test:
+        - CMD
+        - pg_isready
+        - -h
+        - 127.0.0.1
+        - -U
+        - muster
+        - -d
+        - muster
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

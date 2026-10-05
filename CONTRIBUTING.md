@@ -25,8 +25,8 @@ the exact version that `packageManager` in `web/package.json` pins. The Makefile
 which has no `package.json`, so with corepack also run `corepack install -g pnpm@<that version>`; otherwise corepack
 starts its default pnpm, which refuses the project. The Makefile installs its pinned tools (golangci-lint,
 go-test-coverage, go-licenses, govulncheck, gremlins, helm, kubeconform) into `bin/tools/` on first use, built with the
-project's toolchain. Only `make compose-check` needs more: the Docker CLI with the compose plugin, but no running
-daemon.
+project's toolchain. `make compose-check` also needs the Docker CLI with the compose plugin, but no running daemon;
+`make dev-db` and `make dev` need Docker with the compose plugin and a running daemon.
 
 The Makefile is the only entry point:
 
@@ -46,14 +46,34 @@ The Makefile is the only entry point:
 | `make mutation` | runs mutation testing over the core packages |
 | `make helm-check` | lints the chart, renders it with default and all-options values, validates both with kubeconform |
 | `make compose-check` | checks the compose example with `docker compose config` |
+| `make dev-db` | starts the development PostgreSQL on `127.0.0.1:55432` with Docker Compose |
+| `make dev` | starts the development PostgreSQL, builds the binary and runs `muster dev` |
+| `make e2e` | builds the binary and runs the end-to-end suite on `muster dev`; `E2E_REPLICAS=2` runs two replicas |
+| `make load-test` | runs the load test against a running `muster dev`; `LOAD_TEST_FLAGS` passes `-rate` and `-duration` |
 | `make ci` | runs the pull-request tier locally: `lint`, `lint-arch`, `generate-check`, `licenses`, `test-race`, `build` |
 | `make clean` | removes `bin/`: the binary, the coverage profile and the installed tools |
+
+`muster dev` starts the fake Alertmanager, Mattermost and Telegram servers on `127.0.0.1:19093`, `127.0.0.1:18065`
+and `127.0.0.1:18081` and prints their addresses; each records its requests at `/_fake/requests` and takes scripted
+faults at `/_fake/faults`. Muster itself joins them with the runtime, which a later story adds: from the runtime on,
+`muster dev` also listens on `:8080` (app), `:8081` (ingest) and `:8082` (internal) and connects to the development
+database, and `muster dev --replica` runs an additional replica on `:9080`, `:9081` and `:9082`, without fake servers,
+against the same database; until then the replica only prints that it started and waits. Every `MUSTER_*` variable
+with a development default takes it unless the variable is set, even empty, and `muster dev <command>` runs another
+command with the same defaults. The database default also yields to any field of the main connection
+(`MUSTER_DATABASE_HOST`, `_PORT`, `_NAME`, `_USER`, `_PASSWORD`, `_PASSWORD_FILE`, `_SSLMODE`), and the master key and
+the Admin password to their `_FILE` variables. `docker compose -f deploy/dev/docker-compose.yml down -v` removes the
+development database with its data.
 
 In CI, the `ci` workflow runs the jobs `lint`, `lint-arch`, `test`, `build`, `generate` (`make generate-check`),
 `licenses`, `vulncheck`, `helm-check`, `compose-check` (`make compose-check`, then the example's PostgreSQL settings)
 and `image-scan` (a snapshot release whose images are checked and scanned with Trivy) on every pull request, with
-`make test-race` in `test`, and on every push to `master`, with `make test`. A pull request also gets the non-blocking
-`oasdiff` report of breaking changes to the API spec, and the `codeql` workflow analyses the Go and TypeScript code.
+`make test-race` in `test`, and on every push to `master`, with `make test`. A pull request also runs the `e2e` job
+(`make e2e`) and gets the non-blocking `oasdiff` report of breaking changes to the API spec, and the `codeql` workflow
+analyses the Go and TypeScript code. The `nightly` workflow runs `mutation` (`make mutation`, its report kept as an
+artifact), `vulncheck`, `e2e-two-replicas` (`make e2e E2E_REPLICAS=2`) and `load-test`: the load test against
+`muster dev`, then against the compose example started with the build under test, with the peak memory of its Muster
+and PostgreSQL containers in the job summary.
 Pushes to other branches run nothing: open a pull request, a draft one if the work is not ready, to get the checks.
 
 ## Releases

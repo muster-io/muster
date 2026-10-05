@@ -11,13 +11,15 @@ import (
 )
 
 const (
-	exitOK    = 0
-	exitUsage = 2
+	exitOK      = 0
+	exitFailure = 1
+	exitUsage   = 2
 )
 
 const usage = `Usage: muster <command>
 
 Commands:
+  dev       Development mode: fake servers and development defaults (muster dev [--replica] | muster dev <command>)
   version   Print the version and commit
   help      Show this help
 `
@@ -32,6 +34,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	switch args[0] {
+	case "dev":
+		return runDev(args[1:], stdout, stderr)
 	case "version":
 		if len(args) > 1 {
 			fmt.Fprintf(stderr, "muster: version takes no arguments\n\n%s", usage)
