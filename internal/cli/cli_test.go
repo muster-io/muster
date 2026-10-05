@@ -5,9 +5,12 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/muster-io/muster/internal/buildinfo"
+	"github.com/muster-io/muster/internal/runtime"
 )
 
 func TestRun(t *testing.T) {
@@ -37,7 +40,12 @@ func TestRun(t *testing.T) {
 		{name: "help", args: []string{"help"}, wantCode: 0, wantStdout: usage},
 		{name: "short help flag", args: []string{"-h"}, wantCode: 0, wantStdout: usage},
 		{name: "long help flag", args: []string{"--help"}, wantCode: 0, wantStdout: usage},
-		{name: "no arguments", args: nil, wantCode: 2, wantStderr: usage},
+		{
+			name:       "migrate with arguments",
+			args:       []string{"migrate", "--actor", "alice"},
+			wantCode:   2,
+			wantStderr: "muster: migrate takes no arguments\n\n" + usage,
+		},
 		{
 			name:       "unknown command",
 			args:       []string{"frobnicate"},
@@ -59,5 +67,63 @@ func TestRun(t *testing.T) {
 				t.Errorf("stderr = %q, want %q", got, tt.wantStderr)
 			}
 		})
+	}
+}
+
+// fakeRuntime replaces the runtime entry points and the signal context for one test.
+func fakeRuntime(t *testing.T, serve, migrate func(context.Context, runtime.Options) error) context.CancelFunc {
+	t.Helper()
+	origServer, origMigrate, origSignals, origEnviron := runServer, runMigrate, signals, environ
+	t.Cleanup(func() { runServer, runMigrate, signals, environ = origServer, origMigrate, origSignals, origEnviron })
+	ctx, cancel := context.WithCancel(t.Context())
+	runServer, runMigrate = serve, migrate
+	signals = func() (context.Context, context.CancelFunc) { return ctx, cancel }
+	environ = func() []string { return []string{"MUSTER_PUBLIC_URL=http://muster.test"} }
+	return cancel
+}
+
+func TestServe(t *testing.T) {
+	var got runtime.Options
+	cancel := fakeRuntime(t, func(ctx context.Context, o runtime.Options) error {
+		got = o
+		<-ctx.Done()
+		return nil
+	}, nil)
+	cancel()
+	var stdout, stderr bytes.Buffer
+	if code := Run(nil, &stdout, &stderr); code != exitOK || stderr.Len() != 0 {
+		t.Errorf("muster = %d, stderr %q", code, stderr.String())
+	}
+	if got.Stdout != &stdout || got.Development || len(got.Environ) != 1 || got.Environ[0] != "MUSTER_PUBLIC_URL=http://muster.test" {
+		t.Errorf("options %+v", got)
+	}
+
+	fakeRuntime(t, func(context.Context, runtime.Options) error {
+		return errors.New(`invalid MUSTER_DATABASE_PORT: "abc" is not a port number`)
+	}, nil)
+	stderr.Reset()
+	if code := Run(nil, &stdout, &stderr); code != exitFailure ||
+		stderr.String() != "muster: invalid MUSTER_DATABASE_PORT: \"abc\" is not a port number\n" {
+		t.Errorf("muster with an invalid port = %d, stderr %q", code, stderr.String())
+	}
+}
+
+func TestMigrateCommand(t *testing.T) {
+	migrated := false
+	fakeRuntime(t, nil, func(_ context.Context, o runtime.Options) error {
+		migrated = o.Stdout != nil && len(o.Environ) == 1
+		return nil
+	})
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"migrate"}, &stdout, &stderr); code != exitOK || !migrated || stderr.Len() != 0 {
+		t.Errorf("muster migrate = %d, migrated %v, stderr %q", code, migrated, stderr.String())
+	}
+
+	fakeRuntime(t, nil, func(context.Context, runtime.Options) error {
+		return errors.New("database schema version 999 is newer than this binary knows (1)")
+	})
+	if code := Run([]string{"migrate"}, &stdout, &stderr); code != exitFailure ||
+		stderr.String() != "muster: database schema version 999 is newer than this binary knows (1)\n" {
+		t.Errorf("muster migrate on a newer schema = %d, stderr %q", code, stderr.String())
 	}
 }

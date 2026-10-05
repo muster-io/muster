@@ -25,17 +25,31 @@ files_touched:
   - internal/runtime/runtime.go
   - internal/runtime/runtime_test.go
   - internal/cli/cli.go
+  - internal/cli/cli_test.go
   - internal/cli/serve.go
   - internal/cli/migrate.go
+  - internal/cli/dev.go
+  - internal/cli/dev_test.go
   - internal/devmode/devmode.go
+  - internal/devmode/devmode_test.go
   - internal/logging/events.go
+  - internal/logging/logger.go
+  - internal/logging/logger_test.go
   - internal/metrics/catalogue.go
+  - internal/metrics/metrics.go
+  - internal/metrics/metrics_test.go
+  - internal/tools/refgen/main.go
+  - internal/archlint/secretleak.go
   - test/e2e/harness.go
   - deploy/helm/muster/templates/deployment.yaml
-  - deploy/helm/muster/values.yaml
+  - deploy/helm/muster/ci/all-options-values.yaml
   - deploy/compose/docker-compose.yml
   - Makefile
   - .github/workflows/ci.yml
+  - .golangci.yml
+  - go.mod
+  - AGENTS.md
+  - design/architecture.md
   - design/db/schema.md
   - design/prd/l1/defaults.md
   - design/prd/L1.md
@@ -85,7 +99,11 @@ issue: 6
   `MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE`). An invalid or missing required value stops startup with an error that names
   the variable; nothing falls back silently. When `MUSTER_DATABASE_URL` and the fields are both set, the URL wins and
   `database_settings_conflict` is logged at WARN. `MUSTER_PUBLIC_URL` is an absolute `http` or `https` URL;
-  `MUSTER_INGEST_URL` defaults to it. The bootstrap Admin variables are parsed here and used by S-010. `HTTP_PROXY`,
+  `MUSTER_INGEST_URL` defaults to it. A database URL names its host, user and database; the port (5432) and `sslmode`
+  (`prefer`) it does not name are written into it, and the password, connect timeout and application name come only
+  from it, so that the `PG*` variables and the password file pgx would read change nothing. A
+  `MUSTER_DATABASE_PASSWORD_FILE` that the URL makes ignored is not read. The bootstrap Admin variables are parsed here
+  and used by S-010. `HTTP_PROXY`,
   `HTTPS_PROXY` and `NO_PROXY` are never read. In development mode — `muster dev`, `muster dev --replica` and
   `muster dev <subcommand>` (S-004) — the development defaults fill every variable that is not set; a variable that is
   set replaces its default.
@@ -94,35 +112,48 @@ issue: 6
   migration lock here, the Leader lock (S-008) and `LISTEN` (S-012).
 - **Startup checks** (C-02.FR-5): `server_version_num` of at least 140000, otherwise "PostgreSQL 13.x is not
   supported: Muster needs PostgreSQL 14 or newer". On the session connection, take and release a session advisory lock
-  and complete a `LISTEN`/`NOTIFY` round trip within 5 s; a failure stops startup with an error that says the connection
-  does not keep session state, probably because of a transaction pooler, and names `MUSTER_DATABASE_SESSION_URL`,
-  `MUSTER_DATABASE_SESSION_HOST` and `MUSTER_DATABASE_SESSION_PORT`.
+  and complete a `LISTEN`/`NOTIFY` round trip within 5 s, the `NOTIFY` sent over the main pool; a failure stops startup
+  with an error that says the connection does not keep session state, probably because of a transaction pooler, and
+  names `MUSTER_DATABASE_SESSION_URL`, `MUSTER_DATABASE_SESSION_HOST` and `MUSTER_DATABASE_SESSION_PORT`.
 - **TLS report** (C-02.FR-14, P-04): the default `MUSTER_DATABASE_SSLMODE` is `prefer`; at startup each connection's
   state from `pg_stat_ssl` is logged as `database_connection_security` (`connection`, `sslmode`, `encrypted`), INFO when
   encrypted and WARN when not. `muster doctor` reports the same in S-008.
 - **Migrations** (C-02.FR-6, ADR-0006): `design/db/migrations/0001_init.{up,down}.sql` move unchanged to
   `internal/db/migrations/` (embedded; also the schema `sqlc` reads from S-007 on) and the links in
-  `design/db/schema.md` follow. golang-migrate runs them over the session connection under Muster's migration advisory
-  lock, from `muster migrate` (no `--actor`) or at startup when `MUSTER_MIGRATE_ON_START` is on. Applied versions are
-  logged as `migrations_applied` (`from`, `to`). A database whose version is newer than the newest embedded migration
-  makes both `muster migrate` and the server stop with `schema_too_new` naming both versions; a dirty version stops
-  them too.
+  `design/db/schema.md` follow. golang-migrate runs them over the session connection that holds Muster's migration
+  advisory lock, through a small golang-migrate database driver of Muster's own over that pgx connection: golang-migrate's
+  `pgx/v5` driver imports `jackc/pgerrcode`, which is also under the PostgreSQL License, a licence ADR-0001 does not
+  list. It keeps golang-migrate's `schema_migrations` table. Migrations run from `muster migrate` (no `--actor`) or at
+  startup when `MUSTER_MIGRATE_ON_START` is on. Applied versions are logged as `migrations_applied` (`from`, `to`), and
+  a run with nothing to apply as `migrations_current` (`version`). A database whose version is newer than the newest
+  embedded migration makes both `muster migrate` and the server stop with `schema_too_new` naming both versions; a
+  dirty version stops them too (`schema_dirty`), and so does, for a server that does not migrate on start, a version
+  older than the binary needs (`schema_too_old`).
 - **Listeners** (C-02.FR-3, P-03): `MUSTER_LISTEN_APP` (`:8080`), `MUSTER_LISTEN_INGEST` (`:8081`),
   `MUSTER_LISTEN_INTERNAL` (`:8082`). When app and ingest have the same address, one server routes the ingest paths
   (`/api/v1/ingest`, `/api/v1/heartbeat`, `/api/v1/callbacks/`) to the ingest handler and every other path to the app
   handler. In this story the app handler serves the embedded SPA and the ingest handler has no routes yet.
 - **Health and metrics** (C-02.FR-4, FR-19; operations `getHealthLive`, `getHealthReady`, `getMetrics`): on the
   internal listener, `GET /health/live` answers `200 ok` without checks; `GET /health/ready` answers `200 ok` when
-  `SELECT 1` on the main pool returns within 1 s and `503 database unavailable` otherwise; `GET /metrics` serves the
-  registry of S-005. New metrics: the database pool
+  `SELECT 1` on the main pool returns within 1 s, `503 database unavailable` otherwise and `503 shutting down` once the
+  shutdown has begun; `GET /metrics` serves the registry of S-005. New metrics: the database pool
   gauges and counters `muster_db_pool_connections{state}` (`acquired`, `idle`, `constructing`),
-  `muster_db_pool_max_connections`, `muster_db_pool_acquires_total` and `muster_db_pool_acquire_wait_seconds_total`.
+  `muster_db_pool_max_connections`, `muster_db_pool_acquires_total` and `muster_db_pool_acquire_wait_seconds_total`,
+  read from the pool at every scrape (the registry gains `Counter.Func` for a count a library keeps).
 - **Server command and start-up order**: `muster` without a subcommand runs the server: settings → logger
   (`MUSTER_LOG_LEVEL`) → connections and checks → migrations when enabled → schema version check → (S-007: Keyring,
   canary, Organization defaults) → listeners → ready. `process_started` is logged with version and commit.
 - **Shutdown** (C-02.FR-16, P-02): on SIGTERM, `shutdown_requested` (WARN), readiness turns 503, workers registered by
-  later stories stop claiming and finish or release their rows, HTTP servers drain, and everything ends within
-  `process.shutdown_grace` (20 s); `process_stopped` (INFO); exit status 0.
+  later stories stop claiming and finish or release their rows, HTTP servers drain — app and ingest first, the internal
+  listener last, so that readiness keeps answering 503 and metrics stay scrapable meanwhile — and everything ends within
+  `process.shutdown_grace` (20 s), closing what has not drained (`shutdown_grace_exceeded`, WARN); `process_stopped`
+  (INFO); exit status 0. A signal during startup, such as while waiting for the migration lock, stops the server the
+  same way with status 0; `muster migrate` stops with status 1. After the first signal, a second one kills the process.
+- **Other log events**: `database_settings_conflict` (WARN: `used`, `ignored`), `database_connection_security` (INFO or
+  WARN: `connection`, `sslmode`, `encrypted`; the logger gains `LogAt` for an event declared at more than one level, and
+  the reference page lists both), `listeners_started` (INFO: `app`, `ingest`, `internal`), `listener_failed` (ERROR:
+  `listener`, `error`) and `startup_failed` (ERROR: `error`). Errors before the logger exists, such as an invalid
+  variable, go to stderr only.
 - **Clocks** (`internal/clock`): two clocks, each with a manual implementation that drives tests. The **business clock**
   is the time of the domain — domain timestamps, timers, windows, retention, sessions, the alive mark and downtime; in
   development mode it is real time plus the development offset of S-020. The **real clock** is always the system time,
@@ -130,14 +161,19 @@ issue: 6
   `iat`, outgoing webhook signatures and their timestamps, row leases (`lease_until`) and the Leader lease, the clock
   skew check and replica records. Each consumer takes the clock it needs by injection; S-020 lists which consumer uses
   which. No query calls SQL `now()` (ADR-0006): it is given the time of its consumer's clock.
-- **Chart** (C-02.FR-4, FR-6): an init container runs `muster migrate`; probes on the internal port — startup
-  (`/health/ready`, up to 5 minutes), readiness (`/health/ready`), liveness (`/health/live`);
-  `terminationGracePeriodSeconds: 30`.
+- **Chart** (C-02.FR-4, FR-6): an init container runs `muster migrate` with the environment of the main container;
+  probes on the internal port — startup (`/health/ready`, up to 5 minutes), readiness (`/health/ready`), liveness
+  (`/health/live`), each with a 2 s timeout above the 1 s of the readiness check; `terminationGracePeriodSeconds: 30`.
+  The chart needs no new values. `ci/all-options-values.yaml` sets `MUSTER_LOG_LEVEL=warn`, since `debug` is not a
+  level of the log event registry and is now refused.
 - **Compose**: `MUSTER_MIGRATE_ON_START=true`; `MUSTER_LISTEN_APP` and `MUSTER_LISTEN_INGEST` both `:8080`; the image
   can be overridden with `MUSTER_IMAGE` for local builds.
 - **Development mode** (C-01.FR-13): `muster dev` starts the runtime in the same process with the development defaults
-  of S-004 and migrations on start; `muster dev migrate` runs the migrations with the same defaults; the end-to-end
-  harness waits for `/health/ready` and gives each run a fresh database on the development PostgreSQL.
+  of S-004 and migrations on start, after the fake servers; `muster dev --replica` runs it as an additional replica;
+  `muster dev migrate` runs the migrations with the same defaults; the end-to-end harness waits for `/health/ready` and
+  gives each run a fresh database on the development PostgreSQL, which `make e2e` starts (`make dev-db`).
+- **Secret leaks** (lint 5): a probe gives secrets to the bootstrap settings and to refused database URLs and runs the
+  server and `muster migrate` against an unreachable database; neither the log nor the errors may carry them.
 - **Integration tests**: `make test-integration` (build tag `integration`) runs against PostgreSQL 14 and 17 started by
   testcontainers with pinned image digests (`internal/db/dbtest`); CI runs it in the pull-request tier.
 
@@ -192,7 +228,8 @@ env -u MUSTER_DATABASE_URL MUSTER_DATABASE_HOST=127.0.0.1 MUSTER_DATABASE_PORT=5
 curl -s -o /dev/null -w '%{http_code}\n' localhost:8082/health/ready      # 200
 kill %1
 MUSTER_DATABASE_HOST=127.0.0.1 ./bin/muster 2>&1 | grep -m1 database_settings_conflict
-# {"level":"WARN","event":"database_settings_conflict","used":"MUSTER_DATABASE_URL","ignored":"MUSTER_DATABASE_HOST",...}
+# {"level":"WARN","event":"database_settings_conflict","used":"MUSTER_DATABASE_URL","ignored":["MUSTER_DATABASE_HOST"]}
+# (the server keeps running after grep exits; stop it)
 MUSTER_DATABASE_PORT=abc ./bin/muster; echo "exit=$?"
 # invalid MUSTER_DATABASE_PORT: "abc" is not a port number
 # exit=1

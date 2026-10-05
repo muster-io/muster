@@ -36,8 +36,13 @@ services:
     restart: unless-stopped
 
   muster:
-    image: ghcr.io/muster-io/muster:v0.0.0 # x-release-please-version
+    # MUSTER_IMAGE replaces the image, such as a local build.
+    image: ${MUSTER_IMAGE:-ghcr.io/muster-io/muster:v0.0.0} # x-release-please-version
     environment:
+      # The server migrates on start, and one port serves the app and ingestion.
+      MUSTER_MIGRATE_ON_START: "true"
+      MUSTER_LISTEN_APP: ":8080"
+      MUSTER_LISTEN_INGEST: ":8080"
       MUSTER_DATABASE_HOST: postgres
       MUSTER_DATABASE_NAME: muster
       MUSTER_DATABASE_USER: muster

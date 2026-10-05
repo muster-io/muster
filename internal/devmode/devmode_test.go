@@ -264,9 +264,17 @@ func TestRun(t *testing.T) {
 	defer cancel()
 	out := &syncBuffer{}
 	done := make(chan error, 1)
-	go func() { done <- devmode.Run(ctx, out, anyPort) }()
+	served := make(chan struct{})
+	go func() {
+		done <- devmode.Run(ctx, out, anyPort, func(ctx context.Context) error {
+			close(served)
+			<-ctx.Done()
+			return nil
+		})
+	}()
 
 	got := waitFor(t, out, 3, done)
+	<-served
 	re := regexp.MustCompile(`^muster dev: fake Alertmanager (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake Mattermost (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake Telegram (http://127\.0\.0\.1:\d+)\n$`)
@@ -314,12 +322,38 @@ func TestRunBusyPort(t *testing.T) {
 	addrs := anyPort
 	addrs.Telegram = busy.Addr().String()
 	var out bytes.Buffer
-	err = devmode.Run(t.Context(), &out, addrs)
+	err = devmode.Run(t.Context(), &out, addrs, func(context.Context) error {
+		t.Error("Muster ran although a fake server could not start")
+		return nil
+	})
 	if err == nil || !strings.Contains(err.Error(), "start the fake Telegram on "+busy.Addr().String()) {
 		t.Errorf("Run = %v, want an error naming the fake Telegram and its address", err)
 	}
 	if out.Len() != 0 {
 		t.Errorf("printed %q before failing", out.String())
+	}
+}
+
+func TestRunServeFails(t *testing.T) {
+	var out bytes.Buffer
+	var fakes []string
+	failed := errors.New("connect to the database (main connection): refused")
+	err := devmode.Run(t.Context(), &out, anyPort, func(context.Context) error {
+		fakes = regexp.MustCompile(`http://\S+`).FindAllString(out.String(), -1)
+		return failed
+	})
+	if !errors.Is(err, failed) {
+		t.Errorf("Run = %v, want the error of serve", err)
+	}
+	if len(fakes) != 3 {
+		t.Fatalf("the fake servers were not running while serving: %q", out.String())
+	}
+	for _, base := range fakes {
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/_fake/requests", nil)
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			_ = resp.Body.Close()
+			t.Errorf("%s still answers after Run returned", base)
+		}
 	}
 }
 
@@ -344,7 +378,12 @@ func TestRunReplica(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	out := &syncBuffer{}
 	done := make(chan error, 1)
-	go func() { done <- devmode.RunReplica(ctx, out) }()
+	go func() {
+		done <- devmode.RunReplica(ctx, out, func(ctx context.Context) error {
+			<-ctx.Done()
+			return nil
+		})
+	}()
 	if got := waitFor(t, out, 1, done); got != "muster dev: additional replica, no fake servers\n" {
 		t.Errorf("output %q", got)
 	}

@@ -149,6 +149,7 @@ func TestSeries(t *testing.T) {
 	queue := newGauge(Definition{Name: "muster_test_queue", Help: "Queue.", Capability: "C-11"})
 	pool := newGauge(Definition{Name: "muster_test_pool", Help: "Pool.", Capability: "C-02"})
 	wait := newCounter(Definition{Name: "muster_test_wait_seconds_total", Help: "Wait.", Capability: "C-02"})
+	acquires := newCounter(Definition{Name: "muster_test_acquires_total", Help: "Acquires.", Capability: "C-02"})
 	errorsTotal := newCounter(Definition{Name: "muster_test_errors_total", Help: "Errors.", Capability: "C-12",
 		Labels: []Label{entity("route"), entity("destination")}})
 	infoGauge := newGauge(Definition{Name: "muster_test_info", Help: "Info.", Capability: "C-02",
@@ -159,6 +160,7 @@ func TestSeries(t *testing.T) {
 	queue.With().Set(3)
 	pool.Func(func() float64 { return 7 })
 	wait.Float().Add(1.5)
+	acquires.Func(func() float64 { return 42 })
 	errorsTotal.With("rt_1", "").Inc()
 	infoGauge.With(`1.0"\` + "\n").Set(1)
 	infoGauge.With("gone").Set(1)
@@ -173,6 +175,7 @@ func TestSeries(t *testing.T) {
 		`muster_test_queue 3`,
 		`muster_test_pool 7`,
 		`muster_test_wait_seconds_total 1.5`,
+		`muster_test_acquires_total 42`,
 		`muster_test_errors_total{route="rt_1",destination=""} 1`,
 		`muster_test_info{version="1.0\"\\\n"} 1`,
 	} {
@@ -187,7 +190,7 @@ func TestSeries(t *testing.T) {
 		t.Errorf("a vmrange histogram was written:\n%s", got)
 	}
 	defs, err := Catalogue()
-	if err != nil || len(defs) != 7 || defs[0].Name != "muster_test_errors_total" {
+	if err != nil || len(defs) != 8 || defs[0].Name != "muster_test_acquires_total" {
 		t.Errorf("Catalogue() = %v, %v", defs, err)
 	}
 

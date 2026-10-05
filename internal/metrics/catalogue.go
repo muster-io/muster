@@ -19,3 +19,32 @@ var BuildInfo = newGauge(Definition{
 	},
 	Capability: "C-02",
 })
+
+// DBPoolConnections counts the connections of the main database pool by state.
+var DBPoolConnections = newGauge(Definition{
+	Name:       "muster_db_pool_connections",
+	Help:       "Connections of the main database pool of this replica, by state.",
+	Labels:     []Label{closed("state", "the state of the connection", "acquired", "idle", "constructing")},
+	Capability: "C-02",
+})
+
+// DBPoolMaxConnections is the size limit of the main database pool.
+var DBPoolMaxConnections = newGauge(Definition{
+	Name:       "muster_db_pool_max_connections",
+	Help:       "The most connections the main database pool of this replica opens.",
+	Capability: "C-02",
+})
+
+// DBPoolAcquires counts the connections taken from the main database pool.
+var DBPoolAcquires = newCounter(Definition{
+	Name:       "muster_db_pool_acquires_total",
+	Help:       "Connections taken from the main database pool of this replica.",
+	Capability: "C-02",
+})
+
+// DBPoolAcquireWait sums the time spent waiting for a connection of the main database pool.
+var DBPoolAcquireWait = newCounter(Definition{
+	Name:       "muster_db_pool_acquire_wait_seconds_total",
+	Help:       "Seconds spent waiting for a connection of the main database pool of this replica, summed over every acquire.",
+	Capability: "C-02",
+})

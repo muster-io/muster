@@ -65,6 +65,21 @@ jobs:
           go-version-file: go.mod
       - run: make ${{ github.event_name == 'pull_request' && 'test-race' || 'test' }}
 
+  # The integration tests on PostgreSQL 14 and 17, started by testcontainers on the runner's Docker.
+  test-integration:
+    name: test-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make test-integration
+
   generate:
     name: generate
     runs-on: ubuntu-latest
@@ -203,7 +218,8 @@ jobs:
       - run: ./bin/muster version
       - run: WEB_DIST_REQUIRED=1 go test ./web/... -run TestEmbeddedIndex -v
 
-  # The end-to-end suite on muster dev; the nightly workflow runs it with two replicas.
+  # The end-to-end suite on muster dev against the development PostgreSQL; the nightly workflow runs it with two
+  # replicas.
   e2e:
     name: e2e
     runs-on: ubuntu-latest

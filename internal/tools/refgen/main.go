@@ -91,7 +91,15 @@ func logEventsMarkdown(events []logging.EventInfo) string {
 		if fields == "" {
 			fields = "—"
 		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s |\n", e.Name, e.Level, fields, e.Capability, cell(e.Description))
+		levels := make([]string, 0, len(e.Levels))
+		for _, l := range e.Levels {
+			levels = append(levels, l.String())
+		}
+		if len(levels) == 0 {
+			levels = append(levels, e.Level.String())
+		}
+		fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s |\n", e.Name, strings.Join(levels, " or "), fields, e.Capability,
+			cell(e.Description))
 	}
 	return b.String()
 }

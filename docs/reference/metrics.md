@@ -12,6 +12,10 @@ replica that is the Leader. The capability is the one that exports the metric.
 | Metric | Type | Labels | Capability | Leader only | Description |
 |---|---|---|---|---|---|
 | `muster_build_info` | gauge | version, commit | C-02 | no | Always 1; the labels carry the version and commit of the running binary. |
+| `muster_db_pool_acquire_wait_seconds_total` | counter | — | C-02 | no | Seconds spent waiting for a connection of the main database pool of this replica, summed over every acquire. |
+| `muster_db_pool_acquires_total` | counter | — | C-02 | no | Connections taken from the main database pool of this replica. |
+| `muster_db_pool_connections` | gauge | state | C-02 | no | Connections of the main database pool of this replica, by state. |
+| `muster_db_pool_max_connections` | gauge | — | C-02 | no | The most connections the main database pool of this replica opens. |
 
 ## Label values
 
@@ -19,3 +23,4 @@ replica that is the Leader. The capability is the one that exports the metric.
 |---|---|---|
 | `muster_build_info` | `version` | info: the release version of the binary, such as 1.4.0 |
 | `muster_build_info` | `commit` | info: the Git commit the binary was built from |
+| `muster_db_pool_connections` | `state` | `acquired`, `idle`, `constructing` — the state of the connection |

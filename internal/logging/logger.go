@@ -13,6 +13,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -120,16 +121,33 @@ func (l *Logger) Enabled(ctx context.Context, e Event) bool {
 	return e.def != nil && l.handler.Enabled(ctx, slog.Level(e.def.level))
 }
 
-// Log writes one line of e with fields. An unregistered event, a field e does not declare and a repeated field are
-// refused: they panic in tests and are dropped otherwise.
+// Log writes one line of e with fields at the level of e. An unregistered event, a field e does not declare and a
+// repeated field are refused: they panic in tests and are dropped otherwise.
 func (l *Logger) Log(ctx context.Context, e Event, fields ...Field) {
+	if e.def == nil {
+		refuse("logging: the event is not registered in internal/logging/events.go")
+		return
+	}
+	l.log(ctx, e.def, e.def.level, fields)
+}
+
+// LogAt writes one line of e at level, which must be one of the levels e declares; it is refused like Log refuses.
+func (l *Logger) LogAt(ctx context.Context, e Event, level Level, fields ...Field) {
 	def := e.def
 	if def == nil {
 		refuse("logging: the event is not registered in internal/logging/events.go")
 		return
 	}
+	if !slices.Contains(def.levels(), level) {
+		refuse(fmt.Sprintf("logging: event %s is not declared at the level %s", def.name, level))
+		return
+	}
+	l.log(ctx, def, level, fields)
+}
+
+func (l *Logger) log(ctx context.Context, def *eventDef, level Level, fields []Field) {
 	// Tests check the fields at every threshold; elsewhere a disabled line costs nothing more.
-	enabled := l.handler.Enabled(ctx, slog.Level(def.level))
+	enabled := l.handler.Enabled(ctx, slog.Level(level))
 	if !enabled && !strict {
 		return
 	}
@@ -152,7 +170,7 @@ func (l *Logger) Log(ctx context.Context, e Event, fields ...Field) {
 	}
 	// A line carries the real time: it must agree with the logs of the systems around Muster, not with the business
 	// clock.
-	r := slog.NewRecord(time.Now(), slog.Level(def.level), def.name, 0)
+	r := slog.NewRecord(time.Now(), slog.Level(level), def.name, 0)
 	r.AddAttrs(attrs...)
 	_ = l.handler.Handle(ctx, r)
 }
