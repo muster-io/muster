@@ -62,3 +62,27 @@ var ClockSkew = newGauge(Definition{
 	Help:       "This replica's clock minus the database clock, corrected by half the round trip; positive when the replica is ahead.",
 	Capability: "C-02",
 })
+
+// clientLabels are the labels of the outbound HTTP metrics: the client classes and the outcomes of ADR-0015.
+var clientLabels = []Label{
+	closed("client", "the client class of ADR-0015", "delivery", "interactive", "background", "heartbeat"),
+	closed("outcome", "the classified outcome of the request",
+		"ok", "retry_after", "transient", "fatal", "unknown", "blocked", "redirect"),
+}
+
+// ClientRequests counts the outbound HTTP requests by client class and outcome.
+var ClientRequests = newCounter(Definition{
+	Name:       "muster_client_requests_total",
+	Help:       "Outbound HTTP requests, one per attempt, by client class and classified outcome.",
+	Labels:     clientLabels,
+	Capability: "C-02",
+})
+
+// ClientRequestDuration observes how long each outbound HTTP request took, its body included.
+var ClientRequestDuration = newHistogram(Definition{
+	Name:       "muster_client_request_duration_seconds",
+	Help:       "Duration of outbound HTTP requests, one per attempt, from the dial to the end of the body, by client class and outcome.",
+	Labels:     clientLabels,
+	Buckets:    []float64{0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+	Capability: "C-02",
+})

@@ -178,6 +178,18 @@ var ClockSkew = newEvent("clock_skew", LevelWarn, "C-02",
 		"positive when the replica's clock is ahead. Synchronise the clocks with NTP.",
 	"skew_seconds", "warning_seconds")
 
+// OutboundBlocked is logged when the outbound address policy refused a request.
+var OutboundBlocked = newEvent("outbound_blocked", LevelWarn, "C-02",
+	"The outbound address policy refused a request, which fails without retry; rule names the rule and the address "+
+		"or proxy it refused. Correct the configured address, or change the policy and its allowed networks.",
+	"client", "rule", "scheme", "host")
+
+// OutboundUnverifiedAddress is logged when a request through a proxy was sent with only its host name checked.
+var OutboundUnverifiedAddress = newEvent("outbound_unverified_address", LevelInfo, "C-02",
+	"A request went through the client's proxy to a host name that Muster cannot resolve itself, so only the name "+
+		"was checked against the allowed and denied lists, not its addresses.",
+	"client", "scheme", "host")
+
 // Event is a registered log event. Its zero value is not registered, and the logger refuses it.
 type Event struct {
 	def *eventDef

@@ -20,7 +20,7 @@ files_touched:
   - internal/outbound/proxy_test.go
   - internal/outbound/live_test.go
   - internal/organization/outbound.go
-  - internal/organization/query.sql
+  - internal/organization/outbound_test.go
   - internal/fakes/fakeproxy/fakeproxy.go
   - internal/fakes/fakeproxy/fakeproxy_test.go
   - internal/metrics/catalogue.go

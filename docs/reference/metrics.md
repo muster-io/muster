@@ -12,6 +12,8 @@ replica that is the Leader. The capability is the one that exports the metric.
 | Metric | Type | Labels | Capability | Leader only | Description |
 |---|---|---|---|---|---|
 | `muster_build_info` | gauge | version, commit | C-02 | no | Always 1; the labels carry the version and commit of the running binary. |
+| `muster_client_request_duration_seconds` | histogram | client, outcome | C-02 | no | Duration of outbound HTTP requests, one per attempt, from the dial to the end of the body, by client class and outcome. Buckets (le): 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60. |
+| `muster_client_requests_total` | counter | client, outcome | C-02 | no | Outbound HTTP requests, one per attempt, by client class and classified outcome. |
 | `muster_clock_skew_seconds` | gauge | — | C-02 | no | This replica's clock minus the database clock, corrected by half the round trip; positive when the replica is ahead. |
 | `muster_db_pool_acquire_wait_seconds_total` | counter | — | C-02 | no | Seconds spent waiting for a connection of the main database pool of this replica, summed over every acquire. |
 | `muster_db_pool_acquires_total` | counter | — | C-02 | no | Connections taken from the main database pool of this replica. |
@@ -25,4 +27,8 @@ replica that is the Leader. The capability is the one that exports the metric.
 |---|---|---|
 | `muster_build_info` | `version` | info: the release version of the binary, such as 1.4.0 |
 | `muster_build_info` | `commit` | info: the Git commit the binary was built from |
+| `muster_client_request_duration_seconds` | `client` | `delivery`, `interactive`, `background`, `heartbeat` — the client class of ADR-0015 |
+| `muster_client_request_duration_seconds` | `outcome` | `ok`, `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect` — the classified outcome of the request |
+| `muster_client_requests_total` | `client` | `delivery`, `interactive`, `background`, `heartbeat` — the client class of ADR-0015 |
+| `muster_client_requests_total` | `outcome` | `ok`, `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect` — the classified outcome of the request |
 | `muster_db_pool_connections` | `state` | `acquired`, `idle`, `constructing` — the state of the connection |
