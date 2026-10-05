@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/muster-mark-on-dark.svg">
+    <img src="docs/brand/muster-mark.svg" alt="" width="96" height="96">
+  </picture>
+</p>
+
 # Muster
 
 Muster is a self-hosted alert grouping and on-call service that sits after Alertmanager. It turns Alertmanager's
