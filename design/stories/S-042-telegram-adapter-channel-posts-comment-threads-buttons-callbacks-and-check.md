@@ -132,7 +132,7 @@ issue: 42
     to the group without `reply_parameters`, `thread_state` becomes `unattached` with a `thread_not_attached` event, and
     the Destination stays healthy.
   - `listAlertGroupDeliveries` shows `thread_not_attached: true` for `unattached`; S-061's `delivery_problem` counts it.
-    The buffer is pruned after a day by a Leader task.
+    The buffer is pruned after a day by the `short_lived_pruning` Leader task, which this story extends.
 - **Response mapping** (C-14.FR-7; `classify.go`): `429` with `parameters.retry_after` → `retry_after` for the
   Destination, and for the whole Connection when a second Destination of the same Connection gets a `429` within 60
   seconds (C-14.FR-7); "message is not modified" → `ok` (F-017); "message to edit not found" → `gone`;
