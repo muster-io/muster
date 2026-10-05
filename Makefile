@@ -41,10 +41,15 @@ KUBECONFORM_PKG := github.com/yannh/kubeconform/cmd/kubeconform
 # renovate: datasource=go depName=github.com/yannh/kubeconform
 KUBECONFORM_VERSION := v0.8.0
 KUBECONFORM := $(TOOLS)/kubeconform-$(KUBECONFORM_VERSION)
+SQLC_PKG := github.com/sqlc-dev/sqlc/cmd/sqlc
+# renovate: datasource=go depName=github.com/sqlc-dev/sqlc
+SQLC_VERSION := v1.31.1
+SQLC := $(TOOLS)/sqlc-$(SQLC_VERSION)
 # The tools above, as their install rules name them; make licenses reports their licences.
 INSTALLED_TOOLS := $(GOLANGCI_LINT_PKG)@$(GOLANGCI_LINT_VERSION) $(GO_TEST_COVERAGE_PKG)@$(GO_TEST_COVERAGE_VERSION) \
 	$(GO_LICENSES_PKG)@$(GO_LICENSES_VERSION) $(GOVULNCHECK_PKG)@$(GOVULNCHECK_VERSION) \
-	$(GREMLINS_PKG)@$(GREMLINS_VERSION) $(HELM_PKG)@$(HELM_VERSION) $(KUBECONFORM_PKG)@$(KUBECONFORM_VERSION)
+	$(GREMLINS_PKG)@$(GREMLINS_VERSION) $(HELM_PKG)@$(HELM_VERSION) $(KUBECONFORM_PKG)@$(KUBECONFORM_VERSION) \
+	$(SQLC_PKG)@$(SQLC_VERSION)
 
 VERSION ?= 0.0.0-dev
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
@@ -55,8 +60,9 @@ COVER_PROFILE := $(BIN)/cover.out
 # Stands for the installed SPA dependencies: pnpm keeps its install state in this file, and the rule touches it.
 WEB_DEPS := web/node_modules/.modules.yaml
 
-# The output of make generate, checked in.
-GENERATED := internal/api/gen pkg/apiclient web/src/api/gen web/src/routeTree.gen.ts docs/reference
+# The output of make generate, checked in; sqlc writes one dbgen directory per package with a query.sql.
+GENERATED := internal/api/gen pkg/apiclient web/src/api/gen web/src/routeTree.gen.ts docs/reference \
+	$(patsubst %/query.sql,%/dbgen,$(wildcard internal/*/query.sql))
 
 # The licences shipped artifacts may depend on (ADR-0001).
 SHIPPED_LICENSES := MIT,MIT-0,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,0BSD,Unlicense,CC0-1.0,MPL-2.0
@@ -129,8 +135,9 @@ test-integration: ## Run the integration tests on PostgreSQL 14 and 17 (needs Do
 
 # The Go outputs and the reference pages are removed first, as orval cleans its own, so that a file the generators no
 # longer write goes away.
-generate: $(WEB_DEPS) ## Run every code generator
-	rm -f internal/api/gen/*.gen.go pkg/apiclient/*.gen.go
+generate: $(WEB_DEPS) $(SQLC) ## Run every code generator
+	rm -f internal/api/gen/*.gen.go pkg/apiclient/*.gen.go internal/*/dbgen/*.go
+	$(SQLC) generate -f sqlc.yaml
 	$(GO) tool oapi-codegen -config api/codegen-server.yaml api/openapi.yaml
 	$(GO) tool oapi-codegen -config api/codegen-client.yaml api/openapi.yaml
 	$(PNPM) --dir web run generate
@@ -302,3 +309,8 @@ $(HELM):
 
 $(KUBECONFORM):
 	$(call go-install,$(KUBECONFORM_PKG)@$(KUBECONFORM_VERSION),kubeconform)
+
+# Without cgo, sqlc parses SQL with the WebAssembly build of the PostgreSQL parser, so no C compiler is needed.
+$(SQLC): export CGO_ENABLED := 0
+$(SQLC):
+	$(call go-install,$(SQLC_PKG)@$(SQLC_VERSION),sqlc)

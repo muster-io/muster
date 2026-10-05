@@ -10,15 +10,20 @@ the event.
 
 | Event | Level | Fields | Capability | Description |
 |---|---|---|---|---|
+| `active_key_not_held` | ERROR | active_key_id, key_ids, error | C-02 | The active master key is not in this replica's MUSTER_SECRET_KEYS, which happens when a key was activated while this replica's record had expired. The replica stops; add the key to its environment. |
 | `database_connection_security` | INFO or WARN | connection, sslmode, encrypted | C-02 | Whether a database connection (main or session) is encrypted, with the sslmode in effect; WARN when it is not encrypted, which prefer allows without an error. |
 | `database_settings_conflict` | WARN | used, ignored | C-02 | A database connection is set both as a URL and as fields: the URL is used and the fields are ignored. |
+| `key_canary_failed` | ERROR | active_key_id, key_ids, error | C-02 | The master keys cannot decrypt the key canary: the active key is missing from MUSTER_SECRET_KEYS, or the keys belong to another database. The replica stops; set the keys this database was written with. |
+| `keyring_loaded` | INFO | key_ids, active_key_id | C-02 | The master keys of MUSTER_SECRET_KEYS were loaded and decrypt the key canary; the ids are derived from the keys and never reveal them. |
 | `library_message` | WARN | message | C-02 | A third-party library wrote a line of its own, such as a failed read of the process metrics. |
 | `listener_failed` | ERROR | listener, error | C-02 | A listener stopped serving with an error; the process stops so that it is restarted. |
 | `listeners_started` | INFO | app, ingest, internal | C-02 | The listeners serve and the process is ready; app and ingest are the same address when one port serves both. |
 | `migrations_applied` | INFO | from, to | C-02 | Migrations were applied under the migration lock, from one schema version to another. |
 | `migrations_current` | INFO | version | C-02 | No migration was applied: the schema already has the newest version this binary knows. |
+| `organization_created` | INFO | organization | C-02 | The first start created the Organization with the defaults of its settings and its outbound address policy. |
 | `process_started` | INFO | version, commit | C-02 | The server process started, with the version and commit of the binary. |
 | `process_stopped` | INFO | — | C-02 | The server process stopped after a graceful shutdown. |
+| `replica_record_failed` | WARN | replica, error | C-02 | A replica could not refresh its record of the keys it holds, usually because the database is unavailable; it retries at the next refresh and stops counting as live once the record is older than replica.live_expiry. At shutdown, the record could not be deleted; it stops counting as live after replica.live_expiry. |
 | `schema_dirty` | ERROR | database_version | C-02 | A migration failed halfway and the schema is marked dirty at its version: repair the schema from a backup or by hand, then clear the dirty flag in schema_migrations. |
 | `schema_too_new` | ERROR | database_version, known_version | C-02 | The database schema is newer than this binary knows, after an upgrade was rolled back: run a release that knows the schema version. |
 | `schema_too_old` | ERROR | database_version, known_version | C-02 | The database schema is older than this binary needs: run muster migrate or set MUSTER_MIGRATE_ON_START. |

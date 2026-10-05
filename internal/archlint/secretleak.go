@@ -17,7 +17,13 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/keyring"
+	"github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/runtime"
 )
@@ -42,15 +48,24 @@ type Probe struct {
 var registry = []Probe{
 	{Name: "domain_logger", Run: probeDomainLogger},
 	{Name: "bootstrap_settings", Run: probeBootstrapSettings},
+	{Name: "keyring", Run: probeKeyring},
+}
+
+// masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
+// takes it: a leak of the key in any encoding shows the secret in that encoding.
+func masterKey(secret string) string {
+	m := make([]byte, keyring.KeySize)
+	copy(m, secret)
+	return base64.StdEncoding.EncodeToString(m)
 }
 
 // probeBootstrapSettings gives the secrets to the bootstrap settings — inside database URLs that are refused, as the
-// database password, the master keys and the bootstrap Admin password — and runs the server and muster migrate
-// against an address where nothing listens: the startup log and the startup errors must not carry them.
+// database password, inside the master keys and as the bootstrap Admin password — and runs the server and muster
+// migrate against an address where nothing listens: the startup log and the startup errors must not carry them.
 func probeBootstrapSettings(ctx context.Context, secrets []string, log io.Writer) error {
 	base := []string{
 		"MUSTER_PUBLIC_URL=http://localhost:8080",
-		"MUSTER_SECRET_KEYS=" + secrets[1],
+		"MUSTER_SECRET_KEYS=" + masterKey(secrets[1]),
 		"MUSTER_BOOTSTRAP_ADMIN_EMAIL=admin@example.org",
 		"MUSTER_BOOTSTRAP_ADMIN_PASSWORD=" + secrets[2],
 		"MUSTER_LISTEN_APP=127.0.0.1:0",
@@ -68,6 +83,86 @@ func probeBootstrapSettings(ctx context.Context, secrets []string, log io.Writer
 		runtime.Run(ctx, runtime.Options{Environ: unreachable, Stdout: log}),
 		runtime.Migrate(ctx, runtime.Options{Environ: unreachable, Stdout: log}),
 	)
+}
+
+// probeKeyring loads master keys made of the secrets — also as an entry that is not a key, from the variable and from
+// a file — writes and checks the key canary, encrypts a secret and opens it for the right field, another field, with
+// altered bytes and with an unknown key, then refuses a Keyring that cannot read the canary and an active key that is
+// not held: neither the key material nor the decrypted secret may reach a log line or an error.
+func probeKeyring(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	keys := masterKey(secrets[0]) + "," + masterKey(secrets[1])
+	_, errVar := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(keys + "," + secrets[2]),
+		Source: keyring.SecretKeysVar}, false)
+	_, errFile := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey(secrets[0]) + "\n" + secrets[1] + "\n"),
+		Source: keyring.SecretKeysFileVar}, false)
+	_, errRepeated := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(keys + "," + masterKey(secrets[0])),
+		Source: keyring.SecretKeysVar}, false)
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(keys), Source: keyring.SecretKeysVar}, false)
+	if err != nil {
+		return errors.Join(errVar, errFile, errRepeated, err)
+	}
+	store := &probeStore{}
+	st, err := k.Establish(ctx, store, time.Unix(0, 0))
+	if err != nil {
+		return err
+	}
+	errs := []error{errVar, errFile, errRepeated, k.Open(ctx, logger, st)}
+
+	const field = "destinations.bot_token"
+	ct, id, err := k.Encrypt(field, []byte(secrets[2]))
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	altered := bytes.Clone(ct)
+	altered[len(altered)-1] ^= 1
+	for _, f := range []func() ([]byte, error){
+		func() ([]byte, error) { return k.Decrypt(field, id, ct) },
+		func() ([]byte, error) { return k.Decrypt("oidc_settings.client_secret", id, ct) },
+		func() ([]byte, error) { return k.Decrypt(field, id, altered) },
+		func() ([]byte, error) { return k.Decrypt(field, "k-unknown", ct) },
+	} {
+		_, err := f()
+		errs = append(errs, err)
+	}
+
+	other, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey(secrets[2])),
+		Source: keyring.SecretKeysVar}, false)
+	if err == nil {
+		errs = append(errs, other.Open(ctx, logger, st))
+	}
+	store.active = "k-unknown"
+	r := keyring.NewRecorder(k, store, clock.Real{}, logger, "probe", "probe", "dev")
+	return errors.Join(append(errs, err, r.Start(ctx), r.Refresh(ctx))...)
+}
+
+// probeStore is keyring_state and replicas in memory for probeKeyring.
+type probeStore struct {
+	state  *dbgen.GetKeyringStateRow
+	active string
+}
+
+func (s *probeStore) GetKeyringState(context.Context) (dbgen.GetKeyringStateRow, error) {
+	if s.state == nil {
+		return dbgen.GetKeyringStateRow{}, pgx.ErrNoRows
+	}
+	return *s.state, nil
+}
+
+func (s *probeStore) CreateKeyringState(_ context.Context, arg dbgen.CreateKeyringStateParams) (int64, error) {
+	s.state = &dbgen.GetKeyringStateRow{ActiveKeyID: arg.ActiveKeyID, ActivatedAt: arg.ActivatedAt,
+		CanaryCiphertext: arg.CanaryCiphertext, CanaryKeyID: arg.ActiveKeyID}
+	return 1, nil
+}
+
+func (s *probeStore) GetActiveKeyID(context.Context) (string, error) { return s.active, nil }
+
+func (s *probeStore) RecordReplica(context.Context, dbgen.RecordReplicaParams) error { return nil }
+
+func (s *probeStore) DeleteReplica(context.Context, string) error { return nil }
+
+func (s *probeStore) ListLiveReplicas(context.Context, time.Time) ([]dbgen.Replica, error) {
+	return nil, nil
 }
 
 // probeDomainLogger logs the secrets as logging.Secret values through the domain logger: as a field, inside a value

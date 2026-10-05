@@ -18,15 +18,15 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
+	"github.com/muster-io/muster/internal/keyring"
 )
 
 // The development defaults, published so that anyone can run Muster locally.
 //
 //nolint:gosec // G101: published development credentials, never used outside development mode
 const (
-	// DevelopmentKey is the development master key, the base64 of "muster-dev-only-key-not-a-secret". The server
-	// command refuses it outside development mode.
-	DevelopmentKey = "bXVzdGVyLWRldi1vbmx5LWtleS1ub3QtYS1zZWNyZXQ="
+	// DevelopmentKey is the development master key; the server command refuses it outside development mode.
+	DevelopmentKey = keyring.DevelopmentKey
 	PublicURL      = "http://localhost:8080"
 	DatabaseURL    = "postgres://muster:muster@127.0.0.1:55432/muster?sslmode=disable"
 	AdminEmail     = "admin@example.org"

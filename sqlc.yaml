@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# sqlc reads the schema from the migrations (down migrations are skipped) and generates each package's query.sql
+# into internal/<package>/dbgen, checked in. make generate runs it; make generate-check fails on stale output.
+version: "2"
+sql:
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/keyring/query.sql
+    gen:
+      go: &go
+        package: dbgen
+        out: internal/keyring/dbgen
+        sql_package: pgx/v5
+        emit_empty_slices: true
+        omit_unused_structs: true
+        overrides:
+          - db_type: timestamptz
+            go_type: time.Time
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/organization/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/organization/dbgen

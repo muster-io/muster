@@ -96,6 +96,36 @@ var SchemaDirty = newEvent("schema_dirty", LevelError, "C-02",
 		"by hand, then clear the dirty flag in schema_migrations.",
 	"database_version")
 
+// KeyringLoaded is logged once the key canary decrypts, with the ids of the keys held and of the active key.
+var KeyringLoaded = newEvent("keyring_loaded", LevelInfo, "C-02",
+	"The master keys of MUSTER_SECRET_KEYS were loaded and decrypt the key canary; the ids are derived from the keys "+
+		"and never reveal them.",
+	"key_ids", "active_key_id")
+
+// KeyCanaryFailed is logged when the Keyring cannot decrypt the key canary; the replica stops.
+var KeyCanaryFailed = newEvent("key_canary_failed", LevelError, "C-02",
+	"The master keys cannot decrypt the key canary: the active key is missing from MUSTER_SECRET_KEYS, or the keys "+
+		"belong to another database. The replica stops; set the keys this database was written with.",
+	"active_key_id", "key_ids", "error")
+
+// ActiveKeyNotHeld is logged when a running replica sees an active key it does not hold; the replica stops.
+var ActiveKeyNotHeld = newEvent("active_key_not_held", LevelError, "C-02",
+	"The active master key is not in this replica's MUSTER_SECRET_KEYS, which happens when a key was activated while "+
+		"this replica's record had expired. The replica stops; add the key to its environment.",
+	"active_key_id", "key_ids", "error")
+
+// ReplicaRecordFailed is logged when a replica cannot refresh or, at shutdown, delete its key record.
+var ReplicaRecordFailed = newEvent("replica_record_failed", LevelWarn, "C-02",
+	"A replica could not refresh its record of the keys it holds, usually because the database is unavailable; it "+
+		"retries at the next refresh and stops counting as live once the record is older than replica.live_expiry. "+
+		"At shutdown, the record could not be deleted; it stops counting as live after replica.live_expiry.",
+	"replica", "error")
+
+// OrganizationCreated is logged when the first start creates the Organization with its defaults.
+var OrganizationCreated = newEvent("organization_created", LevelInfo, "C-02",
+	"The first start created the Organization with the defaults of its settings and its outbound address policy.",
+	"organization")
+
 // Event is a registered log event. Its zero value is not registered, and the logger refuses it.
 type Event struct {
 	def *eventDef

@@ -160,7 +160,7 @@ A false positive is fixed in the lint, never worked around in the code.
 
 The Makefile is the only entry point. Targets appear as the stories that define them land; the Makefile is
 authoritative, and `make help`, its default goal, lists them. Pinned tools — golangci-lint, go-test-coverage, go-licenses,
-govulncheck, gremlins, helm and kubeconform — are built with the project's Go toolchain into `bin/tools/` on first use.
+govulncheck, gremlins, helm, kubeconform and sqlc — are built with the project's Go toolchain into `bin/tools/` on first use.
 Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageManager` in `web/package.json`) are pinned.
 
 | Target | Does | From |
@@ -170,7 +170,7 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 | `make lint` | the licence headers (`internal/tools/licensecheck`, skipping the paths listed in `NOTICE`), golangci-lint, Redocly on the spec, the TypeScript type check, oxlint and the oxfmt check; later translations | S-001, S-002 |
 | `make lint-arch` | the architecture lints | S-001 |
 | `make test`, `make test-race` | unit tests with the coverage gate of `.testcoverage.yml`; the same with the race detector | S-001 |
-| `make generate`, `make generate-check` | run the code generators (the OpenAPI server and clients, the route tree); fail on stale generated files, naming them | S-001, S-002 |
+| `make generate`, `make generate-check` | run the code generators (the sqlc queries, the OpenAPI server and clients, the route tree); fail on stale generated files, naming them | S-001, S-002, S-007 |
 | `make build` | the SPA, then `bin/muster` with version and commit | S-001, S-002 |
 | `make ci` | the pull-request tier, locally: `lint`, `lint-arch`, `generate-check`, `licenses`, `test-race`, `build`, and what later stories add | S-001, S-002 |
 | `make clean` | remove `bin/`: the binary, the coverage profile and the installed tools | S-001 |
