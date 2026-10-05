@@ -8,3 +8,7 @@ CLAUDE.local.md
 /web/dist/*
 !/web/dist/.gitkeep
 *.tsbuildinfo
+# Local compose environment
+/deploy/compose/.env
+# Goreleaser output
+/dist/

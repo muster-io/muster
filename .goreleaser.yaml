@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# The release workflow runs `goreleaser release` on a vX.Y.Z tag; CI runs `goreleaser release --snapshot` and scans
+# the images it loads.
+version: 2
+
+project_name: muster
+
+before:
+  hooks:
+    - pnpm --dir web install --frozen-lockfile
+    - pnpm --dir web run build
+
+builds:
+  - id: muster
+    binary: muster
+    main: ./cmd/muster
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    # The same version and 12-character commit as `make build`.
+    ldflags:
+      - -s -w
+      - -X github.com/muster-io/muster/internal/buildinfo.Version={{ .Version }}
+      - -X github.com/muster-io/muster/internal/buildinfo.Commit={{ slice .FullCommit 0 12 }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# One SPDX JSON document per archive (syft's default output in goreleaser).
+sboms:
+  - artifacts: archive
+
+# One image per platform plus the multi-arch index, built and pushed in one step. A snapshot loads one image per
+# platform into the local Docker, tagged v<version>-amd64 and v<version>-arm64.
+dockers_v2:
+  - id: muster
+    ids:
+      - muster
+    dockerfile: Dockerfile
+    images:
+      - ghcr.io/muster-io/muster
+    tags:
+      - "v{{ .Version }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels: &oci
+      org.opencontainers.image.source: https://github.com/muster-io/muster
+      org.opencontainers.image.title: muster
+      org.opencontainers.image.description: Self-hosted alert grouping and on-call service
+      org.opencontainers.image.licenses: AGPL-3.0-only
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+    annotations: *oci
+    # The SBOM attestation is attached when the images are pushed; a snapshot loads them without attestations.
+    sbom: true
+
+# Keyless signatures with the release workflow's GitHub OIDC identity: the index and, with --recursive, the image of
+# every platform. The default artifacts are the dockers_v2 images, and ${digest} is the digest of the pushed index.
+docker_signs:
+  - cmd: cosign
+    args:
+      - sign
+      - --yes
+      - --recursive
+      - ${artifact}@${digest}
+    output: true
+
+# release-please writes the changelog into the draft release it creates for the tag.
+changelog:
+  disable: true
+
+# goreleaser uploads into that draft and leaves it a draft; the release workflow publishes it as its last step, after
+# the chart is pushed, so a published release always has every artifact.
+release:
+  github:
+    owner: muster-io
+    name: muster
+  draft: true
+  use_existing_draft: true
+  mode: keep-existing
+  prerelease: auto
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-SNAPSHOT-{{ .ShortCommit }}"

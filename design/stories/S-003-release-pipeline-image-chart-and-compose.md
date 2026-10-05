@@ -32,6 +32,10 @@ files_touched:
   - deploy/compose/.env.example
   - Makefile
   - .github/workflows/ci.yml
+  - .gitignore
+  - CONTRIBUTING.md
+  - AGENTS.md
+  - .github/renovate.json5
 acceptance:
   - "[C-01.FR-1, C-01.FR-9, C-01.AC-2] A release tag produces binaries for linux and darwin on amd64 and arm64, a multi-arch image ghcr.io/muster-io/muster whose amd64 and arm64 images pass `cosign verify` against the release workflow's identity, an SBOM attached to the release, and the chart oci://ghcr.io/muster-io/charts/muster."
   - "[C-01.FR-9] The image is distroless, runs as a non-root user and has `muster` as its entry point; the changelog of the release is written by release-please from conventional commits."
@@ -69,13 +73,14 @@ issue: 3
 
 - **Names** (C-01.FR-1): image `ghcr.io/muster-io/muster`, chart `oci://ghcr.io/muster-io/charts/muster`.
 - **Release flow** (C-01.FR-9): `.github/workflows/release-please.yml` keeps the release pull request with the
-  changelog from conventional commits; the tag `vX.Y.Z` triggers `.github/workflows/release.yml`, which runs goreleaser
-  (`.goreleaser.yaml`): binaries for linux and darwin on amd64 and arm64 with `-ldflags` version and commit, the image
-  per architecture plus the multi-arch manifest, an SPDX SBOM, keyless cosign signatures of the image digests
-  (GitHub OIDC), checksums; then `helm package` and `helm push` of the chart with `version` and `appVersion` set to the
-  release.
+  changelog from conventional commits; merging it creates a draft release and the tag `vX.Y.Z`, which triggers
+  `.github/workflows/release.yml`. It runs goreleaser (`.goreleaser.yaml`) into the draft: binaries for linux and darwin
+  on amd64 and arm64 with `-ldflags` version and commit, the image per architecture plus the multi-arch manifest, an
+  SPDX SBOM, keyless cosign signatures of the image digests (GitHub OIDC), checksums; then `helm package` and
+  `helm push` of the chart with `version` set to the release and `appVersion` to its tag (image tags carry the `v`);
+  then it publishes the release.
 - **Image**: `Dockerfile` copies the goreleaser binary into `gcr.io/distroless/static-debian12:nonroot`; entry point
-  `muster`, user `nonroot`, no shell.
+  `muster`, user `nonroot` (uid 65532), no shell.
 - **Helm chart** (C-01.FR-10), main values:
 
   | Value | Default | Meaning |
@@ -83,9 +88,10 @@ issue: 3
   | `image.repository`, `image.tag` | `ghcr.io/muster-io/muster`, the chart's `appVersion` | |
   | `replicas` | `1` | `2` is an option, together with `podDisruptionBudget.enabled` |
   | `existingSecret` | required | the Secret with the master keys, the database password and the bootstrap Admin password; rendering fails without it ("the master keys are never generated: create a Secret and set existingSecret") |
+  | `masterKeysKey` | `secret-keys` | the Secret key with the master keys, mounted as a file and passed as `MUSTER_SECRET_KEYS_FILE` |
   | `database.host`, `.port`, `.name`, `.user`, `.sslmode`, `database.passwordKey` | — | plain values; the password is mounted from the Secret key and passed as `MUSTER_DATABASE_PASSWORD_FILE`; `database.urlKey` instead passes a whole `MUSTER_DATABASE_URL` from the Secret |
   | `database.sessionHost`, `.sessionPort` | unset | the session connection for PgBouncer installations |
-  | `publicURL`, `ingestURL` | required, optional | `MUSTER_PUBLIC_URL`, `MUSTER_INGEST_URL` |
+  | `publicURL`, `ingestURL` | unset, unset | `MUSTER_PUBLIC_URL`, `MUSTER_INGEST_URL`, set only when given; Muster requires `MUSTER_PUBLIC_URL` at startup, but rendering does not, so the chart renders with only `existingSecret` |
   | `bootstrapAdmin.email`, `bootstrapAdmin.passwordKey` | unset | `MUSTER_BOOTSTRAP_ADMIN_EMAIL`, `MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE` |
   | `ingress.*`, `httpRoute.*` | disabled | expose the app and ingest Services separately |
   | `serviceMonitor.enabled`, `networkPolicy.enabled`, `podDisruptionBudget.enabled` | false | objects a cluster may lack render only when enabled |
@@ -137,7 +143,7 @@ docker inspect -f '{{.HostConfig.Memory}}' "$(docker compose -f deploy/compose/d
 # 167772160
 
 goreleaser release --snapshot --clean
-docker run --rm ghcr.io/muster-io/muster:<snapshot tag>-amd64 version
+docker run --rm ghcr.io/muster-io/muster:v<snapshot version>-amd64 version
 # muster 0.0.1-SNAPSHOT-<sha> (commit <sha>)
 ```
 
@@ -158,7 +164,7 @@ kubectl -n muster get deploy,svc
 # deployment.apps/muster ... service/muster-app, service/muster-ingest, service/muster-internal
 ```
 
-The GitHub release lists the four archives, the checksums and the SBOM.
+The GitHub release lists the four archives, the checksums, and an SBOM per archive.
 
 ## Open questions
 
@@ -168,7 +174,9 @@ The GitHub release lists the four archives, the checksums and the SBOM.
 ## Notes
 
 - Suggested commit: `build: add release pipeline, container image, Helm chart and compose example`.
-- `operator_attention: true` — GHCR permissions, the first tag and the kind cluster for the install check.
+- `operator_attention: true` — GHCR permissions, the first tag and the kind cluster for the install check, and a
+  GitHub App for release-please (variable `RELEASE_PLEASE_APP_CLIENT_ID`, secret `RELEASE_PLEASE_APP_PRIVATE_KEY`),
+  because a tag created with `GITHUB_TOKEN` starts no workflow.
 - The compose memory values are provisional (P-43); S-004's nightly load test measures the footprint, and a change
   updates the compose file and closes P-43.
 

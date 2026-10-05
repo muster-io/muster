@@ -33,10 +33,18 @@ GREMLINS_PKG := github.com/go-gremlins/gremlins/cmd/gremlins
 # renovate: datasource=go depName=github.com/go-gremlins/gremlins
 GREMLINS_VERSION := v0.6.0
 GREMLINS := $(TOOLS)/gremlins-$(GREMLINS_VERSION)
+HELM_PKG := helm.sh/helm/v4/cmd/helm
+# renovate: datasource=go depName=helm.sh/helm/v4
+HELM_VERSION := v4.3.0
+HELM := $(TOOLS)/helm-$(HELM_VERSION)
+KUBECONFORM_PKG := github.com/yannh/kubeconform/cmd/kubeconform
+# renovate: datasource=go depName=github.com/yannh/kubeconform
+KUBECONFORM_VERSION := v0.8.0
+KUBECONFORM := $(TOOLS)/kubeconform-$(KUBECONFORM_VERSION)
 # The tools above, as their install rules name them; make licenses reports their licences.
 INSTALLED_TOOLS := $(GOLANGCI_LINT_PKG)@$(GOLANGCI_LINT_VERSION) $(GO_TEST_COVERAGE_PKG)@$(GO_TEST_COVERAGE_VERSION) \
 	$(GO_LICENSES_PKG)@$(GO_LICENSES_VERSION) $(GOVULNCHECK_PKG)@$(GOVULNCHECK_VERSION) \
-	$(GREMLINS_PKG)@$(GREMLINS_VERSION)
+	$(GREMLINS_PKG)@$(GREMLINS_VERSION) $(HELM_PKG)@$(HELM_VERSION) $(KUBECONFORM_PKG)@$(KUBECONFORM_VERSION)
 
 VERSION ?= 0.0.0-dev
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
@@ -57,7 +65,19 @@ SHIPPED_LICENSES := MIT,MIT-0,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,0BSD,Unli
 MUTATION_PKGS ?= internal/groups internal/routing internal/delivery internal/timers
 MUTATION_DIR := $(BIN)/mutation
 
-.PHONY: help fmt lint lint-arch test test-race generate generate-check build licenses vulncheck mutation ci clean
+# make helm-check renders the chart for this Kubernetes version and validates it against its schemas; the Gateway API
+# and ServiceMonitor schemas come from a pinned commit of the CRDs catalog.
+CHART := deploy/helm/muster
+HELM_CHECK_KUBE_VERSION := 1.33.0
+HELM_CHECK_SECRET_ERROR := the master keys are never generated: create a Secret and set existingSecret
+KUBECONFORM_FLAGS := -strict -summary -kubernetes-version $(HELM_CHECK_KUBE_VERSION) -schema-location default \
+	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/4c8dc296d32b06d15ccde9668ff136c951f4d539/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+
+# make compose-check needs the Docker CLI with the compose plugin, not a running daemon.
+DOCKER ?= docker
+
+.PHONY: help fmt lint lint-arch test test-race generate generate-check build licenses vulncheck mutation helm-check \
+	compose-check ci clean
 
 help: ## List the targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -183,6 +203,38 @@ mutation: $(GREMLINS) ## Run mutation testing over the core packages, report onl
 	cat $$summary; \
 	exit $$failed
 
+# Lints and renders the chart with the default values plus an existingSecret and with the all-options values, and
+# validates both renderings with kubeconform; rendering without existingSecret must fail with the master keys message.
+# Every step runs even when an earlier one fails.
+helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check the existingSecret error
+	@tmp=$$(mktemp -d) || exit 1; \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	failed=0; \
+	for values in "--set existingSecret=muster" "-f $(CHART)/ci/all-options-values.yaml"; do \
+		echo "helm lint, helm template and kubeconform with $$values"; \
+		$(HELM) lint --strict --kube-version $(HELM_CHECK_KUBE_VERSION) $$values $(CHART) || \
+			{ echo "helm lint failed with $$values"; failed=1; }; \
+		if $(HELM) template muster $(CHART) --kube-version $(HELM_CHECK_KUBE_VERSION) $$values >"$$tmp/chart.yaml"; then \
+			$(KUBECONFORM) $(KUBECONFORM_FLAGS) "$$tmp/chart.yaml" || { echo "kubeconform failed with $$values"; failed=1; }; \
+		else \
+			echo "helm template failed with $$values"; failed=1; \
+		fi; \
+	done; \
+	echo "helm template without existingSecret"; \
+	if out=$$($(HELM) template muster $(CHART) --set publicURL=https://muster.example.org 2>&1); then \
+		echo "rendered without existingSecret"; failed=1; \
+	elif echo "$$out" | grep -qF '$(HELM_CHECK_SECRET_ERROR)'; then \
+		echo "fails as it should: $(HELM_CHECK_SECRET_ERROR)"; \
+	else \
+		echo "$$out"; echo "the error does not say: $(HELM_CHECK_SECRET_ERROR)"; failed=1; \
+	fi; \
+	exit $$failed
+
+# Without a .env next to the compose file its variables are unset, which compose reports as warnings.
+compose-check: ## Check the compose example with docker compose config, without and with .env.example
+	$(DOCKER) compose -f deploy/compose/docker-compose.yml config --quiet
+	$(DOCKER) compose -f deploy/compose/docker-compose.yml --env-file deploy/compose/.env.example config --quiet
+
 ci: lint lint-arch generate-check licenses test-race build ## Run the pull-request tier locally
 
 clean: ## Remove build output and installed tools
@@ -215,3 +267,9 @@ $(GOVULNCHECK):
 
 $(GREMLINS):
 	$(call go-install,$(GREMLINS_PKG)@$(GREMLINS_VERSION),gremlins)
+
+$(HELM):
+	$(call go-install,$(HELM_PKG)@$(HELM_VERSION),helm)
+
+$(KUBECONFORM):
+	$(call go-install,$(KUBECONFORM_PKG)@$(KUBECONFORM_VERSION),kubeconform)

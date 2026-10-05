@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+image:
+  repository: ghcr.io/muster-io/muster
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+replicas: 1
+
+existingSecret: ""
+masterKeysKey: secret-keys
+
+database:
+  host: ""
+  port: 5432
+  name: muster
+  user: muster
+  sslmode: ""
+  passwordKey: database-password
+  urlKey: ""
+  sessionHost: ""
+  sessionPort: null
+
+publicURL: ""
+ingestURL: ""
+
+bootstrapAdmin:
+  email: ""
+  passwordKey: ""
+
+extraEnv: []
+
+resources: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+podAnnotations: {}
+podLabels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+service:
+  app:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+  ingest:
+    type: ClusterIP
+    port: 8081
+    annotations: {}
+  internal:
+    type: ClusterIP
+    port: 8082
+    annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  app:
+    hosts: []
+    tls: []
+  ingest:
+    hosts: []
+    tls: []
+
+httpRoute:
+  enabled: false
+  parentRefs: []
+  annotations: {}
+  labels: {}
+  app:
+    hostnames: []
+  ingest:
+    hostnames: []
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
+networkPolicy:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+  maxUnavailable: 1

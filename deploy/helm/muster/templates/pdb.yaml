@@ -1,0 +1,17 @@
+{{- /*
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright The Muster Authors
+*/ -}}
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "muster.fullname" . }}
+  labels:
+    {{- include "muster.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "muster.selectorLabels" . | nindent 6 }}
+{{- end }}

@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# A vX.Y.Z tag, created when release-please's release pull request merges, builds the release: goreleaser fills the
+# draft release with the archives, their SBOMs and the checksums, and pushes and signs the image; then the chart is
+# pushed, and the last step publishes the draft, so a published release always has every artifact.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    env:
+      # renovate: datasource=github-releases depName=goreleaser/goreleaser
+      GORELEASER_VERSION: v2.18.2
+      # renovate: datasource=github-releases depName=sigstore/cosign
+      COSIGN_VERSION: v3.1.3
+      # renovate: datasource=github-releases depName=anchore/syft
+      SYFT_VERSION: v1.54.0
+      # The Makefile's helm; `make` fails when the two versions differ.
+      # renovate: datasource=go depName=helm.sh/helm/v4
+      HELM_VERSION: v4.3.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          syft-version: ${{ env.SYFT_VERSION }}
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: build helm
+        run: make "bin/tools/helm-${HELM_VERSION}"
+      - name: package and push the chart
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          helm="bin/tools/helm-${HELM_VERSION}"
+          version="${REF_NAME#v}"
+          # appVersion is the tag: image tags carry the v, and image.tag defaults to appVersion.
+          "$helm" package deploy/helm/muster --version "$version" --app-version "$REF_NAME" \
+            --destination "$RUNNER_TEMP/chart"
+          printf '%s' "$GH_TOKEN" | "$helm" registry login ghcr.io -u "$ACTOR" --password-stdin
+          "$helm" push "$RUNNER_TEMP/chart/muster-$version.tgz" oci://ghcr.io/muster-io/charts
+      - name: publish the release
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false

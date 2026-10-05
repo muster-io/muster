@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+existingSecret: muster
+replicas: 2
+
+database:
+  host: postgres
+  port: 5432
+  name: muster
+  user: muster
+  sslmode: require
+  sessionHost: pgbouncer
+  sessionPort: 6432
+
+publicURL: https://muster.example.org
+ingestURL: https://ingest.muster.example.org
+
+bootstrapAdmin:
+  email: admin@example.org
+  passwordKey: bootstrap-password
+
+extraEnv:
+  - name: MUSTER_LOG_LEVEL
+    value: debug
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+nodeSelector:
+  workload: default
+
+tolerations:
+  - key: workload
+    operator: Equal
+    value: default
+    effect: NoSchedule
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - muster
+          topologyKey: kubernetes.io/hostname
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: muster
+
+priorityClassName: high-priority
+
+serviceAccount:
+  create: true
+  annotations:
+    example.com/sa-annotation: value
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  app:
+    hosts:
+      - host: muster.example.org
+        path: /
+        pathType: Prefix
+    tls:
+      - secretName: muster-tls
+        hosts:
+          - muster.example.org
+  ingest:
+    hosts:
+      - host: ingest.muster.example.org
+        path: /
+        pathType: Prefix
+    tls:
+      - secretName: muster-ingest-tls
+        hosts:
+          - ingest.muster.example.org
+
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: gateway
+      namespace: gateway
+  labels:
+    example.com/gateway: public
+  annotations:
+    example.com/route-annotation: value
+  app:
+    hostnames:
+      - muster.example.org
+  ingest:
+    hostnames:
+      - ingest.muster.example.org
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  labels:
+    prometheus: kube-prometheus
+
+networkPolicy:
+  enabled: true
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1

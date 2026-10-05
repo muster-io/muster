@@ -56,6 +56,12 @@
       matchDatasources: ["npm"],
       minimumReleaseAge: "3 days",
     },
+    // release-please sets the Muster image tag in the compose example on every release.
+    {
+      matchManagers: ["docker-compose"],
+      matchPackageNames: ["ghcr.io/muster-io/muster"],
+      enabled: false,
+    },
   ],
   lockFileMaintenance: {
     enabled: true,

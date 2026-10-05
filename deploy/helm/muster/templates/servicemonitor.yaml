@@ -1,0 +1,27 @@
+{{- /*
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright The Muster Authors
+*/ -}}
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "muster.fullname" . }}
+  labels:
+    {{- include "muster.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  # The scrape job is named after the Service's app.kubernetes.io/name label: muster.
+  jobLabel: app.kubernetes.io/name
+  selector:
+    matchLabels:
+      {{- include "muster.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: internal
+  endpoints:
+    - port: internal
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+{{- end }}
