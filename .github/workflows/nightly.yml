@@ -158,8 +158,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/image/linux/amd64"
           cp bin/muster "$RUNNER_TEMP/image/linux/amd64/muster"
           docker build --platform linux/amd64 -f Dockerfile -t "$image" "$RUNNER_TEMP/image"
-          # Not --wait: until the server command exists, the muster container exits and restarts.
-          "${compose[@]}" up -d
+          "${compose[@]}" up -d --wait
       - name: load test against the compose example
         run: |
           set -euo pipefail

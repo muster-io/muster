@@ -66,7 +66,7 @@ issue: 60
   |---|---|---|
   | Quick start | `quick-start.md` | the compose example with a generated master key, the first sign-in, an Integration, the snippet for Alertmanager, a test alert, the next steps |
   | Install | `install/helm.md` | Helm values, an existing Secret for the master keys and passwords, ingress and Gateway API routes, the two public addresses (`MUSTER_PUBLIC_URL`, `MUSTER_INGEST_URL`), replicas and the PodDisruptionBudget |
-  | Install | `install/database.md` | the database as a URL or as fields, external PostgreSQL with a CloudNativePG `Cluster` example, notes for managed PostgreSQL, the session connection for PgBouncer, TLS modes |
+  | Install | `install/database.md` | the database as a URL or as fields, external PostgreSQL with a CloudNativePG `Cluster` example, notes for managed PostgreSQL, the session connection for PgBouncer (and, for the main connection in transaction mode, PgBouncer 1.21 or newer with `max_prepared_statements` above 0), TLS modes |
   | Alertmanager | `integrations/alertmanager.md` (extended) | repeat intervals of 5–15 minutes, `max_alerts: 0`, Static labels, advice against Instance labels in informational alerts, besides the existing receiver, route and HA pair settings |
   | Messengers | `messengers/proxies.md` | the proxy of each client, the three types, authentication, what the outbound address policy checks through a proxy |
   | Sign-in | `sign-in/totp.md`, `sign-in/closed-networks.md` | TOTP and its policy, recovery codes, resets; installations whose IdP Muster cannot reach: local users with TOTP |

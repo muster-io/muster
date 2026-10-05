@@ -131,7 +131,7 @@ spec:
             - name: secrets
               mountPath: /etc/muster/secrets
               readOnly: true
-      # process.shutdown_grace is 20 s; the pod gets 30 s before it is killed.
+      # The preStop sleep of 5 s and process.shutdown_grace of 20 s fit in the 30 s before the pod is killed.
       terminationGracePeriodSeconds: 30
       containers:
         - name: muster
@@ -139,6 +139,12 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: {{ include "muster.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Endpoints drop a terminating pod a moment after the kubelet sends SIGTERM; sleeping first keeps the
+          # listeners accepting until then, so a rollout refuses no connections.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
           ports:
             - name: app
               containerPort: {{ .Values.service.app.port }}
