@@ -2,9 +2,9 @@
 
 Version 1.0
 
-This agreement sets out the terms under which You contribute to Muster, the project maintained at
-[github.com/muster-io/muster](https://github.com/muster-io/muster) by its maintainers on behalf of The Muster Authors
-(the "Project"). It is modelled on the Apache Software Foundation's Individual Contributor License Agreement, version
+This agreement sets out the terms under which You contribute to Muster, the project at
+[github.com/muster-io/muster](https://github.com/muster-io/muster), maintained by Aleksandr Nikitin. In this agreement
+the **"Project"** means Aleksandr Nikitin as the maintainer of Muster, together with his successors and assigns. It is modelled on the Apache Software Foundation's Individual Contributor License Agreement, version
 2.2. It is a licence, not an assignment: You keep the copyright in Your Contributions and may use them in any other way
 You like.
 
