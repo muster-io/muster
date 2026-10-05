@@ -266,6 +266,25 @@ func TestSecretFiles(t *testing.T) {
 	if string(c.SecretKeys) != "a2V5LXR3bw==" || string(c.BootstrapAdminPassword) != "admin-pw" {
 		t.Error("the secrets were not read from their files")
 	}
+	if c.SecretKeysSource != "MUSTER_SECRET_KEYS_FILE" {
+		t.Errorf("SecretKeysSource = %q, want MUSTER_SECRET_KEYS_FILE", c.SecretKeysSource)
+	}
+}
+
+// The Keyring checks the master keys (internal/keyring): the settings only say which variable holds them.
+func TestSecretKeysSource(t *testing.T) {
+	for _, tc := range []struct {
+		vars map[string]string
+		want string
+	}{
+		{base(), "MUSTER_SECRET_KEYS"},
+		{with(base(), "MUSTER_SECRET_KEYS", ""), "MUSTER_SECRET_KEYS"},
+		{without(base(), "MUSTER_SECRET_KEYS"), ""},
+	} {
+		if c := load(t, tc.vars); c.SecretKeysSource != tc.want {
+			t.Errorf("SecretKeysSource = %q, want %q", c.SecretKeysSource, tc.want)
+		}
+	}
 }
 
 func TestProxyVariablesIgnored(t *testing.T) {
@@ -306,9 +325,9 @@ func TestErrors(t *testing.T) {
 			},
 		},
 		{
-			name: "missing public URL and keys",
-			vars: without(base(), "MUSTER_PUBLIC_URL", "MUSTER_SECRET_KEYS"),
-			want: []string{"MUSTER_PUBLIC_URL is required", "MUSTER_SECRET_KEYS or MUSTER_SECRET_KEYS_FILE is required"},
+			name: "missing public URL",
+			vars: without(base(), "MUSTER_PUBLIC_URL"),
+			want: []string{"MUSTER_PUBLIC_URL is required"},
 		},
 		{
 			name: "empty public URL",

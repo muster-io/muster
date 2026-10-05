@@ -2,7 +2,8 @@
 // Copyright The Muster Authors
 
 // Package runtime wires the process: the server command, `muster migrate` and Muster inside `muster dev`. It owns the
-// start-up order — settings, logger, connections and checks, migrations when enabled, the schema version check, the
+// start-up order — settings, logger, the Keyring, connections and checks, migrations when enabled, the schema version
+// check, the key canary and the start-up ensure steps under the migration lock, the replica key record, the
 // listeners — and the graceful shutdown on SIGTERM (C-02.FR-16).
 package runtime
 
@@ -15,10 +16,13 @@ import (
 	"time"
 
 	"github.com/muster-io/muster/internal/buildinfo"
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/web"
 )
@@ -32,13 +36,15 @@ type Options struct {
 	Environ []string
 	// Stdout receives the log lines.
 	Stdout io.Writer
-	// Development is `muster dev`: the schema is migrated on start whatever MUSTER_MIGRATE_ON_START says.
+	// Development is `muster dev`: the schema is migrated on start whatever MUSTER_MIGRATE_ON_START says, and the
+	// published development key is accepted.
 	Development bool
 
 	// The fields below are replaced by tests.
-	open    func(context.Context, config.Config) (database, error)
-	grace   time.Duration
-	serving func(server.Addresses)
+	open             func(context.Context, config.Config) (database, error)
+	grace            time.Duration
+	serving          func(server.Addresses)
+	keyRecordRefresh time.Duration
 }
 
 // database is what the runtime needs of internal/db; tests give a fake.
@@ -49,10 +55,26 @@ type database interface {
 	Ping(ctx context.Context) error
 	RegisterMetrics()
 	Close()
+	WithMigrationLock(ctx context.Context, f func(context.Context) error) error
+	KeyringStore() keyring.Store
+	OrganizationStore() organization.Store
 }
 
+// pgDatabase is internal/db with the stores of the domain packages over its main pool.
+type pgDatabase struct {
+	*db.DB
+}
+
+func (d pgDatabase) KeyringStore() keyring.Store { return keyring.NewStore(d.Pool) }
+
+func (d pgDatabase) OrganizationStore() organization.Store { return organization.NewStore(d.Pool) }
+
 func openDB(ctx context.Context, cfg config.Config) (database, error) {
-	return db.Open(ctx, cfg.Database, cfg.Session)
+	d, err := db.Open(ctx, cfg.Database, cfg.Session)
+	if err != nil {
+		return nil, err
+	}
+	return pgDatabase{d}, nil
 }
 
 // Run is the server: it starts in order and serves until ctx ends, then shuts down within the grace period and
@@ -68,12 +90,16 @@ func Run(ctx context.Context, opts Options) error {
 	return p.serve(ctx)
 }
 
-// Migrate is `muster migrate`: settings, logger, connections and checks, then the migrations under the migration
-// lock. It takes no --actor (C-02.FR-15).
+// Migrate is `muster migrate`: settings, logger, the master keys, connections and checks, then the migrations under
+// the migration lock. It refuses keys the server refuses, except the development key, which only the server command
+// checks for. It takes no --actor (C-02.FR-15).
 func Migrate(ctx context.Context, opts Options) error {
 	cfg, log, err := setup(ctx, opts)
 	if err != nil {
 		return err
+	}
+	if _, err := loadKeyring(ctx, cfg, true); err != nil {
+		return failed(ctx, log, err)
 	}
 	d, err := connect(ctx, opts, cfg, log)
 	if err != nil {
@@ -84,10 +110,13 @@ func Migrate(ctx context.Context, opts Options) error {
 }
 
 type process struct {
-	opts Options
-	cfg  config.Config
-	log  *logging.Logger
-	db   database
+	opts    Options
+	cfg     config.Config
+	log     *logging.Logger
+	db      database
+	clocks  clock.Clocks
+	keyring *keyring.Keyring
+	replica *keyring.Recorder
 }
 
 func setup(ctx context.Context, opts Options) (config.Config, *logging.Logger, error) {
@@ -102,6 +131,10 @@ func setup(ctx context.Context, opts Options) (config.Config, *logging.Logger, e
 		log.Log(ctx, logging.DatabaseSettingsConflict, logging.F("used", c.Used), logging.F("ignored", c.Ignored))
 	}
 	return cfg, log, nil
+}
+
+func loadKeyring(ctx context.Context, cfg config.Config, allowDevelopmentKey bool) (*keyring.Keyring, error) {
+	return keyring.Load(ctx, keyring.Env{Keys: cfg.SecretKeys, Source: cfg.SecretKeysSource}, allowDevelopmentKey)
 }
 
 func connect(ctx context.Context, opts Options, cfg config.Config, log *logging.Logger) (database, error) {
@@ -126,6 +159,11 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Development mode accepts the published development key: muster dev, also with --replica.
+	k, err := loadKeyring(ctx, cfg, opts.Development)
+	if err != nil {
+		return nil, failed(ctx, log, err)
+	}
 	d, err := connect(ctx, opts, cfg, log)
 	if err != nil {
 		return nil, err
@@ -140,8 +178,17 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 		d.Close()
 		return nil, failed(ctx, log, err)
 	}
-	// The Keyring, the key canary and the Organization defaults join the start-up order here (S-007).
-	return &process{opts: opts, cfg: cfg, log: log, db: d}, nil
+	clocks, _ := clock.System()
+	p := &process{opts: opts, cfg: cfg, log: log, db: d, clocks: clocks, keyring: k}
+	if err := p.bootstrap(ctx); err != nil {
+		d.Close()
+		return nil, failed(ctx, log, err)
+	}
+	if err := p.startReplica(ctx); err != nil {
+		d.Close()
+		return nil, failed(ctx, log, err)
+	}
+	return p, nil
 }
 
 // serve starts the listeners and serves until ctx ends or a listener stops.
@@ -158,6 +205,7 @@ func (p *process) serve(ctx context.Context) error {
 		Internal: server.Internal(health, metrics.Handler(nil)),
 	})
 	if err != nil {
+		p.stopReplica(ctx)
 		return failed(ctx, p.log, err)
 	}
 	addrs := srv.Addrs()
@@ -167,15 +215,36 @@ func (p *process) serve(ctx context.Context) error {
 		p.opts.serving(addrs)
 	}
 
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
+	keys := make(chan error, 1)
+	go func() { keys <- p.watchKeys(watchCtx) }()
+
 	grace := cmp.Or(p.opts.grace, ShutdownGrace)
 	var stopped error
+	watching := true
 	select {
 	case <-ctx.Done():
 		p.log.Log(ctx, logging.ShutdownRequested, logging.F("grace_seconds", grace.Seconds()))
 	case stopped = <-srv.Errors():
 		p.log.Log(ctx, logging.ListenerFailed, logging.F("listener", listenerOf(stopped)),
 			logging.F("error", stopped.Error()))
+	case stopped = <-keys:
+		// The watch logged active_key_not_held; it ends without an error only when ctx ended.
+		watching = false
+		if stopped == nil {
+			p.log.Log(ctx, logging.ShutdownRequested, logging.F("grace_seconds", grace.Seconds()))
+		}
 	}
+	stopWatch()
+	if watching {
+		// A key watch that stopped the replica just as ctx ended still decides the exit.
+		if err := <-keys; errors.Is(err, keyring.ErrKeyMismatch) {
+			stopped = err
+		}
+	}
+	// The record goes before the drain, so that a refresh never writes it back.
+	p.stopReplica(ctx)
 	health.ShuttingDown()
 	// Workers that later stories register stop claiming here and finish or release their rows within the grace.
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), grace)

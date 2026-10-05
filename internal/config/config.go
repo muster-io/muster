@@ -47,9 +47,12 @@ type Config struct {
 	Database Database
 	Session  Database
 
-	SecretKeys logging.Secret
-	PublicURL  *url.URL
-	IngestURL  *url.URL
+	// SecretKeys is the value of MUSTER_SECRET_KEYS or the content of MUSTER_SECRET_KEYS_FILE, and SecretKeysSource
+	// the variable that was set, empty when neither was; internal/keyring reads and checks them.
+	SecretKeys       logging.Secret
+	SecretKeysSource string
+	PublicURL        *url.URL
+	IngestURL        *url.URL
 
 	ListenApp      string
 	ListenIngest   string
@@ -96,7 +99,7 @@ type raw struct {
 	SessionHost string `env:"MUSTER_DATABASE_SESSION_HOST"`
 	SessionPort string `env:"MUSTER_DATABASE_SESSION_PORT" validate:"omitempty,portnum"`
 
-	SecretKeys     string `env:"MUSTER_SECRET_KEYS" validate:"required" secret:"true"`
+	SecretKeys     string `env:"MUSTER_SECRET_KEYS" secret:"true"`
 	SecretKeysFile string `env:"MUSTER_SECRET_KEYS_FILE"`
 
 	PublicURL string `env:"MUSTER_PUBLIC_URL" validate:"required,httpurl"`
@@ -207,7 +210,16 @@ func Load(environ []string) (Config, error) {
 	if err := errors.Join(errs...); err != nil {
 		return Config{}, err
 	}
-	return build(&r, conflicts)
+	c, err := build(&r, conflicts)
+	if err != nil {
+		return Config{}, err
+	}
+	for _, name := range []string{"MUSTER_SECRET_KEYS", "MUSTER_SECRET_KEYS_FILE"} {
+		if _, ok := vars[name]; ok {
+			c.SecretKeysSource = name
+		}
+	}
+	return c, nil
 }
 
 func findConflicts(vars map[string]string) []Conflict {
@@ -334,9 +346,6 @@ func check(v *validator.Validate, r *raw, vars map[string]string, unreadable map
 
 func fieldError(name string, fe validator.FieldError, secret bool, vars map[string]string) error {
 	if fe.Tag() == "required" {
-		if slices.ContainsFunc(secretFiles, func(s secretFile) bool { return s.name == name }) {
-			return fmt.Errorf("%s or %s_FILE is required", name, name)
-		}
 		if _, ok := vars[name]; ok {
 			return fmt.Errorf("%s is set but empty", name)
 		}

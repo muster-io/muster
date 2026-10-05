@@ -21,13 +21,18 @@ files_touched:
   - internal/organization/query.sql
   - internal/organization/organization_test.go
   - internal/runtime/bootstrap.go
+  - internal/runtime/bootstrap_test.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
+  - internal/config/config.go
+  - internal/config/config_test.go
   - internal/devmode/devmode.go
   - internal/archlint/secretleak.go
   - internal/logging/events.go
   - sqlc.yaml
   - deploy/compose/.env.example
   - Makefile
+  - AGENTS.md
 acceptance:
   - "[C-02.FR-7, C-02.AC-1] With a Keyring that cannot decrypt the key canary the replica exits non-zero and logs `key_canary_failed` with \"master key does not match the database\"; with the right Keyring it becomes ready."
   - "[C-02.FR-7] On a new database the first key of `MUSTER_SECRET_KEYS` becomes active and the canary is written under the migration lock, once, even when two replicas start at the same moment; adding a second key later leaves the active key unchanged."
@@ -85,8 +90,9 @@ issue: 7
   outside development mode. Development mode accepts that key everywhere — `muster dev`, the additional replica of
   `muster dev --replica` and the CLI as `muster dev <subcommand>` (S-004) — and other subcommands do not check for it.
   Each refusal stops startup with an error that names `MUSTER_SECRET_KEYS` and says how to generate a key
-  (`openssl rand -base64 32`). A `MUSTER_SECRET_KEYS` that is set replaces the development default (S-004), so it is
-  the whole Keyring in every mode.
+  (`openssl rand -base64 32`). The bootstrap settings (S-006) no longer require the variable themselves, so that the
+  Keyring gives these errors; `muster migrate` checks the keys the same way, except for the development key. A
+  `MUSTER_SECRET_KEYS` that is set replaces the development default (S-004), so it is the whole Keyring in every mode.
 - **Replica key records** (C-02.FR-8, `replicas`): a replica id is chosen at process start (host name plus a random
   suffix); the row with the held key ids, version, host name and start time is written at start and refreshed every
   `replica.key_record_refresh`; a replica counts as live while its row is younger than `replica.live_expiry`. These
@@ -108,9 +114,12 @@ issue: 7
   `internal/organization` exposes a read accessor of these settings for later capabilities.
 - **sqlc**: `sqlc.yaml` reads the schema from `internal/db/migrations` and generates each package's `query.sql` into
   `internal/<package>/dbgen/` (generated, never listed in `files_touched`). This is the first story with queries, so
-  `make generate` and the generated-code check of S-002 gain `sqlc generate` here.
+  `make generate` and the generated-code check of S-002 gain `sqlc generate` here. sqlc is a pinned tool built into
+  `bin/tools/` like golangci-lint (without cgo, so it parses with the WebAssembly build of the PostgreSQL parser), not a
+  `go.mod` tool, which keeps its dependencies out of the module.
 - **Log events**: `keyring_loaded` (INFO: key ids, active key id), `key_canary_failed` (ERROR), `active_key_not_held`
-  (ERROR), `organization_created` (INFO).
+  (ERROR), `replica_record_failed` (WARN: a refresh of the replica record failed and is retried at the next one),
+  `organization_created` (INFO).
 
 ## Steps
 

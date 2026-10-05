@@ -11,22 +11,161 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/muster-io/muster/internal/config"
+	"github.com/muster-io/muster/internal/keyring"
+	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/organization"
+	odb "github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/server"
 )
 
 type fakeDB struct {
 	mu                                 sync.Mutex
 	checkErr, migrateErr, schemaErr    error
-	pingErr                            error
+	pingErr, lockErr                   error
 	checked, migrated, schema, metrics bool
-	closed                             int
+	closed, locked                     int
+	keys                               fakeKeyringStore
+	org                                fakeOrgStore
+}
+
+func (f *fakeDB) WithMigrationLock(ctx context.Context, fn func(context.Context) error) error {
+	f.mu.Lock()
+	f.locked++
+	err := f.lockErr
+	f.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return fn(ctx)
+}
+
+func (f *fakeDB) KeyringStore() keyring.Store { return &f.keys }
+
+func (f *fakeDB) OrganizationStore() organization.Store { return &f.org }
+
+// fakeKeyringStore keeps keyring_state and replicas in memory; err fails every call, recordErr the replica records.
+type fakeKeyringStore struct {
+	mu        sync.Mutex
+	state     *kdb.GetKeyringStateRow
+	replicas  map[string]kdb.RecordReplicaParams
+	err       error
+	recordErr error
+}
+
+func (s *fakeKeyringStore) GetKeyringState(context.Context) (kdb.GetKeyringStateRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return kdb.GetKeyringStateRow{}, s.err
+	}
+	if s.state == nil {
+		return kdb.GetKeyringStateRow{}, pgx.ErrNoRows
+	}
+	return *s.state, nil
+}
+
+func (s *fakeKeyringStore) CreateKeyringState(_ context.Context, arg kdb.CreateKeyringStateParams) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != nil {
+		return 0, nil
+	}
+	s.state = &kdb.GetKeyringStateRow{ActiveKeyID: arg.ActiveKeyID, ActivatedAt: arg.ActivatedAt,
+		CanaryCiphertext: arg.CanaryCiphertext, CanaryKeyID: arg.ActiveKeyID}
+	return 1, nil
+}
+
+func (s *fakeKeyringStore) GetActiveKeyID(context.Context) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.ActiveKeyID, nil
+}
+
+func (s *fakeKeyringStore) setActive(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state.ActiveKeyID, s.state.CanaryKeyID = id, id
+}
+
+func (s *fakeKeyringStore) RecordReplica(_ context.Context, arg kdb.RecordReplicaParams) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.recordErr != nil {
+		return s.recordErr
+	}
+	if s.replicas == nil {
+		s.replicas = map[string]kdb.RecordReplicaParams{}
+	}
+	s.replicas[arg.ReplicaID] = arg
+	return nil
+}
+
+func (s *fakeKeyringStore) DeleteReplica(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.replicas, id)
+	return nil
+}
+
+func (s *fakeKeyringStore) ListLiveReplicas(context.Context, time.Time) ([]kdb.Replica, error) {
+	return nil, errors.New("not used by the runtime")
+}
+
+func (s *fakeKeyringStore) replicaCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.replicas)
+}
+
+// fakeOrgStore keeps the Organization and its outbound address policy in memory; err fails every call.
+type fakeOrgStore struct {
+	mu     sync.Mutex
+	org    *odb.CreateOrganizationParams
+	policy *odb.CreateOutboundPolicyParams
+	err    error
+}
+
+func (s *fakeOrgStore) GetOrganization(context.Context) (odb.GetOrganizationRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return odb.GetOrganizationRow{}, s.err
+	}
+	if s.org == nil {
+		return odb.GetOrganizationRow{}, pgx.ErrNoRows
+	}
+	return odb.GetOrganizationRow{ID: 1, PublicID: s.org.PublicID, Name: s.org.Name}, nil
+}
+
+func (s *fakeOrgStore) CreateOrganization(_ context.Context, arg odb.CreateOrganizationParams) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.org = &arg
+	return 1, nil
+}
+
+func (s *fakeOrgStore) CreateOutboundPolicy(_ context.Context, arg odb.CreateOutboundPolicyParams) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.policy != nil {
+		return 0, nil
+	}
+	s.policy = &arg
+	return 1, nil
+}
+
+func (s *fakeOrgStore) GetOutboundPolicy(context.Context, int64) (odb.GetOutboundPolicyRow, error) {
+	return odb.GetOutboundPolicyRow{}, errors.New("not used by the runtime")
 }
 
 func (f *fakeDB) Check(context.Context, *logging.Logger) error {
@@ -99,10 +238,16 @@ func names(lines []map[string]any) []string {
 	return out
 }
 
+// testKey is a master key for the tests: 32 bytes of "k" in base64. otherKey is another.
+const (
+	testKey  = "a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s="
+	otherKey = "b29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb28="
+)
+
 func env(extra ...string) []string {
 	return append([]string{
 		"MUSTER_DATABASE_URL=postgres://muster:pw@127.0.0.1:1/muster?sslmode=disable&connect_timeout=1",
-		"MUSTER_SECRET_KEYS=a2V5",
+		"MUSTER_SECRET_KEYS=" + testKey,
 		"MUSTER_PUBLIC_URL=http://localhost:8080",
 		"MUSTER_LISTEN_APP=127.0.0.1:0",
 		"MUSTER_LISTEN_INGEST=127.0.0.1:0",
@@ -199,13 +344,13 @@ func TestRunAndShutdown(t *testing.T) {
 		t.Errorf("database %+v: want checked, not migrated, schema checked, metrics, closed once", fake)
 	}
 	lines := out.events(t)
-	want := []string{"process_started", "database_settings_conflict", "listeners_started", "shutdown_requested",
-		"process_stopped"}
+	want := []string{"process_started", "database_settings_conflict", "keyring_loaded", "organization_created",
+		"listeners_started", "shutdown_requested", "process_stopped"}
 	if strings.Join(names(lines), " ") != strings.Join(want, " ") {
 		t.Fatalf("events %v, want %v", names(lines), want)
 	}
 	if lines[1]["used"] != "MUSTER_DATABASE_URL" || lines[1]["level"] != "WARN" ||
-		lines[3]["level"] != "WARN" || lines[3]["grace_seconds"] != float64(2) {
+		lines[5]["level"] != "WARN" || lines[5]["grace_seconds"] != float64(2) {
 		t.Errorf("lines %v", lines)
 	}
 	d := net.Dialer{Timeout: time.Second}
@@ -321,6 +466,15 @@ func TestMigrate(t *testing.T) {
 	if err := Migrate(t.Context(), options(fake, &out, env())); err == nil || fake.closed != 1 {
 		t.Errorf("Migrate = %v, closed %d", err, fake.closed)
 	}
+	fake = &fakeDB{}
+	if err := Migrate(t.Context(), options(fake, &out, env("MUSTER_SECRET_KEYS="))); err == nil ||
+		!strings.Contains(err.Error(), "MUSTER_SECRET_KEYS is empty") || fake.checked {
+		t.Errorf("Migrate without a key = %v, database checked %v", err, fake.checked)
+	}
+	fake = &fakeDB{}
+	if err := Migrate(t.Context(), options(fake, &out, env("MUSTER_SECRET_KEYS="+keyring.DevelopmentKey))); err != nil {
+		t.Errorf("Migrate with the development key = %v", err)
+	}
 	fake = &fakeDB{checkErr: errors.New("pooler")}
 	if err := Migrate(t.Context(), options(fake, &out, env())); err == nil || fake.migrated {
 		t.Errorf("Migrate after a failed check = %v, migrated %v", err, fake.migrated)
@@ -421,6 +575,180 @@ func TestSignalDuringStartup(t *testing.T) {
 			want := []string{"process_started", "shutdown_requested", "process_stopped"}
 			if strings.Join(got, " ") != strings.Join(want, " ") {
 				t.Errorf("events %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestStartupCreatesRuntimeRows: a first start writes the active key with its canary, the Organization with its
+// outbound address policy and the replica record under the migration lock; the record goes at the shutdown, and a
+// second start changes nothing.
+func TestStartupCreatesRuntimeRows(t *testing.T) {
+	fake := &fakeDB{}
+	_, cancel, done := running(t, options(fake, io.Discard, env()))
+	if fake.keys.replicaCount() != 1 {
+		t.Errorf("%d replica records while serving, want 1", fake.keys.replicaCount())
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if fake.locked != 1 || fake.keys.state == nil || fake.org.org == nil || fake.org.policy == nil {
+		t.Fatalf("after the first start: locked %d, state %v, organization %v, policy %v", fake.locked,
+			fake.keys.state, fake.org.org, fake.org.policy)
+	}
+	if fake.keys.replicaCount() != 0 {
+		t.Errorf("%d replica records after the shutdown, want 0", fake.keys.replicaCount())
+	}
+	if want := keyring.KeyID([]byte(strings.Repeat("k", 32))); fake.keys.state.ActiveKeyID != want {
+		t.Errorf("active key %s, want the first key %s", fake.keys.state.ActiveKeyID, want)
+	}
+	if fake.org.org.Name != "Muster" || fake.org.policy.Policy != "standard" {
+		t.Errorf("organization %+v, policy %+v", fake.org.org, fake.org.policy)
+	}
+	state, org := *fake.keys.state, *fake.org.org
+
+	var out syncBuffer
+	_, cancel, done = running(t, options(fake, &out, env("MUSTER_SECRET_KEYS="+otherKey+","+testKey)))
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !sameState(*fake.keys.state, state) || fake.org.org.PublicID != org.PublicID {
+		t.Errorf("a second start changed the rows")
+	}
+	if got := names(out.events(t)); slices.Contains(got, "organization_created") {
+		t.Errorf("a second start logged organization_created: %v", got)
+	}
+}
+
+func sameState(a, b kdb.GetKeyringStateRow) bool {
+	return a.ActiveKeyID == b.ActiveKeyID && a.CanaryKeyID == b.CanaryKeyID &&
+		bytes.Equal(a.CanaryCiphertext, b.CanaryCiphertext)
+}
+
+func TestKeyringRefusals(t *testing.T) {
+	tests := []struct {
+		name        string
+		environ     []string
+		development bool
+		want        string
+	}{
+		{"empty", []string{"MUSTER_SECRET_KEYS="}, false,
+			"MUSTER_SECRET_KEYS is empty: generate a key with `openssl rand -base64 32`"},
+		{"placeholder", []string{"MUSTER_SECRET_KEYS=" + keyring.Placeholder}, false,
+			"MUSTER_SECRET_KEYS still holds the placeholder of the compose example: generate a key with " +
+				"`openssl rand -base64 32`"},
+		{"development key", []string{"MUSTER_SECRET_KEYS=" + keyring.DevelopmentKey}, false,
+			"MUSTER_SECRET_KEYS holds the published development key"},
+		{"not a key", []string{"MUSTER_SECRET_KEYS=" + testKey + ",a2V5"}, true,
+			"MUSTER_SECRET_KEYS: key 2 is not a base64-encoded key of 32 bytes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &fakeDB{}
+			var out syncBuffer
+			opts := options(fake, &out, env(tt.environ...))
+			opts.Development = tt.development
+			err := Run(t.Context(), opts)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Run = %v, want %q", err, tt.want)
+			}
+			if fake.checked {
+				t.Error("the database was opened before the Keyring was checked")
+			}
+			if last := out.events(t)[len(out.events(t))-1]; last["event"] != "startup_failed" {
+				t.Errorf("last line %v", last)
+			}
+		})
+	}
+}
+
+// TestDevelopmentKeyInDevelopmentMode: muster dev, also with --replica, runs with the development key.
+func TestDevelopmentKeyInDevelopmentMode(t *testing.T) {
+	opts := options(&fakeDB{}, io.Discard, env("MUSTER_SECRET_KEYS="+keyring.DevelopmentKey))
+	opts.Development = true
+	_, cancel, done := running(t, opts)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestKeyCanaryFailed(t *testing.T) {
+	fake := &fakeDB{}
+	_, cancel, done := running(t, options(fake, io.Discard, env()))
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	fake.closed = 0
+	var out syncBuffer
+	err := Run(t.Context(), options(fake, &out, env("MUSTER_SECRET_KEYS="+otherKey)))
+	if !errors.Is(err, keyring.ErrKeyMismatch) || err.Error() != "master key does not match the database" {
+		t.Fatalf("Run = %v", err)
+	}
+	lines := out.events(t)
+	got := names(lines)
+	if want := []string{"process_started", "key_canary_failed", "startup_failed"}; strings.Join(got, " ") !=
+		strings.Join(want, " ") {
+		t.Fatalf("events %v, want %v", got, want)
+	}
+	if lines[1]["level"] != "ERROR" || lines[1]["error"] != "master key does not match the database" {
+		t.Errorf("line %v", lines[1])
+	}
+	if fake.closed != 1 || fake.keys.replicaCount() != 0 {
+		t.Errorf("closed %d, replica records %d", fake.closed, fake.keys.replicaCount())
+	}
+}
+
+// TestActiveKeyNotHeld: a running replica that sees an active key it does not hold stops with the canary error and
+// removes its record.
+func TestActiveKeyNotHeld(t *testing.T) {
+	fake := &fakeDB{}
+	var out syncBuffer
+	opts := options(fake, &out, env())
+	opts.keyRecordRefresh = 10 * time.Millisecond
+	_, cancel, done := running(t, opts)
+	defer cancel()
+	fake.keys.setActive("k-unknown")
+	select {
+	case err := <-done:
+		if !errors.Is(err, keyring.ErrKeyMismatch) {
+			t.Fatalf("Run = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the replica did not stop")
+	}
+	got := names(out.events(t))
+	if !slices.Contains(got, "active_key_not_held") || slices.Contains(got, "process_stopped") {
+		t.Errorf("events %v", got)
+	}
+	if fake.keys.replicaCount() != 0 {
+		t.Errorf("%d replica records after the stop", fake.keys.replicaCount())
+	}
+}
+
+func TestBootstrapFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		fake *fakeDB
+		want string
+	}{
+		{"lock", &fakeDB{lockErr: errors.New("take the migration lock: boom")}, "take the migration lock: boom"},
+		{"keyring state", &fakeDB{keys: fakeKeyringStore{err: errors.New("boom")}}, "read the key canary: boom"},
+		{"organization", &fakeDB{org: fakeOrgStore{err: errors.New("boom")}},
+			"start-up step organization: read the organization: boom"},
+		{"replica record", &fakeDB{keys: fakeKeyringStore{recordErr: errors.New("boom")}}, "record the keys of replica"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Run(t.Context(), options(tt.fake, io.Discard, env()))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Run = %v, want %q", err, tt.want)
+			}
+			if tt.fake.closed != 1 {
+				t.Errorf("closed %d times", tt.fake.closed)
 			}
 		})
 	}
