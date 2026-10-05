@@ -73,14 +73,21 @@ HELM_CHECK_SECRET_ERROR := the master keys are never generated: create a Secret 
 KUBECONFORM_FLAGS := -strict -summary -kubernetes-version $(HELM_CHECK_KUBE_VERSION) -schema-location default \
 	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/4c8dc296d32b06d15ccde9668ff136c951f4d539/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
-# make compose-check needs the Docker CLI with the compose plugin, not a running daemon.
+# make compose-check needs the Docker CLI with the compose plugin, not a running daemon; make dev-db and make dev
+# need the daemon too.
 DOCKER ?= docker
+DEV_COMPOSE := deploy/dev/docker-compose.yml
+
+# make e2e runs one replica; E2E_REPLICAS=2 adds muster dev --replica beside muster dev.
+E2E_REPLICAS ?= 1
+# Flags of the load test, such as LOAD_TEST_FLAGS="-rate 50 -duration 1m".
+LOAD_TEST_FLAGS ?=
 
 .PHONY: help fmt lint lint-arch test test-race generate generate-check build licenses vulncheck mutation helm-check \
-	compose-check ci clean
+	compose-check dev-db dev e2e load-test ci clean
 
 help: ## List the targets
-	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "} /^[a-z0-9-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 fmt: $(GOLANGCI_LINT) $(WEB_DEPS) ## Format Go code (gofmt, goimports) and the SPA (oxfmt)
 	$(GOLANGCI_LINT) fmt
@@ -234,6 +241,19 @@ helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check
 compose-check: ## Check the compose example with docker compose config, without and with .env.example
 	$(DOCKER) compose -f deploy/compose/docker-compose.yml config --quiet
 	$(DOCKER) compose -f deploy/compose/docker-compose.yml --env-file deploy/compose/.env.example config --quiet
+
+dev-db: ## Start the development PostgreSQL on 127.0.0.1:55432
+	$(DOCKER) compose -f $(DEV_COMPOSE) up -d --wait
+
+dev: dev-db build ## Start the development PostgreSQL, build and run muster dev
+	./$(BIN)/muster dev
+
+e2e: build ## Run the end-to-end suite; E2E_REPLICAS=2 runs two replicas
+	MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) E2E_REPLICAS=$(E2E_REPLICAS) \
+		$(GO) test -tags e2e -count=1 -timeout 10m ./test/e2e/...
+
+load-test: ## Run the load test against a running muster dev
+	$(GO) run ./test/load $(LOAD_TEST_FLAGS)
 
 ci: lint lint-arch generate-check licenses test-race build ## Run the pull-request tier locally
 

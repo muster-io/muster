@@ -51,3 +51,178 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
       - run: make vulncheck
+
+  e2e-two-replicas:
+    name: e2e-two-replicas
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: make e2e E2E_REPLICAS=2
+
+  # The load test runs against muster dev with the fake servers, then against the compose example started with the
+  # build under test. The job summary shows both reports and the peak memory working set of the example's Muster and
+  # PostgreSQL containers; the memory is reported, never checked.
+  load-test:
+    name: load-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: start muster dev
+        run: |
+          set -euo pipefail
+          make dev-db
+          make build
+          ./bin/muster dev </dev/null >"$RUNNER_TEMP/muster-dev.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/muster-dev.pid"
+          deadline=$((SECONDS + 60))
+          for port in 19093 18065 18081; do
+            until curl -fs -o /dev/null "http://127.0.0.1:$port/_fake/requests"; do
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "the fake servers did not answer within 60 s"
+                cat "$RUNNER_TEMP/muster-dev.log"
+                exit 1
+              fi
+              sleep 1
+            done
+          done
+          cat "$RUNNER_TEMP/muster-dev.log"
+      - name: load test against muster dev
+        run: |
+          set -euo pipefail
+          make load-test 2>&1 | tee "$RUNNER_TEMP/load-dev.txt"
+      - name: stop muster dev
+        run: |
+          set -euo pipefail
+          pid=$(cat "$RUNNER_TEMP/muster-dev.pid")
+          kill -INT "$pid"
+          for _ in $(seq 20); do
+            if ! kill -0 "$pid" 2>/dev/null; then break; fi
+            sleep 0.5
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "muster dev did not stop within 10 s"
+            kill -KILL "$pid"
+          fi
+          rm "$RUNNER_TEMP/muster-dev.pid"
+          cat "$RUNNER_TEMP/muster-dev.log"
+      # bin/muster is the linux/amd64 build of this runner. Compose uses the image built here, because its pull policy
+      # pulls only a missing image. A bootstrap Admin is written into .env for the load test to sign in with.
+      - name: start the compose example with the build under test
+        run: |
+          set -euo pipefail
+          key=$(openssl rand -base64 32)
+          postgres_password=$(openssl rand -hex 16)
+          admin_password=$(openssl rand -hex 16)
+          echo "::add-mask::$key"
+          echo "::add-mask::$postgres_password"
+          echo "::add-mask::$admin_password"
+          sed -e "s|^MUSTER_SECRET_KEYS=.*|MUSTER_SECRET_KEYS=$key|" \
+            -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$postgres_password|" \
+            -e "s|^MUSTER_BOOTSTRAP_ADMIN_EMAIL=.*|MUSTER_BOOTSTRAP_ADMIN_EMAIL=admin@example.org|" \
+            -e "s|^MUSTER_BOOTSTRAP_ADMIN_PASSWORD=.*|MUSTER_BOOTSTRAP_ADMIN_PASSWORD=$admin_password|" \
+            deploy/compose/.env.example >deploy/compose/.env
+          compose=(docker compose -f deploy/compose/docker-compose.yml)
+          image=$("${compose[@]}" config --images | grep -m1 '^ghcr\.io/muster-io/muster:' || true)
+          if [ -z "$image" ]; then
+            echo "the compose example references no ghcr.io/muster-io/muster image"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/image/linux/amd64"
+          cp bin/muster "$RUNNER_TEMP/image/linux/amd64/muster"
+          docker build --platform linux/amd64 -f Dockerfile -t "$image" "$RUNNER_TEMP/image"
+          # Not --wait: until the server command exists, the muster container exits and restarts.
+          "${compose[@]}" up -d
+      - name: load test against the compose example
+        run: |
+          set -euo pipefail
+          compose=(docker compose -f deploy/compose/docker-compose.yml)
+          mapfile -t containers < <("${compose[@]}" ps -a --format '{{.Name}}' muster postgres)
+          stats="$RUNNER_TEMP/docker-stats.txt"
+          sample() {
+            docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' "${containers[@]}" >>"$stats" 2>/dev/null ||
+              true
+          }
+          sample
+          while :; do sample; sleep 1; done &
+          sampler=$!
+          trap 'kill "$sampler" 2>/dev/null || true' EXIT
+          admin_email=$(sed -n 's/^MUSTER_BOOTSTRAP_ADMIN_EMAIL=//p' deploy/compose/.env)
+          admin_password=$(sed -n 's/^MUSTER_BOOTSTRAP_ADMIN_PASSWORD=//p' deploy/compose/.env)
+          MUSTER_PUBLIC_URL=http://localhost:8080 MUSTER_INGEST_URL=http://localhost:8080 \
+            MUSTER_LOAD_ADMIN_EMAIL="$admin_email" MUSTER_LOAD_ADMIN_PASSWORD="$admin_password" \
+            make load-test 2>&1 | tee "$RUNNER_TEMP/load-compose.txt"
+          kill "$sampler" 2>/dev/null || true
+          sample
+      - name: write the job summary
+        if: always()
+        run: |
+          set -euo pipefail
+          stats="$RUNNER_TEMP/docker-stats.txt"
+          # The peak memory working set of a container in MiB, from docker stats samples such as "12.5MiB / 7.7GiB".
+          peak() {
+            awk -v name="$1" '
+              BEGIN {
+                mib["B"] = 1 / 1048576; mib["KiB"] = 1 / 1024; mib["MiB"] = 1; mib["GiB"] = 1024
+                mib["kB"] = 1e3 / 1048576; mib["MB"] = 1e6 / 1048576; mib["GB"] = 1e9 / 1048576
+              }
+              $1 == name { unit = $2; sub(/^[0-9.]+/, "", unit); v = $2 * mib[unit]; if (v > max) max = v }
+              END { printf "%.1f", max }' "$stats"
+          }
+          # shellcheck disable=SC2016 # the backticks are the Markdown code fence
+          report() {
+            printf '### %s\n\n' "$1"
+            if [ -f "$2" ]; then printf '```\n%s\n```\n\n' "$(cat "$2")"; else printf 'Did not run.\n\n'; fi
+          }
+          {
+            printf '## Load test\n\n'
+            report "Against muster dev with the fake servers" "$RUNNER_TEMP/load-dev.txt"
+            report "Against the compose example" "$RUNNER_TEMP/load-compose.txt"
+            if [ -s "$stats" ]; then
+              compose=(docker compose -f deploy/compose/docker-compose.yml)
+              muster=$(peak "$("${compose[@]}" ps -a --format '{{.Name}}' muster)")
+              postgres=$(peak "$("${compose[@]}" ps -a --format '{{.Name}}' postgres)")
+              sum=$(awk -v a="$muster" -v b="$postgres" 'BEGIN { printf "%.1f", a + b }')
+              printf '| Container | Peak memory working set |\n|---|---|\n'
+              printf '| Muster | %s MiB |\n| PostgreSQL | %s MiB |\n' "$muster" "$postgres"
+              printf '| Sum of the peaks | %s MiB |\n\n' "$sum"
+              printf 'The NFR-3 budget is 256 MB (244 MiB); the figures are reported, not checked.\n'
+            else
+              printf 'No memory samples of the compose example.\n'
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: clean up
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/muster-dev.pid" ]; then
+            kill -INT "$(cat "$RUNNER_TEMP/muster-dev.pid")" 2>/dev/null || true
+          fi
+          docker compose -f deploy/compose/docker-compose.yml down -v || true
+          docker compose -f deploy/dev/docker-compose.yml down -v || true

@@ -18,6 +18,8 @@ exclude:
     - ^cmd/
     - ^internal/fakes/
     - ^internal/tools/
+    # Test infrastructure: the end-to-end harness and the load test, a main package without unit tests.
+    - ^test/
     # Generated code.
     - /dbgen/
     - ^internal/api/gen/

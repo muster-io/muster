@@ -6,8 +6,10 @@
 version: "2"
 
 run:
+  # lint: the architecture lints; e2e: the end-to-end harness.
   build-tags:
     - lint
+    - e2e
   relative-path-mode: gomod
 
 linters:
@@ -105,6 +107,10 @@ linters:
       - linters: [forbidigo]
         text: "archlint rule 7"
         path: ^(internal/(logging|cli|devmode|tools)/|test/load/|cmd/muster-archlint/)
+      # Tests use made-up tokens, keys and passwords.
+      - linters: [gosec]
+        text: "G101:"
+        path: _test\.go$
 
 issues:
   max-issues-per-linter: 0
