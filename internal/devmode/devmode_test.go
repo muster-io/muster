@@ -7,10 +7,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"slices"
 	"strings"
@@ -18,7 +20,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/devmode/dbgen"
 	"github.com/muster-io/muster/internal/fakes/fakealertmanager"
 )
 
@@ -459,5 +465,137 @@ func TestOIDCDemo(t *testing.T) {
 	if d.IssuerURL != "http://"+devmode.OIDCAddr || d.DisplayName != "Dev IdP" || d.AllowNetwork != "127.0.0.0/8" ||
 		len(d.Mappings) != 2 || d.Mappings[0].Role != "admin" || d.Mappings[1].Group != "oncall" {
 		t.Errorf("OIDCDemo() = %+v", d)
+	}
+}
+
+// clockDB is runtime_state in memory: the offset of the development clock and the notifications sent.
+type clockDB struct {
+	mu       sync.Mutex
+	offset   *int64
+	notified []dbgen.NotifyDevClockParams
+	fail     map[string]error
+}
+
+func (c *clockDB) GetDevClockOffset(context.Context) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.fail["get"]; err != nil {
+		return 0, err
+	}
+	if c.offset == nil {
+		return 0, pgx.ErrNoRows
+	}
+	return *c.offset, nil
+}
+
+func (c *clockDB) AdvanceDevClock(_ context.Context, arg dbgen.AdvanceDevClockParams) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.fail["advance"]; err != nil {
+		return 0, err
+	}
+	if c.offset == nil {
+		c.offset = new(int64)
+	}
+	*c.offset += arg.Seconds
+	return *c.offset, nil
+}
+
+func (c *clockDB) NotifyDevClock(_ context.Context, arg dbgen.NotifyDevClockParams) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.fail["notify"]; err != nil {
+		return err
+	}
+	c.notified = append(c.notified, arg)
+	return nil
+}
+
+func (c *clockDB) InTx(_ context.Context, f func(devmode.ClockQueries) error) error { return f(c) }
+
+func clockAnswer(t *testing.T, h http.Handler, method, body string) (int, map[string]any) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), method, devmode.ClockPath, strings.NewReader(body)))
+	var out map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	return w.Code, out
+}
+
+// TestClock is the development clock of C-01.FR-13: an advance runs partition maintenance as at the new time, adds
+// to the stored offset, notifies the replicas and moves the business clock of this replica; Load takes the stored
+// offset, as another replica does on the notification; the real clock never moves.
+func TestClock(t *testing.T) {
+	store := &clockDB{fail: map[string]error{}}
+	_, business := clock.System()
+	var maintained []time.Time
+	changes := 0
+	c := devmode.NewClock(store, business, func(_ context.Context, at time.Time) error {
+		maintained = append(maintained, at)
+		return nil
+	}, func() { changes++ })
+	if err := c.Load(t.Context()); err != nil || business.Offset() != 0 || changes != 0 {
+		t.Fatalf("Load without a row = %v, offset %v", err, business.Offset())
+	}
+	h := c.Handler()
+	before := time.Now()
+	code, out := clockAnswer(t, h, http.MethodPost, `{"advance_seconds": 600}`)
+	if code != http.StatusOK || out["offset_seconds"] != 600.0 || business.Offset() != 10*time.Minute || changes != 1 {
+		t.Fatalf("advance = %d %v", code, out)
+	}
+	now, err := time.Parse(time.RFC3339Nano, out["now"].(string))
+	if err != nil || now.Sub(before) < 10*time.Minute || now.Sub(before) > 11*time.Minute {
+		t.Errorf("now %v", out["now"])
+	}
+	if len(maintained) != 1 || maintained[0].Sub(before) < 10*time.Minute ||
+		len(store.notified) != 1 || store.notified[0] != (dbgen.NotifyDevClockParams{Channel: devmode.ClockChannel,
+		Payload: "600"}) {
+		t.Errorf("maintained %v, notified %v", maintained, store.notified)
+	}
+	if (clock.Real{}).Now().Sub(before) > time.Minute {
+		t.Error("the real clock moved")
+	}
+	if code, out := clockAnswer(t, h, http.MethodGet, ""); code != http.StatusOK || out["offset_seconds"] != 600.0 ||
+		c.OffsetSeconds() != 600 {
+		t.Errorf("GET = %d %v", code, out)
+	}
+	// Another replica advanced the clock: Load takes the stored offset.
+	*store.offset = 900
+	if err := c.Load(t.Context()); err != nil || c.OffsetSeconds() != 900 || changes != 2 {
+		t.Errorf("Load = %v, offset %d, changes %d", err, c.OffsetSeconds(), changes)
+	}
+	if err := c.Load(t.Context()); err != nil || changes != 2 {
+		t.Errorf("an unchanged offset was announced: %d", changes)
+	}
+	for _, body := range []string{``, `{}`, `{"advance_seconds": -1}`, `{"advance_seconds": 1e12}`,
+		`{"advance_seconds": 1, "x": 2}`, `{"advance_seconds": "1"}`} {
+		if code, _ := clockAnswer(t, h, http.MethodPost, body); code != http.StatusBadRequest {
+			t.Errorf("POST %s = %d", body, code)
+		}
+	}
+	// An advance starts from the stored offset, which another replica may have moved.
+	*store.offset = 1200
+	maintained = nil
+	before = time.Now()
+	if code, out := clockAnswer(t, h, http.MethodPost, `{"advance_seconds": 60}`); code != http.StatusOK ||
+		out["offset_seconds"] != 1260.0 || len(maintained) != 1 || maintained[0].Sub(before) < 21*time.Minute {
+		t.Errorf("advance after another replica = %d %v, maintained %v", code, out, maintained)
+	}
+	for _, name := range []string{"advance", "notify", "get"} {
+		store.fail = map[string]error{name: errors.New("down")}
+		if code, _ := clockAnswer(t, h, http.MethodPost, `{"advance_seconds": 1}`); code != http.StatusInternalServerError {
+			t.Errorf("%s fails: %d", name, code)
+		}
+	}
+	store.fail = map[string]error{"get": errors.New("down")}
+	if err := c.Load(t.Context()); err == nil {
+		t.Error("Load: no error")
+	}
+	failing := devmode.NewClock(&clockDB{}, business, func(context.Context, time.Time) error {
+		return errors.New("no partitions")
+	}, nil)
+	if code, _ := clockAnswer(t, failing.Handler(), http.MethodPost, `{"advance_seconds": 1}`); code !=
+		http.StatusInternalServerError {
+		t.Errorf("failed maintenance = %d", code)
 	}
 }

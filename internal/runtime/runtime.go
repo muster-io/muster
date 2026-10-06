@@ -94,6 +94,9 @@ type database interface {
 	TokensStore() tokens.Store
 	IntegrationsStore() integrations.Store
 	IngestStore() ingest.Store
+	// ProcessStore serves Snapshot processing and the Alerts view; ClockStore the development clock.
+	ProcessStore() ingest.ProcessStore
+	ClockStore() devmode.ClockStore
 	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
 	SessionListenConn(ctx context.Context) (db.ListenConn, error)
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
@@ -140,6 +143,10 @@ func (d pgDatabase) TokensStore() tokens.Store { return tokens.NewStore(d.Pool) 
 func (d pgDatabase) IntegrationsStore() integrations.Store { return integrations.NewStore(d.Pool) }
 
 func (d pgDatabase) IngestStore() ingest.Store { return ingest.NewStore(d.Pool) }
+
+func (d pgDatabase) ProcessStore() ingest.ProcessStore { return ingest.NewProcessStore(d.Pool) }
+
+func (d pgDatabase) ClockStore() devmode.ClockStore { return devmode.NewClockStore(d.Pool) }
 
 func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
 	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
@@ -238,7 +245,10 @@ func ResetPassword(ctx context.Context, opts Options, r PasswordReset) (string, 
 	if err != nil {
 		return "", failed(ctx, log, fmt.Errorf("read the organization: %w", err))
 	}
-	clocks, _ := clock.System()
+	clocks, err := commandClocks(ctx, opts, d, log)
+	if err != nil {
+		return "", failed(ctx, log, err)
+	}
 	admin := users.NewAdmin(org.ID, d.AdminStore(), audit.NewWriter(log, clocks.Business), clocks.Business,
 		cfg.PublicURL)
 	return admin.ResetPassword(ctx, r.Actor, r.Login, string(r.Password))
@@ -271,9 +281,27 @@ func ResetTOTP(ctx context.Context, opts Options, r TOTPReset) (string, bool, er
 	if err != nil {
 		return "", false, failed(ctx, log, fmt.Errorf("read the organization: %w", err))
 	}
-	clocks, _ := clock.System()
+	clocks, err := commandClocks(ctx, opts, d, log)
+	if err != nil {
+		return "", false, failed(ctx, log, err)
+	}
 	factors := totp.New(org.ID, d.TOTPStore(), nil, audit.NewWriter(log, clocks.Business), clocks, nil)
 	return factors.ResetByLogin(ctx, r.Actor, r.Login)
+}
+
+// commandClocks are the clocks of a subcommand: under `muster dev` the business clock runs on the development clock
+// that the replicas of the database share, so that what the command writes agrees with them.
+func commandClocks(ctx context.Context, opts Options, d database, log *logging.Logger) (clock.Clocks, error) {
+	clocks, business := clock.System()
+	if !opts.Development {
+		return clocks, nil
+	}
+	dev := devmode.NewClock(d.ClockStore(), business, func(context.Context, time.Time) error { return nil }, nil)
+	if err := dev.Load(ctx); err != nil {
+		return clocks, err
+	}
+	log.Log(ctx, logging.DevClockLoaded, logging.F("offset_seconds", dev.OffsetSeconds()))
+	return clocks, nil
 }
 
 type process struct {
@@ -294,9 +322,13 @@ type process struct {
 	// orgID and signIn are the Organization and its OIDC service, for the background re-checks.
 	orgID  int64
 	signIn *oidc.Service
-	// integrations and snapshots serve ingestion on the ingest listener besides the API.
+	// integrations and snapshots serve ingestion on the ingest listener besides the API; worker processes the
+	// Stored Snapshots.
 	integrations *integrations.Service
 	snapshots    *ingest.Service
+	worker       *ingest.Worker
+	// devClock is the development clock of `muster dev`, nil outside development mode.
+	devClock *devmode.Clock
 }
 
 func setup(ctx context.Context, opts Options) (config.Config, *logging.Logger, error) {
@@ -358,9 +390,21 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 		d.Close()
 		return nil, failed(ctx, log, err)
 	}
-	clocks, _ := clock.System()
+	clocks, business := clock.System()
 	p := &process{opts: opts, cfg: cfg, log: log, db: d, clocks: clocks, keyring: k}
 	p.partitions = partitions.New(d.PartitionSession, clocks.Business, log)
+	p.worker = &ingest.Worker{Log: log, Real: clocks.Real}
+	if opts.Development {
+		// The development clock comes before anything reads the business clock, the partitions among them.
+		p.devClock = devmode.NewClock(d.ClockStore(), business, func(ctx context.Context, at time.Time) error {
+			return partitions.New(d.PartitionSession, clock.NewManual(at), log).Maintain(ctx)
+		}, p.worker.Wake)
+		if err := p.devClock.Load(ctx); err != nil {
+			d.Close()
+			return nil, failed(ctx, log, err)
+		}
+		log.Log(ctx, logging.DevClockLoaded, logging.F("offset_seconds", p.devClock.OffsetSeconds()))
+	}
 	if err := p.bootstrap(ctx); err != nil {
 		d.Close()
 		return nil, failed(ctx, log, err)
@@ -373,6 +417,7 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 		d.Close()
 		return nil, failed(ctx, log, err)
 	}
+	p.configureWorker()
 	return p, nil
 }
 
@@ -392,7 +437,7 @@ func (p *process) serve(ctx context.Context) error {
 			Auth: p.integrations, Snapshots: p.snapshots, Log: p.log, Real: p.clocks.Real,
 			TrustedProxies: p.cfg.TrustedProxies,
 		}),
-		Internal: server.Internal(health, metrics.Handler(p.keeper.Leading)),
+		Internal: p.internalHandler(health),
 	})
 	if err != nil {
 		p.stopReplica(ctx)
@@ -451,6 +496,18 @@ func (p *process) serve(ctx context.Context) error {
 	}
 	p.log.Log(ctx, logging.ProcessStopped)
 	return nil
+}
+
+// internalHandler serves health and metrics, and in development mode the development clock.
+func (p *process) internalHandler(health *server.Health) http.Handler {
+	internal := server.Internal(health, metrics.Handler(p.keeper.Leading))
+	if p.devClock == nil {
+		return internal
+	}
+	mux := http.NewServeMux()
+	mux.Handle(devmode.ClockPath, p.devClock.Handler())
+	mux.Handle("/", internal)
+	return mux
 }
 
 func listenerOf(err error) string {
@@ -512,6 +569,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		OrgID: orgID, Store: p.db.IntegrationsStore(), Audit: w, Business: p.clocks.Business, IngestURL: p.cfg.IngestURL,
 	})
 	p.snapshots = ingest.New(orgID, p.db.IngestStore(), p.clocks.Business)
+	alerts := ingest.NewAlertsView(orgID, p.db.ProcessStore(), p.clocks.Business)
 	if p.opts.Development {
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
 			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)
@@ -534,6 +592,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			tokens.NewLimiter(p.clocks.Real)),
 		Integrations:   p.integrations,
 		Snapshots:      p.snapshots,
+		Alerts:         alerts,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -555,6 +614,9 @@ func (p *process) newKeeper() *leader.Keeper {
 		},
 		Business: p.clocks.Business,
 		Log:      p.log,
+		IngestBacklog: func(ctx context.Context, orgs []int64) error {
+			return ingest.Backlog(ctx, p.db.ProcessStore(), orgs)
+		},
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
 			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},
@@ -605,7 +667,13 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 		p.notices.Run(ctx, noticeTicks)
 	})
 	// A hint about an Integration, maybe changed on another replica, refreshes muster_integration_info; so does a
-	// LISTEN that is back after a loss, which may have missed hints.
+	// LISTEN that is back after a loss, which may have missed hints. A stored Snapshot wakes the processing worker,
+	// and in development mode a change of the development clock reloads it; each LISTEN in place does both, in case
+	// a notification was missed.
+	p.listener.Listen(ingest.SnapshotChannel, func(string) { p.worker.Wake() })
+	if p.devClock != nil {
+		p.listener.Listen(devmode.ClockChannel, func(string) { p.loadDevClock(ctx) })
+	}
 	wg.Go(func() {
 		p.listener.Run(ctx, func(h db.Hint) {
 			p.hub.Receive(h)
@@ -616,9 +684,12 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 			p.hub.Listening(restored)
 			if restored {
 				p.integrations.InfoChanged()
+				p.loadDevClock(ctx)
 			}
+			p.worker.Wake()
 		})
 	})
+	wg.Go(func() { p.worker.Run(ctx) })
 	wg.Go(func() { p.rechecker().Run(ctx) })
 	wg.Go(func() { p.integrations.RunTouches(ctx) })
 	wg.Go(func() {
@@ -637,6 +708,28 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 		case <-wait.Done():
 		}
 	}
+}
+
+// loadDevClock reads the development clock again after a change on any replica.
+func (p *process) loadDevClock(ctx context.Context) {
+	if p.devClock == nil {
+		return
+	}
+	if err := p.devClock.Load(ctx); err != nil {
+		p.log.Log(ctx, logging.DevClockLoadFailed, logging.F("error", err.Error()))
+		return
+	}
+	p.log.Log(ctx, logging.DevClockLoaded, logging.F("offset_seconds", p.devClock.OffsetSeconds()))
+}
+
+// configureWorker completes the processing worker of this replica (C-06.FR-1) over the Organization, with leases held
+// by this replica's id, once both are known and before anything serves or runs that could wake it.
+func (p *process) configureWorker() {
+	processor := ingest.NewProcessor(ingest.ProcessorConfig{OrgID: p.orgID, Store: p.db.ProcessStore(),
+		Business: p.clocks.Business, Log: p.log,
+		Lease: db.Lease{Owner: p.replica.ID(), Duration: ingest.Lease, Clocks: p.clocks}})
+	p.worker.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
+	p.worker.Processor = func(orgID int64) (*ingest.Processor, bool) { return processor, orgID == p.orgID }
 }
 
 // rechecker is the worker of the background re-checks of OIDC users on this replica (C-03.FR-30): it claims the due

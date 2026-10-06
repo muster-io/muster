@@ -151,6 +151,11 @@ type StoredSnapshots interface {
 	Get(ctx context.Context, publicID string) (ingest.Snapshot, error)
 }
 
+// Alerts is what the API needs of the Alerts view of internal/ingest.
+type Alerts interface {
+	List(ctx context.Context, f ingest.AlertFilter) (ingest.AlertPage, error)
+}
+
 // Config is what the API serves with.
 type Config struct {
 	Sessions     Sessions
@@ -165,6 +170,7 @@ type Config struct {
 	Tokens       Tokens
 	Integrations Integrations
 	Snapshots    StoredSnapshots
+	Alerts       Alerts
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -188,6 +194,7 @@ type Server struct {
 	tokens         Tokens
 	integrations   Integrations
 	snapshots      StoredSnapshots
+	alerts         Alerts
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -218,6 +225,7 @@ var implemented = map[string]bool{
 	"ListIntegrations": true, "CreateIntegration": true, "GetIntegration": true, "UpdateIntegration": true,
 	"DeleteIntegration": true, "ListIntegrationTokens": true, "CreateIntegrationToken": true,
 	"RevokeIntegrationToken": true, "ListStoredSnapshots": true, "GetStoredSnapshot": true,
+	"ListIntegrationAlerts": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -245,7 +253,7 @@ func New(cfg Config) (*Server, error) {
 	s := &Server{
 		sessions: cfg.Sessions, users: cfg.Users, admin: cfg.Admin, auditLog: cfg.AuditLog, totp: cfg.TOTP,
 		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, oidc: cfg.OIDC, tokens: cfg.Tokens,
-		integrations: cfg.Integrations, snapshots: cfg.Snapshots, trustedProxies: cfg.TrustedProxies, log: cfg.Log,
+		integrations: cfg.Integrations, snapshots: cfg.Snapshots, alerts: cfg.Alerts, trustedProxies: cfg.TrustedProxies, log: cfg.Log,
 		real:   cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}

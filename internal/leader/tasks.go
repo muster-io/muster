@@ -19,6 +19,9 @@ import (
 // pruning.
 const MaintenanceInterval = time.Hour
 
+// BacklogInterval is how often the Leader counts the pending Stored Snapshots for muster_ingest_backlog.
+const BacklogInterval = 15 * time.Second
+
 // PruneBatch is the most rows one delete of short-lived pruning removes, so that a large backlog is deleted in short
 // statements that hold their row locks briefly.
 const PruneBatch = 1000
@@ -53,6 +56,9 @@ type Work struct {
 	PruneUsers []PruneTable
 	// PruneOIDC are the short-lived tables of internal/oidc: the OIDC redirects in flight.
 	PruneOIDC []PruneTable
+
+	// IngestBacklog sets muster_ingest_backlog from the pending Stored Snapshots of the Organizations.
+	IngestBacklog func(ctx context.Context, orgs []int64) error
 }
 
 // PruneTable is one short-lived table of short-lived pruning.
@@ -108,8 +114,9 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 }
 
 // Tasks returns the closed list of Leader tasks (ADR-0007): partition maintenance and retention, the alive mark, the
-// pruning of replica records and the pruning of short-lived state. Later capabilities add theirs here: the Heartbeat lost and Stale checks, Telegram
-// polling, the outgoing heartbeat and the OIDC client secret expiry check. The Keeper calls the result at every
+// pruning of replica records, the pruning of short-lived state and the ingestion backlog. Later capabilities add
+// theirs here: the Heartbeat lost and Stale checks, Telegram polling, the outgoing heartbeat and the OIDC client secret
+// expiry check. The Keeper calls the result at every
 // leadership, so each one starts with a takeover.
 func Tasks(w Work) func() []Task {
 	return func() []Task {
@@ -131,6 +138,19 @@ func Tasks(w Work) func() []Task {
 			}},
 			{Name: "replica_pruning", Every: MaintenanceInterval, Run: w.PruneReplicas},
 			{Name: "short_lived_pruning", Every: MaintenanceInterval, Run: w.pruneShortLived},
+			{Name: "ingest_backlog", Every: BacklogInterval, Run: w.ingestBacklog},
 		}
 	}
+}
+
+// ingestBacklog counts the pending Stored Snapshots of every Organization; counting twice sets the same value.
+func (w Work) ingestBacklog(ctx context.Context) error {
+	if w.IngestBacklog == nil {
+		return nil
+	}
+	orgs, err := w.Organizations(ctx)
+	if err != nil {
+		return fmt.Errorf("list the organizations to count the backlog of: %w", err)
+	}
+	return w.IngestBacklog(ctx, orgs)
 }
