@@ -16,12 +16,17 @@ import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as TotpEnrolmentRouteImport } from './routes/totp-enrolment'
 import { Route as AdminAuditLogRouteImport } from './routes/admin.audit-log'
 import { Route as AdminOidcRouteImport } from './routes/admin.oidc'
+import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
+import { Route as IntegrationsNewRouteImport } from './routes/integrations.new'
 import { Route as SignInTotpRouteImport } from './routes/sign-in.totp'
 import { Route as AdminOrganizationSecurityRouteImport } from './routes/admin.organization.security'
 import { Route as AdminServiceAccountsIndexRouteImport } from './routes/admin.service-accounts.index'
 import { Route as AdminServiceAccountsServiceAccountIdRouteImport } from './routes/admin.service-accounts.$serviceAccountId'
 import { Route as AdminUsersIndexRouteImport } from './routes/admin.users.index'
 import { Route as AdminUsersUserIdRouteImport } from './routes/admin.users.$userId'
+import { Route as IntegrationsIntegrationIdIndexRouteImport } from './routes/integrations.$integrationId.index'
+import { Route as IntegrationsIntegrationIdEditRouteImport } from './routes/integrations.$integrationId.edit'
+import { Route as IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRouteImport } from './routes/integrations.$integrationId.snapshots.$storedSnapshotId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -58,6 +63,16 @@ const AdminOidcRoute = AdminOidcRouteImport.update({
   path: '/admin/oidc',
   getParentRoute: () => rootRouteImport,
 } as any)
+const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
+  id: '/integrations/',
+  path: '/integrations/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IntegrationsNewRoute = IntegrationsNewRouteImport.update({
+  id: '/integrations/new',
+  path: '/integrations/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignInTotpRoute = SignInTotpRouteImport.update({
   id: '/totp',
   path: '/totp',
@@ -91,6 +106,24 @@ const AdminUsersUserIdRoute = AdminUsersUserIdRouteImport.update({
   path: '/admin/users/$userId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const IntegrationsIntegrationIdIndexRoute =
+  IntegrationsIntegrationIdIndexRouteImport.update({
+    id: '/integrations/$integrationId/',
+    path: '/integrations/$integrationId/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const IntegrationsIntegrationIdEditRoute =
+  IntegrationsIntegrationIdEditRouteImport.update({
+    id: '/integrations/$integrationId/edit',
+    path: '/integrations/$integrationId/edit',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute =
+  IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRouteImport.update({
+    id: '/integrations/$integrationId/snapshots/$storedSnapshotId',
+    path: '/integrations/$integrationId/snapshots/$storedSnapshotId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -100,12 +133,17 @@ export interface FileRoutesByFullPath {
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
+  '/integrations/new': typeof IntegrationsNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
+  '/integrations/': typeof IntegrationsIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
   '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
+  '/integrations/$integrationId/edit': typeof IntegrationsIntegrationIdEditRoute
   '/admin/service-accounts/': typeof AdminServiceAccountsIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
+  '/integrations/$integrationId/': typeof IntegrationsIntegrationIdIndexRoute
+  '/integrations/$integrationId/snapshots/$storedSnapshotId': typeof IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -115,12 +153,17 @@ export interface FileRoutesByTo {
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
+  '/integrations/new': typeof IntegrationsNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
+  '/integrations': typeof IntegrationsIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
   '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
+  '/integrations/$integrationId/edit': typeof IntegrationsIntegrationIdEditRoute
   '/admin/service-accounts': typeof AdminServiceAccountsIndexRoute
   '/admin/users': typeof AdminUsersIndexRoute
+  '/integrations/$integrationId': typeof IntegrationsIntegrationIdIndexRoute
+  '/integrations/$integrationId/snapshots/$storedSnapshotId': typeof IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -131,12 +174,17 @@ export interface FileRoutesById {
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
+  '/integrations/new': typeof IntegrationsNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
+  '/integrations/': typeof IntegrationsIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
   '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
+  '/integrations/$integrationId/edit': typeof IntegrationsIntegrationIdEditRoute
   '/admin/service-accounts/': typeof AdminServiceAccountsIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
+  '/integrations/$integrationId/': typeof IntegrationsIntegrationIdIndexRoute
+  '/integrations/$integrationId/snapshots/$storedSnapshotId': typeof IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -148,12 +196,17 @@ export interface FileRouteTypes {
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
+    | '/integrations/new'
     | '/sign-in/totp'
+    | '/integrations/'
     | '/admin/organization/security'
     | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
+    | '/integrations/$integrationId/edit'
     | '/admin/service-accounts/'
     | '/admin/users/'
+    | '/integrations/$integrationId/'
+    | '/integrations/$integrationId/snapshots/$storedSnapshotId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -163,12 +216,17 @@ export interface FileRouteTypes {
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
+    | '/integrations/new'
     | '/sign-in/totp'
+    | '/integrations'
     | '/admin/organization/security'
     | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
+    | '/integrations/$integrationId/edit'
     | '/admin/service-accounts'
     | '/admin/users'
+    | '/integrations/$integrationId'
+    | '/integrations/$integrationId/snapshots/$storedSnapshotId'
   id:
     | '__root__'
     | '/'
@@ -178,12 +236,17 @@ export interface FileRouteTypes {
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
+    | '/integrations/new'
     | '/sign-in/totp'
+    | '/integrations/'
     | '/admin/organization/security'
     | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
+    | '/integrations/$integrationId/edit'
     | '/admin/service-accounts/'
     | '/admin/users/'
+    | '/integrations/$integrationId/'
+    | '/integrations/$integrationId/snapshots/$storedSnapshotId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -194,11 +257,16 @@ export interface RootRouteChildren {
   TotpEnrolmentRoute: typeof TotpEnrolmentRoute
   AdminAuditLogRoute: typeof AdminAuditLogRoute
   AdminOidcRoute: typeof AdminOidcRoute
+  IntegrationsNewRoute: typeof IntegrationsNewRoute
+  IntegrationsIndexRoute: typeof IntegrationsIndexRoute
   AdminOrganizationSecurityRoute: typeof AdminOrganizationSecurityRoute
   AdminServiceAccountsServiceAccountIdRoute: typeof AdminServiceAccountsServiceAccountIdRoute
   AdminUsersUserIdRoute: typeof AdminUsersUserIdRoute
+  IntegrationsIntegrationIdEditRoute: typeof IntegrationsIntegrationIdEditRoute
   AdminServiceAccountsIndexRoute: typeof AdminServiceAccountsIndexRoute
   AdminUsersIndexRoute: typeof AdminUsersIndexRoute
+  IntegrationsIntegrationIdIndexRoute: typeof IntegrationsIntegrationIdIndexRoute
+  IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute: typeof IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -252,6 +320,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminOidcRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/integrations/': {
+      id: '/integrations/'
+      path: '/integrations'
+      fullPath: '/integrations/'
+      preLoaderRoute: typeof IntegrationsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/integrations/new': {
+      id: '/integrations/new'
+      path: '/integrations/new'
+      fullPath: '/integrations/new'
+      preLoaderRoute: typeof IntegrationsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-in/totp': {
       id: '/sign-in/totp'
       path: '/totp'
@@ -294,6 +376,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersUserIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/integrations/$integrationId/': {
+      id: '/integrations/$integrationId/'
+      path: '/integrations/$integrationId'
+      fullPath: '/integrations/$integrationId/'
+      preLoaderRoute: typeof IntegrationsIntegrationIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/integrations/$integrationId/edit': {
+      id: '/integrations/$integrationId/edit'
+      path: '/integrations/$integrationId/edit'
+      fullPath: '/integrations/$integrationId/edit'
+      preLoaderRoute: typeof IntegrationsIntegrationIdEditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/integrations/$integrationId/snapshots/$storedSnapshotId': {
+      id: '/integrations/$integrationId/snapshots/$storedSnapshotId'
+      path: '/integrations/$integrationId/snapshots/$storedSnapshotId'
+      fullPath: '/integrations/$integrationId/snapshots/$storedSnapshotId'
+      preLoaderRoute: typeof IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -316,12 +419,18 @@ const rootRouteChildren: RootRouteChildren = {
   TotpEnrolmentRoute: TotpEnrolmentRoute,
   AdminAuditLogRoute: AdminAuditLogRoute,
   AdminOidcRoute: AdminOidcRoute,
+  IntegrationsNewRoute: IntegrationsNewRoute,
+  IntegrationsIndexRoute: IntegrationsIndexRoute,
   AdminOrganizationSecurityRoute: AdminOrganizationSecurityRoute,
   AdminServiceAccountsServiceAccountIdRoute:
     AdminServiceAccountsServiceAccountIdRoute,
   AdminUsersUserIdRoute: AdminUsersUserIdRoute,
+  IntegrationsIntegrationIdEditRoute: IntegrationsIntegrationIdEditRoute,
   AdminServiceAccountsIndexRoute: AdminServiceAccountsIndexRoute,
   AdminUsersIndexRoute: AdminUsersIndexRoute,
+  IntegrationsIntegrationIdIndexRoute: IntegrationsIntegrationIdIndexRoute,
+  IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute:
+    IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

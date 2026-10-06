@@ -110,9 +110,96 @@
     "placeholder": "Alert Groups will appear here.",
     "title": "Welcome, {{name}}"
   },
+  "integrations": {
+    "connectionMode": {
+      "precision": "An Alert that Alertmanager resolves closes at once. An Alert that Alertmanager stops listing is Gone after up to two repeat intervals, never sooner than 5 minutes, and Stale after three learned repeat intervals.",
+      "webhookOnly": "Webhook only"
+    },
+    "create": {
+      "start": "Create integration",
+      "submit": "Create",
+      "title": "Create integration"
+    },
+    "delete": {
+      "action": "Delete",
+      "snapshotsKept_one": "Its Stored Snapshots are kept for {{count}} day.",
+      "snapshotsKept_other": "Its Stored Snapshots are kept for {{count}} days.",
+      "title": "Delete integration {{name}}?",
+      "tokens": "Its tokens stop working at once."
+    },
+    "edit": {
+      "title": "Edit integration"
+    },
+    "empty": "No integrations yet.",
+    "errors": {
+      "builtin": "The built-in integration cannot be changed.",
+      "duplicateWindow": "Enter a whole number of seconds, at least 1.",
+      "nameTaken": "Another integration has this name.",
+      "stale": "Someone else changed this integration. Reload to see the changes."
+    },
+    "fields": {
+      "connectionMode": "Connection mode",
+      "description": "Description",
+      "duplicateWindow": "Duplicate window",
+      "ingestUrl": "Ingestion URL",
+      "lastSnapshot": "Last Snapshot",
+      "name": "Name",
+      "staticLabels": "Static labels"
+    },
+    "form": {
+      "duplicateWindowHint": "Snapshots of the same Alertmanager group that arrive this close together count as one.",
+      "nameHint": "Name it after the Alertmanager cluster, such as \"prod-eu\".",
+      "secondsUnit": "seconds",
+      "staticLabelsHint": "Added to every Alert of this integration before routing, such as cluster=prod-eu."
+    },
+    "hint": "Each Alertmanager cluster sends its alerts to Muster through an integration of its own.",
+    "never": "never",
+    "noStaticLabels": "None",
+    "page": {
+      "details": "Details",
+      "edit": "Edit",
+      "lastSnapshot": "Last Snapshot: {{time}}",
+      "lastSnapshotNever": "Last Snapshot: never",
+      "snapshotCount": "Snapshots received: {{number}}",
+      "snapshots": "Snapshots",
+      "title": "Integration"
+    },
+    "seconds_one": "{{count}} second",
+    "seconds_other": "{{count}} seconds",
+    "title": "Integrations",
+    "tokens": {
+      "create": {
+        "hint": "The token lets Alertmanager send to {{name}} and nothing else. Its value and the Alertmanager configuration are shown once.",
+        "nameHint": "Optional; tells tokens apart during a rotation, such as \"rotation-1\"."
+      },
+      "created": {
+        "hint": "Add the receiver and the route to the Alertmanager configuration now.",
+        "snippet": "Alertmanager configuration"
+      },
+      "empty": "This integration has no tokens.",
+      "hint": "Alertmanager sends with one of these tokens. To rotate, create a second token, switch Alertmanager to it, then revoke the first.",
+      "revokeConfirm": "Alertmanager stops being able to send with this token at once.",
+      "title": "Tokens",
+      "unnamed": "Unnamed token"
+    }
+  },
+  "labels": {
+    "add": "Add label",
+    "errors": {
+      "duplicate": "This label name is already used.",
+      "invalidName": "A label name starts with a letter or an underscore and has only letters, digits and underscores."
+    },
+    "namePlaceholder": "cluster",
+    "nameRow": "Label name {{row}}",
+    "remove": "Remove label {{name}}",
+    "removeEmpty": "Remove this label",
+    "valuePlaceholder": "prod-eu",
+    "valueRow": "Label value {{row}}"
+  },
   "nav": {
     "auditLog": "Audit log",
     "home": "Home",
+    "integrations": "Integrations",
     "label": "Main",
     "oidc": "OIDC",
     "profile": "Profile",
@@ -379,6 +466,49 @@
     "submit": "Sign in",
     "title": "Sign in to Muster",
     "withProvider": "Sign in with {{provider}}"
+  },
+  "snapshots": {
+    "bytes": "{{size}} B",
+    "columns": {
+      "alerts": "Alerts",
+      "groupKey": "Group key",
+      "received": "Received",
+      "size": "Size",
+      "state": "State"
+    },
+    "empty": "No Stored Snapshots yet.",
+    "emptyFiltered": "No Stored Snapshots match these filters.",
+    "filters": {
+      "anyState": "All states",
+      "clear": "Clear filters",
+      "from": "From",
+      "label": "Stored Snapshot filters",
+      "state": "State",
+      "to": "To"
+    },
+    "hint": "Snapshots exactly as Alertmanager sent them, newest first.",
+    "state": {
+      "failed": "Failed",
+      "failedWith": "Failed: {{error}}",
+      "pending": "Pending",
+      "processed": "Processed"
+    },
+    "title": "Stored Snapshots",
+    "viewer": {
+      "base64": "The body is not valid UTF-8 and is shown as base64.",
+      "body": "Body",
+      "contentType": "Content type",
+      "formatJson": "Format JSON",
+      "formattedNote": "Formatted for reading: numbers, escapes and repeated keys may differ from the body as received, which \"Copy\" copies.",
+      "noContentType": "none",
+      "notJson": "The body is not valid JSON; it is shown as received.",
+      "partial_one": "Showing the first {{shown}} of {{total}} character.",
+      "partial_other": "Showing the first {{shown}} of {{total}} characters.",
+      "processed": "Processed",
+      "received": "Received {{time}}",
+      "showAll": "Show all",
+      "title": "Stored Snapshot"
+    }
   },
   "table": {
     "loadMore": "Load more"
