@@ -234,6 +234,8 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
   `test`, `refactor`, `perf` or `chore`. Say what changed; no story or phase IDs. The story's Notes suggest a message.
 - No AI attribution: no `Co-Authored-By` trailers for tools, no "Generated with" lines, in commits or pull requests.
 - Pull requests are squash-merged, so the title is the commit message, and release-please writes the changelog from it.
+  Nothing is released before L1 is complete: never merge the release pull request. Each commit on `master` is
+  published as the development image `ghcr.io/muster-io/muster:sha-<7 hex digits>` (and `edge` for the newest).
 - The pull request body has `Closes #<issue>`, `Story: S-NNN`, a table with every `acceptance` statement and its
   evidence (test name, command with output, Playwright trace or screenshot), the output of `verify`, and every change
   to the story file with its reason.
