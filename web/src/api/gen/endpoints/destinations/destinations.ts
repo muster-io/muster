@@ -64,7 +64,10 @@ import type {
   UnprocessableResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -82,40 +85,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
-
-export type listDestinationsResponse200 = {
-  data: DestinationList
-  status: 200
-}
-
-export type listDestinationsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listDestinationsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listDestinationsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listDestinationsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listDestinationsResponseSuccess = (listDestinationsResponse200) & {
-  headers: Headers;
-};
-export type listDestinationsResponseError = (listDestinationsResponse400 | listDestinationsResponse401 | listDestinationsResponse403 | listDestinationsResponse429) & {
-  headers: Headers;
-};
-
-export type listDestinationsResponse = (listDestinationsResponseSuccess | listDestinationsResponseError)
 
 export const getListDestinationsUrl = (params?: ListDestinationsParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -136,23 +105,16 @@ export const getListDestinationsUrl = (params?: ListDestinationsParams,) => {
  * All types, with health. Outgoing webhook URL and header templates are shown with Secret references only.
  * @summary List destinations
  */
-export const listDestinations = async (params?: ListDestinationsParams, options?: RequestInit): Promise<listDestinationsResponse> => {
+export const listDestinations = async (params?: ListDestinationsParams, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationList> => {
 
-  const res = await fetch(getListDestinationsUrl(params),
+  return apiFetch<DestinationList>(getListDestinationsUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listDestinationsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listDestinationsResponse
-}
+);}
 
 
 
@@ -165,16 +127,16 @@ export const getListDestinationsQueryKey = (params?: ListDestinationsParams,) =>
     }
 
 
-export const getListDestinationsQueryOptions = <TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListDestinationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinations>>, TError, TData>>, fetch?: RequestInit}
+export const getListDestinationsQueryOptions = <TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListDestinationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinations>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListDestinationsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDestinations>>> = ({ signal }) => listDestinations(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDestinations>>> = ({ signal }) => listDestinations(params, { signal, ...requestOptions });
 
 
 
@@ -194,7 +156,7 @@ export function useListDestinations<TData = Awaited<ReturnType<typeof listDestin
           TError,
           Awaited<ReturnType<typeof listDestinations>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListDestinations<TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -204,11 +166,11 @@ export function useListDestinations<TData = Awaited<ReturnType<typeof listDestin
           TError,
           Awaited<ReturnType<typeof listDestinations>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListDestinations<TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListDestinationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinations>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListDestinationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinations>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -216,7 +178,7 @@ export function useListDestinations<TData = Awaited<ReturnType<typeof listDestin
  */
 
 export function useListDestinations<TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListDestinationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinations>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListDestinationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinations>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -232,50 +194,6 @@ export function useListDestinations<TData = Awaited<ReturnType<typeof listDestin
 
 
 
-export type createDestinationResponse201 = {
-  data: DestinationCreated
-  status: 201
-}
-
-export type createDestinationResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createDestinationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createDestinationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createDestinationResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type createDestinationResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type createDestinationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createDestinationResponseSuccess = (createDestinationResponse201) & {
-  headers: Headers;
-};
-export type createDestinationResponseError = (createDestinationResponse400 | createDestinationResponse401 | createDestinationResponse403 | createDestinationResponse409 | createDestinationResponse422 | createDestinationResponse429) & {
-  headers: Headers;
-};
-
-export type createDestinationResponse = (createDestinationResponseSuccess | createDestinationResponseError)
-
 export const getCreateDestinationUrl = () => {
 
 
@@ -288,7 +206,7 @@ export const getCreateDestinationUrl = () => {
  * `type` selects Mattermost, Telegram or outgoing webhook. Saving a Mattermost or Telegram Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
  * @summary Create Destination
  */
-export const createDestination = async (destinationInput: DestinationInput, options?: RequestInit): Promise<createDestinationResponse> => {
+export const createDestination = async (destinationInput: DestinationInput, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationCreated> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -304,21 +222,14 @@ export const createDestination = async (destinationInput: DestinationInput, opti
     }
     return headers;
   };
-const res = await fetch(getCreateDestinationUrl(),
+return apiFetch<DestinationCreated>(getCreateDestinationUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(destinationInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createDestinationResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createDestinationResponse
-}
+);}
 
 
 
@@ -327,15 +238,15 @@ const res = await fetch(getCreateDestinationUrl(),
 export const getCreateDestinationMutationKey = () => ['createDestination'] as const;
 
 export const getCreateDestinationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDestination>>, TError,CreateDestinationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDestination>>, TError,CreateDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createDestination>>, TError,CreateDestinationMutationVariables, TContext> => {
 
 const mutationKey = getCreateDestinationMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -343,7 +254,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createDestination>>, CreateDestinationMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  createDestination(data,fetchOptions)
+          return  createDestination(data,requestOptions)
         }
 
 
@@ -362,7 +273,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Create Destination
  */
 export const useCreateDestination = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDestination>>, TError,CreateDestinationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDestination>>, TError,CreateDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createDestination>>,
         TError,
@@ -371,41 +282,7 @@ export const useCreateDestination = <TError = BadRequestResponse | UnauthorizedR
       > => {
       return useMutation(getCreateDestinationMutationOptions(options), queryClient);
     }
-    export type getDestinationResponse200 = {
-  data: Destination
-  status: 200
-}
-
-export type getDestinationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getDestinationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getDestinationResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getDestinationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getDestinationResponseSuccess = (getDestinationResponse200) & {
-  headers: Headers;
-};
-export type getDestinationResponseError = (getDestinationResponse401 | getDestinationResponse403 | getDestinationResponse404 | getDestinationResponse429) & {
-  headers: Headers;
-};
-
-export type getDestinationResponse = (getDestinationResponseSuccess | getDestinationResponseError)
-
-export const getGetDestinationUrl = (destinationId: string,) => {
+    export const getGetDestinationUrl = (destinationId: string,) => {
 
 
 
@@ -416,23 +293,16 @@ export const getGetDestinationUrl = (destinationId: string,) => {
 /**
  * @summary Read Destination
  */
-export const getDestination = async (destinationId: string, options?: RequestInit): Promise<getDestinationResponse> => {
+export const getDestination = async (destinationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<Destination> => {
 
-  const res = await fetch(getGetDestinationUrl(destinationId),
+  return apiFetch<Destination>(getGetDestinationUrl(destinationId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getDestinationResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getDestinationResponse
-}
+);}
 
 
 
@@ -445,16 +315,16 @@ export const getGetDestinationQueryKey = (destinationId: string,) => {
     }
 
 
-export const getGetDestinationQueryOptions = <TData = Awaited<ReturnType<typeof getDestination>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDestination>>, TError, TData>>, fetch?: RequestInit}
+export const getGetDestinationQueryOptions = <TData = Awaited<ReturnType<typeof getDestination>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDestination>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetDestinationQueryKey(destinationId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDestination>>> = ({ signal }) => getDestination(destinationId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDestination>>> = ({ signal }) => getDestination(destinationId, { signal, ...requestOptions });
 
 
 
@@ -474,7 +344,7 @@ export function useGetDestination<TData = Awaited<ReturnType<typeof getDestinati
           TError,
           Awaited<ReturnType<typeof getDestination>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetDestination<TData = Awaited<ReturnType<typeof getDestination>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -484,11 +354,11 @@ export function useGetDestination<TData = Awaited<ReturnType<typeof getDestinati
           TError,
           Awaited<ReturnType<typeof getDestination>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetDestination<TData = Awaited<ReturnType<typeof getDestination>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDestination>>, TError, TData>>, fetch?: RequestInit}
+ destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDestination>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -496,7 +366,7 @@ export function useGetDestination<TData = Awaited<ReturnType<typeof getDestinati
  */
 
 export function useGetDestination<TData = Awaited<ReturnType<typeof getDestination>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDestination>>, TError, TData>>, fetch?: RequestInit}
+ destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getDestination>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -512,65 +382,6 @@ export function useGetDestination<TData = Awaited<ReturnType<typeof getDestinati
 
 
 
-export type updateDestinationResponse200 = {
-  data: Destination
-  status: 200
-}
-
-export type updateDestinationResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type updateDestinationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type updateDestinationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type updateDestinationResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type updateDestinationResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type updateDestinationResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type updateDestinationResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type updateDestinationResponse428 = {
-  data: PreconditionRequiredResponse
-  status: 428
-}
-
-export type updateDestinationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type updateDestinationResponseSuccess = (updateDestinationResponse200) & {
-  headers: Headers;
-};
-export type updateDestinationResponseError = (updateDestinationResponse400 | updateDestinationResponse401 | updateDestinationResponse403 | updateDestinationResponse404 | updateDestinationResponse409 | updateDestinationResponse412 | updateDestinationResponse422 | updateDestinationResponse428 | updateDestinationResponse429) & {
-  headers: Headers;
-};
-
-export type updateDestinationResponse = (updateDestinationResponseSuccess | updateDestinationResponseError)
-
 export const getUpdateDestinationUrl = (destinationId: string,) => {
 
 
@@ -584,7 +395,7 @@ export const getUpdateDestinationUrl = (destinationId: string,) => {
  * @summary Update Destination
  */
 export const updateDestination = async (destinationId: string,
-    destinationInput: DestinationInput, options?: RequestInit): Promise<updateDestinationResponse> => {
+    destinationInput: DestinationInput, options?: Parameters<typeof apiFetch>[1]): Promise<Destination> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -600,21 +411,14 @@ export const updateDestination = async (destinationId: string,
     }
     return headers;
   };
-const res = await fetch(getUpdateDestinationUrl(destinationId),
+return apiFetch<Destination>(getUpdateDestinationUrl(destinationId),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(destinationInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: updateDestinationResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as updateDestinationResponse
-}
+);}
 
 
 
@@ -623,15 +427,15 @@ const res = await fetch(getUpdateDestinationUrl(destinationId),
 export const getUpdateDestinationMutationKey = () => ['updateDestination'] as const;
 
 export const getUpdateDestinationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDestination>>, TError,UpdateDestinationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDestination>>, TError,UpdateDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateDestination>>, TError,UpdateDestinationMutationVariables, TContext> => {
 
 const mutationKey = getUpdateDestinationMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -639,7 +443,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateDestination>>, UpdateDestinationMutationVariables> = (props) => {
           const {destinationId,data} = props ?? {};
 
-          return  updateDestination(destinationId,data,fetchOptions)
+          return  updateDestination(destinationId,data,requestOptions)
         }
 
 
@@ -658,7 +462,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Update Destination
  */
 export const useUpdateDestination = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDestination>>, TError,UpdateDestinationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDestination>>, TError,UpdateDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateDestination>>,
         TError,
@@ -667,46 +471,7 @@ export const useUpdateDestination = <TError = BadRequestResponse | UnauthorizedR
       > => {
       return useMutation(getUpdateDestinationMutationOptions(options), queryClient);
     }
-    export type deleteDestinationResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteDestinationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteDestinationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteDestinationResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type deleteDestinationResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type deleteDestinationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteDestinationResponseSuccess = (deleteDestinationResponse204) & {
-  headers: Headers;
-};
-export type deleteDestinationResponseError = (deleteDestinationResponse401 | deleteDestinationResponse403 | deleteDestinationResponse404 | deleteDestinationResponse412 | deleteDestinationResponse429) & {
-  headers: Headers;
-};
-
-export type deleteDestinationResponse = (deleteDestinationResponseSuccess | deleteDestinationResponseError)
-
-export const getDeleteDestinationUrl = (destinationId: string,) => {
+    export const getDeleteDestinationUrl = (destinationId: string,) => {
 
 
 
@@ -718,23 +483,16 @@ export const getDeleteDestinationUrl = (destinationId: string,) => {
  * Always allowed: the Destination leaves every Route, and open Root messages get one final edit "No longer updated here" and nothing after; then the Destination's secrets are wiped. An outgoing webhook in events mode has no Root message: its queued events are abandoned and end as Not delivered, no final event is sent, and its secrets are wiped at once (in mode `both`, after the final edits of the template mode). It is a soft delete: the Destination is kept for history and no longer counts as using its Connection. There is no `409`; a stale `If-Match` is `412`.
  * @summary Delete Destination
  */
-export const deleteDestination = async (destinationId: string, options?: RequestInit): Promise<deleteDestinationResponse> => {
+export const deleteDestination = async (destinationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteDestinationUrl(destinationId),
+  return apiFetch<void>(getDeleteDestinationUrl(destinationId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteDestinationResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteDestinationResponse
-}
+);}
 
 
 
@@ -743,15 +501,15 @@ export const deleteDestination = async (destinationId: string, options?: Request
 export const getDeleteDestinationMutationKey = () => ['deleteDestination'] as const;
 
 export const getDeleteDestinationMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDestination>>, TError,DeleteDestinationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDestination>>, TError,DeleteDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteDestination>>, TError,DeleteDestinationMutationVariables, TContext> => {
 
 const mutationKey = getDeleteDestinationMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -759,7 +517,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteDestination>>, DeleteDestinationMutationVariables> = (props) => {
           const {destinationId} = props ?? {};
 
-          return  deleteDestination(destinationId,fetchOptions)
+          return  deleteDestination(destinationId,requestOptions)
         }
 
 
@@ -778,7 +536,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Delete Destination
  */
 export const useDeleteDestination = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDestination>>, TError,DeleteDestinationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDestination>>, TError,DeleteDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteDestination>>,
         TError,
@@ -787,51 +545,7 @@ export const useDeleteDestination = <TError = UnauthorizedResponse | ForbiddenRe
       > => {
       return useMutation(getDeleteDestinationMutationOptions(options), queryClient);
     }
-    export type checkDestinationResponse200 = {
-  data: DestinationCheckResult
-  status: 200
-}
-
-export type checkDestinationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type checkDestinationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type checkDestinationResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type checkDestinationResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type checkDestinationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type checkDestinationResponse503 = {
-  data: LimitedResponse
-  status: 503
-}
-
-export type checkDestinationResponseSuccess = (checkDestinationResponse200) & {
-  headers: Headers;
-};
-export type checkDestinationResponseError = (checkDestinationResponse401 | checkDestinationResponse403 | checkDestinationResponse404 | checkDestinationResponse422 | checkDestinationResponse429 | checkDestinationResponse503) & {
-  headers: Headers;
-};
-
-export type checkDestinationResponse = (checkDestinationResponseSuccess | checkDestinationResponseError)
-
-export const getCheckDestinationUrl = (destinationId: string,) => {
+    export const getCheckDestinationUrl = (destinationId: string,) => {
 
 
 
@@ -843,23 +557,16 @@ export const getCheckDestinationUrl = (destinationId: string,) => {
  * Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both. A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary Run the Destination check
  */
-export const checkDestination = async (destinationId: string, options?: RequestInit): Promise<checkDestinationResponse> => {
+export const checkDestination = async (destinationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationCheckResult> => {
 
-  const res = await fetch(getCheckDestinationUrl(destinationId),
+  return apiFetch<DestinationCheckResult>(getCheckDestinationUrl(destinationId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: checkDestinationResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as checkDestinationResponse
-}
+);}
 
 
 
@@ -868,15 +575,15 @@ export const checkDestination = async (destinationId: string, options?: RequestI
 export const getCheckDestinationMutationKey = () => ['checkDestination'] as const;
 
 export const getCheckDestinationMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkDestination>>, TError,CheckDestinationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkDestination>>, TError,CheckDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof checkDestination>>, TError,CheckDestinationMutationVariables, TContext> => {
 
 const mutationKey = getCheckDestinationMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -884,7 +591,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof checkDestination>>, CheckDestinationMutationVariables> = (props) => {
           const {destinationId} = props ?? {};
 
-          return  checkDestination(destinationId,fetchOptions)
+          return  checkDestination(destinationId,requestOptions)
         }
 
 
@@ -903,7 +610,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Run the Destination check
  */
 export const useCheckDestination = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkDestination>>, TError,CheckDestinationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkDestination>>, TError,CheckDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof checkDestination>>,
         TError,
@@ -912,51 +619,7 @@ export const useCheckDestination = <TError = UnauthorizedResponse | ForbiddenRes
       > => {
       return useMutation(getCheckDestinationMutationOptions(options), queryClient);
     }
-    export type testDestinationResponse200 = {
-  data: DestinationTestResult
-  status: 200
-}
-
-export type testDestinationResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type testDestinationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type testDestinationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type testDestinationResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type testDestinationResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type testDestinationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type testDestinationResponseSuccess = (testDestinationResponse200) & {
-  headers: Headers;
-};
-export type testDestinationResponseError = (testDestinationResponse400 | testDestinationResponse401 | testDestinationResponse403 | testDestinationResponse404 | testDestinationResponse422 | testDestinationResponse429) & {
-  headers: Headers;
-};
-
-export type testDestinationResponse = (testDestinationResponseSuccess | testDestinationResponseError)
-
-export const getTestDestinationUrl = (destinationId: string,) => {
+    export const getTestDestinationUrl = (destinationId: string,) => {
 
 
 
@@ -969,7 +632,7 @@ export const getTestDestinationUrl = (destinationId: string,) => {
  * @summary Send a test message
  */
 export const testDestination = async (destinationId: string,
-    destinationTestRequest: DestinationTestRequest, options?: RequestInit): Promise<testDestinationResponse> => {
+    destinationTestRequest: DestinationTestRequest, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationTestResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -985,21 +648,14 @@ export const testDestination = async (destinationId: string,
     }
     return headers;
   };
-const res = await fetch(getTestDestinationUrl(destinationId),
+return apiFetch<DestinationTestResult>(getTestDestinationUrl(destinationId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(destinationTestRequest)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: testDestinationResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as testDestinationResponse
-}
+);}
 
 
 
@@ -1008,15 +664,15 @@ const res = await fetch(getTestDestinationUrl(destinationId),
 export const getTestDestinationMutationKey = () => ['testDestination'] as const;
 
 export const getTestDestinationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testDestination>>, TError,TestDestinationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testDestination>>, TError,TestDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof testDestination>>, TError,TestDestinationMutationVariables, TContext> => {
 
 const mutationKey = getTestDestinationMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1024,7 +680,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof testDestination>>, TestDestinationMutationVariables> = (props) => {
           const {destinationId,data} = props ?? {};
 
-          return  testDestination(destinationId,data,fetchOptions)
+          return  testDestination(destinationId,data,requestOptions)
         }
 
 
@@ -1043,7 +699,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Send a test message
  */
 export const useTestDestination = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testDestination>>, TError,TestDestinationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testDestination>>, TError,TestDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof testDestination>>,
         TError,
@@ -1052,51 +708,7 @@ export const useTestDestination = <TError = BadRequestResponse | UnauthorizedRes
       > => {
       return useMutation(getTestDestinationMutationOptions(options), queryClient);
     }
-    export type previewDestinationResponse200 = {
-  data: DestinationPreview
-  status: 200
-}
-
-export type previewDestinationResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type previewDestinationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type previewDestinationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type previewDestinationResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type previewDestinationResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type previewDestinationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type previewDestinationResponseSuccess = (previewDestinationResponse200) & {
-  headers: Headers;
-};
-export type previewDestinationResponseError = (previewDestinationResponse400 | previewDestinationResponse401 | previewDestinationResponse403 | previewDestinationResponse404 | previewDestinationResponse422 | previewDestinationResponse429) & {
-  headers: Headers;
-};
-
-export type previewDestinationResponse = (previewDestinationResponseSuccess | previewDestinationResponseError)
-
-export const getPreviewDestinationUrl = (destinationId: string,) => {
+    export const getPreviewDestinationUrl = (destinationId: string,) => {
 
 
 
@@ -1109,7 +721,7 @@ export const getPreviewDestinationUrl = (destinationId: string,) => {
  * @summary Preview a message or request
  */
 export const previewDestination = async (destinationId: string,
-    destinationPreviewRequest: DestinationPreviewRequest, options?: RequestInit): Promise<previewDestinationResponse> => {
+    destinationPreviewRequest: DestinationPreviewRequest, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationPreview> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1125,21 +737,14 @@ export const previewDestination = async (destinationId: string,
     }
     return headers;
   };
-const res = await fetch(getPreviewDestinationUrl(destinationId),
+return apiFetch<DestinationPreview>(getPreviewDestinationUrl(destinationId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(destinationPreviewRequest)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: previewDestinationResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as previewDestinationResponse
-}
+);}
 
 
 
@@ -1148,15 +753,15 @@ const res = await fetch(getPreviewDestinationUrl(destinationId),
 export const getPreviewDestinationMutationKey = () => ['previewDestination'] as const;
 
 export const getPreviewDestinationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewDestination>>, TError,PreviewDestinationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewDestination>>, TError,PreviewDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof previewDestination>>, TError,PreviewDestinationMutationVariables, TContext> => {
 
 const mutationKey = getPreviewDestinationMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1164,7 +769,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewDestination>>, PreviewDestinationMutationVariables> = (props) => {
           const {destinationId,data} = props ?? {};
 
-          return  previewDestination(destinationId,data,fetchOptions)
+          return  previewDestination(destinationId,data,requestOptions)
         }
 
 
@@ -1183,7 +788,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Preview a message or request
  */
 export const usePreviewDestination = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewDestination>>, TError,PreviewDestinationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewDestination>>, TError,PreviewDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof previewDestination>>,
         TError,
@@ -1192,46 +797,7 @@ export const usePreviewDestination = <TError = BadRequestResponse | Unauthorized
       > => {
       return useMutation(getPreviewDestinationMutationOptions(options), queryClient);
     }
-    export type listDestinationSecretsResponse200 = {
-  data: DestinationSecretList
-  status: 200
-}
-
-export type listDestinationSecretsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listDestinationSecretsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listDestinationSecretsResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type listDestinationSecretsResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type listDestinationSecretsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listDestinationSecretsResponseSuccess = (listDestinationSecretsResponse200) & {
-  headers: Headers;
-};
-export type listDestinationSecretsResponseError = (listDestinationSecretsResponse401 | listDestinationSecretsResponse403 | listDestinationSecretsResponse404 | listDestinationSecretsResponse409 | listDestinationSecretsResponse429) & {
-  headers: Headers;
-};
-
-export type listDestinationSecretsResponse = (listDestinationSecretsResponseSuccess | listDestinationSecretsResponseError)
-
-export const getListDestinationSecretsUrl = (destinationId: string,) => {
+    export const getListDestinationSecretsUrl = (destinationId: string,) => {
 
 
 
@@ -1243,23 +809,16 @@ export const getListDestinationSecretsUrl = (destinationId: string,) => {
  * Names with `set` and the time of the last change. Values are never returned. `409` (`not_webhook_destination`) for a Destination that is not an outgoing webhook.
  * @summary List the Secrets of a webhook Destination
  */
-export const listDestinationSecrets = async (destinationId: string, options?: RequestInit): Promise<listDestinationSecretsResponse> => {
+export const listDestinationSecrets = async (destinationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationSecretList> => {
 
-  const res = await fetch(getListDestinationSecretsUrl(destinationId),
+  return apiFetch<DestinationSecretList>(getListDestinationSecretsUrl(destinationId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listDestinationSecretsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listDestinationSecretsResponse
-}
+);}
 
 
 
@@ -1272,16 +831,16 @@ export const getListDestinationSecretsQueryKey = (destinationId: string,) => {
     }
 
 
-export const getListDestinationSecretsQueryOptions = <TData = Awaited<ReturnType<typeof listDestinationSecrets>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse>(destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinationSecrets>>, TError, TData>>, fetch?: RequestInit}
+export const getListDestinationSecretsQueryOptions = <TData = Awaited<ReturnType<typeof listDestinationSecrets>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse>(destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinationSecrets>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListDestinationSecretsQueryKey(destinationId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDestinationSecrets>>> = ({ signal }) => listDestinationSecrets(destinationId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDestinationSecrets>>> = ({ signal }) => listDestinationSecrets(destinationId, { signal, ...requestOptions });
 
 
 
@@ -1301,7 +860,7 @@ export function useListDestinationSecrets<TData = Awaited<ReturnType<typeof list
           TError,
           Awaited<ReturnType<typeof listDestinationSecrets>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListDestinationSecrets<TData = Awaited<ReturnType<typeof listDestinationSecrets>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse>(
@@ -1311,11 +870,11 @@ export function useListDestinationSecrets<TData = Awaited<ReturnType<typeof list
           TError,
           Awaited<ReturnType<typeof listDestinationSecrets>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListDestinationSecrets<TData = Awaited<ReturnType<typeof listDestinationSecrets>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse>(
- destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinationSecrets>>, TError, TData>>, fetch?: RequestInit}
+ destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinationSecrets>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1323,7 +882,7 @@ export function useListDestinationSecrets<TData = Awaited<ReturnType<typeof list
  */
 
 export function useListDestinationSecrets<TData = Awaited<ReturnType<typeof listDestinationSecrets>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse>(
- destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinationSecrets>>, TError, TData>>, fetch?: RequestInit}
+ destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinationSecrets>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1338,60 +897,6 @@ export function useListDestinationSecrets<TData = Awaited<ReturnType<typeof list
 
 
 
-
-export type setDestinationSecretResponse200 = {
-  data: DestinationSecret
-  status: 200
-}
-
-export type setDestinationSecretResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type setDestinationSecretResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type setDestinationSecretResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type setDestinationSecretResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type setDestinationSecretResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type setDestinationSecretResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type setDestinationSecretResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type setDestinationSecretResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type setDestinationSecretResponseSuccess = (setDestinationSecretResponse200) & {
-  headers: Headers;
-};
-export type setDestinationSecretResponseError = (setDestinationSecretResponse400 | setDestinationSecretResponse401 | setDestinationSecretResponse403 | setDestinationSecretResponse404 | setDestinationSecretResponse409 | setDestinationSecretResponse412 | setDestinationSecretResponse422 | setDestinationSecretResponse429) & {
-  headers: Headers;
-};
-
-export type setDestinationSecretResponse = (setDestinationSecretResponseSuccess | setDestinationSecretResponseError)
 
 export const getSetDestinationSecretUrl = (destinationId: string,
     secretName: string,) => {
@@ -1408,7 +913,7 @@ export const getSetDestinationSecretUrl = (destinationId: string,
  */
 export const setDestinationSecret = async (destinationId: string,
     secretName: string,
-    destinationSecretInput: DestinationSecretInput, options?: RequestInit): Promise<setDestinationSecretResponse> => {
+    destinationSecretInput: DestinationSecretInput, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationSecret> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1424,21 +929,14 @@ export const setDestinationSecret = async (destinationId: string,
     }
     return headers;
   };
-const res = await fetch(getSetDestinationSecretUrl(destinationId,secretName),
+return apiFetch<DestinationSecret>(getSetDestinationSecretUrl(destinationId,secretName),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(destinationSecretInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: setDestinationSecretResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as setDestinationSecretResponse
-}
+);}
 
 
 
@@ -1447,15 +945,15 @@ const res = await fetch(getSetDestinationSecretUrl(destinationId,secretName),
 export const getSetDestinationSecretMutationKey = () => ['setDestinationSecret'] as const;
 
 export const getSetDestinationSecretMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setDestinationSecret>>, TError,SetDestinationSecretMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setDestinationSecret>>, TError,SetDestinationSecretMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof setDestinationSecret>>, TError,SetDestinationSecretMutationVariables, TContext> => {
 
 const mutationKey = getSetDestinationSecretMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1463,7 +961,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof setDestinationSecret>>, SetDestinationSecretMutationVariables> = (props) => {
           const {destinationId,secretName,data} = props ?? {};
 
-          return  setDestinationSecret(destinationId,secretName,data,fetchOptions)
+          return  setDestinationSecret(destinationId,secretName,data,requestOptions)
         }
 
 
@@ -1482,7 +980,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Set a Secret of a webhook Destination
  */
 export const useSetDestinationSecret = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setDestinationSecret>>, TError,SetDestinationSecretMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setDestinationSecret>>, TError,SetDestinationSecretMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setDestinationSecret>>,
         TError,
@@ -1491,51 +989,7 @@ export const useSetDestinationSecret = <TError = BadRequestResponse | Unauthoriz
       > => {
       return useMutation(getSetDestinationSecretMutationOptions(options), queryClient);
     }
-    export type deleteDestinationSecretResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteDestinationSecretResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteDestinationSecretResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteDestinationSecretResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type deleteDestinationSecretResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type deleteDestinationSecretResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type deleteDestinationSecretResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteDestinationSecretResponseSuccess = (deleteDestinationSecretResponse204) & {
-  headers: Headers;
-};
-export type deleteDestinationSecretResponseError = (deleteDestinationSecretResponse401 | deleteDestinationSecretResponse403 | deleteDestinationSecretResponse404 | deleteDestinationSecretResponse409 | deleteDestinationSecretResponse412 | deleteDestinationSecretResponse429) & {
-  headers: Headers;
-};
-
-export type deleteDestinationSecretResponse = (deleteDestinationSecretResponseSuccess | deleteDestinationSecretResponseError)
-
-export const getDeleteDestinationSecretUrl = (destinationId: string,
+    export const getDeleteDestinationSecretUrl = (destinationId: string,
     secretName: string,) => {
 
 
@@ -1549,23 +1003,16 @@ export const getDeleteDestinationSecretUrl = (destinationId: string,
  * @summary Delete a Secret of a webhook Destination
  */
 export const deleteDestinationSecret = async (destinationId: string,
-    secretName: string, options?: RequestInit): Promise<deleteDestinationSecretResponse> => {
+    secretName: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteDestinationSecretUrl(destinationId,secretName),
+  return apiFetch<void>(getDeleteDestinationSecretUrl(destinationId,secretName),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteDestinationSecretResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteDestinationSecretResponse
-}
+);}
 
 
 
@@ -1574,15 +1021,15 @@ export const deleteDestinationSecret = async (destinationId: string,
 export const getDeleteDestinationSecretMutationKey = () => ['deleteDestinationSecret'] as const;
 
 export const getDeleteDestinationSecretMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDestinationSecret>>, TError,DeleteDestinationSecretMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDestinationSecret>>, TError,DeleteDestinationSecretMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteDestinationSecret>>, TError,DeleteDestinationSecretMutationVariables, TContext> => {
 
 const mutationKey = getDeleteDestinationSecretMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1590,7 +1037,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteDestinationSecret>>, DeleteDestinationSecretMutationVariables> = (props) => {
           const {destinationId,secretName} = props ?? {};
 
-          return  deleteDestinationSecret(destinationId,secretName,fetchOptions)
+          return  deleteDestinationSecret(destinationId,secretName,requestOptions)
         }
 
 
@@ -1609,7 +1056,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Delete a Secret of a webhook Destination
  */
 export const useDeleteDestinationSecret = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDestinationSecret>>, TError,DeleteDestinationSecretMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDestinationSecret>>, TError,DeleteDestinationSecretMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteDestinationSecret>>,
         TError,
@@ -1618,46 +1065,7 @@ export const useDeleteDestinationSecret = <TError = UnauthorizedResponse | Forbi
       > => {
       return useMutation(getDeleteDestinationSecretMutationOptions(options), queryClient);
     }
-    export type getSigningSecretResponse200 = {
-  data: SigningSecretStatus
-  status: 200
-}
-
-export type getSigningSecretResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getSigningSecretResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getSigningSecretResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getSigningSecretResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type getSigningSecretResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getSigningSecretResponseSuccess = (getSigningSecretResponse200) & {
-  headers: Headers;
-};
-export type getSigningSecretResponseError = (getSigningSecretResponse401 | getSigningSecretResponse403 | getSigningSecretResponse404 | getSigningSecretResponse409 | getSigningSecretResponse429) & {
-  headers: Headers;
-};
-
-export type getSigningSecretResponse = (getSigningSecretResponseSuccess | getSigningSecretResponseError)
-
-export const getGetSigningSecretUrl = (destinationId: string,) => {
+    export const getGetSigningSecretUrl = (destinationId: string,) => {
 
 
 
@@ -1669,23 +1077,16 @@ export const getGetSigningSecretUrl = (destinationId: string,) => {
  * `409` (`not_webhook_destination`) for a Destination that is not an outgoing webhook.
  * @summary Read the Signing secret status
  */
-export const getSigningSecret = async (destinationId: string, options?: RequestInit): Promise<getSigningSecretResponse> => {
+export const getSigningSecret = async (destinationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<SigningSecretStatus> => {
 
-  const res = await fetch(getGetSigningSecretUrl(destinationId),
+  return apiFetch<SigningSecretStatus>(getGetSigningSecretUrl(destinationId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getSigningSecretResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getSigningSecretResponse
-}
+);}
 
 
 
@@ -1698,16 +1099,16 @@ export const getGetSigningSecretQueryKey = (destinationId: string,) => {
     }
 
 
-export const getGetSigningSecretQueryOptions = <TData = Awaited<ReturnType<typeof getSigningSecret>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse>(destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSigningSecret>>, TError, TData>>, fetch?: RequestInit}
+export const getGetSigningSecretQueryOptions = <TData = Awaited<ReturnType<typeof getSigningSecret>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse>(destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSigningSecret>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetSigningSecretQueryKey(destinationId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSigningSecret>>> = ({ signal }) => getSigningSecret(destinationId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSigningSecret>>> = ({ signal }) => getSigningSecret(destinationId, { signal, ...requestOptions });
 
 
 
@@ -1727,7 +1128,7 @@ export function useGetSigningSecret<TData = Awaited<ReturnType<typeof getSigning
           TError,
           Awaited<ReturnType<typeof getSigningSecret>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetSigningSecret<TData = Awaited<ReturnType<typeof getSigningSecret>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse>(
@@ -1737,11 +1138,11 @@ export function useGetSigningSecret<TData = Awaited<ReturnType<typeof getSigning
           TError,
           Awaited<ReturnType<typeof getSigningSecret>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetSigningSecret<TData = Awaited<ReturnType<typeof getSigningSecret>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse>(
- destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSigningSecret>>, TError, TData>>, fetch?: RequestInit}
+ destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSigningSecret>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1749,7 +1150,7 @@ export function useGetSigningSecret<TData = Awaited<ReturnType<typeof getSigning
  */
 
 export function useGetSigningSecret<TData = Awaited<ReturnType<typeof getSigningSecret>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse>(
- destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSigningSecret>>, TError, TData>>, fetch?: RequestInit}
+ destinationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSigningSecret>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1765,45 +1166,6 @@ export function useGetSigningSecret<TData = Awaited<ReturnType<typeof getSigning
 
 
 
-export type generateSigningSecretResponse201 = {
-  data: SigningSecretGenerated
-  status: 201
-}
-
-export type generateSigningSecretResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type generateSigningSecretResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type generateSigningSecretResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type generateSigningSecretResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type generateSigningSecretResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type generateSigningSecretResponseSuccess = (generateSigningSecretResponse201) & {
-  headers: Headers;
-};
-export type generateSigningSecretResponseError = (generateSigningSecretResponse401 | generateSigningSecretResponse403 | generateSigningSecretResponse404 | generateSigningSecretResponse409 | generateSigningSecretResponse429) & {
-  headers: Headers;
-};
-
-export type generateSigningSecretResponse = (generateSigningSecretResponseSuccess | generateSigningSecretResponseError)
-
 export const getGenerateSigningSecretUrl = (destinationId: string,) => {
 
 
@@ -1816,23 +1178,16 @@ export const getGenerateSigningSecretUrl = (destinationId: string,) => {
  * The first Signing secret is generated when the Destination is created. This returns a new one, once; requests then carry signatures with both the new and the previous secret until `retirePreviousSigningSecret`.
  * @summary Regenerate the Signing secret
  */
-export const generateSigningSecret = async (destinationId: string, options?: RequestInit): Promise<generateSigningSecretResponse> => {
+export const generateSigningSecret = async (destinationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<SigningSecretGenerated> => {
 
-  const res = await fetch(getGenerateSigningSecretUrl(destinationId),
+  return apiFetch<SigningSecretGenerated>(getGenerateSigningSecretUrl(destinationId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: generateSigningSecretResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as generateSigningSecretResponse
-}
+);}
 
 
 
@@ -1841,15 +1196,15 @@ export const generateSigningSecret = async (destinationId: string, options?: Req
 export const getGenerateSigningSecretMutationKey = () => ['generateSigningSecret'] as const;
 
 export const getGenerateSigningSecretMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateSigningSecret>>, TError,GenerateSigningSecretMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateSigningSecret>>, TError,GenerateSigningSecretMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof generateSigningSecret>>, TError,GenerateSigningSecretMutationVariables, TContext> => {
 
 const mutationKey = getGenerateSigningSecretMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1857,7 +1212,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof generateSigningSecret>>, GenerateSigningSecretMutationVariables> = (props) => {
           const {destinationId} = props ?? {};
 
-          return  generateSigningSecret(destinationId,fetchOptions)
+          return  generateSigningSecret(destinationId,requestOptions)
         }
 
 
@@ -1876,7 +1231,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Regenerate the Signing secret
  */
 export const useGenerateSigningSecret = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateSigningSecret>>, TError,GenerateSigningSecretMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateSigningSecret>>, TError,GenerateSigningSecretMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof generateSigningSecret>>,
         TError,
@@ -1885,46 +1240,7 @@ export const useGenerateSigningSecret = <TError = UnauthorizedResponse | Forbidd
       > => {
       return useMutation(getGenerateSigningSecretMutationOptions(options), queryClient);
     }
-    export type retirePreviousSigningSecretResponse204 = {
-  data: void
-  status: 204
-}
-
-export type retirePreviousSigningSecretResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type retirePreviousSigningSecretResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type retirePreviousSigningSecretResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type retirePreviousSigningSecretResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type retirePreviousSigningSecretResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type retirePreviousSigningSecretResponseSuccess = (retirePreviousSigningSecretResponse204) & {
-  headers: Headers;
-};
-export type retirePreviousSigningSecretResponseError = (retirePreviousSigningSecretResponse401 | retirePreviousSigningSecretResponse403 | retirePreviousSigningSecretResponse404 | retirePreviousSigningSecretResponse409 | retirePreviousSigningSecretResponse429) & {
-  headers: Headers;
-};
-
-export type retirePreviousSigningSecretResponse = (retirePreviousSigningSecretResponseSuccess | retirePreviousSigningSecretResponseError)
-
-export const getRetirePreviousSigningSecretUrl = (destinationId: string,) => {
+    export const getRetirePreviousSigningSecretUrl = (destinationId: string,) => {
 
 
 
@@ -1936,23 +1252,16 @@ export const getRetirePreviousSigningSecretUrl = (destinationId: string,) => {
  * `409` (`not_webhook_destination`) for a Destination that is not an outgoing webhook.
  * @summary Retire the previous Signing secret
  */
-export const retirePreviousSigningSecret = async (destinationId: string, options?: RequestInit): Promise<retirePreviousSigningSecretResponse> => {
+export const retirePreviousSigningSecret = async (destinationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getRetirePreviousSigningSecretUrl(destinationId),
+  return apiFetch<void>(getRetirePreviousSigningSecretUrl(destinationId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: retirePreviousSigningSecretResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as retirePreviousSigningSecretResponse
-}
+);}
 
 
 
@@ -1961,15 +1270,15 @@ export const retirePreviousSigningSecret = async (destinationId: string, options
 export const getRetirePreviousSigningSecretMutationKey = () => ['retirePreviousSigningSecret'] as const;
 
 export const getRetirePreviousSigningSecretMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retirePreviousSigningSecret>>, TError,RetirePreviousSigningSecretMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retirePreviousSigningSecret>>, TError,RetirePreviousSigningSecretMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof retirePreviousSigningSecret>>, TError,RetirePreviousSigningSecretMutationVariables, TContext> => {
 
 const mutationKey = getRetirePreviousSigningSecretMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1977,7 +1286,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof retirePreviousSigningSecret>>, RetirePreviousSigningSecretMutationVariables> = (props) => {
           const {destinationId} = props ?? {};
 
-          return  retirePreviousSigningSecret(destinationId,fetchOptions)
+          return  retirePreviousSigningSecret(destinationId,requestOptions)
         }
 
 
@@ -1996,7 +1305,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Retire the previous Signing secret
  */
 export const useRetirePreviousSigningSecret = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retirePreviousSigningSecret>>, TError,RetirePreviousSigningSecretMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retirePreviousSigningSecret>>, TError,RetirePreviousSigningSecretMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof retirePreviousSigningSecret>>,
         TError,

@@ -56,6 +56,8 @@ jobs:
     name: e2e-two-replicas
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      PLAYWRIGHT_INSTALL_FLAGS: --with-deps
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

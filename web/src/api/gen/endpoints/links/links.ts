@@ -56,7 +56,10 @@ import type {
   UnprocessableResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -74,40 +77,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
-
-export type listLookupTablesResponse200 = {
-  data: LookupTableList
-  status: 200
-}
-
-export type listLookupTablesResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listLookupTablesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listLookupTablesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listLookupTablesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listLookupTablesResponseSuccess = (listLookupTablesResponse200) & {
-  headers: Headers;
-};
-export type listLookupTablesResponseError = (listLookupTablesResponse400 | listLookupTablesResponse401 | listLookupTablesResponse403 | listLookupTablesResponse429) & {
-  headers: Headers;
-};
-
-export type listLookupTablesResponse = (listLookupTablesResponseSuccess | listLookupTablesResponseError)
 
 export const getListLookupTablesUrl = (params?: ListLookupTablesParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -127,23 +96,16 @@ export const getListLookupTablesUrl = (params?: ListLookupTablesParams,) => {
 /**
  * @summary List lookuptables
  */
-export const listLookupTables = async (params?: ListLookupTablesParams, options?: RequestInit): Promise<listLookupTablesResponse> => {
+export const listLookupTables = async (params?: ListLookupTablesParams, options?: Parameters<typeof apiFetch>[1]): Promise<LookupTableList> => {
 
-  const res = await fetch(getListLookupTablesUrl(params),
+  return apiFetch<LookupTableList>(getListLookupTablesUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listLookupTablesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listLookupTablesResponse
-}
+);}
 
 
 
@@ -156,16 +118,16 @@ export const getListLookupTablesQueryKey = (params?: ListLookupTablesParams,) =>
     }
 
 
-export const getListLookupTablesQueryOptions = <TData = Awaited<ReturnType<typeof listLookupTables>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListLookupTablesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLookupTables>>, TError, TData>>, fetch?: RequestInit}
+export const getListLookupTablesQueryOptions = <TData = Awaited<ReturnType<typeof listLookupTables>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListLookupTablesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLookupTables>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListLookupTablesQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listLookupTables>>> = ({ signal }) => listLookupTables(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listLookupTables>>> = ({ signal }) => listLookupTables(params, { signal, ...requestOptions });
 
 
 
@@ -185,7 +147,7 @@ export function useListLookupTables<TData = Awaited<ReturnType<typeof listLookup
           TError,
           Awaited<ReturnType<typeof listLookupTables>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListLookupTables<TData = Awaited<ReturnType<typeof listLookupTables>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -195,11 +157,11 @@ export function useListLookupTables<TData = Awaited<ReturnType<typeof listLookup
           TError,
           Awaited<ReturnType<typeof listLookupTables>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListLookupTables<TData = Awaited<ReturnType<typeof listLookupTables>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListLookupTablesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLookupTables>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListLookupTablesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLookupTables>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -207,7 +169,7 @@ export function useListLookupTables<TData = Awaited<ReturnType<typeof listLookup
  */
 
 export function useListLookupTables<TData = Awaited<ReturnType<typeof listLookupTables>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListLookupTablesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLookupTables>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListLookupTablesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLookupTables>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -223,50 +185,6 @@ export function useListLookupTables<TData = Awaited<ReturnType<typeof listLookup
 
 
 
-export type createLookupTableResponse201 = {
-  data: LookupTable
-  status: 201
-}
-
-export type createLookupTableResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createLookupTableResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createLookupTableResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createLookupTableResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type createLookupTableResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type createLookupTableResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createLookupTableResponseSuccess = (createLookupTableResponse201) & {
-  headers: Headers;
-};
-export type createLookupTableResponseError = (createLookupTableResponse400 | createLookupTableResponse401 | createLookupTableResponse403 | createLookupTableResponse409 | createLookupTableResponse422 | createLookupTableResponse429) & {
-  headers: Headers;
-};
-
-export type createLookupTableResponse = (createLookupTableResponseSuccess | createLookupTableResponseError)
-
 export const getCreateLookupTableUrl = () => {
 
 
@@ -278,7 +196,7 @@ export const getCreateLookupTableUrl = () => {
 /**
  * @summary Create LookupTable
  */
-export const createLookupTable = async (lookupTableBase: LookupTableBase, options?: RequestInit): Promise<createLookupTableResponse> => {
+export const createLookupTable = async (lookupTableBase: LookupTableBase, options?: Parameters<typeof apiFetch>[1]): Promise<LookupTable> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -294,21 +212,14 @@ export const createLookupTable = async (lookupTableBase: LookupTableBase, option
     }
     return headers;
   };
-const res = await fetch(getCreateLookupTableUrl(),
+return apiFetch<LookupTable>(getCreateLookupTableUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(lookupTableBase)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createLookupTableResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createLookupTableResponse
-}
+);}
 
 
 
@@ -317,15 +228,15 @@ const res = await fetch(getCreateLookupTableUrl(),
 export const getCreateLookupTableMutationKey = () => ['createLookupTable'] as const;
 
 export const getCreateLookupTableMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createLookupTable>>, TError,CreateLookupTableMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createLookupTable>>, TError,CreateLookupTableMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createLookupTable>>, TError,CreateLookupTableMutationVariables, TContext> => {
 
 const mutationKey = getCreateLookupTableMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -333,7 +244,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createLookupTable>>, CreateLookupTableMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  createLookupTable(data,fetchOptions)
+          return  createLookupTable(data,requestOptions)
         }
 
 
@@ -352,7 +263,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Create LookupTable
  */
 export const useCreateLookupTable = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createLookupTable>>, TError,CreateLookupTableMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createLookupTable>>, TError,CreateLookupTableMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createLookupTable>>,
         TError,
@@ -361,41 +272,7 @@ export const useCreateLookupTable = <TError = BadRequestResponse | UnauthorizedR
       > => {
       return useMutation(getCreateLookupTableMutationOptions(options), queryClient);
     }
-    export type getLookupTableResponse200 = {
-  data: LookupTable
-  status: 200
-}
-
-export type getLookupTableResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getLookupTableResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getLookupTableResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getLookupTableResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getLookupTableResponseSuccess = (getLookupTableResponse200) & {
-  headers: Headers;
-};
-export type getLookupTableResponseError = (getLookupTableResponse401 | getLookupTableResponse403 | getLookupTableResponse404 | getLookupTableResponse429) & {
-  headers: Headers;
-};
-
-export type getLookupTableResponse = (getLookupTableResponseSuccess | getLookupTableResponseError)
-
-export const getGetLookupTableUrl = (lookupTableId: string,) => {
+    export const getGetLookupTableUrl = (lookupTableId: string,) => {
 
 
 
@@ -406,23 +283,16 @@ export const getGetLookupTableUrl = (lookupTableId: string,) => {
 /**
  * @summary Read LookupTable
  */
-export const getLookupTable = async (lookupTableId: string, options?: RequestInit): Promise<getLookupTableResponse> => {
+export const getLookupTable = async (lookupTableId: string, options?: Parameters<typeof apiFetch>[1]): Promise<LookupTable> => {
 
-  const res = await fetch(getGetLookupTableUrl(lookupTableId),
+  return apiFetch<LookupTable>(getGetLookupTableUrl(lookupTableId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getLookupTableResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getLookupTableResponse
-}
+);}
 
 
 
@@ -435,16 +305,16 @@ export const getGetLookupTableQueryKey = (lookupTableId: string,) => {
     }
 
 
-export const getGetLookupTableQueryOptions = <TData = Awaited<ReturnType<typeof getLookupTable>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(lookupTableId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLookupTable>>, TError, TData>>, fetch?: RequestInit}
+export const getGetLookupTableQueryOptions = <TData = Awaited<ReturnType<typeof getLookupTable>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(lookupTableId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLookupTable>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetLookupTableQueryKey(lookupTableId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLookupTable>>> = ({ signal }) => getLookupTable(lookupTableId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLookupTable>>> = ({ signal }) => getLookupTable(lookupTableId, { signal, ...requestOptions });
 
 
 
@@ -464,7 +334,7 @@ export function useGetLookupTable<TData = Awaited<ReturnType<typeof getLookupTab
           TError,
           Awaited<ReturnType<typeof getLookupTable>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetLookupTable<TData = Awaited<ReturnType<typeof getLookupTable>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -474,11 +344,11 @@ export function useGetLookupTable<TData = Awaited<ReturnType<typeof getLookupTab
           TError,
           Awaited<ReturnType<typeof getLookupTable>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetLookupTable<TData = Awaited<ReturnType<typeof getLookupTable>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- lookupTableId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLookupTable>>, TError, TData>>, fetch?: RequestInit}
+ lookupTableId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLookupTable>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -486,7 +356,7 @@ export function useGetLookupTable<TData = Awaited<ReturnType<typeof getLookupTab
  */
 
 export function useGetLookupTable<TData = Awaited<ReturnType<typeof getLookupTable>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- lookupTableId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLookupTable>>, TError, TData>>, fetch?: RequestInit}
+ lookupTableId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLookupTable>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -502,65 +372,6 @@ export function useGetLookupTable<TData = Awaited<ReturnType<typeof getLookupTab
 
 
 
-export type updateLookupTableResponse200 = {
-  data: LookupTable
-  status: 200
-}
-
-export type updateLookupTableResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type updateLookupTableResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type updateLookupTableResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type updateLookupTableResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type updateLookupTableResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type updateLookupTableResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type updateLookupTableResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type updateLookupTableResponse428 = {
-  data: PreconditionRequiredResponse
-  status: 428
-}
-
-export type updateLookupTableResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type updateLookupTableResponseSuccess = (updateLookupTableResponse200) & {
-  headers: Headers;
-};
-export type updateLookupTableResponseError = (updateLookupTableResponse400 | updateLookupTableResponse401 | updateLookupTableResponse403 | updateLookupTableResponse404 | updateLookupTableResponse409 | updateLookupTableResponse412 | updateLookupTableResponse422 | updateLookupTableResponse428 | updateLookupTableResponse429) & {
-  headers: Headers;
-};
-
-export type updateLookupTableResponse = (updateLookupTableResponseSuccess | updateLookupTableResponseError)
-
 export const getUpdateLookupTableUrl = (lookupTableId: string,) => {
 
 
@@ -574,7 +385,7 @@ export const getUpdateLookupTableUrl = (lookupTableId: string,) => {
  * @summary Update LookupTable
  */
 export const updateLookupTable = async (lookupTableId: string,
-    lookupTableBase: LookupTableBase, options?: RequestInit): Promise<updateLookupTableResponse> => {
+    lookupTableBase: LookupTableBase, options?: Parameters<typeof apiFetch>[1]): Promise<LookupTable> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -590,21 +401,14 @@ export const updateLookupTable = async (lookupTableId: string,
     }
     return headers;
   };
-const res = await fetch(getUpdateLookupTableUrl(lookupTableId),
+return apiFetch<LookupTable>(getUpdateLookupTableUrl(lookupTableId),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(lookupTableBase)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: updateLookupTableResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as updateLookupTableResponse
-}
+);}
 
 
 
@@ -613,15 +417,15 @@ const res = await fetch(getUpdateLookupTableUrl(lookupTableId),
 export const getUpdateLookupTableMutationKey = () => ['updateLookupTable'] as const;
 
 export const getUpdateLookupTableMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLookupTable>>, TError,UpdateLookupTableMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLookupTable>>, TError,UpdateLookupTableMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateLookupTable>>, TError,UpdateLookupTableMutationVariables, TContext> => {
 
 const mutationKey = getUpdateLookupTableMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -629,7 +433,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateLookupTable>>, UpdateLookupTableMutationVariables> = (props) => {
           const {lookupTableId,data} = props ?? {};
 
-          return  updateLookupTable(lookupTableId,data,fetchOptions)
+          return  updateLookupTable(lookupTableId,data,requestOptions)
         }
 
 
@@ -648,7 +452,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Update LookupTable
  */
 export const useUpdateLookupTable = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLookupTable>>, TError,UpdateLookupTableMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLookupTable>>, TError,UpdateLookupTableMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateLookupTable>>,
         TError,
@@ -657,51 +461,7 @@ export const useUpdateLookupTable = <TError = BadRequestResponse | UnauthorizedR
       > => {
       return useMutation(getUpdateLookupTableMutationOptions(options), queryClient);
     }
-    export type deleteLookupTableResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteLookupTableResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteLookupTableResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteLookupTableResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type deleteLookupTableResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type deleteLookupTableResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type deleteLookupTableResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteLookupTableResponseSuccess = (deleteLookupTableResponse204) & {
-  headers: Headers;
-};
-export type deleteLookupTableResponseError = (deleteLookupTableResponse401 | deleteLookupTableResponse403 | deleteLookupTableResponse404 | deleteLookupTableResponse409 | deleteLookupTableResponse412 | deleteLookupTableResponse429) & {
-  headers: Headers;
-};
-
-export type deleteLookupTableResponse = (deleteLookupTableResponseSuccess | deleteLookupTableResponseError)
-
-export const getDeleteLookupTableUrl = (lookupTableId: string,) => {
+    export const getDeleteLookupTableUrl = (lookupTableId: string,) => {
 
 
 
@@ -713,23 +473,16 @@ export const getDeleteLookupTableUrl = (lookupTableId: string,) => {
  * Refused with `409` while a Link rule uses the table.
  * @summary Delete LookupTable
  */
-export const deleteLookupTable = async (lookupTableId: string, options?: RequestInit): Promise<deleteLookupTableResponse> => {
+export const deleteLookupTable = async (lookupTableId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteLookupTableUrl(lookupTableId),
+  return apiFetch<void>(getDeleteLookupTableUrl(lookupTableId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteLookupTableResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteLookupTableResponse
-}
+);}
 
 
 
@@ -738,15 +491,15 @@ export const deleteLookupTable = async (lookupTableId: string, options?: Request
 export const getDeleteLookupTableMutationKey = () => ['deleteLookupTable'] as const;
 
 export const getDeleteLookupTableMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteLookupTable>>, TError,DeleteLookupTableMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteLookupTable>>, TError,DeleteLookupTableMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteLookupTable>>, TError,DeleteLookupTableMutationVariables, TContext> => {
 
 const mutationKey = getDeleteLookupTableMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -754,7 +507,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteLookupTable>>, DeleteLookupTableMutationVariables> = (props) => {
           const {lookupTableId} = props ?? {};
 
-          return  deleteLookupTable(lookupTableId,fetchOptions)
+          return  deleteLookupTable(lookupTableId,requestOptions)
         }
 
 
@@ -773,7 +526,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Delete LookupTable
  */
 export const useDeleteLookupTable = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteLookupTable>>, TError,DeleteLookupTableMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteLookupTable>>, TError,DeleteLookupTableMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteLookupTable>>,
         TError,
@@ -782,41 +535,7 @@ export const useDeleteLookupTable = <TError = UnauthorizedResponse | ForbiddenRe
       > => {
       return useMutation(getDeleteLookupTableMutationOptions(options), queryClient);
     }
-    export type listLinkRulesResponse200 = {
-  data: LinkRuleList
-  status: 200
-}
-
-export type listLinkRulesResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listLinkRulesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listLinkRulesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listLinkRulesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listLinkRulesResponseSuccess = (listLinkRulesResponse200) & {
-  headers: Headers;
-};
-export type listLinkRulesResponseError = (listLinkRulesResponse400 | listLinkRulesResponse401 | listLinkRulesResponse403 | listLinkRulesResponse429) & {
-  headers: Headers;
-};
-
-export type listLinkRulesResponse = (listLinkRulesResponseSuccess | listLinkRulesResponseError)
-
-export const getListLinkRulesUrl = (params?: ListLinkRulesParams,) => {
+    export const getListLinkRulesUrl = (params?: ListLinkRulesParams,) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -834,23 +553,16 @@ export const getListLinkRulesUrl = (params?: ListLinkRulesParams,) => {
 /**
  * @summary List linkrules
  */
-export const listLinkRules = async (params?: ListLinkRulesParams, options?: RequestInit): Promise<listLinkRulesResponse> => {
+export const listLinkRules = async (params?: ListLinkRulesParams, options?: Parameters<typeof apiFetch>[1]): Promise<LinkRuleList> => {
 
-  const res = await fetch(getListLinkRulesUrl(params),
+  return apiFetch<LinkRuleList>(getListLinkRulesUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listLinkRulesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listLinkRulesResponse
-}
+);}
 
 
 
@@ -863,16 +575,16 @@ export const getListLinkRulesQueryKey = (params?: ListLinkRulesParams,) => {
     }
 
 
-export const getListLinkRulesQueryOptions = <TData = Awaited<ReturnType<typeof listLinkRules>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListLinkRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLinkRules>>, TError, TData>>, fetch?: RequestInit}
+export const getListLinkRulesQueryOptions = <TData = Awaited<ReturnType<typeof listLinkRules>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListLinkRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLinkRules>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListLinkRulesQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listLinkRules>>> = ({ signal }) => listLinkRules(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listLinkRules>>> = ({ signal }) => listLinkRules(params, { signal, ...requestOptions });
 
 
 
@@ -892,7 +604,7 @@ export function useListLinkRules<TData = Awaited<ReturnType<typeof listLinkRules
           TError,
           Awaited<ReturnType<typeof listLinkRules>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListLinkRules<TData = Awaited<ReturnType<typeof listLinkRules>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -902,11 +614,11 @@ export function useListLinkRules<TData = Awaited<ReturnType<typeof listLinkRules
           TError,
           Awaited<ReturnType<typeof listLinkRules>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListLinkRules<TData = Awaited<ReturnType<typeof listLinkRules>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListLinkRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLinkRules>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListLinkRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLinkRules>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -914,7 +626,7 @@ export function useListLinkRules<TData = Awaited<ReturnType<typeof listLinkRules
  */
 
 export function useListLinkRules<TData = Awaited<ReturnType<typeof listLinkRules>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListLinkRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLinkRules>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListLinkRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLinkRules>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -930,50 +642,6 @@ export function useListLinkRules<TData = Awaited<ReturnType<typeof listLinkRules
 
 
 
-export type createLinkRuleResponse201 = {
-  data: LinkRule
-  status: 201
-}
-
-export type createLinkRuleResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createLinkRuleResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createLinkRuleResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createLinkRuleResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type createLinkRuleResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type createLinkRuleResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createLinkRuleResponseSuccess = (createLinkRuleResponse201) & {
-  headers: Headers;
-};
-export type createLinkRuleResponseError = (createLinkRuleResponse400 | createLinkRuleResponse401 | createLinkRuleResponse403 | createLinkRuleResponse409 | createLinkRuleResponse422 | createLinkRuleResponse429) & {
-  headers: Headers;
-};
-
-export type createLinkRuleResponse = (createLinkRuleResponseSuccess | createLinkRuleResponseError)
-
 export const getCreateLinkRuleUrl = () => {
 
 
@@ -985,7 +653,7 @@ export const getCreateLinkRuleUrl = () => {
 /**
  * @summary Create LinkRule
  */
-export const createLinkRule = async (linkRuleBase: LinkRuleBase, options?: RequestInit): Promise<createLinkRuleResponse> => {
+export const createLinkRule = async (linkRuleBase: LinkRuleBase, options?: Parameters<typeof apiFetch>[1]): Promise<LinkRule> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1001,21 +669,14 @@ export const createLinkRule = async (linkRuleBase: LinkRuleBase, options?: Reque
     }
     return headers;
   };
-const res = await fetch(getCreateLinkRuleUrl(),
+return apiFetch<LinkRule>(getCreateLinkRuleUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(linkRuleBase)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createLinkRuleResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createLinkRuleResponse
-}
+);}
 
 
 
@@ -1024,15 +685,15 @@ const res = await fetch(getCreateLinkRuleUrl(),
 export const getCreateLinkRuleMutationKey = () => ['createLinkRule'] as const;
 
 export const getCreateLinkRuleMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createLinkRule>>, TError,CreateLinkRuleMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createLinkRule>>, TError,CreateLinkRuleMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createLinkRule>>, TError,CreateLinkRuleMutationVariables, TContext> => {
 
 const mutationKey = getCreateLinkRuleMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1040,7 +701,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createLinkRule>>, CreateLinkRuleMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  createLinkRule(data,fetchOptions)
+          return  createLinkRule(data,requestOptions)
         }
 
 
@@ -1059,7 +720,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Create LinkRule
  */
 export const useCreateLinkRule = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createLinkRule>>, TError,CreateLinkRuleMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createLinkRule>>, TError,CreateLinkRuleMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createLinkRule>>,
         TError,
@@ -1068,41 +729,7 @@ export const useCreateLinkRule = <TError = BadRequestResponse | UnauthorizedResp
       > => {
       return useMutation(getCreateLinkRuleMutationOptions(options), queryClient);
     }
-    export type getLinkRuleResponse200 = {
-  data: LinkRule
-  status: 200
-}
-
-export type getLinkRuleResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getLinkRuleResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getLinkRuleResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getLinkRuleResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getLinkRuleResponseSuccess = (getLinkRuleResponse200) & {
-  headers: Headers;
-};
-export type getLinkRuleResponseError = (getLinkRuleResponse401 | getLinkRuleResponse403 | getLinkRuleResponse404 | getLinkRuleResponse429) & {
-  headers: Headers;
-};
-
-export type getLinkRuleResponse = (getLinkRuleResponseSuccess | getLinkRuleResponseError)
-
-export const getGetLinkRuleUrl = (linkRuleId: string,) => {
+    export const getGetLinkRuleUrl = (linkRuleId: string,) => {
 
 
 
@@ -1113,23 +740,16 @@ export const getGetLinkRuleUrl = (linkRuleId: string,) => {
 /**
  * @summary Read LinkRule
  */
-export const getLinkRule = async (linkRuleId: string, options?: RequestInit): Promise<getLinkRuleResponse> => {
+export const getLinkRule = async (linkRuleId: string, options?: Parameters<typeof apiFetch>[1]): Promise<LinkRule> => {
 
-  const res = await fetch(getGetLinkRuleUrl(linkRuleId),
+  return apiFetch<LinkRule>(getGetLinkRuleUrl(linkRuleId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getLinkRuleResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getLinkRuleResponse
-}
+);}
 
 
 
@@ -1142,16 +762,16 @@ export const getGetLinkRuleQueryKey = (linkRuleId: string,) => {
     }
 
 
-export const getGetLinkRuleQueryOptions = <TData = Awaited<ReturnType<typeof getLinkRule>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(linkRuleId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLinkRule>>, TError, TData>>, fetch?: RequestInit}
+export const getGetLinkRuleQueryOptions = <TData = Awaited<ReturnType<typeof getLinkRule>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(linkRuleId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLinkRule>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetLinkRuleQueryKey(linkRuleId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLinkRule>>> = ({ signal }) => getLinkRule(linkRuleId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLinkRule>>> = ({ signal }) => getLinkRule(linkRuleId, { signal, ...requestOptions });
 
 
 
@@ -1171,7 +791,7 @@ export function useGetLinkRule<TData = Awaited<ReturnType<typeof getLinkRule>>, 
           TError,
           Awaited<ReturnType<typeof getLinkRule>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetLinkRule<TData = Awaited<ReturnType<typeof getLinkRule>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -1181,11 +801,11 @@ export function useGetLinkRule<TData = Awaited<ReturnType<typeof getLinkRule>>, 
           TError,
           Awaited<ReturnType<typeof getLinkRule>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetLinkRule<TData = Awaited<ReturnType<typeof getLinkRule>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- linkRuleId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLinkRule>>, TError, TData>>, fetch?: RequestInit}
+ linkRuleId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLinkRule>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1193,7 +813,7 @@ export function useGetLinkRule<TData = Awaited<ReturnType<typeof getLinkRule>>, 
  */
 
 export function useGetLinkRule<TData = Awaited<ReturnType<typeof getLinkRule>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- linkRuleId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLinkRule>>, TError, TData>>, fetch?: RequestInit}
+ linkRuleId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getLinkRule>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1209,65 +829,6 @@ export function useGetLinkRule<TData = Awaited<ReturnType<typeof getLinkRule>>, 
 
 
 
-export type updateLinkRuleResponse200 = {
-  data: LinkRule
-  status: 200
-}
-
-export type updateLinkRuleResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type updateLinkRuleResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type updateLinkRuleResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type updateLinkRuleResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type updateLinkRuleResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type updateLinkRuleResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type updateLinkRuleResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type updateLinkRuleResponse428 = {
-  data: PreconditionRequiredResponse
-  status: 428
-}
-
-export type updateLinkRuleResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type updateLinkRuleResponseSuccess = (updateLinkRuleResponse200) & {
-  headers: Headers;
-};
-export type updateLinkRuleResponseError = (updateLinkRuleResponse400 | updateLinkRuleResponse401 | updateLinkRuleResponse403 | updateLinkRuleResponse404 | updateLinkRuleResponse409 | updateLinkRuleResponse412 | updateLinkRuleResponse422 | updateLinkRuleResponse428 | updateLinkRuleResponse429) & {
-  headers: Headers;
-};
-
-export type updateLinkRuleResponse = (updateLinkRuleResponseSuccess | updateLinkRuleResponseError)
-
 export const getUpdateLinkRuleUrl = (linkRuleId: string,) => {
 
 
@@ -1281,7 +842,7 @@ export const getUpdateLinkRuleUrl = (linkRuleId: string,) => {
  * @summary Update LinkRule
  */
 export const updateLinkRule = async (linkRuleId: string,
-    linkRuleBase: LinkRuleBase, options?: RequestInit): Promise<updateLinkRuleResponse> => {
+    linkRuleBase: LinkRuleBase, options?: Parameters<typeof apiFetch>[1]): Promise<LinkRule> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1297,21 +858,14 @@ export const updateLinkRule = async (linkRuleId: string,
     }
     return headers;
   };
-const res = await fetch(getUpdateLinkRuleUrl(linkRuleId),
+return apiFetch<LinkRule>(getUpdateLinkRuleUrl(linkRuleId),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(linkRuleBase)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: updateLinkRuleResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as updateLinkRuleResponse
-}
+);}
 
 
 
@@ -1320,15 +874,15 @@ const res = await fetch(getUpdateLinkRuleUrl(linkRuleId),
 export const getUpdateLinkRuleMutationKey = () => ['updateLinkRule'] as const;
 
 export const getUpdateLinkRuleMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLinkRule>>, TError,UpdateLinkRuleMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLinkRule>>, TError,UpdateLinkRuleMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateLinkRule>>, TError,UpdateLinkRuleMutationVariables, TContext> => {
 
 const mutationKey = getUpdateLinkRuleMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1336,7 +890,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateLinkRule>>, UpdateLinkRuleMutationVariables> = (props) => {
           const {linkRuleId,data} = props ?? {};
 
-          return  updateLinkRule(linkRuleId,data,fetchOptions)
+          return  updateLinkRule(linkRuleId,data,requestOptions)
         }
 
 
@@ -1355,7 +909,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Update LinkRule
  */
 export const useUpdateLinkRule = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLinkRule>>, TError,UpdateLinkRuleMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLinkRule>>, TError,UpdateLinkRuleMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateLinkRule>>,
         TError,
@@ -1364,51 +918,7 @@ export const useUpdateLinkRule = <TError = BadRequestResponse | UnauthorizedResp
       > => {
       return useMutation(getUpdateLinkRuleMutationOptions(options), queryClient);
     }
-    export type deleteLinkRuleResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteLinkRuleResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteLinkRuleResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteLinkRuleResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type deleteLinkRuleResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type deleteLinkRuleResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type deleteLinkRuleResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteLinkRuleResponseSuccess = (deleteLinkRuleResponse204) & {
-  headers: Headers;
-};
-export type deleteLinkRuleResponseError = (deleteLinkRuleResponse401 | deleteLinkRuleResponse403 | deleteLinkRuleResponse404 | deleteLinkRuleResponse409 | deleteLinkRuleResponse412 | deleteLinkRuleResponse429) & {
-  headers: Headers;
-};
-
-export type deleteLinkRuleResponse = (deleteLinkRuleResponseSuccess | deleteLinkRuleResponseError)
-
-export const getDeleteLinkRuleUrl = (linkRuleId: string,) => {
+    export const getDeleteLinkRuleUrl = (linkRuleId: string,) => {
 
 
 
@@ -1420,23 +930,16 @@ export const getDeleteLinkRuleUrl = (linkRuleId: string,) => {
  * The built-in "Explore" rule cannot be deleted (`409`).
  * @summary Delete LinkRule
  */
-export const deleteLinkRule = async (linkRuleId: string, options?: RequestInit): Promise<deleteLinkRuleResponse> => {
+export const deleteLinkRule = async (linkRuleId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteLinkRuleUrl(linkRuleId),
+  return apiFetch<void>(getDeleteLinkRuleUrl(linkRuleId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteLinkRuleResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteLinkRuleResponse
-}
+);}
 
 
 
@@ -1445,15 +948,15 @@ export const deleteLinkRule = async (linkRuleId: string, options?: RequestInit):
 export const getDeleteLinkRuleMutationKey = () => ['deleteLinkRule'] as const;
 
 export const getDeleteLinkRuleMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteLinkRule>>, TError,DeleteLinkRuleMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteLinkRule>>, TError,DeleteLinkRuleMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteLinkRule>>, TError,DeleteLinkRuleMutationVariables, TContext> => {
 
 const mutationKey = getDeleteLinkRuleMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1461,7 +964,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteLinkRule>>, DeleteLinkRuleMutationVariables> = (props) => {
           const {linkRuleId} = props ?? {};
 
-          return  deleteLinkRule(linkRuleId,fetchOptions)
+          return  deleteLinkRule(linkRuleId,requestOptions)
         }
 
 
@@ -1480,7 +983,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Delete LinkRule
  */
 export const useDeleteLinkRule = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteLinkRule>>, TError,DeleteLinkRuleMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteLinkRule>>, TError,DeleteLinkRuleMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteLinkRule>>,
         TError,

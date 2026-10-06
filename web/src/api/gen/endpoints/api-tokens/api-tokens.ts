@@ -58,7 +58,10 @@ import type {
   UnprocessableResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -77,35 +80,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type listPersonalAccessTokensResponse200 = {
-  data: PersonalAccessTokenList
-  status: 200
-}
-
-export type listPersonalAccessTokensResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listPersonalAccessTokensResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listPersonalAccessTokensResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listPersonalAccessTokensResponseSuccess = (listPersonalAccessTokensResponse200) & {
-  headers: Headers;
-};
-export type listPersonalAccessTokensResponseError = (listPersonalAccessTokensResponse401 | listPersonalAccessTokensResponse403 | listPersonalAccessTokensResponse429) & {
-  headers: Headers;
-};
-
-export type listPersonalAccessTokensResponse = (listPersonalAccessTokensResponseSuccess | listPersonalAccessTokensResponseError)
-
 export const getListPersonalAccessTokensUrl = () => {
 
 
@@ -118,23 +92,16 @@ export const getListPersonalAccessTokensUrl = () => {
  * Values are never returned. Each token shows when and from which address it was last used. Service account tokens get `403` (`service_account_not_allowed`).
  * @summary List own Personal access tokens
  */
-export const listPersonalAccessTokens = async ( options?: RequestInit): Promise<listPersonalAccessTokensResponse> => {
+export const listPersonalAccessTokens = async ( options?: Parameters<typeof apiFetch>[1]): Promise<PersonalAccessTokenList> => {
 
-  const res = await fetch(getListPersonalAccessTokensUrl(),
+  return apiFetch<PersonalAccessTokenList>(getListPersonalAccessTokensUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listPersonalAccessTokensResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listPersonalAccessTokensResponse
-}
+);}
 
 
 
@@ -147,16 +114,16 @@ export const getListPersonalAccessTokensQueryKey = () => {
     }
 
 
-export const getListPersonalAccessTokensQueryOptions = <TData = Awaited<ReturnType<typeof listPersonalAccessTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPersonalAccessTokens>>, TError, TData>>, fetch?: RequestInit}
+export const getListPersonalAccessTokensQueryOptions = <TData = Awaited<ReturnType<typeof listPersonalAccessTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPersonalAccessTokens>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListPersonalAccessTokensQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPersonalAccessTokens>>> = ({ signal }) => listPersonalAccessTokens({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPersonalAccessTokens>>> = ({ signal }) => listPersonalAccessTokens({ signal, ...requestOptions });
 
 
 
@@ -176,7 +143,7 @@ export function useListPersonalAccessTokens<TData = Awaited<ReturnType<typeof li
           TError,
           Awaited<ReturnType<typeof listPersonalAccessTokens>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListPersonalAccessTokens<TData = Awaited<ReturnType<typeof listPersonalAccessTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -186,11 +153,11 @@ export function useListPersonalAccessTokens<TData = Awaited<ReturnType<typeof li
           TError,
           Awaited<ReturnType<typeof listPersonalAccessTokens>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListPersonalAccessTokens<TData = Awaited<ReturnType<typeof listPersonalAccessTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPersonalAccessTokens>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPersonalAccessTokens>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -198,7 +165,7 @@ export function useListPersonalAccessTokens<TData = Awaited<ReturnType<typeof li
  */
 
 export function useListPersonalAccessTokens<TData = Awaited<ReturnType<typeof listPersonalAccessTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPersonalAccessTokens>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPersonalAccessTokens>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -214,45 +181,6 @@ export function useListPersonalAccessTokens<TData = Awaited<ReturnType<typeof li
 
 
 
-export type createPersonalAccessTokenResponse201 = {
-  data: PersonalAccessTokenCreated
-  status: 201
-}
-
-export type createPersonalAccessTokenResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createPersonalAccessTokenResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createPersonalAccessTokenResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createPersonalAccessTokenResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type createPersonalAccessTokenResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createPersonalAccessTokenResponseSuccess = (createPersonalAccessTokenResponse201) & {
-  headers: Headers;
-};
-export type createPersonalAccessTokenResponseError = (createPersonalAccessTokenResponse400 | createPersonalAccessTokenResponse401 | createPersonalAccessTokenResponse403 | createPersonalAccessTokenResponse422 | createPersonalAccessTokenResponse429) & {
-  headers: Headers;
-};
-
-export type createPersonalAccessTokenResponse = (createPersonalAccessTokenResponseSuccess | createPersonalAccessTokenResponseError)
-
 export const getCreatePersonalAccessTokenUrl = () => {
 
 
@@ -265,7 +193,7 @@ export const getCreatePersonalAccessTokenUrl = () => {
  * Shows the token once. Its Permissions must be a subset of the Permissions the caller holds now (`422` `permission_not_held` on `/permissions/<i>`). Web session only: a token can never mint another token.
  * @summary Create a Personal access token
  */
-export const createPersonalAccessToken = async (personalAccessTokenCreate: PersonalAccessTokenCreate, options?: RequestInit): Promise<createPersonalAccessTokenResponse> => {
+export const createPersonalAccessToken = async (personalAccessTokenCreate: PersonalAccessTokenCreate, options?: Parameters<typeof apiFetch>[1]): Promise<PersonalAccessTokenCreated> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -281,21 +209,14 @@ export const createPersonalAccessToken = async (personalAccessTokenCreate: Perso
     }
     return headers;
   };
-const res = await fetch(getCreatePersonalAccessTokenUrl(),
+return apiFetch<PersonalAccessTokenCreated>(getCreatePersonalAccessTokenUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(personalAccessTokenCreate)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createPersonalAccessTokenResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createPersonalAccessTokenResponse
-}
+);}
 
 
 
@@ -304,15 +225,15 @@ const res = await fetch(getCreatePersonalAccessTokenUrl(),
 export const getCreatePersonalAccessTokenMutationKey = () => ['createPersonalAccessToken'] as const;
 
 export const getCreatePersonalAccessTokenMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPersonalAccessToken>>, TError,CreatePersonalAccessTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPersonalAccessToken>>, TError,CreatePersonalAccessTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPersonalAccessToken>>, TError,CreatePersonalAccessTokenMutationVariables, TContext> => {
 
 const mutationKey = getCreatePersonalAccessTokenMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -320,7 +241,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPersonalAccessToken>>, CreatePersonalAccessTokenMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  createPersonalAccessToken(data,fetchOptions)
+          return  createPersonalAccessToken(data,requestOptions)
         }
 
 
@@ -339,7 +260,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Create a Personal access token
  */
 export const useCreatePersonalAccessToken = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPersonalAccessToken>>, TError,CreatePersonalAccessTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPersonalAccessToken>>, TError,CreatePersonalAccessTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPersonalAccessToken>>,
         TError,
@@ -348,41 +269,7 @@ export const useCreatePersonalAccessToken = <TError = BadRequestResponse | Unaut
       > => {
       return useMutation(getCreatePersonalAccessTokenMutationOptions(options), queryClient);
     }
-    export type revokePersonalAccessTokenResponse204 = {
-  data: void
-  status: 204
-}
-
-export type revokePersonalAccessTokenResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type revokePersonalAccessTokenResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type revokePersonalAccessTokenResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type revokePersonalAccessTokenResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type revokePersonalAccessTokenResponseSuccess = (revokePersonalAccessTokenResponse204) & {
-  headers: Headers;
-};
-export type revokePersonalAccessTokenResponseError = (revokePersonalAccessTokenResponse401 | revokePersonalAccessTokenResponse403 | revokePersonalAccessTokenResponse404 | revokePersonalAccessTokenResponse429) & {
-  headers: Headers;
-};
-
-export type revokePersonalAccessTokenResponse = (revokePersonalAccessTokenResponseSuccess | revokePersonalAccessTokenResponseError)
-
-export const getRevokePersonalAccessTokenUrl = (tokenId: string,) => {
+    export const getRevokePersonalAccessTokenUrl = (tokenId: string,) => {
 
 
 
@@ -394,23 +281,16 @@ export const getRevokePersonalAccessTokenUrl = (tokenId: string,) => {
  * Revokes the token at once. Web session only.
  * @summary Revoke a Personal access token
  */
-export const revokePersonalAccessToken = async (tokenId: string, options?: RequestInit): Promise<revokePersonalAccessTokenResponse> => {
+export const revokePersonalAccessToken = async (tokenId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getRevokePersonalAccessTokenUrl(tokenId),
+  return apiFetch<void>(getRevokePersonalAccessTokenUrl(tokenId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: revokePersonalAccessTokenResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as revokePersonalAccessTokenResponse
-}
+);}
 
 
 
@@ -419,15 +299,15 @@ export const revokePersonalAccessToken = async (tokenId: string, options?: Reque
 export const getRevokePersonalAccessTokenMutationKey = () => ['revokePersonalAccessToken'] as const;
 
 export const getRevokePersonalAccessTokenMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokePersonalAccessToken>>, TError,RevokePersonalAccessTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokePersonalAccessToken>>, TError,RevokePersonalAccessTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof revokePersonalAccessToken>>, TError,RevokePersonalAccessTokenMutationVariables, TContext> => {
 
 const mutationKey = getRevokePersonalAccessTokenMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -435,7 +315,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokePersonalAccessToken>>, RevokePersonalAccessTokenMutationVariables> = (props) => {
           const {tokenId} = props ?? {};
 
-          return  revokePersonalAccessToken(tokenId,fetchOptions)
+          return  revokePersonalAccessToken(tokenId,requestOptions)
         }
 
 
@@ -454,7 +334,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Revoke a Personal access token
  */
 export const useRevokePersonalAccessToken = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokePersonalAccessToken>>, TError,RevokePersonalAccessTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokePersonalAccessToken>>, TError,RevokePersonalAccessTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof revokePersonalAccessToken>>,
         TError,
@@ -463,41 +343,7 @@ export const useRevokePersonalAccessToken = <TError = UnauthorizedResponse | For
       > => {
       return useMutation(getRevokePersonalAccessTokenMutationOptions(options), queryClient);
     }
-    export type listServiceAccountsResponse200 = {
-  data: ServiceAccountList
-  status: 200
-}
-
-export type listServiceAccountsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listServiceAccountsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listServiceAccountsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listServiceAccountsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listServiceAccountsResponseSuccess = (listServiceAccountsResponse200) & {
-  headers: Headers;
-};
-export type listServiceAccountsResponseError = (listServiceAccountsResponse400 | listServiceAccountsResponse401 | listServiceAccountsResponse403 | listServiceAccountsResponse429) & {
-  headers: Headers;
-};
-
-export type listServiceAccountsResponse = (listServiceAccountsResponseSuccess | listServiceAccountsResponseError)
-
-export const getListServiceAccountsUrl = (params?: ListServiceAccountsParams,) => {
+    export const getListServiceAccountsUrl = (params?: ListServiceAccountsParams,) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -515,23 +361,16 @@ export const getListServiceAccountsUrl = (params?: ListServiceAccountsParams,) =
 /**
  * @summary List Service accounts
  */
-export const listServiceAccounts = async (params?: ListServiceAccountsParams, options?: RequestInit): Promise<listServiceAccountsResponse> => {
+export const listServiceAccounts = async (params?: ListServiceAccountsParams, options?: Parameters<typeof apiFetch>[1]): Promise<ServiceAccountList> => {
 
-  const res = await fetch(getListServiceAccountsUrl(params),
+  return apiFetch<ServiceAccountList>(getListServiceAccountsUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listServiceAccountsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listServiceAccountsResponse
-}
+);}
 
 
 
@@ -544,16 +383,16 @@ export const getListServiceAccountsQueryKey = (params?: ListServiceAccountsParam
     }
 
 
-export const getListServiceAccountsQueryOptions = <TData = Awaited<ReturnType<typeof listServiceAccounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListServiceAccountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServiceAccounts>>, TError, TData>>, fetch?: RequestInit}
+export const getListServiceAccountsQueryOptions = <TData = Awaited<ReturnType<typeof listServiceAccounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListServiceAccountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServiceAccounts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListServiceAccountsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listServiceAccounts>>> = ({ signal }) => listServiceAccounts(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listServiceAccounts>>> = ({ signal }) => listServiceAccounts(params, { signal, ...requestOptions });
 
 
 
@@ -573,7 +412,7 @@ export function useListServiceAccounts<TData = Awaited<ReturnType<typeof listSer
           TError,
           Awaited<ReturnType<typeof listServiceAccounts>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListServiceAccounts<TData = Awaited<ReturnType<typeof listServiceAccounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -583,11 +422,11 @@ export function useListServiceAccounts<TData = Awaited<ReturnType<typeof listSer
           TError,
           Awaited<ReturnType<typeof listServiceAccounts>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListServiceAccounts<TData = Awaited<ReturnType<typeof listServiceAccounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListServiceAccountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServiceAccounts>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListServiceAccountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServiceAccounts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -595,7 +434,7 @@ export function useListServiceAccounts<TData = Awaited<ReturnType<typeof listSer
  */
 
 export function useListServiceAccounts<TData = Awaited<ReturnType<typeof listServiceAccounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListServiceAccountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServiceAccounts>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListServiceAccountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServiceAccounts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -611,50 +450,6 @@ export function useListServiceAccounts<TData = Awaited<ReturnType<typeof listSer
 
 
 
-export type createServiceAccountResponse201 = {
-  data: ServiceAccount
-  status: 201
-}
-
-export type createServiceAccountResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createServiceAccountResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createServiceAccountResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createServiceAccountResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type createServiceAccountResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type createServiceAccountResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createServiceAccountResponseSuccess = (createServiceAccountResponse201) & {
-  headers: Headers;
-};
-export type createServiceAccountResponseError = (createServiceAccountResponse400 | createServiceAccountResponse401 | createServiceAccountResponse403 | createServiceAccountResponse409 | createServiceAccountResponse422 | createServiceAccountResponse429) & {
-  headers: Headers;
-};
-
-export type createServiceAccountResponse = (createServiceAccountResponseSuccess | createServiceAccountResponseError)
-
 export const getCreateServiceAccountUrl = () => {
 
 
@@ -666,7 +461,7 @@ export const getCreateServiceAccountUrl = () => {
 /**
  * @summary Create a Service account
  */
-export const createServiceAccount = async (serviceAccountInput: ServiceAccountInput, options?: RequestInit): Promise<createServiceAccountResponse> => {
+export const createServiceAccount = async (serviceAccountInput: ServiceAccountInput, options?: Parameters<typeof apiFetch>[1]): Promise<ServiceAccount> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -682,21 +477,14 @@ export const createServiceAccount = async (serviceAccountInput: ServiceAccountIn
     }
     return headers;
   };
-const res = await fetch(getCreateServiceAccountUrl(),
+return apiFetch<ServiceAccount>(getCreateServiceAccountUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(serviceAccountInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createServiceAccountResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createServiceAccountResponse
-}
+);}
 
 
 
@@ -705,15 +493,15 @@ const res = await fetch(getCreateServiceAccountUrl(),
 export const getCreateServiceAccountMutationKey = () => ['createServiceAccount'] as const;
 
 export const getCreateServiceAccountMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServiceAccount>>, TError,CreateServiceAccountMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServiceAccount>>, TError,CreateServiceAccountMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createServiceAccount>>, TError,CreateServiceAccountMutationVariables, TContext> => {
 
 const mutationKey = getCreateServiceAccountMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -721,7 +509,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createServiceAccount>>, CreateServiceAccountMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  createServiceAccount(data,fetchOptions)
+          return  createServiceAccount(data,requestOptions)
         }
 
 
@@ -740,7 +528,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Create a Service account
  */
 export const useCreateServiceAccount = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServiceAccount>>, TError,CreateServiceAccountMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServiceAccount>>, TError,CreateServiceAccountMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createServiceAccount>>,
         TError,
@@ -749,41 +537,7 @@ export const useCreateServiceAccount = <TError = BadRequestResponse | Unauthoriz
       > => {
       return useMutation(getCreateServiceAccountMutationOptions(options), queryClient);
     }
-    export type getServiceAccountResponse200 = {
-  data: ServiceAccount
-  status: 200
-}
-
-export type getServiceAccountResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getServiceAccountResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getServiceAccountResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getServiceAccountResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getServiceAccountResponseSuccess = (getServiceAccountResponse200) & {
-  headers: Headers;
-};
-export type getServiceAccountResponseError = (getServiceAccountResponse401 | getServiceAccountResponse403 | getServiceAccountResponse404 | getServiceAccountResponse429) & {
-  headers: Headers;
-};
-
-export type getServiceAccountResponse = (getServiceAccountResponseSuccess | getServiceAccountResponseError)
-
-export const getGetServiceAccountUrl = (serviceAccountId: string,) => {
+    export const getGetServiceAccountUrl = (serviceAccountId: string,) => {
 
 
 
@@ -794,23 +548,16 @@ export const getGetServiceAccountUrl = (serviceAccountId: string,) => {
 /**
  * @summary Read a Service account
  */
-export const getServiceAccount = async (serviceAccountId: string, options?: RequestInit): Promise<getServiceAccountResponse> => {
+export const getServiceAccount = async (serviceAccountId: string, options?: Parameters<typeof apiFetch>[1]): Promise<ServiceAccount> => {
 
-  const res = await fetch(getGetServiceAccountUrl(serviceAccountId),
+  return apiFetch<ServiceAccount>(getGetServiceAccountUrl(serviceAccountId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getServiceAccountResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getServiceAccountResponse
-}
+);}
 
 
 
@@ -823,16 +570,16 @@ export const getGetServiceAccountQueryKey = (serviceAccountId: string,) => {
     }
 
 
-export const getGetServiceAccountQueryOptions = <TData = Awaited<ReturnType<typeof getServiceAccount>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(serviceAccountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getServiceAccount>>, TError, TData>>, fetch?: RequestInit}
+export const getGetServiceAccountQueryOptions = <TData = Awaited<ReturnType<typeof getServiceAccount>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(serviceAccountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getServiceAccount>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetServiceAccountQueryKey(serviceAccountId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getServiceAccount>>> = ({ signal }) => getServiceAccount(serviceAccountId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getServiceAccount>>> = ({ signal }) => getServiceAccount(serviceAccountId, { signal, ...requestOptions });
 
 
 
@@ -852,7 +599,7 @@ export function useGetServiceAccount<TData = Awaited<ReturnType<typeof getServic
           TError,
           Awaited<ReturnType<typeof getServiceAccount>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetServiceAccount<TData = Awaited<ReturnType<typeof getServiceAccount>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -862,11 +609,11 @@ export function useGetServiceAccount<TData = Awaited<ReturnType<typeof getServic
           TError,
           Awaited<ReturnType<typeof getServiceAccount>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetServiceAccount<TData = Awaited<ReturnType<typeof getServiceAccount>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- serviceAccountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getServiceAccount>>, TError, TData>>, fetch?: RequestInit}
+ serviceAccountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getServiceAccount>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -874,7 +621,7 @@ export function useGetServiceAccount<TData = Awaited<ReturnType<typeof getServic
  */
 
 export function useGetServiceAccount<TData = Awaited<ReturnType<typeof getServiceAccount>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- serviceAccountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getServiceAccount>>, TError, TData>>, fetch?: RequestInit}
+ serviceAccountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getServiceAccount>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -890,65 +637,6 @@ export function useGetServiceAccount<TData = Awaited<ReturnType<typeof getServic
 
 
 
-export type updateServiceAccountResponse200 = {
-  data: ServiceAccount
-  status: 200
-}
-
-export type updateServiceAccountResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type updateServiceAccountResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type updateServiceAccountResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type updateServiceAccountResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type updateServiceAccountResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type updateServiceAccountResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type updateServiceAccountResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type updateServiceAccountResponse428 = {
-  data: PreconditionRequiredResponse
-  status: 428
-}
-
-export type updateServiceAccountResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type updateServiceAccountResponseSuccess = (updateServiceAccountResponse200) & {
-  headers: Headers;
-};
-export type updateServiceAccountResponseError = (updateServiceAccountResponse400 | updateServiceAccountResponse401 | updateServiceAccountResponse403 | updateServiceAccountResponse404 | updateServiceAccountResponse409 | updateServiceAccountResponse412 | updateServiceAccountResponse422 | updateServiceAccountResponse428 | updateServiceAccountResponse429) & {
-  headers: Headers;
-};
-
-export type updateServiceAccountResponse = (updateServiceAccountResponseSuccess | updateServiceAccountResponseError)
-
 export const getUpdateServiceAccountUrl = (serviceAccountId: string,) => {
 
 
@@ -961,7 +649,7 @@ export const getUpdateServiceAccountUrl = (serviceAccountId: string,) => {
  * @summary Update a Service account
  */
 export const updateServiceAccount = async (serviceAccountId: string,
-    serviceAccountInput: ServiceAccountInput, options?: RequestInit): Promise<updateServiceAccountResponse> => {
+    serviceAccountInput: ServiceAccountInput, options?: Parameters<typeof apiFetch>[1]): Promise<ServiceAccount> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -977,21 +665,14 @@ export const updateServiceAccount = async (serviceAccountId: string,
     }
     return headers;
   };
-const res = await fetch(getUpdateServiceAccountUrl(serviceAccountId),
+return apiFetch<ServiceAccount>(getUpdateServiceAccountUrl(serviceAccountId),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(serviceAccountInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: updateServiceAccountResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as updateServiceAccountResponse
-}
+);}
 
 
 
@@ -1000,15 +681,15 @@ const res = await fetch(getUpdateServiceAccountUrl(serviceAccountId),
 export const getUpdateServiceAccountMutationKey = () => ['updateServiceAccount'] as const;
 
 export const getUpdateServiceAccountMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateServiceAccount>>, TError,UpdateServiceAccountMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateServiceAccount>>, TError,UpdateServiceAccountMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateServiceAccount>>, TError,UpdateServiceAccountMutationVariables, TContext> => {
 
 const mutationKey = getUpdateServiceAccountMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1016,7 +697,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateServiceAccount>>, UpdateServiceAccountMutationVariables> = (props) => {
           const {serviceAccountId,data} = props ?? {};
 
-          return  updateServiceAccount(serviceAccountId,data,fetchOptions)
+          return  updateServiceAccount(serviceAccountId,data,requestOptions)
         }
 
 
@@ -1035,7 +716,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Update a Service account
  */
 export const useUpdateServiceAccount = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateServiceAccount>>, TError,UpdateServiceAccountMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateServiceAccount>>, TError,UpdateServiceAccountMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateServiceAccount>>,
         TError,
@@ -1044,46 +725,7 @@ export const useUpdateServiceAccount = <TError = BadRequestResponse | Unauthoriz
       > => {
       return useMutation(getUpdateServiceAccountMutationOptions(options), queryClient);
     }
-    export type deleteServiceAccountResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteServiceAccountResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteServiceAccountResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteServiceAccountResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type deleteServiceAccountResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type deleteServiceAccountResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteServiceAccountResponseSuccess = (deleteServiceAccountResponse204) & {
-  headers: Headers;
-};
-export type deleteServiceAccountResponseError = (deleteServiceAccountResponse401 | deleteServiceAccountResponse403 | deleteServiceAccountResponse404 | deleteServiceAccountResponse412 | deleteServiceAccountResponse429) & {
-  headers: Headers;
-};
-
-export type deleteServiceAccountResponse = (deleteServiceAccountResponseSuccess | deleteServiceAccountResponseError)
-
-export const getDeleteServiceAccountUrl = (serviceAccountId: string,) => {
+    export const getDeleteServiceAccountUrl = (serviceAccountId: string,) => {
 
 
 
@@ -1095,23 +737,16 @@ export const getDeleteServiceAccountUrl = (serviceAccountId: string,) => {
  * Revokes its tokens.
  * @summary Delete a Service account
  */
-export const deleteServiceAccount = async (serviceAccountId: string, options?: RequestInit): Promise<deleteServiceAccountResponse> => {
+export const deleteServiceAccount = async (serviceAccountId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteServiceAccountUrl(serviceAccountId),
+  return apiFetch<void>(getDeleteServiceAccountUrl(serviceAccountId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteServiceAccountResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteServiceAccountResponse
-}
+);}
 
 
 
@@ -1120,15 +755,15 @@ export const deleteServiceAccount = async (serviceAccountId: string, options?: R
 export const getDeleteServiceAccountMutationKey = () => ['deleteServiceAccount'] as const;
 
 export const getDeleteServiceAccountMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteServiceAccount>>, TError,DeleteServiceAccountMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteServiceAccount>>, TError,DeleteServiceAccountMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteServiceAccount>>, TError,DeleteServiceAccountMutationVariables, TContext> => {
 
 const mutationKey = getDeleteServiceAccountMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1136,7 +771,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteServiceAccount>>, DeleteServiceAccountMutationVariables> = (props) => {
           const {serviceAccountId} = props ?? {};
 
-          return  deleteServiceAccount(serviceAccountId,fetchOptions)
+          return  deleteServiceAccount(serviceAccountId,requestOptions)
         }
 
 
@@ -1155,7 +790,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Delete a Service account
  */
 export const useDeleteServiceAccount = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteServiceAccount>>, TError,DeleteServiceAccountMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteServiceAccount>>, TError,DeleteServiceAccountMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteServiceAccount>>,
         TError,
@@ -1164,46 +799,7 @@ export const useDeleteServiceAccount = <TError = UnauthorizedResponse | Forbidde
       > => {
       return useMutation(getDeleteServiceAccountMutationOptions(options), queryClient);
     }
-    export type disableServiceAccountResponse200 = {
-  data: ServiceAccount
-  status: 200
-}
-
-export type disableServiceAccountResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type disableServiceAccountResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type disableServiceAccountResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type disableServiceAccountResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type disableServiceAccountResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type disableServiceAccountResponseSuccess = (disableServiceAccountResponse200) & {
-  headers: Headers;
-};
-export type disableServiceAccountResponseError = (disableServiceAccountResponse401 | disableServiceAccountResponse403 | disableServiceAccountResponse404 | disableServiceAccountResponse409 | disableServiceAccountResponse429) & {
-  headers: Headers;
-};
-
-export type disableServiceAccountResponse = (disableServiceAccountResponseSuccess | disableServiceAccountResponseError)
-
-export const getDisableServiceAccountUrl = (serviceAccountId: string,) => {
+    export const getDisableServiceAccountUrl = (serviceAccountId: string,) => {
 
 
 
@@ -1215,23 +811,16 @@ export const getDisableServiceAccountUrl = (serviceAccountId: string,) => {
  * Its tokens stop working until the account is enabled again.
  * @summary Disable a Service account
  */
-export const disableServiceAccount = async (serviceAccountId: string, options?: RequestInit): Promise<disableServiceAccountResponse> => {
+export const disableServiceAccount = async (serviceAccountId: string, options?: Parameters<typeof apiFetch>[1]): Promise<ServiceAccount> => {
 
-  const res = await fetch(getDisableServiceAccountUrl(serviceAccountId),
+  return apiFetch<ServiceAccount>(getDisableServiceAccountUrl(serviceAccountId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: disableServiceAccountResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as disableServiceAccountResponse
-}
+);}
 
 
 
@@ -1240,15 +829,15 @@ export const disableServiceAccount = async (serviceAccountId: string, options?: 
 export const getDisableServiceAccountMutationKey = () => ['disableServiceAccount'] as const;
 
 export const getDisableServiceAccountMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disableServiceAccount>>, TError,DisableServiceAccountMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disableServiceAccount>>, TError,DisableServiceAccountMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof disableServiceAccount>>, TError,DisableServiceAccountMutationVariables, TContext> => {
 
 const mutationKey = getDisableServiceAccountMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1256,7 +845,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof disableServiceAccount>>, DisableServiceAccountMutationVariables> = (props) => {
           const {serviceAccountId} = props ?? {};
 
-          return  disableServiceAccount(serviceAccountId,fetchOptions)
+          return  disableServiceAccount(serviceAccountId,requestOptions)
         }
 
 
@@ -1275,7 +864,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Disable a Service account
  */
 export const useDisableServiceAccount = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disableServiceAccount>>, TError,DisableServiceAccountMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disableServiceAccount>>, TError,DisableServiceAccountMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof disableServiceAccount>>,
         TError,
@@ -1284,46 +873,7 @@ export const useDisableServiceAccount = <TError = UnauthorizedResponse | Forbidd
       > => {
       return useMutation(getDisableServiceAccountMutationOptions(options), queryClient);
     }
-    export type enableServiceAccountResponse200 = {
-  data: ServiceAccount
-  status: 200
-}
-
-export type enableServiceAccountResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type enableServiceAccountResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type enableServiceAccountResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type enableServiceAccountResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type enableServiceAccountResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type enableServiceAccountResponseSuccess = (enableServiceAccountResponse200) & {
-  headers: Headers;
-};
-export type enableServiceAccountResponseError = (enableServiceAccountResponse401 | enableServiceAccountResponse403 | enableServiceAccountResponse404 | enableServiceAccountResponse409 | enableServiceAccountResponse429) & {
-  headers: Headers;
-};
-
-export type enableServiceAccountResponse = (enableServiceAccountResponseSuccess | enableServiceAccountResponseError)
-
-export const getEnableServiceAccountUrl = (serviceAccountId: string,) => {
+    export const getEnableServiceAccountUrl = (serviceAccountId: string,) => {
 
 
 
@@ -1335,23 +885,16 @@ export const getEnableServiceAccountUrl = (serviceAccountId: string,) => {
  * Makes a disabled Service account usable again; its tokens work again.
  * @summary Enable a Service account
  */
-export const enableServiceAccount = async (serviceAccountId: string, options?: RequestInit): Promise<enableServiceAccountResponse> => {
+export const enableServiceAccount = async (serviceAccountId: string, options?: Parameters<typeof apiFetch>[1]): Promise<ServiceAccount> => {
 
-  const res = await fetch(getEnableServiceAccountUrl(serviceAccountId),
+  return apiFetch<ServiceAccount>(getEnableServiceAccountUrl(serviceAccountId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: enableServiceAccountResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as enableServiceAccountResponse
-}
+);}
 
 
 
@@ -1360,15 +903,15 @@ export const enableServiceAccount = async (serviceAccountId: string, options?: R
 export const getEnableServiceAccountMutationKey = () => ['enableServiceAccount'] as const;
 
 export const getEnableServiceAccountMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof enableServiceAccount>>, TError,EnableServiceAccountMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof enableServiceAccount>>, TError,EnableServiceAccountMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof enableServiceAccount>>, TError,EnableServiceAccountMutationVariables, TContext> => {
 
 const mutationKey = getEnableServiceAccountMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1376,7 +919,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof enableServiceAccount>>, EnableServiceAccountMutationVariables> = (props) => {
           const {serviceAccountId} = props ?? {};
 
-          return  enableServiceAccount(serviceAccountId,fetchOptions)
+          return  enableServiceAccount(serviceAccountId,requestOptions)
         }
 
 
@@ -1395,7 +938,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Enable a Service account
  */
 export const useEnableServiceAccount = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof enableServiceAccount>>, TError,EnableServiceAccountMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof enableServiceAccount>>, TError,EnableServiceAccountMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof enableServiceAccount>>,
         TError,
@@ -1404,41 +947,7 @@ export const useEnableServiceAccount = <TError = UnauthorizedResponse | Forbidde
       > => {
       return useMutation(getEnableServiceAccountMutationOptions(options), queryClient);
     }
-    export type listServiceAccountTokensResponse200 = {
-  data: ServiceAccountTokenList
-  status: 200
-}
-
-export type listServiceAccountTokensResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listServiceAccountTokensResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listServiceAccountTokensResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type listServiceAccountTokensResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listServiceAccountTokensResponseSuccess = (listServiceAccountTokensResponse200) & {
-  headers: Headers;
-};
-export type listServiceAccountTokensResponseError = (listServiceAccountTokensResponse401 | listServiceAccountTokensResponse403 | listServiceAccountTokensResponse404 | listServiceAccountTokensResponse429) & {
-  headers: Headers;
-};
-
-export type listServiceAccountTokensResponse = (listServiceAccountTokensResponseSuccess | listServiceAccountTokensResponseError)
-
-export const getListServiceAccountTokensUrl = (serviceAccountId: string,) => {
+    export const getListServiceAccountTokensUrl = (serviceAccountId: string,) => {
 
 
 
@@ -1449,23 +958,16 @@ export const getListServiceAccountTokensUrl = (serviceAccountId: string,) => {
 /**
  * @summary List tokens of a Service account
  */
-export const listServiceAccountTokens = async (serviceAccountId: string, options?: RequestInit): Promise<listServiceAccountTokensResponse> => {
+export const listServiceAccountTokens = async (serviceAccountId: string, options?: Parameters<typeof apiFetch>[1]): Promise<ServiceAccountTokenList> => {
 
-  const res = await fetch(getListServiceAccountTokensUrl(serviceAccountId),
+  return apiFetch<ServiceAccountTokenList>(getListServiceAccountTokensUrl(serviceAccountId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listServiceAccountTokensResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listServiceAccountTokensResponse
-}
+);}
 
 
 
@@ -1478,16 +980,16 @@ export const getListServiceAccountTokensQueryKey = (serviceAccountId: string,) =
     }
 
 
-export const getListServiceAccountTokensQueryOptions = <TData = Awaited<ReturnType<typeof listServiceAccountTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(serviceAccountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServiceAccountTokens>>, TError, TData>>, fetch?: RequestInit}
+export const getListServiceAccountTokensQueryOptions = <TData = Awaited<ReturnType<typeof listServiceAccountTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(serviceAccountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServiceAccountTokens>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListServiceAccountTokensQueryKey(serviceAccountId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listServiceAccountTokens>>> = ({ signal }) => listServiceAccountTokens(serviceAccountId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listServiceAccountTokens>>> = ({ signal }) => listServiceAccountTokens(serviceAccountId, { signal, ...requestOptions });
 
 
 
@@ -1507,7 +1009,7 @@ export function useListServiceAccountTokens<TData = Awaited<ReturnType<typeof li
           TError,
           Awaited<ReturnType<typeof listServiceAccountTokens>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListServiceAccountTokens<TData = Awaited<ReturnType<typeof listServiceAccountTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -1517,11 +1019,11 @@ export function useListServiceAccountTokens<TData = Awaited<ReturnType<typeof li
           TError,
           Awaited<ReturnType<typeof listServiceAccountTokens>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListServiceAccountTokens<TData = Awaited<ReturnType<typeof listServiceAccountTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- serviceAccountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServiceAccountTokens>>, TError, TData>>, fetch?: RequestInit}
+ serviceAccountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServiceAccountTokens>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1529,7 +1031,7 @@ export function useListServiceAccountTokens<TData = Awaited<ReturnType<typeof li
  */
 
 export function useListServiceAccountTokens<TData = Awaited<ReturnType<typeof listServiceAccountTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- serviceAccountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServiceAccountTokens>>, TError, TData>>, fetch?: RequestInit}
+ serviceAccountId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listServiceAccountTokens>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1545,50 +1047,6 @@ export function useListServiceAccountTokens<TData = Awaited<ReturnType<typeof li
 
 
 
-export type createServiceAccountTokenResponse201 = {
-  data: ServiceAccountTokenCreated
-  status: 201
-}
-
-export type createServiceAccountTokenResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createServiceAccountTokenResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createServiceAccountTokenResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createServiceAccountTokenResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type createServiceAccountTokenResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type createServiceAccountTokenResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createServiceAccountTokenResponseSuccess = (createServiceAccountTokenResponse201) & {
-  headers: Headers;
-};
-export type createServiceAccountTokenResponseError = (createServiceAccountTokenResponse400 | createServiceAccountTokenResponse401 | createServiceAccountTokenResponse403 | createServiceAccountTokenResponse404 | createServiceAccountTokenResponse422 | createServiceAccountTokenResponse429) & {
-  headers: Headers;
-};
-
-export type createServiceAccountTokenResponse = (createServiceAccountTokenResponseSuccess | createServiceAccountTokenResponseError)
-
 export const getCreateServiceAccountTokenUrl = (serviceAccountId: string,) => {
 
 
@@ -1601,7 +1059,7 @@ export const getCreateServiceAccountTokenUrl = (serviceAccountId: string,) => {
  * @summary Create a Service account token
  */
 export const createServiceAccountToken = async (serviceAccountId: string,
-    serviceAccountTokenCreate: ServiceAccountTokenCreate, options?: RequestInit): Promise<createServiceAccountTokenResponse> => {
+    serviceAccountTokenCreate: ServiceAccountTokenCreate, options?: Parameters<typeof apiFetch>[1]): Promise<ServiceAccountTokenCreated> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1617,21 +1075,14 @@ export const createServiceAccountToken = async (serviceAccountId: string,
     }
     return headers;
   };
-const res = await fetch(getCreateServiceAccountTokenUrl(serviceAccountId),
+return apiFetch<ServiceAccountTokenCreated>(getCreateServiceAccountTokenUrl(serviceAccountId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(serviceAccountTokenCreate)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createServiceAccountTokenResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createServiceAccountTokenResponse
-}
+);}
 
 
 
@@ -1640,15 +1091,15 @@ const res = await fetch(getCreateServiceAccountTokenUrl(serviceAccountId),
 export const getCreateServiceAccountTokenMutationKey = () => ['createServiceAccountToken'] as const;
 
 export const getCreateServiceAccountTokenMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServiceAccountToken>>, TError,CreateServiceAccountTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServiceAccountToken>>, TError,CreateServiceAccountTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createServiceAccountToken>>, TError,CreateServiceAccountTokenMutationVariables, TContext> => {
 
 const mutationKey = getCreateServiceAccountTokenMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1656,7 +1107,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createServiceAccountToken>>, CreateServiceAccountTokenMutationVariables> = (props) => {
           const {serviceAccountId,data} = props ?? {};
 
-          return  createServiceAccountToken(serviceAccountId,data,fetchOptions)
+          return  createServiceAccountToken(serviceAccountId,data,requestOptions)
         }
 
 
@@ -1675,7 +1126,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Create a Service account token
  */
 export const useCreateServiceAccountToken = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServiceAccountToken>>, TError,CreateServiceAccountTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createServiceAccountToken>>, TError,CreateServiceAccountTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createServiceAccountToken>>,
         TError,
@@ -1684,41 +1135,7 @@ export const useCreateServiceAccountToken = <TError = BadRequestResponse | Unaut
       > => {
       return useMutation(getCreateServiceAccountTokenMutationOptions(options), queryClient);
     }
-    export type revokeServiceAccountTokenResponse204 = {
-  data: void
-  status: 204
-}
-
-export type revokeServiceAccountTokenResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type revokeServiceAccountTokenResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type revokeServiceAccountTokenResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type revokeServiceAccountTokenResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type revokeServiceAccountTokenResponseSuccess = (revokeServiceAccountTokenResponse204) & {
-  headers: Headers;
-};
-export type revokeServiceAccountTokenResponseError = (revokeServiceAccountTokenResponse401 | revokeServiceAccountTokenResponse403 | revokeServiceAccountTokenResponse404 | revokeServiceAccountTokenResponse429) & {
-  headers: Headers;
-};
-
-export type revokeServiceAccountTokenResponse = (revokeServiceAccountTokenResponseSuccess | revokeServiceAccountTokenResponseError)
-
-export const getRevokeServiceAccountTokenUrl = (serviceAccountId: string,
+    export const getRevokeServiceAccountTokenUrl = (serviceAccountId: string,
     tokenId: string,) => {
 
 
@@ -1731,23 +1148,16 @@ export const getRevokeServiceAccountTokenUrl = (serviceAccountId: string,
  * @summary Revoke a Service account token
  */
 export const revokeServiceAccountToken = async (serviceAccountId: string,
-    tokenId: string, options?: RequestInit): Promise<revokeServiceAccountTokenResponse> => {
+    tokenId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getRevokeServiceAccountTokenUrl(serviceAccountId,tokenId),
+  return apiFetch<void>(getRevokeServiceAccountTokenUrl(serviceAccountId,tokenId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: revokeServiceAccountTokenResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as revokeServiceAccountTokenResponse
-}
+);}
 
 
 
@@ -1756,15 +1166,15 @@ export const revokeServiceAccountToken = async (serviceAccountId: string,
 export const getRevokeServiceAccountTokenMutationKey = () => ['revokeServiceAccountToken'] as const;
 
 export const getRevokeServiceAccountTokenMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeServiceAccountToken>>, TError,RevokeServiceAccountTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeServiceAccountToken>>, TError,RevokeServiceAccountTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof revokeServiceAccountToken>>, TError,RevokeServiceAccountTokenMutationVariables, TContext> => {
 
 const mutationKey = getRevokeServiceAccountTokenMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1772,7 +1182,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokeServiceAccountToken>>, RevokeServiceAccountTokenMutationVariables> = (props) => {
           const {serviceAccountId,tokenId} = props ?? {};
 
-          return  revokeServiceAccountToken(serviceAccountId,tokenId,fetchOptions)
+          return  revokeServiceAccountToken(serviceAccountId,tokenId,requestOptions)
         }
 
 
@@ -1791,7 +1201,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Revoke a Service account token
  */
 export const useRevokeServiceAccountToken = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeServiceAccountToken>>, TError,RevokeServiceAccountTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeServiceAccountToken>>, TError,RevokeServiceAccountTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof revokeServiceAccountToken>>,
         TError,

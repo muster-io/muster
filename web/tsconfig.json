@@ -6,7 +6,7 @@
     "moduleResolution": "bundler",
     "moduleDetection": "force",
     "jsx": "react-jsx",
-    "types": ["vite/client"],
+    "types": ["vite/client", "node", "@vitest/browser-playwright"],
     "noEmit": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
@@ -17,7 +17,16 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "noUnusedParameters": true,
+    "resolveJsonModule": true
   },
-  "include": ["src", "vite.config.ts", "orval.config.ts"]
+  "include": [
+    "src",
+    "e2e",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "orval.config.ts",
+    "i18next.config.ts"
+  ]
 }

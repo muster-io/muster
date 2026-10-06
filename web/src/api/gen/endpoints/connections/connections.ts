@@ -57,7 +57,10 @@ import type {
   UnprocessableResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -75,40 +78,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
-
-export type listConnectionsResponse200 = {
-  data: ConnectionList
-  status: 200
-}
-
-export type listConnectionsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listConnectionsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listConnectionsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listConnectionsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listConnectionsResponseSuccess = (listConnectionsResponse200) & {
-  headers: Headers;
-};
-export type listConnectionsResponseError = (listConnectionsResponse400 | listConnectionsResponse401 | listConnectionsResponse403 | listConnectionsResponse429) & {
-  headers: Headers;
-};
-
-export type listConnectionsResponse = (listConnectionsResponseSuccess | listConnectionsResponseError)
 
 export const getListConnectionsUrl = (params?: ListConnectionsParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -128,23 +97,16 @@ export const getListConnectionsUrl = (params?: ListConnectionsParams,) => {
 /**
  * @summary List connections
  */
-export const listConnections = async (params?: ListConnectionsParams, options?: RequestInit): Promise<listConnectionsResponse> => {
+export const listConnections = async (params?: ListConnectionsParams, options?: Parameters<typeof apiFetch>[1]): Promise<ConnectionList> => {
 
-  const res = await fetch(getListConnectionsUrl(params),
+  return apiFetch<ConnectionList>(getListConnectionsUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listConnectionsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listConnectionsResponse
-}
+);}
 
 
 
@@ -157,16 +119,16 @@ export const getListConnectionsQueryKey = (params?: ListConnectionsParams,) => {
     }
 
 
-export const getListConnectionsQueryOptions = <TData = Awaited<ReturnType<typeof listConnections>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListConnectionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnections>>, TError, TData>>, fetch?: RequestInit}
+export const getListConnectionsQueryOptions = <TData = Awaited<ReturnType<typeof listConnections>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListConnectionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnections>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListConnectionsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listConnections>>> = ({ signal }) => listConnections(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listConnections>>> = ({ signal }) => listConnections(params, { signal, ...requestOptions });
 
 
 
@@ -186,7 +148,7 @@ export function useListConnections<TData = Awaited<ReturnType<typeof listConnect
           TError,
           Awaited<ReturnType<typeof listConnections>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListConnections<TData = Awaited<ReturnType<typeof listConnections>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -196,11 +158,11 @@ export function useListConnections<TData = Awaited<ReturnType<typeof listConnect
           TError,
           Awaited<ReturnType<typeof listConnections>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListConnections<TData = Awaited<ReturnType<typeof listConnections>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListConnectionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnections>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListConnectionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnections>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -208,7 +170,7 @@ export function useListConnections<TData = Awaited<ReturnType<typeof listConnect
  */
 
 export function useListConnections<TData = Awaited<ReturnType<typeof listConnections>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListConnectionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnections>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListConnectionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnections>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -224,50 +186,6 @@ export function useListConnections<TData = Awaited<ReturnType<typeof listConnect
 
 
 
-export type createConnectionResponse201 = {
-  data: Connection
-  status: 201
-}
-
-export type createConnectionResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createConnectionResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createConnectionResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createConnectionResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type createConnectionResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type createConnectionResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createConnectionResponseSuccess = (createConnectionResponse201) & {
-  headers: Headers;
-};
-export type createConnectionResponseError = (createConnectionResponse400 | createConnectionResponse401 | createConnectionResponse403 | createConnectionResponse409 | createConnectionResponse422 | createConnectionResponse429) & {
-  headers: Headers;
-};
-
-export type createConnectionResponse = (createConnectionResponseSuccess | createConnectionResponseError)
-
 export const getCreateConnectionUrl = () => {
 
 
@@ -280,7 +198,7 @@ export const getCreateConnectionUrl = () => {
  * `type` selects Mattermost or Telegram. The bot token is a write-only Secret.
  * @summary Create Connection
  */
-export const createConnection = async (connectionInput: ConnectionInput, options?: RequestInit): Promise<createConnectionResponse> => {
+export const createConnection = async (connectionInput: ConnectionInput, options?: Parameters<typeof apiFetch>[1]): Promise<Connection> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -296,21 +214,14 @@ export const createConnection = async (connectionInput: ConnectionInput, options
     }
     return headers;
   };
-const res = await fetch(getCreateConnectionUrl(),
+return apiFetch<Connection>(getCreateConnectionUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(connectionInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createConnectionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createConnectionResponse
-}
+);}
 
 
 
@@ -319,15 +230,15 @@ const res = await fetch(getCreateConnectionUrl(),
 export const getCreateConnectionMutationKey = () => ['createConnection'] as const;
 
 export const getCreateConnectionMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createConnection>>, TError,CreateConnectionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createConnection>>, TError,CreateConnectionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createConnection>>, TError,CreateConnectionMutationVariables, TContext> => {
 
 const mutationKey = getCreateConnectionMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -335,7 +246,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createConnection>>, CreateConnectionMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  createConnection(data,fetchOptions)
+          return  createConnection(data,requestOptions)
         }
 
 
@@ -354,7 +265,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Create Connection
  */
 export const useCreateConnection = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createConnection>>, TError,CreateConnectionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createConnection>>, TError,CreateConnectionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createConnection>>,
         TError,
@@ -363,41 +274,7 @@ export const useCreateConnection = <TError = BadRequestResponse | UnauthorizedRe
       > => {
       return useMutation(getCreateConnectionMutationOptions(options), queryClient);
     }
-    export type getConnectionResponse200 = {
-  data: Connection
-  status: 200
-}
-
-export type getConnectionResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getConnectionResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getConnectionResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getConnectionResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getConnectionResponseSuccess = (getConnectionResponse200) & {
-  headers: Headers;
-};
-export type getConnectionResponseError = (getConnectionResponse401 | getConnectionResponse403 | getConnectionResponse404 | getConnectionResponse429) & {
-  headers: Headers;
-};
-
-export type getConnectionResponse = (getConnectionResponseSuccess | getConnectionResponseError)
-
-export const getGetConnectionUrl = (connectionId: string,) => {
+    export const getGetConnectionUrl = (connectionId: string,) => {
 
 
 
@@ -408,23 +285,16 @@ export const getGetConnectionUrl = (connectionId: string,) => {
 /**
  * @summary Read Connection
  */
-export const getConnection = async (connectionId: string, options?: RequestInit): Promise<getConnectionResponse> => {
+export const getConnection = async (connectionId: string, options?: Parameters<typeof apiFetch>[1]): Promise<Connection> => {
 
-  const res = await fetch(getGetConnectionUrl(connectionId),
+  return apiFetch<Connection>(getGetConnectionUrl(connectionId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getConnectionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getConnectionResponse
-}
+);}
 
 
 
@@ -437,16 +307,16 @@ export const getGetConnectionQueryKey = (connectionId: string,) => {
     }
 
 
-export const getGetConnectionQueryOptions = <TData = Awaited<ReturnType<typeof getConnection>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(connectionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getConnection>>, TError, TData>>, fetch?: RequestInit}
+export const getGetConnectionQueryOptions = <TData = Awaited<ReturnType<typeof getConnection>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(connectionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getConnection>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetConnectionQueryKey(connectionId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConnection>>> = ({ signal }) => getConnection(connectionId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConnection>>> = ({ signal }) => getConnection(connectionId, { signal, ...requestOptions });
 
 
 
@@ -466,7 +336,7 @@ export function useGetConnection<TData = Awaited<ReturnType<typeof getConnection
           TError,
           Awaited<ReturnType<typeof getConnection>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetConnection<TData = Awaited<ReturnType<typeof getConnection>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -476,11 +346,11 @@ export function useGetConnection<TData = Awaited<ReturnType<typeof getConnection
           TError,
           Awaited<ReturnType<typeof getConnection>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetConnection<TData = Awaited<ReturnType<typeof getConnection>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- connectionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getConnection>>, TError, TData>>, fetch?: RequestInit}
+ connectionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getConnection>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -488,7 +358,7 @@ export function useGetConnection<TData = Awaited<ReturnType<typeof getConnection
  */
 
 export function useGetConnection<TData = Awaited<ReturnType<typeof getConnection>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- connectionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getConnection>>, TError, TData>>, fetch?: RequestInit}
+ connectionId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getConnection>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -504,65 +374,6 @@ export function useGetConnection<TData = Awaited<ReturnType<typeof getConnection
 
 
 
-export type updateConnectionResponse200 = {
-  data: Connection
-  status: 200
-}
-
-export type updateConnectionResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type updateConnectionResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type updateConnectionResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type updateConnectionResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type updateConnectionResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type updateConnectionResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type updateConnectionResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type updateConnectionResponse428 = {
-  data: PreconditionRequiredResponse
-  status: 428
-}
-
-export type updateConnectionResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type updateConnectionResponseSuccess = (updateConnectionResponse200) & {
-  headers: Headers;
-};
-export type updateConnectionResponseError = (updateConnectionResponse400 | updateConnectionResponse401 | updateConnectionResponse403 | updateConnectionResponse404 | updateConnectionResponse409 | updateConnectionResponse412 | updateConnectionResponse422 | updateConnectionResponse428 | updateConnectionResponse429) & {
-  headers: Headers;
-};
-
-export type updateConnectionResponse = (updateConnectionResponseSuccess | updateConnectionResponseError)
-
 export const getUpdateConnectionUrl = (connectionId: string,) => {
 
 
@@ -576,7 +387,7 @@ export const getUpdateConnectionUrl = (connectionId: string,) => {
  * @summary Update Connection
  */
 export const updateConnection = async (connectionId: string,
-    connectionInput: ConnectionInput, options?: RequestInit): Promise<updateConnectionResponse> => {
+    connectionInput: ConnectionInput, options?: Parameters<typeof apiFetch>[1]): Promise<Connection> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -592,21 +403,14 @@ export const updateConnection = async (connectionId: string,
     }
     return headers;
   };
-const res = await fetch(getUpdateConnectionUrl(connectionId),
+return apiFetch<Connection>(getUpdateConnectionUrl(connectionId),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(connectionInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: updateConnectionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as updateConnectionResponse
-}
+);}
 
 
 
@@ -615,15 +419,15 @@ const res = await fetch(getUpdateConnectionUrl(connectionId),
 export const getUpdateConnectionMutationKey = () => ['updateConnection'] as const;
 
 export const getUpdateConnectionMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateConnection>>, TError,UpdateConnectionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateConnection>>, TError,UpdateConnectionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateConnection>>, TError,UpdateConnectionMutationVariables, TContext> => {
 
 const mutationKey = getUpdateConnectionMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -631,7 +435,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateConnection>>, UpdateConnectionMutationVariables> = (props) => {
           const {connectionId,data} = props ?? {};
 
-          return  updateConnection(connectionId,data,fetchOptions)
+          return  updateConnection(connectionId,data,requestOptions)
         }
 
 
@@ -650,7 +454,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Update Connection
  */
 export const useUpdateConnection = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateConnection>>, TError,UpdateConnectionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateConnection>>, TError,UpdateConnectionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateConnection>>,
         TError,
@@ -659,51 +463,7 @@ export const useUpdateConnection = <TError = BadRequestResponse | UnauthorizedRe
       > => {
       return useMutation(getUpdateConnectionMutationOptions(options), queryClient);
     }
-    export type deleteConnectionResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteConnectionResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteConnectionResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteConnectionResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type deleteConnectionResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type deleteConnectionResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type deleteConnectionResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteConnectionResponseSuccess = (deleteConnectionResponse204) & {
-  headers: Headers;
-};
-export type deleteConnectionResponseError = (deleteConnectionResponse401 | deleteConnectionResponse403 | deleteConnectionResponse404 | deleteConnectionResponse409 | deleteConnectionResponse412 | deleteConnectionResponse429) & {
-  headers: Headers;
-};
-
-export type deleteConnectionResponse = (deleteConnectionResponseSuccess | deleteConnectionResponseError)
-
-export const getDeleteConnectionUrl = (connectionId: string,) => {
+    export const getDeleteConnectionUrl = (connectionId: string,) => {
 
 
 
@@ -715,23 +475,16 @@ export const getDeleteConnectionUrl = (connectionId: string,) => {
  * A Connection used by Destinations cannot be deleted: `409` (`in_use`). Deleted Destinations do not count; deleting the Connection abandons the final edits still pending for them, which end as Not delivered.
  * @summary Delete Connection
  */
-export const deleteConnection = async (connectionId: string, options?: RequestInit): Promise<deleteConnectionResponse> => {
+export const deleteConnection = async (connectionId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteConnectionUrl(connectionId),
+  return apiFetch<void>(getDeleteConnectionUrl(connectionId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteConnectionResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteConnectionResponse
-}
+);}
 
 
 
@@ -740,15 +493,15 @@ export const deleteConnection = async (connectionId: string, options?: RequestIn
 export const getDeleteConnectionMutationKey = () => ['deleteConnection'] as const;
 
 export const getDeleteConnectionMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteConnection>>, TError,DeleteConnectionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteConnection>>, TError,DeleteConnectionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteConnection>>, TError,DeleteConnectionMutationVariables, TContext> => {
 
 const mutationKey = getDeleteConnectionMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -756,7 +509,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteConnection>>, DeleteConnectionMutationVariables> = (props) => {
           const {connectionId} = props ?? {};
 
-          return  deleteConnection(connectionId,fetchOptions)
+          return  deleteConnection(connectionId,requestOptions)
         }
 
 
@@ -775,7 +528,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Delete Connection
  */
 export const useDeleteConnection = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteConnection>>, TError,DeleteConnectionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteConnection>>, TError,DeleteConnectionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteConnection>>,
         TError,
@@ -784,51 +537,7 @@ export const useDeleteConnection = <TError = UnauthorizedResponse | ForbiddenRes
       > => {
       return useMutation(getDeleteConnectionMutationOptions(options), queryClient);
     }
-    export type checkConnectionResponse200 = {
-  data: ConnectionCheckResult
-  status: 200
-}
-
-export type checkConnectionResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type checkConnectionResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type checkConnectionResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type checkConnectionResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type checkConnectionResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type checkConnectionResponse503 = {
-  data: LimitedResponse
-  status: 503
-}
-
-export type checkConnectionResponseSuccess = (checkConnectionResponse200) & {
-  headers: Headers;
-};
-export type checkConnectionResponseError = (checkConnectionResponse400 | checkConnectionResponse401 | checkConnectionResponse403 | checkConnectionResponse404 | checkConnectionResponse429 | checkConnectionResponse503) & {
-  headers: Headers;
-};
-
-export type checkConnectionResponse = (checkConnectionResponseSuccess | checkConnectionResponseError)
-
-export const getCheckConnectionUrl = (connectionId: string,) => {
+    export const getCheckConnectionUrl = (connectionId: string,) => {
 
 
 
@@ -841,7 +550,7 @@ export const getCheckConnectionUrl = (connectionId: string,) => {
  * @summary Check a Connection
  */
 export const checkConnection = async (connectionId: string,
-    connectionCheckRequest?: ConnectionCheckRequest, options?: RequestInit): Promise<checkConnectionResponse> => {
+    connectionCheckRequest?: ConnectionCheckRequest, options?: Parameters<typeof apiFetch>[1]): Promise<ConnectionCheckResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -857,21 +566,14 @@ export const checkConnection = async (connectionId: string,
     }
     return headers;
   };
-const res = await fetch(getCheckConnectionUrl(connectionId),
+return apiFetch<ConnectionCheckResult>(getCheckConnectionUrl(connectionId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(connectionCheckRequest)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: checkConnectionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as checkConnectionResponse
-}
+);}
 
 
 
@@ -880,15 +582,15 @@ const res = await fetch(getCheckConnectionUrl(connectionId),
 export const getCheckConnectionMutationKey = () => ['checkConnection'] as const;
 
 export const getCheckConnectionMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse | LimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkConnection>>, TError,CheckConnectionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkConnection>>, TError,CheckConnectionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof checkConnection>>, TError,CheckConnectionMutationVariables, TContext> => {
 
 const mutationKey = getCheckConnectionMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -896,7 +598,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof checkConnection>>, CheckConnectionMutationVariables> = (props) => {
           const {connectionId,data} = props ?? {};
 
-          return  checkConnection(connectionId,data,fetchOptions)
+          return  checkConnection(connectionId,data,requestOptions)
         }
 
 
@@ -915,7 +617,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Check a Connection
  */
 export const useCheckConnection = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse | LimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkConnection>>, TError,CheckConnectionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkConnection>>, TError,CheckConnectionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof checkConnection>>,
         TError,
@@ -924,56 +626,7 @@ export const useCheckConnection = <TError = BadRequestResponse | UnauthorizedRes
       > => {
       return useMutation(getCheckConnectionMutationOptions(options), queryClient);
     }
-    export type listConnectionChannelsResponse200 = {
-  data: MattermostChannelList
-  status: 200
-}
-
-export type listConnectionChannelsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listConnectionChannelsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listConnectionChannelsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listConnectionChannelsResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type listConnectionChannelsResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type listConnectionChannelsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listConnectionChannelsResponse503 = {
-  data: LimitedResponse
-  status: 503
-}
-
-export type listConnectionChannelsResponseSuccess = (listConnectionChannelsResponse200) & {
-  headers: Headers;
-};
-export type listConnectionChannelsResponseError = (listConnectionChannelsResponse400 | listConnectionChannelsResponse401 | listConnectionChannelsResponse403 | listConnectionChannelsResponse404 | listConnectionChannelsResponse409 | listConnectionChannelsResponse429 | listConnectionChannelsResponse503) & {
-  headers: Headers;
-};
-
-export type listConnectionChannelsResponse = (listConnectionChannelsResponseSuccess | listConnectionChannelsResponseError)
-
-export const getListConnectionChannelsUrl = (connectionId: string,
+    export const getListConnectionChannelsUrl = (connectionId: string,
     params?: ListConnectionChannelsParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -994,23 +647,16 @@ export const getListConnectionChannelsUrl = (connectionId: string,
  * @summary List channels visible to the bot
  */
 export const listConnectionChannels = async (connectionId: string,
-    params?: ListConnectionChannelsParams, options?: RequestInit): Promise<listConnectionChannelsResponse> => {
+    params?: ListConnectionChannelsParams, options?: Parameters<typeof apiFetch>[1]): Promise<MattermostChannelList> => {
 
-  const res = await fetch(getListConnectionChannelsUrl(connectionId,params),
+  return apiFetch<MattermostChannelList>(getListConnectionChannelsUrl(connectionId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listConnectionChannelsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listConnectionChannelsResponse
-}
+);}
 
 
 
@@ -1025,16 +671,16 @@ export const getListConnectionChannelsQueryKey = (connectionId: string,
 
 
 export const getListConnectionChannelsQueryOptions = <TData = Awaited<ReturnType<typeof listConnectionChannels>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse | LimitedResponse>(connectionId: string,
-    params?: ListConnectionChannelsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnectionChannels>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListConnectionChannelsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnectionChannels>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListConnectionChannelsQueryKey(connectionId,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listConnectionChannels>>> = ({ signal }) => listConnectionChannels(connectionId,params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listConnectionChannels>>> = ({ signal }) => listConnectionChannels(connectionId,params, { signal, ...requestOptions });
 
 
 
@@ -1055,7 +701,7 @@ export function useListConnectionChannels<TData = Awaited<ReturnType<typeof list
           TError,
           Awaited<ReturnType<typeof listConnectionChannels>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListConnectionChannels<TData = Awaited<ReturnType<typeof listConnectionChannels>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse | LimitedResponse>(
@@ -1066,12 +712,12 @@ export function useListConnectionChannels<TData = Awaited<ReturnType<typeof list
           TError,
           Awaited<ReturnType<typeof listConnectionChannels>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListConnectionChannels<TData = Awaited<ReturnType<typeof listConnectionChannels>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse | LimitedResponse>(
  connectionId: string,
-    params?: ListConnectionChannelsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnectionChannels>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListConnectionChannelsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnectionChannels>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1080,7 +726,7 @@ export function useListConnectionChannels<TData = Awaited<ReturnType<typeof list
 
 export function useListConnectionChannels<TData = Awaited<ReturnType<typeof listConnectionChannels>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse | LimitedResponse>(
  connectionId: string,
-    params?: ListConnectionChannelsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnectionChannels>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListConnectionChannelsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnectionChannels>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 

@@ -69,7 +69,10 @@ import type {
   UnprocessableResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -87,40 +90,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
-
-export type listAlertGroupsResponse200 = {
-  data: AlertGroupList
-  status: 200
-}
-
-export type listAlertGroupsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listAlertGroupsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listAlertGroupsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listAlertGroupsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listAlertGroupsResponseSuccess = (listAlertGroupsResponse200) & {
-  headers: Headers;
-};
-export type listAlertGroupsResponseError = (listAlertGroupsResponse400 | listAlertGroupsResponse401 | listAlertGroupsResponse403 | listAlertGroupsResponse429) & {
-  headers: Headers;
-};
-
-export type listAlertGroupsResponse = (listAlertGroupsResponseSuccess | listAlertGroupsResponseError)
 
 export const getListAlertGroupsUrl = (params?: ListAlertGroupsParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -149,23 +118,16 @@ export const getListAlertGroupsUrl = (params?: ListAlertGroupsParams,) => {
  * The main working list. Without `status` it returns open Alert Groups (firing, acknowledged, snoozed). Without `from` and `to` it covers the last `alert_group.list_range` (7 days) and selects Alert Groups whose lifetime overlaps the range, so one that has been firing for weeks is always included. Search matches `#N` and text in the title or `summary`. Changes arrive as `alert-group` and `alert-groups` hints.
  * @summary List Alert Groups
  */
-export const listAlertGroups = async (params?: ListAlertGroupsParams, options?: RequestInit): Promise<listAlertGroupsResponse> => {
+export const listAlertGroups = async (params?: ListAlertGroupsParams, options?: Parameters<typeof apiFetch>[1]): Promise<AlertGroupList> => {
 
-  const res = await fetch(getListAlertGroupsUrl(params),
+  return apiFetch<AlertGroupList>(getListAlertGroupsUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listAlertGroupsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listAlertGroupsResponse
-}
+);}
 
 
 
@@ -178,16 +140,16 @@ export const getListAlertGroupsQueryKey = (params?: ListAlertGroupsParams,) => {
     }
 
 
-export const getListAlertGroupsQueryOptions = <TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroups>>, TError, TData>>, fetch?: RequestInit}
+export const getListAlertGroupsQueryOptions = <TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListAlertGroupsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAlertGroups>>> = ({ signal }) => listAlertGroups(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAlertGroups>>> = ({ signal }) => listAlertGroups(params, { signal, ...requestOptions });
 
 
 
@@ -207,7 +169,7 @@ export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGr
           TError,
           Awaited<ReturnType<typeof listAlertGroups>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -217,11 +179,11 @@ export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGr
           TError,
           Awaited<ReturnType<typeof listAlertGroups>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroups>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -229,7 +191,7 @@ export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGr
  */
 
 export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroups>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -244,40 +206,6 @@ export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGr
 
 
 
-
-export type getAlertGroupCountsResponse200 = {
-  data: AlertGroupCounts
-  status: 200
-}
-
-export type getAlertGroupCountsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type getAlertGroupCountsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getAlertGroupCountsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getAlertGroupCountsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getAlertGroupCountsResponseSuccess = (getAlertGroupCountsResponse200) & {
-  headers: Headers;
-};
-export type getAlertGroupCountsResponseError = (getAlertGroupCountsResponse400 | getAlertGroupCountsResponse401 | getAlertGroupCountsResponse403 | getAlertGroupCountsResponse429) & {
-  headers: Headers;
-};
-
-export type getAlertGroupCountsResponse = (getAlertGroupCountsResponseSuccess | getAlertGroupCountsResponseError)
 
 export const getGetAlertGroupCountsUrl = (params?: GetAlertGroupCountsParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -306,23 +234,16 @@ export const getGetAlertGroupCountsUrl = (params?: GetAlertGroupCountsParams,) =
  * Counts per status tab for the same filters as `listAlertGroups`, `status` excluded.
  * @summary Count Alert Groups per status
  */
-export const getAlertGroupCounts = async (params?: GetAlertGroupCountsParams, options?: RequestInit): Promise<getAlertGroupCountsResponse> => {
+export const getAlertGroupCounts = async (params?: GetAlertGroupCountsParams, options?: Parameters<typeof apiFetch>[1]): Promise<AlertGroupCounts> => {
 
-  const res = await fetch(getGetAlertGroupCountsUrl(params),
+  return apiFetch<AlertGroupCounts>(getGetAlertGroupCountsUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getAlertGroupCountsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getAlertGroupCountsResponse
-}
+);}
 
 
 
@@ -335,16 +256,16 @@ export const getGetAlertGroupCountsQueryKey = (params?: GetAlertGroupCountsParam
     }
 
 
-export const getGetAlertGroupCountsQueryOptions = <TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: GetAlertGroupCountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupCounts>>, TError, TData>>, fetch?: RequestInit}
+export const getGetAlertGroupCountsQueryOptions = <TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: GetAlertGroupCountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupCounts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetAlertGroupCountsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAlertGroupCounts>>> = ({ signal }) => getAlertGroupCounts(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAlertGroupCounts>>> = ({ signal }) => getAlertGroupCounts(params, { signal, ...requestOptions });
 
 
 
@@ -364,7 +285,7 @@ export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAler
           TError,
           Awaited<ReturnType<typeof getAlertGroupCounts>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -374,11 +295,11 @@ export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAler
           TError,
           Awaited<ReturnType<typeof getAlertGroupCounts>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: GetAlertGroupCountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupCounts>>, TError, TData>>, fetch?: RequestInit}
+ params?: GetAlertGroupCountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupCounts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -386,7 +307,7 @@ export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAler
  */
 
 export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: GetAlertGroupCountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupCounts>>, TError, TData>>, fetch?: RequestInit}
+ params?: GetAlertGroupCountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupCounts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -401,50 +322,6 @@ export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAler
 
 
 
-
-export type getAlertGroupStatisticsResponse200 = {
-  data: AlertGroupStatistics
-  status: 200
-}
-
-export type getAlertGroupStatisticsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type getAlertGroupStatisticsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getAlertGroupStatisticsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getAlertGroupStatisticsResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getAlertGroupStatisticsResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type getAlertGroupStatisticsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getAlertGroupStatisticsResponseSuccess = (getAlertGroupStatisticsResponse200) & {
-  headers: Headers;
-};
-export type getAlertGroupStatisticsResponseError = (getAlertGroupStatisticsResponse400 | getAlertGroupStatisticsResponse401 | getAlertGroupStatisticsResponse403 | getAlertGroupStatisticsResponse404 | getAlertGroupStatisticsResponse422 | getAlertGroupStatisticsResponse429) & {
-  headers: Headers;
-};
-
-export type getAlertGroupStatisticsResponse = (getAlertGroupStatisticsResponseSuccess | getAlertGroupStatisticsResponseError)
 
 export const getGetAlertGroupStatisticsUrl = (params: GetAlertGroupStatisticsParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -473,23 +350,16 @@ export const getGetAlertGroupStatisticsUrl = (params: GetAlertGroupStatisticsPar
  * Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as totals and per day of start, from the summary rows, one item per Route or per Integration as `group_by` says. Narrow it with `route` or `integration` ids (the one that matches `group_by`); without them every Route or Integration is returned. An Alert Group with Alerts from several Integrations counts for each.
  * @summary Read Alert Group statistics
  */
-export const getAlertGroupStatistics = async (params: GetAlertGroupStatisticsParams, options?: RequestInit): Promise<getAlertGroupStatisticsResponse> => {
+export const getAlertGroupStatistics = async (params: GetAlertGroupStatisticsParams, options?: Parameters<typeof apiFetch>[1]): Promise<AlertGroupStatistics> => {
 
-  const res = await fetch(getGetAlertGroupStatisticsUrl(params),
+  return apiFetch<AlertGroupStatistics>(getGetAlertGroupStatisticsUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getAlertGroupStatisticsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getAlertGroupStatisticsResponse
-}
+);}
 
 
 
@@ -502,16 +372,16 @@ export const getGetAlertGroupStatisticsQueryKey = (params?: GetAlertGroupStatist
     }
 
 
-export const getGetAlertGroupStatisticsQueryOptions = <TData = Awaited<ReturnType<typeof getAlertGroupStatistics>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse>(params: GetAlertGroupStatisticsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupStatistics>>, TError, TData>>, fetch?: RequestInit}
+export const getGetAlertGroupStatisticsQueryOptions = <TData = Awaited<ReturnType<typeof getAlertGroupStatistics>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse>(params: GetAlertGroupStatisticsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupStatistics>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetAlertGroupStatisticsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAlertGroupStatistics>>> = ({ signal }) => getAlertGroupStatistics(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAlertGroupStatistics>>> = ({ signal }) => getAlertGroupStatistics(params, { signal, ...requestOptions });
 
 
 
@@ -531,7 +401,7 @@ export function useGetAlertGroupStatistics<TData = Awaited<ReturnType<typeof get
           TError,
           Awaited<ReturnType<typeof getAlertGroupStatistics>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetAlertGroupStatistics<TData = Awaited<ReturnType<typeof getAlertGroupStatistics>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse>(
@@ -541,11 +411,11 @@ export function useGetAlertGroupStatistics<TData = Awaited<ReturnType<typeof get
           TError,
           Awaited<ReturnType<typeof getAlertGroupStatistics>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetAlertGroupStatistics<TData = Awaited<ReturnType<typeof getAlertGroupStatistics>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse>(
- params: GetAlertGroupStatisticsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupStatistics>>, TError, TData>>, fetch?: RequestInit}
+ params: GetAlertGroupStatisticsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupStatistics>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -553,7 +423,7 @@ export function useGetAlertGroupStatistics<TData = Awaited<ReturnType<typeof get
  */
 
 export function useGetAlertGroupStatistics<TData = Awaited<ReturnType<typeof getAlertGroupStatistics>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse>(
- params: GetAlertGroupStatisticsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupStatistics>>, TError, TData>>, fetch?: RequestInit}
+ params: GetAlertGroupStatisticsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupStatistics>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -569,40 +439,6 @@ export function useGetAlertGroupStatistics<TData = Awaited<ReturnType<typeof get
 
 
 
-export type getAlertGroupResponse200 = {
-  data: AlertGroup
-  status: 200
-}
-
-export type getAlertGroupResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getAlertGroupResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getAlertGroupResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getAlertGroupResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getAlertGroupResponseSuccess = (getAlertGroupResponse200) & {
-  headers: Headers;
-};
-export type getAlertGroupResponseError = (getAlertGroupResponse401 | getAlertGroupResponse403 | getAlertGroupResponse404 | getAlertGroupResponse429) & {
-  headers: Headers;
-};
-
-export type getAlertGroupResponse = (getAlertGroupResponseSuccess | getAlertGroupResponseError)
-
 export const getGetAlertGroupUrl = (alertGroupId: string,) => {
 
 
@@ -615,23 +451,16 @@ export const getGetAlertGroupUrl = (alertGroupId: string,) => {
  * An Alert Group whose details were removed by retention opens as its summary with the notice `details_removed`; its Notes stay until the summary row is removed.
  * @summary Read an Alert Group
  */
-export const getAlertGroup = async (alertGroupId: string, options?: RequestInit): Promise<getAlertGroupResponse> => {
+export const getAlertGroup = async (alertGroupId: string, options?: Parameters<typeof apiFetch>[1]): Promise<AlertGroup> => {
 
-  const res = await fetch(getGetAlertGroupUrl(alertGroupId),
+  return apiFetch<AlertGroup>(getGetAlertGroupUrl(alertGroupId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getAlertGroupResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getAlertGroupResponse
-}
+);}
 
 
 
@@ -644,16 +473,16 @@ export const getGetAlertGroupQueryKey = (alertGroupId: string,) => {
     }
 
 
-export const getGetAlertGroupQueryOptions = <TData = Awaited<ReturnType<typeof getAlertGroup>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(alertGroupId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroup>>, TError, TData>>, fetch?: RequestInit}
+export const getGetAlertGroupQueryOptions = <TData = Awaited<ReturnType<typeof getAlertGroup>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(alertGroupId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroup>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetAlertGroupQueryKey(alertGroupId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAlertGroup>>> = ({ signal }) => getAlertGroup(alertGroupId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAlertGroup>>> = ({ signal }) => getAlertGroup(alertGroupId, { signal, ...requestOptions });
 
 
 
@@ -673,7 +502,7 @@ export function useGetAlertGroup<TData = Awaited<ReturnType<typeof getAlertGroup
           TError,
           Awaited<ReturnType<typeof getAlertGroup>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetAlertGroup<TData = Awaited<ReturnType<typeof getAlertGroup>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -683,11 +512,11 @@ export function useGetAlertGroup<TData = Awaited<ReturnType<typeof getAlertGroup
           TError,
           Awaited<ReturnType<typeof getAlertGroup>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetAlertGroup<TData = Awaited<ReturnType<typeof getAlertGroup>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- alertGroupId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroup>>, TError, TData>>, fetch?: RequestInit}
+ alertGroupId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroup>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -695,7 +524,7 @@ export function useGetAlertGroup<TData = Awaited<ReturnType<typeof getAlertGroup
  */
 
 export function useGetAlertGroup<TData = Awaited<ReturnType<typeof getAlertGroup>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- alertGroupId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroup>>, TError, TData>>, fetch?: RequestInit}
+ alertGroupId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroup>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -710,45 +539,6 @@ export function useGetAlertGroup<TData = Awaited<ReturnType<typeof getAlertGroup
 
 
 
-
-export type listAlertGroupAlertsResponse200 = {
-  data: AlertGroupAlertList
-  status: 200
-}
-
-export type listAlertGroupAlertsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listAlertGroupAlertsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listAlertGroupAlertsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listAlertGroupAlertsResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type listAlertGroupAlertsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listAlertGroupAlertsResponseSuccess = (listAlertGroupAlertsResponse200) & {
-  headers: Headers;
-};
-export type listAlertGroupAlertsResponseError = (listAlertGroupAlertsResponse400 | listAlertGroupAlertsResponse401 | listAlertGroupAlertsResponse403 | listAlertGroupAlertsResponse404 | listAlertGroupAlertsResponse429) & {
-  headers: Headers;
-};
-
-export type listAlertGroupAlertsResponse = (listAlertGroupAlertsResponseSuccess | listAlertGroupAlertsResponseError)
 
 export const getListAlertGroupAlertsUrl = (alertGroupId: string,
     params?: ListAlertGroupAlertsParams,) => {
@@ -770,23 +560,16 @@ export const getListAlertGroupAlertsUrl = (alertGroupId: string,
  * @summary List the Alerts of an Alert Group
  */
 export const listAlertGroupAlerts = async (alertGroupId: string,
-    params?: ListAlertGroupAlertsParams, options?: RequestInit): Promise<listAlertGroupAlertsResponse> => {
+    params?: ListAlertGroupAlertsParams, options?: Parameters<typeof apiFetch>[1]): Promise<AlertGroupAlertList> => {
 
-  const res = await fetch(getListAlertGroupAlertsUrl(alertGroupId,params),
+  return apiFetch<AlertGroupAlertList>(getListAlertGroupAlertsUrl(alertGroupId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listAlertGroupAlertsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listAlertGroupAlertsResponse
-}
+);}
 
 
 
@@ -801,16 +584,16 @@ export const getListAlertGroupAlertsQueryKey = (alertGroupId: string,
 
 
 export const getListAlertGroupAlertsQueryOptions = <TData = Awaited<ReturnType<typeof listAlertGroupAlerts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(alertGroupId: string,
-    params?: ListAlertGroupAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupAlerts>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListAlertGroupAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupAlerts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListAlertGroupAlertsQueryKey(alertGroupId,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAlertGroupAlerts>>> = ({ signal }) => listAlertGroupAlerts(alertGroupId,params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAlertGroupAlerts>>> = ({ signal }) => listAlertGroupAlerts(alertGroupId,params, { signal, ...requestOptions });
 
 
 
@@ -831,7 +614,7 @@ export function useListAlertGroupAlerts<TData = Awaited<ReturnType<typeof listAl
           TError,
           Awaited<ReturnType<typeof listAlertGroupAlerts>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListAlertGroupAlerts<TData = Awaited<ReturnType<typeof listAlertGroupAlerts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -842,12 +625,12 @@ export function useListAlertGroupAlerts<TData = Awaited<ReturnType<typeof listAl
           TError,
           Awaited<ReturnType<typeof listAlertGroupAlerts>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListAlertGroupAlerts<TData = Awaited<ReturnType<typeof listAlertGroupAlerts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
  alertGroupId: string,
-    params?: ListAlertGroupAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupAlerts>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListAlertGroupAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupAlerts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -856,7 +639,7 @@ export function useListAlertGroupAlerts<TData = Awaited<ReturnType<typeof listAl
 
 export function useListAlertGroupAlerts<TData = Awaited<ReturnType<typeof listAlertGroupAlerts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
  alertGroupId: string,
-    params?: ListAlertGroupAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupAlerts>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListAlertGroupAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupAlerts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -871,45 +654,6 @@ export function useListAlertGroupAlerts<TData = Awaited<ReturnType<typeof listAl
 
 
 
-
-export type getAlertGroupTimelineResponse200 = {
-  data: TimelineEntryList
-  status: 200
-}
-
-export type getAlertGroupTimelineResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type getAlertGroupTimelineResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getAlertGroupTimelineResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getAlertGroupTimelineResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getAlertGroupTimelineResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getAlertGroupTimelineResponseSuccess = (getAlertGroupTimelineResponse200) & {
-  headers: Headers;
-};
-export type getAlertGroupTimelineResponseError = (getAlertGroupTimelineResponse400 | getAlertGroupTimelineResponse401 | getAlertGroupTimelineResponse403 | getAlertGroupTimelineResponse404 | getAlertGroupTimelineResponse429) & {
-  headers: Headers;
-};
-
-export type getAlertGroupTimelineResponse = (getAlertGroupTimelineResponseSuccess | getAlertGroupTimelineResponseError)
 
 export const getGetAlertGroupTimelineUrl = (alertGroupId: string,
     params?: GetAlertGroupTimelineParams,) => {
@@ -940,23 +684,16 @@ export const getGetAlertGroupTimelineUrl = (alertGroupId: string,
  * @summary Read the Timeline of an Alert Group
  */
 export const getAlertGroupTimeline = async (alertGroupId: string,
-    params?: GetAlertGroupTimelineParams, options?: RequestInit): Promise<getAlertGroupTimelineResponse> => {
+    params?: GetAlertGroupTimelineParams, options?: Parameters<typeof apiFetch>[1]): Promise<TimelineEntryList> => {
 
-  const res = await fetch(getGetAlertGroupTimelineUrl(alertGroupId,params),
+  return apiFetch<TimelineEntryList>(getGetAlertGroupTimelineUrl(alertGroupId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getAlertGroupTimelineResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getAlertGroupTimelineResponse
-}
+);}
 
 
 
@@ -971,16 +708,16 @@ export const getGetAlertGroupTimelineQueryKey = (alertGroupId: string,
 
 
 export const getGetAlertGroupTimelineQueryOptions = <TData = Awaited<ReturnType<typeof getAlertGroupTimeline>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(alertGroupId: string,
-    params?: GetAlertGroupTimelineParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupTimeline>>, TError, TData>>, fetch?: RequestInit}
+    params?: GetAlertGroupTimelineParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupTimeline>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetAlertGroupTimelineQueryKey(alertGroupId,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAlertGroupTimeline>>> = ({ signal }) => getAlertGroupTimeline(alertGroupId,params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAlertGroupTimeline>>> = ({ signal }) => getAlertGroupTimeline(alertGroupId,params, { signal, ...requestOptions });
 
 
 
@@ -1001,7 +738,7 @@ export function useGetAlertGroupTimeline<TData = Awaited<ReturnType<typeof getAl
           TError,
           Awaited<ReturnType<typeof getAlertGroupTimeline>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetAlertGroupTimeline<TData = Awaited<ReturnType<typeof getAlertGroupTimeline>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -1012,12 +749,12 @@ export function useGetAlertGroupTimeline<TData = Awaited<ReturnType<typeof getAl
           TError,
           Awaited<ReturnType<typeof getAlertGroupTimeline>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetAlertGroupTimeline<TData = Awaited<ReturnType<typeof getAlertGroupTimeline>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
  alertGroupId: string,
-    params?: GetAlertGroupTimelineParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupTimeline>>, TError, TData>>, fetch?: RequestInit}
+    params?: GetAlertGroupTimelineParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupTimeline>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1026,7 +763,7 @@ export function useGetAlertGroupTimeline<TData = Awaited<ReturnType<typeof getAl
 
 export function useGetAlertGroupTimeline<TData = Awaited<ReturnType<typeof getAlertGroupTimeline>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
  alertGroupId: string,
-    params?: GetAlertGroupTimelineParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupTimeline>>, TError, TData>>, fetch?: RequestInit}
+    params?: GetAlertGroupTimelineParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupTimeline>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1041,45 +778,6 @@ export function useGetAlertGroupTimeline<TData = Awaited<ReturnType<typeof getAl
 
 
 
-
-export type listRelatedAlertGroupsResponse200 = {
-  data: RelatedAlertGroupList
-  status: 200
-}
-
-export type listRelatedAlertGroupsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listRelatedAlertGroupsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listRelatedAlertGroupsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listRelatedAlertGroupsResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type listRelatedAlertGroupsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listRelatedAlertGroupsResponseSuccess = (listRelatedAlertGroupsResponse200) & {
-  headers: Headers;
-};
-export type listRelatedAlertGroupsResponseError = (listRelatedAlertGroupsResponse400 | listRelatedAlertGroupsResponse401 | listRelatedAlertGroupsResponse403 | listRelatedAlertGroupsResponse404 | listRelatedAlertGroupsResponse429) & {
-  headers: Headers;
-};
-
-export type listRelatedAlertGroupsResponse = (listRelatedAlertGroupsResponseSuccess | listRelatedAlertGroupsResponseError)
 
 export const getListRelatedAlertGroupsUrl = (alertGroupId: string,
     params?: ListRelatedAlertGroupsParams,) => {
@@ -1102,23 +800,16 @@ export const getListRelatedAlertGroupsUrl = (alertGroupId: string,
  * @summary List previous Alert Groups with the same key
  */
 export const listRelatedAlertGroups = async (alertGroupId: string,
-    params?: ListRelatedAlertGroupsParams, options?: RequestInit): Promise<listRelatedAlertGroupsResponse> => {
+    params?: ListRelatedAlertGroupsParams, options?: Parameters<typeof apiFetch>[1]): Promise<RelatedAlertGroupList> => {
 
-  const res = await fetch(getListRelatedAlertGroupsUrl(alertGroupId,params),
+  return apiFetch<RelatedAlertGroupList>(getListRelatedAlertGroupsUrl(alertGroupId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listRelatedAlertGroupsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listRelatedAlertGroupsResponse
-}
+);}
 
 
 
@@ -1133,16 +824,16 @@ export const getListRelatedAlertGroupsQueryKey = (alertGroupId: string,
 
 
 export const getListRelatedAlertGroupsQueryOptions = <TData = Awaited<ReturnType<typeof listRelatedAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(alertGroupId: string,
-    params?: ListRelatedAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRelatedAlertGroups>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListRelatedAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRelatedAlertGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListRelatedAlertGroupsQueryKey(alertGroupId,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRelatedAlertGroups>>> = ({ signal }) => listRelatedAlertGroups(alertGroupId,params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRelatedAlertGroups>>> = ({ signal }) => listRelatedAlertGroups(alertGroupId,params, { signal, ...requestOptions });
 
 
 
@@ -1163,7 +854,7 @@ export function useListRelatedAlertGroups<TData = Awaited<ReturnType<typeof list
           TError,
           Awaited<ReturnType<typeof listRelatedAlertGroups>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListRelatedAlertGroups<TData = Awaited<ReturnType<typeof listRelatedAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -1174,12 +865,12 @@ export function useListRelatedAlertGroups<TData = Awaited<ReturnType<typeof list
           TError,
           Awaited<ReturnType<typeof listRelatedAlertGroups>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListRelatedAlertGroups<TData = Awaited<ReturnType<typeof listRelatedAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
  alertGroupId: string,
-    params?: ListRelatedAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRelatedAlertGroups>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListRelatedAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRelatedAlertGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1188,7 +879,7 @@ export function useListRelatedAlertGroups<TData = Awaited<ReturnType<typeof list
 
 export function useListRelatedAlertGroups<TData = Awaited<ReturnType<typeof listRelatedAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
  alertGroupId: string,
-    params?: ListRelatedAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRelatedAlertGroups>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListRelatedAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRelatedAlertGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1204,40 +895,6 @@ export function useListRelatedAlertGroups<TData = Awaited<ReturnType<typeof list
 
 
 
-export type listAlertGroupDeliveriesResponse200 = {
-  data: AlertGroupDeliveryList
-  status: 200
-}
-
-export type listAlertGroupDeliveriesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listAlertGroupDeliveriesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listAlertGroupDeliveriesResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type listAlertGroupDeliveriesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listAlertGroupDeliveriesResponseSuccess = (listAlertGroupDeliveriesResponse200) & {
-  headers: Headers;
-};
-export type listAlertGroupDeliveriesResponseError = (listAlertGroupDeliveriesResponse401 | listAlertGroupDeliveriesResponse403 | listAlertGroupDeliveriesResponse404 | listAlertGroupDeliveriesResponse429) & {
-  headers: Headers;
-};
-
-export type listAlertGroupDeliveriesResponse = (listAlertGroupDeliveriesResponseSuccess | listAlertGroupDeliveriesResponseError)
-
 export const getListAlertGroupDeliveriesUrl = (alertGroupId: string,) => {
 
 
@@ -1249,23 +906,16 @@ export const getListAlertGroupDeliveriesUrl = (alertGroupId: string,) => {
 /**
  * @summary Read delivery state per Destination
  */
-export const listAlertGroupDeliveries = async (alertGroupId: string, options?: RequestInit): Promise<listAlertGroupDeliveriesResponse> => {
+export const listAlertGroupDeliveries = async (alertGroupId: string, options?: Parameters<typeof apiFetch>[1]): Promise<AlertGroupDeliveryList> => {
 
-  const res = await fetch(getListAlertGroupDeliveriesUrl(alertGroupId),
+  return apiFetch<AlertGroupDeliveryList>(getListAlertGroupDeliveriesUrl(alertGroupId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listAlertGroupDeliveriesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listAlertGroupDeliveriesResponse
-}
+);}
 
 
 
@@ -1278,16 +928,16 @@ export const getListAlertGroupDeliveriesQueryKey = (alertGroupId: string,) => {
     }
 
 
-export const getListAlertGroupDeliveriesQueryOptions = <TData = Awaited<ReturnType<typeof listAlertGroupDeliveries>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(alertGroupId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupDeliveries>>, TError, TData>>, fetch?: RequestInit}
+export const getListAlertGroupDeliveriesQueryOptions = <TData = Awaited<ReturnType<typeof listAlertGroupDeliveries>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(alertGroupId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupDeliveries>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListAlertGroupDeliveriesQueryKey(alertGroupId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAlertGroupDeliveries>>> = ({ signal }) => listAlertGroupDeliveries(alertGroupId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAlertGroupDeliveries>>> = ({ signal }) => listAlertGroupDeliveries(alertGroupId, { signal, ...requestOptions });
 
 
 
@@ -1307,7 +957,7 @@ export function useListAlertGroupDeliveries<TData = Awaited<ReturnType<typeof li
           TError,
           Awaited<ReturnType<typeof listAlertGroupDeliveries>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListAlertGroupDeliveries<TData = Awaited<ReturnType<typeof listAlertGroupDeliveries>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -1317,11 +967,11 @@ export function useListAlertGroupDeliveries<TData = Awaited<ReturnType<typeof li
           TError,
           Awaited<ReturnType<typeof listAlertGroupDeliveries>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListAlertGroupDeliveries<TData = Awaited<ReturnType<typeof listAlertGroupDeliveries>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- alertGroupId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupDeliveries>>, TError, TData>>, fetch?: RequestInit}
+ alertGroupId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupDeliveries>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1329,7 +979,7 @@ export function useListAlertGroupDeliveries<TData = Awaited<ReturnType<typeof li
  */
 
 export function useListAlertGroupDeliveries<TData = Awaited<ReturnType<typeof listAlertGroupDeliveries>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- alertGroupId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupDeliveries>>, TError, TData>>, fetch?: RequestInit}
+ alertGroupId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupDeliveries>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1345,45 +995,6 @@ export function useListAlertGroupDeliveries<TData = Awaited<ReturnType<typeof li
 
 
 
-export type acknowledgeAlertGroupResponse200 = {
-  data: CommandResult
-  status: 200
-}
-
-export type acknowledgeAlertGroupResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type acknowledgeAlertGroupResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type acknowledgeAlertGroupResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type acknowledgeAlertGroupResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type acknowledgeAlertGroupResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type acknowledgeAlertGroupResponseSuccess = (acknowledgeAlertGroupResponse200) & {
-  headers: Headers;
-};
-export type acknowledgeAlertGroupResponseError = (acknowledgeAlertGroupResponse401 | acknowledgeAlertGroupResponse403 | acknowledgeAlertGroupResponse404 | acknowledgeAlertGroupResponse409 | acknowledgeAlertGroupResponse429) & {
-  headers: Headers;
-};
-
-export type acknowledgeAlertGroupResponse = (acknowledgeAlertGroupResponseSuccess | acknowledgeAlertGroupResponseError)
-
 export const getAcknowledgeAlertGroupUrl = (alertGroupId: string,) => {
 
 
@@ -1396,23 +1007,16 @@ export const getAcknowledgeAlertGroupUrl = (alertGroupId: string,) => {
  * From firing or snoozed: the caller becomes the Owner and a Snooze ends. By the current Owner it changes nothing (`outcome` `unchanged`). By another user it is a Takeover: ownership moves, a Loud event mentions the previous Owner. A Personal access token acts as its User and may; a Service account token cannot become an Owner and is refused with `409` `command-refused` and the code `owner_must_be_user`. Other refusals: `already_resolved`.
  * @summary Acknowledge
  */
-export const acknowledgeAlertGroup = async (alertGroupId: string, options?: RequestInit): Promise<acknowledgeAlertGroupResponse> => {
+export const acknowledgeAlertGroup = async (alertGroupId: string, options?: Parameters<typeof apiFetch>[1]): Promise<CommandResult> => {
 
-  const res = await fetch(getAcknowledgeAlertGroupUrl(alertGroupId),
+  return apiFetch<CommandResult>(getAcknowledgeAlertGroupUrl(alertGroupId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: acknowledgeAlertGroupResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as acknowledgeAlertGroupResponse
-}
+);}
 
 
 
@@ -1421,15 +1025,15 @@ export const acknowledgeAlertGroup = async (alertGroupId: string, options?: Requ
 export const getAcknowledgeAlertGroupMutationKey = () => ['acknowledgeAlertGroup'] as const;
 
 export const getAcknowledgeAlertGroupMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acknowledgeAlertGroup>>, TError,AcknowledgeAlertGroupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acknowledgeAlertGroup>>, TError,AcknowledgeAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof acknowledgeAlertGroup>>, TError,AcknowledgeAlertGroupMutationVariables, TContext> => {
 
 const mutationKey = getAcknowledgeAlertGroupMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1437,7 +1041,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof acknowledgeAlertGroup>>, AcknowledgeAlertGroupMutationVariables> = (props) => {
           const {alertGroupId} = props ?? {};
 
-          return  acknowledgeAlertGroup(alertGroupId,fetchOptions)
+          return  acknowledgeAlertGroup(alertGroupId,requestOptions)
         }
 
 
@@ -1456,7 +1060,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Acknowledge
  */
 export const useAcknowledgeAlertGroup = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acknowledgeAlertGroup>>, TError,AcknowledgeAlertGroupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acknowledgeAlertGroup>>, TError,AcknowledgeAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof acknowledgeAlertGroup>>,
         TError,
@@ -1465,46 +1069,7 @@ export const useAcknowledgeAlertGroup = <TError = UnauthorizedResponse | Forbidd
       > => {
       return useMutation(getAcknowledgeAlertGroupMutationOptions(options), queryClient);
     }
-    export type unacknowledgeAlertGroupResponse200 = {
-  data: CommandResult
-  status: 200
-}
-
-export type unacknowledgeAlertGroupResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type unacknowledgeAlertGroupResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type unacknowledgeAlertGroupResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type unacknowledgeAlertGroupResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type unacknowledgeAlertGroupResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type unacknowledgeAlertGroupResponseSuccess = (unacknowledgeAlertGroupResponse200) & {
-  headers: Headers;
-};
-export type unacknowledgeAlertGroupResponseError = (unacknowledgeAlertGroupResponse401 | unacknowledgeAlertGroupResponse403 | unacknowledgeAlertGroupResponse404 | unacknowledgeAlertGroupResponse409 | unacknowledgeAlertGroupResponse429) & {
-  headers: Headers;
-};
-
-export type unacknowledgeAlertGroupResponse = (unacknowledgeAlertGroupResponseSuccess | unacknowledgeAlertGroupResponseError)
-
-export const getUnacknowledgeAlertGroupUrl = (alertGroupId: string,) => {
+    export const getUnacknowledgeAlertGroupUrl = (alertGroupId: string,) => {
 
 
 
@@ -1516,23 +1081,16 @@ export const getUnacknowledgeAlertGroupUrl = (alertGroupId: string,) => {
  * Allowed to every user with the Permission, not only the Owner. The Alert Group becomes firing without an Owner. Refused with the code `not_acknowledged`.
  * @summary Unacknowledge
  */
-export const unacknowledgeAlertGroup = async (alertGroupId: string, options?: RequestInit): Promise<unacknowledgeAlertGroupResponse> => {
+export const unacknowledgeAlertGroup = async (alertGroupId: string, options?: Parameters<typeof apiFetch>[1]): Promise<CommandResult> => {
 
-  const res = await fetch(getUnacknowledgeAlertGroupUrl(alertGroupId),
+  return apiFetch<CommandResult>(getUnacknowledgeAlertGroupUrl(alertGroupId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: unacknowledgeAlertGroupResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as unacknowledgeAlertGroupResponse
-}
+);}
 
 
 
@@ -1541,15 +1099,15 @@ export const unacknowledgeAlertGroup = async (alertGroupId: string, options?: Re
 export const getUnacknowledgeAlertGroupMutationKey = () => ['unacknowledgeAlertGroup'] as const;
 
 export const getUnacknowledgeAlertGroupMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unacknowledgeAlertGroup>>, TError,UnacknowledgeAlertGroupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unacknowledgeAlertGroup>>, TError,UnacknowledgeAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof unacknowledgeAlertGroup>>, TError,UnacknowledgeAlertGroupMutationVariables, TContext> => {
 
 const mutationKey = getUnacknowledgeAlertGroupMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1557,7 +1115,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof unacknowledgeAlertGroup>>, UnacknowledgeAlertGroupMutationVariables> = (props) => {
           const {alertGroupId} = props ?? {};
 
-          return  unacknowledgeAlertGroup(alertGroupId,fetchOptions)
+          return  unacknowledgeAlertGroup(alertGroupId,requestOptions)
         }
 
 
@@ -1576,7 +1134,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Unacknowledge
  */
 export const useUnacknowledgeAlertGroup = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unacknowledgeAlertGroup>>, TError,UnacknowledgeAlertGroupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unacknowledgeAlertGroup>>, TError,UnacknowledgeAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof unacknowledgeAlertGroup>>,
         TError,
@@ -1585,51 +1143,7 @@ export const useUnacknowledgeAlertGroup = <TError = UnauthorizedResponse | Forbi
       > => {
       return useMutation(getUnacknowledgeAlertGroupMutationOptions(options), queryClient);
     }
-    export type resolveAlertGroupResponse200 = {
-  data: CommandResult
-  status: 200
-}
-
-export type resolveAlertGroupResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type resolveAlertGroupResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type resolveAlertGroupResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type resolveAlertGroupResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type resolveAlertGroupResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type resolveAlertGroupResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type resolveAlertGroupResponseSuccess = (resolveAlertGroupResponse200) & {
-  headers: Headers;
-};
-export type resolveAlertGroupResponseError = (resolveAlertGroupResponse400 | resolveAlertGroupResponse401 | resolveAlertGroupResponse403 | resolveAlertGroupResponse404 | resolveAlertGroupResponse409 | resolveAlertGroupResponse429) & {
-  headers: Headers;
-};
-
-export type resolveAlertGroupResponse = (resolveAlertGroupResponseSuccess | resolveAlertGroupResponseError)
-
-export const getResolveAlertGroupUrl = (alertGroupId: string,) => {
+    export const getResolveAlertGroupUrl = (alertGroupId: string,) => {
 
 
 
@@ -1642,7 +1156,7 @@ export const getResolveAlertGroupUrl = (alertGroupId: string,) => {
  * @summary Resolve
  */
 export const resolveAlertGroup = async (alertGroupId: string,
-    resolveRequest?: ResolveRequest, options?: RequestInit): Promise<resolveAlertGroupResponse> => {
+    resolveRequest?: ResolveRequest, options?: Parameters<typeof apiFetch>[1]): Promise<CommandResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1658,21 +1172,14 @@ export const resolveAlertGroup = async (alertGroupId: string,
     }
     return headers;
   };
-const res = await fetch(getResolveAlertGroupUrl(alertGroupId),
+return apiFetch<CommandResult>(getResolveAlertGroupUrl(alertGroupId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(resolveRequest)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: resolveAlertGroupResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as resolveAlertGroupResponse
-}
+);}
 
 
 
@@ -1681,15 +1188,15 @@ const res = await fetch(getResolveAlertGroupUrl(alertGroupId),
 export const getResolveAlertGroupMutationKey = () => ['resolveAlertGroup'] as const;
 
 export const getResolveAlertGroupMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveAlertGroup>>, TError,ResolveAlertGroupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveAlertGroup>>, TError,ResolveAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof resolveAlertGroup>>, TError,ResolveAlertGroupMutationVariables, TContext> => {
 
 const mutationKey = getResolveAlertGroupMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1697,7 +1204,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof resolveAlertGroup>>, ResolveAlertGroupMutationVariables> = (props) => {
           const {alertGroupId,data} = props ?? {};
 
-          return  resolveAlertGroup(alertGroupId,data,fetchOptions)
+          return  resolveAlertGroup(alertGroupId,data,requestOptions)
         }
 
 
@@ -1716,7 +1223,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Resolve
  */
 export const useResolveAlertGroup = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveAlertGroup>>, TError,ResolveAlertGroupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveAlertGroup>>, TError,ResolveAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof resolveAlertGroup>>,
         TError,
@@ -1725,46 +1232,7 @@ export const useResolveAlertGroup = <TError = BadRequestResponse | UnauthorizedR
       > => {
       return useMutation(getResolveAlertGroupMutationOptions(options), queryClient);
     }
-    export type unresolveAlertGroupResponse200 = {
-  data: CommandResult
-  status: 200
-}
-
-export type unresolveAlertGroupResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type unresolveAlertGroupResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type unresolveAlertGroupResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type unresolveAlertGroupResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type unresolveAlertGroupResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type unresolveAlertGroupResponseSuccess = (unresolveAlertGroupResponse200) & {
-  headers: Headers;
-};
-export type unresolveAlertGroupResponseError = (unresolveAlertGroupResponse401 | unresolveAlertGroupResponse403 | unresolveAlertGroupResponse404 | unresolveAlertGroupResponse409 | unresolveAlertGroupResponse429) & {
-  headers: Headers;
-};
-
-export type unresolveAlertGroupResponse = (unresolveAlertGroupResponseSuccess | unresolveAlertGroupResponseError)
-
-export const getUnresolveAlertGroupUrl = (alertGroupId: string,) => {
+    export const getUnresolveAlertGroupUrl = (alertGroupId: string,) => {
 
 
 
@@ -1776,23 +1244,16 @@ export const getUnresolveAlertGroupUrl = (alertGroupId: string,) => {
  * Only for an Alert Group a person resolved; messengers never offer it. Refused with the codes `not_resolved`, `all_alerts_resolved`, `resolved_automatically` and `newer_alert_group_exists` (see `related_alert_group`).
  * @summary Unresolve
  */
-export const unresolveAlertGroup = async (alertGroupId: string, options?: RequestInit): Promise<unresolveAlertGroupResponse> => {
+export const unresolveAlertGroup = async (alertGroupId: string, options?: Parameters<typeof apiFetch>[1]): Promise<CommandResult> => {
 
-  const res = await fetch(getUnresolveAlertGroupUrl(alertGroupId),
+  return apiFetch<CommandResult>(getUnresolveAlertGroupUrl(alertGroupId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: unresolveAlertGroupResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as unresolveAlertGroupResponse
-}
+);}
 
 
 
@@ -1801,15 +1262,15 @@ export const unresolveAlertGroup = async (alertGroupId: string, options?: Reques
 export const getUnresolveAlertGroupMutationKey = () => ['unresolveAlertGroup'] as const;
 
 export const getUnresolveAlertGroupMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unresolveAlertGroup>>, TError,UnresolveAlertGroupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unresolveAlertGroup>>, TError,UnresolveAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof unresolveAlertGroup>>, TError,UnresolveAlertGroupMutationVariables, TContext> => {
 
 const mutationKey = getUnresolveAlertGroupMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1817,7 +1278,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof unresolveAlertGroup>>, UnresolveAlertGroupMutationVariables> = (props) => {
           const {alertGroupId} = props ?? {};
 
-          return  unresolveAlertGroup(alertGroupId,fetchOptions)
+          return  unresolveAlertGroup(alertGroupId,requestOptions)
         }
 
 
@@ -1836,7 +1297,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Unresolve
  */
 export const useUnresolveAlertGroup = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unresolveAlertGroup>>, TError,UnresolveAlertGroupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unresolveAlertGroup>>, TError,UnresolveAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof unresolveAlertGroup>>,
         TError,
@@ -1845,56 +1306,7 @@ export const useUnresolveAlertGroup = <TError = UnauthorizedResponse | Forbidden
       > => {
       return useMutation(getUnresolveAlertGroupMutationOptions(options), queryClient);
     }
-    export type snoozeAlertGroupResponse200 = {
-  data: CommandResult
-  status: 200
-}
-
-export type snoozeAlertGroupResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type snoozeAlertGroupResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type snoozeAlertGroupResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type snoozeAlertGroupResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type snoozeAlertGroupResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type snoozeAlertGroupResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type snoozeAlertGroupResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type snoozeAlertGroupResponseSuccess = (snoozeAlertGroupResponse200) & {
-  headers: Headers;
-};
-export type snoozeAlertGroupResponseError = (snoozeAlertGroupResponse400 | snoozeAlertGroupResponse401 | snoozeAlertGroupResponse403 | snoozeAlertGroupResponse404 | snoozeAlertGroupResponse409 | snoozeAlertGroupResponse422 | snoozeAlertGroupResponse429) & {
-  headers: Headers;
-};
-
-export type snoozeAlertGroupResponse = (snoozeAlertGroupResponseSuccess | snoozeAlertGroupResponseError)
-
-export const getSnoozeAlertGroupUrl = (alertGroupId: string,) => {
+    export const getSnoozeAlertGroupUrl = (alertGroupId: string,) => {
 
 
 
@@ -1907,7 +1319,7 @@ export const getSnoozeAlertGroupUrl = (alertGroupId: string,) => {
  * @summary Snooze
  */
 export const snoozeAlertGroup = async (alertGroupId: string,
-    snoozeRequest: SnoozeRequest, options?: RequestInit): Promise<snoozeAlertGroupResponse> => {
+    snoozeRequest: SnoozeRequest, options?: Parameters<typeof apiFetch>[1]): Promise<CommandResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1923,21 +1335,14 @@ export const snoozeAlertGroup = async (alertGroupId: string,
     }
     return headers;
   };
-const res = await fetch(getSnoozeAlertGroupUrl(alertGroupId),
+return apiFetch<CommandResult>(getSnoozeAlertGroupUrl(alertGroupId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(snoozeRequest)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: snoozeAlertGroupResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as snoozeAlertGroupResponse
-}
+);}
 
 
 
@@ -1946,15 +1351,15 @@ const res = await fetch(getSnoozeAlertGroupUrl(alertGroupId),
 export const getSnoozeAlertGroupMutationKey = () => ['snoozeAlertGroup'] as const;
 
 export const getSnoozeAlertGroupMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof snoozeAlertGroup>>, TError,SnoozeAlertGroupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof snoozeAlertGroup>>, TError,SnoozeAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof snoozeAlertGroup>>, TError,SnoozeAlertGroupMutationVariables, TContext> => {
 
 const mutationKey = getSnoozeAlertGroupMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1962,7 +1367,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof snoozeAlertGroup>>, SnoozeAlertGroupMutationVariables> = (props) => {
           const {alertGroupId,data} = props ?? {};
 
-          return  snoozeAlertGroup(alertGroupId,data,fetchOptions)
+          return  snoozeAlertGroup(alertGroupId,data,requestOptions)
         }
 
 
@@ -1981,7 +1386,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Snooze
  */
 export const useSnoozeAlertGroup = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof snoozeAlertGroup>>, TError,SnoozeAlertGroupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof snoozeAlertGroup>>, TError,SnoozeAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof snoozeAlertGroup>>,
         TError,
@@ -1990,46 +1395,7 @@ export const useSnoozeAlertGroup = <TError = BadRequestResponse | UnauthorizedRe
       > => {
       return useMutation(getSnoozeAlertGroupMutationOptions(options), queryClient);
     }
-    export type unsnoozeAlertGroupResponse200 = {
-  data: CommandResult
-  status: 200
-}
-
-export type unsnoozeAlertGroupResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type unsnoozeAlertGroupResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type unsnoozeAlertGroupResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type unsnoozeAlertGroupResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type unsnoozeAlertGroupResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type unsnoozeAlertGroupResponseSuccess = (unsnoozeAlertGroupResponse200) & {
-  headers: Headers;
-};
-export type unsnoozeAlertGroupResponseError = (unsnoozeAlertGroupResponse401 | unsnoozeAlertGroupResponse403 | unsnoozeAlertGroupResponse404 | unsnoozeAlertGroupResponse409 | unsnoozeAlertGroupResponse429) & {
-  headers: Headers;
-};
-
-export type unsnoozeAlertGroupResponse = (unsnoozeAlertGroupResponseSuccess | unsnoozeAlertGroupResponseError)
-
-export const getUnsnoozeAlertGroupUrl = (alertGroupId: string,) => {
+    export const getUnsnoozeAlertGroupUrl = (alertGroupId: string,) => {
 
 
 
@@ -2041,23 +1407,16 @@ export const getUnsnoozeAlertGroupUrl = (alertGroupId: string,) => {
  * The Alert Group becomes firing without an Owner. Refused with the code `not_snoozed`.
  * @summary Unsnooze
  */
-export const unsnoozeAlertGroup = async (alertGroupId: string, options?: RequestInit): Promise<unsnoozeAlertGroupResponse> => {
+export const unsnoozeAlertGroup = async (alertGroupId: string, options?: Parameters<typeof apiFetch>[1]): Promise<CommandResult> => {
 
-  const res = await fetch(getUnsnoozeAlertGroupUrl(alertGroupId),
+  return apiFetch<CommandResult>(getUnsnoozeAlertGroupUrl(alertGroupId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: unsnoozeAlertGroupResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as unsnoozeAlertGroupResponse
-}
+);}
 
 
 
@@ -2066,15 +1425,15 @@ export const unsnoozeAlertGroup = async (alertGroupId: string, options?: Request
 export const getUnsnoozeAlertGroupMutationKey = () => ['unsnoozeAlertGroup'] as const;
 
 export const getUnsnoozeAlertGroupMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unsnoozeAlertGroup>>, TError,UnsnoozeAlertGroupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unsnoozeAlertGroup>>, TError,UnsnoozeAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof unsnoozeAlertGroup>>, TError,UnsnoozeAlertGroupMutationVariables, TContext> => {
 
 const mutationKey = getUnsnoozeAlertGroupMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -2082,7 +1441,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof unsnoozeAlertGroup>>, UnsnoozeAlertGroupMutationVariables> = (props) => {
           const {alertGroupId} = props ?? {};
 
-          return  unsnoozeAlertGroup(alertGroupId,fetchOptions)
+          return  unsnoozeAlertGroup(alertGroupId,requestOptions)
         }
 
 
@@ -2101,7 +1460,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Unsnooze
  */
 export const useUnsnoozeAlertGroup = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unsnoozeAlertGroup>>, TError,UnsnoozeAlertGroupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof unsnoozeAlertGroup>>, TError,UnsnoozeAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof unsnoozeAlertGroup>>,
         TError,
@@ -2110,46 +1469,7 @@ export const useUnsnoozeAlertGroup = <TError = UnauthorizedResponse | ForbiddenR
       > => {
       return useMutation(getUnsnoozeAlertGroupMutationOptions(options), queryClient);
     }
-    export type listAlertGroupNotesResponse200 = {
-  data: NoteList
-  status: 200
-}
-
-export type listAlertGroupNotesResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listAlertGroupNotesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listAlertGroupNotesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listAlertGroupNotesResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type listAlertGroupNotesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listAlertGroupNotesResponseSuccess = (listAlertGroupNotesResponse200) & {
-  headers: Headers;
-};
-export type listAlertGroupNotesResponseError = (listAlertGroupNotesResponse400 | listAlertGroupNotesResponse401 | listAlertGroupNotesResponse403 | listAlertGroupNotesResponse404 | listAlertGroupNotesResponse429) & {
-  headers: Headers;
-};
-
-export type listAlertGroupNotesResponse = (listAlertGroupNotesResponseSuccess | listAlertGroupNotesResponseError)
-
-export const getListAlertGroupNotesUrl = (alertGroupId: string,
+    export const getListAlertGroupNotesUrl = (alertGroupId: string,
     params?: ListAlertGroupNotesParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -2170,23 +1490,16 @@ export const getListAlertGroupNotesUrl = (alertGroupId: string,
  * @summary List Notes
  */
 export const listAlertGroupNotes = async (alertGroupId: string,
-    params?: ListAlertGroupNotesParams, options?: RequestInit): Promise<listAlertGroupNotesResponse> => {
+    params?: ListAlertGroupNotesParams, options?: Parameters<typeof apiFetch>[1]): Promise<NoteList> => {
 
-  const res = await fetch(getListAlertGroupNotesUrl(alertGroupId,params),
+  return apiFetch<NoteList>(getListAlertGroupNotesUrl(alertGroupId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listAlertGroupNotesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listAlertGroupNotesResponse
-}
+);}
 
 
 
@@ -2201,16 +1514,16 @@ export const getListAlertGroupNotesQueryKey = (alertGroupId: string,
 
 
 export const getListAlertGroupNotesQueryOptions = <TData = Awaited<ReturnType<typeof listAlertGroupNotes>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(alertGroupId: string,
-    params?: ListAlertGroupNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupNotes>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListAlertGroupNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupNotes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListAlertGroupNotesQueryKey(alertGroupId,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAlertGroupNotes>>> = ({ signal }) => listAlertGroupNotes(alertGroupId,params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAlertGroupNotes>>> = ({ signal }) => listAlertGroupNotes(alertGroupId,params, { signal, ...requestOptions });
 
 
 
@@ -2231,7 +1544,7 @@ export function useListAlertGroupNotes<TData = Awaited<ReturnType<typeof listAle
           TError,
           Awaited<ReturnType<typeof listAlertGroupNotes>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListAlertGroupNotes<TData = Awaited<ReturnType<typeof listAlertGroupNotes>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -2242,12 +1555,12 @@ export function useListAlertGroupNotes<TData = Awaited<ReturnType<typeof listAle
           TError,
           Awaited<ReturnType<typeof listAlertGroupNotes>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListAlertGroupNotes<TData = Awaited<ReturnType<typeof listAlertGroupNotes>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
  alertGroupId: string,
-    params?: ListAlertGroupNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupNotes>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListAlertGroupNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupNotes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -2256,7 +1569,7 @@ export function useListAlertGroupNotes<TData = Awaited<ReturnType<typeof listAle
 
 export function useListAlertGroupNotes<TData = Awaited<ReturnType<typeof listAlertGroupNotes>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
  alertGroupId: string,
-    params?: ListAlertGroupNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupNotes>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListAlertGroupNotesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroupNotes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -2272,50 +1585,6 @@ export function useListAlertGroupNotes<TData = Awaited<ReturnType<typeof listAle
 
 
 
-export type createAlertGroupNoteResponse201 = {
-  data: Note
-  status: 201
-}
-
-export type createAlertGroupNoteResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createAlertGroupNoteResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createAlertGroupNoteResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createAlertGroupNoteResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type createAlertGroupNoteResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type createAlertGroupNoteResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createAlertGroupNoteResponseSuccess = (createAlertGroupNoteResponse201) & {
-  headers: Headers;
-};
-export type createAlertGroupNoteResponseError = (createAlertGroupNoteResponse400 | createAlertGroupNoteResponse401 | createAlertGroupNoteResponse403 | createAlertGroupNoteResponse404 | createAlertGroupNoteResponse422 | createAlertGroupNoteResponse429) & {
-  headers: Headers;
-};
-
-export type createAlertGroupNoteResponse = (createAlertGroupNoteResponseSuccess | createAlertGroupNoteResponseError)
-
 export const getCreateAlertGroupNoteUrl = (alertGroupId: string,) => {
 
 
@@ -2329,7 +1598,7 @@ export const getCreateAlertGroupNoteUrl = (alertGroupId: string,) => {
  * @summary Add a Note
  */
 export const createAlertGroupNote = async (alertGroupId: string,
-    noteInput: NoteInput, options?: RequestInit): Promise<createAlertGroupNoteResponse> => {
+    noteInput: NoteInput, options?: Parameters<typeof apiFetch>[1]): Promise<Note> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -2345,21 +1614,14 @@ export const createAlertGroupNote = async (alertGroupId: string,
     }
     return headers;
   };
-const res = await fetch(getCreateAlertGroupNoteUrl(alertGroupId),
+return apiFetch<Note>(getCreateAlertGroupNoteUrl(alertGroupId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(noteInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createAlertGroupNoteResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createAlertGroupNoteResponse
-}
+);}
 
 
 
@@ -2368,15 +1630,15 @@ const res = await fetch(getCreateAlertGroupNoteUrl(alertGroupId),
 export const getCreateAlertGroupNoteMutationKey = () => ['createAlertGroupNote'] as const;
 
 export const getCreateAlertGroupNoteMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAlertGroupNote>>, TError,CreateAlertGroupNoteMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAlertGroupNote>>, TError,CreateAlertGroupNoteMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createAlertGroupNote>>, TError,CreateAlertGroupNoteMutationVariables, TContext> => {
 
 const mutationKey = getCreateAlertGroupNoteMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -2384,7 +1646,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAlertGroupNote>>, CreateAlertGroupNoteMutationVariables> = (props) => {
           const {alertGroupId,data} = props ?? {};
 
-          return  createAlertGroupNote(alertGroupId,data,fetchOptions)
+          return  createAlertGroupNote(alertGroupId,data,requestOptions)
         }
 
 
@@ -2403,7 +1665,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Add a Note
  */
 export const useCreateAlertGroupNote = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAlertGroupNote>>, TError,CreateAlertGroupNoteMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAlertGroupNote>>, TError,CreateAlertGroupNoteMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createAlertGroupNote>>,
         TError,
@@ -2412,46 +1674,7 @@ export const useCreateAlertGroupNote = <TError = BadRequestResponse | Unauthoriz
       > => {
       return useMutation(getCreateAlertGroupNoteMutationOptions(options), queryClient);
     }
-    export type answerReminderResponse200 = {
-  data: CommandResult
-  status: 200
-}
-
-export type answerReminderResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type answerReminderResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type answerReminderResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type answerReminderResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type answerReminderResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type answerReminderResponseSuccess = (answerReminderResponse200) & {
-  headers: Headers;
-};
-export type answerReminderResponseError = (answerReminderResponse401 | answerReminderResponse403 | answerReminderResponse404 | answerReminderResponse409 | answerReminderResponse429) & {
-  headers: Headers;
-};
-
-export type answerReminderResponse = (answerReminderResponseSuccess | answerReminderResponseError)
-
-export const getAnswerReminderUrl = (alertGroupId: string,) => {
+    export const getAnswerReminderUrl = (alertGroupId: string,) => {
 
 
 
@@ -2463,23 +1686,16 @@ export const getAnswerReminderUrl = (alertGroupId: string,) => {
  * Owner only. Recorded in the Timeline like a press in a messenger; it does not reset the Reminder interval. Refused with `409` `command-refused` and the codes `not_owner`, `no_reminder_pending` and, for a Service account token, `owner_must_be_user`.
  * @summary Answer a Reminder with "Still on it"
  */
-export const answerReminder = async (alertGroupId: string, options?: RequestInit): Promise<answerReminderResponse> => {
+export const answerReminder = async (alertGroupId: string, options?: Parameters<typeof apiFetch>[1]): Promise<CommandResult> => {
 
-  const res = await fetch(getAnswerReminderUrl(alertGroupId),
+  return apiFetch<CommandResult>(getAnswerReminderUrl(alertGroupId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: answerReminderResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as answerReminderResponse
-}
+);}
 
 
 
@@ -2488,15 +1704,15 @@ export const answerReminder = async (alertGroupId: string, options?: RequestInit
 export const getAnswerReminderMutationKey = () => ['answerReminder'] as const;
 
 export const getAnswerReminderMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof answerReminder>>, TError,AnswerReminderMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof answerReminder>>, TError,AnswerReminderMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof answerReminder>>, TError,AnswerReminderMutationVariables, TContext> => {
 
 const mutationKey = getAnswerReminderMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -2504,7 +1720,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof answerReminder>>, AnswerReminderMutationVariables> = (props) => {
           const {alertGroupId} = props ?? {};
 
-          return  answerReminder(alertGroupId,fetchOptions)
+          return  answerReminder(alertGroupId,requestOptions)
         }
 
 
@@ -2523,7 +1739,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Answer a Reminder with "Still on it"
  */
 export const useAnswerReminder = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof answerReminder>>, TError,AnswerReminderMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof answerReminder>>, TError,AnswerReminderMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof answerReminder>>,
         TError,
@@ -2532,46 +1748,7 @@ export const useAnswerReminder = <TError = UnauthorizedResponse | ForbiddenRespo
       > => {
       return useMutation(getAnswerReminderMutationOptions(options), queryClient);
     }
-    export type runBulkCommandResponse200 = {
-  data: BulkCommandResult
-  status: 200
-}
-
-export type runBulkCommandResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type runBulkCommandResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type runBulkCommandResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type runBulkCommandResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type runBulkCommandResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type runBulkCommandResponseSuccess = (runBulkCommandResponse200) & {
-  headers: Headers;
-};
-export type runBulkCommandResponseError = (runBulkCommandResponse400 | runBulkCommandResponse401 | runBulkCommandResponse403 | runBulkCommandResponse422 | runBulkCommandResponse429) & {
-  headers: Headers;
-};
-
-export type runBulkCommandResponse = (runBulkCommandResponseSuccess | runBulkCommandResponseError)
-
-export const getRunBulkCommandUrl = () => {
+    export const getRunBulkCommandUrl = () => {
 
 
 
@@ -2583,7 +1760,7 @@ export const getRunBulkCommandUrl = () => {
  * Acknowledge, Resolve, Snooze or Unsnooze on up to `alert_group.bulk_max` Alert Groups. Each goes through the dispatcher on its own, with its own Audit log and Timeline entry; a refusal never stops the others. Bulk Acknowledge skips Alert Groups another user owns and never makes a Takeover. `x-permission` lists alternatives: the caller needs the Permission of the chosen command (`acknowledge` needs `alert-groups:acknowledge`, `resolve` needs `alert-groups:resolve`, `snooze` and `unsnooze` need `alert-groups:snooze`).
  * @summary Run a Command on several Alert Groups
  */
-export const runBulkCommand = async (bulkCommandRequest: BulkCommandRequest, options?: RequestInit): Promise<runBulkCommandResponse> => {
+export const runBulkCommand = async (bulkCommandRequest: BulkCommandRequest, options?: Parameters<typeof apiFetch>[1]): Promise<BulkCommandResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -2599,21 +1776,14 @@ export const runBulkCommand = async (bulkCommandRequest: BulkCommandRequest, opt
     }
     return headers;
   };
-const res = await fetch(getRunBulkCommandUrl(),
+return apiFetch<BulkCommandResult>(getRunBulkCommandUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(bulkCommandRequest)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: runBulkCommandResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as runBulkCommandResponse
-}
+);}
 
 
 
@@ -2622,15 +1792,15 @@ const res = await fetch(getRunBulkCommandUrl(),
 export const getRunBulkCommandMutationKey = () => ['runBulkCommand'] as const;
 
 export const getRunBulkCommandMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runBulkCommand>>, TError,RunBulkCommandMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runBulkCommand>>, TError,RunBulkCommandMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof runBulkCommand>>, TError,RunBulkCommandMutationVariables, TContext> => {
 
 const mutationKey = getRunBulkCommandMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -2638,7 +1808,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof runBulkCommand>>, RunBulkCommandMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  runBulkCommand(data,fetchOptions)
+          return  runBulkCommand(data,requestOptions)
         }
 
 
@@ -2657,7 +1827,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Run a Command on several Alert Groups
  */
 export const useRunBulkCommand = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runBulkCommand>>, TError,RunBulkCommandMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runBulkCommand>>, TError,RunBulkCommandMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof runBulkCommand>>,
         TError,

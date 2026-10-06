@@ -39,7 +39,10 @@ import type {
   UnauthorizedResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -58,35 +61,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type streamLiveUpdatesResponse200 = {
-  data: HintEvent
-  status: 200
-}
-
-export type streamLiveUpdatesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type streamLiveUpdatesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type streamLiveUpdatesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type streamLiveUpdatesResponseSuccess = (streamLiveUpdatesResponse200) & {
-  headers: Headers;
-};
-export type streamLiveUpdatesResponseError = (streamLiveUpdatesResponse401 | streamLiveUpdatesResponse403 | streamLiveUpdatesResponse429) & {
-  headers: Headers;
-};
-
-export type streamLiveUpdatesResponse = (streamLiveUpdatesResponseSuccess | streamLiveUpdatesResponseError)
-
 export const getStreamLiveUpdatesUrl = () => {
 
 
@@ -101,23 +75,16 @@ export const getStreamLiveUpdatesUrl = () => {
  * Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page.
  * @summary Stream change hints
  */
-export const streamLiveUpdates = async ( options?: RequestInit): Promise<streamLiveUpdatesResponse> => {
+export const streamLiveUpdates = async ( options?: Parameters<typeof apiFetch>[1]): Promise<HintEvent> => {
 
-  const res = await fetch(getStreamLiveUpdatesUrl(),
+  return apiFetch<HintEvent>(getStreamLiveUpdatesUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-  const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: streamLiveUpdatesResponse['data'] = body ? (contentType.includes('json') ? JSON.parse(body) : body) : {}
-  return { data, status: res.status, headers: res.headers } as streamLiveUpdatesResponse
-}
+);}
 
 
 
@@ -130,16 +97,16 @@ export const getStreamLiveUpdatesQueryKey = () => {
     }
 
 
-export const getStreamLiveUpdatesQueryOptions = <TData = Awaited<ReturnType<typeof streamLiveUpdates>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamLiveUpdates>>, TError, TData>>, fetch?: RequestInit}
+export const getStreamLiveUpdatesQueryOptions = <TData = Awaited<ReturnType<typeof streamLiveUpdates>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamLiveUpdates>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getStreamLiveUpdatesQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof streamLiveUpdates>>> = ({ signal }) => streamLiveUpdates({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof streamLiveUpdates>>> = ({ signal }) => streamLiveUpdates({ signal, ...requestOptions });
 
 
 
@@ -159,7 +126,7 @@ export function useStreamLiveUpdates<TData = Awaited<ReturnType<typeof streamLiv
           TError,
           Awaited<ReturnType<typeof streamLiveUpdates>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useStreamLiveUpdates<TData = Awaited<ReturnType<typeof streamLiveUpdates>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -169,11 +136,11 @@ export function useStreamLiveUpdates<TData = Awaited<ReturnType<typeof streamLiv
           TError,
           Awaited<ReturnType<typeof streamLiveUpdates>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useStreamLiveUpdates<TData = Awaited<ReturnType<typeof streamLiveUpdates>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamLiveUpdates>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamLiveUpdates>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -181,7 +148,7 @@ export function useStreamLiveUpdates<TData = Awaited<ReturnType<typeof streamLiv
  */
 
 export function useStreamLiveUpdates<TData = Awaited<ReturnType<typeof streamLiveUpdates>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamLiveUpdates>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamLiveUpdates>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 

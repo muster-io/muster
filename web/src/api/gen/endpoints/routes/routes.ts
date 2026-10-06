@@ -58,7 +58,10 @@ import type {
   UnprocessableResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -77,35 +80,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type listRoutesResponse200 = {
-  data: RouteList
-  status: 200
-}
-
-export type listRoutesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listRoutesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listRoutesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listRoutesResponseSuccess = (listRoutesResponse200) & {
-  headers: Headers;
-};
-export type listRoutesResponseError = (listRoutesResponse401 | listRoutesResponse403 | listRoutesResponse429) & {
-  headers: Headers;
-};
-
-export type listRoutesResponse = (listRoutesResponseSuccess | listRoutesResponseError)
-
 export const getListRoutesUrl = () => {
 
 
@@ -118,23 +92,16 @@ export const getListRoutesUrl = () => {
  * The first Route whose Matchers all match takes an Alert. The Default route is always last. The ETag covers the order and is what `reorderRoutes` expects in `If-Match`.
  * @summary List Routes in evaluation order
  */
-export const listRoutes = async ( options?: RequestInit): Promise<listRoutesResponse> => {
+export const listRoutes = async ( options?: Parameters<typeof apiFetch>[1]): Promise<RouteList> => {
 
-  const res = await fetch(getListRoutesUrl(),
+  return apiFetch<RouteList>(getListRoutesUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listRoutesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listRoutesResponse
-}
+);}
 
 
 
@@ -147,16 +114,16 @@ export const getListRoutesQueryKey = () => {
     }
 
 
-export const getListRoutesQueryOptions = <TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>>, fetch?: RequestInit}
+export const getListRoutesQueryOptions = <TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListRoutesQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRoutes>>> = ({ signal }) => listRoutes({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRoutes>>> = ({ signal }) => listRoutes({ signal, ...requestOptions });
 
 
 
@@ -176,7 +143,7 @@ export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TE
           TError,
           Awaited<ReturnType<typeof listRoutes>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -186,11 +153,11 @@ export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TE
           TError,
           Awaited<ReturnType<typeof listRoutes>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -198,7 +165,7 @@ export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TE
  */
 
 export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -214,50 +181,6 @@ export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TE
 
 
 
-export type createRouteResponse201 = {
-  data: Route
-  status: 201
-}
-
-export type createRouteResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createRouteResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createRouteResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createRouteResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type createRouteResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type createRouteResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createRouteResponseSuccess = (createRouteResponse201) & {
-  headers: Headers;
-};
-export type createRouteResponseError = (createRouteResponse400 | createRouteResponse401 | createRouteResponse403 | createRouteResponse409 | createRouteResponse422 | createRouteResponse429) & {
-  headers: Headers;
-};
-
-export type createRouteResponse = (createRouteResponseSuccess | createRouteResponseError)
-
 export const getCreateRouteUrl = () => {
 
 
@@ -270,7 +193,7 @@ export const getCreateRouteUrl = () => {
  * Inserted before the Default route. Fields omitted from `policy` are not defaulted: fetch a profile with `listRouteProfiles` to pre-fill the form. Templates are parsed and dry-run against recent Stored Snapshots; a template that fails is refused with `422` and the error position.
  * @summary Create a Route
  */
-export const createRoute = async (routeInput: RouteInput, options?: RequestInit): Promise<createRouteResponse> => {
+export const createRoute = async (routeInput: RouteInput, options?: Parameters<typeof apiFetch>[1]): Promise<Route> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -286,21 +209,14 @@ export const createRoute = async (routeInput: RouteInput, options?: RequestInit)
     }
     return headers;
   };
-const res = await fetch(getCreateRouteUrl(),
+return apiFetch<Route>(getCreateRouteUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(routeInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createRouteResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createRouteResponse
-}
+);}
 
 
 
@@ -309,15 +225,15 @@ const res = await fetch(getCreateRouteUrl(),
 export const getCreateRouteMutationKey = () => ['createRoute'] as const;
 
 export const getCreateRouteMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRoute>>, TError,CreateRouteMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRoute>>, TError,CreateRouteMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createRoute>>, TError,CreateRouteMutationVariables, TContext> => {
 
 const mutationKey = getCreateRouteMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -325,7 +241,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createRoute>>, CreateRouteMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  createRoute(data,fetchOptions)
+          return  createRoute(data,requestOptions)
         }
 
 
@@ -344,7 +260,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Create a Route
  */
 export const useCreateRoute = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRoute>>, TError,CreateRouteMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRoute>>, TError,CreateRouteMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createRoute>>,
         TError,
@@ -353,41 +269,7 @@ export const useCreateRoute = <TError = BadRequestResponse | UnauthorizedRespons
       > => {
       return useMutation(getCreateRouteMutationOptions(options), queryClient);
     }
-    export type getRouteResponse200 = {
-  data: Route
-  status: 200
-}
-
-export type getRouteResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getRouteResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getRouteResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getRouteResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getRouteResponseSuccess = (getRouteResponse200) & {
-  headers: Headers;
-};
-export type getRouteResponseError = (getRouteResponse401 | getRouteResponse403 | getRouteResponse404 | getRouteResponse429) & {
-  headers: Headers;
-};
-
-export type getRouteResponse = (getRouteResponseSuccess | getRouteResponseError)
-
-export const getGetRouteUrl = (routeId: string,) => {
+    export const getGetRouteUrl = (routeId: string,) => {
 
 
 
@@ -398,23 +280,16 @@ export const getGetRouteUrl = (routeId: string,) => {
 /**
  * @summary Read a Route
  */
-export const getRoute = async (routeId: string, options?: RequestInit): Promise<getRouteResponse> => {
+export const getRoute = async (routeId: string, options?: Parameters<typeof apiFetch>[1]): Promise<Route> => {
 
-  const res = await fetch(getGetRouteUrl(routeId),
+  return apiFetch<Route>(getGetRouteUrl(routeId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getRouteResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getRouteResponse
-}
+);}
 
 
 
@@ -427,16 +302,16 @@ export const getGetRouteQueryKey = (routeId: string,) => {
     }
 
 
-export const getGetRouteQueryOptions = <TData = Awaited<ReturnType<typeof getRoute>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(routeId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRoute>>, TError, TData>>, fetch?: RequestInit}
+export const getGetRouteQueryOptions = <TData = Awaited<ReturnType<typeof getRoute>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(routeId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRoute>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetRouteQueryKey(routeId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRoute>>> = ({ signal }) => getRoute(routeId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRoute>>> = ({ signal }) => getRoute(routeId, { signal, ...requestOptions });
 
 
 
@@ -456,7 +331,7 @@ export function useGetRoute<TData = Awaited<ReturnType<typeof getRoute>>, TError
           TError,
           Awaited<ReturnType<typeof getRoute>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetRoute<TData = Awaited<ReturnType<typeof getRoute>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -466,11 +341,11 @@ export function useGetRoute<TData = Awaited<ReturnType<typeof getRoute>>, TError
           TError,
           Awaited<ReturnType<typeof getRoute>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetRoute<TData = Awaited<ReturnType<typeof getRoute>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- routeId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRoute>>, TError, TData>>, fetch?: RequestInit}
+ routeId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRoute>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -478,7 +353,7 @@ export function useGetRoute<TData = Awaited<ReturnType<typeof getRoute>>, TError
  */
 
 export function useGetRoute<TData = Awaited<ReturnType<typeof getRoute>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- routeId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRoute>>, TError, TData>>, fetch?: RequestInit}
+ routeId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRoute>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -494,65 +369,6 @@ export function useGetRoute<TData = Awaited<ReturnType<typeof getRoute>>, TError
 
 
 
-export type updateRouteResponse200 = {
-  data: Route
-  status: 200
-}
-
-export type updateRouteResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type updateRouteResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type updateRouteResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type updateRouteResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type updateRouteResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type updateRouteResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type updateRouteResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type updateRouteResponse428 = {
-  data: PreconditionRequiredResponse
-  status: 428
-}
-
-export type updateRouteResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type updateRouteResponseSuccess = (updateRouteResponse200) & {
-  headers: Headers;
-};
-export type updateRouteResponseError = (updateRouteResponse400 | updateRouteResponse401 | updateRouteResponse403 | updateRouteResponse404 | updateRouteResponse409 | updateRouteResponse412 | updateRouteResponse422 | updateRouteResponse428 | updateRouteResponse429) & {
-  headers: Headers;
-};
-
-export type updateRouteResponse = (updateRouteResponseSuccess | updateRouteResponseError)
-
 export const getUpdateRouteUrl = (routeId: string,) => {
 
 
@@ -566,7 +382,7 @@ export const getUpdateRouteUrl = (routeId: string,) => {
  * @summary Update a Route
  */
 export const updateRoute = async (routeId: string,
-    routeInput: RouteInput, options?: RequestInit): Promise<updateRouteResponse> => {
+    routeInput: RouteInput, options?: Parameters<typeof apiFetch>[1]): Promise<Route> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -582,21 +398,14 @@ export const updateRoute = async (routeId: string,
     }
     return headers;
   };
-const res = await fetch(getUpdateRouteUrl(routeId),
+return apiFetch<Route>(getUpdateRouteUrl(routeId),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(routeInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: updateRouteResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as updateRouteResponse
-}
+);}
 
 
 
@@ -605,15 +414,15 @@ const res = await fetch(getUpdateRouteUrl(routeId),
 export const getUpdateRouteMutationKey = () => ['updateRoute'] as const;
 
 export const getUpdateRouteMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRoute>>, TError,UpdateRouteMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRoute>>, TError,UpdateRouteMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateRoute>>, TError,UpdateRouteMutationVariables, TContext> => {
 
 const mutationKey = getUpdateRouteMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -621,7 +430,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateRoute>>, UpdateRouteMutationVariables> = (props) => {
           const {routeId,data} = props ?? {};
 
-          return  updateRoute(routeId,data,fetchOptions)
+          return  updateRoute(routeId,data,requestOptions)
         }
 
 
@@ -640,7 +449,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Update a Route
  */
 export const useUpdateRoute = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRoute>>, TError,UpdateRouteMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRoute>>, TError,UpdateRouteMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateRoute>>,
         TError,
@@ -649,51 +458,7 @@ export const useUpdateRoute = <TError = BadRequestResponse | UnauthorizedRespons
       > => {
       return useMutation(getUpdateRouteMutationOptions(options), queryClient);
     }
-    export type deleteRouteResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteRouteResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteRouteResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteRouteResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type deleteRouteResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type deleteRouteResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type deleteRouteResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteRouteResponseSuccess = (deleteRouteResponse204) & {
-  headers: Headers;
-};
-export type deleteRouteResponseError = (deleteRouteResponse401 | deleteRouteResponse403 | deleteRouteResponse404 | deleteRouteResponse409 | deleteRouteResponse412 | deleteRouteResponse429) & {
-  headers: Headers;
-};
-
-export type deleteRouteResponse = (deleteRouteResponseSuccess | deleteRouteResponseError)
-
-export const getDeleteRouteUrl = (routeId: string,) => {
+    export const getDeleteRouteUrl = (routeId: string,) => {
 
 
 
@@ -705,23 +470,16 @@ export const getDeleteRouteUrl = (routeId: string,) => {
  * Refused with `409` `default-route-immutable` for the Default route and with `409` `route-has-open-alert-groups` (carrying `open_alert_group_count`) while open Alert Groups remain; move them first with `moveOpenAlertGroups`.
  * @summary Delete a Route
  */
-export const deleteRoute = async (routeId: string, options?: RequestInit): Promise<deleteRouteResponse> => {
+export const deleteRoute = async (routeId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteRouteUrl(routeId),
+  return apiFetch<void>(getDeleteRouteUrl(routeId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteRouteResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteRouteResponse
-}
+);}
 
 
 
@@ -730,15 +488,15 @@ export const deleteRoute = async (routeId: string, options?: RequestInit): Promi
 export const getDeleteRouteMutationKey = () => ['deleteRoute'] as const;
 
 export const getDeleteRouteMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRoute>>, TError,DeleteRouteMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRoute>>, TError,DeleteRouteMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteRoute>>, TError,DeleteRouteMutationVariables, TContext> => {
 
 const mutationKey = getDeleteRouteMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -746,7 +504,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteRoute>>, DeleteRouteMutationVariables> = (props) => {
           const {routeId} = props ?? {};
 
-          return  deleteRoute(routeId,fetchOptions)
+          return  deleteRoute(routeId,requestOptions)
         }
 
 
@@ -765,7 +523,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Delete a Route
  */
 export const useDeleteRoute = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRoute>>, TError,DeleteRouteMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRoute>>, TError,DeleteRouteMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteRoute>>,
         TError,
@@ -774,61 +532,7 @@ export const useDeleteRoute = <TError = UnauthorizedResponse | ForbiddenResponse
       > => {
       return useMutation(getDeleteRouteMutationOptions(options), queryClient);
     }
-    export type reorderRoutesResponse200 = {
-  data: RouteList
-  status: 200
-}
-
-export type reorderRoutesResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type reorderRoutesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type reorderRoutesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type reorderRoutesResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type reorderRoutesResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type reorderRoutesResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type reorderRoutesResponse428 = {
-  data: PreconditionRequiredResponse
-  status: 428
-}
-
-export type reorderRoutesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type reorderRoutesResponseSuccess = (reorderRoutesResponse200) & {
-  headers: Headers;
-};
-export type reorderRoutesResponseError = (reorderRoutesResponse400 | reorderRoutesResponse401 | reorderRoutesResponse403 | reorderRoutesResponse409 | reorderRoutesResponse412 | reorderRoutesResponse422 | reorderRoutesResponse428 | reorderRoutesResponse429) & {
-  headers: Headers;
-};
-
-export type reorderRoutesResponse = (reorderRoutesResponseSuccess | reorderRoutesResponseError)
-
-export const getReorderRoutesUrl = () => {
+    export const getReorderRoutesUrl = () => {
 
 
 
@@ -840,7 +544,7 @@ export const getReorderRoutesUrl = () => {
  * Replaces the order of all Routes except the Default route, which cannot be moved. `If-Match` carries the ETag of `listRoutes`; a stale one gets `412`. A list that contains the Default route is `409` (`default-route-immutable`); a set of ids that differs from the current set is `422` (`route_set_mismatch`).
  * @summary Reorder Routes
  */
-export const reorderRoutes = async (routeOrder: RouteOrder, options?: RequestInit): Promise<reorderRoutesResponse> => {
+export const reorderRoutes = async (routeOrder: RouteOrder, options?: Parameters<typeof apiFetch>[1]): Promise<RouteList> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -856,21 +560,14 @@ export const reorderRoutes = async (routeOrder: RouteOrder, options?: RequestIni
     }
     return headers;
   };
-const res = await fetch(getReorderRoutesUrl(),
+return apiFetch<RouteList>(getReorderRoutesUrl(),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(routeOrder)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: reorderRoutesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as reorderRoutesResponse
-}
+);}
 
 
 
@@ -879,15 +576,15 @@ const res = await fetch(getReorderRoutesUrl(),
 export const getReorderRoutesMutationKey = () => ['reorderRoutes'] as const;
 
 export const getReorderRoutesMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderRoutes>>, TError,ReorderRoutesMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderRoutes>>, TError,ReorderRoutesMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof reorderRoutes>>, TError,ReorderRoutesMutationVariables, TContext> => {
 
 const mutationKey = getReorderRoutesMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -895,7 +592,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof reorderRoutes>>, ReorderRoutesMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  reorderRoutes(data,fetchOptions)
+          return  reorderRoutes(data,requestOptions)
         }
 
 
@@ -914,7 +611,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Reorder Routes
  */
 export const useReorderRoutes = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderRoutes>>, TError,ReorderRoutesMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reorderRoutes>>, TError,ReorderRoutesMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof reorderRoutes>>,
         TError,
@@ -923,46 +620,7 @@ export const useReorderRoutes = <TError = BadRequestResponse | UnauthorizedRespo
       > => {
       return useMutation(getReorderRoutesMutationOptions(options), queryClient);
     }
-    export type moveOpenAlertGroupsResponse200 = {
-  data: MovedAlertGroups
-  status: 200
-}
-
-export type moveOpenAlertGroupsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type moveOpenAlertGroupsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type moveOpenAlertGroupsResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type moveOpenAlertGroupsResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type moveOpenAlertGroupsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type moveOpenAlertGroupsResponseSuccess = (moveOpenAlertGroupsResponse200) & {
-  headers: Headers;
-};
-export type moveOpenAlertGroupsResponseError = (moveOpenAlertGroupsResponse401 | moveOpenAlertGroupsResponse403 | moveOpenAlertGroupsResponse404 | moveOpenAlertGroupsResponse409 | moveOpenAlertGroupsResponse429) & {
-  headers: Headers;
-};
-
-export type moveOpenAlertGroupsResponse = (moveOpenAlertGroupsResponseSuccess | moveOpenAlertGroupsResponseError)
-
-export const getMoveOpenAlertGroupsUrl = (routeId: string,) => {
+    export const getMoveOpenAlertGroupsUrl = (routeId: string,) => {
 
 
 
@@ -974,23 +632,16 @@ export const getMoveOpenAlertGroupsUrl = (routeId: string,) => {
  * Adds a `moved_to_default_route` Timeline entry to each moved Alert Group. Afterwards the Route can be deleted. A moved Alert Group keeps its Group key values but takes no new Alerts and never reopens; it stays open until its Alerts resolve or a person resolves it.
  * @summary Move open Alert Groups to the Default route
  */
-export const moveOpenAlertGroups = async (routeId: string, options?: RequestInit): Promise<moveOpenAlertGroupsResponse> => {
+export const moveOpenAlertGroups = async (routeId: string, options?: Parameters<typeof apiFetch>[1]): Promise<MovedAlertGroups> => {
 
-  const res = await fetch(getMoveOpenAlertGroupsUrl(routeId),
+  return apiFetch<MovedAlertGroups>(getMoveOpenAlertGroupsUrl(routeId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: moveOpenAlertGroupsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as moveOpenAlertGroupsResponse
-}
+);}
 
 
 
@@ -999,15 +650,15 @@ export const moveOpenAlertGroups = async (routeId: string, options?: RequestInit
 export const getMoveOpenAlertGroupsMutationKey = () => ['moveOpenAlertGroups'] as const;
 
 export const getMoveOpenAlertGroupsMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof moveOpenAlertGroups>>, TError,MoveOpenAlertGroupsMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof moveOpenAlertGroups>>, TError,MoveOpenAlertGroupsMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof moveOpenAlertGroups>>, TError,MoveOpenAlertGroupsMutationVariables, TContext> => {
 
 const mutationKey = getMoveOpenAlertGroupsMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1015,7 +666,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof moveOpenAlertGroups>>, MoveOpenAlertGroupsMutationVariables> = (props) => {
           const {routeId} = props ?? {};
 
-          return  moveOpenAlertGroups(routeId,fetchOptions)
+          return  moveOpenAlertGroups(routeId,requestOptions)
         }
 
 
@@ -1034,7 +685,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Move open Alert Groups to the Default route
  */
 export const useMoveOpenAlertGroups = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof moveOpenAlertGroups>>, TError,MoveOpenAlertGroupsMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof moveOpenAlertGroups>>, TError,MoveOpenAlertGroupsMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof moveOpenAlertGroups>>,
         TError,
@@ -1043,36 +694,7 @@ export const useMoveOpenAlertGroups = <TError = UnauthorizedResponse | Forbidden
       > => {
       return useMutation(getMoveOpenAlertGroupsMutationOptions(options), queryClient);
     }
-    export type listRouteProfilesResponse200 = {
-  data: RouteProfileList
-  status: 200
-}
-
-export type listRouteProfilesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listRouteProfilesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listRouteProfilesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listRouteProfilesResponseSuccess = (listRouteProfilesResponse200) & {
-  headers: Headers;
-};
-export type listRouteProfilesResponseError = (listRouteProfilesResponse401 | listRouteProfilesResponse403 | listRouteProfilesResponse429) & {
-  headers: Headers;
-};
-
-export type listRouteProfilesResponse = (listRouteProfilesResponseSuccess | listRouteProfilesResponseError)
-
-export const getListRouteProfilesUrl = () => {
+    export const getListRouteProfilesUrl = () => {
 
 
 
@@ -1084,23 +706,16 @@ export const getListRouteProfilesUrl = () => {
  * The two starting sets of Route settings, On-call and Informational, read from the built-in defaults. They only pre-fill the create form; they cannot be edited or stored.
  * @summary List Route profiles
  */
-export const listRouteProfiles = async ( options?: RequestInit): Promise<listRouteProfilesResponse> => {
+export const listRouteProfiles = async ( options?: Parameters<typeof apiFetch>[1]): Promise<RouteProfileList> => {
 
-  const res = await fetch(getListRouteProfilesUrl(),
+  return apiFetch<RouteProfileList>(getListRouteProfilesUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listRouteProfilesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listRouteProfilesResponse
-}
+);}
 
 
 
@@ -1113,16 +728,16 @@ export const getListRouteProfilesQueryKey = () => {
     }
 
 
-export const getListRouteProfilesQueryOptions = <TData = Awaited<ReturnType<typeof listRouteProfiles>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteProfiles>>, TError, TData>>, fetch?: RequestInit}
+export const getListRouteProfilesQueryOptions = <TData = Awaited<ReturnType<typeof listRouteProfiles>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteProfiles>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListRouteProfilesQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRouteProfiles>>> = ({ signal }) => listRouteProfiles({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRouteProfiles>>> = ({ signal }) => listRouteProfiles({ signal, ...requestOptions });
 
 
 
@@ -1142,7 +757,7 @@ export function useListRouteProfiles<TData = Awaited<ReturnType<typeof listRoute
           TError,
           Awaited<ReturnType<typeof listRouteProfiles>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListRouteProfiles<TData = Awaited<ReturnType<typeof listRouteProfiles>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -1152,11 +767,11 @@ export function useListRouteProfiles<TData = Awaited<ReturnType<typeof listRoute
           TError,
           Awaited<ReturnType<typeof listRouteProfiles>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListRouteProfiles<TData = Awaited<ReturnType<typeof listRouteProfiles>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteProfiles>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteProfiles>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1164,7 +779,7 @@ export function useListRouteProfiles<TData = Awaited<ReturnType<typeof listRoute
  */
 
 export function useListRouteProfiles<TData = Awaited<ReturnType<typeof listRouteProfiles>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteProfiles>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteProfiles>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1180,50 +795,6 @@ export function useListRouteProfiles<TData = Awaited<ReturnType<typeof listRoute
 
 
 
-export type previewGroupKeyResponse200 = {
-  data: GroupKeyPreview
-  status: 200
-}
-
-export type previewGroupKeyResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type previewGroupKeyResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type previewGroupKeyResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type previewGroupKeyResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type previewGroupKeyResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type previewGroupKeyResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type previewGroupKeyResponseSuccess = (previewGroupKeyResponse200) & {
-  headers: Headers;
-};
-export type previewGroupKeyResponseError = (previewGroupKeyResponse400 | previewGroupKeyResponse401 | previewGroupKeyResponse403 | previewGroupKeyResponse404 | previewGroupKeyResponse422 | previewGroupKeyResponse429) & {
-  headers: Headers;
-};
-
-export type previewGroupKeyResponse = (previewGroupKeyResponseSuccess | previewGroupKeyResponseError)
-
 export const getPreviewGroupKeyUrl = () => {
 
 
@@ -1236,7 +807,7 @@ export const getPreviewGroupKeyUrl = () => {
  * Counts the Alert Groups that the Stored Snapshots of the period would have produced with the current and with the proposed Group key.
  * @summary Preview a Group key
  */
-export const previewGroupKey = async (groupKeyPreviewRequest: GroupKeyPreviewRequest, options?: RequestInit): Promise<previewGroupKeyResponse> => {
+export const previewGroupKey = async (groupKeyPreviewRequest: GroupKeyPreviewRequest, options?: Parameters<typeof apiFetch>[1]): Promise<GroupKeyPreview> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1252,21 +823,14 @@ export const previewGroupKey = async (groupKeyPreviewRequest: GroupKeyPreviewReq
     }
     return headers;
   };
-const res = await fetch(getPreviewGroupKeyUrl(),
+return apiFetch<GroupKeyPreview>(getPreviewGroupKeyUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(groupKeyPreviewRequest)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: previewGroupKeyResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as previewGroupKeyResponse
-}
+);}
 
 
 
@@ -1275,15 +839,15 @@ const res = await fetch(getPreviewGroupKeyUrl(),
 export const getPreviewGroupKeyMutationKey = () => ['previewGroupKey'] as const;
 
 export const getPreviewGroupKeyMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewGroupKey>>, TError,PreviewGroupKeyMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewGroupKey>>, TError,PreviewGroupKeyMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof previewGroupKey>>, TError,PreviewGroupKeyMutationVariables, TContext> => {
 
 const mutationKey = getPreviewGroupKeyMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1291,7 +855,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewGroupKey>>, PreviewGroupKeyMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  previewGroupKey(data,fetchOptions)
+          return  previewGroupKey(data,requestOptions)
         }
 
 
@@ -1310,7 +874,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Preview a Group key
  */
 export const usePreviewGroupKey = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewGroupKey>>, TError,PreviewGroupKeyMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewGroupKey>>, TError,PreviewGroupKeyMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof previewGroupKey>>,
         TError,
@@ -1319,36 +883,7 @@ export const usePreviewGroupKey = <TError = BadRequestResponse | UnauthorizedRes
       > => {
       return useMutation(getPreviewGroupKeyMutationOptions(options), queryClient);
     }
-    export type listRouteSuggestionsResponse200 = {
-  data: RouteSuggestionList
-  status: 200
-}
-
-export type listRouteSuggestionsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listRouteSuggestionsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listRouteSuggestionsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listRouteSuggestionsResponseSuccess = (listRouteSuggestionsResponse200) & {
-  headers: Headers;
-};
-export type listRouteSuggestionsResponseError = (listRouteSuggestionsResponse401 | listRouteSuggestionsResponse403 | listRouteSuggestionsResponse429) & {
-  headers: Headers;
-};
-
-export type listRouteSuggestionsResponse = (listRouteSuggestionsResponseSuccess | listRouteSuggestionsResponseError)
-
-export const getListRouteSuggestionsUrl = () => {
+    export const getListRouteSuggestionsUrl = () => {
 
 
 
@@ -1360,23 +895,16 @@ export const getListRouteSuggestionsUrl = () => {
  * A Route for `MusterHeartbeatLost` when an Integration has a Heartbeat and no Route other than the Default route matches it; from the first Destination on, a Route for `alertname=~"Muster.*"`. Dismissals are remembered per user.
  * @summary List Route suggestions
  */
-export const listRouteSuggestions = async ( options?: RequestInit): Promise<listRouteSuggestionsResponse> => {
+export const listRouteSuggestions = async ( options?: Parameters<typeof apiFetch>[1]): Promise<RouteSuggestionList> => {
 
-  const res = await fetch(getListRouteSuggestionsUrl(),
+  return apiFetch<RouteSuggestionList>(getListRouteSuggestionsUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listRouteSuggestionsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listRouteSuggestionsResponse
-}
+);}
 
 
 
@@ -1389,16 +917,16 @@ export const getListRouteSuggestionsQueryKey = () => {
     }
 
 
-export const getListRouteSuggestionsQueryOptions = <TData = Awaited<ReturnType<typeof listRouteSuggestions>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteSuggestions>>, TError, TData>>, fetch?: RequestInit}
+export const getListRouteSuggestionsQueryOptions = <TData = Awaited<ReturnType<typeof listRouteSuggestions>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteSuggestions>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListRouteSuggestionsQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRouteSuggestions>>> = ({ signal }) => listRouteSuggestions({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRouteSuggestions>>> = ({ signal }) => listRouteSuggestions({ signal, ...requestOptions });
 
 
 
@@ -1418,7 +946,7 @@ export function useListRouteSuggestions<TData = Awaited<ReturnType<typeof listRo
           TError,
           Awaited<ReturnType<typeof listRouteSuggestions>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListRouteSuggestions<TData = Awaited<ReturnType<typeof listRouteSuggestions>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -1428,11 +956,11 @@ export function useListRouteSuggestions<TData = Awaited<ReturnType<typeof listRo
           TError,
           Awaited<ReturnType<typeof listRouteSuggestions>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListRouteSuggestions<TData = Awaited<ReturnType<typeof listRouteSuggestions>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteSuggestions>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteSuggestions>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1440,7 +968,7 @@ export function useListRouteSuggestions<TData = Awaited<ReturnType<typeof listRo
  */
 
 export function useListRouteSuggestions<TData = Awaited<ReturnType<typeof listRouteSuggestions>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteSuggestions>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteSuggestions>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1456,55 +984,6 @@ export function useListRouteSuggestions<TData = Awaited<ReturnType<typeof listRo
 
 
 
-export type acceptRouteSuggestionResponse201 = {
-  data: Route
-  status: 201
-}
-
-export type acceptRouteSuggestionResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type acceptRouteSuggestionResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type acceptRouteSuggestionResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type acceptRouteSuggestionResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type acceptRouteSuggestionResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type acceptRouteSuggestionResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type acceptRouteSuggestionResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type acceptRouteSuggestionResponseSuccess = (acceptRouteSuggestionResponse201) & {
-  headers: Headers;
-};
-export type acceptRouteSuggestionResponseError = (acceptRouteSuggestionResponse400 | acceptRouteSuggestionResponse401 | acceptRouteSuggestionResponse403 | acceptRouteSuggestionResponse404 | acceptRouteSuggestionResponse409 | acceptRouteSuggestionResponse422 | acceptRouteSuggestionResponse429) & {
-  headers: Headers;
-};
-
-export type acceptRouteSuggestionResponse = (acceptRouteSuggestionResponseSuccess | acceptRouteSuggestionResponseError)
-
 export const getAcceptRouteSuggestionUrl = (suggestionId: 'heartbeat_lost' | 'internal_alerts',) => {
 
 
@@ -1518,7 +997,7 @@ export const getAcceptRouteSuggestionUrl = (suggestionId: 'heartbeat_lost' | 'in
  * @summary Accept a Route suggestion
  */
 export const acceptRouteSuggestion = async (suggestionId: 'heartbeat_lost' | 'internal_alerts',
-    routeSuggestionAcceptance?: RouteSuggestionAcceptance, options?: RequestInit): Promise<acceptRouteSuggestionResponse> => {
+    routeSuggestionAcceptance?: RouteSuggestionAcceptance, options?: Parameters<typeof apiFetch>[1]): Promise<Route> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1534,21 +1013,14 @@ export const acceptRouteSuggestion = async (suggestionId: 'heartbeat_lost' | 'in
     }
     return headers;
   };
-const res = await fetch(getAcceptRouteSuggestionUrl(suggestionId),
+return apiFetch<Route>(getAcceptRouteSuggestionUrl(suggestionId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(routeSuggestionAcceptance)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: acceptRouteSuggestionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as acceptRouteSuggestionResponse
-}
+);}
 
 
 
@@ -1557,15 +1029,15 @@ const res = await fetch(getAcceptRouteSuggestionUrl(suggestionId),
 export const getAcceptRouteSuggestionMutationKey = () => ['acceptRouteSuggestion'] as const;
 
 export const getAcceptRouteSuggestionMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptRouteSuggestion>>, TError,AcceptRouteSuggestionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptRouteSuggestion>>, TError,AcceptRouteSuggestionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof acceptRouteSuggestion>>, TError,AcceptRouteSuggestionMutationVariables, TContext> => {
 
 const mutationKey = getAcceptRouteSuggestionMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1573,7 +1045,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof acceptRouteSuggestion>>, AcceptRouteSuggestionMutationVariables> = (props) => {
           const {suggestionId,data} = props ?? {};
 
-          return  acceptRouteSuggestion(suggestionId,data,fetchOptions)
+          return  acceptRouteSuggestion(suggestionId,data,requestOptions)
         }
 
 
@@ -1592,7 +1064,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Accept a Route suggestion
  */
 export const useAcceptRouteSuggestion = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptRouteSuggestion>>, TError,AcceptRouteSuggestionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptRouteSuggestion>>, TError,AcceptRouteSuggestionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof acceptRouteSuggestion>>,
         TError,
@@ -1601,46 +1073,7 @@ export const useAcceptRouteSuggestion = <TError = BadRequestResponse | Unauthori
       > => {
       return useMutation(getAcceptRouteSuggestionMutationOptions(options), queryClient);
     }
-    export type dismissRouteSuggestionResponse204 = {
-  data: void
-  status: 204
-}
-
-export type dismissRouteSuggestionResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type dismissRouteSuggestionResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type dismissRouteSuggestionResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type dismissRouteSuggestionResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type dismissRouteSuggestionResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type dismissRouteSuggestionResponseSuccess = (dismissRouteSuggestionResponse204) & {
-  headers: Headers;
-};
-export type dismissRouteSuggestionResponseError = (dismissRouteSuggestionResponse401 | dismissRouteSuggestionResponse403 | dismissRouteSuggestionResponse404 | dismissRouteSuggestionResponse409 | dismissRouteSuggestionResponse429) & {
-  headers: Headers;
-};
-
-export type dismissRouteSuggestionResponse = (dismissRouteSuggestionResponseSuccess | dismissRouteSuggestionResponseError)
-
-export const getDismissRouteSuggestionUrl = (suggestionId: 'heartbeat_lost' | 'internal_alerts',) => {
+    export const getDismissRouteSuggestionUrl = (suggestionId: 'heartbeat_lost' | 'internal_alerts',) => {
 
 
 
@@ -1652,23 +1085,16 @@ export const getDismissRouteSuggestionUrl = (suggestionId: 'heartbeat_lost' | 'i
  * Remembered for the calling user only, so Service account tokens get `403` (`service_account_not_allowed`). `409` (`suggestion_obsolete`) when it no longer applies.
  * @summary Dismiss a Route suggestion
  */
-export const dismissRouteSuggestion = async (suggestionId: 'heartbeat_lost' | 'internal_alerts', options?: RequestInit): Promise<dismissRouteSuggestionResponse> => {
+export const dismissRouteSuggestion = async (suggestionId: 'heartbeat_lost' | 'internal_alerts', options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDismissRouteSuggestionUrl(suggestionId),
+  return apiFetch<void>(getDismissRouteSuggestionUrl(suggestionId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: dismissRouteSuggestionResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as dismissRouteSuggestionResponse
-}
+);}
 
 
 
@@ -1677,15 +1103,15 @@ export const dismissRouteSuggestion = async (suggestionId: 'heartbeat_lost' | 'i
 export const getDismissRouteSuggestionMutationKey = () => ['dismissRouteSuggestion'] as const;
 
 export const getDismissRouteSuggestionMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissRouteSuggestion>>, TError,DismissRouteSuggestionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissRouteSuggestion>>, TError,DismissRouteSuggestionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof dismissRouteSuggestion>>, TError,DismissRouteSuggestionMutationVariables, TContext> => {
 
 const mutationKey = getDismissRouteSuggestionMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1693,7 +1119,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof dismissRouteSuggestion>>, DismissRouteSuggestionMutationVariables> = (props) => {
           const {suggestionId} = props ?? {};
 
-          return  dismissRouteSuggestion(suggestionId,fetchOptions)
+          return  dismissRouteSuggestion(suggestionId,requestOptions)
         }
 
 
@@ -1712,7 +1138,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Dismiss a Route suggestion
  */
 export const useDismissRouteSuggestion = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissRouteSuggestion>>, TError,DismissRouteSuggestionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissRouteSuggestion>>, TError,DismissRouteSuggestionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof dismissRouteSuggestion>>,
         TError,

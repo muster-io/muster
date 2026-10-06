@@ -58,7 +58,10 @@ import type {
   UserUpdate
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -76,40 +79,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
-
-export type listUsersResponse200 = {
-  data: UserList
-  status: 200
-}
-
-export type listUsersResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listUsersResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listUsersResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listUsersResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listUsersResponseSuccess = (listUsersResponse200) & {
-  headers: Headers;
-};
-export type listUsersResponseError = (listUsersResponse400 | listUsersResponse401 | listUsersResponse403 | listUsersResponse429) & {
-  headers: Headers;
-};
-
-export type listUsersResponse = (listUsersResponseSuccess | listUsersResponseError)
 
 export const getListUsersUrl = (params?: ListUsersParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -129,23 +98,16 @@ export const getListUsersUrl = (params?: ListUsersParams,) => {
 /**
  * @summary List users
  */
-export const listUsers = async (params?: ListUsersParams, options?: RequestInit): Promise<listUsersResponse> => {
+export const listUsers = async (params?: ListUsersParams, options?: Parameters<typeof apiFetch>[1]): Promise<UserList> => {
 
-  const res = await fetch(getListUsersUrl(params),
+  return apiFetch<UserList>(getListUsersUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listUsersResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listUsersResponse
-}
+);}
 
 
 
@@ -158,16 +120,16 @@ export const getListUsersQueryKey = (params?: ListUsersParams,) => {
     }
 
 
-export const getListUsersQueryOptions = <TData = Awaited<ReturnType<typeof listUsers>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUsers>>, TError, TData>>, fetch?: RequestInit}
+export const getListUsersQueryOptions = <TData = Awaited<ReturnType<typeof listUsers>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUsers>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListUsersQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listUsers>>> = ({ signal }) => listUsers(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listUsers>>> = ({ signal }) => listUsers(params, { signal, ...requestOptions });
 
 
 
@@ -187,7 +149,7 @@ export function useListUsers<TData = Awaited<ReturnType<typeof listUsers>>, TErr
           TError,
           Awaited<ReturnType<typeof listUsers>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListUsers<TData = Awaited<ReturnType<typeof listUsers>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -197,11 +159,11 @@ export function useListUsers<TData = Awaited<ReturnType<typeof listUsers>>, TErr
           TError,
           Awaited<ReturnType<typeof listUsers>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListUsers<TData = Awaited<ReturnType<typeof listUsers>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUsers>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUsers>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -209,7 +171,7 @@ export function useListUsers<TData = Awaited<ReturnType<typeof listUsers>>, TErr
  */
 
 export function useListUsers<TData = Awaited<ReturnType<typeof listUsers>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUsers>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListUsersParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUsers>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -225,50 +187,6 @@ export function useListUsers<TData = Awaited<ReturnType<typeof listUsers>>, TErr
 
 
 
-export type createUserResponse201 = {
-  data: UserCreated
-  status: 201
-}
-
-export type createUserResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createUserResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createUserResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createUserResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type createUserResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type createUserResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createUserResponseSuccess = (createUserResponse201) & {
-  headers: Headers;
-};
-export type createUserResponseError = (createUserResponse400 | createUserResponse401 | createUserResponse403 | createUserResponse409 | createUserResponse422 | createUserResponse429) & {
-  headers: Headers;
-};
-
-export type createUserResponse = (createUserResponseSuccess | createUserResponseError)
-
 export const getCreateUserUrl = () => {
 
 
@@ -281,7 +199,7 @@ export const getCreateUserUrl = () => {
  * Returns a single-use password setup link; Muster sends no email.
  * @summary Create a local user
  */
-export const createUser = async (userCreate: UserCreate, options?: RequestInit): Promise<createUserResponse> => {
+export const createUser = async (userCreate: UserCreate, options?: Parameters<typeof apiFetch>[1]): Promise<UserCreated> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -297,21 +215,14 @@ export const createUser = async (userCreate: UserCreate, options?: RequestInit):
     }
     return headers;
   };
-const res = await fetch(getCreateUserUrl(),
+return apiFetch<UserCreated>(getCreateUserUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(userCreate)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createUserResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createUserResponse
-}
+);}
 
 
 
@@ -320,15 +231,15 @@ const res = await fetch(getCreateUserUrl(),
 export const getCreateUserMutationKey = () => ['createUser'] as const;
 
 export const getCreateUserMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUser>>, TError,CreateUserMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUser>>, TError,CreateUserMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createUser>>, TError,CreateUserMutationVariables, TContext> => {
 
 const mutationKey = getCreateUserMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -336,7 +247,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createUser>>, CreateUserMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  createUser(data,fetchOptions)
+          return  createUser(data,requestOptions)
         }
 
 
@@ -355,7 +266,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Create a local user
  */
 export const useCreateUser = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUser>>, TError,CreateUserMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUser>>, TError,CreateUserMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createUser>>,
         TError,
@@ -364,41 +275,7 @@ export const useCreateUser = <TError = BadRequestResponse | UnauthorizedResponse
       > => {
       return useMutation(getCreateUserMutationOptions(options), queryClient);
     }
-    export type getUserResponse200 = {
-  data: User
-  status: 200
-}
-
-export type getUserResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getUserResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getUserResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getUserResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getUserResponseSuccess = (getUserResponse200) & {
-  headers: Headers;
-};
-export type getUserResponseError = (getUserResponse401 | getUserResponse403 | getUserResponse404 | getUserResponse429) & {
-  headers: Headers;
-};
-
-export type getUserResponse = (getUserResponseSuccess | getUserResponseError)
-
-export const getGetUserUrl = (userId: string,) => {
+    export const getGetUserUrl = (userId: string,) => {
 
 
 
@@ -409,23 +286,16 @@ export const getGetUserUrl = (userId: string,) => {
 /**
  * @summary Read a user
  */
-export const getUser = async (userId: string, options?: RequestInit): Promise<getUserResponse> => {
+export const getUser = async (userId: string, options?: Parameters<typeof apiFetch>[1]): Promise<User> => {
 
-  const res = await fetch(getGetUserUrl(userId),
+  return apiFetch<User>(getGetUserUrl(userId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getUserResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getUserResponse
-}
+);}
 
 
 
@@ -438,16 +308,16 @@ export const getGetUserQueryKey = (userId: string,) => {
     }
 
 
-export const getGetUserQueryOptions = <TData = Awaited<ReturnType<typeof getUser>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(userId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUser>>, TError, TData>>, fetch?: RequestInit}
+export const getGetUserQueryOptions = <TData = Awaited<ReturnType<typeof getUser>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(userId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUser>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetUserQueryKey(userId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getUser>>> = ({ signal }) => getUser(userId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getUser>>> = ({ signal }) => getUser(userId, { signal, ...requestOptions });
 
 
 
@@ -467,7 +337,7 @@ export function useGetUser<TData = Awaited<ReturnType<typeof getUser>>, TError =
           TError,
           Awaited<ReturnType<typeof getUser>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetUser<TData = Awaited<ReturnType<typeof getUser>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -477,11 +347,11 @@ export function useGetUser<TData = Awaited<ReturnType<typeof getUser>>, TError =
           TError,
           Awaited<ReturnType<typeof getUser>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetUser<TData = Awaited<ReturnType<typeof getUser>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- userId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUser>>, TError, TData>>, fetch?: RequestInit}
+ userId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUser>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -489,7 +359,7 @@ export function useGetUser<TData = Awaited<ReturnType<typeof getUser>>, TError =
  */
 
 export function useGetUser<TData = Awaited<ReturnType<typeof getUser>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- userId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUser>>, TError, TData>>, fetch?: RequestInit}
+ userId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getUser>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -505,65 +375,6 @@ export function useGetUser<TData = Awaited<ReturnType<typeof getUser>>, TError =
 
 
 
-export type updateUserResponse200 = {
-  data: User
-  status: 200
-}
-
-export type updateUserResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type updateUserResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type updateUserResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type updateUserResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type updateUserResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type updateUserResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type updateUserResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type updateUserResponse428 = {
-  data: PreconditionRequiredResponse
-  status: 428
-}
-
-export type updateUserResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type updateUserResponseSuccess = (updateUserResponse200) & {
-  headers: Headers;
-};
-export type updateUserResponseError = (updateUserResponse400 | updateUserResponse401 | updateUserResponse403 | updateUserResponse404 | updateUserResponse409 | updateUserResponse412 | updateUserResponse422 | updateUserResponse428 | updateUserResponse429) & {
-  headers: Headers;
-};
-
-export type updateUserResponse = (updateUserResponseSuccess | updateUserResponseError)
-
 export const getUpdateUserUrl = (userId: string,) => {
 
 
@@ -577,7 +388,7 @@ export const getUpdateUserUrl = (userId: string,) => {
  * @summary Update a user
  */
 export const updateUser = async (userId: string,
-    userUpdate: UserUpdate, options?: RequestInit): Promise<updateUserResponse> => {
+    userUpdate: UserUpdate, options?: Parameters<typeof apiFetch>[1]): Promise<User> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -593,21 +404,14 @@ export const updateUser = async (userId: string,
     }
     return headers;
   };
-const res = await fetch(getUpdateUserUrl(userId),
+return apiFetch<User>(getUpdateUserUrl(userId),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(userUpdate)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: updateUserResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as updateUserResponse
-}
+);}
 
 
 
@@ -616,15 +420,15 @@ const res = await fetch(getUpdateUserUrl(userId),
 export const getUpdateUserMutationKey = () => ['updateUser'] as const;
 
 export const getUpdateUserMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateUser>>, TError,UpdateUserMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateUser>>, TError,UpdateUserMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateUser>>, TError,UpdateUserMutationVariables, TContext> => {
 
 const mutationKey = getUpdateUserMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -632,7 +436,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateUser>>, UpdateUserMutationVariables> = (props) => {
           const {userId,data} = props ?? {};
 
-          return  updateUser(userId,data,fetchOptions)
+          return  updateUser(userId,data,requestOptions)
         }
 
 
@@ -651,7 +455,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Update a user
  */
 export const useUpdateUser = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateUser>>, TError,UpdateUserMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateUser>>, TError,UpdateUserMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateUser>>,
         TError,
@@ -660,51 +464,7 @@ export const useUpdateUser = <TError = BadRequestResponse | UnauthorizedResponse
       > => {
       return useMutation(getUpdateUserMutationOptions(options), queryClient);
     }
-    export type deleteUserResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteUserResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteUserResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteUserResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type deleteUserResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type deleteUserResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type deleteUserResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteUserResponseSuccess = (deleteUserResponse204) & {
-  headers: Headers;
-};
-export type deleteUserResponseError = (deleteUserResponse401 | deleteUserResponse403 | deleteUserResponse404 | deleteUserResponse409 | deleteUserResponse412 | deleteUserResponse429) & {
-  headers: Headers;
-};
-
-export type deleteUserResponse = (deleteUserResponseSuccess | deleteUserResponseError)
-
-export const getDeleteUserUrl = (userId: string,) => {
+    export const getDeleteUserUrl = (userId: string,) => {
 
 
 
@@ -716,23 +476,16 @@ export const getDeleteUserUrl = (userId: string,) => {
  * Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked and Account links are removed. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
  * @summary Delete a user
  */
-export const deleteUser = async (userId: string, options?: RequestInit): Promise<deleteUserResponse> => {
+export const deleteUser = async (userId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteUserUrl(userId),
+  return apiFetch<void>(getDeleteUserUrl(userId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteUserResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteUserResponse
-}
+);}
 
 
 
@@ -741,15 +494,15 @@ export const deleteUser = async (userId: string, options?: RequestInit): Promise
 export const getDeleteUserMutationKey = () => ['deleteUser'] as const;
 
 export const getDeleteUserMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUser>>, TError,DeleteUserMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUser>>, TError,DeleteUserMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteUser>>, TError,DeleteUserMutationVariables, TContext> => {
 
 const mutationKey = getDeleteUserMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -757,7 +510,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteUser>>, DeleteUserMutationVariables> = (props) => {
           const {userId} = props ?? {};
 
-          return  deleteUser(userId,fetchOptions)
+          return  deleteUser(userId,requestOptions)
         }
 
 
@@ -776,7 +529,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Delete a user
  */
 export const useDeleteUser = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUser>>, TError,DeleteUserMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUser>>, TError,DeleteUserMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteUser>>,
         TError,
@@ -785,46 +538,7 @@ export const useDeleteUser = <TError = UnauthorizedResponse | ForbiddenResponse 
       > => {
       return useMutation(getDeleteUserMutationOptions(options), queryClient);
     }
-    export type disableUserResponse200 = {
-  data: User
-  status: 200
-}
-
-export type disableUserResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type disableUserResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type disableUserResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type disableUserResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type disableUserResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type disableUserResponseSuccess = (disableUserResponse200) & {
-  headers: Headers;
-};
-export type disableUserResponseError = (disableUserResponse401 | disableUserResponse403 | disableUserResponse404 | disableUserResponse409 | disableUserResponse429) & {
-  headers: Headers;
-};
-
-export type disableUserResponse = (disableUserResponseSuccess | disableUserResponseError)
-
-export const getDisableUserUrl = (userId: string,) => {
+    export const getDisableUserUrl = (userId: string,) => {
 
 
 
@@ -836,23 +550,16 @@ export const getDisableUserUrl = (userId: string,) => {
  * Ends the user's sessions; tokens stop working until the user is enabled again. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_disabled`; enabling the user again gives no acknowledgement back. The last active Admin cannot be disabled (`409` `last_admin`).
  * @summary Disable a user
  */
-export const disableUser = async (userId: string, options?: RequestInit): Promise<disableUserResponse> => {
+export const disableUser = async (userId: string, options?: Parameters<typeof apiFetch>[1]): Promise<User> => {
 
-  const res = await fetch(getDisableUserUrl(userId),
+  return apiFetch<User>(getDisableUserUrl(userId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: disableUserResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as disableUserResponse
-}
+);}
 
 
 
@@ -861,15 +568,15 @@ export const disableUser = async (userId: string, options?: RequestInit): Promis
 export const getDisableUserMutationKey = () => ['disableUser'] as const;
 
 export const getDisableUserMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disableUser>>, TError,DisableUserMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disableUser>>, TError,DisableUserMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof disableUser>>, TError,DisableUserMutationVariables, TContext> => {
 
 const mutationKey = getDisableUserMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -877,7 +584,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof disableUser>>, DisableUserMutationVariables> = (props) => {
           const {userId} = props ?? {};
 
-          return  disableUser(userId,fetchOptions)
+          return  disableUser(userId,requestOptions)
         }
 
 
@@ -896,7 +603,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Disable a user
  */
 export const useDisableUser = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disableUser>>, TError,DisableUserMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disableUser>>, TError,DisableUserMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof disableUser>>,
         TError,
@@ -905,46 +612,7 @@ export const useDisableUser = <TError = UnauthorizedResponse | ForbiddenResponse
       > => {
       return useMutation(getDisableUserMutationOptions(options), queryClient);
     }
-    export type enableUserResponse200 = {
-  data: User
-  status: 200
-}
-
-export type enableUserResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type enableUserResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type enableUserResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type enableUserResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type enableUserResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type enableUserResponseSuccess = (enableUserResponse200) & {
-  headers: Headers;
-};
-export type enableUserResponseError = (enableUserResponse401 | enableUserResponse403 | enableUserResponse404 | enableUserResponse409 | enableUserResponse429) & {
-  headers: Headers;
-};
-
-export type enableUserResponse = (enableUserResponseSuccess | enableUserResponseError)
-
-export const getEnableUserUrl = (userId: string,) => {
+    export const getEnableUserUrl = (userId: string,) => {
 
 
 
@@ -955,23 +623,16 @@ export const getEnableUserUrl = (userId: string,) => {
 /**
  * @summary Enable a user
  */
-export const enableUser = async (userId: string, options?: RequestInit): Promise<enableUserResponse> => {
+export const enableUser = async (userId: string, options?: Parameters<typeof apiFetch>[1]): Promise<User> => {
 
-  const res = await fetch(getEnableUserUrl(userId),
+  return apiFetch<User>(getEnableUserUrl(userId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: enableUserResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as enableUserResponse
-}
+);}
 
 
 
@@ -980,15 +641,15 @@ export const enableUser = async (userId: string, options?: RequestInit): Promise
 export const getEnableUserMutationKey = () => ['enableUser'] as const;
 
 export const getEnableUserMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof enableUser>>, TError,EnableUserMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof enableUser>>, TError,EnableUserMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof enableUser>>, TError,EnableUserMutationVariables, TContext> => {
 
 const mutationKey = getEnableUserMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -996,7 +657,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof enableUser>>, EnableUserMutationVariables> = (props) => {
           const {userId} = props ?? {};
 
-          return  enableUser(userId,fetchOptions)
+          return  enableUser(userId,requestOptions)
         }
 
 
@@ -1015,7 +676,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Enable a user
  */
 export const useEnableUser = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof enableUser>>, TError,EnableUserMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof enableUser>>, TError,EnableUserMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof enableUser>>,
         TError,
@@ -1024,41 +685,7 @@ export const useEnableUser = <TError = UnauthorizedResponse | ForbiddenResponse 
       > => {
       return useMutation(getEnableUserMutationOptions(options), queryClient);
     }
-    export type resetUserTotpResponse204 = {
-  data: void
-  status: 204
-}
-
-export type resetUserTotpResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type resetUserTotpResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type resetUserTotpResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type resetUserTotpResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type resetUserTotpResponseSuccess = (resetUserTotpResponse204) & {
-  headers: Headers;
-};
-export type resetUserTotpResponseError = (resetUserTotpResponse401 | resetUserTotpResponse403 | resetUserTotpResponse404 | resetUserTotpResponse429) & {
-  headers: Headers;
-};
-
-export type resetUserTotpResponse = (resetUserTotpResponseSuccess | resetUserTotpResponseError)
-
-export const getResetUserTotpUrl = (userId: string,) => {
+    export const getResetUserTotpUrl = (userId: string,) => {
 
 
 
@@ -1070,23 +697,16 @@ export const getResetUserTotpUrl = (userId: string,) => {
  * Audited. The user enrols again at the next sign-in if the policy requires it.
  * @summary Reset a user's TOTP
  */
-export const resetUserTotp = async (userId: string, options?: RequestInit): Promise<resetUserTotpResponse> => {
+export const resetUserTotp = async (userId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getResetUserTotpUrl(userId),
+  return apiFetch<void>(getResetUserTotpUrl(userId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: resetUserTotpResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as resetUserTotpResponse
-}
+);}
 
 
 
@@ -1095,15 +715,15 @@ export const resetUserTotp = async (userId: string, options?: RequestInit): Prom
 export const getResetUserTotpMutationKey = () => ['resetUserTotp'] as const;
 
 export const getResetUserTotpMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetUserTotp>>, TError,ResetUserTotpMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetUserTotp>>, TError,ResetUserTotpMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof resetUserTotp>>, TError,ResetUserTotpMutationVariables, TContext> => {
 
 const mutationKey = getResetUserTotpMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1111,7 +731,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof resetUserTotp>>, ResetUserTotpMutationVariables> = (props) => {
           const {userId} = props ?? {};
 
-          return  resetUserTotp(userId,fetchOptions)
+          return  resetUserTotp(userId,requestOptions)
         }
 
 
@@ -1130,7 +750,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Reset a user's TOTP
  */
 export const useResetUserTotp = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetUserTotp>>, TError,ResetUserTotpMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetUserTotp>>, TError,ResetUserTotpMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof resetUserTotp>>,
         TError,
@@ -1139,46 +759,7 @@ export const useResetUserTotp = <TError = UnauthorizedResponse | ForbiddenRespon
       > => {
       return useMutation(getResetUserTotpMutationOptions(options), queryClient);
     }
-    export type convertUserToLocalResponse200 = {
-  data: UserCreated
-  status: 200
-}
-
-export type convertUserToLocalResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type convertUserToLocalResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type convertUserToLocalResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type convertUserToLocalResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type convertUserToLocalResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type convertUserToLocalResponseSuccess = (convertUserToLocalResponse200) & {
-  headers: Headers;
-};
-export type convertUserToLocalResponseError = (convertUserToLocalResponse401 | convertUserToLocalResponse403 | convertUserToLocalResponse404 | convertUserToLocalResponse409 | convertUserToLocalResponse429) & {
-  headers: Headers;
-};
-
-export type convertUserToLocalResponse = (convertUserToLocalResponseSuccess | convertUserToLocalResponseError)
-
-export const getConvertUserToLocalUrl = (userId: string,) => {
+    export const getConvertUserToLocalUrl = (userId: string,) => {
 
 
 
@@ -1190,23 +771,16 @@ export const getConvertUserToLocalUrl = (userId: string,) => {
  * Removes the OIDC identity of an account that signs in through OIDC — created through OIDC or linked — and ends its sessions; the response carries a password setup link, as at user creation, and the Audit log records the conversion. The account keeps its TOTP enrolment and, once the password is set, signs in only with it. `409` with `oidc_not_linked` when the account does not sign in through OIDC.
  * @summary Convert an OIDC account to local
  */
-export const convertUserToLocal = async (userId: string, options?: RequestInit): Promise<convertUserToLocalResponse> => {
+export const convertUserToLocal = async (userId: string, options?: Parameters<typeof apiFetch>[1]): Promise<UserCreated> => {
 
-  const res = await fetch(getConvertUserToLocalUrl(userId),
+  return apiFetch<UserCreated>(getConvertUserToLocalUrl(userId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: convertUserToLocalResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as convertUserToLocalResponse
-}
+);}
 
 
 
@@ -1215,15 +789,15 @@ export const convertUserToLocal = async (userId: string, options?: RequestInit):
 export const getConvertUserToLocalMutationKey = () => ['convertUserToLocal'] as const;
 
 export const getConvertUserToLocalMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof convertUserToLocal>>, TError,ConvertUserToLocalMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof convertUserToLocal>>, TError,ConvertUserToLocalMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof convertUserToLocal>>, TError,ConvertUserToLocalMutationVariables, TContext> => {
 
 const mutationKey = getConvertUserToLocalMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1231,7 +805,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof convertUserToLocal>>, ConvertUserToLocalMutationVariables> = (props) => {
           const {userId} = props ?? {};
 
-          return  convertUserToLocal(userId,fetchOptions)
+          return  convertUserToLocal(userId,requestOptions)
         }
 
 
@@ -1250,7 +824,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Convert an OIDC account to local
  */
 export const useConvertUserToLocal = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof convertUserToLocal>>, TError,ConvertUserToLocalMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof convertUserToLocal>>, TError,ConvertUserToLocalMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof convertUserToLocal>>,
         TError,
@@ -1259,46 +833,7 @@ export const useConvertUserToLocal = <TError = UnauthorizedResponse | ForbiddenR
       > => {
       return useMutation(getConvertUserToLocalMutationOptions(options), queryClient);
     }
-    export type createPasswordSetupLinkResponse201 = {
-  data: PasswordSetupLink
-  status: 201
-}
-
-export type createPasswordSetupLinkResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createPasswordSetupLinkResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createPasswordSetupLinkResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type createPasswordSetupLinkResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type createPasswordSetupLinkResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createPasswordSetupLinkResponseSuccess = (createPasswordSetupLinkResponse201) & {
-  headers: Headers;
-};
-export type createPasswordSetupLinkResponseError = (createPasswordSetupLinkResponse401 | createPasswordSetupLinkResponse403 | createPasswordSetupLinkResponse404 | createPasswordSetupLinkResponse409 | createPasswordSetupLinkResponse429) & {
-  headers: Headers;
-};
-
-export type createPasswordSetupLinkResponse = (createPasswordSetupLinkResponseSuccess | createPasswordSetupLinkResponseError)
-
-export const getCreatePasswordSetupLinkUrl = (userId: string,) => {
+    export const getCreatePasswordSetupLinkUrl = (userId: string,) => {
 
 
 
@@ -1310,23 +845,16 @@ export const getCreatePasswordSetupLinkUrl = (userId: string,) => {
  * Valid for `auth.password_setup_link_ttl`, single use. Only for an account that signs in with a password (`409` `local_user_only` for an OIDC account; convert it with `convertUserToLocal`).
  * @summary Issue a password setup link
  */
-export const createPasswordSetupLink = async (userId: string, options?: RequestInit): Promise<createPasswordSetupLinkResponse> => {
+export const createPasswordSetupLink = async (userId: string, options?: Parameters<typeof apiFetch>[1]): Promise<PasswordSetupLink> => {
 
-  const res = await fetch(getCreatePasswordSetupLinkUrl(userId),
+  return apiFetch<PasswordSetupLink>(getCreatePasswordSetupLinkUrl(userId),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createPasswordSetupLinkResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createPasswordSetupLinkResponse
-}
+);}
 
 
 
@@ -1335,15 +863,15 @@ export const createPasswordSetupLink = async (userId: string, options?: RequestI
 export const getCreatePasswordSetupLinkMutationKey = () => ['createPasswordSetupLink'] as const;
 
 export const getCreatePasswordSetupLinkMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPasswordSetupLink>>, TError,CreatePasswordSetupLinkMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPasswordSetupLink>>, TError,CreatePasswordSetupLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPasswordSetupLink>>, TError,CreatePasswordSetupLinkMutationVariables, TContext> => {
 
 const mutationKey = getCreatePasswordSetupLinkMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1351,7 +879,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPasswordSetupLink>>, CreatePasswordSetupLinkMutationVariables> = (props) => {
           const {userId} = props ?? {};
 
-          return  createPasswordSetupLink(userId,fetchOptions)
+          return  createPasswordSetupLink(userId,requestOptions)
         }
 
 
@@ -1370,7 +898,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Issue a password setup link
  */
 export const useCreatePasswordSetupLink = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPasswordSetupLink>>, TError,CreatePasswordSetupLinkMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPasswordSetupLink>>, TError,CreatePasswordSetupLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPasswordSetupLink>>,
         TError,
@@ -1379,41 +907,7 @@ export const useCreatePasswordSetupLink = <TError = UnauthorizedResponse | Forbi
       > => {
       return useMutation(getCreatePasswordSetupLinkMutationOptions(options), queryClient);
     }
-    export type listUserDirectoryResponse200 = {
-  data: UserDirectoryList
-  status: 200
-}
-
-export type listUserDirectoryResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listUserDirectoryResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listUserDirectoryResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listUserDirectoryResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listUserDirectoryResponseSuccess = (listUserDirectoryResponse200) & {
-  headers: Headers;
-};
-export type listUserDirectoryResponseError = (listUserDirectoryResponse400 | listUserDirectoryResponse401 | listUserDirectoryResponse403 | listUserDirectoryResponse429) & {
-  headers: Headers;
-};
-
-export type listUserDirectoryResponse = (listUserDirectoryResponseSuccess | listUserDirectoryResponseError)
-
-export const getListUserDirectoryUrl = (params?: ListUserDirectoryParams,) => {
+    export const getListUserDirectoryUrl = (params?: ListUserDirectoryParams,) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -1432,23 +926,16 @@ export const getListUserDirectoryUrl = (params?: ListUserDirectoryParams,) => {
  * Name, login and whether the user is deactivated, for the Owner filter, Mention settings and other pickers. Includes deleted users, because their acknowledgements stay visible. Available to everyone who reads Alert Groups, unlike `listUsers`.
  * @summary List users for pickers and filters
  */
-export const listUserDirectory = async (params?: ListUserDirectoryParams, options?: RequestInit): Promise<listUserDirectoryResponse> => {
+export const listUserDirectory = async (params?: ListUserDirectoryParams, options?: Parameters<typeof apiFetch>[1]): Promise<UserDirectoryList> => {
 
-  const res = await fetch(getListUserDirectoryUrl(params),
+  return apiFetch<UserDirectoryList>(getListUserDirectoryUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listUserDirectoryResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listUserDirectoryResponse
-}
+);}
 
 
 
@@ -1461,16 +948,16 @@ export const getListUserDirectoryQueryKey = (params?: ListUserDirectoryParams,) 
     }
 
 
-export const getListUserDirectoryQueryOptions = <TData = Awaited<ReturnType<typeof listUserDirectory>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListUserDirectoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUserDirectory>>, TError, TData>>, fetch?: RequestInit}
+export const getListUserDirectoryQueryOptions = <TData = Awaited<ReturnType<typeof listUserDirectory>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListUserDirectoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUserDirectory>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListUserDirectoryQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listUserDirectory>>> = ({ signal }) => listUserDirectory(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listUserDirectory>>> = ({ signal }) => listUserDirectory(params, { signal, ...requestOptions });
 
 
 
@@ -1490,7 +977,7 @@ export function useListUserDirectory<TData = Awaited<ReturnType<typeof listUserD
           TError,
           Awaited<ReturnType<typeof listUserDirectory>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListUserDirectory<TData = Awaited<ReturnType<typeof listUserDirectory>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -1500,11 +987,11 @@ export function useListUserDirectory<TData = Awaited<ReturnType<typeof listUserD
           TError,
           Awaited<ReturnType<typeof listUserDirectory>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListUserDirectory<TData = Awaited<ReturnType<typeof listUserDirectory>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListUserDirectoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUserDirectory>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListUserDirectoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUserDirectory>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1512,7 +999,7 @@ export function useListUserDirectory<TData = Awaited<ReturnType<typeof listUserD
  */
 
 export function useListUserDirectory<TData = Awaited<ReturnType<typeof listUserDirectory>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListUserDirectoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUserDirectory>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListUserDirectoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUserDirectory>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1528,35 +1015,6 @@ export function useListUserDirectory<TData = Awaited<ReturnType<typeof listUserD
 
 
 
-export type listRolesResponse200 = {
-  data: RoleList
-  status: 200
-}
-
-export type listRolesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listRolesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listRolesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listRolesResponseSuccess = (listRolesResponse200) & {
-  headers: Headers;
-};
-export type listRolesResponseError = (listRolesResponse401 | listRolesResponse403 | listRolesResponse429) & {
-  headers: Headers;
-};
-
-export type listRolesResponse = (listRolesResponseSuccess | listRolesResponseError)
-
 export const getListRolesUrl = () => {
 
 
@@ -1568,23 +1026,16 @@ export const getListRolesUrl = () => {
 /**
  * @summary List Roles with their Permissions
  */
-export const listRoles = async ( options?: RequestInit): Promise<listRolesResponse> => {
+export const listRoles = async ( options?: Parameters<typeof apiFetch>[1]): Promise<RoleList> => {
 
-  const res = await fetch(getListRolesUrl(),
+  return apiFetch<RoleList>(getListRolesUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listRolesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listRolesResponse
-}
+);}
 
 
 
@@ -1597,16 +1048,16 @@ export const getListRolesQueryKey = () => {
     }
 
 
-export const getListRolesQueryOptions = <TData = Awaited<ReturnType<typeof listRoles>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>>, fetch?: RequestInit}
+export const getListRolesQueryOptions = <TData = Awaited<ReturnType<typeof listRoles>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListRolesQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRoles>>> = ({ signal }) => listRoles({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRoles>>> = ({ signal }) => listRoles({ signal, ...requestOptions });
 
 
 
@@ -1626,7 +1077,7 @@ export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TErr
           TError,
           Awaited<ReturnType<typeof listRoles>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -1636,11 +1087,11 @@ export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TErr
           TError,
           Awaited<ReturnType<typeof listRoles>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1648,7 +1099,7 @@ export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TErr
  */
 
 export function useListRoles<TData = Awaited<ReturnType<typeof listRoles>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoles>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 

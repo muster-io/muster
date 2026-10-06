@@ -5,8 +5,9 @@ packages:
   - .
 
 # pnpm refuses to install while a dependency's build script is neither allowed nor denied. None is needed:
-# esbuild (used by orval) finds its binary through its platform package, and msw's postinstall only copies the
-# service worker when package.json sets msw.workerDirectory, which it does not.
+# esbuild (used by orval) and @swc/core (used by i18next-cli) find their binaries through their platform packages, and
+# msw's postinstall only copies the service worker when package.json sets msw.workerDirectory, which it does not.
 allowBuilds:
+  "@swc/core": false
   esbuild: false
   msw: false

@@ -32,7 +32,10 @@ import type {
   UseQueryResult
 } from '@tanstack/react-query';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -51,18 +54,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type getHealthLiveResponse200 = {
-  data: string
-  status: 200
-}
-
-export type getHealthLiveResponseSuccess = (getHealthLiveResponse200) & {
-  headers: Headers;
-};
-;
-
-export type getHealthLiveResponse = (getHealthLiveResponseSuccess)
-
 export const getGetHealthLiveUrl = () => {
 
 
@@ -75,23 +66,16 @@ export const getGetHealthLiveUrl = () => {
  * Performs no checks.
  * @summary Liveness
  */
-export const getHealthLive = async ( options?: RequestInit): Promise<getHealthLiveResponse> => {
+export const getHealthLive = async ( options?: Parameters<typeof apiFetch>[1]): Promise<string> => {
 
-  const res = await fetch(getGetHealthLiveUrl(),
+  return apiFetch<string>(getGetHealthLiveUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getHealthLiveResponse['data'] = body !== null ? body : ''
-  return { data, status: res.status, headers: res.headers } as getHealthLiveResponse
-}
+);}
 
 
 
@@ -104,16 +88,16 @@ export const getGetHealthLiveQueryKey = () => {
     }
 
 
-export const getGetHealthLiveQueryOptions = <TData = Awaited<ReturnType<typeof getHealthLive>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthLive>>, TError, TData>>, fetch?: RequestInit}
+export const getGetHealthLiveQueryOptions = <TData = Awaited<ReturnType<typeof getHealthLive>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthLive>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetHealthLiveQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHealthLive>>> = ({ signal }) => getHealthLive({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHealthLive>>> = ({ signal }) => getHealthLive({ signal, ...requestOptions });
 
 
 
@@ -133,7 +117,7 @@ export function useGetHealthLive<TData = Awaited<ReturnType<typeof getHealthLive
           TError,
           Awaited<ReturnType<typeof getHealthLive>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetHealthLive<TData = Awaited<ReturnType<typeof getHealthLive>>, TError = unknown>(
@@ -143,11 +127,11 @@ export function useGetHealthLive<TData = Awaited<ReturnType<typeof getHealthLive
           TError,
           Awaited<ReturnType<typeof getHealthLive>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetHealthLive<TData = Awaited<ReturnType<typeof getHealthLive>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthLive>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthLive>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -155,7 +139,7 @@ export function useGetHealthLive<TData = Awaited<ReturnType<typeof getHealthLive
  */
 
 export function useGetHealthLive<TData = Awaited<ReturnType<typeof getHealthLive>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthLive>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthLive>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -171,25 +155,6 @@ export function useGetHealthLive<TData = Awaited<ReturnType<typeof getHealthLive
 
 
 
-export type getHealthReadyResponse200 = {
-  data: string
-  status: 200
-}
-
-export type getHealthReadyResponse503 = {
-  data: string
-  status: 503
-}
-
-export type getHealthReadyResponseSuccess = (getHealthReadyResponse200) & {
-  headers: Headers;
-};
-export type getHealthReadyResponseError = (getHealthReadyResponse503) & {
-  headers: Headers;
-};
-
-export type getHealthReadyResponse = (getHealthReadyResponseSuccess | getHealthReadyResponseError)
-
 export const getGetHealthReadyUrl = () => {
 
 
@@ -202,23 +167,16 @@ export const getGetHealthReadyUrl = () => {
  * Checks only the database.
  * @summary Readiness
  */
-export const getHealthReady = async ( options?: RequestInit): Promise<getHealthReadyResponse> => {
+export const getHealthReady = async ( options?: Parameters<typeof apiFetch>[1]): Promise<string> => {
 
-  const res = await fetch(getGetHealthReadyUrl(),
+  return apiFetch<string>(getGetHealthReadyUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getHealthReadyResponse['data'] = body !== null ? body : ''
-  return { data, status: res.status, headers: res.headers } as getHealthReadyResponse
-}
+);}
 
 
 
@@ -231,16 +189,16 @@ export const getGetHealthReadyQueryKey = () => {
     }
 
 
-export const getGetHealthReadyQueryOptions = <TData = Awaited<ReturnType<typeof getHealthReady>>, TError = string>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>>, fetch?: RequestInit}
+export const getGetHealthReadyQueryOptions = <TData = Awaited<ReturnType<typeof getHealthReady>>, TError = string>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetHealthReadyQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHealthReady>>> = ({ signal }) => getHealthReady({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHealthReady>>> = ({ signal }) => getHealthReady({ signal, ...requestOptions });
 
 
 
@@ -260,7 +218,7 @@ export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthRea
           TError,
           Awaited<ReturnType<typeof getHealthReady>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthReady>>, TError = string>(
@@ -270,11 +228,11 @@ export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthRea
           TError,
           Awaited<ReturnType<typeof getHealthReady>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthReady>>, TError = string>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -282,7 +240,7 @@ export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthRea
  */
 
 export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthReady>>, TError = string>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getHealthReady>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -298,18 +256,6 @@ export function useGetHealthReady<TData = Awaited<ReturnType<typeof getHealthRea
 
 
 
-export type getMetricsResponse200 = {
-  data: string
-  status: 200
-}
-
-export type getMetricsResponseSuccess = (getMetricsResponse200) & {
-  headers: Headers;
-};
-;
-
-export type getMetricsResponse = (getMetricsResponseSuccess)
-
 export const getGetMetricsUrl = () => {
 
 
@@ -322,23 +268,16 @@ export const getGetMetricsUrl = () => {
  * Pull only. The metric catalogue is generated from the registry in code; no JSON catalogue is served.
  * @summary Prometheus metrics
  */
-export const getMetrics = async ( options?: RequestInit): Promise<getMetricsResponse> => {
+export const getMetrics = async ( options?: Parameters<typeof apiFetch>[1]): Promise<string> => {
 
-  const res = await fetch(getGetMetricsUrl(),
+  return apiFetch<string>(getGetMetricsUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getMetricsResponse['data'] = body !== null ? body : ''
-  return { data, status: res.status, headers: res.headers } as getMetricsResponse
-}
+);}
 
 
 
@@ -351,16 +290,16 @@ export const getGetMetricsQueryKey = () => {
     }
 
 
-export const getGetMetricsQueryOptions = <TData = Awaited<ReturnType<typeof getMetrics>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, fetch?: RequestInit}
+export const getGetMetricsQueryOptions = <TData = Awaited<ReturnType<typeof getMetrics>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetMetricsQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMetrics>>> = ({ signal }) => getMetrics({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMetrics>>> = ({ signal }) => getMetrics({ signal, ...requestOptions });
 
 
 
@@ -380,7 +319,7 @@ export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TE
           TError,
           Awaited<ReturnType<typeof getMetrics>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = unknown>(
@@ -390,11 +329,11 @@ export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TE
           TError,
           Awaited<ReturnType<typeof getMetrics>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -402,7 +341,7 @@ export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TE
  */
 
 export function useGetMetrics<TData = Awaited<ReturnType<typeof getMetrics>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMetrics>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 

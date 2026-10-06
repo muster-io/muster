@@ -89,11 +89,13 @@ DEV_COMPOSE := deploy/dev/docker-compose.yml
 
 # make e2e runs one replica; E2E_REPLICAS=2 adds muster dev --replica beside muster dev.
 E2E_REPLICAS ?= 1
+# Flags of `playwright install chromium`, such as --with-deps on a CI runner that lacks the browser's libraries.
+PLAYWRIGHT_INSTALL_FLAGS ?=
 # Flags of the load test, such as LOAD_TEST_FLAGS="-rate 50 -duration 1m".
 LOAD_TEST_FLAGS ?=
 
-.PHONY: help fmt lint lint-arch test test-race test-integration generate generate-check build licenses vulncheck \
-	mutation helm-check compose-check dev-db dev e2e load-test ci clean
+.PHONY: help fmt lint lint-arch test test-race test-web test-integration generate generate-check build licenses \
+	vulncheck mutation helm-check compose-check dev-db dev e2e load-test ci clean web-browsers
 
 help: ## List the targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z0-9-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -102,13 +104,16 @@ fmt: $(GOLANGCI_LINT) $(WEB_DEPS) ## Format Go code (gofmt, goimports) and the S
 	$(GOLANGCI_LINT) fmt
 	$(PNPM) --dir web run fmt
 
-lint: $(GOLANGCI_LINT) $(WEB_DEPS) ## Check licence headers, Go code, the spec (Redocly) and the SPA (tsc, oxlint, oxfmt)
+# lint:i18n fails when the translation files and the keys of the code differ, or a key lacks a text in English or
+# Russian (Russian plural forms included).
+lint: $(GOLANGCI_LINT) $(WEB_DEPS) ## Check licence headers, Go code, the spec (Redocly), the SPA (tsc, oxlint, oxfmt) and translations
 	$(GO) run ./internal/tools/licensecheck
 	$(GOLANGCI_LINT) run ./...
 	$(PNPM) --dir web run lint:spec
 	$(PNPM) --dir web run typecheck
 	$(PNPM) --dir web run lint
 	$(PNPM) --dir web run fmt:check
+	$(PNPM) --dir web run lint:i18n
 
 # Rules 1-4 on the tree, the fixtures of all eight rules with the rule 5 probes, then rules 6-8 on the tree. Every
 # step runs even when an earlier one fails, so one run names every broken rule.
@@ -121,15 +126,23 @@ lint-arch: $(GOLANGCI_LINT) ## Run the architecture lints
 	done; \
 	exit $$failed
 
-test: $(GO_TEST_COVERAGE) ## Run unit tests with the coverage gate
+test: $(GO_TEST_COVERAGE) test-web ## Run unit tests with the coverage gate, and the SPA's component tests
 	@mkdir -p $(BIN)
 	$(GO) test -coverprofile=$(COVER_PROFILE) -covermode=atomic ./...
 	$(GO_TEST_COVERAGE) --config=.testcoverage.yml
 
-test-race: $(GO_TEST_COVERAGE) ## Run unit tests with the race detector and the coverage gate
+test-race: $(GO_TEST_COVERAGE) test-web ## Run unit tests with the race detector and the coverage gate, and the SPA's tests
 	@mkdir -p $(BIN)
 	$(GO) test -race -coverprofile=$(COVER_PROFILE) -covermode=atomic ./...
 	$(GO_TEST_COVERAGE) --config=.testcoverage.yml
+
+# Vitest in browser mode: the SPA's component tests in Chromium.
+test-web: $(WEB_DEPS) web-browsers ## Run the SPA's component tests (Vitest in Chromium)
+	$(PNPM) --dir web run test
+
+# The Chromium of the pinned Playwright, in Playwright's cache; a no-op when it is there.
+web-browsers: $(WEB_DEPS)
+	$(PNPM) --dir web exec playwright install $(PLAYWRIGHT_INSTALL_FLAGS) chromium
 
 # The tests with the integration tag, on PostgreSQL 14 and 17 in containers that testcontainers starts from pinned
 # images (internal/db/dbtest); they need a running Docker daemon. The unit tests run with them.
@@ -266,10 +279,15 @@ dev-db: ## Start the development PostgreSQL on 127.0.0.1:55432
 dev: dev-db build ## Start the development PostgreSQL, build and run muster dev
 	./$(BIN)/muster dev
 
-# Each run gets a fresh database on the development PostgreSQL, which it drops at the end.
-e2e: dev-db build ## Run the end-to-end suite; E2E_REPLICAS=2 runs two replicas
-	MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) E2E_REPLICAS=$(E2E_REPLICAS) \
-		$(GO) test -tags e2e -count=1 -timeout 10m ./test/e2e/...
+# Each run gets a fresh database on the development PostgreSQL, which it drops at the end: the Go suite, then the
+# Playwright specs of the SPA (web/e2e) on a muster dev of their own. Both run even when the first fails.
+e2e: dev-db build web-browsers ## Run the end-to-end suites (Go, then Playwright); E2E_REPLICAS=2 for the Go suite
+	@failed=0; \
+	for step in "MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) E2E_REPLICAS=$(E2E_REPLICAS) $(GO) test -tags e2e -count=1 -timeout 10m ./test/e2e/..." \
+		"MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) $(PNPM) --dir web run e2e"; do \
+		echo "$$step"; sh -c "$$step" || failed=1; \
+	done; \
+	exit $$failed
 
 load-test: ## Run the load test against a running muster dev
 	$(GO) run ./test/load $(LOAD_TEST_FLAGS)

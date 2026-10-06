@@ -1,0 +1,126 @@
+/*
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright The Muster Authors
+*/
+
+/*
+  Tailwind CSS with the design tokens of the shadcn/ui components in src/components/ui. The neutral base and the
+  token names follow shadcn/ui (MIT); primary and ring take the indigo of the Muster mark, the warning tone its amber
+  (docs/brand). Dark mode follows the operating system. Fonts are the system's: the Content Security Policy allows no
+  other origin.
+*/
+@import "tailwindcss";
+
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+/* Base UI marks orientation with data-orientation; these two variants come from shadcn/ui's tailwind.css (MIT). */
+@custom-variant data-horizontal {
+  &:where([data-orientation="horizontal"]) {
+    @slot;
+  }
+}
+
+@custom-variant data-vertical {
+  &:where([data-orientation="vertical"]) {
+    @slot;
+  }
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  /* #3B3F9E, the lines of the mark: 8.8:1 against white. */
+  --primary: oklch(0.423 0.151 276);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0.006 277);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.49 0 0);
+  --accent: oklch(0.96 0.015 277);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.53 0.22 27);
+  --border: oklch(0.922 0 0);
+  /* Input borders keep 3:1 against the background (WCAG 1.4.11). */
+  --input: oklch(0.6 0 0);
+  --ring: oklch(0.423 0.151 276);
+  /* #F5A524, the point of the mark; text on it stays the foreground colour. */
+  --warning: oklch(0.782 0.158 72.3);
+  --warning-surface: oklch(0.97 0.05 85);
+  --brand-line: #3b3f9e;
+  --brand-point: #f5a524;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    /* #A9ACF2, the lines of the mark on a dark background: 7.2:1 against the card. */
+    --primary: oklch(0.768 0.1 282);
+    --primary-foreground: oklch(0.2 0.05 277);
+    --secondary: oklch(0.269 0.01 277);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.75 0 0);
+    --accent: oklch(0.3 0.03 277);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 12%);
+    --input: oklch(1 0 0 / 45%);
+    --ring: oklch(0.768 0.1 282);
+    --warning: oklch(0.782 0.158 72.3);
+    --warning-surface: oklch(0.3 0.06 70);
+    --brand-line: #a9acf2;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-warning: var(--warning);
+  --color-warning-surface: var(--warning-surface);
+  --color-brand-line: var(--brand-line);
+  --color-brand-point: var(--brand-point);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    color-scheme: light dark;
+  }
+
+  body {
+    @apply min-h-dvh bg-background text-foreground antialiased;
+  }
+}

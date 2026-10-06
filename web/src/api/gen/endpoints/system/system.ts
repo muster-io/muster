@@ -40,7 +40,10 @@ import type {
   UnauthorizedResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -59,35 +62,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type listSystemNoticesResponse200 = {
-  data: SystemNoticeList
-  status: 200
-}
-
-export type listSystemNoticesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listSystemNoticesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listSystemNoticesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listSystemNoticesResponseSuccess = (listSystemNoticesResponse200) & {
-  headers: Headers;
-};
-export type listSystemNoticesResponseError = (listSystemNoticesResponse401 | listSystemNoticesResponse403 | listSystemNoticesResponse429) & {
-  headers: Headers;
-};
-
-export type listSystemNoticesResponse = (listSystemNoticesResponseSuccess | listSystemNoticesResponseError)
-
 export const getListSystemNoticesUrl = () => {
 
 
@@ -100,23 +74,16 @@ export const getListSystemNoticesUrl = () => {
  * "Recovering after downtime" for every signed-in user, "no replica is leading" for Admins. Changes arrive as `system-notices` hints.
  * @summary List active Organization-wide notices
  */
-export const listSystemNotices = async ( options?: RequestInit): Promise<listSystemNoticesResponse> => {
+export const listSystemNotices = async ( options?: Parameters<typeof apiFetch>[1]): Promise<SystemNoticeList> => {
 
-  const res = await fetch(getListSystemNoticesUrl(),
+  return apiFetch<SystemNoticeList>(getListSystemNoticesUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listSystemNoticesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listSystemNoticesResponse
-}
+);}
 
 
 
@@ -129,16 +96,16 @@ export const getListSystemNoticesQueryKey = () => {
     }
 
 
-export const getListSystemNoticesQueryOptions = <TData = Awaited<ReturnType<typeof listSystemNotices>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSystemNotices>>, TError, TData>>, fetch?: RequestInit}
+export const getListSystemNoticesQueryOptions = <TData = Awaited<ReturnType<typeof listSystemNotices>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSystemNotices>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListSystemNoticesQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSystemNotices>>> = ({ signal }) => listSystemNotices({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSystemNotices>>> = ({ signal }) => listSystemNotices({ signal, ...requestOptions });
 
 
 
@@ -158,7 +125,7 @@ export function useListSystemNotices<TData = Awaited<ReturnType<typeof listSyste
           TError,
           Awaited<ReturnType<typeof listSystemNotices>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListSystemNotices<TData = Awaited<ReturnType<typeof listSystemNotices>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -168,11 +135,11 @@ export function useListSystemNotices<TData = Awaited<ReturnType<typeof listSyste
           TError,
           Awaited<ReturnType<typeof listSystemNotices>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListSystemNotices<TData = Awaited<ReturnType<typeof listSystemNotices>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSystemNotices>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSystemNotices>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -180,7 +147,7 @@ export function useListSystemNotices<TData = Awaited<ReturnType<typeof listSyste
  */
 
 export function useListSystemNotices<TData = Awaited<ReturnType<typeof listSystemNotices>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSystemNotices>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSystemNotices>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -196,35 +163,6 @@ export function useListSystemNotices<TData = Awaited<ReturnType<typeof listSyste
 
 
 
-export type getSystemStatusResponse200 = {
-  data: SystemStatus
-  status: 200
-}
-
-export type getSystemStatusResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getSystemStatusResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getSystemStatusResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getSystemStatusResponseSuccess = (getSystemStatusResponse200) & {
-  headers: Headers;
-};
-export type getSystemStatusResponseError = (getSystemStatusResponse401 | getSystemStatusResponse403 | getSystemStatusResponse429) & {
-  headers: Headers;
-};
-
-export type getSystemStatusResponse = (getSystemStatusResponseSuccess | getSystemStatusResponseError)
-
 export const getGetSystemStatusUrl = () => {
 
 
@@ -237,23 +175,16 @@ export const getGetSystemStatusUrl = () => {
  * Read-only: replicas and the Leader with their key ids, the recovery state, delivery queues, Broken Destinations, Integrations with Heartbeat lost or truncated Snapshots, template errors, active Storms and the last outgoing heartbeat.
  * @summary Read the System status
  */
-export const getSystemStatus = async ( options?: RequestInit): Promise<getSystemStatusResponse> => {
+export const getSystemStatus = async ( options?: Parameters<typeof apiFetch>[1]): Promise<SystemStatus> => {
 
-  const res = await fetch(getGetSystemStatusUrl(),
+  return apiFetch<SystemStatus>(getGetSystemStatusUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getSystemStatusResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getSystemStatusResponse
-}
+);}
 
 
 
@@ -266,16 +197,16 @@ export const getGetSystemStatusQueryKey = () => {
     }
 
 
-export const getGetSystemStatusQueryOptions = <TData = Awaited<ReturnType<typeof getSystemStatus>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSystemStatus>>, TError, TData>>, fetch?: RequestInit}
+export const getGetSystemStatusQueryOptions = <TData = Awaited<ReturnType<typeof getSystemStatus>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSystemStatus>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetSystemStatusQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSystemStatus>>> = ({ signal }) => getSystemStatus({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSystemStatus>>> = ({ signal }) => getSystemStatus({ signal, ...requestOptions });
 
 
 
@@ -295,7 +226,7 @@ export function useGetSystemStatus<TData = Awaited<ReturnType<typeof getSystemSt
           TError,
           Awaited<ReturnType<typeof getSystemStatus>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetSystemStatus<TData = Awaited<ReturnType<typeof getSystemStatus>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -305,11 +236,11 @@ export function useGetSystemStatus<TData = Awaited<ReturnType<typeof getSystemSt
           TError,
           Awaited<ReturnType<typeof getSystemStatus>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetSystemStatus<TData = Awaited<ReturnType<typeof getSystemStatus>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSystemStatus>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSystemStatus>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -317,7 +248,7 @@ export function useGetSystemStatus<TData = Awaited<ReturnType<typeof getSystemSt
  */
 
 export function useGetSystemStatus<TData = Awaited<ReturnType<typeof getSystemStatus>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSystemStatus>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSystemStatus>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -333,18 +264,6 @@ export function useGetSystemStatus<TData = Awaited<ReturnType<typeof getSystemSt
 
 
 
-export type getOpenApiSpecResponse200 = {
-  data: string
-  status: 200
-}
-
-export type getOpenApiSpecResponseSuccess = (getOpenApiSpecResponse200) & {
-  headers: Headers;
-};
-;
-
-export type getOpenApiSpecResponse = (getOpenApiSpecResponseSuccess)
-
 export const getGetOpenApiSpecUrl = () => {
 
 
@@ -357,23 +276,16 @@ export const getGetOpenApiSpecUrl = () => {
  * The specification the binary was built from, as checked in at `api/openapi.yaml`.
  * @summary Read this specification
  */
-export const getOpenApiSpec = async ( options?: RequestInit): Promise<getOpenApiSpecResponse> => {
+export const getOpenApiSpec = async ( options?: Parameters<typeof apiFetch>[1]): Promise<string> => {
 
-  const res = await fetch(getGetOpenApiSpecUrl(),
+  return apiFetch<string>(getGetOpenApiSpecUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getOpenApiSpecResponse['data'] = body !== null ? body : ''
-  return { data, status: res.status, headers: res.headers } as getOpenApiSpecResponse
-}
+);}
 
 
 
@@ -386,16 +298,16 @@ export const getGetOpenApiSpecQueryKey = () => {
     }
 
 
-export const getGetOpenApiSpecQueryOptions = <TData = Awaited<ReturnType<typeof getOpenApiSpec>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpenApiSpec>>, TError, TData>>, fetch?: RequestInit}
+export const getGetOpenApiSpecQueryOptions = <TData = Awaited<ReturnType<typeof getOpenApiSpec>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpenApiSpec>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetOpenApiSpecQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpenApiSpec>>> = ({ signal }) => getOpenApiSpec({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpenApiSpec>>> = ({ signal }) => getOpenApiSpec({ signal, ...requestOptions });
 
 
 
@@ -415,7 +327,7 @@ export function useGetOpenApiSpec<TData = Awaited<ReturnType<typeof getOpenApiSp
           TError,
           Awaited<ReturnType<typeof getOpenApiSpec>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetOpenApiSpec<TData = Awaited<ReturnType<typeof getOpenApiSpec>>, TError = unknown>(
@@ -425,11 +337,11 @@ export function useGetOpenApiSpec<TData = Awaited<ReturnType<typeof getOpenApiSp
           TError,
           Awaited<ReturnType<typeof getOpenApiSpec>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetOpenApiSpec<TData = Awaited<ReturnType<typeof getOpenApiSpec>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpenApiSpec>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpenApiSpec>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -437,7 +349,7 @@ export function useGetOpenApiSpec<TData = Awaited<ReturnType<typeof getOpenApiSp
  */
 
 export function useGetOpenApiSpec<TData = Awaited<ReturnType<typeof getOpenApiSpec>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpenApiSpec>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpenApiSpec>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 

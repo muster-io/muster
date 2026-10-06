@@ -10,33 +10,101 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PasswordSetupRouteImport } from './routes/password-setup'
+import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as TotpEnrolmentRouteImport } from './routes/totp-enrolment'
+import { Route as SignInTotpRouteImport } from './routes/sign-in.totp'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PasswordSetupRoute = PasswordSetupRouteImport.update({
+  id: '/password-setup',
+  path: '/password-setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TotpEnrolmentRoute = TotpEnrolmentRouteImport.update({
+  id: '/totp-enrolment',
+  path: '/totp-enrolment',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInTotpRoute = SignInTotpRouteImport.update({
+  id: '/totp',
+  path: '/totp',
+  getParentRoute: () => SignInRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/password-setup': typeof PasswordSetupRoute
+  '/profile': typeof ProfileRoute
+  '/sign-in': typeof SignInRouteWithChildren
+  '/totp-enrolment': typeof TotpEnrolmentRoute
+  '/sign-in/totp': typeof SignInTotpRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/password-setup': typeof PasswordSetupRoute
+  '/profile': typeof ProfileRoute
+  '/sign-in': typeof SignInRouteWithChildren
+  '/totp-enrolment': typeof TotpEnrolmentRoute
+  '/sign-in/totp': typeof SignInTotpRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/password-setup': typeof PasswordSetupRoute
+  '/profile': typeof ProfileRoute
+  '/sign-in': typeof SignInRouteWithChildren
+  '/totp-enrolment': typeof TotpEnrolmentRoute
+  '/sign-in/totp': typeof SignInTotpRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/password-setup'
+    | '/profile'
+    | '/sign-in'
+    | '/totp-enrolment'
+    | '/sign-in/totp'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/password-setup'
+    | '/profile'
+    | '/sign-in'
+    | '/totp-enrolment'
+    | '/sign-in/totp'
+  id:
+    | '__root__'
+    | '/'
+    | '/password-setup'
+    | '/profile'
+    | '/sign-in'
+    | '/totp-enrolment'
+    | '/sign-in/totp'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  PasswordSetupRoute: typeof PasswordSetupRoute
+  ProfileRoute: typeof ProfileRoute
+  SignInRoute: typeof SignInRouteWithChildren
+  TotpEnrolmentRoute: typeof TotpEnrolmentRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +116,61 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/password-setup': {
+      id: '/password-setup'
+      path: '/password-setup'
+      fullPath: '/password-setup'
+      preLoaderRoute: typeof PasswordSetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/totp-enrolment': {
+      id: '/totp-enrolment'
+      path: '/totp-enrolment'
+      fullPath: '/totp-enrolment'
+      preLoaderRoute: typeof TotpEnrolmentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in/totp': {
+      id: '/sign-in/totp'
+      path: '/totp'
+      fullPath: '/sign-in/totp'
+      preLoaderRoute: typeof SignInTotpRouteImport
+      parentRoute: typeof SignInRoute
+    }
   }
 }
 
+interface SignInRouteChildren {
+  SignInTotpRoute: typeof SignInTotpRoute
+}
+
+const SignInRouteChildren: SignInRouteChildren = {
+  SignInTotpRoute: SignInTotpRoute,
+}
+
+const SignInRouteWithChildren =
+  SignInRoute._addFileChildren(SignInRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  PasswordSetupRoute: PasswordSetupRoute,
+  ProfileRoute: ProfileRoute,
+  SignInRoute: SignInRouteWithChildren,
+  TotpEnrolmentRoute: TotpEnrolmentRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

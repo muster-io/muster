@@ -55,7 +55,10 @@ import type {
   UnprocessableResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -74,35 +77,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type listMyAccountLinksResponse200 = {
-  data: AccountLinkList
-  status: 200
-}
-
-export type listMyAccountLinksResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listMyAccountLinksResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listMyAccountLinksResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listMyAccountLinksResponseSuccess = (listMyAccountLinksResponse200) & {
-  headers: Headers;
-};
-export type listMyAccountLinksResponseError = (listMyAccountLinksResponse401 | listMyAccountLinksResponse403 | listMyAccountLinksResponse429) & {
-  headers: Headers;
-};
-
-export type listMyAccountLinksResponse = (listMyAccountLinksResponseSuccess | listMyAccountLinksResponseError)
-
 export const getListMyAccountLinksUrl = () => {
 
 
@@ -115,23 +89,16 @@ export const getListMyAccountLinksUrl = () => {
  * Service account tokens get `403` (`service_account_not_allowed`).
  * @summary List own Account links
  */
-export const listMyAccountLinks = async ( options?: RequestInit): Promise<listMyAccountLinksResponse> => {
+export const listMyAccountLinks = async ( options?: Parameters<typeof apiFetch>[1]): Promise<AccountLinkList> => {
 
-  const res = await fetch(getListMyAccountLinksUrl(),
+  return apiFetch<AccountLinkList>(getListMyAccountLinksUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listMyAccountLinksResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listMyAccountLinksResponse
-}
+);}
 
 
 
@@ -144,16 +111,16 @@ export const getListMyAccountLinksQueryKey = () => {
     }
 
 
-export const getListMyAccountLinksQueryOptions = <TData = Awaited<ReturnType<typeof listMyAccountLinks>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMyAccountLinks>>, TError, TData>>, fetch?: RequestInit}
+export const getListMyAccountLinksQueryOptions = <TData = Awaited<ReturnType<typeof listMyAccountLinks>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMyAccountLinks>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListMyAccountLinksQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMyAccountLinks>>> = ({ signal }) => listMyAccountLinks({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMyAccountLinks>>> = ({ signal }) => listMyAccountLinks({ signal, ...requestOptions });
 
 
 
@@ -173,7 +140,7 @@ export function useListMyAccountLinks<TData = Awaited<ReturnType<typeof listMyAc
           TError,
           Awaited<ReturnType<typeof listMyAccountLinks>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListMyAccountLinks<TData = Awaited<ReturnType<typeof listMyAccountLinks>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -183,11 +150,11 @@ export function useListMyAccountLinks<TData = Awaited<ReturnType<typeof listMyAc
           TError,
           Awaited<ReturnType<typeof listMyAccountLinks>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListMyAccountLinks<TData = Awaited<ReturnType<typeof listMyAccountLinks>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMyAccountLinks>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMyAccountLinks>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -195,7 +162,7 @@ export function useListMyAccountLinks<TData = Awaited<ReturnType<typeof listMyAc
  */
 
 export function useListMyAccountLinks<TData = Awaited<ReturnType<typeof listMyAccountLinks>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMyAccountLinks>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMyAccountLinks>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -211,35 +178,6 @@ export function useListMyAccountLinks<TData = Awaited<ReturnType<typeof listMyAc
 
 
 
-export type listLinkableConnectionsResponse200 = {
-  data: LinkableConnectionList
-  status: 200
-}
-
-export type listLinkableConnectionsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listLinkableConnectionsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listLinkableConnectionsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listLinkableConnectionsResponseSuccess = (listLinkableConnectionsResponse200) & {
-  headers: Headers;
-};
-export type listLinkableConnectionsResponseError = (listLinkableConnectionsResponse401 | listLinkableConnectionsResponse403 | listLinkableConnectionsResponse429) & {
-  headers: Headers;
-};
-
-export type listLinkableConnectionsResponse = (listLinkableConnectionsResponseSuccess | listLinkableConnectionsResponseError)
-
 export const getListLinkableConnectionsUrl = () => {
 
 
@@ -252,23 +190,16 @@ export const getListLinkableConnectionsUrl = () => {
  * The profile's own short list of the Connections that are not deleted, for picking one when linking a messenger account. It needs no Permission, independently of `connections:read`, and shows only the id, the name and the messenger of each Connection. Service account tokens get `403` (`service_account_not_allowed`).
  * @summary List the Connections an account can be linked through
  */
-export const listLinkableConnections = async ( options?: RequestInit): Promise<listLinkableConnectionsResponse> => {
+export const listLinkableConnections = async ( options?: Parameters<typeof apiFetch>[1]): Promise<LinkableConnectionList> => {
 
-  const res = await fetch(getListLinkableConnectionsUrl(),
+  return apiFetch<LinkableConnectionList>(getListLinkableConnectionsUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listLinkableConnectionsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listLinkableConnectionsResponse
-}
+);}
 
 
 
@@ -281,16 +212,16 @@ export const getListLinkableConnectionsQueryKey = () => {
     }
 
 
-export const getListLinkableConnectionsQueryOptions = <TData = Awaited<ReturnType<typeof listLinkableConnections>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLinkableConnections>>, TError, TData>>, fetch?: RequestInit}
+export const getListLinkableConnectionsQueryOptions = <TData = Awaited<ReturnType<typeof listLinkableConnections>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLinkableConnections>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListLinkableConnectionsQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listLinkableConnections>>> = ({ signal }) => listLinkableConnections({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listLinkableConnections>>> = ({ signal }) => listLinkableConnections({ signal, ...requestOptions });
 
 
 
@@ -310,7 +241,7 @@ export function useListLinkableConnections<TData = Awaited<ReturnType<typeof lis
           TError,
           Awaited<ReturnType<typeof listLinkableConnections>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListLinkableConnections<TData = Awaited<ReturnType<typeof listLinkableConnections>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -320,11 +251,11 @@ export function useListLinkableConnections<TData = Awaited<ReturnType<typeof lis
           TError,
           Awaited<ReturnType<typeof listLinkableConnections>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListLinkableConnections<TData = Awaited<ReturnType<typeof listLinkableConnections>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLinkableConnections>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLinkableConnections>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -332,7 +263,7 @@ export function useListLinkableConnections<TData = Awaited<ReturnType<typeof lis
  */
 
 export function useListLinkableConnections<TData = Awaited<ReturnType<typeof listLinkableConnections>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLinkableConnections>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listLinkableConnections>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -348,40 +279,6 @@ export function useListLinkableConnections<TData = Awaited<ReturnType<typeof lis
 
 
 
-export type deleteMyAccountLinkResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteMyAccountLinkResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteMyAccountLinkResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteMyAccountLinkResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type deleteMyAccountLinkResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteMyAccountLinkResponseSuccess = (deleteMyAccountLinkResponse204) & {
-  headers: Headers;
-};
-export type deleteMyAccountLinkResponseError = (deleteMyAccountLinkResponse401 | deleteMyAccountLinkResponse403 | deleteMyAccountLinkResponse404 | deleteMyAccountLinkResponse429) & {
-  headers: Headers;
-};
-
-export type deleteMyAccountLinkResponse = (deleteMyAccountLinkResponseSuccess | deleteMyAccountLinkResponseError)
-
 export const getDeleteMyAccountLinkUrl = (accountLinkId: string,) => {
 
 
@@ -394,23 +291,16 @@ export const getDeleteMyAccountLinkUrl = (accountLinkId: string,) => {
  * Unlinks one of the caller's own messenger accounts. Web session only: a token gets `403` (`session_required`).
  * @summary Unlink an own messenger account
  */
-export const deleteMyAccountLink = async (accountLinkId: string, options?: RequestInit): Promise<deleteMyAccountLinkResponse> => {
+export const deleteMyAccountLink = async (accountLinkId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteMyAccountLinkUrl(accountLinkId),
+  return apiFetch<void>(getDeleteMyAccountLinkUrl(accountLinkId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteMyAccountLinkResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteMyAccountLinkResponse
-}
+);}
 
 
 
@@ -419,15 +309,15 @@ export const deleteMyAccountLink = async (accountLinkId: string, options?: Reque
 export const getDeleteMyAccountLinkMutationKey = () => ['deleteMyAccountLink'] as const;
 
 export const getDeleteMyAccountLinkMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMyAccountLink>>, TError,DeleteMyAccountLinkMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMyAccountLink>>, TError,DeleteMyAccountLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteMyAccountLink>>, TError,DeleteMyAccountLinkMutationVariables, TContext> => {
 
 const mutationKey = getDeleteMyAccountLinkMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -435,7 +325,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteMyAccountLink>>, DeleteMyAccountLinkMutationVariables> = (props) => {
           const {accountLinkId} = props ?? {};
 
-          return  deleteMyAccountLink(accountLinkId,fetchOptions)
+          return  deleteMyAccountLink(accountLinkId,requestOptions)
         }
 
 
@@ -454,7 +344,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Unlink an own messenger account
  */
 export const useDeleteMyAccountLink = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMyAccountLink>>, TError,DeleteMyAccountLinkMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMyAccountLink>>, TError,DeleteMyAccountLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteMyAccountLink>>,
         TError,
@@ -463,51 +353,7 @@ export const useDeleteMyAccountLink = <TError = UnauthorizedResponse | Forbidden
       > => {
       return useMutation(getDeleteMyAccountLinkMutationOptions(options), queryClient);
     }
-    export type startTelegramLinkResponse201 = {
-  data: TelegramLinkStart
-  status: 201
-}
-
-export type startTelegramLinkResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type startTelegramLinkResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type startTelegramLinkResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type startTelegramLinkResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type startTelegramLinkResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type startTelegramLinkResponse503 = {
-  data: LimitedResponse
-  status: 503
-}
-
-export type startTelegramLinkResponseSuccess = (startTelegramLinkResponse201) & {
-  headers: Headers;
-};
-export type startTelegramLinkResponseError = (startTelegramLinkResponse400 | startTelegramLinkResponse401 | startTelegramLinkResponse403 | startTelegramLinkResponse422 | startTelegramLinkResponse429 | startTelegramLinkResponse503) & {
-  headers: Headers;
-};
-
-export type startTelegramLinkResponse = (startTelegramLinkResponseSuccess | startTelegramLinkResponseError)
-
-export const getStartTelegramLinkUrl = () => {
+    export const getStartTelegramLinkUrl = () => {
 
 
 
@@ -519,7 +365,7 @@ export const getStartTelegramLinkUrl = () => {
  * Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary Start linking a Telegram account
  */
-export const startTelegramLink = async (telegramLinkRequest: TelegramLinkRequest, options?: RequestInit): Promise<startTelegramLinkResponse> => {
+export const startTelegramLink = async (telegramLinkRequest: TelegramLinkRequest, options?: Parameters<typeof apiFetch>[1]): Promise<TelegramLinkStart> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -535,21 +381,14 @@ export const startTelegramLink = async (telegramLinkRequest: TelegramLinkRequest
     }
     return headers;
   };
-const res = await fetch(getStartTelegramLinkUrl(),
+return apiFetch<TelegramLinkStart>(getStartTelegramLinkUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(telegramLinkRequest)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: startTelegramLinkResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as startTelegramLinkResponse
-}
+);}
 
 
 
@@ -558,15 +397,15 @@ const res = await fetch(getStartTelegramLinkUrl(),
 export const getStartTelegramLinkMutationKey = () => ['startTelegramLink'] as const;
 
 export const getStartTelegramLinkMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startTelegramLink>>, TError,StartTelegramLinkMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startTelegramLink>>, TError,StartTelegramLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof startTelegramLink>>, TError,StartTelegramLinkMutationVariables, TContext> => {
 
 const mutationKey = getStartTelegramLinkMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -574,7 +413,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof startTelegramLink>>, StartTelegramLinkMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  startTelegramLink(data,fetchOptions)
+          return  startTelegramLink(data,requestOptions)
         }
 
 
@@ -593,7 +432,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Start linking a Telegram account
  */
 export const useStartTelegramLink = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startTelegramLink>>, TError,StartTelegramLinkMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startTelegramLink>>, TError,StartTelegramLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof startTelegramLink>>,
         TError,
@@ -602,61 +441,7 @@ export const useStartTelegramLink = <TError = BadRequestResponse | UnauthorizedR
       > => {
       return useMutation(getStartTelegramLinkMutationOptions(options), queryClient);
     }
-    export type startMattermostLinkResponse202 = {
-  data: MattermostLinkStarted
-  status: 202
-}
-
-export type startMattermostLinkResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type startMattermostLinkResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type startMattermostLinkResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type startMattermostLinkResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type startMattermostLinkResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type startMattermostLinkResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type startMattermostLinkResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type startMattermostLinkResponse503 = {
-  data: LimitedResponse
-  status: 503
-}
-
-export type startMattermostLinkResponseSuccess = (startMattermostLinkResponse202) & {
-  headers: Headers;
-};
-export type startMattermostLinkResponseError = (startMattermostLinkResponse400 | startMattermostLinkResponse401 | startMattermostLinkResponse403 | startMattermostLinkResponse404 | startMattermostLinkResponse409 | startMattermostLinkResponse422 | startMattermostLinkResponse429 | startMattermostLinkResponse503) & {
-  headers: Headers;
-};
-
-export type startMattermostLinkResponse = (startMattermostLinkResponseSuccess | startMattermostLinkResponseError)
-
-export const getStartMattermostLinkUrl = () => {
+    export const getStartMattermostLinkUrl = () => {
 
 
 
@@ -668,7 +453,7 @@ export const getStartMattermostLinkUrl = () => {
  * The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
  * @summary Start linking a Mattermost account
  */
-export const startMattermostLink = async (mattermostLinkRequest: MattermostLinkRequest, options?: RequestInit): Promise<startMattermostLinkResponse> => {
+export const startMattermostLink = async (mattermostLinkRequest: MattermostLinkRequest, options?: Parameters<typeof apiFetch>[1]): Promise<MattermostLinkStarted> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -684,21 +469,14 @@ export const startMattermostLink = async (mattermostLinkRequest: MattermostLinkR
     }
     return headers;
   };
-const res = await fetch(getStartMattermostLinkUrl(),
+return apiFetch<MattermostLinkStarted>(getStartMattermostLinkUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(mattermostLinkRequest)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: startMattermostLinkResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as startMattermostLinkResponse
-}
+);}
 
 
 
@@ -707,15 +485,15 @@ const res = await fetch(getStartMattermostLinkUrl(),
 export const getStartMattermostLinkMutationKey = () => ['startMattermostLink'] as const;
 
 export const getStartMattermostLinkMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startMattermostLink>>, TError,StartMattermostLinkMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startMattermostLink>>, TError,StartMattermostLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof startMattermostLink>>, TError,StartMattermostLinkMutationVariables, TContext> => {
 
 const mutationKey = getStartMattermostLinkMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -723,7 +501,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof startMattermostLink>>, StartMattermostLinkMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  startMattermostLink(data,fetchOptions)
+          return  startMattermostLink(data,requestOptions)
         }
 
 
@@ -742,7 +520,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Start linking a Mattermost account
  */
 export const useStartMattermostLink = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startMattermostLink>>, TError,StartMattermostLinkMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startMattermostLink>>, TError,StartMattermostLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof startMattermostLink>>,
         TError,
@@ -751,61 +529,7 @@ export const useStartMattermostLink = <TError = BadRequestResponse | Unauthorize
       > => {
       return useMutation(getStartMattermostLinkMutationOptions(options), queryClient);
     }
-    export type confirmMattermostLinkResponse201 = {
-  data: AccountLink
-  status: 201
-}
-
-export type confirmMattermostLinkResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type confirmMattermostLinkResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type confirmMattermostLinkResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type confirmMattermostLinkResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type confirmMattermostLinkResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type confirmMattermostLinkResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type confirmMattermostLinkResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type confirmMattermostLinkResponse503 = {
-  data: LimitedResponse
-  status: 503
-}
-
-export type confirmMattermostLinkResponseSuccess = (confirmMattermostLinkResponse201) & {
-  headers: Headers;
-};
-export type confirmMattermostLinkResponseError = (confirmMattermostLinkResponse400 | confirmMattermostLinkResponse401 | confirmMattermostLinkResponse403 | confirmMattermostLinkResponse404 | confirmMattermostLinkResponse409 | confirmMattermostLinkResponse422 | confirmMattermostLinkResponse429 | confirmMattermostLinkResponse503) & {
-  headers: Headers;
-};
-
-export type confirmMattermostLinkResponse = (confirmMattermostLinkResponseSuccess | confirmMattermostLinkResponseError)
-
-export const getConfirmMattermostLinkUrl = () => {
+    export const getConfirmMattermostLinkUrl = () => {
 
 
 
@@ -817,7 +541,7 @@ export const getConfirmMattermostLinkUrl = () => {
  * At most 5 attempts; after that the code is void. A wrong code, and a request that is void, used or expired, answer `422` `link_code_invalid` at `/code`, never saying which; a request of another User is `404`. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role.
  * @summary Confirm a Mattermost link with the code
  */
-export const confirmMattermostLink = async (mattermostLinkConfirm: MattermostLinkConfirm, options?: RequestInit): Promise<confirmMattermostLinkResponse> => {
+export const confirmMattermostLink = async (mattermostLinkConfirm: MattermostLinkConfirm, options?: Parameters<typeof apiFetch>[1]): Promise<AccountLink> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -833,21 +557,14 @@ export const confirmMattermostLink = async (mattermostLinkConfirm: MattermostLin
     }
     return headers;
   };
-const res = await fetch(getConfirmMattermostLinkUrl(),
+return apiFetch<AccountLink>(getConfirmMattermostLinkUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(mattermostLinkConfirm)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: confirmMattermostLinkResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as confirmMattermostLinkResponse
-}
+);}
 
 
 
@@ -856,15 +573,15 @@ const res = await fetch(getConfirmMattermostLinkUrl(),
 export const getConfirmMattermostLinkMutationKey = () => ['confirmMattermostLink'] as const;
 
 export const getConfirmMattermostLinkMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmMattermostLink>>, TError,ConfirmMattermostLinkMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmMattermostLink>>, TError,ConfirmMattermostLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof confirmMattermostLink>>, TError,ConfirmMattermostLinkMutationVariables, TContext> => {
 
 const mutationKey = getConfirmMattermostLinkMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -872,7 +589,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmMattermostLink>>, ConfirmMattermostLinkMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  confirmMattermostLink(data,fetchOptions)
+          return  confirmMattermostLink(data,requestOptions)
         }
 
 
@@ -891,7 +608,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Confirm a Mattermost link with the code
  */
 export const useConfirmMattermostLink = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmMattermostLink>>, TError,ConfirmMattermostLinkMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmMattermostLink>>, TError,ConfirmMattermostLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof confirmMattermostLink>>,
         TError,
@@ -900,41 +617,7 @@ export const useConfirmMattermostLink = <TError = BadRequestResponse | Unauthori
       > => {
       return useMutation(getConfirmMattermostLinkMutationOptions(options), queryClient);
     }
-    export type listUserAccountLinksResponse200 = {
-  data: AccountLinkList
-  status: 200
-}
-
-export type listUserAccountLinksResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listUserAccountLinksResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listUserAccountLinksResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type listUserAccountLinksResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listUserAccountLinksResponseSuccess = (listUserAccountLinksResponse200) & {
-  headers: Headers;
-};
-export type listUserAccountLinksResponseError = (listUserAccountLinksResponse401 | listUserAccountLinksResponse403 | listUserAccountLinksResponse404 | listUserAccountLinksResponse429) & {
-  headers: Headers;
-};
-
-export type listUserAccountLinksResponse = (listUserAccountLinksResponseSuccess | listUserAccountLinksResponseError)
-
-export const getListUserAccountLinksUrl = (userId: string,) => {
+    export const getListUserAccountLinksUrl = (userId: string,) => {
 
 
 
@@ -945,23 +628,16 @@ export const getListUserAccountLinksUrl = (userId: string,) => {
 /**
  * @summary List a user's Account links
  */
-export const listUserAccountLinks = async (userId: string, options?: RequestInit): Promise<listUserAccountLinksResponse> => {
+export const listUserAccountLinks = async (userId: string, options?: Parameters<typeof apiFetch>[1]): Promise<AccountLinkList> => {
 
-  const res = await fetch(getListUserAccountLinksUrl(userId),
+  return apiFetch<AccountLinkList>(getListUserAccountLinksUrl(userId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listUserAccountLinksResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listUserAccountLinksResponse
-}
+);}
 
 
 
@@ -974,16 +650,16 @@ export const getListUserAccountLinksQueryKey = (userId: string,) => {
     }
 
 
-export const getListUserAccountLinksQueryOptions = <TData = Awaited<ReturnType<typeof listUserAccountLinks>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(userId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUserAccountLinks>>, TError, TData>>, fetch?: RequestInit}
+export const getListUserAccountLinksQueryOptions = <TData = Awaited<ReturnType<typeof listUserAccountLinks>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(userId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUserAccountLinks>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListUserAccountLinksQueryKey(userId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listUserAccountLinks>>> = ({ signal }) => listUserAccountLinks(userId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listUserAccountLinks>>> = ({ signal }) => listUserAccountLinks(userId, { signal, ...requestOptions });
 
 
 
@@ -1003,7 +679,7 @@ export function useListUserAccountLinks<TData = Awaited<ReturnType<typeof listUs
           TError,
           Awaited<ReturnType<typeof listUserAccountLinks>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListUserAccountLinks<TData = Awaited<ReturnType<typeof listUserAccountLinks>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -1013,11 +689,11 @@ export function useListUserAccountLinks<TData = Awaited<ReturnType<typeof listUs
           TError,
           Awaited<ReturnType<typeof listUserAccountLinks>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListUserAccountLinks<TData = Awaited<ReturnType<typeof listUserAccountLinks>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- userId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUserAccountLinks>>, TError, TData>>, fetch?: RequestInit}
+ userId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUserAccountLinks>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1025,7 +701,7 @@ export function useListUserAccountLinks<TData = Awaited<ReturnType<typeof listUs
  */
 
 export function useListUserAccountLinks<TData = Awaited<ReturnType<typeof listUserAccountLinks>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- userId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUserAccountLinks>>, TError, TData>>, fetch?: RequestInit}
+ userId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listUserAccountLinks>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1041,40 +717,6 @@ export function useListUserAccountLinks<TData = Awaited<ReturnType<typeof listUs
 
 
 
-export type deleteUserAccountLinkResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteUserAccountLinkResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteUserAccountLinkResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteUserAccountLinkResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type deleteUserAccountLinkResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteUserAccountLinkResponseSuccess = (deleteUserAccountLinkResponse204) & {
-  headers: Headers;
-};
-export type deleteUserAccountLinkResponseError = (deleteUserAccountLinkResponse401 | deleteUserAccountLinkResponse403 | deleteUserAccountLinkResponse404 | deleteUserAccountLinkResponse429) & {
-  headers: Headers;
-};
-
-export type deleteUserAccountLinkResponse = (deleteUserAccountLinkResponseSuccess | deleteUserAccountLinkResponseError)
-
 export const getDeleteUserAccountLinkUrl = (userId: string,
     accountLinkId: string,) => {
 
@@ -1089,23 +731,16 @@ export const getDeleteUserAccountLinkUrl = (userId: string,
  * @summary Remove a user's Account link
  */
 export const deleteUserAccountLink = async (userId: string,
-    accountLinkId: string, options?: RequestInit): Promise<deleteUserAccountLinkResponse> => {
+    accountLinkId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteUserAccountLinkUrl(userId,accountLinkId),
+  return apiFetch<void>(getDeleteUserAccountLinkUrl(userId,accountLinkId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteUserAccountLinkResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteUserAccountLinkResponse
-}
+);}
 
 
 
@@ -1114,15 +749,15 @@ export const deleteUserAccountLink = async (userId: string,
 export const getDeleteUserAccountLinkMutationKey = () => ['deleteUserAccountLink'] as const;
 
 export const getDeleteUserAccountLinkMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUserAccountLink>>, TError,DeleteUserAccountLinkMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUserAccountLink>>, TError,DeleteUserAccountLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteUserAccountLink>>, TError,DeleteUserAccountLinkMutationVariables, TContext> => {
 
 const mutationKey = getDeleteUserAccountLinkMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1130,7 +765,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteUserAccountLink>>, DeleteUserAccountLinkMutationVariables> = (props) => {
           const {userId,accountLinkId} = props ?? {};
 
-          return  deleteUserAccountLink(userId,accountLinkId,fetchOptions)
+          return  deleteUserAccountLink(userId,accountLinkId,requestOptions)
         }
 
 
@@ -1149,7 +784,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Remove a user's Account link
  */
 export const useDeleteUserAccountLink = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUserAccountLink>>, TError,DeleteUserAccountLinkMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUserAccountLink>>, TError,DeleteUserAccountLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteUserAccountLink>>,
         TError,
