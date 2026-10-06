@@ -7,10 +7,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
-  ADMIN_LOGIN,
-  ADMIN_PASSWORD,
   APP,
-  Api,
+  adminApi,
   disableIdpUser,
   expectNoHorizontalScroll,
   freshCode,
@@ -25,7 +23,7 @@ import {
 
 /** Creates a local user through the Admin and sets the password of its setup link through the API. */
 async function localUser(login: string, password: string): Promise<void> {
-  const admin = await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
+  const admin = await adminApi();
   const { token } = await admin.createUser(login);
   await admin.call("POST", "/api/v1/password-setups", { token, password });
   await admin.dispose();

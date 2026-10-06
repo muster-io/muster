@@ -9,13 +9,13 @@ import { expect, test, type Page } from "@playwright/test";
 
 import {
   ADMIN_LOGIN,
-  ADMIN_PASSWORD,
   APP,
   Api,
+  adminApi,
   expectNoHorizontalScroll,
   nextIdpUser,
   shot,
-  signInLocally,
+  signInAdmin,
   totpCode,
   watchCsp,
 } from "./support";
@@ -24,26 +24,6 @@ const SETUP_LINK = /^http:\/\/localhost:8080\/password-setup#token=\S+$/;
 
 function nav(page: Page) {
   return page.getByRole("navigation", { name: "Main" });
-}
-
-/**
- * Signs the Admin in. The sign-in spec ends with a throttled source address; a success resets it, so a refused attempt
- * is made again once the wait the page names has passed.
- */
-async function signInAdmin(page: Page): Promise<void> {
-  await page.goto("/sign-in");
-  const tooMany = page.getByText(/^Too many attempts\. Try again in (\d+) seconds?\.$/);
-  const menu = page.getByTestId("user-menu-name");
-  for (let attempt = 0; attempt < 5; attempt++) {
-    await signInLocally(page, ADMIN_LOGIN, ADMIN_PASSWORD);
-    await expect(menu.or(tooMany)).toBeVisible();
-    if (await menu.isVisible()) {
-      break;
-    }
-    const seconds = Number(/(\d+) second/.exec((await tooMany.textContent()) ?? "")?.[1] ?? "1");
-    await page.waitForTimeout(seconds * 1000 + 200);
-  }
-  await expect(menu).toHaveText("admin");
 }
 
 /** The row of the users table that holds a text. */
@@ -126,7 +106,7 @@ test("resets TOTP, converts an OIDC user to local and issues a new setup link", 
   browser,
   page,
 }) => {
-  const admin = await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
+  const admin = await adminApi();
   // A local user with TOTP.
   const { token } = await admin.createUser("tina");
   await admin.call("POST", "/api/v1/password-setups", { token, password: "tina-password-1" });
@@ -207,7 +187,7 @@ test("without users:write the user's page offers no action", async ({ page }) =>
 });
 
 test("pages through the users with the cursor of the list", async ({ page }) => {
-  const admin = await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
+  const admin = await adminApi();
   for (let i = 0; i < 55; i++) {
     await admin.call("POST", "/api/v1/users", {
       name: `page-user-${String(i).padStart(2, "0")}`,

@@ -9,13 +9,12 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 
 import {
   ADMIN_LOGIN,
-  ADMIN_PASSWORD,
   APP,
-  Api,
+  adminApi,
   expectNoHorizontalScroll,
   nextIdpUser,
   shot,
-  signInLocally,
+  signInAdmin,
   watchCsp,
 } from "./support";
 
@@ -25,12 +24,6 @@ const NOBODY = "Nobody will be able to sign in through OIDC.";
 
 function nav(page: Page) {
   return page.getByRole("navigation", { name: "Main" });
-}
-
-async function signInAdmin(page: Page): Promise<void> {
-  await page.goto("/sign-in");
-  await signInLocally(page, ADMIN_LOGIN, ADMIN_PASSWORD);
-  await expect(page.getByTestId("user-menu-name")).toHaveText("admin");
 }
 
 /** A day n days from today (UTC), as the date input takes it and as the warning shows it. */
@@ -145,7 +138,7 @@ async function securityPage(browser: Browser): Promise<Page> {
 test("Organization → Security saves the TOTP policy and refuses a save over a newer version", async ({
   browser,
 }) => {
-  const api = await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
+  const api = await adminApi();
   // Both pages sign in before the policy covers the Admin, who has no TOTP.
   const first = await securityPage(browser);
   const second = await securityPage(browser);
@@ -191,7 +184,7 @@ test("warns while the last active Admin keeps the Role, and a Responder sees non
   await page.goto("/sign-in");
   await page.getByText("Sign in with Dev IdP").click();
   await expect(page.getByTestId("user-menu-name")).toHaveText("ada");
-  const api = await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
+  const api = await adminApi();
   const { items } = await api.call<{ items: { id: string; etag: string; name: string }[] }>(
     "GET",
     `/api/v1/users?q=${encodeURIComponent(ADMIN_LOGIN)}`,

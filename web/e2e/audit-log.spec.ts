@@ -8,12 +8,11 @@ import { expect, test, type Page } from "@playwright/test";
 
 import {
   ADMIN_LOGIN,
-  ADMIN_PASSWORD,
   APP,
-  Api,
+  adminApi,
   expectNoHorizontalScroll,
   shot,
-  signInLocally,
+  signInAdmin,
   watchCsp,
 } from "./support";
 
@@ -38,9 +37,7 @@ function berlinDay(daysBefore: number): string {
 
 test("filters the Audit log and shows a Secret only as changed", async ({ page }) => {
   const csp = watchCsp(page);
-  await page.goto("/sign-in");
-  await signInLocally(page, ADMIN_LOGIN, ADMIN_PASSWORD);
-  await expect(page.getByTestId("user-menu-name")).toHaveText("admin");
+  await signInAdmin(page);
 
   // A new client secret, so that the newest oidc_settings.updated entry is the Admin's.
   await nav(page).getByRole("link", { name: "OIDC" }).click();
@@ -100,7 +97,7 @@ test("filters the Audit log and shows a Secret only as changed", async ({ page }
 
 // The later specs sign in through the fake IdP, which accepts any secret; the demo secret is put back all the same.
 test.afterAll(async () => {
-  const admin = await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
+  const admin = await adminApi();
   const settings = await admin.call<
     Record<string, unknown> & { etag: string; proxy: Record<string, unknown> }
   >("GET", "/api/v1/oidc-settings");
@@ -123,7 +120,7 @@ test.afterAll(async () => {
 });
 
 test("shows the values that deleting a user erased as [erased]", async ({ page }) => {
-  const admin = await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
+  const admin = await adminApi();
   const created = await admin.call<{ user: { id: string } }>("POST", "/api/v1/users", {
     name: "Erin Example",
     login: "erin",
@@ -133,9 +130,7 @@ test("shows the values that deleting a user erased as [erased]", async ({ page }
   await admin.call("DELETE", `/api/v1/users/${created.user.id}`);
   await admin.dispose();
 
-  await page.goto("/sign-in");
-  await signInLocally(page, ADMIN_LOGIN, ADMIN_PASSWORD);
-  await expect(page.getByTestId("user-menu-name")).toHaveText("admin");
+  await signInAdmin(page);
   await page.goto(
     `/admin/audit-log?action=user.created&resource_type=user&resource_id=${created.user.id}`,
   );
