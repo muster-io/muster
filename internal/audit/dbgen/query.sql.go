@@ -13,6 +13,39 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const findServiceAccountActor = `-- name: FindServiceAccountActor :one
+SELECT id FROM service_accounts WHERE org_id = $1 AND public_id = $2
+`
+
+type FindServiceAccountActorParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+func (q *Queries) FindServiceAccountActor(ctx context.Context, arg FindServiceAccountActorParams) (int64, error) {
+	row := q.db.QueryRow(ctx, findServiceAccountActor, arg.OrgID, arg.PublicID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const findUserActor = `-- name: FindUserActor :one
+SELECT id FROM users WHERE org_id = $1 AND public_id = $2
+`
+
+type FindUserActorParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+// FindUserActor resolves the public_id of a user, and FindServiceAccountActor that of a Service account, to the internal id the entries store.
+func (q *Queries) FindUserActor(ctx context.Context, arg FindUserActorParams) (int64, error) {
+	row := q.db.QueryRow(ctx, findUserActor, arg.OrgID, arg.PublicID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertAuditEntry = `-- name: InsertAuditEntry :exec
 
 INSERT INTO audit_log (
@@ -70,4 +103,121 @@ func (q *Queries) InsertAuditEntry(ctx context.Context, arg InsertAuditEntryPara
 		arg.SourceAddress,
 	)
 	return err
+}
+
+const listAuditEntries = `-- name: ListAuditEntries :many
+SELECT a.id, a.public_id, a.at, a.actor_kind, a.actor_name, a.token_name, a.transport, a.action, a.resource_type,
+       a.resource_public_id, a.resource_name, ru.name AS resource_user_name, a.diff, a.details,
+       u.public_id AS actor_user_public_id, u.name AS actor_user_name,
+       sa.public_id AS actor_service_account_public_id, sa.name AS actor_service_account_name,
+       t.public_id AS token_public_id
+FROM audit_log a
+LEFT JOIN users u ON u.org_id = $1 AND u.id = a.actor_user_id
+LEFT JOIN service_accounts sa ON sa.org_id = $1 AND sa.id = a.actor_service_account_id
+LEFT JOIN api_tokens t ON t.org_id = $1 AND t.id = a.api_token_id
+LEFT JOIN users ru ON ru.org_id = $1 AND a.resource_type = 'user' AND ru.public_id = a.resource_public_id
+WHERE a.org_id = $1
+  AND ($2::timestamptz IS NULL OR a.at >= $2::timestamptz)
+  AND ($3::timestamptz IS NULL OR a.at < $3::timestamptz)
+  AND ($4::bigint IS NULL OR a.actor_user_id = $4::bigint)
+  AND ($5::bigint IS NULL
+       OR a.actor_service_account_id = $5::bigint)
+  AND ($6::text IS NULL OR a.action = $6::text)
+  AND ($7::text IS NULL OR a.resource_type = $7::text)
+  AND ($8::text IS NULL OR a.resource_public_id = $8::text)
+  AND ($9::timestamptz IS NULL
+       OR (a.at, a.id) < ($9::timestamptz, $10::bigint))
+ORDER BY a.at DESC, a.id DESC
+LIMIT $11
+`
+
+type ListAuditEntriesParams struct {
+	OrgID                 int64
+	From                  pgtype.Timestamptz
+	To                    pgtype.Timestamptz
+	ActorUserID           pgtype.Int8
+	ActorServiceAccountID pgtype.Int8
+	Action                pgtype.Text
+	ResourceType          pgtype.Text
+	ResourceID            pgtype.Text
+	BeforeAt              pgtype.Timestamptz
+	BeforeID              pgtype.Int8
+	PageSize              int32
+}
+
+type ListAuditEntriesRow struct {
+	ID                          int64
+	PublicID                    string
+	At                          time.Time
+	ActorKind                   string
+	ActorName                   pgtype.Text
+	TokenName                   pgtype.Text
+	Transport                   string
+	Action                      string
+	ResourceType                pgtype.Text
+	ResourcePublicID            pgtype.Text
+	ResourceName                pgtype.Text
+	ResourceUserName            pgtype.Text
+	Diff                        []byte
+	Details                     []byte
+	ActorUserPublicID           pgtype.Text
+	ActorUserName               pgtype.Text
+	ActorServiceAccountPublicID pgtype.Text
+	ActorServiceAccountName     pgtype.Text
+	TokenPublicID               pgtype.Text
+}
+
+// ListAuditEntries is a page of entries, newest first by time and id, after the cursor (before_at, before_id) when
+// one is given, with the filters that are set. The actor, and a user as the resource, show their current name, so
+// that a deleted user appears as deleted-user-<id> (C-03.FR-13); rows are never rewritten.
+func (q *Queries) ListAuditEntries(ctx context.Context, arg ListAuditEntriesParams) ([]ListAuditEntriesRow, error) {
+	rows, err := q.db.Query(ctx, listAuditEntries,
+		arg.OrgID,
+		arg.From,
+		arg.To,
+		arg.ActorUserID,
+		arg.ActorServiceAccountID,
+		arg.Action,
+		arg.ResourceType,
+		arg.ResourceID,
+		arg.BeforeAt,
+		arg.BeforeID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAuditEntriesRow{}
+	for rows.Next() {
+		var i ListAuditEntriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.At,
+			&i.ActorKind,
+			&i.ActorName,
+			&i.TokenName,
+			&i.Transport,
+			&i.Action,
+			&i.ResourceType,
+			&i.ResourcePublicID,
+			&i.ResourceName,
+			&i.ResourceUserName,
+			&i.Diff,
+			&i.Details,
+			&i.ActorUserPublicID,
+			&i.ActorUserName,
+			&i.ActorServiceAccountPublicID,
+			&i.ActorServiceAccountName,
+			&i.TokenPublicID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

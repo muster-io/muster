@@ -65,6 +65,10 @@ const (
 	EndSignOutEverywhere = "sign_out_everywhere"
 	EndPasswordChanged   = "password_changed"
 	EndExpired           = "expired"
+	// The administrative endings: an Admin changed the Role, disabled or deleted the user (C-03.FR-9, FR-13).
+	EndRoleChanged  = "role_changed"
+	EndUserDisabled = "user_disabled"
+	EndUserDeleted  = "user_deleted"
 )
 
 var (

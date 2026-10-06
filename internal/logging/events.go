@@ -174,8 +174,9 @@ var ReplicasPruned = newEvent("replicas_pruned", LevelInfo, "C-02",
 // ShortLivedPruned is logged when the short-lived pruning Leader task deleted expired rows from a table.
 var ShortLivedPruned = newEvent("short_lived_pruned", LevelInfo, "C-02",
 	"The hourly short-lived pruning of the Leader deleted, in batches, rows of a short-lived table that can no "+
-		"longer be used, such as sessions that ended or expired auth.session_prune_after ago and sign-in throttles "+
-		"without a failure for auth.signin_throttle_prune_after; rows is how many it deleted from the table.",
+		"longer be used, such as sessions that ended or expired auth.session_prune_after ago, sign-in throttles "+
+		"without a failure for auth.signin_throttle_prune_after and password setup links that expired "+
+		"auth.password_setup_prune_after ago; rows is how many it deleted from the table.",
 	"table", "rows")
 
 // ClockSkew is logged when this replica's clock differs from the database clock by more than

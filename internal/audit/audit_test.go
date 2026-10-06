@@ -8,10 +8,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/netip"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/clock"
@@ -141,5 +145,212 @@ func TestChangedAndActors(t *testing.T) {
 	}
 	if NewStore(nil) == nil {
 		t.Error("NewStore")
+	}
+}
+
+type proxy struct {
+	Address  string `json:"address"`
+	Password string `json:"password" audit:"secret"`
+}
+
+type settings struct {
+	Name     string            `json:"name"`
+	Email    *string           `json:"email"`
+	Proxy    proxy             `json:"proxy"`
+	Next     *proxy            `json:"next"`
+	Labels   map[string]string `json:"labels"`
+	Path     string            `json:"a/b~c"`
+	Untagged int
+	Skipped  string `json:"-"`
+	private  string
+	Token    string `json:"token" audit:"secret"`
+}
+
+// TestDiff is the before/after diff of C-03.FR-14 with the Secret rule of C-03.FR-21: changed values at their JSON
+// pointer, nested objects walked, Secrets only marked as changed.
+func TestDiff(t *testing.T) {
+	email := "a@example.org"
+	before := settings{Name: "A", Proxy: proxy{Address: "p:1", Password: "old"}, Next: &proxy{Address: "n"},
+		Labels: map[string]string{"a": "1"}, Path: "x", Untagged: 1, Skipped: "s", private: "p", Token: "t1"}
+	after := before
+	after.Name, after.Email, after.Proxy.Password, after.Next = "B", &email, "new", &proxy{Address: "m"}
+	after.Labels, after.Path, after.Untagged, after.Skipped, after.private = map[string]string{"a": "2"}, "y", 2, "t", "q"
+	got := Diff(before, after)
+	b, _ := json.Marshal(got)
+	want := `[{"pointer":"/name","before":"A","after":"B"},{"pointer":"/email","after":"a@example.org"},` +
+		`{"pointer":"/proxy/password","secret_changed":true},{"pointer":"/next/address","before":"n","after":"m"},` +
+		`{"pointer":"/labels","before":{"a":"1"},"after":{"a":"2"}},{"pointer":"/a~1b~0c","before":"x","after":"y"},` +
+		`{"pointer":"/Untagged","before":1,"after":2}]`
+	if string(b) != want {
+		t.Errorf("diff\n %s\nwant\n %s", b, want)
+	}
+	if strings.Contains(string(b), "old") || strings.Contains(string(b), "new") {
+		t.Error("a Secret value is in the diff")
+	}
+	if d := Diff(before, before); d != nil {
+		t.Errorf("no change = %+v", d)
+	}
+	after = before
+	before.Next.Password = "secret-value"
+	after.Next, after.Token = nil, "t2"
+	b, _ = json.Marshal(Diff(before, after))
+	if string(b) != `[{"pointer":"/next/address","before":"n","after":""},{"pointer":"/next/password","secret_changed":true},`+
+		`{"pointer":"/token","secret_changed":true}]` {
+		t.Errorf("a removed object = %s", b)
+	}
+	b, _ = json.Marshal(Diff(after, before))
+	if !strings.Contains(string(b), `{"pointer":"/next/password","secret_changed":true}`) || strings.Contains(string(b), "secret-value") {
+		t.Errorf("an added object = %s", b)
+	}
+	b, _ = json.Marshal(Created(settings{Name: "C", Token: "t"}))
+	if string(b) != `[{"pointer":"/name","after":"C"},{"pointer":"/token","secret_changed":true}]` {
+		t.Errorf("created = %s", b)
+	}
+	if d := Diff(time.Time{}, t0); len(d) != 1 || d[0].Pointer != "" {
+		t.Errorf("a time = %+v", d)
+	}
+	if a := CLI("ops"); a.Kind != ActorCLI || a.Name != "ops" {
+		t.Errorf("CLI = %+v", a)
+	}
+}
+
+// fakeList answers the list queries from rows in memory, newest first, and records the parameters.
+type fakeList struct {
+	rows  []dbgen.ListAuditEntriesRow
+	users map[string]int64
+	sas   map[string]int64
+	arg   dbgen.ListAuditEntriesParams
+	err   error
+}
+
+func (f *fakeList) FindUserActor(_ context.Context, arg dbgen.FindUserActorParams) (int64, error) {
+	if id, ok := f.users[arg.PublicID]; ok && arg.OrgID == 7 {
+		return id, nil
+	}
+	return 0, f.notFound()
+}
+
+func (f *fakeList) FindServiceAccountActor(_ context.Context, arg dbgen.FindServiceAccountActorParams) (int64, error) {
+	if id, ok := f.sas[arg.PublicID]; ok && arg.OrgID == 7 {
+		return id, nil
+	}
+	return 0, f.notFound()
+}
+
+func (f *fakeList) notFound() error {
+	if f.err != nil {
+		return f.err
+	}
+	return pgx.ErrNoRows
+}
+
+func (f *fakeList) ListAuditEntries(_ context.Context, arg dbgen.ListAuditEntriesParams) ([]dbgen.ListAuditEntriesRow,
+	error) {
+	f.arg = arg
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []dbgen.ListAuditEntriesRow
+	for _, r := range f.rows {
+		if arg.BeforeID.Valid && r.ID >= arg.BeforeID.Int64 {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out[:min(len(out), int(arg.PageSize))], nil
+}
+
+func txt(s string) pgtype.Text { return pgtype.Text{String: s, Valid: s != ""} }
+
+func entryRow(id int64, kind, action string) dbgen.ListAuditEntriesRow {
+	return dbgen.ListAuditEntriesRow{ID: id, PublicID: fmt.Sprintf("AE%012d", id), At: t0.Add(time.Duration(id) * time.Minute),
+		ActorKind: kind, Transport: "ui", Action: action, Diff: []byte(`[]`), Details: []byte(`{}`)}
+}
+
+// TestList is C-03.FR-15's reader: newest first, pages by a cursor on time and id, the filters passed on, actors
+// resolved by public_id and named by their current name.
+func TestList(t *testing.T) {
+	user := entryRow(5, "user", "user.deleted")
+	user.ActorUserPublicID, user.ActorUserName = txt("SR0000000000AA"), txt("deleted-user-SR0000000000BB")
+	user.ResourceType, user.ResourcePublicID, user.ResourceName = txt("user"), txt("SR0000000000BB"), txt("x")
+	user.ResourceUserName = txt("deleted-user-SR0000000000BB")
+	user.Diff, user.Details = []byte(`[{"pointer":"/status","before":"active","after":"deleted"}]`), []byte(`{"n":1}`)
+	sa := entryRow(4, "service_account", "a.b")
+	sa.ActorServiceAccountPublicID, sa.ActorServiceAccountName, sa.TokenPublicID, sa.TokenName = txt("SA0000000000AA"),
+		txt("ci"), txt("ST0000000000AA"), txt("deploy")
+	cli := entryRow(3, "cli", "user.password_reset")
+	cli.ActorName = txt("ops")
+	f := &fakeList{rows: []dbgen.ListAuditEntriesRow{user, sa, cli, entryRow(2, "system", "a.b"),
+		entryRow(1, "bootstrap", "user.created")}, users: map[string]int64{"SR0000000000AA": 11},
+		sas: map[string]int64{"SA0000000000AA": 12}}
+	r := NewReader(7, f)
+	page, err := r.List(t.Context(), Filter{Limit: 3})
+	if err != nil || len(page.Entries) != 3 || page.Next == nil || *page.Next != (Cursor{At: cli.At, ID: 3}) {
+		t.Fatalf("page = %+v, %v", page, err)
+	}
+	if e := page.Entries[0]; e.Actor != (ListedActor{Kind: ActorUser, PublicID: "SR0000000000AA",
+		Name: "deleted-user-SR0000000000BB"}) || e.ResourceID != "SR0000000000BB" ||
+		e.ResourceName != "deleted-user-SR0000000000BB" || e.Diff[0].After != "deleted" ||
+		e.Details["n"] != 1.0 {
+		t.Errorf("user entry = %+v", e)
+	}
+	if e := page.Entries[1]; e.Actor.Name != "ci" || e.Actor.PublicID != "SA0000000000AA" || e.TokenPublicID != "ST0000000000AA" {
+		t.Errorf("service account entry = %+v", e)
+	}
+	if e := page.Entries[2]; e.Actor.Name != "ops" || e.Actor.PublicID != "" {
+		t.Errorf("cli entry = %+v", e)
+	}
+	page, err = r.List(t.Context(), Filter{Limit: 3, After: page.Next})
+	if err != nil || len(page.Entries) != 2 || page.Next != nil || page.Entries[0].Actor.Name != SystemName ||
+		page.Entries[1].Actor.Name != BootstrapName || len(page.Entries[1].Diff) != 0 || page.Entries[1].Details == nil {
+		t.Errorf("last page = %+v, %v", page, err)
+	}
+	if f.arg.BeforeID.Int64 != 3 || !f.arg.BeforeAt.Time.Equal(cli.At) || f.arg.PageSize != 4 {
+		t.Errorf("cursor parameters = %+v", f.arg)
+	}
+	from, to := t0, t0.Add(time.Hour)
+	if _, err := r.List(t.Context(), Filter{From: &from, To: &to, Actor: "sr0000000000aa", Action: "a.b",
+		ResourceType: "user", ResourceID: "sr00000000000o", Limit: 50}); err != nil {
+		t.Fatal(err)
+	}
+	if a := f.arg; !a.From.Time.Equal(from) || !a.To.Time.Equal(to) || a.ActorUserID.Int64 != 11 ||
+		a.ActorServiceAccountID.Valid || a.Action.String != "a.b" || a.ResourceType.String != "user" ||
+		a.ResourceID.String != "SR000000000000" || a.OrgID != 7 || a.BeforeID.Valid {
+		t.Errorf("filter parameters = %+v", a)
+	}
+	if _, err := r.List(t.Context(), Filter{Actor: "SA0000000000AA", ResourceID: "x", Limit: 50}); err != nil {
+		t.Fatal(err)
+	}
+	if a := f.arg; a.ActorServiceAccountID.Int64 != 12 || a.ActorUserID.Valid || a.ResourceID.String != "x" {
+		t.Errorf("service account parameters = %+v", a)
+	}
+	for _, actor := range []string{"SR0000000000ZZ", "SA0000000000ZZ", "nonsense"} {
+		f.arg = dbgen.ListAuditEntriesParams{}
+		page, err := r.List(t.Context(), Filter{Actor: actor, Limit: 50})
+		if err != nil || len(page.Entries) != 0 || page.Entries == nil || f.arg.OrgID != 0 {
+			t.Errorf("actor %s = %+v, %v", actor, page, err)
+		}
+	}
+	if NewListQueries(nil) == nil {
+		t.Error("NewListQueries")
+	}
+}
+
+func TestListFailures(t *testing.T) {
+	boom := errors.New("boom")
+	for _, actor := range []string{"", "SR0000000000ZZ", "SA0000000000ZZ"} {
+		r := NewReader(7, &fakeList{err: boom})
+		if _, err := r.List(t.Context(), Filter{Actor: actor, Limit: 1}); !errors.Is(err, boom) {
+			t.Errorf("actor %q: %v", actor, err)
+		}
+	}
+	for name, row := range map[string]dbgen.ListAuditEntriesRow{
+		"diff":    {Diff: []byte(`{`), Details: []byte(`{}`)},
+		"details": {Diff: []byte(`[]`), Details: []byte(`[`)},
+	} {
+		r := NewReader(7, &fakeList{rows: []dbgen.ListAuditEntriesRow{row}})
+		if _, err := r.List(t.Context(), Filter{Limit: 1}); err == nil {
+			t.Errorf("a broken %s was read", name)
+		}
 	}
 }

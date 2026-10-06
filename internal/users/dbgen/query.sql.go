@@ -69,6 +69,73 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, 
 	return id, err
 }
 
+const endSessionsOfUser = `-- name: EndSessionsOfUser :execrows
+UPDATE sessions
+SET ended_at = $1::timestamptz, end_reason = $2
+WHERE org_id = $3 AND user_id = $4 AND ended_at IS NULL
+`
+
+type EndSessionsOfUserParams struct {
+	Now       time.Time
+	EndReason pgtype.Text
+	OrgID     int64
+	UserID    int64
+}
+
+// EndSessionsOfUser ends every session of a user that has not ended, with the reason of the administrative action.
+func (q *Queries) EndSessionsOfUser(ctx context.Context, arg EndSessionsOfUserParams) (int64, error) {
+	result, err := q.db.Exec(ctx, endSessionsOfUser,
+		arg.Now,
+		arg.EndReason,
+		arg.OrgID,
+		arg.UserID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getPasswordSetup = `-- name: GetPasswordSetup :one
+SELECT p.id, p.user_id, p.expires_at, p.used_at, p.superseded_at, u.public_id AS user_public_id, u.name AS user_name
+FROM password_setups p
+JOIN users u ON u.org_id = $1 AND u.id = p.user_id
+WHERE p.org_id = $1 AND p.token_hash = $2
+FOR UPDATE OF p
+`
+
+type GetPasswordSetupParams struct {
+	OrgID     int64
+	TokenHash []byte
+}
+
+type GetPasswordSetupRow struct {
+	ID           int64
+	UserID       int64
+	ExpiresAt    time.Time
+	UsedAt       pgtype.Timestamptz
+	SupersededAt pgtype.Timestamptz
+	UserPublicID string
+	UserName     string
+}
+
+// GetPasswordSetup finds a link by the hash of its token and, inside a transaction, locks it, so that it is used
+// once. The transaction locks the user first (LockUser), as every change of a user and its links does.
+func (q *Queries) GetPasswordSetup(ctx context.Context, arg GetPasswordSetupParams) (GetPasswordSetupRow, error) {
+	row := q.db.QueryRow(ctx, getPasswordSetup, arg.OrgID, arg.TokenHash)
+	var i GetPasswordSetupRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.SupersededAt,
+		&i.UserPublicID,
+		&i.UserName,
+	)
+	return i, err
+}
+
 const getUser = `-- name: GetUser :one
 
 SELECT u.id, u.public_id, u.login, u.name, u.email, u.role, u.source, u.status, (u.password_hash IS NOT NULL)::boolean AS has_password,
@@ -135,6 +202,445 @@ func (q *Queries) GetUser(ctx context.Context, arg GetUserParams) (GetUserRow, e
 	return i, err
 }
 
+const getUserByLogin = `-- name: GetUserByLogin :one
+SELECT id, public_id, name, status, (oidc_subject IS NOT NULL)::boolean AS has_oidc_identity
+FROM users
+WHERE org_id = $1 AND lower(login) = lower($2)
+`
+
+type GetUserByLoginParams struct {
+	OrgID int64
+	Login string
+}
+
+type GetUserByLoginRow struct {
+	ID              int64
+	PublicID        string
+	Name            string
+	Status          string
+	HasOidcIdentity bool
+}
+
+// GetUserByLogin finds an account by its login, compared lowercased.
+func (q *Queries) GetUserByLogin(ctx context.Context, arg GetUserByLoginParams) (GetUserByLoginRow, error) {
+	row := q.db.QueryRow(ctx, getUserByLogin, arg.OrgID, arg.Login)
+	var i GetUserByLoginRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.Status,
+		&i.HasOidcIdentity,
+	)
+	return i, err
+}
+
+const getUserByPublicID = `-- name: GetUserByPublicID :one
+SELECT u.id, u.public_id, u.login, u.name, u.email, u.role, u.source, u.status, (u.password_hash IS NOT NULL)::boolean AS has_password,
+       (u.oidc_subject IS NOT NULL)::boolean AS has_oidc_identity,
+       (u.oidc_offline_token_ciphertext IS NOT NULL)::boolean AS has_offline_token,
+       u.time_zone, u.language, u.last_sign_in_at, u.created_at, u.version,
+       EXISTS (
+           SELECT 1 FROM user_totp t
+           WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.enrolled_at IS NOT NULL
+       ) AS totp_enabled
+FROM users u
+WHERE u.org_id = $1 AND u.public_id = $2
+`
+
+type GetUserByPublicIDParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+type GetUserByPublicIDRow struct {
+	ID              int64
+	PublicID        string
+	Login           string
+	Name            string
+	Email           pgtype.Text
+	Role            string
+	Source          string
+	Status          string
+	HasPassword     bool
+	HasOidcIdentity bool
+	HasOfflineToken bool
+	TimeZone        pgtype.Text
+	Language        pgtype.Text
+	LastSignInAt    pgtype.Timestamptz
+	CreatedAt       time.Time
+	Version         int64
+	TotpEnabled     bool
+}
+
+// GetUserByPublicID reads a user by the public_id of the API, deleted users included.
+func (q *Queries) GetUserByPublicID(ctx context.Context, arg GetUserByPublicIDParams) (GetUserByPublicIDRow, error) {
+	row := q.db.QueryRow(ctx, getUserByPublicID, arg.OrgID, arg.PublicID)
+	var i GetUserByPublicIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Login,
+		&i.Name,
+		&i.Email,
+		&i.Role,
+		&i.Source,
+		&i.Status,
+		&i.HasPassword,
+		&i.HasOidcIdentity,
+		&i.HasOfflineToken,
+		&i.TimeZone,
+		&i.Language,
+		&i.LastSignInAt,
+		&i.CreatedAt,
+		&i.Version,
+		&i.TotpEnabled,
+	)
+	return i, err
+}
+
+const insertPasswordSetup = `-- name: InsertPasswordSetup :exec
+INSERT INTO password_setups (org_id, user_id, token_hash, created_by_user_id, created_at, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertPasswordSetupParams struct {
+	OrgID           int64
+	UserID          int64
+	TokenHash       []byte
+	CreatedByUserID pgtype.Int8
+	CreatedAt       time.Time
+	ExpiresAt       time.Time
+}
+
+func (q *Queries) InsertPasswordSetup(ctx context.Context, arg InsertPasswordSetupParams) error {
+	_, err := q.db.Exec(ctx, insertPasswordSetup,
+		arg.OrgID,
+		arg.UserID,
+		arg.TokenHash,
+		arg.CreatedByUserID,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
+const listUsers = `-- name: ListUsers :many
+SELECT u.id, u.public_id, u.login, u.name, u.email, u.role, u.source, u.status, (u.password_hash IS NOT NULL)::boolean AS has_password,
+       (u.oidc_subject IS NOT NULL)::boolean AS has_oidc_identity,
+       (u.oidc_offline_token_ciphertext IS NOT NULL)::boolean AS has_offline_token,
+       u.time_zone, u.language, u.last_sign_in_at, u.created_at, u.version,
+       EXISTS (
+           SELECT 1 FROM user_totp t
+           WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.enrolled_at IS NOT NULL
+       ) AS totp_enabled,
+       lower(u.name)::text AS sort_name
+FROM users u
+WHERE u.org_id = $1
+  AND ($2::text IS NULL
+       OR strpos(lower(u.name), lower($2::text)) > 0
+       OR strpos(lower(u.login), lower($2::text)) > 0
+       OR strpos(lower(coalesce(u.email, '')), lower($2::text)) > 0)
+  AND ($3::text IS NULL OR u.role = $3::text)
+  AND ($4::text IS NULL OR u.status = $4::text)
+  AND ($5::text IS NULL OR u.source = $5::text)
+  AND ($6::text IS NULL
+       OR (lower(u.name), u.id) > ($6::text, $7::bigint))
+ORDER BY lower(u.name), u.id
+LIMIT $8
+`
+
+type ListUsersParams struct {
+	OrgID     int64
+	Q         pgtype.Text
+	Role      pgtype.Text
+	Status    pgtype.Text
+	Source    pgtype.Text
+	AfterName pgtype.Text
+	AfterID   pgtype.Int8
+	PageSize  int32
+}
+
+type ListUsersRow struct {
+	ID              int64
+	PublicID        string
+	Login           string
+	Name            string
+	Email           pgtype.Text
+	Role            string
+	Source          string
+	Status          string
+	HasPassword     bool
+	HasOidcIdentity bool
+	HasOfflineToken bool
+	TimeZone        pgtype.Text
+	Language        pgtype.Text
+	LastSignInAt    pgtype.Timestamptz
+	CreatedAt       time.Time
+	Version         int64
+	TotpEnabled     bool
+	SortName        string
+}
+
+// ListUsers is a page of users in the order of their lowercased name, then id, after the cursor (after_name,
+// after_id) when one is given; q matches the name, the login and the email case-insensitively.
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
+	rows, err := q.db.Query(ctx, listUsers,
+		arg.OrgID,
+		arg.Q,
+		arg.Role,
+		arg.Status,
+		arg.Source,
+		arg.AfterName,
+		arg.AfterID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersRow{}
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Login,
+			&i.Name,
+			&i.Email,
+			&i.Role,
+			&i.Source,
+			&i.Status,
+			&i.HasPassword,
+			&i.HasOidcIdentity,
+			&i.HasOfflineToken,
+			&i.TimeZone,
+			&i.Language,
+			&i.LastSignInAt,
+			&i.CreatedAt,
+			&i.Version,
+			&i.TotpEnabled,
+			&i.SortName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockActiveAdmins = `-- name: LockActiveAdmins :many
+SELECT id
+FROM users
+WHERE org_id = $1 AND role = 'admin' AND status = 'active'
+ORDER BY id
+FOR NO KEY UPDATE
+`
+
+// LockActiveAdmins locks the rows of the active Admins, so that a change that could remove the last of them is
+// decided by one transaction at a time; a row that stopped matching while waiting is left out. Every change that locks
+// them does so before it locks its own user, so that two changes never wait for each other.
+func (q *Queries) LockActiveAdmins(ctx context.Context, orgID int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, lockActiveAdmins, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockUser = `-- name: LockUser :one
+SELECT id
+FROM users
+WHERE org_id = $1 AND public_id = $2
+FOR NO KEY UPDATE
+`
+
+type LockUserParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+// LockUser locks the user an administrative change is about, so that it reads the row it changes.
+func (q *Queries) LockUser(ctx context.Context, arg LockUserParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockUser, arg.OrgID, arg.PublicID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const markPasswordSetupUsed = `-- name: MarkPasswordSetupUsed :execrows
+UPDATE password_setups
+SET used_at = $1::timestamptz
+WHERE org_id = $2 AND id = $3 AND used_at IS NULL AND superseded_at IS NULL
+`
+
+type MarkPasswordSetupUsedParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+}
+
+func (q *Queries) MarkPasswordSetupUsed(ctx context.Context, arg MarkPasswordSetupUsedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markPasswordSetupUsed, arg.Now, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const prunePasswordSetups = `-- name: PrunePasswordSetups :execrows
+DELETE FROM password_setups p
+WHERE p.org_id = $1 AND p.id IN (
+    SELECT o.id FROM password_setups o
+    WHERE o.org_id = $1 AND o.expires_at < $2::timestamptz
+    ORDER BY o.id
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type PrunePasswordSetupsParams struct {
+	OrgID     int64
+	Before    time.Time
+	BatchSize int32
+}
+
+// PrunePasswordSetups deletes up to batch_size links that expired before @before, used and superseded ones included.
+// A link being used is skipped and taken at the next run.
+func (q *Queries) PrunePasswordSetups(ctx context.Context, arg PrunePasswordSetupsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, prunePasswordSetups, arg.OrgID, arg.Before, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const pseudonymizeUser = `-- name: PseudonymizeUser :execrows
+UPDATE users
+SET status = 'deleted', name = $1, login = $1, email = NULL, password_hash = NULL,
+    oidc_offline_token_ciphertext = NULL, oidc_offline_token_key_id = NULL, oidc_offline_token_updated_at = NULL,
+    deleted_at = $2::timestamptz, updated_at = $2::timestamptz, version = version + 1
+WHERE org_id = $3 AND id = $4 AND status <> 'deleted'
+`
+
+type PseudonymizeUserParams struct {
+	Pseudonym string
+	Now       time.Time
+	OrgID     int64
+	ID        int64
+}
+
+// PseudonymizeUser deletes a user: the row stays with the status deleted, name and login become the pseudonym, and
+// the email, the password and the offline token are erased.
+func (q *Queries) PseudonymizeUser(ctx context.Context, arg PseudonymizeUserParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pseudonymizeUser,
+		arg.Pseudonym,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setUserPassword = `-- name: SetUserPassword :execrows
+UPDATE users
+SET password_hash = $1, password_changed_at = $2::timestamptz, updated_at = $2::timestamptz,
+    version = version + 1
+WHERE org_id = $3 AND id = $4 AND status <> 'deleted' AND oidc_subject IS NULL
+`
+
+type SetUserPasswordParams struct {
+	PasswordHash pgtype.Text
+	Now          time.Time
+	OrgID        int64
+	ID           int64
+}
+
+// SetUserPassword sets the password of a local account that is not deleted.
+func (q *Queries) SetUserPassword(ctx context.Context, arg SetUserPasswordParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setUserPassword,
+		arg.PasswordHash,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setUserStatus = `-- name: SetUserStatus :execrows
+UPDATE users
+SET status = $1,
+    oidc_offline_token_ciphertext = CASE WHEN $1 = 'active' THEN oidc_offline_token_ciphertext END,
+    oidc_offline_token_key_id = CASE WHEN $1 = 'active' THEN oidc_offline_token_key_id END,
+    oidc_offline_token_updated_at = CASE WHEN $1 = 'active' THEN oidc_offline_token_updated_at END,
+    updated_at = $2::timestamptz, version = version + 1
+WHERE org_id = $3 AND id = $4 AND status <> 'deleted'
+`
+
+type SetUserStatusParams struct {
+	Status string
+	Now    time.Time
+	OrgID  int64
+	ID     int64
+}
+
+// SetUserStatus disables or enables a user that is not deleted; disabling wipes the offline token of an OIDC account.
+func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setUserStatus,
+		arg.Status,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const supersedePasswordSetups = `-- name: SupersedePasswordSetups :execrows
+UPDATE password_setups
+SET superseded_at = $1::timestamptz
+WHERE org_id = $2 AND user_id = $3 AND used_at IS NULL AND superseded_at IS NULL
+`
+
+type SupersedePasswordSetupsParams struct {
+	Now    time.Time
+	OrgID  int64
+	UserID int64
+}
+
+// SupersedePasswordSetups marks the open links of a user as replaced, before a newer one is issued or the user is
+// deleted.
+func (q *Queries) SupersedePasswordSetups(ctx context.Context, arg SupersedePasswordSetupsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, supersedePasswordSetups, arg.Now, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateProfile = `-- name: UpdateProfile :execrows
 UPDATE users
 SET name = $1, time_zone = $2, language = $3, updated_at = $4,
@@ -160,6 +666,39 @@ func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) (i
 		arg.UpdatedAt,
 		arg.OrgID,
 		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateUser = `-- name: UpdateUser :execrows
+UPDATE users
+SET name = $1, email = $2, role = $3, updated_at = $4::timestamptz, version = version + 1
+WHERE org_id = $5 AND id = $6 AND version = $7 AND status <> 'deleted'
+`
+
+type UpdateUserParams struct {
+	Name    string
+	Email   pgtype.Text
+	Role    string
+	Now     time.Time
+	OrgID   int64
+	ID      int64
+	Version int64
+}
+
+// UpdateUser changes what an Admin edits: the name, the email and the Role, at the version that was read.
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateUser,
+		arg.Name,
+		arg.Email,
+		arg.Role,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+		arg.Version,
 	)
 	if err != nil {
 		return 0, err

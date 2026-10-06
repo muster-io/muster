@@ -12,16 +12,22 @@ files_touched:
   - internal/api/sessions.go
   - internal/api/etag.go
   - internal/api/pagination.go
+  - internal/api/server.go
+  - internal/api/problem.go
   - internal/api/users_test.go
   - internal/api/auditlog_test.go
   - internal/users/admin.go
   - internal/users/setup.go
+  - internal/users/users.go
   - internal/users/query.sql
   - internal/users/admin_test.go
+  - internal/users/admin_integration_test.go
   - internal/auth/session.go
   - internal/leader/tasks.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/metrics/catalogue.go
+  - internal/audit/audit.go
   - internal/audit/list.go
   - internal/audit/diff.go
   - internal/audit/query.sql
@@ -30,6 +36,9 @@ files_touched:
   - internal/cli/admin.go
   - internal/cli/admin_test.go
   - internal/logging/events.go
+  - api/openapi.yaml
+  - go.mod
+  - design/db/schema.md
   - design/prd/l1/defaults.md
   - design/prd/L1.md
 acceptance:
@@ -182,13 +191,31 @@ curl -s -b jar 'localhost:8080/api/v1/audit-log?action=user.password_reset' | jq
 ## Open questions
 
 1. The PRD gives the Audit log list no default time range. Proposal: none in the API (newest first by cursor); the page
-   (S-015) starts with the last 7 days.
+   (S-015) starts with the last 7 days. _Resolved (D244):_ as proposed.
 
 ## Notes
 
 - Suggested commit: `feat(users): add user administration, password setup links and the audit log api`.
 - P-05 (`auth.password_setup_link_ttl`) is confirmed or changed here.
 - The password setup page itself is S-014; until then the link can be completed with `curl` as above.
+- Choices made in the implementation, within the contract:
+  - Every change of a user locks, in this order, the rows of the active Admins (when it can remove one), the user,
+    then the user's setup links, so the `last_admin` check and the change share one transaction and two changes never
+    wait for each other in a cycle. Completing a link hashes the password before its transaction, then locks the
+    user and the link and checks the link again, so a token sets a password once.
+  - A deleted user is still read and listed, with the status `deleted`; any other operation on it answers `404`.
+    Deleting a user also supersedes its open setup links; the deletion's diff names the status and the pseudonym,
+    not the erased values.
+  - Completing a setup link ends the user's sessions (the reason `password_changed`) and is recorded as
+    `user.password_set` by the actor `system` with the Transport `ui`: the person holding the link is not signed in.
+    `muster admin reset-password` also supersedes the account's open links.
+  - A login may not contain spaces or control characters, nor start with `deleted-user-` (`422`), so that no login
+    collides with a pseudonym. An email must be a bare address.
+  - The Audit log names the actor `system` "Muster" and the actor `bootstrap` "bootstrap"; a CLI actor carries its
+    `--actor` name. A user shows its current name as the actor and as the resource, so entries about a deleted user
+    show `deleted-user-<id>` too.
+  - `If-Match: *` matches any version; a weak tag `W/"n"` is read as `"n"`.
+  - `muster admin reset-password` reads the password without echo through `golang.org/x/term` (BSD-3-Clause).
 
 ## Coverage
 

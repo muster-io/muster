@@ -24,6 +24,7 @@ when MUSTER_MIGRATE_ON_START is true, then the app, ingest and internal listener
 Commands:
   migrate   Apply the database migrations under the migration lock
   doctor    Check the database, its connections, the master keys and the clock; only reads
+  admin     Emergency access: admin reset-password --actor <name> <login> sets a password read from standard input
   dev       Development mode: fake servers and development defaults (muster dev [--replica] | muster dev <command>)
   version   Print the version and commit
   help      Show this help
@@ -57,6 +58,8 @@ func run(args []string, stdout, stderr io.Writer, development bool) int {
 		return runDoctor(stdout, stderr, development)
 	case "dev":
 		return runDev(args[1:], stdout, stderr)
+	case "admin":
+		return runAdmin(args[1:], stdout, stderr)
 	case "version":
 		if len(args) > 1 {
 			fmt.Fprintf(stderr, "muster: version takes no arguments\n\n%s", usage)

@@ -36,3 +36,140 @@ VALUES (
     sqlc.narg('password_changed_at'), @created_at, @created_at
 )
 RETURNING id;
+
+-- GetUserByPublicID reads a user by the public_id of the API, deleted users included.
+-- name: GetUserByPublicID :one
+SELECT u.id, u.public_id, u.login, u.name, u.email, u.role, u.source, u.status, (u.password_hash IS NOT NULL)::boolean AS has_password,
+       (u.oidc_subject IS NOT NULL)::boolean AS has_oidc_identity,
+       (u.oidc_offline_token_ciphertext IS NOT NULL)::boolean AS has_offline_token,
+       u.time_zone, u.language, u.last_sign_in_at, u.created_at, u.version,
+       EXISTS (
+           SELECT 1 FROM user_totp t
+           WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.enrolled_at IS NOT NULL
+       ) AS totp_enabled
+FROM users u
+WHERE u.org_id = @org_id AND u.public_id = @public_id;
+
+-- GetUserByLogin finds an account by its login, compared lowercased.
+-- name: GetUserByLogin :one
+SELECT id, public_id, name, status, (oidc_subject IS NOT NULL)::boolean AS has_oidc_identity
+FROM users
+WHERE org_id = @org_id AND lower(login) = lower(@login);
+
+-- ListUsers is a page of users in the order of their lowercased name, then id, after the cursor (after_name,
+-- after_id) when one is given; q matches the name, the login and the email case-insensitively.
+-- name: ListUsers :many
+SELECT u.id, u.public_id, u.login, u.name, u.email, u.role, u.source, u.status, (u.password_hash IS NOT NULL)::boolean AS has_password,
+       (u.oidc_subject IS NOT NULL)::boolean AS has_oidc_identity,
+       (u.oidc_offline_token_ciphertext IS NOT NULL)::boolean AS has_offline_token,
+       u.time_zone, u.language, u.last_sign_in_at, u.created_at, u.version,
+       EXISTS (
+           SELECT 1 FROM user_totp t
+           WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.enrolled_at IS NOT NULL
+       ) AS totp_enabled,
+       lower(u.name)::text AS sort_name
+FROM users u
+WHERE u.org_id = @org_id
+  AND (sqlc.narg('q')::text IS NULL
+       OR strpos(lower(u.name), lower(sqlc.narg('q')::text)) > 0
+       OR strpos(lower(u.login), lower(sqlc.narg('q')::text)) > 0
+       OR strpos(lower(coalesce(u.email, '')), lower(sqlc.narg('q')::text)) > 0)
+  AND (sqlc.narg('role')::text IS NULL OR u.role = sqlc.narg('role')::text)
+  AND (sqlc.narg('status')::text IS NULL OR u.status = sqlc.narg('status')::text)
+  AND (sqlc.narg('source')::text IS NULL OR u.source = sqlc.narg('source')::text)
+  AND (sqlc.narg('after_name')::text IS NULL
+       OR (lower(u.name), u.id) > (sqlc.narg('after_name')::text, sqlc.narg('after_id')::bigint))
+ORDER BY lower(u.name), u.id
+LIMIT @page_size;
+
+-- LockActiveAdmins locks the rows of the active Admins, so that a change that could remove the last of them is
+-- decided by one transaction at a time; a row that stopped matching while waiting is left out. Every change that locks
+-- them does so before it locks its own user, so that two changes never wait for each other.
+-- name: LockActiveAdmins :many
+SELECT id
+FROM users
+WHERE org_id = @org_id AND role = 'admin' AND status = 'active'
+ORDER BY id
+FOR NO KEY UPDATE;
+
+-- LockUser locks the user an administrative change is about, so that it reads the row it changes.
+-- name: LockUser :one
+SELECT id
+FROM users
+WHERE org_id = @org_id AND public_id = @public_id
+FOR NO KEY UPDATE;
+
+-- UpdateUser changes what an Admin edits: the name, the email and the Role, at the version that was read.
+-- name: UpdateUser :execrows
+UPDATE users
+SET name = @name, email = sqlc.narg('email'), role = @role, updated_at = @now::timestamptz, version = version + 1
+WHERE org_id = @org_id AND id = @id AND version = @version AND status <> 'deleted';
+
+-- SetUserStatus disables or enables a user that is not deleted; disabling wipes the offline token of an OIDC account.
+-- name: SetUserStatus :execrows
+UPDATE users
+SET status = @status,
+    oidc_offline_token_ciphertext = CASE WHEN @status = 'active' THEN oidc_offline_token_ciphertext END,
+    oidc_offline_token_key_id = CASE WHEN @status = 'active' THEN oidc_offline_token_key_id END,
+    oidc_offline_token_updated_at = CASE WHEN @status = 'active' THEN oidc_offline_token_updated_at END,
+    updated_at = @now::timestamptz, version = version + 1
+WHERE org_id = @org_id AND id = @id AND status <> 'deleted';
+
+-- PseudonymizeUser deletes a user: the row stays with the status deleted, name and login become the pseudonym, and
+-- the email, the password and the offline token are erased.
+-- name: PseudonymizeUser :execrows
+UPDATE users
+SET status = 'deleted', name = @pseudonym, login = @pseudonym, email = NULL, password_hash = NULL,
+    oidc_offline_token_ciphertext = NULL, oidc_offline_token_key_id = NULL, oidc_offline_token_updated_at = NULL,
+    deleted_at = @now::timestamptz, updated_at = @now::timestamptz, version = version + 1
+WHERE org_id = @org_id AND id = @id AND status <> 'deleted';
+
+-- SetUserPassword sets the password of a local account that is not deleted.
+-- name: SetUserPassword :execrows
+UPDATE users
+SET password_hash = @password_hash, password_changed_at = @now::timestamptz, updated_at = @now::timestamptz,
+    version = version + 1
+WHERE org_id = @org_id AND id = @id AND status <> 'deleted' AND oidc_subject IS NULL;
+
+-- EndSessionsOfUser ends every session of a user that has not ended, with the reason of the administrative action.
+-- name: EndSessionsOfUser :execrows
+UPDATE sessions
+SET ended_at = @now::timestamptz, end_reason = @end_reason
+WHERE org_id = @org_id AND user_id = @user_id AND ended_at IS NULL;
+
+-- name: InsertPasswordSetup :exec
+INSERT INTO password_setups (org_id, user_id, token_hash, created_by_user_id, created_at, expires_at)
+VALUES (@org_id, @user_id, @token_hash, sqlc.narg('created_by_user_id'), @created_at, @expires_at);
+
+-- SupersedePasswordSetups marks the open links of a user as replaced, before a newer one is issued or the user is
+-- deleted.
+-- name: SupersedePasswordSetups :execrows
+UPDATE password_setups
+SET superseded_at = @now::timestamptz
+WHERE org_id = @org_id AND user_id = @user_id AND used_at IS NULL AND superseded_at IS NULL;
+
+-- GetPasswordSetup finds a link by the hash of its token and, inside a transaction, locks it, so that it is used
+-- once. The transaction locks the user first (LockUser), as every change of a user and its links does.
+-- name: GetPasswordSetup :one
+SELECT p.id, p.user_id, p.expires_at, p.used_at, p.superseded_at, u.public_id AS user_public_id, u.name AS user_name
+FROM password_setups p
+JOIN users u ON u.org_id = @org_id AND u.id = p.user_id
+WHERE p.org_id = @org_id AND p.token_hash = @token_hash
+FOR UPDATE OF p;
+
+-- name: MarkPasswordSetupUsed :execrows
+UPDATE password_setups
+SET used_at = @now::timestamptz
+WHERE org_id = @org_id AND id = @id AND used_at IS NULL AND superseded_at IS NULL;
+
+-- PrunePasswordSetups deletes up to batch_size links that expired before @before, used and superseded ones included.
+-- A link being used is skipped and taken at the next run.
+-- name: PrunePasswordSetups :execrows
+DELETE FROM password_setups p
+WHERE p.org_id = @org_id AND p.id IN (
+    SELECT o.id FROM password_setups o
+    WHERE o.org_id = @org_id AND o.expires_at < @before::timestamptz
+    ORDER BY o.id
+    LIMIT @batch_size
+    FOR UPDATE SKIP LOCKED
+);

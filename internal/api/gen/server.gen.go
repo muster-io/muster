@@ -24401,6 +24401,22 @@ func (response CompletePasswordSetup400ApplicationProblemPlusJSONResponse) Visit
 	return err
 }
 
+type CompletePasswordSetup403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response CompletePasswordSetup403ApplicationProblemPlusJSONResponse) VisitCompletePasswordSetupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CompletePasswordSetup404ApplicationProblemPlusJSONResponse struct {
 	NotFoundApplicationProblemPlusJSONResponse
 }

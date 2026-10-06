@@ -994,6 +994,11 @@ export type completePasswordSetupResponse400 = {
   status: 400
 }
 
+export type completePasswordSetupResponse403 = {
+  data: ForbiddenResponse
+  status: 403
+}
+
 export type completePasswordSetupResponse404 = {
   data: NotFoundResponse
   status: 404
@@ -1017,7 +1022,7 @@ export type completePasswordSetupResponse429 = {
 export type completePasswordSetupResponseSuccess = (completePasswordSetupResponse204) & {
   headers: Headers;
 };
-export type completePasswordSetupResponseError = (completePasswordSetupResponse400 | completePasswordSetupResponse404 | completePasswordSetupResponse410 | completePasswordSetupResponse422 | completePasswordSetupResponse429) & {
+export type completePasswordSetupResponseError = (completePasswordSetupResponse400 | completePasswordSetupResponse403 | completePasswordSetupResponse404 | completePasswordSetupResponse410 | completePasswordSetupResponse422 | completePasswordSetupResponse429) & {
   headers: Headers;
 };
 
@@ -1032,7 +1037,7 @@ export const getCompletePasswordSetupUrl = () => {
 }
 
 /**
- * Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`).
+ * Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`). Like the sign-in, a request that a browser marks as cross-site is `403` (`csrf_invalid`).
  * @summary Set a password from a setup link
  */
 export const completePasswordSetup = async (passwordSetup: PasswordSetup, options?: RequestInit): Promise<completePasswordSetupResponse> => {
@@ -1073,7 +1078,7 @@ const res = await fetch(getCompletePasswordSetupUrl(),
 
 export const getCompletePasswordSetupMutationKey = () => ['completePasswordSetup'] as const;
 
-export const getCompletePasswordSetupMutationOptions = <TError = BadRequestResponse | NotFoundResponse | GoneResponse | UnprocessableResponse | TooManyRequestsResponse,
+export const getCompletePasswordSetupMutationOptions = <TError = BadRequestResponse | ForbiddenResponse | NotFoundResponse | GoneResponse | UnprocessableResponse | TooManyRequestsResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completePasswordSetup>>, TError,CompletePasswordSetupMutationVariables, TContext>, fetch?: RequestInit}
 ): UseMutationOptions<Awaited<ReturnType<typeof completePasswordSetup>>, TError,CompletePasswordSetupMutationVariables, TContext> => {
 
@@ -1102,13 +1107,13 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
 
     export type CompletePasswordSetupMutationResult = NonNullable<Awaited<ReturnType<typeof completePasswordSetup>>>
     export type CompletePasswordSetupMutationBody = PasswordSetup
-    export type CompletePasswordSetupMutationError = BadRequestResponse | NotFoundResponse | GoneResponse | UnprocessableResponse | TooManyRequestsResponse
+    export type CompletePasswordSetupMutationError = BadRequestResponse | ForbiddenResponse | NotFoundResponse | GoneResponse | UnprocessableResponse | TooManyRequestsResponse
     export type CompletePasswordSetupMutationVariables = {data: PasswordSetup}
 
     /**
  * @summary Set a password from a setup link
  */
-export const useCompletePasswordSetup = <TError = BadRequestResponse | NotFoundResponse | GoneResponse | UnprocessableResponse | TooManyRequestsResponse,
+export const useCompletePasswordSetup = <TError = BadRequestResponse | ForbiddenResponse | NotFoundResponse | GoneResponse | UnprocessableResponse | TooManyRequestsResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completePasswordSetup>>, TError,CompletePasswordSetupMutationVariables, TContext>, fetch?: RequestInit}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof completePasswordSetup>>,

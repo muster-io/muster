@@ -25,15 +25,18 @@ const problemBase = "https://muster-io.github.io/muster/problems/"
 
 // The problem types of x-problem-types that this package answers with.
 const (
-	typeValidationFailed = "validation-failed"
-	typeUnauthenticated  = "unauthenticated"
-	typeForbidden        = "forbidden"
-	typeNotFound         = "not-found"
-	typeConflict         = "conflict"
-	typePayloadTooLarge  = "payload-too-large"
-	typeRateLimited      = "rate-limited"
-	typeInternal         = "internal"
-	typeNotImplemented   = "not-implemented"
+	typeValidationFailed     = "validation-failed"
+	typeUnauthenticated      = "unauthenticated"
+	typeForbidden            = "forbidden"
+	typeNotFound             = "not-found"
+	typeConflict             = "conflict"
+	typeGone                 = "gone"
+	typePreconditionFailed   = "precondition-failed"
+	typePreconditionRequired = "precondition-required"
+	typePayloadTooLarge      = "payload-too-large"
+	typeRateLimited          = "rate-limited"
+	typeInternal             = "internal"
+	typeNotImplemented       = "not-implemented"
 )
 
 // The codes of x-problem-codes that this package answers with: problem codes, then the codes of errors[].
@@ -45,6 +48,10 @@ const (
 	codeTOTPRequired          = "totp_required"
 	codeTOTPEnrolmentRequired = "totp_enrolment_required"
 	codeLocalUserOnly         = "local_user_only"
+	codeNameTaken             = "name_taken"
+	codeLastAdmin             = "last_admin"
+	codeLinkExpired           = "link_expired"
+	codeLinkUsed              = "link_used"
 
 	fieldRequired      = "required"
 	fieldInvalidFormat = "invalid_format"
@@ -60,15 +67,18 @@ const (
 )
 
 var titles = map[string]string{
-	typeValidationFailed: "Validation failed",
-	typeUnauthenticated:  "Unauthenticated",
-	typeForbidden:        "Forbidden",
-	typeNotFound:         "Not found",
-	typeConflict:         "Conflict",
-	typePayloadTooLarge:  "Payload too large",
-	typeRateLimited:      "Rate limited",
-	typeInternal:         "Internal error",
-	typeNotImplemented:   "Not implemented",
+	typeValidationFailed:     "Validation failed",
+	typeUnauthenticated:      "Unauthenticated",
+	typeForbidden:            "Forbidden",
+	typeNotFound:             "Not found",
+	typeConflict:             "Conflict",
+	typeGone:                 "Gone",
+	typePreconditionFailed:   "Precondition failed",
+	typePreconditionRequired: "Precondition required",
+	typePayloadTooLarge:      "Payload too large",
+	typeRateLimited:          "Rate limited",
+	typeInternal:             "Internal error",
+	typeNotImplemented:       "Not implemented",
 }
 
 // Problem is an RFC 9457 problem as an error: handlers and middleware return it, and writeProblem answers it.
@@ -178,6 +188,22 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 			"The account signs in through OIDC and has no password to change.")
 	case errors.Is(err, users.ErrNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such user.")
+	case errors.Is(err, users.ErrNameTaken):
+		return problem(http.StatusConflict, typeConflict, codeNameTaken,
+			"Another user has this login; logins are compared case-insensitively.")
+	case errors.Is(err, users.ErrLastAdmin):
+		return problem(http.StatusConflict, typeConflict, codeLastAdmin,
+			"The Organization needs an active Admin: the last one cannot be disabled, deleted or given a lower Role.")
+	case errors.Is(err, users.ErrVersionMismatch):
+		return errPreconditionFailed
+	case errors.Is(err, users.ErrLinkNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such password setup link.")
+	case errors.Is(err, users.ErrLinkExpired):
+		return problem(http.StatusGone, typeGone, codeLinkExpired,
+			"The password setup link expired; ask an Admin for a new one.")
+	case errors.Is(err, users.ErrLinkUsed):
+		return problem(http.StatusGone, typeGone, codeLinkUsed,
+			"The password setup link was used or replaced by a newer one.")
 	}
 	s.log.Log(ctx, logging.APIRequestFailed, logging.F("operation", operation), logging.F("error", err.Error()))
 	return errInternal

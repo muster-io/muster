@@ -12,6 +12,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
@@ -34,6 +35,7 @@ import (
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/internal/users"
+	usersdb "github.com/muster-io/muster/internal/users/dbgen"
 	"github.com/muster-io/muster/web"
 )
 
@@ -71,6 +73,8 @@ type database interface {
 	KeyringStore() keyring.Store
 	OrganizationStore() organization.Store
 	UsersStore() users.Store
+	AdminStore() users.AdminStore
+	AuditReader() audit.ListQueries
 	AuthStore() auth.Store
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
 	LeaderSession(ctx context.Context) (leader.Session, error)
@@ -78,6 +82,7 @@ type database interface {
 	LeaderStore() leader.Store
 	ReplicaPruner() keyring.Pruner
 	AuthPruner() auth.PruneQueries
+	UsersPruner() users.PruneQueries
 	// Clock reads the database clock, for the clock skew check.
 	Clock() rowQuerier
 }
@@ -92,6 +97,10 @@ func (d pgDatabase) KeyringStore() keyring.Store { return keyring.NewStore(d.Poo
 func (d pgDatabase) OrganizationStore() organization.Store { return organization.NewStore(d.Pool) }
 
 func (d pgDatabase) UsersStore() users.Store { return users.NewStore(d.Pool) }
+
+func (d pgDatabase) AdminStore() users.AdminStore { return users.NewAdminStore(d.Pool) }
+
+func (d pgDatabase) AuditReader() audit.ListQueries { return audit.NewListQueries(d.Pool) }
 
 func (d pgDatabase) AuthStore() auth.Store { return auth.NewStore(d.Pool) }
 
@@ -116,6 +125,8 @@ func (d pgDatabase) LeaderStore() leader.Store { return leader.NewStore(d.Pool) 
 func (d pgDatabase) ReplicaPruner() keyring.Pruner { return kdb.New(d.Pool) }
 
 func (d pgDatabase) AuthPruner() auth.PruneQueries { return authdb.New(d.Pool) }
+
+func (d pgDatabase) UsersPruner() users.PruneQueries { return usersdb.New(d.Pool) }
 
 func (d pgDatabase) Clock() rowQuerier { return d.Pool }
 
@@ -157,6 +168,39 @@ func Migrate(ctx context.Context, opts Options) error {
 	}
 	defer d.Close()
 	return failed(ctx, log, d.Migrate(ctx, log))
+}
+
+// PasswordReset is what `muster admin reset-password` asks for: the --actor name, the login and the new password.
+type PasswordReset struct {
+	Actor    string
+	Login    string
+	Password logging.Secret
+}
+
+// ResetPassword is `muster admin reset-password` (C-03.FR-11): settings, logger, connections and checks and the schema
+// version check, then the reset of the account's password in the Organization, recorded in the Audit log with the
+// --actor name. It returns the public_id of the account. It needs no master key: the Keyring is not opened.
+func ResetPassword(ctx context.Context, opts Options, r PasswordReset) (string, error) {
+	cfg, log, err := setup(ctx, opts)
+	if err != nil {
+		return "", err
+	}
+	d, err := connect(ctx, opts, cfg, log)
+	if err != nil {
+		return "", err
+	}
+	defer d.Close()
+	if err := d.CheckSchema(ctx, log); err != nil {
+		return "", failed(ctx, log, err)
+	}
+	org, err := d.OrganizationStore().GetOrganization(ctx)
+	if err != nil {
+		return "", failed(ctx, log, fmt.Errorf("read the organization: %w", err))
+	}
+	clocks, _ := clock.System()
+	admin := users.NewAdmin(org.ID, d.AdminStore(), audit.NewWriter(log, clocks.Business), clocks.Business,
+		cfg.PublicURL)
+	return admin.ResetPassword(ctx, r.Actor, r.Login, string(r.Password))
 }
 
 type process struct {
@@ -363,6 +407,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	return api.New(api.Config{
 		Sessions:       auth.NewService(orgID, authStore, p.keyring, w, p.clocks.Business, roles),
 		Users:          users.NewService(orgID, p.db.UsersStore(), w, p.clocks.Business),
+		Admin:          users.NewAdmin(orgID, p.db.AdminStore(), w, p.clocks.Business, p.cfg.PublicURL),
+		AuditLog:       audit.NewReader(orgID, p.db.AuditReader()),
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -387,6 +433,9 @@ func (p *process) newKeeper() *leader.Keeper {
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
 			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},
+		},
+		PruneUsers: []leader.PruneTable{
+			{Name: "password_setups", Delete: users.NewPruner(p.db.UsersPruner()).PasswordSetups},
 		},
 	}))
 }

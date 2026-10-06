@@ -2,8 +2,9 @@
 // Copyright The Muster Authors
 
 // Package users holds the Users of the Organization (C-03): reading a user, the profile a user edits — display name,
-// time zone and language — and the start-up step that creates the bootstrap Admin. User administration arrives with
-// C-03's later stories.
+// time zone and language — the start-up step that creates the bootstrap Admin, the administration of users by Admins
+// with the rule that the Organization keeps an active Admin, the single-use password setup links and the emergency
+// password reset of the CLI.
 package users
 
 import (
@@ -136,7 +137,12 @@ func (s *Service) Get(ctx context.Context, id int64) (User, error) {
 	return get(ctx, s.store, s.orgID, id)
 }
 
-func get(ctx context.Context, q Queries, orgID, id int64) (User, error) {
+// userReader reads a user by its internal id.
+type userReader interface {
+	GetUser(ctx context.Context, arg dbgen.GetUserParams) (dbgen.GetUserRow, error)
+}
+
+func get(ctx context.Context, q userReader, orgID, id int64) (User, error) {
 	row, err := q.GetUser(ctx, dbgen.GetUserParams{OrgID: orgID, ID: id})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
@@ -144,6 +150,11 @@ func get(ctx context.Context, q Queries, orgID, id int64) (User, error) {
 	if err != nil {
 		return User{}, fmt.Errorf("read the user: %w", err)
 	}
+	return userOf(row), nil
+}
+
+// userOf is the user of a row of the users table.
+func userOf(row dbgen.GetUserRow) User {
 	u := User{
 		ID: row.ID, PublicID: row.PublicID, Login: row.Login, Name: row.Name, Email: row.Email.String, Role: row.Role,
 		Source: row.Source, Status: row.Status, HasPassword: row.HasPassword, HasOIDCIdentity: row.HasOidcIdentity,
@@ -154,7 +165,7 @@ func get(ctx context.Context, q Queries, orgID, id int64) (User, error) {
 		t := row.LastSignInAt.Time
 		u.LastSignInAt = &t
 	}
-	return u, nil
+	return u
 }
 
 // Profile is what a user edits about themselves; a nil time zone or language follows the browser.

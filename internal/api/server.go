@@ -51,10 +51,30 @@ type Users interface {
 	UpdateProfile(ctx context.Context, id int64, actor audit.Actor, p users.Profile, addr netip.Addr) (users.User, error)
 }
 
+// UserAdmin is what the API needs of the administration of users in internal/users.
+type UserAdmin interface {
+	List(ctx context.Context, f users.ListFilter) (users.Page, error)
+	Get(ctx context.Context, id string) (users.User, error)
+	Create(ctx context.Context, r users.Requester, n users.NewUser) (users.User, users.SetupLink, error)
+	Update(ctx context.Context, r users.Requester, id string, version *int64, c users.Changes) (users.User, error)
+	Disable(ctx context.Context, r users.Requester, id string) (users.User, error)
+	Enable(ctx context.Context, r users.Requester, id string) (users.User, error)
+	Delete(ctx context.Context, r users.Requester, id string, version *int64) error
+	CreateSetupLink(ctx context.Context, r users.Requester, id string) (users.SetupLink, error)
+	CompleteSetup(ctx context.Context, token, password string, addr netip.Addr) error
+}
+
+// AuditLog is what the API needs of the Audit log reader in internal/audit.
+type AuditLog interface {
+	List(ctx context.Context, f audit.Filter) (audit.Page, error)
+}
+
 // Config is what the API serves with.
 type Config struct {
 	Sessions Sessions
 	Users    Users
+	Admin    UserAdmin
+	AuditLog AuditLog
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -68,13 +88,17 @@ type Server struct {
 
 	sessions       Sessions
 	users          Users
+	admin          UserAdmin
+	auditLog       AuditLog
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
 
 	router     routers.Router
 	operations map[*openapi3.Operation]*operation
-	validated  http.Handler
+	// ifMatchRequired are the operations whose If-Match header is required.
+	ifMatchRequired map[string]bool
+	validated       http.Handler
 }
 
 // implemented are the operations this build serves, by the method names of the strict server.
@@ -82,6 +106,8 @@ var implemented = map[string]bool{
 	"GetSignInOptions": true, "CreateSession": true, "GetCurrentSession": true, "DeleteCurrentSession": true,
 	"GetMe": true, "UpdateMe": true, "ChangePassword": true, "ListMySessions": true, "DeleteMySessions": true,
 	"ListRoles": true, "GetOpenApiSpec": true,
+	"ListUsers": true, "CreateUser": true, "GetUser": true, "UpdateUser": true, "DeleteUser": true, "DisableUser": true,
+	"EnableUser": true, "CreatePasswordSetupLink": true, "CompletePasswordSetup": true, "ListAuditLog": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -107,8 +133,9 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("route the API specification: %w", err)
 	}
 	s := &Server{
-		sessions: cfg.Sessions, users: cfg.Users, trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
-		router: router, operations: readOperations(doc),
+		sessions: cfg.Sessions, users: cfg.Users, admin: cfg.Admin, auditLog: cfg.AuditLog,
+		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
+		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}
 	mux := http.NewServeMux()
 	strict := gen.NewStrictHandlerWithOptions(s, []gen.StrictMiddlewareFunc{notImplemented},
@@ -134,7 +161,7 @@ func New(cfg Config) (*Server, error) {
 				"A parameter is not valid."))
 		},
 	})
-	s.validated = s.validator(doc)(s.permit(mux))
+	s.validated = s.preconditions(s.validator(doc)(s.permit(mux)))
 	return s, nil
 }
 
@@ -168,12 +195,12 @@ func identity(ctx context.Context) (*auth.Identity, error) {
 
 // userOf is the API form of a user.
 func userOf(u users.User) gen.User {
-	etag := u.ETag()
+	tag := etag(u.Version)
 	method := gen.UserSignInMethod(u.SignInMethod())
 	offline := u.OfflineAccess
 	out := gen.User{
 		Id: u.PublicID, Name: u.Name, Login: u.Login, Role: gen.RoleName(u.Role), Source: gen.UserSource(u.Source),
-		Status: gen.UserStatus(u.Status), TotpEnabled: u.TOTPEnabled, CreatedAt: u.CreatedAt.UTC(), Etag: &etag,
+		Status: gen.UserStatus(u.Status), TotpEnabled: u.TOTPEnabled, CreatedAt: u.CreatedAt.UTC(), Etag: &tag,
 		SignInMethod: &method,
 	}
 	if u.HasOIDCIdentity {

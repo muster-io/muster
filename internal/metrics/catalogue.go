@@ -72,7 +72,7 @@ var ClockSkew = newGauge(Definition{
 
 // ShortLivedTables are the table values of muster_short_lived_rows_pruned_total: the short-lived tables that the
 // short_lived_pruning Leader task prunes. A story that adds a table to the task adds it here.
-var ShortLivedTables = []string{"sessions", "sign_in_throttles"}
+var ShortLivedTables = []string{"sessions", "sign_in_throttles", "password_setups"}
 
 // ShortLivedRowsPruned counts the rows the short_lived_pruning Leader task deleted, by table.
 var ShortLivedRowsPruned = newCounter(Definition{
