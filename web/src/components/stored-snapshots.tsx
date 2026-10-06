@@ -9,7 +9,6 @@ import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { z } from "zod";
 
 import {
   getListStoredSnapshotsQueryKey,
@@ -22,21 +21,12 @@ import {
 } from "../api/gen/model";
 import { startOfDayIn, useTimeFormat } from "../lib/time";
 import { type DataColumn, DataTable, useCursorList } from "./data-table";
+import { DAY, type SnapshotSearch } from "./stored-snapshot-search";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
-
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
-
-/** The filters of the Stored Snapshots in the URL of the Integration page. */
-export const snapshotSearchSchema = z.object({
-  snapshot_state: z.enum(SnapshotState).optional().catch(undefined),
-  snapshot_from: z.string().regex(DAY).optional().catch(undefined),
-  snapshot_to: z.string().regex(DAY).optional().catch(undefined),
-});
-export type SnapshotSearch = z.infer<typeof snapshotSearchSchema>;
 
 /** A size in bytes as the language writes it, in SI units, such as "8 B" or "1.2 kB". */
 export function formatBytes(t: TFunction, bytes: number, locale: string): string {

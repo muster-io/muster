@@ -92,17 +92,21 @@ function useStoreMe() {
   };
 }
 
-const nameSchema = UpdateMeBody.pick({ name: true }).extend({
-  name: z.string().trim().min(1, "required"),
-});
-type NameValues = z.infer<typeof nameSchema>;
+// A function rather than a module-level value: the route keeps module-level values with its eager part, and this one
+// would load the generated schemas with the application.
+function nameSchema() {
+  return UpdateMeBody.pick({ name: true }).extend({
+    name: z.string().trim().min(1, "required"),
+  });
+}
+type NameValues = z.infer<ReturnType<typeof nameSchema>>;
 
 function DetailsCard({ user }: { user: User }) {
   const { t } = useTranslation();
   const store = useStoreMe();
   const [saved, setSaved] = useState(false);
   const form = useForm<NameValues>({
-    resolver: zodResolver(nameSchema),
+    resolver: zodResolver(nameSchema()),
     defaultValues: { name: user.name },
   });
   const update = useUpdateMe({

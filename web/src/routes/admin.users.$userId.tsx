@@ -126,11 +126,15 @@ function Details({ user }: { user: User }) {
   );
 }
 
-const editSchema = UpdateUserBody.extend({
-  name: z.string().trim().min(1, "required"),
-  email: z.string().trim(),
-});
-type EditValues = z.infer<typeof editSchema>;
+// A function rather than a module-level value: the route keeps module-level values with its eager part, and this one
+// would load the generated schemas with the application.
+function editSchema() {
+  return UpdateUserBody.extend({
+    name: z.string().trim().min(1, "required"),
+    email: z.string().trim(),
+  });
+}
+type EditValues = z.infer<ReturnType<typeof editSchema>>;
 
 function editValues(user: User): EditValues {
   return { name: user.name, email: user.email ?? "", role: user.role };
@@ -150,7 +154,7 @@ function EditCard({ user }: { user: User }) {
   const [saved, setSaved] = useState(false);
   const [unmatched, setUnmatched] = useState<string[]>([]);
   const form = useForm<EditValues>({
-    resolver: zodResolver(editSchema),
+    resolver: zodResolver(editSchema()),
     values: editValues(base),
   });
   const { isDirty } = form.formState;

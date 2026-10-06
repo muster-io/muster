@@ -20,9 +20,34 @@ function keepGitkeep(): Plugin {
 
 export default defineConfig({
   plugins: [
-    tanstackRouter({ target: "react", autoCodeSplitting: true }),
+    // Every page loads on demand except the sign-in page, the first one a visitor without a session sees.
+    tanstackRouter({
+      target: "react",
+      autoCodeSplitting: true,
+      codeSplittingOptions: {
+        splitBehavior: ({ routeId }) => (routeId === "/sign-in" ? [] : undefined),
+      },
+    }),
     react(),
     tailwindcss(),
     keepGitkeep(),
   ],
+  build: {
+    rolldownOptions: {
+      // The generated client, schemas and models only declare things, so a module of theirs that nothing uses is left
+      // out; a route's eager part may still import one for a form of its lazily loaded page.
+      treeshake: {
+        moduleSideEffects: (id) => (/[\\/]src[\\/]api[\\/]gen[\\/]/.test(id) ? false : undefined),
+        manualPureFunctions: ["zod"],
+      },
+      output: {
+        // React in a chunk of its own: it changes with dependency updates only, so browsers keep it across releases.
+        codeSplitting: {
+          groups: [
+            { name: "react", test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
 });

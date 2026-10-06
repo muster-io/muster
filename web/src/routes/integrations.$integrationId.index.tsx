@@ -16,11 +16,8 @@ import { RequirePermission, useCan } from "../components/app-shell";
 import { IntegrationDeleteDialog } from "../components/integration-delete-dialog";
 import { ConnectionMode } from "../components/integration-form";
 import { IntegrationTokens } from "../components/integration-tokens";
-import {
-  type SnapshotSearch,
-  StoredSnapshots,
-  snapshotSearchSchema,
-} from "../components/stored-snapshots";
+import { type SnapshotSearch, snapshotSearchSchema } from "../components/stored-snapshot-search";
+import { StoredSnapshots } from "../components/stored-snapshots";
 import { buttonVariants } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { problemText } from "../lib/api";
