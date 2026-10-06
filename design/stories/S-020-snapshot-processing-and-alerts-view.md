@@ -95,7 +95,7 @@ issue: 20
   `NOTIFY` of S-018 and polling every 5 seconds as a fallback. It works per Organization — it iterates over the
   Organizations (one in L1) and passes `org_id` to every claim and query (lint 1). It finds Integrations with pending
   Snapshots, leases one
-  through its `ingest_claims` row (created with the Integration if missing) using the claim helper of S-013, and
+  through its `ingest_claims` row (created with the Integration if missing) using the claim helper of S-062, and
   processes that Integration's pending Snapshots in `(received_at, id)` order, one transaction each, renewing the lease.
   Shutdown releases the lease. The Integration's `snapshot_count` and `last_snapshot_at` are updated in the same
   transaction.
@@ -179,7 +179,7 @@ issue: 20
   | Clock | Consumers |
   |---|---|
   | Business: moved by the development clock | domain timestamps (`received_at`, `fired_at`, Timeline and Audit log entries, `created_at`, `updated_at`); timers and every due time (`timers.deadline` for Snoozes, notices and Reminders, `oidc_checks.deadline`, the delivery worker's `next_attempt_at` and its limiter buckets); windows (duplicate, Reopen, Grace period, Thread batching, Storm, copy wait); retention and partition maintenance; sessions and the expiry of tokens and links; the Leader's alive mark, downtime and the recovery window |
-  | Real: never moved | TOTP steps (S-012); ID-token `exp` and `iat` (S-013); outgoing webhook signatures and `webhook-timestamp` (S-044); row leases (`lease_until` of the claim helper, S-013) and the Leader lease (S-008); the clock skew check (S-008); replica key records and their liveness (S-007); HTTP timeouts and other waits on an external system |
+  | Real: never moved | TOTP steps (S-012); ID-token `exp` and `iat` (S-013); outgoing webhook signatures and `webhook-timestamp` (S-044); row leases (`lease_until` of the claim helper, S-062) and the Leader lease (S-008); the clock skew check (S-008); replica key records and their liveness (S-007); HTTP timeouts and other waits on an external system |
 - **Fake Alertmanager** (C-01.FR-13): a group model on top of the receivers of S-018:
   - `PUT /_fake/groups/{group}` `{"receiver", "route", "labels"}` defines an Alertmanager group and answers its
     `group_key` (`<route>:{<labels>}`, rendered as Alertmanager does);

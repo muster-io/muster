@@ -34,7 +34,7 @@ export const GetMeResponse = zod.object({
   "login": zod.string().describe('As entered. Logins are case-insensitive; uniqueness and sign-in compare them lowercased.'),
   "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'responder', 'viewer']),
-  "role_locked": zod.boolean().optional().describe('True while `oidc.sync_role` lets the identity provider decide the Role.'),
+  "role_locked": zod.boolean().optional().describe('True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the identity provider decides the Role.'),
   "source": zod.enum(['local', 'oidc', 'bootstrap']).describe('How the account was created; `sign_in_method` says how it signs in now (linking OIDC or a conversion by an Admin changes it).'),
   "oidc_offline_access": zod.boolean().optional().describe('True while Muster holds an offline token from the identity provider for this OIDC account, so it is re-checked in the background and its Personal access tokens have no inactivity limit. The token itself is never returned.'),
   "sign_in_method": zod.enum(['local', 'oidc']).describe('How the user signs in now, one way only. `local` with a password (which may still wait for its setup link); `oidc` only through the identity provider, which is then the only source of truth for the account — created through OIDC, or a local account that linked an identity and lost its password.'),
@@ -72,7 +72,7 @@ export const UpdateMeResponse = zod.object({
   "login": zod.string().describe('As entered. Logins are case-insensitive; uniqueness and sign-in compare them lowercased.'),
   "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'responder', 'viewer']),
-  "role_locked": zod.boolean().optional().describe('True while `oidc.sync_role` lets the identity provider decide the Role.'),
+  "role_locked": zod.boolean().optional().describe('True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the identity provider decides the Role.'),
   "source": zod.enum(['local', 'oidc', 'bootstrap']).describe('How the account was created; `sign_in_method` says how it signs in now (linking OIDC or a conversion by an Admin changes it).'),
   "oidc_offline_access": zod.boolean().optional().describe('True while Muster holds an offline token from the identity provider for this OIDC account, so it is re-checked in the background and its Personal access tokens have no inactivity limit. The token itself is never returned.'),
   "sign_in_method": zod.enum(['local', 'oidc']).describe('How the user signs in now, one way only. `local` with a password (which may still wait for its setup link); `oidc` only through the identity provider, which is then the only source of truth for the account — created through OIDC, or a local account that linked an identity and lost its password.'),
@@ -108,7 +108,7 @@ export const StartOidcLinkResponse = zod.object({
 })
 
 /**
- * Redirect target of the identity provider for a link started by `startOidcLink`; register `MUSTER_PUBLIC_URL/api/v1/me/oidc-identity/callback` at the identity provider next to the sign-in callback. Every outcome is a `302` to the profile page. On success the identity (issuer and subject) is added to the account of the web session that started the link and the password is removed; an offline token granted by the link flow is kept on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit log records it; the page opens with `?oidc_link=linked`. A failure opens it with `?oidc_link_error=<code>`, one of `identity_linked_elsewhere` (the identity belongs to another user; the Audit log records the refusal), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`, no web session, or a `state` started by another session) and `idp_error`.
+ * Redirect target of the identity provider for a link started by `startOidcLink`; register `MUSTER_PUBLIC_URL/api/v1/me/oidc-identity/callback` at the identity provider next to the sign-in callback. Every outcome is a `302` to the profile page. On success the identity (issuer and subject) is added to the account of the web session that started the link and the password is removed; an offline token granted by the link flow is kept on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit log records it; the redirect goes to `/profile`. A failure redirects to `/profile?error=<code>`, with one of `identity_linked_elsewhere` (the identity belongs to another user; the Audit log records the refusal), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`, no web session, or a `state` started by another session) and `idp_error`.
  * @summary Complete linking an OIDC identity
  */
 export const CompleteOidcLinkQueryParams = zod.object({

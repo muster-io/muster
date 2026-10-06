@@ -42,4 +42,4 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_client_requests_total` | `outcome` | `ok`, `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect` — the classified outcome of the request |
 | `muster_db_pool_connections` | `state` | `acquired`, `idle`, `constructing` — the state of the connection |
 | `muster_login_failures_total` | `method` | `local`, `oidc`, `totp` — local is a wrong login or password, oidc a refused OIDC sign-in, totp a wrong TOTP or recovery code |
-| `muster_short_lived_rows_pruned_total` | `table` | `sessions`, `sign_in_throttles`, `password_setups` — the short-lived table the rows were deleted from |
+| `muster_short_lived_rows_pruned_total` | `table` | `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests` — the short-lived table the rows were deleted from |

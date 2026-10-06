@@ -3975,7 +3975,7 @@ type OidcSettings struct {
 	// ClientSecretStatus What a read shows instead of a Secret. The value itself is never returned.
 	ClientSecretStatus SecretStatus `json:"client_secret_status"`
 
-	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL.
+	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL; a read leaves it out while the default applies, and an empty value returns to the default.
 	DisplayName *string `json:"display_name,omitempty"`
 	Enabled     bool    `json:"enabled"`
 
@@ -4008,7 +4008,7 @@ type OidcSettingsBase struct {
 	// ClientSecretExpiresOn Optional expiry date of the client secret; the OIDC settings warn within `oidc.secret_expiry_lead`.
 	ClientSecretExpiresOn nullable.Nullable[openapi_types.Date] `json:"client_secret_expires_on,omitempty"`
 
-	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL.
+	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL; a read leaves it out while the default applies, and an empty value returns to the default.
 	DisplayName   *string            `json:"display_name,omitempty"`
 	Enabled       bool               `json:"enabled"`
 	GroupMappings []OidcGroupMapping `json:"group_mappings"`
@@ -4036,7 +4036,7 @@ type OidcSettingsInput struct {
 	// ClientSecretExpiresOn Optional expiry date of the client secret; the OIDC settings warn within `oidc.secret_expiry_lead`.
 	ClientSecretExpiresOn nullable.Nullable[openapi_types.Date] `json:"client_secret_expires_on,omitempty"`
 
-	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL.
+	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL; a read leaves it out while the default applies, and an empty value returns to the default.
 	DisplayName   *string            `json:"display_name,omitempty"`
 	Enabled       bool               `json:"enabled"`
 	GroupMappings []OidcGroupMapping `json:"group_mappings"`
@@ -5510,7 +5510,7 @@ type User struct {
 	OidcOfflineAccess *bool    `json:"oidc_offline_access,omitempty"`
 	Role              RoleName `json:"role"`
 
-	// RoleLocked True while `oidc.sync_role` lets the identity provider decide the Role.
+	// RoleLocked True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the identity provider decides the Role.
 	RoleLocked *bool `json:"role_locked,omitempty"`
 
 	// SignInMethod How the user signs in now, one way only. `local` with a password (which may still wait for its setup link); `oidc` only through the identity provider, which is then the only source of truth for the account — created through OIDC, or a local account that linked an identity and lost its password.
@@ -6388,7 +6388,7 @@ type CompleteOidcSignInParams struct {
 
 // StartOidcSignInParams defines parameters for StartOidcSignIn.
 type StartOidcSignInParams struct {
-	// ReturnTo Path to open after sign-in: a relative path that starts with a single `/` (never `//` or a scheme). Anything else is ignored.
+	// ReturnTo Path to open after sign-in: a relative path that starts with a single `/` (never `//`, `/\` or a scheme), at most 2000 characters. Anything else is ignored, not refused, so the flow is no open redirect.
 	ReturnTo *string `form:"return_to,omitempty" json:"return_to,omitempty"`
 }
 

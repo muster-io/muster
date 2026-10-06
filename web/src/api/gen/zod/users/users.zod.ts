@@ -47,7 +47,7 @@ export const ListUsersResponse = zod.object({
   "login": zod.string().describe('As entered. Logins are case-insensitive; uniqueness and sign-in compare them lowercased.'),
   "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'responder', 'viewer']),
-  "role_locked": zod.boolean().optional().describe('True while `oidc.sync_role` lets the identity provider decide the Role.'),
+  "role_locked": zod.boolean().optional().describe('True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the identity provider decides the Role.'),
   "source": zod.enum(['local', 'oidc', 'bootstrap']).describe('How the account was created; `sign_in_method` says how it signs in now (linking OIDC or a conversion by an Admin changes it).'),
   "oidc_offline_access": zod.boolean().optional().describe('True while Muster holds an offline token from the identity provider for this OIDC account, so it is re-checked in the background and its Personal access tokens have no inactivity limit. The token itself is never returned.'),
   "sign_in_method": zod.enum(['local', 'oidc']).describe('How the user signs in now, one way only. `local` with a password (which may still wait for its setup link); `oidc` only through the identity provider, which is then the only source of truth for the account — created through OIDC, or a local account that linked an identity and lost its password.'),
@@ -87,7 +87,7 @@ export const CreateUserResponse = zod.object({
   "login": zod.string().describe('As entered. Logins are case-insensitive; uniqueness and sign-in compare them lowercased.'),
   "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'responder', 'viewer']),
-  "role_locked": zod.boolean().optional().describe('True while `oidc.sync_role` lets the identity provider decide the Role.'),
+  "role_locked": zod.boolean().optional().describe('True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the identity provider decides the Role.'),
   "source": zod.enum(['local', 'oidc', 'bootstrap']).describe('How the account was created; `sign_in_method` says how it signs in now (linking OIDC or a conversion by an Admin changes it).'),
   "oidc_offline_access": zod.boolean().optional().describe('True while Muster holds an offline token from the identity provider for this OIDC account, so it is re-checked in the background and its Personal access tokens have no inactivity limit. The token itself is never returned.'),
   "sign_in_method": zod.enum(['local', 'oidc']).describe('How the user signs in now, one way only. `local` with a password (which may still wait for its setup link); `oidc` only through the identity provider, which is then the only source of truth for the account — created through OIDC, or a local account that linked an identity and lost its password.'),
@@ -124,7 +124,7 @@ export const GetUserResponse = zod.object({
   "login": zod.string().describe('As entered. Logins are case-insensitive; uniqueness and sign-in compare them lowercased.'),
   "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'responder', 'viewer']),
-  "role_locked": zod.boolean().optional().describe('True while `oidc.sync_role` lets the identity provider decide the Role.'),
+  "role_locked": zod.boolean().optional().describe('True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the identity provider decides the Role.'),
   "source": zod.enum(['local', 'oidc', 'bootstrap']).describe('How the account was created; `sign_in_method` says how it signs in now (linking OIDC or a conversion by an Admin changes it).'),
   "oidc_offline_access": zod.boolean().optional().describe('True while Muster holds an offline token from the identity provider for this OIDC account, so it is re-checked in the background and its Personal access tokens have no inactivity limit. The token itself is never returned.'),
   "sign_in_method": zod.enum(['local', 'oidc']).describe('How the user signs in now, one way only. `local` with a password (which may still wait for its setup link); `oidc` only through the identity provider, which is then the only source of truth for the account — created through OIDC, or a local account that linked an identity and lost its password.'),
@@ -138,7 +138,7 @@ export const GetUserResponse = zod.object({
 })
 
 /**
- * Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) while `oidc.sync_role` locks the Role, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+ * Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
  * @summary Update a user
  */
 export const updateUserPathUserIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -170,7 +170,7 @@ export const UpdateUserResponse = zod.object({
   "login": zod.string().describe('As entered. Logins are case-insensitive; uniqueness and sign-in compare them lowercased.'),
   "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'responder', 'viewer']),
-  "role_locked": zod.boolean().optional().describe('True while `oidc.sync_role` lets the identity provider decide the Role.'),
+  "role_locked": zod.boolean().optional().describe('True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the identity provider decides the Role.'),
   "source": zod.enum(['local', 'oidc', 'bootstrap']).describe('How the account was created; `sign_in_method` says how it signs in now (linking OIDC or a conversion by an Admin changes it).'),
   "oidc_offline_access": zod.boolean().optional().describe('True while Muster holds an offline token from the identity provider for this OIDC account, so it is re-checked in the background and its Personal access tokens have no inactivity limit. The token itself is never returned.'),
   "sign_in_method": zod.enum(['local', 'oidc']).describe('How the user signs in now, one way only. `local` with a password (which may still wait for its setup link); `oidc` only through the identity provider, which is then the only source of truth for the account — created through OIDC, or a local account that linked an identity and lost its password.'),
@@ -220,7 +220,7 @@ export const DisableUserResponse = zod.object({
   "login": zod.string().describe('As entered. Logins are case-insensitive; uniqueness and sign-in compare them lowercased.'),
   "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'responder', 'viewer']),
-  "role_locked": zod.boolean().optional().describe('True while `oidc.sync_role` lets the identity provider decide the Role.'),
+  "role_locked": zod.boolean().optional().describe('True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the identity provider decides the Role.'),
   "source": zod.enum(['local', 'oidc', 'bootstrap']).describe('How the account was created; `sign_in_method` says how it signs in now (linking OIDC or a conversion by an Admin changes it).'),
   "oidc_offline_access": zod.boolean().optional().describe('True while Muster holds an offline token from the identity provider for this OIDC account, so it is re-checked in the background and its Personal access tokens have no inactivity limit. The token itself is never returned.'),
   "sign_in_method": zod.enum(['local', 'oidc']).describe('How the user signs in now, one way only. `local` with a password (which may still wait for its setup link); `oidc` only through the identity provider, which is then the only source of truth for the account — created through OIDC, or a local account that linked an identity and lost its password.'),
@@ -252,7 +252,7 @@ export const EnableUserResponse = zod.object({
   "login": zod.string().describe('As entered. Logins are case-insensitive; uniqueness and sign-in compare them lowercased.'),
   "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'responder', 'viewer']),
-  "role_locked": zod.boolean().optional().describe('True while `oidc.sync_role` lets the identity provider decide the Role.'),
+  "role_locked": zod.boolean().optional().describe('True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the identity provider decides the Role.'),
   "source": zod.enum(['local', 'oidc', 'bootstrap']).describe('How the account was created; `sign_in_method` says how it signs in now (linking OIDC or a conversion by an Admin changes it).'),
   "oidc_offline_access": zod.boolean().optional().describe('True while Muster holds an offline token from the identity provider for this OIDC account, so it is re-checked in the background and its Personal access tokens have no inactivity limit. The token itself is never returned.'),
   "sign_in_method": zod.enum(['local', 'oidc']).describe('How the user signs in now, one way only. `local` with a password (which may still wait for its setup link); `oidc` only through the identity provider, which is then the only source of truth for the account — created through OIDC, or a local account that linked an identity and lost its password.'),
@@ -299,7 +299,7 @@ export const ConvertUserToLocalResponse = zod.object({
   "login": zod.string().describe('As entered. Logins are case-insensitive; uniqueness and sign-in compare them lowercased.'),
   "email": zod.string().nullish(),
   "role": zod.enum(['admin', 'responder', 'viewer']),
-  "role_locked": zod.boolean().optional().describe('True while `oidc.sync_role` lets the identity provider decide the Role.'),
+  "role_locked": zod.boolean().optional().describe('True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the identity provider decides the Role.'),
   "source": zod.enum(['local', 'oidc', 'bootstrap']).describe('How the account was created; `sign_in_method` says how it signs in now (linking OIDC or a conversion by an Admin changes it).'),
   "oidc_offline_access": zod.boolean().optional().describe('True while Muster holds an offline token from the identity provider for this OIDC account, so it is re-checked in the background and its Personal access tokens have no inactivity limit. The token itself is never returned.'),
   "sign_in_method": zod.enum(['local', 'oidc']).describe('How the user signs in now, one way only. `local` with a password (which may still wait for its setup link); `oidc` only through the identity provider, which is then the only source of truth for the account — created through OIDC, or a local account that linked an identity and lost its password.'),

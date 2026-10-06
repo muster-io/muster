@@ -32,6 +32,8 @@ import (
 	"github.com/muster-io/muster/internal/leader"
 	ldb "github.com/muster-io/muster/internal/leader/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/oidc"
+	oidcdb "github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/organization"
 	odb "github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/partitions"
@@ -56,6 +58,42 @@ type fakeDB struct {
 	// admin answers the administration of users and totp the TOTP of users; nil without a test that needs them.
 	admin users.AdminStore
 	totp  totp.Store
+	oidc  fakeOIDCStore
+}
+
+// fakeOIDCStore records the demo OIDC configuration of development mode.
+type fakeOIDCStore struct {
+	oidc.Store
+	mu      sync.Mutex
+	demo    []oidcdb.InsertDemoSettingsParams
+	allowed []string
+	audited []string
+}
+
+func (s *fakeOIDCStore) InTx(_ context.Context, f func(oidc.Queries) error) error { return f(s) }
+
+func (s *fakeOIDCStore) InsertDemoSettings(_ context.Context, arg oidcdb.InsertDemoSettingsParams) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.demo = append(s.demo, arg)
+	if len(s.demo) > 1 {
+		return 0, nil
+	}
+	return 1, nil
+}
+
+func (s *fakeOIDCStore) AllowNetwork(_ context.Context, arg oidcdb.AllowNetworkParams) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.allowed = append(s.allowed, arg.Network)
+	return 1, nil
+}
+
+func (s *fakeOIDCStore) InsertAuditEntry(_ context.Context, arg auditdb.InsertAuditEntryParams) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.audited = append(s.audited, arg.Action)
+	return nil
 }
 
 func (f *fakeDB) LeaderSession(context.Context) (leader.Session, error) {
@@ -111,6 +149,10 @@ func (f *fakeDB) ReplicaPruner() keyring.Pruner { return nil }
 func (f *fakeDB) AuthPruner() auth.PruneQueries { return nil }
 
 func (f *fakeDB) UsersPruner() users.PruneQueries { return nil }
+
+func (f *fakeDB) OIDCPruner() oidc.PruneQueries { return nil }
+
+func (f *fakeDB) OIDCStore() oidc.Store { return &f.oidc }
 
 func (f *fakeDB) AdminStore() users.AdminStore { return f.admin }
 
@@ -808,14 +850,36 @@ func TestKeyringRefusals(t *testing.T) {
 	}
 }
 
-// TestDevelopmentKeyInDevelopmentMode: muster dev, also with --replica, runs with the development key.
+// TestDevelopmentKeyInDevelopmentMode: muster dev, also with --replica, runs with the development key and stores the
+// demo OIDC configuration, which allows loopback; outside development mode there is no demo.
 func TestDevelopmentKeyInDevelopmentMode(t *testing.T) {
-	opts := options(&fakeDB{}, io.Discard, env("MUSTER_SECRET_KEYS="+keyring.DevelopmentKey))
+	fake := &fakeDB{}
+	opts := options(fake, io.Discard, env("MUSTER_SECRET_KEYS="+keyring.DevelopmentKey))
 	opts.Development = true
 	_, cancel, done := running(t, opts)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+	if len(fake.oidc.demo) != 1 || fake.oidc.demo[0].IssuerUrl != "http://127.0.0.1:18090" ||
+		fake.oidc.demo[0].DisplayName.String != "Dev IdP" || len(fake.oidc.demo[0].ClientSecretCiphertext) == 0 {
+		t.Errorf("demo = %+v", fake.oidc.demo)
+	}
+	if len(fake.oidc.allowed) != 1 || fake.oidc.allowed[0] != "127.0.0.0/8" {
+		t.Errorf("allowed = %v", fake.oidc.allowed)
+	}
+	if len(fake.oidc.audited) != 1 || fake.oidc.audited[0] != "oidc_settings.updated" {
+		t.Errorf("audited = %v", fake.oidc.audited)
+	}
+
+	plain := &fakeDB{}
+	_, cancel, done = running(t, options(plain, io.Discard, env()))
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if len(plain.oidc.demo) != 0 || len(plain.oidc.allowed) != 0 {
+		t.Errorf("a server outside development mode stored the demo: %v, %v", plain.oidc.demo, plain.oidc.allowed)
 	}
 }
 

@@ -36,7 +36,10 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/oidc"
+	odb "github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/runtime"
 	"github.com/muster-io/muster/internal/totp"
 	tdb "github.com/muster-io/muster/internal/totp/dbgen"
@@ -69,6 +72,7 @@ var registry = []Probe{
 	{Name: "outbound_http", Run: probeOutbound},
 	{Name: "sign_in", Run: probeSignIn},
 	{Name: "totp", Run: probeTOTP},
+	{Name: "oidc", Run: probeOIDC},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -637,6 +641,161 @@ func (s *probeTOTPStore) ListUnusedRecoveryCodes(context.Context, tdb.ListUnused
 func (s *probeTOTPStore) UseStep(context.Context, tdb.UseStepParams) (int64, error) { return 1, nil }
 
 func (s *probeTOTPStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
+	return nil
+}
+
+// probeOIDC sends the secrets through the OIDC settings and sign-in: the first as the client secret, which the token
+// endpoint of a stand-in identity provider echoes in its error, the second as the password of a SOCKS5 proxy that
+// refuses it, and the third as an authorization code, an ID token and a state. Neither the log — with the Audit log
+// entries it copies — nor the returned errors may carry them.
+func probeOIDC(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	business := clock.NewManual(now)
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	issuer := "http://" + ln.Addr().String()
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/.well-known/openid-configuration" {
+				_, _ = fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"jwks_uri":%q}`,
+					issuer, issuer+"/authorize", issuer+"/token", issuer+"/jwks")
+				return
+			}
+			body, _ := io.ReadAll(r.Body)
+			http.Error(w, `{"error":"`+secrets[0]+`","error_description":"`+string(body)+r.Header.Get("Authorization")+`"}`,
+				http.StatusBadRequest)
+		})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	socks, err := fakeproxy.Start(ctx, fakeproxy.SOCKS5, "127.0.0.1:0", fakeproxy.Options{Username: "muster",
+		Password: "other"})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = socks.Close() }()
+
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	store := &probeOIDCStore{}
+	svc := oidc.NewService(oidc.Config{OrgID: 1, Store: store, Keyring: k, Audit: audit.NewWriter(logger, business),
+		Clocks: clock.Clocks{Business: business, Real: clock.Real{}}, Log: logger, PublicURL: &url.URL{Scheme: "http",
+			Host: "localhost:8080"}, Network: oidc.Network{Policy: outbound.StaticPolicy(policy), Log: logger,
+			Real: clock.Real{}}})
+	scopes := []string{"profile"}
+	in := oidc.Input{Enabled: true, IssuerURL: issuer, ClientID: "muster", ClientSecret: keyring.Replace(
+		logging.Secret(secrets[0])), Scopes: &scopes, GroupsClaim: "groups", UnmatchedRole: oidc.UnmatchedNone,
+		Proxy: proxyconf.Input{Enabled: true, Type: new("socks5"), Address: new(socks.Addr()), UsernameSet: true,
+			Username: new("muster"), Password: keyring.Replace(logging.Secret(secrets[1]))}}
+	var errs []error
+	_, err = svc.Update(ctx, oidc.Requester{Actor: audit.System, Transport: audit.TransportUI}, nil, in)
+	errs = append(errs, err)
+	res, err := svc.Check(ctx)
+	errs = append(errs, err, errors.New(res.Error))
+
+	in.Proxy = proxyconf.Input{Enabled: false}
+	_, err = svc.Update(ctx, oidc.Requester{Actor: audit.System, Transport: audit.TransportUI}, nil, in)
+	errs = append(errs, err)
+	start, err := svc.StartSignIn(ctx, "/"+secrets[2])
+	errs = append(errs, err)
+	out := svc.CompleteSignIn(ctx, oidc.Callback{Code: secrets[2], State: start.State, CookieState: start.State})
+	out2 := svc.CompleteSignIn(ctx, oidc.Callback{Code: secrets[2], State: secrets[2], CookieState: secrets[2],
+		Error: secrets[2]})
+	p, err := oidc.NewProvider(oidc.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}},
+		issuer, "muster", logging.Secret(secrets[0]), nil)
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	d, err := p.Discover(ctx)
+	errs = append(errs, err)
+	_, err = p.Verify(ctx, d, logging.Secret(secrets[2]), secrets[2])
+	errs = append(errs, err, fmt.Errorf("outcomes: %+v %+v", out, out2))
+	return errors.Join(errs...)
+}
+
+// probeOIDCStore is the OIDC settings and requests of probeOIDC in memory.
+type probeOIDCStore struct {
+	oidc.Store
+	row      *odb.OidcSetting
+	requests map[string]odb.InsertAuthRequestParams
+}
+
+func (s *probeOIDCStore) InTx(_ context.Context, f func(oidc.Queries) error) error { return f(s) }
+
+func (s *probeOIDCStore) GetSettings(context.Context, int64) (odb.OidcSetting, error) {
+	if s.row == nil {
+		return odb.OidcSetting{}, pgx.ErrNoRows
+	}
+	return *s.row, nil
+}
+
+func (s *probeOIDCStore) LockSettings(context.Context, int64) (int64, error) {
+	if s.row == nil {
+		return 0, pgx.ErrNoRows
+	}
+	return s.row.Version, nil
+}
+
+func (s *probeOIDCStore) InsertSettings(_ context.Context, a odb.InsertSettingsParams) (int64, error) {
+	s.row = &odb.OidcSetting{OrgID: a.OrgID, Enabled: a.Enabled, IssuerUrl: a.IssuerUrl, ClientID: a.ClientID,
+		ClientSecretCiphertext: a.ClientSecretCiphertext, ClientSecretKeyID: a.ClientSecretKeyID,
+		ClientSecretUpdatedAt: a.ClientSecretUpdatedAt, Scopes: a.Scopes, GroupsClaim: a.GroupsClaim,
+		GroupMappings: a.GroupMappings, UnmatchedRole: a.UnmatchedRole, Proxy: a.Proxy,
+		ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, Version: 1, UpdatedAt: a.UpdatedAt}
+	return 1, nil
+}
+
+func (s *probeOIDCStore) UpdateSettings(_ context.Context, a odb.UpdateSettingsParams) (int64, error) {
+	s.row.Enabled, s.row.Proxy, s.row.Version = a.Enabled, a.Proxy, s.row.Version+1
+	s.row.ProxyPasswordCiphertext, s.row.ProxyPasswordKeyID = a.ProxyPasswordCiphertext, a.ProxyPasswordKeyID
+	return 1, nil
+}
+
+func (s *probeOIDCStore) SetGroupsClaimMissing(context.Context, odb.SetGroupsClaimMissingParams) error {
+	return nil
+}
+
+func (s *probeOIDCStore) LatestKeptAdmin(context.Context, int64) (odb.LatestKeptAdminRow, error) {
+	return odb.LatestKeptAdminRow{}, pgx.ErrNoRows
+}
+
+func (s *probeOIDCStore) InsertAuthRequest(_ context.Context, a odb.InsertAuthRequestParams) (int64, error) {
+	if s.requests == nil {
+		s.requests = map[string]odb.InsertAuthRequestParams{}
+	}
+	s.requests[string(a.StateHash)] = a
+	return 1, nil
+}
+
+func (s *probeOIDCStore) TakeAuthRequest(_ context.Context, a odb.TakeAuthRequestParams) (odb.TakeAuthRequestRow,
+	error) {
+	r, ok := s.requests[string(a.StateHash)]
+	if !ok {
+		return odb.TakeAuthRequestRow{}, pgx.ErrNoRows
+	}
+	return odb.TakeAuthRequestRow{Purpose: r.Purpose, Nonce: r.Nonce, CodeVerifierCiphertext: r.CodeVerifierCiphertext,
+		CodeVerifierKeyID: r.CodeVerifierKeyID, ReturnTo: r.ReturnTo, ExpiresAt: r.ExpiresAt}, nil
+}
+
+func (s *probeOIDCStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
 	return nil
 }
 

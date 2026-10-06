@@ -22,7 +22,7 @@ import type { OidcUnmatchedRole } from './oidcUnmatchedRole';
 
 export interface OidcSettingsBase {
   enabled: boolean;
-  /** Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL. */
+  /** Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL; a read leaves it out while the default applies, and an empty value returns to the default. */
   display_name?: string;
   issuer_url: string;
   client_id: string;

@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -256,5 +257,73 @@ func TestCloseEndsOpenTunnels(t *testing.T) {
 	}
 	if _, err := c.Read(make([]byte, 1)); err == nil {
 		t.Fatal("the tunnel is still open")
+	}
+}
+
+func TestControlEndpointListsTheConnections(t *testing.T) {
+	target := echo(t)
+	for _, kind := range []Kind{HTTP, SOCKS5} {
+		t.Run(string(kind), func(t *testing.T) {
+			s := start(t, kind, Options{})
+			c := dial(t, s)
+			if kind == HTTP {
+				if _, err := io.WriteString(c, "CONNECT "+target+" HTTP/1.1\r\nHost: "+target+"\r\n\r\n"); err != nil {
+					t.Fatal(err)
+				}
+				resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("CONNECT = %d", resp.StatusCode)
+				}
+			} else {
+				host, portText, _ := net.SplitHostPort(target)
+				port, _ := strconv.Atoi(portText)
+				req := []byte{socksVersion, 1, authNone}
+				req = append(req, socksVersion, cmdConnect, 0, atypIPv4)
+				req = append(req, net.ParseIP(host).To4()...)
+				req = binary.BigEndian.AppendUint16(req, uint16(port)) //nolint:gosec // G115: a port fits
+				if _, err := c.Write(req); err != nil {
+					t.Fatal(err)
+				}
+				reply := make([]byte, 12)
+				if _, err := io.ReadFull(c, reply); err != nil || reply[3] != repSucceeded {
+					t.Fatalf("SOCKS5 reply = %v, %v", reply, err)
+				}
+			}
+			get := func(method string) (int, []Connection) {
+				req, _ := http.NewRequestWithContext(t.Context(), method, "http://"+s.Addr()+controlPath, nil)
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = resp.Body.Close() }()
+				var conns []Connection
+				_ = json.NewDecoder(resp.Body).Decode(&conns)
+				return resp.StatusCode, conns
+			}
+			status, conns := get(http.MethodGet)
+			if status != http.StatusOK || len(conns) != 1 || conns[0].Target != target {
+				t.Fatalf("GET %s = %d %v", controlPath, status, conns)
+			}
+			if status, _ := get(http.MethodDelete); status != http.StatusNoContent {
+				t.Fatalf("DELETE = %d", status)
+			}
+			if _, conns := get(http.MethodGet); len(conns) != 0 {
+				t.Fatalf("after DELETE = %v", conns)
+			}
+			req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+s.Addr()+controlPath, nil)
+			req.Header.Set("Origin", "http://evil.example")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("a request with an Origin header = %d", resp.StatusCode)
+			}
+		})
 	}
 }

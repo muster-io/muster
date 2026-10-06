@@ -231,12 +231,12 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 
 | Phase | Capabilities | Stories | Count |
 |---|---|---|---|
-| Foundation | C-01 – C-04 | S-001 – S-017 | 17 |
+| Foundation | C-01 – C-04 | S-001 – S-017, S-062 | 18 |
 | Observation | C-05 – C-10 | S-018 – S-033 | 16 |
 | Shadow | C-11 – C-16 | S-034 – S-048, S-061 | 16 |
 | Actions | C-17, C-18 | S-049 – S-052 | 4 |
 | Operations | C-19 – C-21 | S-053 – S-060 | 8 |
-| **L1** | 21 | | **61** |
+| **L1** | 21 | | **62** |
 
 ### Foundation
 
@@ -254,10 +254,11 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-010](S-010-api-server-local-sign-in-and-sessions.md) | C-03 | API server, local sign-in, sessions and the bootstrap Admin (BE) | be | S-008 |
 | [S-011](S-011-user-administration-and-audit-log.md) | C-03 | User administration, password setup links and the Audit log (BE) | be | S-010 |
 | [S-012](S-012-totp-notices-and-live-updates.md) | C-03 | TOTP, the TOTP policy, system notices and live updates (BE) | be | S-011 |
-| [S-013](S-013-oidc-sign-in-linking-and-proxy-settings.md) | C-03 | OIDC sign-in, account linking, background re-checks and the proxy settings (BE) | be | S-009, S-012 |
-| [S-014](S-014-app-shell-sign-in-and-profile.md) | C-03 | Application shell, sign-in, password setup, TOTP and profile (FE) | fe | S-013 |
+| [S-013](S-013-oidc-sign-in-linking-and-proxy-settings.md) | C-03 | OIDC settings, proxy settings and OIDC sign-in (BE) | be | S-009, S-012 |
+| [S-062](S-062-oidc-linking-conversion-and-background-rechecks.md) | C-03 | OIDC account linking, conversion to local, the offline token and background re-checks (BE) | be | S-013 |
+| [S-014](S-014-app-shell-sign-in-and-profile.md) | C-03 | Application shell, sign-in, password setup, TOTP and profile (FE) | fe | S-013, S-062 |
 | [S-015](S-015-admin-pages-users-oidc-security-audit.md) | C-03 | Users, OIDC settings, Organization security and Audit log pages (FE) | fe | S-014 |
-| [S-016](S-016-api-tokens-and-service-accounts.md) | C-04 | Personal access tokens, Service accounts, token authentication and rate limits (BE) | be | S-013 |
+| [S-016](S-016-api-tokens-and-service-accounts.md) | C-04 | Personal access tokens, Service accounts, token authentication and rate limits (BE) | be | S-013, S-062 |
 | [S-017](S-017-api-tokens-pages.md) | C-04 | Personal access tokens and Service accounts pages (FE) | fe | S-015, S-016 |
 
 ### Observation
@@ -328,7 +329,10 @@ S-059 and S-060 were split from S-053 and S-058 when their contracts were writte
 chart rules follow the runbook pages, so that the check of rendered rules against the pages can run as soon as the
 rules exist. S-061 was split from S-039 after the review of the contracts: S-039 keeps Connections, Destinations, the
 Destination check and the fake server, S-061 takes the adapter and everything that needs posts; it follows S-039 in the
-Shadow phase, before S-040.
+Shadow phase, before S-040. S-062 was split from S-013 before its implementation, because S-013 touched about 50
+files: S-013 keeps the OIDC settings, the proxy settings object and sign-in, S-062 takes linking, conversion to local,
+the offline token and the background re-checks with the shared claim helper; it follows S-013 in the Foundation phase,
+before S-014.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

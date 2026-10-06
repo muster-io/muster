@@ -3977,7 +3977,7 @@ type OidcSettings struct {
 	// ClientSecretStatus What a read shows instead of a Secret. The value itself is never returned.
 	ClientSecretStatus SecretStatus `json:"client_secret_status"`
 
-	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL.
+	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL; a read leaves it out while the default applies, and an empty value returns to the default.
 	DisplayName *string `json:"display_name,omitempty"`
 	Enabled     bool    `json:"enabled"`
 
@@ -4010,7 +4010,7 @@ type OidcSettingsBase struct {
 	// ClientSecretExpiresOn Optional expiry date of the client secret; the OIDC settings warn within `oidc.secret_expiry_lead`.
 	ClientSecretExpiresOn nullable.Nullable[openapi_types.Date] `json:"client_secret_expires_on,omitempty"`
 
-	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL.
+	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL; a read leaves it out while the default applies, and an empty value returns to the default.
 	DisplayName   *string            `json:"display_name,omitempty"`
 	Enabled       bool               `json:"enabled"`
 	GroupMappings []OidcGroupMapping `json:"group_mappings"`
@@ -4038,7 +4038,7 @@ type OidcSettingsInput struct {
 	// ClientSecretExpiresOn Optional expiry date of the client secret; the OIDC settings warn within `oidc.secret_expiry_lead`.
 	ClientSecretExpiresOn nullable.Nullable[openapi_types.Date] `json:"client_secret_expires_on,omitempty"`
 
-	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL.
+	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL; a read leaves it out while the default applies, and an empty value returns to the default.
 	DisplayName   *string            `json:"display_name,omitempty"`
 	Enabled       bool               `json:"enabled"`
 	GroupMappings []OidcGroupMapping `json:"group_mappings"`
@@ -5512,7 +5512,7 @@ type User struct {
 	OidcOfflineAccess *bool    `json:"oidc_offline_access,omitempty"`
 	Role              RoleName `json:"role"`
 
-	// RoleLocked True while `oidc.sync_role` lets the identity provider decide the Role.
+	// RoleLocked True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the identity provider decides the Role.
 	RoleLocked *bool `json:"role_locked,omitempty"`
 
 	// SignInMethod How the user signs in now, one way only. `local` with a password (which may still wait for its setup link); `oidc` only through the identity provider, which is then the only source of truth for the account — created through OIDC, or a local account that linked an identity and lost its password.
@@ -6390,7 +6390,7 @@ type CompleteOidcSignInParams struct {
 
 // StartOidcSignInParams defines parameters for StartOidcSignIn.
 type StartOidcSignInParams struct {
-	// ReturnTo Path to open after sign-in: a relative path that starts with a single `/` (never `//` or a scheme). Anything else is ignored.
+	// ReturnTo Path to open after sign-in: a relative path that starts with a single `/` (never `//`, `/\` or a scheme), at most 2000 characters. Anything else is ignored, not refused, so the flow is no open redirect.
 	ReturnTo *string `form:"return_to,omitempty" json:"return_to,omitempty"`
 }
 
@@ -8832,7 +8832,7 @@ type ClientInterface interface {
 
 	// CompleteOidcLink Complete linking an OIDC identity
 	//
-	// Redirect target of the identity provider for a link started by `startOidcLink`; register `MUSTER_PUBLIC_URL/api/v1/me/oidc-identity/callback` at the identity provider next to the sign-in callback. Every outcome is a `302` to the profile page. On success the identity (issuer and subject) is added to the account of the web session that started the link and the password is removed; an offline token granted by the link flow is kept on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit log records it; the page opens with `?oidc_link=linked`. A failure opens it with `?oidc_link_error=<code>`, one of `identity_linked_elsewhere` (the identity belongs to another user; the Audit log records the refusal), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`, no web session, or a `state` started by another session) and `idp_error`.
+	// Redirect target of the identity provider for a link started by `startOidcLink`; register `MUSTER_PUBLIC_URL/api/v1/me/oidc-identity/callback` at the identity provider next to the sign-in callback. Every outcome is a `302` to the profile page. On success the identity (issuer and subject) is added to the account of the web session that started the link and the password is removed; an offline token granted by the link flow is kept on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit log records it; the redirect goes to `/profile`. A failure redirects to `/profile?error=<code>`, with one of `identity_linked_elsewhere` (the identity belongs to another user; the Audit log records the refusal), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`, no web session, or a `state` started by another session) and `idp_error`.
 	//
 	// Corresponds with GET /me/oidc-identity/callback (the `CompleteOidcLink` operationId).
 	CompleteOidcLink(ctx context.Context, params *CompleteOidcLinkParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -9452,7 +9452,7 @@ type ClientInterface interface {
 
 	// UpdateUserWithBody Update a user
 	//
-	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) while `oidc.sync_role` locks the Role, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -9461,7 +9461,7 @@ type ClientInterface interface {
 
 	// UpdateUser Update a user
 	//
-	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) while `oidc.sync_role` locks the Role, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -11373,7 +11373,7 @@ func (c *Client) StartOidcLink(ctx context.Context, reqEditors ...RequestEditorF
 
 // CompleteOidcLink Complete linking an OIDC identity
 //
-// Redirect target of the identity provider for a link started by `startOidcLink`; register `MUSTER_PUBLIC_URL/api/v1/me/oidc-identity/callback` at the identity provider next to the sign-in callback. Every outcome is a `302` to the profile page. On success the identity (issuer and subject) is added to the account of the web session that started the link and the password is removed; an offline token granted by the link flow is kept on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit log records it; the page opens with `?oidc_link=linked`. A failure opens it with `?oidc_link_error=<code>`, one of `identity_linked_elsewhere` (the identity belongs to another user; the Audit log records the refusal), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`, no web session, or a `state` started by another session) and `idp_error`.
+// Redirect target of the identity provider for a link started by `startOidcLink`; register `MUSTER_PUBLIC_URL/api/v1/me/oidc-identity/callback` at the identity provider next to the sign-in callback. Every outcome is a `302` to the profile page. On success the identity (issuer and subject) is added to the account of the web session that started the link and the password is removed; an offline token granted by the link flow is kept on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit log records it; the redirect goes to `/profile`. A failure redirects to `/profile?error=<code>`, with one of `identity_linked_elsewhere` (the identity belongs to another user; the Audit log records the refusal), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`, no web session, or a `state` started by another session) and `idp_error`.
 //
 // Corresponds with GET /me/oidc-identity/callback (the `CompleteOidcLink` operationId).
 func (c *Client) CompleteOidcLink(ctx context.Context, params *CompleteOidcLinkParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -12813,7 +12813,7 @@ func (c *Client) GetUser(ctx context.Context, userId UserId, reqEditors ...Reque
 
 // UpdateUserWithBody Update a user
 //
-// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) while `oidc.sync_role` locks the Role, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
 //
 // Takes any type of body and a specified content type.
 //
@@ -12832,7 +12832,7 @@ func (c *Client) UpdateUserWithBody(ctx context.Context, userId UserId, params *
 
 // UpdateUser Update a user
 //
-// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) while `oidc.sync_role` locks the Role, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -21043,7 +21043,7 @@ type ClientWithResponsesInterface interface {
 
 	// CompleteOidcLinkWithResponse Complete linking an OIDC identity
 	//
-	// Redirect target of the identity provider for a link started by `startOidcLink`; register `MUSTER_PUBLIC_URL/api/v1/me/oidc-identity/callback` at the identity provider next to the sign-in callback. Every outcome is a `302` to the profile page. On success the identity (issuer and subject) is added to the account of the web session that started the link and the password is removed; an offline token granted by the link flow is kept on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit log records it; the page opens with `?oidc_link=linked`. A failure opens it with `?oidc_link_error=<code>`, one of `identity_linked_elsewhere` (the identity belongs to another user; the Audit log records the refusal), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`, no web session, or a `state` started by another session) and `idp_error`.
+	// Redirect target of the identity provider for a link started by `startOidcLink`; register `MUSTER_PUBLIC_URL/api/v1/me/oidc-identity/callback` at the identity provider next to the sign-in callback. Every outcome is a `302` to the profile page. On success the identity (issuer and subject) is added to the account of the web session that started the link and the password is removed; an offline token granted by the link flow is kept on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit log records it; the redirect goes to `/profile`. A failure redirects to `/profile?error=<code>`, with one of `identity_linked_elsewhere` (the identity belongs to another user; the Audit log records the refusal), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`, no web session, or a `state` started by another session) and `idp_error`.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -21747,7 +21747,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateUserWithBodyWithResponse Update a user
 	//
-	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) while `oidc.sync_role` locks the Role, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21756,7 +21756,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateUserWithResponse Update a user
 	//
-	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) while `oidc.sync_role` locks the Role, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -35474,7 +35474,7 @@ func (c *ClientWithResponses) StartOidcLinkWithResponse(ctx context.Context, req
 
 // CompleteOidcLinkWithResponse Complete linking an OIDC identity
 //
-// Redirect target of the identity provider for a link started by `startOidcLink`; register `MUSTER_PUBLIC_URL/api/v1/me/oidc-identity/callback` at the identity provider next to the sign-in callback. Every outcome is a `302` to the profile page. On success the identity (issuer and subject) is added to the account of the web session that started the link and the password is removed; an offline token granted by the link flow is kept on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit log records it; the page opens with `?oidc_link=linked`. A failure opens it with `?oidc_link_error=<code>`, one of `identity_linked_elsewhere` (the identity belongs to another user; the Audit log records the refusal), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`, no web session, or a `state` started by another session) and `idp_error`.
+// Redirect target of the identity provider for a link started by `startOidcLink`; register `MUSTER_PUBLIC_URL/api/v1/me/oidc-identity/callback` at the identity provider next to the sign-in callback. Every outcome is a `302` to the profile page. On success the identity (issuer and subject) is added to the account of the web session that started the link and the password is removed; an offline token granted by the link flow is kept on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit log records it; the redirect goes to `/profile`. A failure redirects to `/profile?error=<code>`, with one of `identity_linked_elsewhere` (the identity belongs to another user; the Audit log records the refusal), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`, no web session, or a `state` started by another session) and `idp_error`.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -36670,7 +36670,7 @@ func (c *ClientWithResponses) GetUserWithResponse(ctx context.Context, userId Us
 
 // UpdateUserWithBodyWithResponse Update a user
 //
-// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) while `oidc.sync_role` locks the Role, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36685,7 +36685,7 @@ func (c *ClientWithResponses) UpdateUserWithBodyWithResponse(ctx context.Context
 
 // UpdateUserWithResponse Update a user
 //
-// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) while `oidc.sync_role` locks the Role, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

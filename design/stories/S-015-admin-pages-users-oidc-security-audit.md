@@ -145,15 +145,15 @@ None.
 | C-03.FR-5 | full | together with S-013; the Internal alert is S-053 |
 | C-03.FR-6 | full | together with S-013 |
 | C-03.FR-8 | full | together with S-013 |
-| C-03.FR-11 | full | together with S-011, S-012 and S-013 |
+| C-03.FR-11 | full | together with S-011, S-012 and S-062 |
 | C-03.FR-13 | partial | the page; the effects on tokens, links, Reminders and Owners come with S-016, S-051, S-049 and S-032 |
 | C-03.FR-15 | full | together with S-011 |
 | C-03.FR-18 | partial | the Permission-filtered entries of these pages; the shell is S-014 |
 | C-03.FR-19 | full | together with S-013 |
 | C-03.FR-20 | full | together with S-012 |
 | C-03.FR-21 | full | together with S-013 |
-| C-03.FR-29 | full | together with S-013 and S-014 |
-| C-03.FR-32 | full | together with S-013 |
+| C-03.FR-29 | full | together with S-062 and S-014 |
+| C-03.FR-32 | full | together with S-013 and S-062 |
 | C-03.AC-7 | full | together with S-013 |
-| C-03.AC-26 | full | together with S-013 |
+| C-03.AC-26 | full | together with S-013 and S-062 |
 | C-02.FR-22 | partial | the shared proxy form |

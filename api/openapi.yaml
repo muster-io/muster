@@ -230,12 +230,10 @@ paths:
       parameters:
       - name: return_to
         in: query
-        description: 'Path to open after sign-in: a relative path that starts with a single `/` (never `//` or a scheme).
-          Anything else is ignored.'
+        description: 'Path to open after sign-in: a relative path that starts with a single `/` (never `//`, `/\` or a
+          scheme), at most 2000 characters. Anything else is ignored, not refused, so the flow is no open redirect.'
         schema:
           type: string
-          maxLength: 2000
-          pattern: ^/([^/\\].*)?$
       responses:
         '302':
           description: Redirect to the identity provider.
@@ -464,8 +462,8 @@ paths:
         outcome is a `302` to the profile page. On success the identity (issuer and subject) is added to the account of the
         web session that started the link and the password is removed; an offline token granted by the link flow is kept
         on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit
-        log records it; the page opens with `?oidc_link=linked`. A failure
-        opens it with `?oidc_link_error=<code>`, one of `identity_linked_elsewhere` (the identity belongs to another user;
+        log records it; the redirect goes to `/profile`. A failure
+        redirects to `/profile?error=<code>`, with one of `identity_linked_elsewhere` (the identity belongs to another user;
         the Audit log records the refusal), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`,
         no web session, or a `state` started by another session) and `idp_error`.
       x-permission: authenticated
@@ -857,7 +855,7 @@ paths:
       - Users
       summary: Update a user
       description: Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`)
-        while `oidc.sync_role` locks the Role, and with `409` (`last_admin`) when it would give the last active Admin a
+        for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a
         lower Role.
       x-permission: users:write
       x-listener: app
@@ -7463,10 +7461,11 @@ components:
         - code: builtin_immutable
           description: The built-in Integration or Link rule cannot be changed this way.
         - code: role_locked
-          description: The identity provider decides the Role (`oidc.sync_role`).
+          description: The identity provider decides the Role of this OIDC account while OIDC and `oidc.sync_role` are both
+            on.
         - code: local_user_only
-          description: 'The operation needs an account that signs in with a password: password change, password setup link.
-            Convert an OIDC account first (`convertUserToLocal`).'
+          description: 'The operation is refused for an account that signs in through OIDC: password change, password setup
+            link. Convert the account first (`convertUserToLocal`).'
         - code: oidc_not_enabled
           description: OIDC sign-in is switched off.
         - code: oidc_already_linked
@@ -7977,7 +7976,8 @@ components:
           $ref: '#/components/schemas/RoleName'
         role_locked:
           type: boolean
-          description: True while `oidc.sync_role` lets the identity provider decide the Role.
+          description: True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the
+            identity provider decides the Role.
         source:
           $ref: '#/components/schemas/UserSource'
         oidc_offline_access:
@@ -8498,7 +8498,8 @@ components:
           type: boolean
         display_name:
           type: string
-          description: Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL.
+          description: Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL;
+            a read leaves it out while the default applies, and an empty value returns to the default.
         issuer_url:
           type: string
           format: uri

@@ -5,10 +5,14 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"time"
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/oidc"
 )
 
 // sessionCookie carries a session: HttpOnly, Secure and SameSite=Lax on the whole site, ending with the browser
@@ -25,13 +29,110 @@ func clearedCookie() *http.Cookie {
 	return c
 }
 
-// GetSignInOptions is getSignInOptions: public, and says only whether the OIDC button shows. OIDC arrives with C-03's
-// OIDC story; until then it is off.
-func (s *Server) GetSignInOptions(context.Context, gen.GetSignInOptionsRequestObject) (
+// oidcStateCookie binds an OIDC callback to the browser that started the sign-in: it carries the state of the start.
+const oidcStateCookie = "muster_oidc_state"
+
+// oidcStateCookieOf is the binding cookie with value, valid as long as the request it binds; an empty value removes
+// it. SameSite=Lax lets the browser send it on the top-level redirect back from the identity provider.
+func oidcStateCookieOf(value string) *http.Cookie {
+	c := &http.Cookie{Name: oidcStateCookie, Value: value, Path: BasePath + "/", HttpOnly: true, Secure: true,
+		SameSite: http.SameSiteLaxMode, MaxAge: int(oidc.AuthRequestTTL / time.Second)}
+	if value == "" {
+		c.MaxAge = -1
+	}
+	return c
+}
+
+type oidcStateKey struct{}
+
+// withOIDCState is a strict middleware that hands the binding cookie of the request to completeOidcSignIn, whose
+// generated request object carries no cookies.
+func withOIDCState(f gen.StrictHandlerFunc, operationID string) gen.StrictHandlerFunc {
+	if operationID != "CompleteOidcSignIn" {
+		return f
+	}
+	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) {
+		if c, err := r.Cookie(oidcStateCookie); err == nil {
+			ctx = context.WithValue(ctx, oidcStateKey{}, c.Value)
+		}
+		return f(ctx, w, r, request)
+	}
+}
+
+// GetSignInOptions is getSignInOptions: public, and says only whether the OIDC button shows and its provider name
+// (C-03.FR-24).
+func (s *Server) GetSignInOptions(ctx context.Context, _ gen.GetSignInOptionsRequestObject) (
 	gen.GetSignInOptionsResponseObject, error) {
 	var opts gen.SignInOptions
-	opts.Oidc.Enabled = false
+	if s.oidc == nil {
+		return gen.GetSignInOptions200JSONResponse(opts), nil
+	}
+	enabled, name, err := s.oidc.SignInOptions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	opts.Oidc.Enabled = enabled
+	if enabled {
+		opts.Oidc.DisplayName = &name
+	}
 	return gen.GetSignInOptions200JSONResponse(opts), nil
+}
+
+// redirect answers 302 with Location and cookies, for the OIDC redirect flow.
+type redirect struct {
+	location string
+	cookies  []*http.Cookie
+}
+
+func (r redirect) write(w http.ResponseWriter) error {
+	for _, c := range r.cookies {
+		http.SetCookie(w, c)
+	}
+	w.Header().Set("Location", r.location)
+	w.WriteHeader(http.StatusFound)
+	return nil
+}
+
+func (r redirect) VisitStartOidcSignInResponse(w http.ResponseWriter) error { return r.write(w) }
+
+func (r redirect) VisitCompleteOidcSignInResponse(w http.ResponseWriter) error { return r.write(w) }
+
+// StartOidcSignIn is startOidcSignIn: the redirect to the identity provider with PKCE S256, state and nonce
+// (C-03.FR-25), and the cookie that binds the callback to this browser. return_to is kept only when it is a relative
+// path. A failed discovery sends the browser to the sign-in page with idp_error.
+func (s *Server) StartOidcSignIn(ctx context.Context, req gen.StartOidcSignInRequestObject) (
+	gen.StartOidcSignInResponseObject, error) {
+	if s.oidc == nil {
+		return nil, errOIDCNotEnabled
+	}
+	start, err := s.oidc.StartSignIn(ctx, deref(req.Params.ReturnTo))
+	if be, ok := errors.AsType[*oidc.BackChannelError](err); ok {
+		s.log.Log(ctx, logging.OIDCSignInFailed, logging.F("reason", be.Step), logging.F("error", be.Error()))
+		return redirect{location: oidc.SignInPage + "?error=" + oidc.ErrorIDPError}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return redirect{location: start.URL, cookies: []*http.Cookie{oidcStateCookieOf(start.State)}}, nil
+}
+
+// CompleteOidcSignIn is completeOidcSignIn: every outcome is a redirect to the SPA — the page of return_to or / with
+// the session cookie, or the sign-in page with the error (C-03.FR-25). The binding cookie is removed either way.
+func (s *Server) CompleteOidcSignIn(ctx context.Context, req gen.CompleteOidcSignInRequestObject) (
+	gen.CompleteOidcSignInResponseObject, error) {
+	cookies := []*http.Cookie{oidcStateCookieOf("")}
+	if s.oidc == nil {
+		return redirect{location: oidc.SignInPage + "?error=" + oidc.ErrorOIDCDisabled, cookies: cookies}, nil
+	}
+	state, _ := ctx.Value(oidcStateKey{}).(string)
+	out := s.oidc.CompleteSignIn(ctx, oidc.Callback{
+		Code: deref(req.Params.Code), State: deref(req.Params.State), Error: deref(req.Params.Error),
+		CookieState: state, Address: clientAddress(ctx), UserAgent: infoFrom(ctx).userAgent,
+	})
+	if out.Session != nil {
+		cookies = append(cookies, sessionCookie(out.Session.Cookie()))
+	}
+	return redirect{location: out.Redirect, cookies: cookies}, nil
 }
 
 // sessionCreated answers createSession with the session cookie.

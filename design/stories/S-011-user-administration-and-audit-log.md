@@ -74,7 +74,7 @@ issue: 11
 **OUT**
 
 - Resetting another user's TOTP and `muster admin reset-totp` (S-012).
-- OIDC accounts: `role_locked`, `convertUserToLocal`, `local_user_only` and removing the identity on a reset (S-013).
+- OIDC accounts: `role_locked`, `convertUserToLocal`, `local_user_only` and removing the identity on a reset (S-062).
 - Revoking a deleted user's tokens (S-016) and Account links (S-051); the Users and Audit log pages (S-015).
 - Releasing the acknowledgements of a disabled or deleted user, which needs Owners (S-032), and its effect on the ack
   timeout and Reminders (S-049).
@@ -230,7 +230,7 @@ curl -s -b jar 'localhost:8080/api/v1/audit-log?action=user.password_reset' | jq
 |---|---|---|
 | C-03.FR-3 | partial | administration and setup links; the Users page is S-015 |
 | C-03.FR-9 | partial | sessions end on disable, Role change and delete |
-| C-03.FR-11 | partial | `reset-password` for local accounts; for OIDC accounts S-013, `reset-totp` S-012 |
+| C-03.FR-11 | partial | `reset-password` for local accounts; for OIDC accounts S-062, `reset-totp` S-012 |
 | C-03.FR-13 | partial | pseudonymization and sessions; tokens S-016, Account links S-051, the release of acknowledgements S-032 and S-049 |
 | C-03.FR-14 | partial | user entry types and diffs; later stories add theirs |
 | C-03.FR-15 | partial | the API; the page is S-015 |

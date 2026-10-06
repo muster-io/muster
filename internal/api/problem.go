@@ -18,6 +18,7 @@ import (
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/oidc"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
@@ -59,6 +60,7 @@ const (
 	codeTOTPNotEnrolled       = "totp_not_enrolled"
 	codeTOTPNotStarted        = "totp_enrolment_not_started"
 	codeTOTPNotPending        = "totp_not_pending"
+	codeOIDCNotEnabled        = "oidc_not_enabled"
 
 	fieldRequired      = "required"
 	fieldInvalidFormat = "invalid_format"
@@ -136,7 +138,8 @@ var (
 		"This operation accepts the web session only.")
 	errTooLarge = problem(http.StatusRequestEntityTooLarge, typePayloadTooLarge, "",
 		"The request body is larger than 1 MiB.")
-	errInternal = problem(http.StatusInternalServerError, typeInternal, "", "The request failed; try again later.")
+	errOIDCNotEnabled = problem(http.StatusConflict, typeConflict, codeOIDCNotEnabled, "OIDC sign-in is switched off.")
+	errInternal       = problem(http.StatusInternalServerError, typeInternal, "", "The request failed; try again later.")
 )
 
 // writeProblem answers p as application/problem+json; instance is the request path.
@@ -177,6 +180,9 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 			"Too many failed sign-ins; wait before the next attempt.")
 		p.RetryAfter = t.Seconds()
 		return p
+	}
+	if f, ok := errors.AsType[*oidc.FieldError](err); ok {
+		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
 	if f, ok := errors.AsType[*users.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
@@ -234,6 +240,15 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 			"Remove your own TOTP from your profile, with your password or a code.")
 	case errors.Is(err, totp.ErrUserNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such user.")
+	case errors.Is(err, oidc.ErrVersionMismatch):
+		return errPreconditionFailed
+	case errors.Is(err, oidc.ErrNotEnabled):
+		return errOIDCNotEnabled
+	case errors.Is(err, oidc.ErrTooManyRequests):
+		p := problem(http.StatusTooManyRequests, typeRateLimited, "",
+			"Too many OIDC sign-ins are in progress; try again in a minute.")
+		p.RetryAfter = 60
+		return p
 	case errors.Is(err, organization.ErrVersionMismatch):
 		return errPreconditionFailed
 	case errors.Is(err, live.ErrTooManyStreams):

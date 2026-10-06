@@ -22,7 +22,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 |---|---|---|---|---|---|
 | C-01 Project skeleton and releases | Foundation | 20 | S-001, S-002, S-003, S-004 | yes | 20 of 20 |
 | C-02 Process startup and runtime | Foundation | 36 | S-005, S-006, S-007, S-008, S-009 | yes | 36 of 36 |
-| C-03 Sign-in and access | Foundation | 58 | S-010, S-011, S-012, S-013, S-014, S-015 | yes | 58 of 58 |
+| C-03 Sign-in and access | Foundation | 58 | S-010, S-011, S-012, S-013, S-062, S-014, S-015 | yes | 58 of 58 |
 | C-04 API tokens | Foundation | 17 | S-016, S-017 | yes | 17 of 17 |
 | C-05 Integrations | Observation | 18 | S-018, S-019 | yes | 18 of 18 |
 | C-06 Snapshot processing | Observation | 36 | S-020, S-021, S-022 | yes | 36 of 36 |
@@ -114,7 +114,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-03
 
-[Sign-in and access](../prd/l1/C-03-sign-in-and-access.md) · Foundation · stories: S-010, S-011, S-012, S-013, S-014, S-015
+[Sign-in and access](../prd/l1/C-03-sign-in-and-access.md) · Foundation · stories: S-010, S-011, S-012, S-013, S-062, S-014, S-015
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -125,20 +125,20 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-03.FR-5 | S-013 (part), S-015 | complete |  |
 | C-03.FR-6 | S-013 (part), S-015 | complete |  |
 | C-03.FR-7 | S-013 (part), S-014 | complete |  |
-| C-03.FR-8 | S-013, S-015 | complete |  |
-| C-03.FR-9 | S-010 (part), S-011 (part), S-013 (part) | complete |  |
+| C-03.FR-8 | S-013 (part), S-015 | complete |  |
+| C-03.FR-9 | S-010 (part), S-011 (part), S-062 (part) | complete |  |
 | C-03.FR-10 | S-012 (part), S-013 (part), S-014 | complete |  |
-| C-03.FR-11 | S-011 (part), S-012 (part), S-013 (part), S-015 | complete |  |
+| C-03.FR-11 | S-011 (part), S-012 (part), S-062 (part), S-015 | complete |  |
 | C-03.FR-12 | S-010 (part), S-014 (part), S-017 (part), S-052 (part) | complete | Personal access tokens join with S-017, Account links with S-052 |
 | C-03.FR-13 | S-011 (part), S-015 (part), S-016 (part), S-032 (part), S-049 (part), S-051 (part) | complete | the effects on Account links come with S-051; the release of the acknowledgements of disabled and deleted users with S-032 and S-049 |
-| C-03.FR-14 | S-010 (part), S-011 (part), S-012 (part), S-013 (part), S-051 (part) | complete | each later capability adds its entry types; Account links with S-051 |
+| C-03.FR-14 | S-010 (part), S-011 (part), S-012 (part), S-013 (part), S-062 (part), S-051 (part) | complete | each later capability adds its entry types; Account links with S-051 |
 | C-03.FR-15 | S-011 (part), S-015 | complete |  |
 | C-03.FR-16 | S-010 | complete |  |
 | C-03.FR-17 | S-013 | complete |  |
 | C-03.FR-18 | S-012 (part), S-014, S-015 (part) | complete |  |
 | C-03.FR-19 | S-013 (part), S-015 | complete |  |
 | C-03.FR-20 | S-012, S-015 | complete |  |
-| C-03.FR-21 | S-013, S-015 | complete |  |
+| C-03.FR-21 | S-013 (part), S-015 | complete |  |
 | C-03.FR-22 | S-010 | complete |  |
 | C-03.FR-23 | S-010 | complete |  |
 | C-03.FR-24 | S-010 (part), S-012 (part), S-013 (part), S-014 | complete |  |
@@ -146,10 +146,10 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-03.FR-26 | S-011 (part), S-014 | complete |  |
 | C-03.FR-27 | S-010 (part), S-012 (part), S-016 | complete |  |
 | C-03.FR-28 | S-013 (part), S-014 | complete |  |
-| C-03.FR-29 | S-013 (part), S-014 (part), S-015 | complete |  |
-| C-03.FR-30 | S-013 (part), S-016 (part) | complete |  |
+| C-03.FR-29 | S-062 (part), S-014 (part), S-015 | complete |  |
+| C-03.FR-30 | S-013 (part), S-062 (part), S-016 (part) | complete |  |
 | C-03.FR-31 | S-011 | complete |  |
-| C-03.FR-32 | S-013 (part), S-015 | complete |  |
+| C-03.FR-32 | S-013 (part), S-062 (part), S-015 | complete |  |
 | C-03.AC-1 | S-013 | complete |  |
 | C-03.AC-2 | S-014 | complete |  |
 | C-03.AC-3 | S-010 | complete |  |
@@ -168,13 +168,13 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-03.AC-17 | S-011 | complete |  |
 | C-03.AC-18 | S-013 | complete |  |
 | C-03.AC-19 | S-011 | complete |  |
-| C-03.AC-20 | S-013 (part), S-014 | complete |  |
-| C-03.AC-21 | S-013 | complete |  |
-| C-03.AC-22 | S-013 (part), S-014 (part), S-016 | complete | the Personal access token part needs C-04 and is verified by S-016; the sign-in page by S-014 |
-| C-03.AC-23 | S-013 | complete |  |
-| C-03.AC-24 | S-013 (part), S-016 | complete | the Personal access token part needs C-04 and is verified by S-016 |
+| C-03.AC-20 | S-062 (part), S-014 | complete |  |
+| C-03.AC-21 | S-062 | complete |  |
+| C-03.AC-22 | S-062 (part), S-014 (part), S-016 | complete | the Personal access token part needs C-04 and is verified by S-016; the sign-in page by S-014 |
+| C-03.AC-23 | S-062 | complete |  |
+| C-03.AC-24 | S-062 (part), S-016 | complete | the Personal access token part needs C-04 and is verified by S-016 |
 | C-03.AC-25 | S-011 | complete |  |
-| C-03.AC-26 | S-013 (part), S-015 | complete |  |
+| C-03.AC-26 | S-013 (part), S-062 (part), S-015 | complete |  |
 | C-03.AC-27 | S-032 (part), S-049 (part) | complete | needs Owners (S-032) and a messenger with the ack timeout (S-049), both later than the user administration of S-011 |
 
 ## C-04
@@ -734,7 +734,7 @@ the stories that implement and check its parts. A story that proves an NFR says 
 | NFR-3 Footprint | S-003, S-004 | the compose example with PostgreSQL's memory capped (S-003); the nightly measurement of the peak working sets (S-004) |
 | NFR-4 Availability | S-004, S-006, S-008, S-018, S-020, S-028, S-034, S-035 | the nightly two-replica end-to-end run with `muster dev --replica` (S-004); readiness on the database only (S-006); the Leader replaced within a minute and the recovery notice (S-008); `202` only after the Snapshot is stored (S-018); ingestion, timers and delivery on every replica (S-020, S-028, S-034); Broken Destinations that recover to the current state (S-035) |
 | NFR-5 Durability and backup | S-008, S-060 | `muster doctor` with the key canary check (S-008); the backup and restore page with the restore order (S-060) |
-| NFR-6 Security | S-001, S-002, S-003, S-007, S-009, S-010, S-012, S-013, S-016, S-018, S-036, S-041, S-044, S-055 | the secret-leak lint (S-001); dependency scanning (S-002); signed images and the SBOM (S-003); AES-256-GCM under the Keyring (S-007) and its rotation (S-055); the outbound address policy, no redirects, per-client proxies (S-009); secure cookies, CSRF, the Content Security Policy, argon2id and sign-in throttling (S-010); TOTP (S-012); write-only secret fields and OIDC refusing users without a mapped group (S-013); hashed tokens (S-016, S-018); escaping, neutralized Mentions and signed buttons (S-036); the Telegram token sent only to the saved Bot API address (S-041); outgoing webhook Secrets (S-044) |
+| NFR-6 Security | S-001, S-002, S-003, S-007, S-009, S-010, S-012, S-013, S-062, S-016, S-018, S-036, S-041, S-044, S-055 | the secret-leak lint (S-001); dependency scanning (S-002); signed images and the SBOM (S-003); AES-256-GCM under the Keyring (S-007) and its rotation (S-055); the outbound address policy, no redirects, per-client proxies (S-009); secure cookies, CSRF, the Content Security Policy, argon2id and sign-in throttling (S-010); TOTP (S-012); write-only secret fields and OIDC refusing users without a mapped group (S-013); OIDC re-checks at the IdP (S-062); hashed tokens (S-016, S-018); escaping, neutralized Mentions and signed buttons (S-036); the Telegram token sent only to the saved Bot API address (S-041); outgoing webhook Secrets (S-044) |
 | NFR-7 Privacy | S-005, S-011 | metric labels without alert labels, users or Alert Group numbers (S-005); pseudonymized deletion (S-011); no telemetry and no email are properties of the whole design, kept by review |
 | NFR-8 Internationalization | S-014, S-036, S-057 | the UI in English and Russian with plural forms and a lint for missing keys (S-014); built-in message texts in both languages, chosen per Route (S-036); the documentation in English (S-057) |
 | NFR-9 Time | S-008, S-010, S-014, S-036, S-060 | the clock skew check (S-008); UTC in the API (S-010); the user's time zone in the UI (S-014); absolute times in the Organization's time zone in messages (S-036); NTP on the nodes in the high-availability page (S-060) |

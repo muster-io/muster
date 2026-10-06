@@ -257,7 +257,8 @@ func get(t *testing.T, url string) int {
 	return resp.StatusCode
 }
 
-var anyPort = devmode.Addresses{Alertmanager: "127.0.0.1:0", Mattermost: "127.0.0.1:0", Telegram: "127.0.0.1:0"}
+var anyPort = devmode.Addresses{Alertmanager: "127.0.0.1:0", Mattermost: "127.0.0.1:0", Telegram: "127.0.0.1:0",
+	OIDC: "127.0.0.1:0", HTTPProxy: "127.0.0.1:0", SOCKSProxy: "127.0.0.1:0"}
 
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
@@ -273,15 +274,27 @@ func TestRun(t *testing.T) {
 		})
 	}()
 
-	got := waitFor(t, out, 3, done)
+	got := waitFor(t, out, 6, done)
 	<-served
 	re := regexp.MustCompile(`^muster dev: fake Alertmanager (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake Mattermost (http://127\.0\.0\.1:\d+)\n` +
+		`muster dev: fake OIDC (http://127\.0\.0\.1:\d+)\n` +
+		`muster dev: fake HTTP proxy (127\.0\.0\.1:\d+)\n` +
+		`muster dev: fake SOCKS5 proxy (127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake Telegram (http://127\.0\.0\.1:\d+)\n$`)
 	m := re.FindStringSubmatch(got)
 	if m == nil {
-		t.Fatalf("output %q, want the three fake servers", got)
+		t.Fatalf("output %q, want the fake servers and proxies", got)
 	}
+	if status := get(t, m[3]+"/.well-known/openid-configuration"); status != http.StatusOK {
+		t.Errorf("OIDC discovery = %d", status)
+	}
+	for _, proxy := range []string{m[4], m[5]} {
+		if status := get(t, "http://"+proxy+"/_fake/requests"); status != http.StatusOK {
+			t.Errorf("GET %s/_fake/requests = %d", proxy, status)
+		}
+	}
+	m = []string{m[0], m[1], m[2], m[6], m[3]} // the fake servers: Alertmanager, Mattermost, Telegram, OIDC
 	for _, base := range m[1:] {
 		if status := get(t, base+"/_fake/requests"); status != http.StatusOK {
 			t.Errorf("GET %s/_fake/requests = %d", base, status)
@@ -345,7 +358,7 @@ func TestRunServeFails(t *testing.T) {
 	if !errors.Is(err, failed) {
 		t.Errorf("Run = %v, want the error of serve", err)
 	}
-	if len(fakes) != 3 {
+	if len(fakes) != 4 {
 		t.Fatalf("the fake servers were not running while serving: %q", out.String())
 	}
 	for _, base := range fakes {
@@ -368,7 +381,8 @@ func TestStartFakes(t *testing.T) {
 	if err := f.Close(t.Context()); err != nil {
 		t.Errorf("Close: %v", err)
 	}
-	want := devmode.Addresses{Alertmanager: "127.0.0.1:19093", Mattermost: "127.0.0.1:18065", Telegram: "127.0.0.1:18081"}
+	want := devmode.Addresses{Alertmanager: "127.0.0.1:19093", Mattermost: "127.0.0.1:18065", Telegram: "127.0.0.1:18081",
+		OIDC: "127.0.0.1:18090", HTTPProxy: "127.0.0.1:18091", SOCKSProxy: "127.0.0.1:18092"}
 	if devmode.FakeAddresses() != want {
 		t.Errorf("FakeAddresses() = %+v, want %+v", devmode.FakeAddresses(), want)
 	}
@@ -395,5 +409,34 @@ func TestRunReplica(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("RunReplica did not return after the cancel")
+	}
+}
+
+func TestRunBusyProxyPort(t *testing.T) {
+	var lc net.ListenConfig
+	busy, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	for _, which := range []string{"HTTP", "SOCKS5"} {
+		addrs := anyPort
+		if which == "HTTP" {
+			addrs.HTTPProxy = busy.Addr().String()
+		} else {
+			addrs.SOCKSProxy = busy.Addr().String()
+		}
+		_, err := devmode.StartFakes(t.Context(), addrs)
+		if err == nil || !strings.Contains(err.Error(), "start the fake "+which+" proxy on "+busy.Addr().String()) {
+			t.Errorf("StartFakes = %v, want an error naming the fake %s proxy", err, which)
+		}
+	}
+}
+
+func TestOIDCDemo(t *testing.T) {
+	d := devmode.OIDCDemo()
+	if d.IssuerURL != "http://"+devmode.OIDCAddr || d.DisplayName != "Dev IdP" || d.AllowNetwork != "127.0.0.0/8" ||
+		len(d.Mappings) != 2 || d.Mappings[0].Role != "admin" || d.Mappings[1].Group != "oncall" {
+		t.Errorf("OIDCDemo() = %+v", d)
 	}
 }

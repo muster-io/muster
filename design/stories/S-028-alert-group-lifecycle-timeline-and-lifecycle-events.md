@@ -144,7 +144,7 @@ issue: 28
   loudness and Mentions per variant — and every transition records exactly one entry with `event_seq` taken from
   `alert_groups.event_seq`; the `CHECK`s of `timeline_entries` back it. Mentions are symbolic.
 - **Timers** (C-09.FR-12; `timers`, `internal/timers`): a worker on every replica claims due rows with
-  `FOR UPDATE SKIP LOCKED` and a lease through the claim helper of S-013, waking at the earliest deadline and on
+  `FOR UPDATE SKIP LOCKED` and a lease through the claim helper of S-062, waking at the earliest deadline and on
   `NOTIFY`; overdue rows after downtime fire once. The worker, like the downtime step below, runs per Organization: it
   iterates over the Organizations (one in L1) and passes `org_id` to every claim and query (lint 1). Kinds here: `reopen_window_end` (clears `reopen_deadline` and the
   `prior_*` columns, no entry) and `grace_period_end`. S-032, S-035 and S-049 register their kinds.

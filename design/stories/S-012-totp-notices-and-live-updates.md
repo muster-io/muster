@@ -222,7 +222,7 @@ None.
 | ID | Covered | Note |
 |---|---|---|
 | C-03.FR-10 | partial | everything except the OIDC parts (S-013) and the pages (S-014) |
-| C-03.FR-11 | partial | the TOTP resets; `reset-password` is S-011 and S-013 |
+| C-03.FR-11 | partial | the TOTP resets; `reset-password` is S-011 and S-062 |
 | C-03.FR-14 | partial | TOTP and Organization entry types |
 | C-03.FR-18 | partial | the notices and the stream; the shell and its banners are S-014 |
 | C-03.FR-20 | full | the Security page is S-015 |
