@@ -35,8 +35,8 @@ import (
 var t0 = time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 
 var roles = auth.Roles{
-	auth.RoleAdmin: {"alert-groups:read", "integrations:read", "organization:write", "system-status:read", "users:read",
-		"users:write"},
+	auth.RoleAdmin: {"alert-groups:read", "integrations:read", "organization:write", "service-accounts:read",
+		"service-accounts:write", "system-status:read", "users:read", "users:write"},
 	auth.RoleResponder: {"alert-groups:acknowledge", "alert-groups:read", "integrations:read"},
 	auth.RoleViewer:    {"alert-groups:read", "integrations:read"},
 }
@@ -609,7 +609,7 @@ func TestPermissions(t *testing.T) {
 	}
 	_ = json.Unmarshal(a.body, &list)
 	if len(list.Items) != 3 || list.Items[0].Name != "admin" || list.Items[2].Name != "viewer" ||
-		len(list.Items[0].Permissions) != 6 || len(list.Items[2].Permissions) != 2 {
+		len(list.Items[0].Permissions) != 8 || len(list.Items[2].Permissions) != 2 {
 		t.Errorf("roles = %+v", list)
 	}
 	id := &auth.Identity{Permissions: []auth.Permission{"users:read"}}
@@ -619,17 +619,25 @@ func TestPermissions(t *testing.T) {
 			t.Errorf("allowed(%s) = %v", perms, got)
 		}
 	}
-	// A token on an operation for the web session only (C-03.FR-27); tokens arrive with C-04.
+	// A token on an operation for the web session only (C-03.FR-27), and a Service account under /me.
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/api/v1/me", nil)
-	op := &operation{id: "updateMe", sessionOnly: true, permissions: []string{"authenticated"}}
-	ctx := context.WithValue(auth.WithIdentity(r.Context(), &auth.Identity{Transport: audit.TransportAPI}),
-		requestInfoKey{}, requestInfo{operation: op})
-	w := httptest.NewRecorder()
-	x.srv.permit(http.NotFoundHandler()).ServeHTTP(w, r.WithContext(ctx))
-	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), codeSessionRequired) {
-		t.Errorf("a token on updateMe = %d %s", w.Code, w.Body)
+	op := &operation{id: "updateMe", path: "/me", sessionOnly: true, permissions: []string{"authenticated"}}
+	pat := &auth.Identity{Transport: audit.TransportAPI, Token: &auth.Token{ID: 1}}
+	if p := credentialsAllowed(pat, op); p != errSessionRequired {
+		t.Errorf("a token on updateMe = %v", p)
 	}
-	w = httptest.NewRecorder()
+	if p := credentialsAllowed(&auth.Identity{Transport: audit.TransportUI}, op); p != nil {
+		t.Errorf("a session on updateMe = %v", p)
+	}
+	sat := &auth.Identity{Transport: audit.TransportAPI, Token: &auth.Token{ID: 2, ServiceAccount: &auth.Principal{}}}
+	read := &operation{id: "getMyTotp", path: "/me/totp", permissions: []string{"authenticated"}}
+	if p := credentialsAllowed(sat, read); p != errServiceAccountDenied {
+		t.Errorf("a Service account on getMyTotp = %v", p)
+	}
+	if p := credentialsAllowed(sat, &operation{id: "x", path: "/metadata"}); p != nil {
+		t.Errorf("a Service account outside /me = %v", p)
+	}
+	w := httptest.NewRecorder()
 	x.srv.permit(http.NotFoundHandler()).ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestInfoKey{},
 		requestInfo{operation: op})))
 	if w.Code != http.StatusUnauthorized {

@@ -1670,12 +1670,12 @@ paths:
       tags:
       - API tokens
       summary: Create a Service account token
+      description: 'Shows the token once. Web session only: a token can never mint another token.'
       x-permission: service-accounts:write
       x-listener: app
       security:
       - sessionCookie: []
         csrf: []
-      - apiToken: []
       parameters:
       - $ref: '#/components/parameters/ServiceAccountId'
       requestBody:
@@ -1709,12 +1709,12 @@ paths:
       tags:
       - API tokens
       summary: Revoke a Service account token
+      description: 'Revokes the token at once. Web session only: a token can never revoke a token.'
       x-permission: service-accounts:write
       x-listener: app
       security:
       - sessionCookie: []
         csrf: []
-      - apiToken: []
       parameters:
       - $ref: '#/components/parameters/ServiceAccountId'
       - $ref: '#/components/parameters/TokenId'
@@ -3917,12 +3917,11 @@ paths:
       description: |-
         Server-sent events (`text/event-stream`). OpenAPI 3.1 cannot type event streams, so the events are described by `HintEvent`.
 
-        Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page.
+        Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page. The stream follows a web session; a token gets `403` (`session_required`).
       x-permission: authenticated
       x-listener: app
       security:
       - sessionCookie: []
-      - apiToken: []
       responses:
         '200':
           description: An open event stream.

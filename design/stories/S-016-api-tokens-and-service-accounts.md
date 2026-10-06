@@ -16,15 +16,25 @@ files_touched:
   - internal/tokens/tokens_test.go
   - internal/tokens/authenticate_test.go
   - internal/tokens/ratelimit_test.go
+  - internal/tokens/tokens_integration_test.go
   - internal/api/tokens.go
   - internal/api/serviceaccounts.go
   - internal/api/tokens_test.go
   - internal/api/middleware.go
+  - internal/api/server.go
+  - internal/api/problem.go
+  - internal/api/server_test.go
   - internal/auth/identity.go
   - internal/audit/audit.go
   - internal/users/admin.go
-  - internal/logging/events.go
+  - internal/users/query.sql
+  - internal/users/admin_test.go
+  - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/archlint/secretleak.go
+  - sqlc.yaml
+  - api/openapi.yaml
+  - test/e2e/tokens_test.go
   - design/prd/l1/defaults.md
   - design/prd/L1.md
 acceptance:
@@ -92,7 +102,11 @@ issue: 16
   `401 invalid_credentials`. Requests with a token use the Transport `api` and need no CSRF token.
 - **Refusals for tokens** (C-03.FR-27): the operations that change the caller's own account — profile, password, TOTP,
   Personal access tokens, Account links, ending sessions, linking OIDC — answer `403 session_required` to any token;
-  `GET /api/v1/me` and its sub-resources answer `403 service_account_not_allowed` to a Service account token.
+  `GET /api/v1/me` and its sub-resources answer `403 service_account_not_allowed` to a Service account token. A token
+  never mints or revokes a token (C-04.FR-7): `createServiceAccountToken` and `revokeServiceAccountToken` take the web
+  session only, and answer `403 session_required` to a token. `streamLiveUpdates` follows a web session — the Hub
+  checks and ends streams per session — and also answers `403 session_required` to a token. These refusals come before
+  request validation.
 - **OIDC accounts** (C-04.FR-8, C-03.FR-30): a Personal access token whose owner signs in through OIDC answers `401
   oidc_recheck_required` with "Sign in through OIDC to make your tokens work again." while `users.oidc_refused_at` is
   set, or — only for an owner without an offline token — once the last OIDC sign-in is older than

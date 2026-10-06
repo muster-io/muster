@@ -74,3 +74,10 @@ sql:
       go:
         <<: *go
         out: internal/oidc/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/tokens/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/tokens/dbgen

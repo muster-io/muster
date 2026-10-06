@@ -41,6 +41,8 @@ import (
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/runtime"
+	"github.com/muster-io/muster/internal/tokens"
+	tokdb "github.com/muster-io/muster/internal/tokens/dbgen"
 	"github.com/muster-io/muster/internal/totp"
 	tdb "github.com/muster-io/muster/internal/totp/dbgen"
 	"github.com/muster-io/muster/internal/users"
@@ -73,6 +75,7 @@ var registry = []Probe{
 	{Name: "sign_in", Run: probeSignIn},
 	{Name: "totp", Run: probeTOTP},
 	{Name: "oidc", Run: probeOIDC},
+	{Name: "api_tokens", Run: probeTokens},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -860,6 +863,97 @@ func (s *probeOIDCStore) TakeAuthRequest(_ context.Context, a odb.TakeAuthReques
 }
 
 func (s *probeOIDCStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
+	return nil
+}
+
+// probeTokens sends the secrets as bearer tokens to the API — as they are, and after the prefixes of a Personal access
+// token and a Service account token — on a read and on a change, and issues tokens whose values then authenticate
+// while the database fails. None of the answers, errors or log lines may carry a secret. The issued values are not
+// among the planted secrets, so the probe looks for them itself and reports a leak as the first secret.
+func probeTokens(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	business := clock.NewManual(now)
+	store := &probeTokenStore{}
+	svc := tokens.New(1, store, audit.NewWriter(logger, business), business,
+		auth.Roles{auth.RoleAdmin: {"users:read", "users:write"}}, tokens.NewLimiter(clock.Real{}))
+	by := tokens.Requester{Actor: audit.User(1, "SRAAAAAAAAAAAA"), Transport: audit.TransportUI}
+	pat, err1 := svc.CreatePersonal(ctx, by, tokens.Owner{ID: 1, PublicID: "SRAAAAAAAAAAAA"},
+		[]auth.Permission{"users:read"}, tokens.NewPersonal{Name: "probe", Permissions: []auth.Permission{"users:read"}})
+	sat, err2 := svc.CreateServiceAccountToken(ctx, by, "SAAAAAAAAAAAAA", tokens.NewToken{Name: "probe"})
+	errs := []error{err1, err2}
+	store.fail = errors.New("the database is unavailable")
+	h, err := api.New(api.Config{Tokens: svc, Log: logger, Real: clock.Real{}})
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	var values []string
+	for _, secret := range secrets {
+		values = append(values, secret, "mstr_pat_"+secret, "mstr_sat_"+secret)
+	}
+	var answers []string
+	for _, value := range append(values, pat.Value, sat.Value) {
+		_, err := svc.Authenticate(ctx, value, netip.MustParseAddr("192.0.2.1"))
+		errs = append(errs, err)
+		for _, req := range [][3]string{{http.MethodGet, "/api/v1/me", ""},
+			{http.MethodPost, "/api/v1/users", `{"name":"x","login":"x","role":"viewer"}`}} {
+			r, err := http.NewRequestWithContext(ctx, req[0], req[1], strings.NewReader(req[2]))
+			if err != nil {
+				return err
+			}
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Authorization", "Bearer "+value)
+			rec := &probeRecorder{header: http.Header{}}
+			h.ServeHTTP(rec, r)
+			answers = append(answers, rec.body.String())
+		}
+	}
+	errs = append(errs, fmt.Errorf("answers: %s", strings.Join(answers, " | ")))
+	out := errors.Join(errs...)
+	for _, issued := range []string{pat.Value, sat.Value} {
+		if issued == "" {
+			return fmt.Errorf("no token was issued: %w", out)
+		}
+		lw, ok := log.(interface{ String() string })
+		if (out != nil && strings.Contains(out.Error(), issued)) || (ok && strings.Contains(lw.String(), issued)) {
+			return fmt.Errorf("an issued token value leaked; reported as %s", secrets[0])
+		}
+	}
+	return out
+}
+
+// probeTokenStore is the database of probeTokens: one Service account, and every query failing once fail is set.
+type probeTokenStore struct {
+	tokens.Store
+	fail error
+}
+
+func (s *probeTokenStore) InTx(_ context.Context, f func(tokens.Queries) error) error { return f(s) }
+
+func (s *probeTokenStore) InsertToken(context.Context, tokdb.InsertTokenParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *probeTokenStore) InsertTokenPermissions(context.Context, tokdb.InsertTokenPermissionsParams) error {
+	return nil
+}
+
+func (s *probeTokenStore) LockServiceAccount(context.Context, tokdb.LockServiceAccountParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *probeTokenStore) GetServiceAccount(context.Context, tokdb.GetServiceAccountParams) (
+	tokdb.GetServiceAccountRow, error) {
+	return tokdb.GetServiceAccountRow{ID: 1, PublicID: "SAAAAAAAAAAAAA", Name: "probe", Role: auth.RoleAdmin,
+		Status: tokens.StatusActive, Version: 1}, nil
+}
+
+func (s *probeTokenStore) GetTokenByHash(context.Context, tokdb.GetTokenByHashParams) (tokdb.GetTokenByHashRow,
+	error) {
+	return tokdb.GetTokenByHashRow{}, s.fail
+}
+
+func (s *probeTokenStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
 	return nil
 }
 

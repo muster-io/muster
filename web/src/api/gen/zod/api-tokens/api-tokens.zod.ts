@@ -292,6 +292,7 @@ export const ListServiceAccountTokensResponse = zod.object({
 })
 
 /**
+ * Shows the token once. Web session only: a token can never mint another token.
  * @summary Create a Service account token
  */
 export const createServiceAccountTokenPathServiceAccountIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -326,6 +327,7 @@ export const CreateServiceAccountTokenResponse = zod.object({
 })
 
 /**
+ * Revokes the token at once. Web session only: a token can never revoke a token.
  * @summary Revoke a Service account token
  */
 export const revokeServiceAccountTokenPathServiceAccountIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');

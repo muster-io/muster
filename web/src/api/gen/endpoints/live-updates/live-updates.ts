@@ -72,7 +72,7 @@ export const getStreamLiveUpdatesUrl = () => {
 /**
  * Server-sent events (`text/event-stream`). OpenAPI 3.1 cannot type event streams, so the events are described by `HintEvent`.
  *
- * Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page.
+ * Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page. The stream follows a web session; a token gets `403` (`session_required`).
  * @summary Stream change hints
  */
 export const streamLiveUpdates = async ( options?: Parameters<typeof apiFetch>[1]): Promise<HintEvent> => {

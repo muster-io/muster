@@ -52,6 +52,9 @@ type adminStore struct {
 	// roleSync is whether OIDC and oidc.sync_role are both on; dropped are the users whose re-check was removed.
 	roleSync bool
 	dropped  []int64
+	// tokens are the usable Personal access tokens per user, revoked the ones revoked with owner_deleted.
+	tokens  map[int64]int64
+	revoked map[int64]int64
 }
 
 func (s *adminStore) InTx(_ context.Context, f func(AdminQueries) error) error {
@@ -276,6 +279,19 @@ func (s *adminStore) EndSessionsOfUser(_ context.Context, arg dbgen.EndSessionsO
 	n := s.sessions[arg.UserID]
 	delete(s.sessions, arg.UserID)
 	s.reasons = append(s.reasons, arg.EndReason.String)
+	return n, nil
+}
+
+func (s *adminStore) RevokeTokensOfUser(_ context.Context, arg dbgen.RevokeTokensOfUserParams) (int64, error) {
+	if err := s.fail["RevokeTokensOfUser"]; err != nil {
+		return 0, err
+	}
+	n := s.tokens[arg.UserID.Int64]
+	delete(s.tokens, arg.UserID.Int64)
+	if s.revoked == nil {
+		s.revoked = map[int64]int64{}
+	}
+	s.revoked[arg.UserID.Int64] += n
 	return n, nil
 }
 
@@ -651,9 +667,13 @@ func TestDisableEnableDelete(t *testing.T) {
 		t.Errorf("a stale If-Match: %v", err)
 	}
 	s.sessions[2] = 1
+	s.tokens = map[int64]int64{2: 2}
 	current := s.user(2).Version
 	if err := a.Delete(t.Context(), byAdmin, bobID, &current); err != nil {
 		t.Fatal(err)
+	}
+	if s.revoked[2] != 2 || len(s.tokens) != 0 {
+		t.Errorf("the tokens of the deleted user: %v revoked, %v left", s.revoked, s.tokens)
 	}
 	b := s.user(2)
 	if b.Status != StatusDeleted || b.Name != "deleted-user-"+bobID || b.Login != b.Name || b.Email.Valid ||
@@ -684,7 +704,7 @@ func TestStatusFailures(t *testing.T) {
 		"delete":  func(a *Admin) error { return a.Delete(t.Context(), byAdmin, bobID, nil) },
 	}
 	for _, method := range []string{"SetUserStatus", "EndSessionsOfUser", "GetUser", "InsertAuditEntry", "LockUser",
-		"PseudonymizeUser", "SupersedePasswordSetups", "LockActiveAdmins"} {
+		"PseudonymizeUser", "SupersedePasswordSetups", "LockActiveAdmins", "RevokeTokensOfUser"} {
 		failed := 0
 		for name, op := range ops {
 			s := &adminStore{users: []dbgen.GetUserRow{adminRow(1, adminID, "admin"), adminRow(2, bobID, "bob")},

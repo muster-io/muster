@@ -2,10 +2,10 @@
 // Copyright The Muster Authors
 
 // Package api is the HTTP API of the app listener (ADR-0008): the strict server generated from api/openapi.yaml,
-// mounted under /api/v1, behind the middleware of the contract — request metrics, authentication by the session
-// cookie, the CSRF check, request validation and the Permission of each operation's x-permission — with every error
-// answered as an RFC 9457 problem. Handlers are thin: they call the domain packages. An operation that no story has
-// implemented yet answers 501.
+// mounted under /api/v1, behind the middleware of the contract — request metrics, authentication by a bearer token or
+// the session cookie, the CSRF check of the session, request validation and the Permission of each operation's
+// x-permission — with every error answered as an RFC 9457 problem. Handlers are thin: they call the domain packages.
+// An operation that no story has implemented yet answers 501.
 package api
 
 import (
@@ -28,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
 )
@@ -104,6 +105,29 @@ type Live interface {
 	Stream(ctx context.Context, w io.Writer, flush func() error, sub *live.Subscription) error
 }
 
+// Tokens is what the API needs of internal/tokens: bearer authentication, Personal access tokens and Service
+// accounts.
+type Tokens interface {
+	Authenticate(ctx context.Context, value string, addr netip.Addr) (*auth.Identity, error)
+	ListPersonal(ctx context.Context, ownerID int64) ([]tokens.Token, error)
+	CreatePersonal(ctx context.Context, r tokens.Requester, owner tokens.Owner, held []auth.Permission,
+		n tokens.NewPersonal) (tokens.Created, error)
+	RevokePersonal(ctx context.Context, r tokens.Requester, owner tokens.Owner, publicID string) error
+	ListServiceAccounts(ctx context.Context, f tokens.ListFilter) (tokens.Page, error)
+	GetServiceAccount(ctx context.Context, publicID string) (tokens.ServiceAccount, error)
+	CreateServiceAccount(ctx context.Context, r tokens.Requester, in tokens.ServiceAccountInput) (tokens.ServiceAccount,
+		error)
+	UpdateServiceAccount(ctx context.Context, r tokens.Requester, publicID string, version *int64,
+		in tokens.ServiceAccountInput) (tokens.ServiceAccount, error)
+	DisableServiceAccount(ctx context.Context, r tokens.Requester, publicID string) (tokens.ServiceAccount, error)
+	EnableServiceAccount(ctx context.Context, r tokens.Requester, publicID string) (tokens.ServiceAccount, error)
+	DeleteServiceAccount(ctx context.Context, r tokens.Requester, publicID string, version *int64) error
+	ListServiceAccountTokens(ctx context.Context, publicID string) ([]tokens.Token, error)
+	CreateServiceAccountToken(ctx context.Context, r tokens.Requester, publicID string, n tokens.NewToken) (
+		tokens.Created, error)
+	RevokeServiceAccountToken(ctx context.Context, r tokens.Requester, publicID, tokenID string) error
+}
+
 // Config is what the API serves with.
 type Config struct {
 	Sessions     Sessions
@@ -115,6 +139,7 @@ type Config struct {
 	Notices      Notices
 	Live         Live
 	OIDC         OIDC
+	Tokens       Tokens
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -135,6 +160,7 @@ type Server struct {
 	notices        Notices
 	live           Live
 	oidc           OIDC
+	tokens         Tokens
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -158,6 +184,10 @@ var implemented = map[string]bool{
 	"UpdateOrganization": true, "ListSystemNotices": true, "StreamLiveUpdates": true,
 	"GetOidcSettings": true, "UpdateOidcSettings": true, "CheckOidcSettings": true, "StartOidcSignIn": true,
 	"CompleteOidcSignIn": true, "StartOidcLink": true, "CompleteOidcLink": true, "ConvertUserToLocal": true,
+	"ListPersonalAccessTokens": true, "CreatePersonalAccessToken": true, "RevokePersonalAccessToken": true,
+	"ListServiceAccounts": true, "CreateServiceAccount": true, "GetServiceAccount": true, "UpdateServiceAccount": true,
+	"DeleteServiceAccount": true, "DisableServiceAccount": true, "EnableServiceAccount": true,
+	"ListServiceAccountTokens": true, "CreateServiceAccountToken": true, "RevokeServiceAccountToken": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -184,7 +214,8 @@ func New(cfg Config) (*Server, error) {
 	}
 	s := &Server{
 		sessions: cfg.Sessions, users: cfg.Users, admin: cfg.Admin, auditLog: cfg.AuditLog, totp: cfg.TOTP,
-		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, oidc: cfg.OIDC, trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
+		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, oidc: cfg.OIDC, tokens: cfg.Tokens,
+		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}
 	mux := http.NewServeMux()

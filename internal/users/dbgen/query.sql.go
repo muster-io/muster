@@ -645,6 +645,27 @@ func (q *Queries) ResetUserPassword(ctx context.Context, arg ResetUserPasswordPa
 	return result.RowsAffected(), nil
 }
 
+const revokeTokensOfUser = `-- name: RevokeTokensOfUser :execrows
+UPDATE api_tokens
+SET revoked_at = $1::timestamptz, revoked_reason = 'owner_deleted'
+WHERE org_id = $2 AND kind = 'personal' AND user_id = $3 AND revoked_at IS NULL
+`
+
+type RevokeTokensOfUserParams struct {
+	Now    time.Time
+	OrgID  int64
+	UserID pgtype.Int8
+}
+
+// RevokeTokensOfUser revokes the Personal access tokens of a deleted user with the reason owner_deleted (C-04.FR-1).
+func (q *Queries) RevokeTokensOfUser(ctx context.Context, arg RevokeTokensOfUserParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeTokensOfUser, arg.Now, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const roleSyncOn = `-- name: RoleSyncOn :one
 SELECT EXISTS (
     SELECT 1 FROM oidc_settings WHERE org_id = $1 AND enabled AND sync_role

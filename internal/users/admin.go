@@ -79,6 +79,7 @@ type AdminQueries interface {
 	PseudonymizeUser(ctx context.Context, arg dbgen.PseudonymizeUserParams) (int64, error)
 	SetUserPassword(ctx context.Context, arg dbgen.SetUserPasswordParams) (int64, error)
 	EndSessionsOfUser(ctx context.Context, arg dbgen.EndSessionsOfUserParams) (int64, error)
+	RevokeTokensOfUser(ctx context.Context, arg dbgen.RevokeTokensOfUserParams) (int64, error)
 	RoleSyncOn(ctx context.Context, orgID int64) (bool, error)
 	ConvertToLocal(ctx context.Context, arg dbgen.ConvertToLocalParams) (int64, error)
 	ResetUserPassword(ctx context.Context, arg dbgen.ResetUserPasswordParams) (int64, error)
@@ -398,9 +399,10 @@ func (a *Admin) setStatus(ctx context.Context, r Requester, id, status string) (
 }
 
 // Delete deletes the user id (C-03.FR-13): the row stays with the status deleted, the name and the login become
-// deleted-user-<public_id>, the email and the password are erased, the sessions end and open password setup links
-// are superseded. The Audit log keeps the user's earlier entries, which show the new name. A non-nil version must be
-// the user's; deleting the last active Admin is ErrLastAdmin.
+// deleted-user-<public_id>, the email and the password are erased, the sessions end, the Personal access tokens are
+// revoked with the reason owner_deleted (C-04.FR-1) and open password setup links are superseded. The Audit log keeps
+// the user's earlier entries, which show the new name. A non-nil version must be the user's; deleting the last active
+// Admin is ErrLastAdmin.
 func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int64) error {
 	return a.store.InTx(ctx, func(q AdminQueries) error {
 		admins, before, err := a.lock(ctx, q, id, true)
@@ -427,6 +429,12 @@ func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int
 		if err := a.dropCheck(ctx, q, before); err != nil {
 			return err
 		}
+		revoked, err := q.RevokeTokensOfUser(ctx, dbgen.RevokeTokensOfUserParams{
+			OrgID: a.orgID, UserID: pgtype.Int8{Int64: before.ID, Valid: true}, Now: now,
+		})
+		if err != nil {
+			return fmt.Errorf("revoke the personal access tokens of %s: %w", before.PublicID, err)
+		}
 		if _, err := q.SupersedePasswordSetups(ctx, dbgen.SupersedePasswordSetupsParams{
 			OrgID: a.orgID, UserID: before.ID, Now: now,
 		}); err != nil {
@@ -439,7 +447,8 @@ func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int
 				{Pointer: "/status", Before: before.Status, After: StatusDeleted},
 				{Pointer: "/name", After: pseudonym}, {Pointer: "/login", After: pseudonym},
 			},
-			Details: map[string]any{"sessions_ended": ended, "email_erased": before.Email != ""}, SourceAddress: r.Address,
+			Details:       map[string]any{"sessions_ended": ended, "tokens_revoked": revoked, "email_erased": before.Email != ""},
+			SourceAddress: r.Address,
 		})
 	})
 }

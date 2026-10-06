@@ -65,6 +65,19 @@ const (
 	ActionPasswordReset     = "user.password_reset"
 )
 
+// The actions of C-04: issuing and revoking tokens, and the lifecycle of Service accounts.
+const (
+	ActionAPITokenCreated        = "api_token.created"
+	ActionAPITokenRevoked        = "api_token.revoked"
+	ActionServiceAccountCreated  = "service_account.created"
+	ActionServiceAccountUpdated  = "service_account.updated"
+	ActionServiceAccountDisabled = "service_account.disabled"
+	ActionServiceAccountEnabled  = "service_account.enabled"
+	ActionServiceAccountDeleted  = "service_account.deleted"
+	ResourceAPIToken             = "api_token"
+	ResourceServiceAccount       = "service_account"
+)
+
 // The resource types of C-03.
 const (
 	ResourceUser    = "user"
@@ -88,6 +101,18 @@ type Actor struct {
 // User is the actor of a user.
 func User(id int64, publicID string) Actor {
 	return Actor{Kind: ActorUser, ID: id, PublicID: publicID}
+}
+
+// ServiceAccount is the actor of a Service account; it acts only through one of its tokens (Via).
+func ServiceAccount(id int64, publicID string) Actor {
+	return Actor{Kind: ActorServiceAccount, ID: id, PublicID: publicID}
+}
+
+// Via is the actor acting through the Personal access token or Service account token id named name; the Audit log
+// shows it as "{user} via token {name}" or as the Service account and its token (C-04.FR-6).
+func (a Actor) Via(tokenID int64, name string) Actor {
+	a.TokenID, a.TokenName = tokenID, name
+	return a
 }
 
 // System is Muster itself.
