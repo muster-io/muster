@@ -20,19 +20,25 @@ import (
 )
 
 const adminUsage = `Usage: muster admin reset-password --actor <name> <login>
+       muster admin reset-totp --actor <name> <login>
 
-Emergency access (C-03.FR-11). Reads the new password from standard input — without echo on a terminal, otherwise
-the first line — sets it on the account with the login, ends the account's sessions and records the reset in the
-Audit log with the --actor name and the Transport cli. --actor names the person who runs the command and is required;
-flags come before the login.
+Emergency access (C-03.FR-11). --actor names the person who runs the command and is required; flags come before the
+login. Both record the change in the Audit log with the --actor name and the Transport cli.
+
+reset-password reads the new password from standard input — without echo on a terminal, otherwise the first line —
+sets it on the account with the login and ends the account's sessions.
+
+reset-totp removes the TOTP and the recovery codes of the account with the login, for a lost second factor, and ends
+the account's sessions; under a TOTP policy that covers the account, it enrols again at the next sign-in.
 `
 
 // maxPasswordInput bounds the line read from a pipe.
 const maxPasswordInput = 4096
 
-// The runtime entry point and standard input, replaced by tests.
+// The runtime entry points and standard input, replaced by tests.
 var (
 	runResetPassword           = runtime.ResetPassword
+	runResetTOTP               = runtime.ResetTOTP
 	stdin            io.Reader = os.Stdin
 )
 
@@ -45,6 +51,8 @@ func runAdmin(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "reset-password":
 		return runResetPasswordCommand(args[1:], stdout, stderr)
+	case "reset-totp":
+		return runResetTOTPCommand(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, adminUsage)
 		return exitOK
@@ -61,14 +69,14 @@ func runResetPasswordCommand(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(io.Discard)
 	actor := fs.String("actor", "", "")
 	if err := fs.Parse(args); err != nil {
-		return adminUsageError(stderr, err.Error())
+		return adminUsageError(stderr, "reset-password", err.Error())
 	}
 	name := strings.TrimSpace(*actor)
 	switch {
 	case name == "":
-		return adminUsageError(stderr, "--actor is required")
+		return adminUsageError(stderr, "reset-password", "--actor is required")
 	case fs.NArg() != 1 || fs.Arg(0) == "":
-		return adminUsageError(stderr, "give exactly one login after the flags")
+		return adminUsageError(stderr, "reset-password", "give exactly one login after the flags")
 	}
 	login := fs.Arg(0)
 	password, err := readPassword(stdin, stderr)
@@ -112,7 +120,42 @@ func readPassword(r io.Reader, prompt io.Writer) (logging.Secret, error) {
 	return logging.Secret(line), nil
 }
 
-func adminUsageError(stderr io.Writer, msg string) int {
-	fmt.Fprintf(stderr, "muster admin reset-password: %s\n\n%s", msg, adminUsage)
+// runResetTOTPCommand is `muster admin reset-totp --actor <name> <login>`. Without --actor, or with anything but one
+// login, it exits 2 before it connects.
+func runResetTOTPCommand(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("reset-totp", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	actor := fs.String("actor", "", "")
+	if err := fs.Parse(args); err != nil {
+		return adminUsageError(stderr, "reset-totp", err.Error())
+	}
+	name := strings.TrimSpace(*actor)
+	switch {
+	case name == "":
+		return adminUsageError(stderr, "reset-totp", "--actor is required")
+	case fs.NArg() != 1 || fs.Arg(0) == "":
+		return adminUsageError(stderr, "reset-totp", "give exactly one login after the flags")
+	}
+	login := fs.Arg(0)
+	ctx, stop := signals()
+	defer stop()
+	context.AfterFunc(ctx, stop)
+	id, removed, err := runResetTOTP(ctx, runtime.Options{Environ: environ(), Stdout: stdout}, runtime.TOTPReset{
+		Actor: name, Login: login,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "muster admin reset-totp: %v\n", err)
+		return exitFailure
+	}
+	if !removed {
+		fmt.Fprintf(stderr, "muster admin reset-totp: %s (%s) has no TOTP; nothing changed\n", login, id)
+		return exitOK
+	}
+	fmt.Fprintf(stderr, "muster admin reset-totp: the TOTP of %s (%s) is removed and its sessions ended\n", login, id)
+	return exitOK
+}
+
+func adminUsageError(stderr io.Writer, command, msg string) int {
+	fmt.Fprintf(stderr, "muster admin %s: %s\n\n%s", command, msg, adminUsage)
 	return exitUsage
 }

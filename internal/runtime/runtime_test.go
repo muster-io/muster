@@ -26,14 +26,18 @@ import (
 	"github.com/muster-io/muster/internal/auth"
 	adb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/config"
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/leader"
+	ldb "github.com/muster-io/muster/internal/leader/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
 	odb "github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/totp"
+	tdb "github.com/muster-io/muster/internal/totp/dbgen"
 	"github.com/muster-io/muster/internal/users"
 	udb "github.com/muster-io/muster/internal/users/dbgen"
 )
@@ -49,8 +53,9 @@ type fakeDB struct {
 	// partitionErr fails the partition maintenance session; ddl counts its statements.
 	partitionErr error
 	ddl          int
-	// admin answers the administration of users; nil without a test that needs it.
+	// admin answers the administration of users and totp the TOTP of users; nil without a test that needs them.
 	admin users.AdminStore
+	totp  totp.Store
 }
 
 func (f *fakeDB) LeaderSession(context.Context) (leader.Session, error) {
@@ -66,7 +71,40 @@ func (f *fakeDB) PartitionSession(context.Context) (partitions.Session, error) {
 	return fakeSession{f}, nil
 }
 
-func (f *fakeDB) LeaderStore() leader.Store { return nil }
+// LeaderStore reads a runtime state without notices; the replica never leads, so nothing else is asked of it.
+func (f *fakeDB) LeaderStore() leader.Store { return fakeLeaderStore{} }
+
+type fakeLeaderStore struct{ leader.Store }
+
+func (fakeLeaderStore) GetRuntimeState(context.Context) (ldb.GetRuntimeStateRow, error) {
+	return ldb.GetRuntimeStateRow{AliveAt: pgtype.Timestamptz{Time: time.Now(), Valid: true}}, nil
+}
+
+func (fakeLeaderStore) LatestDowntimeEnd(context.Context) (time.Time, error) {
+	return time.Time{}, pgx.ErrNoRows
+}
+
+func (f *fakeDB) TOTPStore() totp.Store { return f.totp }
+
+func (f *fakeDB) SettingsStore() organization.SettingsStore { return nil }
+
+// SessionListenConn listens without a notification ever arriving.
+func (f *fakeDB) SessionListenConn(context.Context) (db.ListenConn, error) {
+	return fakeListenConn{}, nil
+}
+
+type fakeListenConn struct{}
+
+func (fakeListenConn) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
+}
+
+func (fakeListenConn) WaitForNotification(ctx context.Context) (*pgconn.Notification, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (fakeListenConn) Close(context.Context) error { return nil }
 
 func (f *fakeDB) ReplicaPruner() keyring.Pruner { return nil }
 
@@ -929,6 +967,76 @@ func TestResetPassword(t *testing.T) {
 		}
 	}
 	if _, err := ResetPassword(t.Context(), options(fake, &out, nil), reset); err == nil {
+		t.Error("without settings")
+	}
+}
+
+// fakeTOTPStore finds the account bob, who has TOTP, and records the reset of the CLI.
+type fakeTOTPStore struct {
+	totp.Store
+	audit []auditdb.InsertAuditEntryParams
+	ended int
+}
+
+func (s *fakeTOTPStore) GetTOTPUserByLogin(_ context.Context, arg tdb.GetTOTPUserByLoginParams) (
+	tdb.GetTOTPUserByLoginRow, error) {
+	if arg.Login != "bob" || arg.OrgID != 1 {
+		return tdb.GetTOTPUserByLoginRow{}, pgx.ErrNoRows
+	}
+	return tdb.GetTOTPUserByLoginRow{ID: 2, PublicID: "SRBBBBBBBBBBBB", Login: "bob", Name: "Bob", Status: "active"}, nil
+}
+
+func (s *fakeTOTPStore) InTx(_ context.Context, f func(totp.Queries) error) error { return f(s) }
+
+func (s *fakeTOTPStore) DeleteTOTP(context.Context, tdb.DeleteTOTPParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *fakeTOTPStore) DeleteRecoveryCodes(context.Context, tdb.DeleteRecoveryCodesParams) (int64, error) {
+	return 10, nil
+}
+
+func (s *fakeTOTPStore) EndSessionsOfUser(context.Context, tdb.EndSessionsOfUserParams) (int64, error) {
+	s.ended++
+	return 1, nil
+}
+
+func (s *fakeTOTPStore) InsertAuditEntry(_ context.Context, arg auditdb.InsertAuditEntryParams) error {
+	s.audit = append(s.audit, arg)
+	return nil
+}
+
+// TestResetTOTP is the runtime of `muster admin reset-totp` (C-03.FR-11): settings, connection and schema checks, the
+// Organization, then the removal of the TOTP recorded by the CLI actor; it needs no master key.
+func TestResetTOTP(t *testing.T) {
+	store := &fakeTOTPStore{}
+	fake := &fakeDB{totp: store}
+	fake.org.org = &odb.CreateOrganizationParams{PublicID: "RG0000000000AA", Name: "Muster"}
+	var out syncBuffer
+	reset := TOTPReset{Actor: "ops", Login: "bob"}
+	id, removed, err := ResetTOTP(t.Context(), options(fake, &out, env("MUSTER_SECRET_KEYS=")), reset)
+	if err != nil || id != "SRBBBBBBBBBBBB" || !removed || !fake.checked || !fake.schema || fake.migrated ||
+		fake.closed != 1 {
+		t.Fatalf("= %s, %v, %v, database %+v", id, removed, err, fake)
+	}
+	if len(store.audit) != 1 || store.audit[0].Action != totp.ActionReset || store.audit[0].ActorName.String != "ops" ||
+		store.audit[0].Transport != "cli" || store.ended != 1 {
+		t.Errorf("audit = %+v, sessions ended %d times", store.audit, store.ended)
+	}
+	reset.Login = "nobody"
+	if _, _, err := ResetTOTP(t.Context(), options(fake, &out, env()), reset); !errors.Is(err, totp.ErrUserNotFound) {
+		t.Errorf("an unknown login: %v", err)
+	}
+	for name, f := range map[string]*fakeDB{
+		"check":        {checkErr: errors.New("pooler"), totp: store},
+		"schema":       {schemaErr: errors.New("newer"), totp: store},
+		"organization": {totp: store},
+	} {
+		if _, _, err := ResetTOTP(t.Context(), options(f, &out, env()), reset); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+	if _, _, err := ResetTOTP(t.Context(), options(fake, &out, nil), reset); err == nil {
 		t.Error("without settings")
 	}
 }

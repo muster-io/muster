@@ -38,6 +38,9 @@ type operation struct {
 	validate bool
 }
 
+// operationStreamLiveUpdates is the live-updates stream, which the request duration metric leaves out.
+const operationStreamLiveUpdates = "streamLiveUpdates"
+
 // limitedOperations are the operations a limited session may call, per state (SessionState in the specification).
 var limitedOperations = map[auth.SessionState][]string{
 	auth.StateTOTPRequired:          {"getCurrentSession", "deleteCurrentSession", "submitSessionTotp"},
@@ -151,7 +154,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusOK
 		}
 		metrics.APIRequests.With(pattern, method, strconv.Itoa(status)).Inc()
-		metrics.APIRequestDuration.With(pattern, method).Update(s.real.Now().Sub(start).Seconds())
+		// A live-updates stream lasts as long as its tab is open; its duration says nothing about the API's speed.
+		if op == nil || op.id != operationStreamLiveUpdates || status != http.StatusOK {
+			metrics.APIRequestDuration.With(pattern, method).Update(s.real.Now().Sub(start).Seconds())
+		}
 	}()
 	if op == nil {
 		writeProblem(rec, r, errNotFound)

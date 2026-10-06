@@ -27,6 +27,8 @@ the event.
 | `library_message` | WARN | message | C-02 | A third-party library wrote a line of its own, such as a failed read of the process metrics. |
 | `listener_failed` | ERROR | listener, error | C-02 | A listener stopped serving with an error; the process stops so that it is restarted. |
 | `listeners_started` | INFO | app, ingest, internal | C-02 | The listeners serve and the process is ready; app and ingest are the same address when one port serves both. |
+| `live_updates_listen_failed` | WARN | error | C-03 | A replica lost the session connection that listens for live-update hints, or could not open it, usually because the database was unavailable; it connects again with a growing delay, up to 30 seconds. Until then the browsers connected to it miss the hints of changes and see them at their next read. |
+| `live_updates_listen_restored` | INFO | — | C-03 | A replica listens for live-update hints again after live_updates_listen_failed; it sent every connected browser the hints of everything, so that they read it again. |
 | `migrations_applied` | INFO | from, to | C-02 | Migrations were applied under the migration lock, from one schema version to another. |
 | `migrations_current` | INFO | version | C-02 | No migration was applied: the schema already has the newest version this binary knows. |
 | `organization_created` | INFO | organization | C-02 | The first start created the Organization with the defaults of its settings and its outbound address policy. |
@@ -45,3 +47,4 @@ the event.
 | `shutdown_grace_exceeded` | WARN | grace_seconds | C-02 | Requests were still running when the shutdown grace period ended; their connections were closed. |
 | `shutdown_requested` | WARN | grace_seconds | C-02 | The server received SIGTERM or an interrupt: readiness answers 503, work in progress finishes and the listeners drain within the grace period, in seconds. |
 | `startup_failed` | ERROR | error | C-02 | Startup stopped: the database cannot be reached or fails a check, a migration failed, or a listener cannot listen. The error says what to fix. |
+| `system_notices_check_failed` | WARN | error | C-03 | A replica could not read the state of the Organization-wide notices, usually because the database was unavailable, so the live-updates streams get no hint of a notice that started or ended; logged once until a check succeeds again. |

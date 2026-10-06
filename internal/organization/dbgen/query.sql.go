@@ -8,6 +8,8 @@ package dbgen
 import (
 	"context"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createOrganization = `-- name: CreateOrganization :one
@@ -166,4 +168,106 @@ func (q *Queries) GetOutboundPolicy(ctx context.Context, orgID int64) (GetOutbou
 	var i GetOutboundPolicyRow
 	err := row.Scan(&i.Policy, &i.Allowed, &i.Denied)
 	return i, err
+}
+
+const getSettings = `-- name: GetSettings :one
+SELECT id, public_id, name, time_zone, severity_label, severity_mapping, severity_styles, critical_is_urgent,
+       instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+       retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
+       (outgoing_heartbeat_url_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_url_set,
+       outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
+       (outgoing_heartbeat_proxy_password_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_proxy_password_set,
+       outgoing_heartbeat_proxy_password_updated_at, version
+FROM organizations
+WHERE id = $1
+`
+
+type GetSettingsRow struct {
+	ID                                      int64
+	PublicID                                string
+	Name                                    string
+	TimeZone                                string
+	SeverityLabel                           string
+	SeverityMapping                         []byte
+	SeverityStyles                          []byte
+	CriticalIsUrgent                        bool
+	InstanceLabels                          []string
+	RetentionStoredSnapshotsDays            int64
+	RetentionAlertDetailsDays               int64
+	RetentionAlertGroupSummariesDays        int64
+	RetentionAuditLogDays                   int64
+	TotpRequired                            string
+	OidcTokenGraceSeconds                   int64
+	OutgoingHeartbeatUrlSet                 bool
+	OutgoingHeartbeatUrlUpdatedAt           pgtype.Timestamptz
+	OutgoingHeartbeatProxy                  []byte
+	OutgoingHeartbeatProxyPasswordSet       bool
+	OutgoingHeartbeatProxyPasswordUpdatedAt pgtype.Timestamptz
+	Version                                 int64
+}
+
+// GetSettings reads the organization resource, with the state of its Secrets but not their values.
+func (q *Queries) GetSettings(ctx context.Context, orgID int64) (GetSettingsRow, error) {
+	row := q.db.QueryRow(ctx, getSettings, orgID)
+	var i GetSettingsRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.TimeZone,
+		&i.SeverityLabel,
+		&i.SeverityMapping,
+		&i.SeverityStyles,
+		&i.CriticalIsUrgent,
+		&i.InstanceLabels,
+		&i.RetentionStoredSnapshotsDays,
+		&i.RetentionAlertDetailsDays,
+		&i.RetentionAlertGroupSummariesDays,
+		&i.RetentionAuditLogDays,
+		&i.TotpRequired,
+		&i.OidcTokenGraceSeconds,
+		&i.OutgoingHeartbeatUrlSet,
+		&i.OutgoingHeartbeatUrlUpdatedAt,
+		&i.OutgoingHeartbeatProxy,
+		&i.OutgoingHeartbeatProxyPasswordSet,
+		&i.OutgoingHeartbeatProxyPasswordUpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const lockSettings = `-- name: LockSettings :one
+SELECT version
+FROM organizations
+WHERE id = $1
+FOR UPDATE
+`
+
+// LockSettings locks the organization row until the transaction ends and returns its version.
+func (q *Queries) LockSettings(ctx context.Context, orgID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockSettings, orgID)
+	var version int64
+	err := row.Scan(&version)
+	return version, err
+}
+
+const setTOTPPolicy = `-- name: SetTOTPPolicy :execrows
+UPDATE organizations
+SET totp_required = $1, updated_at = $2, version = version + 1
+WHERE id = $3
+`
+
+type SetTOTPPolicyParams struct {
+	TotpRequired string
+	Now          time.Time
+	OrgID        int64
+}
+
+// SetTOTPPolicy changes the TOTP policy and moves the version of the resource.
+func (q *Queries) SetTOTPPolicy(ctx context.Context, arg SetTOTPPolicyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setTOTPPolicy, arg.TotpRequired, arg.Now, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

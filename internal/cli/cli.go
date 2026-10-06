@@ -24,7 +24,8 @@ when MUSTER_MIGRATE_ON_START is true, then the app, ingest and internal listener
 Commands:
   migrate   Apply the database migrations under the migration lock
   doctor    Check the database, its connections, the master keys and the clock; only reads
-  admin     Emergency access: admin reset-password --actor <name> <login> sets a password read from standard input
+  admin     Emergency access with --actor <name> <login>: admin reset-password sets a password read from standard
+            input, admin reset-totp removes a lost second factor
   dev       Development mode: fake servers and development defaults (muster dev [--replica] | muster dev <command>)
   version   Print the version and commit
   help      Show this help

@@ -4,8 +4,8 @@
 // Package runtime wires the process: the server command, `muster migrate` and Muster inside `muster dev`. It owns the
 // start-up order — settings, logger, the Keyring, connections and checks, migrations when enabled, the schema version
 // check, the key canary and the start-up ensure steps (the partitions among them) under the migration lock, the
-// replica key record, the listeners, then the Leader lock keeper and the clock skew check — and the graceful shutdown
-// on SIGTERM (C-02.FR-16).
+// replica key record, the listeners, then the Leader lock keeper, the clock skew check and the live updates — and the
+// graceful shutdown on SIGTERM (C-02.FR-16).
 package runtime
 
 import (
@@ -29,11 +29,13 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/leader"
+	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
 	usersdb "github.com/muster-io/muster/internal/users/dbgen"
 	"github.com/muster-io/muster/web"
@@ -57,7 +59,7 @@ type Options struct {
 	grace            time.Duration
 	serving          func(server.Addresses)
 	keyRecordRefresh time.Duration
-	// every makes the ticks of the Leader lock keeper and the clock skew check.
+	// every makes the ticks of the Leader lock keeper, the clock skew check and the live updates.
 	every func(time.Duration) (<-chan time.Time, func())
 }
 
@@ -76,6 +78,10 @@ type database interface {
 	AdminStore() users.AdminStore
 	AuditReader() audit.ListQueries
 	AuthStore() auth.Store
+	TOTPStore() totp.Store
+	SettingsStore() organization.SettingsStore
+	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
+	SessionListenConn(ctx context.Context) (db.ListenConn, error)
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
 	LeaderSession(ctx context.Context) (leader.Session, error)
 	PartitionSession(ctx context.Context) (partitions.Session, error)
@@ -103,6 +109,12 @@ func (d pgDatabase) AdminStore() users.AdminStore { return users.NewAdminStore(d
 func (d pgDatabase) AuditReader() audit.ListQueries { return audit.NewListQueries(d.Pool) }
 
 func (d pgDatabase) AuthStore() auth.Store { return auth.NewStore(d.Pool) }
+
+func (d pgDatabase) TOTPStore() totp.Store { return totp.NewStore(d.Pool) }
+
+func (d pgDatabase) SettingsStore() organization.SettingsStore {
+	return organization.NewSettingsStore(d.Pool)
+}
 
 func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
 	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
@@ -203,6 +215,38 @@ func ResetPassword(ctx context.Context, opts Options, r PasswordReset) (string, 
 	return admin.ResetPassword(ctx, r.Actor, r.Login, string(r.Password))
 }
 
+// TOTPReset is what `muster admin reset-totp` asks for: the --actor name and the login.
+type TOTPReset struct {
+	Actor string
+	Login string
+}
+
+// ResetTOTP is `muster admin reset-totp` (C-03.FR-11): settings, logger, connections and checks and the schema version
+// check, then the removal of the account's TOTP and recovery codes in the Organization, which ends its sessions and
+// is recorded in the Audit log with the --actor name. It returns the public_id of the account and whether it had
+// TOTP. It needs no master key: the Keyring is not opened.
+func ResetTOTP(ctx context.Context, opts Options, r TOTPReset) (string, bool, error) {
+	cfg, log, err := setup(ctx, opts)
+	if err != nil {
+		return "", false, err
+	}
+	d, err := connect(ctx, opts, cfg, log)
+	if err != nil {
+		return "", false, err
+	}
+	defer d.Close()
+	if err := d.CheckSchema(ctx, log); err != nil {
+		return "", false, failed(ctx, log, err)
+	}
+	org, err := d.OrganizationStore().GetOrganization(ctx)
+	if err != nil {
+		return "", false, failed(ctx, log, fmt.Errorf("read the organization: %w", err))
+	}
+	clocks, _ := clock.System()
+	factors := totp.New(org.ID, d.TOTPStore(), nil, audit.NewWriter(log, clocks.Business), clocks, nil)
+	return factors.ResetByLogin(ctx, r.Actor, r.Login)
+}
+
 type process struct {
 	opts       Options
 	cfg        config.Config
@@ -214,6 +258,10 @@ type process struct {
 	partitions *partitions.Maintainer
 	keeper     *leader.Keeper
 	api        http.Handler
+	// hub, notices and listener carry the live-update hints to the streams of this replica.
+	hub      *live.Hub
+	notices  *live.Notices
+	listener *db.Listener
 }
 
 func setup(ctx context.Context, opts Options) (config.Config, *logging.Logger, error) {
@@ -404,11 +452,24 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		return nil, err
 	}
 	w := audit.NewWriter(p.log, p.clocks.Business)
+	sessions := auth.NewService(orgID, authStore, p.keyring, w, p.clocks.Business, roles)
+	factors := totp.New(orgID, p.db.TOTPStore(), p.keyring, w, p.clocks, sessions)
+	sessions.UseSecondFactor(factors)
+	p.hub = live.NewHub(orgID, sessions.LiveSessions)
+	leaderStore := p.db.LeaderStore()
+	p.notices = live.NewNotices(func(ctx context.Context, now time.Time) ([]organization.Notice, error) {
+		return leader.Notices(ctx, leaderStore, now)
+	}, p.clocks.Business, p.hub, p.log)
+	p.listener = db.NewListener(p.db.SessionListenConn, p.log)
 	return api.New(api.Config{
-		Sessions:       auth.NewService(orgID, authStore, p.keyring, w, p.clocks.Business, roles),
+		Sessions:       sessions,
 		Users:          users.NewService(orgID, p.db.UsersStore(), w, p.clocks.Business),
 		Admin:          users.NewAdmin(orgID, p.db.AdminStore(), w, p.clocks.Business, p.cfg.PublicURL),
 		AuditLog:       audit.NewReader(orgID, p.db.AuditReader()),
+		TOTP:           factors,
+		Organization:   organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business),
+		Notices:        p.notices,
+		Live:           p.hub,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -440,8 +501,9 @@ func (p *process) newKeeper() *leader.Keeper {
 	}))
 }
 
-// startWork starts the Leader lock keeper and the clock skew check; the function it returns stops both and waits for
-// them until its context ends.
+// startWork starts the Leader lock keeper, the clock skew check and the live updates — the Hub's session check, the
+// notice watcher and the LISTEN of the hints; the function it returns stops them all and waits for them until its
+// context ends.
 func (p *process) startWork(ctx context.Context) func(context.Context) {
 	every := p.opts.every
 	if every == nil {
@@ -454,6 +516,8 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	var wg sync.WaitGroup
 	leaderTicks, stopLeaderTicks := every(leader.PingInterval)
 	skewTicks, stopSkewTicks := every(SkewInterval)
+	sessionTicks, stopSessionTicks := every(live.CheckInterval)
+	noticeTicks, stopNoticeTicks := every(live.CheckInterval)
 	wg.Go(func() {
 		defer stopLeaderTicks()
 		p.keeper.Run(ctx, leaderTicks)
@@ -462,6 +526,16 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 		defer stopSkewTicks()
 		skewCheck{q: p.db.Clock(), real: p.clocks.Real, log: p.log}.run(ctx, skewTicks)
 	})
+	// The live-updates streams end when ctx does: the Hub closes them before the listeners drain.
+	wg.Go(func() {
+		defer stopSessionTicks()
+		p.hub.Run(ctx, sessionTicks)
+	})
+	wg.Go(func() {
+		defer stopNoticeTicks()
+		p.notices.Run(ctx, noticeTicks)
+	})
+	wg.Go(func() { p.listener.Run(ctx, p.hub.Receive, p.hub.Listening) })
 	return func(wait context.Context) {
 		cancel()
 		done := make(chan struct{})

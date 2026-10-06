@@ -66,9 +66,44 @@ func addressSubject(addr netip.Addr) string {
 	return netip.PrefixFrom(addr, 64).Masked().String()
 }
 
+// attemptLockClass is the first key of the attempt locks of accounts (TryLockSignInSubject).
+const attemptLockClass = 0x6d75_0001
+
+// attempt evaluates one attempt of an account and a source address — a password, a TOTP code or a recovery code —
+// under the throttle. It runs in a transaction that holds the account's attempt lock, so that concurrent attempts of
+// an account are never evaluated at once: each one sees the failures of the ones before, and a burst cannot slip past
+// a block. An attempt that finds the lock taken, or comes before the throttle allows one, is a *ThrottledError and
+// check does not run. A failed check is counted for the account and the address before the lock goes; attempt then
+// returns false.
+func (s *Service) attempt(ctx context.Context, account, address string,
+	check func(context.Context) (bool, error)) (bool, error) {
+	ok := false
+	err := s.store.InTx(ctx, func(q Queries) error {
+		locked, err := q.TryLockSignInSubject(ctx, dbgen.TryLockSignInSubjectParams{
+			LockClass: attemptLockClass, Subject: account,
+		})
+		if err != nil {
+			return fmt.Errorf("lock the sign-in attempts: %w", err)
+		}
+		if !locked {
+			return &ThrottledError{RetryAfter: ThrottleFirstDelay}
+		}
+		if wait, err := s.throttled(ctx, q, account, address); err != nil {
+			return err
+		} else if wait > 0 {
+			return &ThrottledError{RetryAfter: wait}
+		}
+		if ok, err = check(ctx); err != nil || ok {
+			return err
+		}
+		return s.recordFailure(ctx, q, account, address)
+	})
+	return ok, err
+}
+
 // throttled returns how long the account or the address must still wait before an attempt is evaluated.
-func (s *Service) throttled(ctx context.Context, account, address string) (time.Duration, error) {
-	rows, err := s.store.GetThrottles(ctx, dbgen.GetThrottlesParams{OrgID: s.orgID, Account: account, Address: address})
+func (s *Service) throttled(ctx context.Context, q Queries, account, address string) (time.Duration, error) {
+	rows, err := q.GetThrottles(ctx, dbgen.GetThrottlesParams{OrgID: s.orgID, Account: account, Address: address})
 	if err != nil {
 		return 0, fmt.Errorf("read the sign-in throttle: %w", err)
 	}
@@ -83,32 +118,30 @@ func (s *Service) throttled(ctx context.Context, account, address string) (time.
 }
 
 // recordFailure counts an evaluated failure for the account and the address and blocks each as its count says.
-func (s *Service) recordFailure(ctx context.Context, account, address string) error {
+func (s *Service) recordFailure(ctx context.Context, q Queries, account, address string) error {
 	now := s.clock.Now().UTC()
-	return s.store.InTx(ctx, func(q Queries) error {
-		for _, subj := range []struct{ kind, value string }{{subjectAccount, account}, {subjectAddress, address}} {
-			if subj.value == "" {
-				continue
-			}
-			n, err := q.RecordSignInFailure(ctx, dbgen.RecordSignInFailureParams{
-				OrgID: s.orgID, SubjectKind: subj.kind, Subject: subj.value, Now: now,
-			})
-			if err != nil {
-				return fmt.Errorf("count the failed sign-in: %w", err)
-			}
-			d := ThrottleDelay(n)
-			if d == 0 {
-				continue
-			}
-			until := now.Add(d)
-			if err := q.BlockSignIn(ctx, dbgen.BlockSignInParams{
-				OrgID: s.orgID, SubjectKind: subj.kind, Subject: subj.value, BlockedUntil: timestamptz(until),
-			}); err != nil {
-				return fmt.Errorf("throttle the sign-in: %w", err)
-			}
+	for _, subj := range []struct{ kind, value string }{{subjectAccount, account}, {subjectAddress, address}} {
+		if subj.value == "" {
+			continue
 		}
-		return nil
-	})
+		n, err := q.RecordSignInFailure(ctx, dbgen.RecordSignInFailureParams{
+			OrgID: s.orgID, SubjectKind: subj.kind, Subject: subj.value, Now: now,
+		})
+		if err != nil {
+			return fmt.Errorf("count the failed sign-in: %w", err)
+		}
+		d := ThrottleDelay(n)
+		if d == 0 {
+			continue
+		}
+		until := now.Add(d)
+		if err := q.BlockSignIn(ctx, dbgen.BlockSignInParams{
+			OrgID: s.orgID, SubjectKind: subj.kind, Subject: subj.value, BlockedUntil: timestamptz(until),
+		}); err != nil {
+			return fmt.Errorf("throttle the sign-in: %w", err)
+		}
+	}
+	return nil
 }
 
 func timestamptz(t time.Time) pgtype.Timestamptz {

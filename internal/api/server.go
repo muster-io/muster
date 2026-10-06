@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/netip"
 
@@ -24,7 +25,10 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
 )
 
@@ -41,6 +45,7 @@ type Sessions interface {
 	SignOut(ctx context.Context, sess auth.Session, addr netip.Addr) error
 	SignOutEverywhere(ctx context.Context, sess auth.Session, addr netip.Addr) error
 	ListSessions(ctx context.Context, sess auth.Session) ([]auth.SessionInfo, error)
+	SubmitSecondFactor(ctx context.Context, sess auth.Session, p auth.Proof, addr netip.Addr) (auth.Session, error)
 	ChangePassword(ctx context.Context, sess auth.Session, c auth.PasswordChange) error
 	Roles() auth.Roles
 }
@@ -69,12 +74,45 @@ type AuditLog interface {
 	List(ctx context.Context, f audit.Filter) (audit.Page, error)
 }
 
+// TOTP is what the API needs of internal/totp.
+type TOTP interface {
+	Status(ctx context.Context, userID int64) (totp.Status, error)
+	Begin(ctx context.Context, sess auth.Session) (totp.Enrolment, error)
+	Confirm(ctx context.Context, sess auth.Session, code string, addr netip.Addr) ([]string, error)
+	RegenerateRecoveryCodes(ctx context.Context, sess auth.Session, code string, addr netip.Addr) ([]string, error)
+	Remove(ctx context.Context, sess auth.Session, p totp.Removal, addr netip.Addr) error
+	Reset(ctx context.Context, actor audit.Actor, t audit.Transport, addr netip.Addr, publicID string) error
+}
+
+// Organization is what the API needs of the organization resource in internal/organization.
+type Organization interface {
+	Get(ctx context.Context) (organization.Organization, error)
+	Update(ctx context.Context, actor audit.Actor, t audit.Transport, addr netip.Addr, version *int64,
+		in organization.Input) (organization.Organization, error)
+}
+
+// Notices is what the API needs of the Organization-wide notices in internal/live.
+type Notices interface {
+	Visible(ctx context.Context, admin bool) ([]organization.Notice, error)
+}
+
+// Live is what the API needs of the live-updates Hub in internal/live.
+type Live interface {
+	Subscribe(s live.Subscriber) (*live.Subscription, error)
+	Unsubscribe(sub *live.Subscription)
+	Stream(ctx context.Context, w io.Writer, flush func() error, sub *live.Subscription) error
+}
+
 // Config is what the API serves with.
 type Config struct {
-	Sessions Sessions
-	Users    Users
-	Admin    UserAdmin
-	AuditLog AuditLog
+	Sessions     Sessions
+	Users        Users
+	Admin        UserAdmin
+	AuditLog     AuditLog
+	TOTP         TOTP
+	Organization Organization
+	Notices      Notices
+	Live         Live
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -90,6 +128,10 @@ type Server struct {
 	users          Users
 	admin          UserAdmin
 	auditLog       AuditLog
+	totp           TOTP
+	organization   Organization
+	notices        Notices
+	live           Live
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -108,6 +150,9 @@ var implemented = map[string]bool{
 	"ListRoles": true, "GetOpenApiSpec": true,
 	"ListUsers": true, "CreateUser": true, "GetUser": true, "UpdateUser": true, "DeleteUser": true, "DisableUser": true,
 	"EnableUser": true, "CreatePasswordSetupLink": true, "CompletePasswordSetup": true, "ListAuditLog": true,
+	"GetMyTotp": true, "BeginTotpEnrolment": true, "ConfirmTotpEnrolment": true, "RemoveTotp": true,
+	"RegenerateTotpRecoveryCodes": true, "SubmitSessionTotp": true, "ResetUserTotp": true, "GetOrganization": true,
+	"UpdateOrganization": true, "ListSystemNotices": true, "StreamLiveUpdates": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -133,8 +178,8 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("route the API specification: %w", err)
 	}
 	s := &Server{
-		sessions: cfg.Sessions, users: cfg.Users, admin: cfg.Admin, auditLog: cfg.AuditLog,
-		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
+		sessions: cfg.Sessions, users: cfg.Users, admin: cfg.Admin, auditLog: cfg.AuditLog, totp: cfg.TOTP,
+		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}
 	mux := http.NewServeMux()

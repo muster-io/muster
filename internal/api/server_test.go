@@ -35,7 +35,8 @@ import (
 var t0 = time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 
 var roles = auth.Roles{
-	auth.RoleAdmin:     {"alert-groups:read", "integrations:read", "users:read", "users:write"},
+	auth.RoleAdmin: {"alert-groups:read", "integrations:read", "organization:write", "system-status:read", "users:read",
+		"users:write"},
 	auth.RoleResponder: {"alert-groups:acknowledge", "alert-groups:read", "integrations:read"},
 	auth.RoleViewer:    {"alert-groups:read", "integrations:read"},
 }
@@ -50,6 +51,7 @@ type fakeSessions struct {
 	changes   []auth.PasswordChange
 	signedOut []string
 	list      []auth.SessionInfo
+	submit    func(auth.Session, auth.Proof) (auth.Session, error)
 }
 
 func (f *fakeSessions) SignIn(_ context.Context, req auth.SignInRequest) (auth.Session, error) {
@@ -99,6 +101,11 @@ func (f *fakeSessions) ListSessions(context.Context, auth.Session) ([]auth.Sessi
 func (f *fakeSessions) ChangePassword(_ context.Context, _ auth.Session, c auth.PasswordChange) error {
 	f.changes = append(f.changes, c)
 	return f.err
+}
+
+func (f *fakeSessions) SubmitSecondFactor(_ context.Context, sess auth.Session, p auth.Proof, _ netip.Addr) (
+	auth.Session, error) {
+	return f.submit(sess, p)
 }
 
 func (f *fakeSessions) Roles() auth.Roles { return roles }
@@ -602,7 +609,7 @@ func TestPermissions(t *testing.T) {
 	}
 	_ = json.Unmarshal(a.body, &list)
 	if len(list.Items) != 3 || list.Items[0].Name != "admin" || list.Items[2].Name != "viewer" ||
-		len(list.Items[0].Permissions) != 4 || len(list.Items[2].Permissions) != 2 {
+		len(list.Items[0].Permissions) != 6 || len(list.Items[2].Permissions) != 2 {
 		t.Errorf("roles = %+v", list)
 	}
 	id := &auth.Identity{Permissions: []auth.Permission{"users:read"}}

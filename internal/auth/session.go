@@ -2,9 +2,9 @@
 // Copyright The Muster Authors
 
 // Package auth signs people in and keeps their sessions (C-03): local sign-in with argon2id passwords and its
-// throttling, sessions in PostgreSQL carried in the muster_session cookie, the CSRF token derived from the session,
-// the password change, the client address behind trusted proxies, and the Permissions of the Roles. Every session
-// time follows the business clock.
+// throttling, the second step of a user with TOTP and the limited session states, sessions in PostgreSQL carried in
+// the muster_session cookie, the CSRF token derived from the session, the password change, the client address behind
+// trusted proxies, and the Permissions of the Roles. Every session time follows the business clock.
 package auth
 
 import (
@@ -27,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/publicid"
 )
 
@@ -59,6 +60,12 @@ const (
 	MethodOIDC  = "oidc"
 )
 
+// FailureTOTP is the method label of muster_login_failures_total for a wrong TOTP or recovery code.
+const FailureTOTP = "totp"
+
+// ActionSecondFactorFailed is the Audit log action of a wrong TOTP or recovery code at sign-in.
+const ActionSecondFactorFailed = "session.second_factor_failed"
+
 // The reasons a session ends, as sessions.end_reason stores them.
 const (
 	EndSignOut           = "sign_out"
@@ -72,15 +79,36 @@ const (
 )
 
 var (
-	// ErrInvalidCredentials is a wrong login or password, or an account that cannot sign in; it never says which.
-	ErrInvalidCredentials = errors.New("the login or the password is wrong")
+	// ErrInvalidCredentials is a wrong login, password or second factor, or an account that cannot sign in; it never
+	// says which.
+	ErrInvalidCredentials = errors.New("the login, the password or the code is wrong")
 	// ErrUnauthenticated is a request without a usable session.
 	ErrUnauthenticated = errors.New("no valid session")
 	// ErrSessionExpired is a session that ended by idle timeout or lifetime.
 	ErrSessionExpired = errors.New("the session expired")
 	// ErrNotLocal is a password change of an account that signs in through OIDC.
 	ErrNotLocal = errors.New("the account signs in through OIDC and has no password")
+	// ErrTOTPNotPending is a second factor given to a session that does not wait for one.
+	ErrTOTPNotPending = errors.New("the session is not waiting for a TOTP code")
 )
+
+// Proof is a second factor: a current TOTP code or a single-use recovery code.
+type Proof struct {
+	TOTPCode     string
+	RecoveryCode string
+}
+
+// Given reports whether the proof carries a code.
+func (p Proof) Given() bool {
+	return p.TOTPCode != "" || p.RecoveryCode != ""
+}
+
+// SecondFactor checks the TOTP of the users; internal/totp implements it.
+type SecondFactor interface {
+	// Verify reports whether p is a current TOTP code of the user not used before, or one of the user's unused
+	// recovery codes, and uses it up. A user without TOTP has no right code.
+	Verify(ctx context.Context, userID int64, p Proof) (bool, error)
+}
 
 // ThrottledError refuses a sign-in attempt that comes before the throttle allows the next one; it is not evaluated.
 type ThrottledError struct {
@@ -148,6 +176,9 @@ type Queries interface {
 	EndUserSessions(ctx context.Context, arg dbgen.EndUserSessionsParams) (int64, error)
 	EndOtherUserSessions(ctx context.Context, arg dbgen.EndOtherUserSessionsParams) (int64, error)
 	ListUserSessions(ctx context.Context, arg dbgen.ListUserSessionsParams) ([]dbgen.ListUserSessionsRow, error)
+	CompleteSecondFactor(ctx context.Context, arg dbgen.CompleteSecondFactorParams) (int64, error)
+	LiveSessions(ctx context.Context, arg dbgen.LiveSessionsParams) ([]int64, error)
+	TryLockSignInSubject(ctx context.Context, arg dbgen.TryLockSignInSubjectParams) (bool, error)
 	GetThrottles(ctx context.Context, arg dbgen.GetThrottlesParams) ([]dbgen.GetThrottlesRow, error)
 	RecordSignInFailure(ctx context.Context, arg dbgen.RecordSignInFailureParams) (int64, error)
 	BlockSignIn(ctx context.Context, arg dbgen.BlockSignInParams) error
@@ -190,16 +221,22 @@ type Service struct {
 	audit   *audit.Writer
 	clock   clock.Clock
 	roles   Roles
+	factor  SecondFactor
 }
 
 // NewService returns the Service of the Organization orgID; clock is the business clock.
 func NewService(orgID int64, s Store, k *keyring.Keyring, w *audit.Writer, business clock.Clock, roles Roles) *Service {
 	// The series of muster_login_failures_total exist from the start, so that an increase is seen from zero.
-	for _, method := range []string{MethodLocal, MethodOIDC, "totp"} {
+	for _, method := range []string{MethodLocal, MethodOIDC, FailureTOTP} {
 		metrics.LoginFailures.With(method)
 	}
 	prepareDummy()
 	return &Service{orgID: orgID, store: s, keyring: k, audit: w, clock: business, roles: roles}
+}
+
+// UseSecondFactor sets what checks the TOTP codes and recovery codes of the users; without it no code is right.
+func (s *Service) UseSecondFactor(f SecondFactor) {
+	s.factor = f
 }
 
 // Roles is the allocation of Permissions to Roles.
@@ -215,10 +252,11 @@ func (s *Service) Permissions(sess Session) []Permission {
 	return s.roles.Permissions(sess.User.Role)
 }
 
-// SignInRequest is a local sign-in attempt.
+// SignInRequest is a local sign-in attempt, with the second factor when the user finishes in one request.
 type SignInRequest struct {
 	Login     string
 	Password  string
+	Proof     Proof
 	Address   netip.Addr
 	UserAgent string
 }
@@ -227,38 +265,86 @@ type SignInRequest struct {
 // password, a disabled or deleted account and an account without a password are all ErrInvalidCredentials, and an
 // unknown login spends the time of a password check too. An attempt before the throttle allows one is a
 // *ThrottledError and is not evaluated.
+//
+// The session of a user with TOTP is active when the request carries a right code and totp_required without one; a
+// wrong code is ErrInvalidCredentials and counts like a wrong password (C-03.FR-24). A user without TOTP whom the TOTP
+// policy covers gets a session in the state totp_enrolment_required. Only a session that is active resets the
+// throttle, so that a known password never buys more guesses at the code.
 func (s *Service) SignIn(ctx context.Context, req SignInRequest) (Session, error) {
 	account := accountSubject(req.Login)
 	address := addressSubject(req.Address)
-	if wait, err := s.throttled(ctx, account, address); err != nil {
-		return Session{}, err
-	} else if wait > 0 {
-		return Session{}, &ThrottledError{RetryAfter: wait}
-	}
-	user, err := s.store.GetSignInUser(ctx, dbgen.GetSignInUserParams{OrgID: s.orgID, Login: req.Login})
-	known := err == nil
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return Session{}, fmt.Errorf("find the account: %w", err)
-	}
-	ok := false
-	if known && user.Status == "active" && user.PasswordHash.Valid {
-		if ok, err = VerifyPassword(ctx, user.PasswordHash.String, req.Password); err != nil {
-			return Session{}, fmt.Errorf("check the password of %s: %w", user.PublicID, err)
+	var (
+		user          dbgen.GetSignInUserRow
+		known         bool
+		wrongPassword bool
+	)
+	ok, err := s.attempt(ctx, account, address, func(ctx context.Context) (bool, error) {
+		var err error
+		user, err = s.store.GetSignInUser(ctx, dbgen.GetSignInUserParams{OrgID: s.orgID, Login: req.Login})
+		known = err == nil
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return false, fmt.Errorf("find the account: %w", err)
 		}
-	} else if err := verifyDummy(ctx, req.Password); err != nil {
+		right := false
+		if known && user.Status == "active" && user.PasswordHash.Valid {
+			if right, err = VerifyPassword(ctx, user.PasswordHash.String, req.Password); err != nil {
+				return false, fmt.Errorf("check the password of %s: %w", user.PublicID, err)
+			}
+		} else if err := verifyDummy(ctx, req.Password); err != nil {
+			return false, err
+		}
+		if !right {
+			wrongPassword = true
+			return false, nil
+		}
+		if !user.TotpEnrolled || !req.Proof.Given() {
+			return true, nil
+		}
+		return s.verify(ctx, user.ID, req.Proof)
+	})
+	switch {
+	case err != nil:
 		return Session{}, err
+	case wrongPassword:
+		return Session{}, s.failSignIn(ctx, req, user, known)
+	case !ok:
+		return Session{}, s.failSecondFactor(ctx, req.Address, Principal{ID: user.ID, PublicID: user.PublicID,
+			Name: user.Name})
 	}
-	if !ok {
-		return Session{}, s.failSignIn(ctx, req, account, address, user, known)
+	state := StateActive
+	switch {
+	case user.TotpEnrolled && !req.Proof.Given():
+		state = StateTOTPRequired
+	case !user.TotpEnrolled && organization.TOTPPolicy(user.TotpRequired).Covers(true):
+		state = StateTOTPEnrolmentRequired
 	}
-	return s.openSession(ctx, req, account, address, user)
+	return s.openSession(ctx, req, account, address, user, state)
 }
 
-func (s *Service) failSignIn(ctx context.Context, req SignInRequest, account, address string,
-	user dbgen.GetSignInUserRow, known bool) error {
-	if err := s.recordFailure(ctx, account, address); err != nil {
+// verify checks a second factor of the user; without a SecondFactor no code is right.
+func (s *Service) verify(ctx context.Context, userID int64, p Proof) (bool, error) {
+	if s.factor == nil || !p.Given() {
+		return false, nil
+	}
+	return s.factor.Verify(ctx, userID, p)
+}
+
+// failSecondFactor records a wrong TOTP or recovery code that the throttle counted, and is ErrInvalidCredentials.
+func (s *Service) failSecondFactor(ctx context.Context, addr netip.Addr, user Principal) error {
+	metrics.LoginFailures.With(FailureTOTP).Inc()
+	if err := s.audit.Record(ctx, s.store, audit.Entry{
+		OrgID: s.orgID, Actor: audit.User(user.ID, user.PublicID), Transport: audit.TransportUI,
+		Action:   ActionSecondFactorFailed,
+		Resource: audit.Resource{Type: audit.ResourceUser, PublicID: user.PublicID, Name: user.Name},
+		Details:  map[string]any{"method": MethodLocal}, SourceAddress: addr,
+	}); err != nil {
 		return err
 	}
+	return ErrInvalidCredentials
+}
+
+// failSignIn records a wrong login or password that the throttle counted, and is ErrInvalidCredentials.
+func (s *Service) failSignIn(ctx context.Context, req SignInRequest, user dbgen.GetSignInUserRow, known bool) error {
 	metrics.LoginFailures.With(MethodLocal).Inc()
 	e := audit.Entry{
 		OrgID: s.orgID, Actor: audit.System, Transport: audit.TransportUI, Action: audit.ActionSignInFailed,
@@ -274,14 +360,14 @@ func (s *Service) failSignIn(ctx context.Context, req SignInRequest, account, ad
 }
 
 func (s *Service) openSession(ctx context.Context, req SignInRequest, account, address string,
-	user dbgen.GetSignInUserRow) (Session, error) {
+	user dbgen.GetSignInUserRow, state SessionState) (Session, error) {
 	token := make([]byte, tokenBytes)
 	if _, err := rand.Read(token); err != nil {
 		return Session{}, fmt.Errorf("make a session token: %w", err)
 	}
 	now := s.clock.Now().UTC()
 	sess := Session{
-		PublicID: publicid.New(publicid.Session), State: StateActive, Method: MethodLocal, CreatedAt: now,
+		PublicID: publicid.New(publicid.Session), State: state, Method: MethodLocal, CreatedAt: now,
 		LastUsedAt: now, IdleExpiresAt: now.Add(SessionIdleTimeout), ExpiresAt: now.Add(SessionLifetime),
 		User: Principal{ID: user.ID, PublicID: user.PublicID, Name: user.Name, Role: user.Role}, token: token,
 	}
@@ -296,10 +382,12 @@ func (s *Service) openSession(ctx context.Context, req SignInRequest, account, a
 		p.Address = &addr
 	}
 	err := s.store.InTx(ctx, func(q Queries) error {
-		if err := q.ResetSignInThrottles(ctx, dbgen.ResetSignInThrottlesParams{
-			OrgID: s.orgID, Account: account, Address: address,
-		}); err != nil {
-			return fmt.Errorf("reset the sign-in throttle: %w", err)
+		if state == StateActive {
+			if err := q.ResetSignInThrottles(ctx, dbgen.ResetSignInThrottlesParams{
+				OrgID: s.orgID, Account: account, Address: address,
+			}); err != nil {
+				return fmt.Errorf("reset the sign-in throttle: %w", err)
+			}
 		}
 		id, err := q.CreateSession(ctx, p)
 		if err != nil {
@@ -313,13 +401,107 @@ func (s *Service) openSession(ctx context.Context, req SignInRequest, account, a
 			OrgID: s.orgID, Actor: audit.User(user.ID, user.PublicID), Transport: audit.TransportUI,
 			Action:   audit.ActionSignedIn,
 			Resource: audit.Resource{Type: audit.ResourceSession, PublicID: sess.PublicID, Name: user.Name},
-			Details:  map[string]any{"method": MethodLocal}, SourceAddress: req.Address,
+			Details:  map[string]any{"method": MethodLocal, "state": string(state)}, SourceAddress: req.Address,
 		})
 	})
 	if err != nil {
 		return Session{}, err
 	}
 	return sess, nil
+}
+
+// SubmitSecondFactor completes a session in the state totp_required with a TOTP code or a recovery code of its user
+// (C-03.FR-24) and returns it active. A session that waits for no code is ErrTOTPNotPending. The code is checked under
+// the sign-in throttle of the user's account and of addr like a password: an attempt the throttle refuses is a
+// *ThrottledError, and a wrong code is ErrInvalidCredentials, counted, recorded as session.second_factor_failed and
+// in muster_login_failures_total{method="totp"}. A right code resets the throttle.
+func (s *Service) SubmitSecondFactor(ctx context.Context, sess Session, p Proof, addr netip.Addr) (Session, error) {
+	if sess.State != StateTOTPRequired {
+		return Session{}, ErrTOTPNotPending
+	}
+	row, err := s.store.GetUserPassword(ctx, dbgen.GetUserPasswordParams{OrgID: s.orgID, ID: sess.User.ID})
+	if err != nil {
+		return Session{}, fmt.Errorf("read the account of %s: %w", sess.User.PublicID, err)
+	}
+	account, address := accountSubject(row.Login), addressSubject(addr)
+	right, err := s.attempt(ctx, account, address, func(ctx context.Context) (bool, error) {
+		return s.verify(ctx, sess.User.ID, p)
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	if !right {
+		return Session{}, s.failSecondFactor(ctx, addr, sess.User)
+	}
+	err = s.store.InTx(ctx, func(q Queries) error {
+		n, err := q.CompleteSecondFactor(ctx, dbgen.CompleteSecondFactorParams{OrgID: s.orgID, ID: sess.ID})
+		if err != nil {
+			return fmt.Errorf("complete the session %s: %w", sess.PublicID, err)
+		}
+		if n == 0 {
+			return ErrTOTPNotPending
+		}
+		if err := q.ResetSignInThrottles(ctx, dbgen.ResetSignInThrottlesParams{
+			OrgID: s.orgID, Account: account, Address: address,
+		}); err != nil {
+			return fmt.Errorf("reset the sign-in throttle: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	sess.State = StateActive
+	return sess, nil
+}
+
+// Attempt checks a proof that sess's user gives on their own account — the password, a TOTP code or a recovery
+// code — under the sign-in throttle of the account and of addr, so that a stolen session cannot guess faster than a
+// sign-in could. An attempt the throttle refuses is a *ThrottledError and check does not run; a wrong proof counts
+// as a failed sign-in, in muster_login_failures_total with method (local for a password, totp for a code), and is
+// ErrInvalidCredentials.
+func (s *Service) Attempt(ctx context.Context, sess Session, addr netip.Addr, method string,
+	check func(context.Context) (bool, error)) error {
+	row, err := s.store.GetUserPassword(ctx, dbgen.GetUserPasswordParams{OrgID: s.orgID, ID: sess.User.ID})
+	if err != nil {
+		return fmt.Errorf("read the account of %s: %w", sess.User.PublicID, err)
+	}
+	ok, err := s.attempt(ctx, accountSubject(row.Login), addressSubject(addr), check)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		metrics.LoginFailures.With(method).Inc()
+		return ErrInvalidCredentials
+	}
+	return nil
+}
+
+// CheckPassword reports whether password is the current password of sess's user; an account without a password has
+// no right one. It does not throttle: run it inside Attempt.
+func (s *Service) CheckPassword(ctx context.Context, sess Session, password string) (bool, error) {
+	row, err := s.store.GetUserPassword(ctx, dbgen.GetUserPasswordParams{OrgID: s.orgID, ID: sess.User.ID})
+	if err != nil {
+		return false, fmt.Errorf("read the password of %s: %w", sess.User.PublicID, err)
+	}
+	if !row.PasswordHash.Valid {
+		return false, verifyDummy(ctx, password)
+	}
+	ok, err := VerifyPassword(ctx, row.PasswordHash.String, password)
+	if err != nil {
+		return false, fmt.Errorf("check the password of %s: %w", sess.User.PublicID, err)
+	}
+	return ok, nil
+}
+
+// LiveSessions returns the sessions of ids that are still usable — active, neither ended nor expired, of an active
+// user — without counting the check as a use: the live-updates streams close the others.
+func (s *Service) LiveSessions(ctx context.Context, ids []int64) ([]int64, error) {
+	live, err := s.store.LiveSessions(ctx, dbgen.LiveSessionsParams{OrgID: s.orgID, Ids: ids, Now: s.clock.Now().UTC()})
+	if err != nil {
+		return nil, fmt.Errorf("check the sessions of the live-updates streams: %w", err)
+	}
+	return live, nil
 }
 
 // Authenticate returns the session of a cookie value. A value that names no session, an ended session or a user who
@@ -463,20 +645,18 @@ func (s *Service) ChangePassword(ctx context.Context, sess Session, c PasswordCh
 	if row.HasOidcIdentity || !row.PasswordHash.Valid {
 		return ErrNotLocal
 	}
-	account, address := accountSubject(row.Login), addressSubject(c.Address)
-	if wait, err := s.throttled(ctx, account, address); err != nil {
-		return err
-	} else if wait > 0 {
-		return &ThrottledError{RetryAfter: wait}
-	}
-	ok, err := VerifyPassword(ctx, row.PasswordHash.String, c.Current)
+	ok, err := s.attempt(ctx, accountSubject(row.Login), addressSubject(c.Address),
+		func(ctx context.Context) (bool, error) {
+			ok, err := VerifyPassword(ctx, row.PasswordHash.String, c.Current)
+			if err != nil {
+				return false, fmt.Errorf("check the password of %s: %w", sess.User.PublicID, err)
+			}
+			return ok, nil
+		})
 	if err != nil {
-		return fmt.Errorf("check the password of %s: %w", sess.User.PublicID, err)
+		return err
 	}
 	if !ok {
-		if err := s.recordFailure(ctx, account, address); err != nil {
-			return err
-		}
 		metrics.LoginFailures.With(MethodLocal).Inc()
 		return ErrInvalidCredentials
 	}

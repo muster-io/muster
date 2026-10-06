@@ -45,7 +45,8 @@ func (r sessionCreated) VisitCreateSessionResponse(w http.ResponseWriter) error 
 	return gen.CreateSession201JSONResponse(r.body).VisitCreateSessionResponse(w)
 }
 
-// CreateSession is createSession: local sign-in (C-03.FR-3, FR-24).
+// CreateSession is createSession: local sign-in (C-03.FR-3, FR-24), with the second factor when the request carries
+// it; a user with TOTP who gives no code gets a session in the state totp_required.
 func (s *Server) CreateSession(ctx context.Context, req gen.CreateSessionRequestObject) (
 	gen.CreateSessionResponseObject, error) {
 	if req.Body == nil || req.Body.Password == nil {
@@ -54,6 +55,7 @@ func (s *Server) CreateSession(ctx context.Context, req gen.CreateSessionRequest
 	sess, err := s.sessions.SignIn(ctx, auth.SignInRequest{
 		Login: req.Body.Login, Password: *req.Body.Password, Address: clientAddress(ctx),
 		UserAgent: infoFrom(ctx).userAgent,
+		Proof:     auth.Proof{TOTPCode: deref(req.Body.TotpCode), RecoveryCode: deref(req.Body.RecoveryCode)},
 	})
 	if err != nil {
 		return nil, err
@@ -77,6 +79,32 @@ func (s *Server) GetCurrentSession(ctx context.Context, _ gen.GetCurrentSessionR
 		return nil, err
 	}
 	return gen.GetCurrentSession200JSONResponse(body), nil
+}
+
+// SubmitSessionTotp is submitSessionTotp: a TOTP code or a recovery code completes a session in the state
+// totp_required (C-03.FR-24, AC-13).
+func (s *Server) SubmitSessionTotp(ctx context.Context, req gen.SubmitSessionTotpRequestObject) (
+	gen.SubmitSessionTotpResponseObject, error) {
+	id, err := identity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	p := auth.Proof{TOTPCode: deref(req.Body.TotpCode), RecoveryCode: deref(req.Body.RecoveryCode)}
+	if !p.Given() {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "Give a TOTP code or a recovery code.")
+	}
+	sess, err := s.sessions.SubmitSecondFactor(ctx, id.Session, p, clientAddress(ctx))
+	if err != nil {
+		return nil, err
+	}
+	body, err := s.sessionOf(ctx, sess)
+	if err != nil {
+		return nil, err
+	}
+	return gen.SubmitSessionTotp200JSONResponse(body), nil
 }
 
 // signedOut answers with no content and removes the session cookie.
