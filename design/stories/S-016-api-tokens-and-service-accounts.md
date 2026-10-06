@@ -4,7 +4,7 @@ title: Personal access tokens, Service accounts, token authentication and rate l
 capability: C-04
 kind: be
 layer: L1
-depends_on: [S-013]
+depends_on: [S-013, S-062]
 covers: [C-04.FR-1, C-04.FR-2, C-04.FR-3, C-04.FR-4, C-04.FR-5, C-04.FR-6, C-04.FR-7, C-04.FR-8, C-04.AC-1, C-04.AC-2, C-04.AC-3, C-04.AC-4, C-04.AC-5, C-04.AC-7, C-04.AC-8, C-04.AC-9, C-03.FR-13, C-03.FR-27, C-03.FR-30, C-03.AC-14, C-03.AC-22, C-03.AC-24]
 files_touched:
   - internal/tokens/tokens.go
@@ -203,7 +203,7 @@ None.
 
 - Suggested commit: `feat(tokens): add personal access tokens, service accounts and token authentication`.
 - P-09 (`api.rate_limit`) is confirmed or changed here.
-- "Usable" Personal access tokens — not expired, not revoked, owner active — are what the background re-checks of S-013
+- "Usable" Personal access tokens — not expired, not revoked, owner active — are what the background re-checks of S-062
   count when deciding whether to re-check a user.
 
 ## Coverage
@@ -230,5 +230,5 @@ None.
 | C-03.FR-27 | full | together with S-010 and S-012 |
 | C-03.FR-30 | partial | the token effects |
 | C-03.AC-14 | partial | everything except removing an Account link (S-051) |
-| C-03.AC-22 | full | together with S-013 and S-014 |
-| C-03.AC-24 | full | together with S-013 |
+| C-03.AC-22 | full | together with S-062 and S-014 |
+| C-03.AC-24 | full | together with S-013 and S-062 |

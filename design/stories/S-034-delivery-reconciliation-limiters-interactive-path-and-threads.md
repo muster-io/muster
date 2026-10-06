@@ -114,7 +114,7 @@ issue: 34
 - **Worker** (C-11.FR-1, FR-15; `design/db/schema.md` §5): every replica runs one, woken by `NOTIFY delivery` and by
   the earliest `next_attempt_at`. It works per Organization — it iterates over the Organizations (one in L1) and
   passes `org_id` to every claim and query (lint 1). It claims due `pending` rows of healthy Destinations, Urgent first, with
-  `FOR UPDATE SKIP LOCKED` and a lease through the claim helper of S-013, then in a short transaction re-reads the
+  `FOR UPDATE SKIP LOCKED` and a lease through the claim helper of S-062, then in a short transaction re-reads the
   latest Desired state: if `actual_hash = desired_hash` it marks the row `delivered` and calls nothing. Otherwise it
   takes the tokens (below), records `publication_started_at` before a first Publication, calls the adapter outside any
   transaction through the outbound package in the **delivery** client class (S-009), and records the outcome in a new

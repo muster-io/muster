@@ -4,7 +4,7 @@ title: Application shell, sign-in, password setup, TOTP and profile (FE)
 capability: C-03
 kind: fe
 layer: L1
-depends_on: [S-013]
+depends_on: [S-013, S-062]
 covers: [C-03.FR-7, C-03.FR-10, C-03.FR-12, C-03.FR-18, C-03.FR-24, C-03.FR-25, C-03.FR-26, C-03.FR-28, C-03.FR-29, C-03.AC-2, C-03.AC-9, C-03.AC-20, C-03.AC-22]
 files_touched:
   - web/package.json
@@ -173,8 +173,8 @@ Run `make dev`, then in Playwright (desktop, 1280 × 800):
 | C-03.FR-25 | full | together with S-013 |
 | C-03.FR-26 | full | together with S-011 |
 | C-03.FR-28 | full | together with S-013 |
-| C-03.FR-29 | partial | the profile side; conversion on the Users page is S-015 |
+| C-03.FR-29 | partial | the profile side, on the API of S-062; conversion on the Users page is S-015 |
 | C-03.AC-2 | full | |
 | C-03.AC-9 | full | |
-| C-03.AC-20 | full | together with S-013 |
-| C-03.AC-22 | partial | the SPA part; the token part is S-016 |
+| C-03.AC-20 | full | together with S-013 and S-062 |
+| C-03.AC-22 | partial | the SPA part, after the re-checks of S-062; the token part is S-016 |

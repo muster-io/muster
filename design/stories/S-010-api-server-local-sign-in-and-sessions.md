@@ -273,7 +273,7 @@ None.
 | C-03.FR-2 | full | |
 | C-03.FR-3 | partial | sign-in, case-insensitive logins, argon2id, own password change; user administration is S-011 |
 | C-03.FR-4 | full | |
-| C-03.FR-9 | partial | local sessions; ending on disable and Role change is S-011, OIDC parts S-013; the profile page is C-03.FR-12 |
+| C-03.FR-9 | partial | local sessions; ending on disable and Role change is S-011, OIDC parts S-062; the profile page is C-03.FR-12 |
 | C-03.FR-12 | partial | the API of the profile; the page is S-014 |
 | C-03.FR-14 | partial | the writer and the security events of this story; each later story adds its entry types |
 | C-03.FR-16 | full | |
