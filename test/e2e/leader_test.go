@@ -32,9 +32,11 @@ func TestLeaderFailover(t *testing.T) {
 	if got := b.Metric(t, "muster_leader"); got != "0" {
 		t.Fatalf("replica B exports muster_leader %q while A leads, want 0", got)
 	}
-	if got := b.Metric(t, "muster_clock_skew_seconds"); got == "" {
-		t.Error("replica B exports no muster_clock_skew_seconds")
-	}
+	// The first skew check runs at start beside the listeners, so readiness can answer before it has set the gauge;
+	// it is bounded by its timeout, well within the wait.
+	b.waitFor(t, "replica B to export muster_clock_skew_seconds", func() bool {
+		return b.Metric(t, "muster_clock_skew_seconds") != ""
+	})
 
 	cut := time.Now()
 	hole.Cut()
