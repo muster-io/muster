@@ -43,7 +43,7 @@ acceptance:
   - "[C-03.FR-32, C-03.AC-26] With `oidc.sync_role` on, when the fake IdP maps the last active Admin to a lower Role at a background re-check, the Role stays Admin and the sessions continue, the Audit log records `user.role_sync_kept_admin` with the mapped Role, and the OIDC settings carry the warning `last_admin_kept`; once a second Admin is active, the next re-check applies the lower Role and the warning is gone."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 114
 ---
 
 # S-062. OIDC account linking, conversion to local, the offline token and background re-checks (BE)
