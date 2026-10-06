@@ -42,9 +42,11 @@ export default defineConfig({
       },
       output: {
         // React in a chunk of its own: it changes with dependency updates only, so browsers keep it across releases.
+        // Zod shares a chunk with its configuration, which then runs before any other chunk builds a schema.
         codeSplitting: {
           groups: [
             { name: "react", test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+            { name: "zod", test: /[\\/]node_modules[\\/]zod[\\/]|[\\/]src[\\/]zod-config\.ts$/ },
           ],
         },
       },
