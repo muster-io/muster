@@ -69,12 +69,16 @@ export interface NavEntry {
 }
 
 /** The labels of the entries; each page's story adds its own. */
-export type NavLabel = "home" | "profile";
+export type NavLabel = "home" | "profile" | "users" | "oidc" | "security" | "auditLog";
 
 /** The pages register their entries here, in the order of the navigation. */
 export const NAVIGATION: readonly NavEntry[] = [
   { to: "/", label: "home", exact: true },
   { to: "/profile", label: "profile" },
+  { to: "/admin/users", label: "users", permission: "users:read" },
+  { to: "/admin/oidc", label: "oidc", permission: "oidc:read" },
+  { to: "/admin/organization/security", label: "security", permission: "organization:write" },
+  { to: "/admin/audit-log", label: "auditLog", permission: "audit-log:read" },
 ];
 
 /** The entries whose Permission the session holds; an entry without one is shown to everybody. */
@@ -86,7 +90,46 @@ export function visibleEntries(
 }
 
 function navLabel(t: (key: string) => string, label: NavLabel): string {
-  return label === "home" ? t("nav.home") : t("nav.profile");
+  switch (label) {
+    case "home":
+      return t("nav.home");
+    case "profile":
+      return t("nav.profile");
+    case "users":
+      return t("nav.users");
+    case "oidc":
+      return t("nav.oidc");
+    case "security":
+      return t("nav.security");
+    default:
+      return t("nav.auditLog");
+  }
+}
+
+/** Whether the session holds a Permission; the pages hide what it does not allow. */
+export function useCan(permission: Permission): boolean {
+  const session = useSession();
+  return session?.permissions.includes(permission) === true;
+}
+
+/** Shows a page only to a session that holds its Permission (C-03.FR-18); the API refuses the rest anyway. */
+export function RequirePermission({
+  permission,
+  children,
+}: {
+  permission: Permission;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  if (!useCan(permission)) {
+    return (
+      <section className="flex flex-col gap-2 py-6">
+        <h1 className="text-xl font-semibold">{t("errors.noPermissionTitle")}</h1>
+        <p className="text-muted-foreground">{t("errors.noPermission")}</p>
+      </section>
+    );
+  }
+  return children;
 }
 
 export function Navigation({

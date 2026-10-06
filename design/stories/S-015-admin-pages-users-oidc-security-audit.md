@@ -15,11 +15,15 @@ files_touched:
   - web/src/components/setup-link-dialog.tsx
   - web/src/components/group-mapping-editor.tsx
   - web/src/components/audit-diff.tsx
-  - web/src/routes/admin.users.tsx
+  - web/src/routes/admin.users.index.tsx
   - web/src/routes/admin.users.$userId.tsx
   - web/src/routes/admin.oidc.tsx
   - web/src/routes/admin.organization.security.tsx
   - web/src/routes/admin.audit-log.tsx
+  - web/src/components/app-shell.tsx
+  - web/src/lib/api.ts
+  - web/src/lib/time.ts
+  - web/package.json
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/e2e/users.spec.ts

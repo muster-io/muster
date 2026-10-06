@@ -1,18 +1,94 @@
 {
+  "audit": {
+    "actor": {
+      "bootstrap": "Bootstrap",
+      "cli": "{{name}} (CLI)",
+      "serviceAccount": "{{name}} (service account)",
+      "system": "Muster",
+      "token": "with the token {{name}}"
+    },
+    "columns": {
+      "action": "Action",
+      "actor": "Actor",
+      "at": "Time",
+      "diff": "Changes",
+      "resource": "Resource",
+      "transport": "Transport"
+    },
+    "details": "Details",
+    "empty": "No entries match these filters.",
+    "emptyValue": "(empty)",
+    "erased": "[erased]",
+    "fields": {
+      "email": "Email",
+      "login": "Login",
+      "name": "Name",
+      "oidcEnabled": "OIDC sign-in",
+      "password": "Password",
+      "proxyAddress": "Proxy address",
+      "proxyEnabled": "Use a proxy",
+      "proxyPassword": "Proxy password",
+      "proxyType": "Proxy type",
+      "proxyUsername": "Proxy username",
+      "role": "Role",
+      "signInMethod": "Sign-in method",
+      "status": "Status",
+      "totpRequired": "TOTP required"
+    },
+    "filters": {
+      "action": "Action",
+      "actor": "Actor",
+      "anyActor": "Anyone",
+      "apply": "Apply",
+      "byResource": "Show only the entries about {{name}}",
+      "clear": "Clear filters",
+      "clearResourceId": "Show the entries about every resource",
+      "from": "From",
+      "label": "Audit log filters",
+      "resource": "Resource type",
+      "resourceId": "Resource: {{id}}",
+      "to": "To"
+    },
+    "hint": "Who changed or did what in Muster, newest first. Secrets show only that they changed.",
+    "no": "no",
+    "secretChanged": "changed",
+    "title": "Audit log",
+    "to": "changed to",
+    "transport": {
+      "api": "API",
+      "cli": "CLI",
+      "system": "Muster",
+      "ui": "Web UI"
+    },
+    "yes": "yes"
+  },
   "common": {
     "cancel": "Cancel",
     "close": "Close",
     "continue": "Continue",
+    "done": "Done",
     "loading": "Loading…",
+    "reload": "Reload",
     "save": "Save",
     "saved": "Saved."
   },
   "errors": {
+    "forbidden": "You do not have permission to do this.",
     "generic": "Something went wrong. Try again.",
     "goHome": "Go to the home page",
+    "gone": "It no longer exists. Reload the page.",
+    "lastAdmin": "This is the last active Admin. Make another user Admin first.",
+    "localUserOnly": "This user signs in through OIDC. Convert the user to local first.",
+    "loginTaken": "Another user has this login.",
+    "noPermission": "You do not have permission to see this page.",
+    "noPermissionTitle": "No access",
     "notFound": "There is no page at this address.",
     "notFoundTitle": "Page not found",
+    "oidcNotLinked": "This user does not sign in through OIDC.",
     "reload": "The page is out of date. Reload it and try again.",
+    "roleLocked": "The identity provider decides this user's Role while OIDC and Role sync are on.",
+    "stale": "Someone else changed these settings. Reload to see them.",
+    "staleUser": "Someone else changed this user. Reload to see the changes.",
     "tooManyAttempts_one": "Too many attempts. Try again in {{count}} second.",
     "tooManyAttempts_other": "Too many attempts. Try again in {{count}} seconds.",
     "tryAgain": "Try again",
@@ -26,21 +102,88 @@
     "mismatch": "The passwords do not match.",
     "required": "Fill in this field.",
     "tooLong": "This value is too long.",
-    "tooShort": "This value is too short."
+    "tooShort": "This value is too short.",
+    "unsupported": "This setting cannot be changed yet."
   },
   "home": {
     "placeholder": "Alert Groups will appear here.",
     "title": "Welcome, {{name}}"
   },
   "nav": {
+    "auditLog": "Audit log",
     "home": "Home",
     "label": "Main",
-    "profile": "Profile"
+    "oidc": "OIDC",
+    "profile": "Profile",
+    "security": "Security",
+    "users": "Users"
   },
   "notices": {
     "noReplicaLeading": "No replica is leading: Telegram polling, Heartbeat and Stale checks are paused.",
     "recoveringAfterDowntime": "Muster is recovering after downtime. Data may be incomplete until {{time}}.",
     "recoveringAfterDowntimeNoEnd": "Muster is recovering after downtime. Data may be incomplete for a while."
+  },
+  "oidc": {
+    "check": {
+      "authorizationEndpoint": "Authorization endpoint",
+      "failedDirect": "The check failed (direct connection): {{error}}",
+      "failedProxy": "The check failed (through the proxy): {{error}}",
+      "hint": "Fetches the discovery document of the issuer with the saved settings, through the proxy when one is set.",
+      "issuer": "Issuer",
+      "jwksUri": "Key set (JWKS)",
+      "okDirect": "Connected directly in {{ms}} ms.",
+      "okProxy": "Connected through the proxy in {{ms}} ms.",
+      "running": "Checking…",
+      "start": "Check connection",
+      "title": "Connection check",
+      "tokenEndpoint": "Token endpoint",
+      "unknownError": "unknown error",
+      "unsaved": "The check uses the saved settings: save your changes first."
+    },
+    "fields": {
+      "clientId": "Client ID",
+      "clientSecret": "Client secret",
+      "displayName": "Provider name",
+      "displayNameHint": "Shown on the button \"Sign in with …\". Leave it empty to use the host of the issuer URL.",
+      "enabled": "Allow sign-in through OIDC",
+      "enabledHint": "Users sign in through the identity provider; a user is created at their first sign-in.",
+      "groupsClaim": "Groups claim",
+      "issuerUrl": "Issuer URL",
+      "scopes": "Scopes",
+      "scopesHint": "Separated by spaces. Muster always adds openid and offline_access.",
+      "secretExpiresOn": "Client secret expires on",
+      "secretExpiresOnHint": "Optional. Muster warns 14 days before this date.",
+      "skipTotp": "Skip TOTP when the identity provider confirmed multi-factor authentication",
+      "skipTotpHint": "Muster reads the amr claim of the ID token.",
+      "syncRole": "Sync the Role at every sign-in",
+      "syncRoleHint": "On: the identity provider decides the Role, and it cannot be changed in Muster. Off: the mapping applies only when the user is created.",
+      "unmatchedRole": "Role for users without a matching group",
+      "unmatchedRoleHint": "With \"None\" they cannot sign in."
+    },
+    "fixErrors": "Fix the marked fields and save again.",
+    "hint": "Sign-in through your identity provider.",
+    "mapping": {
+      "add": "Add IdP group",
+      "empty": "No IdP groups are mapped.",
+      "group": "IdP group {{number}}",
+      "hint": "When a user's IdP groups map to several Roles, the highest wins.",
+      "remove": "Remove IdP group {{group}}",
+      "role": "Role for IdP group {{number}}",
+      "title": "IdP groups and Roles"
+    },
+    "provider": {
+      "title": "Identity provider"
+    },
+    "roles": {
+      "hint": "Which Role a user gets from their groups at the identity provider.",
+      "title": "Roles"
+    },
+    "title": "OIDC",
+    "warnings": {
+      "lastAdminKept": "{{user}} stays Admin: they are the last active Admin, and the identity provider maps them to {{role}}. Make another user Admin first.",
+      "nobodyCanSignIn": "Nobody will be able to sign in through OIDC.",
+      "secretExpiring": "The client secret expires on {{date}}. Issue a new one in the identity provider and enter it here."
+    }
   },
   "passwordSetup": {
     "done": "Your password is set. Sign in with your login and the new password.",
@@ -109,6 +252,22 @@
     },
     "title": "Profile"
   },
+  "proxy": {
+    "address": "Address",
+    "addressHint": "host:port",
+    "enabled": "Use a proxy",
+    "enabledHint": "Muster sends these outgoing requests through the proxy.",
+    "password": "Password",
+    "title": "Proxy",
+    "type": "Type",
+    "username": "Username"
+  },
+  "roles": {
+    "admin": "Admin",
+    "none": "None",
+    "responder": "Responder",
+    "viewer": "Viewer"
+  },
   "secondFactor": {
     "cancel": "Sign out",
     "code": "Code",
@@ -119,6 +278,42 @@
     "title": "Two-factor authentication",
     "useCode": "Use the authenticator app instead",
     "useRecoveryCode": "Use a recovery code instead"
+  },
+  "secret": {
+    "clear": "Clear",
+    "cleared": "Will be removed when you save.",
+    "enter": "Set a value",
+    "keep": "Keep the current one",
+    "notSet": "Not set",
+    "replace": "Replace",
+    "set": "Set",
+    "setChanged": "Set, changed {{time}}",
+    "undo": "Undo",
+    "writeOnly": "The stored value is never shown. The new one is saved with the form."
+  },
+  "security": {
+    "hint": "Sign-in rules for the whole Organization.",
+    "title": "Security",
+    "totp": {
+      "everyone": "Everyone",
+      "everyoneHint": "Every user, whether they sign in with a password or through OIDC.",
+      "hint": "A user the policy covers who has no TOTP sets it up right after their next sign-in.",
+      "legend": "TOTP required",
+      "localUsers": "Local users",
+      "localUsersHint": "Users who sign in with a password; users who sign in through OIDC are not asked.",
+      "nobody": "Nobody",
+      "nobodyHint": "TOTP is optional for everyone.",
+      "title": "Two-factor authentication"
+    }
+  },
+  "setupLink": {
+    "copied": "Copied",
+    "copy": "Copy",
+    "handOver": "Hand it to {{name}} yourself: Muster sends no email. It works once, until {{time}}.",
+    "hint": "The user sets their password with this link.",
+    "shownOnce": "This link is shown once.",
+    "title": "Password setup link",
+    "url": "Link"
   },
   "shell": {
     "skipToContent": "Skip to content"
@@ -140,6 +335,9 @@
     "submit": "Sign in",
     "title": "Sign in to Muster",
     "withProvider": "Sign in with {{provider}}"
+  },
+  "table": {
+    "loadMore": "Load more"
   },
   "totp": {
     "alreadyEnrolled": "TOTP is already set up for your account.",
@@ -188,5 +386,75 @@
   "userMenu": {
     "label": "User menu: {{name}}",
     "signOut": "Sign out"
+  },
+  "users": {
+    "actions": {
+      "convert": "Convert to local",
+      "convertConfirm": "{{name}} will no longer sign in through OIDC: the identity is removed and the user's sessions end. You get a password setup link to hand over.",
+      "delete": "Delete",
+      "deleteConfirm": "The name becomes {{pseudonym}}, the email is erased, the sessions end and the Alert Groups the user acknowledged lose their Owner. Audit log entries stay. This cannot be undone.",
+      "deleteTitle": "Delete {{name}}?",
+      "disable": "Disable",
+      "enable": "Enable",
+      "newSetupLink": "New password setup link",
+      "resetTotp": "Reset TOTP",
+      "resetTotpConfirm": "{{name}} loses TOTP and sets it up again at the next sign-in if the policy requires it.",
+      "totpReset": "TOTP was reset."
+    },
+    "create": {
+      "created": "{{name}} is created. Hand over the link below so that they set their password.",
+      "hint": "A local user signs in with a login and a password.",
+      "start": "Create user",
+      "submit": "Create",
+      "title": "Create user"
+    },
+    "empty": "No users match these filters.",
+    "fields": {
+      "created": "Created",
+      "email": "Email",
+      "emailOptional": "Email (optional)",
+      "lastSignIn": "Last sign-in",
+      "login": "Login",
+      "method": "Sign-in method",
+      "name": "Name",
+      "role": "Role",
+      "source": "Source",
+      "status": "Status",
+      "totp": "TOTP"
+    },
+    "filters": {
+      "any": "All",
+      "label": "User filters",
+      "search": "Search",
+      "searchHint": "Name, login or email"
+    },
+    "method": {
+      "local": "Password",
+      "oidc": "OIDC"
+    },
+    "never": "Never",
+    "page": {
+      "actions": "Actions",
+      "details": "Details",
+      "edit": "Name, email and Role",
+      "editHint": "A Role change ends the user's sessions.",
+      "roleLocked": "The identity provider decides the Role while OIDC and Role sync are on.",
+      "title": "User"
+    },
+    "source": {
+      "bootstrap": "Bootstrap",
+      "local": "Local",
+      "oidc": "OIDC"
+    },
+    "status": {
+      "active": "Active",
+      "deleted": "Deleted",
+      "disabled": "Disabled"
+    },
+    "title": "Users",
+    "totp": {
+      "off": "Off",
+      "on": "On"
+    }
   }
 }

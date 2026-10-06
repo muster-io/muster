@@ -14,7 +14,12 @@ import { Route as PasswordSetupRouteImport } from './routes/password-setup'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as TotpEnrolmentRouteImport } from './routes/totp-enrolment'
+import { Route as AdminAuditLogRouteImport } from './routes/admin.audit-log'
+import { Route as AdminOidcRouteImport } from './routes/admin.oidc'
 import { Route as SignInTotpRouteImport } from './routes/sign-in.totp'
+import { Route as AdminOrganizationSecurityRouteImport } from './routes/admin.organization.security'
+import { Route as AdminUsersIndexRouteImport } from './routes/admin.users.index'
+import { Route as AdminUsersUserIdRouteImport } from './routes/admin.users.$userId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -41,10 +46,36 @@ const TotpEnrolmentRoute = TotpEnrolmentRouteImport.update({
   path: '/totp-enrolment',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminAuditLogRoute = AdminAuditLogRouteImport.update({
+  id: '/admin/audit-log',
+  path: '/admin/audit-log',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminOidcRoute = AdminOidcRouteImport.update({
+  id: '/admin/oidc',
+  path: '/admin/oidc',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignInTotpRoute = SignInTotpRouteImport.update({
   id: '/totp',
   path: '/totp',
   getParentRoute: () => SignInRoute,
+} as any)
+const AdminOrganizationSecurityRoute =
+  AdminOrganizationSecurityRouteImport.update({
+    id: '/admin/organization/security',
+    path: '/admin/organization/security',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AdminUsersIndexRoute = AdminUsersIndexRouteImport.update({
+  id: '/admin/users/',
+  path: '/admin/users/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminUsersUserIdRoute = AdminUsersUserIdRouteImport.update({
+  id: '/admin/users/$userId',
+  path: '/admin/users/$userId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -53,7 +84,12 @@ export interface FileRoutesByFullPath {
   '/profile': typeof ProfileRoute
   '/sign-in': typeof SignInRouteWithChildren
   '/totp-enrolment': typeof TotpEnrolmentRoute
+  '/admin/audit-log': typeof AdminAuditLogRoute
+  '/admin/oidc': typeof AdminOidcRoute
   '/sign-in/totp': typeof SignInTotpRoute
+  '/admin/organization/security': typeof AdminOrganizationSecurityRoute
+  '/admin/users/$userId': typeof AdminUsersUserIdRoute
+  '/admin/users/': typeof AdminUsersIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -61,7 +97,12 @@ export interface FileRoutesByTo {
   '/profile': typeof ProfileRoute
   '/sign-in': typeof SignInRouteWithChildren
   '/totp-enrolment': typeof TotpEnrolmentRoute
+  '/admin/audit-log': typeof AdminAuditLogRoute
+  '/admin/oidc': typeof AdminOidcRoute
   '/sign-in/totp': typeof SignInTotpRoute
+  '/admin/organization/security': typeof AdminOrganizationSecurityRoute
+  '/admin/users/$userId': typeof AdminUsersUserIdRoute
+  '/admin/users': typeof AdminUsersIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -70,7 +111,12 @@ export interface FileRoutesById {
   '/profile': typeof ProfileRoute
   '/sign-in': typeof SignInRouteWithChildren
   '/totp-enrolment': typeof TotpEnrolmentRoute
+  '/admin/audit-log': typeof AdminAuditLogRoute
+  '/admin/oidc': typeof AdminOidcRoute
   '/sign-in/totp': typeof SignInTotpRoute
+  '/admin/organization/security': typeof AdminOrganizationSecurityRoute
+  '/admin/users/$userId': typeof AdminUsersUserIdRoute
+  '/admin/users/': typeof AdminUsersIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -80,7 +126,12 @@ export interface FileRouteTypes {
     | '/profile'
     | '/sign-in'
     | '/totp-enrolment'
+    | '/admin/audit-log'
+    | '/admin/oidc'
     | '/sign-in/totp'
+    | '/admin/organization/security'
+    | '/admin/users/$userId'
+    | '/admin/users/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -88,7 +139,12 @@ export interface FileRouteTypes {
     | '/profile'
     | '/sign-in'
     | '/totp-enrolment'
+    | '/admin/audit-log'
+    | '/admin/oidc'
     | '/sign-in/totp'
+    | '/admin/organization/security'
+    | '/admin/users/$userId'
+    | '/admin/users'
   id:
     | '__root__'
     | '/'
@@ -96,7 +152,12 @@ export interface FileRouteTypes {
     | '/profile'
     | '/sign-in'
     | '/totp-enrolment'
+    | '/admin/audit-log'
+    | '/admin/oidc'
     | '/sign-in/totp'
+    | '/admin/organization/security'
+    | '/admin/users/$userId'
+    | '/admin/users/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -105,6 +166,11 @@ export interface RootRouteChildren {
   ProfileRoute: typeof ProfileRoute
   SignInRoute: typeof SignInRouteWithChildren
   TotpEnrolmentRoute: typeof TotpEnrolmentRoute
+  AdminAuditLogRoute: typeof AdminAuditLogRoute
+  AdminOidcRoute: typeof AdminOidcRoute
+  AdminOrganizationSecurityRoute: typeof AdminOrganizationSecurityRoute
+  AdminUsersUserIdRoute: typeof AdminUsersUserIdRoute
+  AdminUsersIndexRoute: typeof AdminUsersIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -144,12 +210,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TotpEnrolmentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/audit-log': {
+      id: '/admin/audit-log'
+      path: '/admin/audit-log'
+      fullPath: '/admin/audit-log'
+      preLoaderRoute: typeof AdminAuditLogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/oidc': {
+      id: '/admin/oidc'
+      path: '/admin/oidc'
+      fullPath: '/admin/oidc'
+      preLoaderRoute: typeof AdminOidcRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-in/totp': {
       id: '/sign-in/totp'
       path: '/totp'
       fullPath: '/sign-in/totp'
       preLoaderRoute: typeof SignInTotpRouteImport
       parentRoute: typeof SignInRoute
+    }
+    '/admin/organization/security': {
+      id: '/admin/organization/security'
+      path: '/admin/organization/security'
+      fullPath: '/admin/organization/security'
+      preLoaderRoute: typeof AdminOrganizationSecurityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/users/': {
+      id: '/admin/users/'
+      path: '/admin/users'
+      fullPath: '/admin/users/'
+      preLoaderRoute: typeof AdminUsersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/users/$userId': {
+      id: '/admin/users/$userId'
+      path: '/admin/users/$userId'
+      fullPath: '/admin/users/$userId'
+      preLoaderRoute: typeof AdminUsersUserIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }
@@ -171,6 +272,11 @@ const rootRouteChildren: RootRouteChildren = {
   ProfileRoute: ProfileRoute,
   SignInRoute: SignInRouteWithChildren,
   TotpEnrolmentRoute: TotpEnrolmentRoute,
+  AdminAuditLogRoute: AdminAuditLogRoute,
+  AdminOidcRoute: AdminOidcRoute,
+  AdminOrganizationSecurityRoute: AdminOrganizationSecurityRoute,
+  AdminUsersUserIdRoute: AdminUsersUserIdRoute,
+  AdminUsersIndexRoute: AdminUsersIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
