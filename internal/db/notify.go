@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -71,11 +73,22 @@ type Listener struct {
 	log     *logging.Logger
 	// wait is how long the Listener sleeps between reconnections; tests replace it.
 	wait func(ctx context.Context, d time.Duration) bool
+	// channels are the other channels it listens on, with what receives their payloads.
+	channels map[string]func(payload string)
 }
 
 // NewListener returns the Listener over connect, which opens a session connection.
 func NewListener(connect func(context.Context) (ListenConn, error), log *logging.Logger) *Listener {
 	return &Listener{connect: connect, log: log, wait: sleep}
+}
+
+// Listen makes the Listener also listen on channel and pass each payload to f, such as the notification that wakes
+// the processing workers; it is called before Run.
+func (l *Listener) Listen(channel string, f func(payload string)) {
+	if l.channels == nil {
+		l.channels = map[string]func(string){}
+	}
+	l.channels[channel] = f
 }
 
 // SessionListenConn opens a session connection for a Listener.
@@ -127,9 +140,11 @@ func (l *Listener) listen(ctx context.Context) (ListenConn, error) {
 	}
 	lctx, cancel := context.WithTimeout(ctx, listenPingTimeout)
 	defer cancel()
-	if _, err := c.Exec(lctx, "LISTEN "+pgx.Identifier{HintChannel}.Sanitize()); err != nil {
-		closeListen(ctx, c)
-		return nil, fmt.Errorf("listen on %s: %w", HintChannel, err)
+	for _, channel := range append([]string{HintChannel}, slices.Sorted(maps.Keys(l.channels))...) {
+		if _, err := c.Exec(lctx, "LISTEN "+pgx.Identifier{channel}.Sanitize()); err != nil {
+			closeListen(ctx, c)
+			return nil, fmt.Errorf("listen on %s: %w", channel, err)
+		}
 	}
 	return c, nil
 }
@@ -144,6 +159,10 @@ func (l *Listener) receive(ctx context.Context, c ListenConn, hint func(Hint)) e
 		switch {
 		case ctx.Err() != nil:
 			return ctx.Err()
+		case err == nil && n.Channel != HintChannel:
+			if f := l.channels[n.Channel]; f != nil {
+				f(n.Payload)
+			}
 		case err == nil:
 			var h Hint
 			if json.Unmarshal([]byte(n.Payload), &h) == nil && h.Type != "" {

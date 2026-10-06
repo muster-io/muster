@@ -95,7 +95,9 @@ func TestIngestion(t *testing.T) {
 	}
 	list := admin.json(http.MethodGet, "/api/v1/stored-snapshots?integration="+id, "", http.StatusOK)
 	items := list["items"].([]any)
-	if len(items) != 1 || items[0].(map[string]any)["state"] != "pending" {
+	// Processing may already have taken it.
+	if len(items) != 1 || (items[0].(map[string]any)["state"] != "pending" &&
+		items[0].(map[string]any)["state"] != "processed") {
 		t.Errorf("stored snapshots = %v", list)
 	}
 	first := admin.json(http.MethodGet, "/api/v1/stored-snapshots/"+items[0].(map[string]any)["id"].(string), "",
@@ -139,7 +141,7 @@ func TestIngestion(t *testing.T) {
 		return admin.json(http.MethodGet, "/api/v1/stored-snapshots/"+ss, "", http.StatusOK)
 	}
 	if sn := newest(); sn["body"] != "not json" || sn["body_encoding"] != "utf8" || sn["content_type"] != "text/plain" ||
-		sn["state"] != "pending" {
+		(sn["state"] != "pending" && sn["state"] != "failed") {
 		t.Errorf("not json snapshot = %v", sn)
 	}
 	if s := postIngest(t, r.Ingest+"/api/v1/ingest", token, "\xff\xfe"); s != http.StatusAccepted {

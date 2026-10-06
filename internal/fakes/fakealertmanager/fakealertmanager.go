@@ -2,7 +2,9 @@
 // Copyright The Muster Authors
 
 // Package fakealertmanager is the fake Alertmanager: it sends Alertmanager webhooks (version 4), or any body, to a URL
-// or to a registered receiver, once or at a steady rate, on request through its control endpoints or from Go.
+// or to a registered receiver, once or at a steady rate, on request through its control endpoints or from Go. Its
+// group model keeps Alertmanager groups and their Alerts and sends the Snapshots Alertmanager would send for them, and
+// its scenarios replay the verified Alertmanager facts that processing relies on.
 package fakealertmanager
 
 import (
@@ -72,6 +74,9 @@ type Fake struct {
 	mu        sync.Mutex
 	seq       int
 	receivers map[string]Receiver
+	groups    map[string]*fakeGroup
+	// clock is the time of the group model; nil is the system time.
+	clock func() time.Time
 }
 
 func New() *Fake {
@@ -80,6 +85,7 @@ func New() *Fake {
 	t.MaxIdleConnsPerHost = 100
 	f := &Fake{
 		receivers: map[string]Receiver{},
+		groups:    map[string]*fakeGroup{},
 		client: &http.Client{
 			Transport: t,
 			Timeout:   sendTimeout,
@@ -92,6 +98,10 @@ func New() *Fake {
 	f.HandleControl("POST /_fake/receivers", f.handleReceivers)
 	f.HandleControl("POST /_fake/send", f.handleSend)
 	f.HandleControl("POST /_fake/load", f.handleLoad)
+	f.HandleControl("PUT /_fake/groups/{group}", f.handlePutGroup)
+	f.HandleControl("PUT /_fake/groups/{group}/alerts/{alert}", f.handlePutAlert)
+	f.HandleControl("DELETE /_fake/groups/{group}/alerts/{alert}", f.handleDeleteAlert)
+	f.HandleControl("POST /_fake/groups/{group}/notify", f.handleNotify)
 	return f
 }
 

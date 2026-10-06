@@ -27,7 +27,9 @@ import (
 	adb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/ingest"
+	ingestdb "github.com/muster-io/muster/internal/ingest/dbgen"
 	"github.com/muster-io/muster/internal/integrations"
 	idb "github.com/muster-io/muster/internal/integrations/dbgen"
 	"github.com/muster-io/muster/internal/keyring"
@@ -64,6 +66,9 @@ type fakeDB struct {
 	totp  totp.Store
 	oidc  fakeOIDCStore
 	integ fakeIntegrationsStore
+	// devOffset is the offset of the development clock in runtime_state; nil has no row. devErr fails its read.
+	devOffset *int64
+	devErr    error
 }
 
 // fakeIntegrationsStore records the demo Integration of development mode: the Integration once, then its token.
@@ -298,6 +303,36 @@ func (f *fakeDB) TokensStore() tokens.Store { return nil }
 func (f *fakeDB) IntegrationsStore() integrations.Store { return &f.integ }
 
 func (f *fakeDB) IngestStore() ingest.Store { return nil }
+
+// ProcessStore has no pending Stored Snapshots.
+func (f *fakeDB) ProcessStore() ingest.ProcessStore { return fakeProcessStore{} }
+
+type fakeProcessStore struct{ ingest.ProcessStore }
+
+func (fakeProcessStore) GetRetention(context.Context, int64) (int64, error) { return 14, nil }
+
+func (fakeProcessStore) ListPendingIntegrations(context.Context, ingestdb.ListPendingIntegrationsParams) ([]int64,
+	error) {
+	return nil, nil
+}
+
+// ClockStore reads the development clock of devOffset.
+func (f *fakeDB) ClockStore() devmode.ClockStore { return fakeClockStore{f: f} }
+
+type fakeClockStore struct {
+	devmode.ClockStore
+	f *fakeDB
+}
+
+func (s fakeClockStore) GetDevClockOffset(context.Context) (int64, error) {
+	if s.f.devErr != nil {
+		return 0, s.f.devErr
+	}
+	if s.f.devOffset == nil {
+		return 0, pgx.ErrNoRows
+	}
+	return *s.f.devOffset, nil
+}
 
 // fakeUsersStore has an Admin, so the bootstrap step creates nothing.
 type fakeUsersStore struct{ users.Store }
@@ -1098,6 +1133,69 @@ func (s *fakeAdminStore) InsertAuditEntry(_ context.Context, arg auditdb.InsertA
 
 // TestResetPassword is the runtime of `muster admin reset-password` (C-03.FR-11): settings, connection and schema
 // checks, the Organization, then the reset recorded by the CLI actor; it needs no master key.
+// TestDevClockServed: in development mode the internal listener serves the development clock, read from the database
+// at start; outside it the path does not exist.
+func TestDevClockServed(t *testing.T) {
+	offset := int64(3600)
+	fake := &fakeDB{devOffset: &offset}
+	opts := options(fake, io.Discard, env("MUSTER_SECRET_KEYS="+keyring.DevelopmentKey))
+	opts.Development = true
+	addrs, cancel, done := running(t, opts)
+	code, body := get(t, "http://"+addrs.Internal+devmode.ClockPath)
+	if code != http.StatusOK || !strings.Contains(body, `"offset_seconds":3600`) {
+		t.Errorf("dev clock = %d %s", code, body)
+	}
+	if code, _ := get(t, "http://"+addrs.Internal+"/health/live"); code != http.StatusOK {
+		t.Errorf("health under the dev clock = %d", code)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	addrs, cancel, done = running(t, options(&fakeDB{}, io.Discard, env()))
+	if code, _ := get(t, "http://"+addrs.Internal+devmode.ClockPath); code != http.StatusNotFound {
+		t.Errorf("dev clock outside development mode = %d", code)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestResetPasswordUnderDev is D245: under muster dev the command runs on the development clock of the database, so
+// that what it writes agrees with the replicas.
+func TestResetPasswordUnderDev(t *testing.T) {
+	admin := &fakeAdminStore{}
+	offset := int64(86400)
+	fake := &fakeDB{admin: admin, devOffset: &offset}
+	fake.org.org = &odb.CreateOrganizationParams{PublicID: "RG0000000000AA", Name: "Muster"}
+	opts := options(fake, io.Discard, env())
+	opts.Development = true
+	if _, err := ResetPassword(t.Context(), opts, PasswordReset{Actor: "ops", Login: "bob",
+		Password: "bob-new-password"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(admin.audit) != 1 || time.Until(admin.audit[0].At) < 23*time.Hour {
+		t.Errorf("audit at %v, want a day ahead", admin.audit[0].At)
+	}
+	fake.devErr = errors.New("down")
+	if _, err := ResetPassword(t.Context(), opts, PasswordReset{Actor: "ops", Login: "bob",
+		Password: "bob-new-password"}); err == nil {
+		t.Error("reset-password without the development clock: no error")
+	}
+	tf := &fakeDB{totp: &fakeTOTPStore{}, devErr: errors.New("down")}
+	tf.org.org = fake.org.org
+	topts := options(tf, io.Discard, env())
+	topts.Development = true
+	if _, _, err := ResetTOTP(t.Context(), topts, TOTPReset{Actor: "ops", Login: "bob"}); err == nil {
+		t.Error("reset-totp without the development clock: no error")
+	}
+	tf.devErr = nil
+	if _, _, err := ResetTOTP(t.Context(), topts, TOTPReset{Actor: "ops", Login: "bob"}); err != nil {
+		t.Errorf("reset-totp under dev: %v", err)
+	}
+}
+
 func TestResetPassword(t *testing.T) {
 	admin := &fakeAdminStore{}
 	fake := &fakeDB{admin: admin}

@@ -12,6 +12,136 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimIntegrations = `-- name: ClaimIntegrations :many
+UPDATE ingest_claims c
+SET lease_owner = $1, lease_until = $2
+FROM integrations i
+WHERE c.org_id = $3 AND i.org_id = $3 AND i.id = c.integration_id AND c.integration_id IN (
+    SELECT f.integration_id
+    FROM ingest_claims f
+    WHERE f.org_id = $3 AND f.integration_id = ANY($4::bigint[])
+      AND (f.lease_until IS NULL OR f.lease_until <= $5::timestamptz)
+    LIMIT $6
+    FOR UPDATE SKIP LOCKED)
+RETURNING c.integration_id, i.public_id
+`
+
+type ClaimIntegrationsParams struct {
+	Owner          pgtype.Text
+	LeaseUntil     pgtype.Timestamptz
+	OrgID          int64
+	IntegrationIds []int64
+	Now            time.Time
+	BatchSize      int32
+}
+
+type ClaimIntegrationsRow struct {
+	IntegrationID int64
+	PublicID      string
+}
+
+// ClaimIntegrations leases at most @batch_size of the Integrations whose lease is free or ran out at @now (real
+// clock); a claim row another transaction holds is skipped.
+func (q *Queries) ClaimIntegrations(ctx context.Context, arg ClaimIntegrationsParams) ([]ClaimIntegrationsRow, error) {
+	rows, err := q.db.Query(ctx, claimIntegrations,
+		arg.Owner,
+		arg.LeaseUntil,
+		arg.OrgID,
+		arg.IntegrationIds,
+		arg.Now,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClaimIntegrationsRow{}
+	for rows.Next() {
+		var i ClaimIntegrationsRow
+		if err := rows.Scan(&i.IntegrationID, &i.PublicID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countPendingSnapshots = `-- name: CountPendingSnapshots :one
+SELECT count(*)
+FROM stored_snapshots
+WHERE org_id = $1 AND state = 'pending'
+`
+
+// CountPendingSnapshots is the backlog of an Organization: its pending Stored Snapshots.
+func (q *Queries) CountPendingSnapshots(ctx context.Context, orgID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countPendingSnapshots, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countSnapshot = `-- name: CountSnapshot :exec
+UPDATE integrations
+SET snapshot_count = snapshot_count + 1, last_snapshot_at = greatest(last_snapshot_at, $1::timestamptz)
+WHERE org_id = $2 AND id = $3
+`
+
+type CountSnapshotParams struct {
+	ReceivedAt    time.Time
+	OrgID         int64
+	IntegrationID int64
+}
+
+// CountSnapshot counts a Stored Snapshot on its Integration; processing is serialized per Integration, so the
+// ingestion path never updates the Integration row.
+func (q *Queries) CountSnapshot(ctx context.Context, arg CountSnapshotParams) error {
+	_, err := q.db.Exec(ctx, countSnapshot, arg.ReceivedAt, arg.OrgID, arg.IntegrationID)
+	return err
+}
+
+const endPresences = `-- name: EndPresences :exec
+UPDATE alert_presences
+SET state = 'gone', missed_since = NULL
+WHERE org_id = $1 AND alert_id = ANY($2::bigint[]) AND state IN ('listed', 'missed')
+  AND ($3::bigint IS NULL
+       OR alertmanager_group_id = $3::bigint)
+`
+
+type EndPresencesParams struct {
+	OrgID               int64
+	AlertIds            []int64
+	AlertmanagerGroupID pgtype.Int8
+}
+
+// EndPresences ends active presences: in one groupKey when it is given (Gone there), or in every groupKey for Alerts
+// that resolved.
+func (q *Queries) EndPresences(ctx context.Context, arg EndPresencesParams) error {
+	_, err := q.db.Exec(ctx, endPresences, arg.OrgID, arg.AlertIds, arg.AlertmanagerGroupID)
+	return err
+}
+
+const ensureIngestClaims = `-- name: EnsureIngestClaims :exec
+INSERT INTO ingest_claims (integration_id, org_id)
+SELECT i.id, i.org_id
+FROM integrations i
+WHERE i.org_id = $1 AND i.id = ANY($2::bigint[])
+ON CONFLICT (integration_id) DO NOTHING
+`
+
+type EnsureIngestClaimsParams struct {
+	OrgID          int64
+	IntegrationIds []int64
+}
+
+// EnsureIngestClaims creates the claim rows of Integrations that have none yet.
+func (q *Queries) EnsureIngestClaims(ctx context.Context, arg EnsureIngestClaimsParams) error {
+	_, err := q.db.Exec(ctx, ensureIngestClaims, arg.OrgID, arg.IntegrationIds)
+	return err
+}
+
 const findSnapshotIntegration = `-- name: FindSnapshotIntegration :one
 SELECT id, public_id, name
 FROM integrations
@@ -36,6 +166,71 @@ func (q *Queries) FindSnapshotIntegration(ctx context.Context, arg FindSnapshotI
 	var i FindSnapshotIntegrationRow
 	err := row.Scan(&i.ID, &i.PublicID, &i.Name)
 	return i, err
+}
+
+const findViewIntegration = `-- name: FindViewIntegration :one
+SELECT i.id, o.retention_alert_details_days
+FROM integrations i
+JOIN organizations o ON o.id = i.org_id
+WHERE i.org_id = $1 AND i.public_id = $2 AND i.deleted_at IS NULL
+`
+
+type FindViewIntegrationParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+type FindViewIntegrationRow struct {
+	ID                        int64
+	RetentionAlertDetailsDays int64
+}
+
+// FindViewIntegration finds an Integration that is not deleted, for its Alerts view, with the Organization's
+// retention.alert_details.
+func (q *Queries) FindViewIntegration(ctx context.Context, arg FindViewIntegrationParams) (FindViewIntegrationRow, error) {
+	row := q.db.QueryRow(ctx, findViewIntegration, arg.OrgID, arg.PublicID)
+	var i FindViewIntegrationRow
+	err := row.Scan(&i.ID, &i.RetentionAlertDetailsDays)
+	return i, err
+}
+
+const finishSnapshot = `-- name: FinishSnapshot :execrows
+UPDATE stored_snapshots
+SET state = $1, processed_at = $2, processing_error = $3,
+    group_key = $4, alert_count = $5,
+    truncated_alerts = $6
+WHERE org_id = $7 AND id = $8 AND received_at = $9::timestamptz AND state = 'pending'
+`
+
+type FinishSnapshotParams struct {
+	State           string
+	ProcessedAt     pgtype.Timestamptz
+	ProcessingError pgtype.Text
+	GroupKey        pgtype.Text
+	AlertCount      pgtype.Int8
+	TruncatedAlerts pgtype.Int8
+	OrgID           int64
+	ID              int64
+	ReceivedAt      time.Time
+}
+
+// FinishSnapshot marks a pending Stored Snapshot processed or failed, with what processing read of its payload.
+func (q *Queries) FinishSnapshot(ctx context.Context, arg FinishSnapshotParams) (int64, error) {
+	result, err := q.db.Exec(ctx, finishSnapshot,
+		arg.State,
+		arg.ProcessedAt,
+		arg.ProcessingError,
+		arg.GroupKey,
+		arg.AlertCount,
+		arg.TruncatedAlerts,
+		arg.OrgID,
+		arg.ID,
+		arg.ReceivedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getRetention = `-- name: GetRetention :one
@@ -117,6 +312,58 @@ func (q *Queries) GetStoredSnapshot(ctx context.Context, arg GetStoredSnapshotPa
 	return i, err
 }
 
+const insertAlerts = `-- name: InsertAlerts :many
+INSERT INTO alerts (
+    org_id, integration_id, fingerprint, labels, annotations, generator_url, static_label_conflicts, status,
+    starts_at, episode, fired_at, first_seen_at, last_seen_at, updated_at
+)
+SELECT $1, $2, u.fingerprint, u.labels, u.annotations, u.generator_url,
+       u.static_label_conflicts, 'firing', u.starts_at, 1, $3, $3, $3, $4
+FROM jsonb_to_recordset($5::jsonb) AS u(fingerprint text, labels jsonb, annotations jsonb, generator_url text,
+                                           static_label_conflicts text[], starts_at timestamptz)
+RETURNING id, fingerprint
+`
+
+type InsertAlertsParams struct {
+	OrgID         int64
+	IntegrationID int64
+	SeenAt        time.Time
+	UpdatedAt     time.Time
+	Rows          []byte
+}
+
+type InsertAlertsRow struct {
+	ID          int64
+	Fingerprint string
+}
+
+// InsertAlerts creates the rows of newly firing fingerprints, given as a JSON array of rows.
+func (q *Queries) InsertAlerts(ctx context.Context, arg InsertAlertsParams) ([]InsertAlertsRow, error) {
+	rows, err := q.db.Query(ctx, insertAlerts,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.SeenAt,
+		arg.UpdatedAt,
+		arg.Rows,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []InsertAlertsRow{}
+	for rows.Next() {
+		var i InsertAlertsRow
+		if err := rows.Scan(&i.ID, &i.Fingerprint); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertSnapshotBody = `-- name: InsertSnapshotBody :exec
 
 INSERT INTO snapshot_bodies (org_id, body_sha256, body_day, body)
@@ -179,6 +426,174 @@ func (q *Queries) InsertStoredSnapshot(ctx context.Context, arg InsertStoredSnap
 		arg.ContentType,
 	)
 	return err
+}
+
+const listActivePresences = `-- name: ListActivePresences :many
+SELECT p.alert_id, p.state, p.last_listed_window, p.missed_since,
+       EXISTS (SELECT 1
+               FROM alert_presences o
+               WHERE o.org_id = $1 AND o.alert_id = p.alert_id
+                 AND o.alertmanager_group_id <> p.alertmanager_group_id
+                 AND o.state IN ('listed', 'missed'))::boolean AS active_elsewhere
+FROM alert_presences p
+WHERE p.org_id = $1 AND p.alertmanager_group_id = $2 AND p.state IN ('listed', 'missed')
+`
+
+type ListActivePresencesParams struct {
+	OrgID               int64
+	AlertmanagerGroupID int64
+}
+
+type ListActivePresencesRow struct {
+	AlertID          int64
+	State            string
+	LastListedWindow int64
+	MissedSince      pgtype.Timestamptz
+	ActiveElsewhere  bool
+}
+
+// ListActivePresences reads the active presences of a groupKey, and whether each Alert has an active presence in
+// another groupKey.
+func (q *Queries) ListActivePresences(ctx context.Context, arg ListActivePresencesParams) ([]ListActivePresencesRow, error) {
+	rows, err := q.db.Query(ctx, listActivePresences, arg.OrgID, arg.AlertmanagerGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActivePresencesRow{}
+	for rows.Next() {
+		var i ListActivePresencesRow
+		if err := rows.Scan(
+			&i.AlertID,
+			&i.State,
+			&i.LastListedWindow,
+			&i.MissedSince,
+			&i.ActiveElsewhere,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingIntegrations = `-- name: ListPendingIntegrations :many
+SELECT DISTINCT integration_id
+FROM stored_snapshots
+WHERE org_id = $1 AND state = 'pending' AND received_at >= $2::timestamptz
+`
+
+type ListPendingIntegrationsParams struct {
+	OrgID   int64
+	Horizon time.Time
+}
+
+// ListPendingIntegrations finds the Integrations with pending Stored Snapshots received since @horizon; the partial
+// index holds only pending rows.
+func (q *Queries) ListPendingIntegrations(ctx context.Context, arg ListPendingIntegrationsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listPendingIntegrations, arg.OrgID, arg.Horizon)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var integration_id int64
+		if err := rows.Scan(&integration_id); err != nil {
+			return nil, err
+		}
+		items = append(items, integration_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSnapshotAlerts = `-- name: ListSnapshotAlerts :many
+SELECT a.id, a.fingerprint, a.labels, a.annotations, a.generator_url, a.static_label_conflicts, a.status,
+       a.starts_at, a.ends_at, a.episode, a.fired_at, a.first_seen_at, a.last_seen_at, a.resolved_at,
+       a.resolve_reason, a.resolve_reason_text
+FROM alerts a
+WHERE a.org_id = $1 AND a.integration_id = $2
+  AND (a.fingerprint = ANY($3::text[])
+       OR a.id IN (SELECT p.alert_id
+                   FROM alert_presences p
+                   WHERE p.org_id = $1 AND p.alertmanager_group_id = $4
+                     AND p.state IN ('listed', 'missed')))
+`
+
+type ListSnapshotAlertsParams struct {
+	OrgID               int64
+	IntegrationID       int64
+	Fingerprints        []string
+	AlertmanagerGroupID int64
+}
+
+type ListSnapshotAlertsRow struct {
+	ID                   int64
+	Fingerprint          string
+	Labels               []byte
+	Annotations          []byte
+	GeneratorUrl         pgtype.Text
+	StaticLabelConflicts []string
+	Status               string
+	StartsAt             time.Time
+	EndsAt               pgtype.Timestamptz
+	Episode              int64
+	FiredAt              time.Time
+	FirstSeenAt          time.Time
+	LastSeenAt           time.Time
+	ResolvedAt           pgtype.Timestamptz
+	ResolveReason        pgtype.Text
+	ResolveReasonText    pgtype.Text
+}
+
+// ListSnapshotAlerts reads the Alerts a Snapshot touches: those it lists by fingerprint and those with an active
+// presence in its groupKey.
+func (q *Queries) ListSnapshotAlerts(ctx context.Context, arg ListSnapshotAlertsParams) ([]ListSnapshotAlertsRow, error) {
+	rows, err := q.db.Query(ctx, listSnapshotAlerts,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.Fingerprints,
+		arg.AlertmanagerGroupID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSnapshotAlertsRow{}
+	for rows.Next() {
+		var i ListSnapshotAlertsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Fingerprint,
+			&i.Labels,
+			&i.Annotations,
+			&i.GeneratorUrl,
+			&i.StaticLabelConflicts,
+			&i.Status,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.Episode,
+			&i.FiredAt,
+			&i.FirstSeenAt,
+			&i.LastSeenAt,
+			&i.ResolvedAt,
+			&i.ResolveReason,
+			&i.ResolveReasonText,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listStoredSnapshots = `-- name: ListStoredSnapshots :many
@@ -263,6 +678,440 @@ func (q *Queries) ListStoredSnapshots(ctx context.Context, arg ListStoredSnapsho
 	return items, nil
 }
 
+const listViewAlertsByLastSeen = `-- name: ListViewAlertsByLastSeen :many
+SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
+       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text
+FROM alerts a
+WHERE a.org_id = $1 AND a.integration_id = $2
+  AND (a.status = 'firing' OR a.resolved_at >= $3::timestamptz)
+  AND ($4::text IS NULL OR a.status = $4::text)
+  AND a.labels @> $5::jsonb
+  AND ($6::timestamptz IS NULL
+       OR (a.last_seen_at, a.id) < ($6::timestamptz, $7::bigint))
+ORDER BY a.last_seen_at DESC, a.id DESC
+LIMIT $8
+`
+
+type ListViewAlertsByLastSeenParams struct {
+	OrgID         int64
+	IntegrationID int64
+	ResolvedSince time.Time
+	Status        pgtype.Text
+	Contains      []byte
+	AfterAt       pgtype.Timestamptz
+	AfterID       pgtype.Int8
+	BatchSize     int32
+}
+
+type ListViewAlertsByLastSeenRow struct {
+	ID                   int64
+	Fingerprint          string
+	Labels               []byte
+	Annotations          []byte
+	StaticLabelConflicts []string
+	Status               string
+	StartsAt             time.Time
+	LastSeenAt           time.Time
+	FiredAt              time.Time
+	ResolvedAt           pgtype.Timestamptz
+	ResolveReason        pgtype.Text
+	ResolveReasonText    pgtype.Text
+}
+
+// ListViewAlertsByLastSeen is a batch of the Alerts view, newest last seen first, after the cursor when given:
+// firing Alerts and those resolved since @resolved_since, in the state when given, whose labels contain @contains.
+func (q *Queries) ListViewAlertsByLastSeen(ctx context.Context, arg ListViewAlertsByLastSeenParams) ([]ListViewAlertsByLastSeenRow, error) {
+	rows, err := q.db.Query(ctx, listViewAlertsByLastSeen,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.ResolvedSince,
+		arg.Status,
+		arg.Contains,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListViewAlertsByLastSeenRow{}
+	for rows.Next() {
+		var i ListViewAlertsByLastSeenRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Fingerprint,
+			&i.Labels,
+			&i.Annotations,
+			&i.StaticLabelConflicts,
+			&i.Status,
+			&i.StartsAt,
+			&i.LastSeenAt,
+			&i.FiredAt,
+			&i.ResolvedAt,
+			&i.ResolveReason,
+			&i.ResolveReasonText,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listViewAlertsByLastSeenAsc = `-- name: ListViewAlertsByLastSeenAsc :many
+SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
+       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text
+FROM alerts a
+WHERE a.org_id = $1 AND a.integration_id = $2
+  AND (a.status = 'firing' OR a.resolved_at >= $3::timestamptz)
+  AND ($4::text IS NULL OR a.status = $4::text)
+  AND a.labels @> $5::jsonb
+  AND ($6::timestamptz IS NULL
+       OR (a.last_seen_at, a.id) > ($6::timestamptz, $7::bigint))
+ORDER BY a.last_seen_at, a.id
+LIMIT $8
+`
+
+type ListViewAlertsByLastSeenAscParams struct {
+	OrgID         int64
+	IntegrationID int64
+	ResolvedSince time.Time
+	Status        pgtype.Text
+	Contains      []byte
+	AfterAt       pgtype.Timestamptz
+	AfterID       pgtype.Int8
+	BatchSize     int32
+}
+
+type ListViewAlertsByLastSeenAscRow struct {
+	ID                   int64
+	Fingerprint          string
+	Labels               []byte
+	Annotations          []byte
+	StaticLabelConflicts []string
+	Status               string
+	StartsAt             time.Time
+	LastSeenAt           time.Time
+	FiredAt              time.Time
+	ResolvedAt           pgtype.Timestamptz
+	ResolveReason        pgtype.Text
+	ResolveReasonText    pgtype.Text
+}
+
+// ListViewAlertsByLastSeenAsc is ListViewAlertsByLastSeen, oldest last seen first.
+func (q *Queries) ListViewAlertsByLastSeenAsc(ctx context.Context, arg ListViewAlertsByLastSeenAscParams) ([]ListViewAlertsByLastSeenAscRow, error) {
+	rows, err := q.db.Query(ctx, listViewAlertsByLastSeenAsc,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.ResolvedSince,
+		arg.Status,
+		arg.Contains,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListViewAlertsByLastSeenAscRow{}
+	for rows.Next() {
+		var i ListViewAlertsByLastSeenAscRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Fingerprint,
+			&i.Labels,
+			&i.Annotations,
+			&i.StaticLabelConflicts,
+			&i.Status,
+			&i.StartsAt,
+			&i.LastSeenAt,
+			&i.FiredAt,
+			&i.ResolvedAt,
+			&i.ResolveReason,
+			&i.ResolveReasonText,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listViewAlertsByStartsAt = `-- name: ListViewAlertsByStartsAt :many
+SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
+       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text
+FROM alerts a
+WHERE a.org_id = $1 AND a.integration_id = $2
+  AND (a.status = 'firing' OR a.resolved_at >= $3::timestamptz)
+  AND ($4::text IS NULL OR a.status = $4::text)
+  AND a.labels @> $5::jsonb
+  AND ($6::timestamptz IS NULL
+       OR (a.starts_at, a.id) < ($6::timestamptz, $7::bigint))
+ORDER BY a.starts_at DESC, a.id DESC
+LIMIT $8
+`
+
+type ListViewAlertsByStartsAtParams struct {
+	OrgID         int64
+	IntegrationID int64
+	ResolvedSince time.Time
+	Status        pgtype.Text
+	Contains      []byte
+	AfterAt       pgtype.Timestamptz
+	AfterID       pgtype.Int8
+	BatchSize     int32
+}
+
+type ListViewAlertsByStartsAtRow struct {
+	ID                   int64
+	Fingerprint          string
+	Labels               []byte
+	Annotations          []byte
+	StaticLabelConflicts []string
+	Status               string
+	StartsAt             time.Time
+	LastSeenAt           time.Time
+	FiredAt              time.Time
+	ResolvedAt           pgtype.Timestamptz
+	ResolveReason        pgtype.Text
+	ResolveReasonText    pgtype.Text
+}
+
+// ListViewAlertsByStartsAt is ListViewAlertsByLastSeen sorted by startsAt, newest first.
+func (q *Queries) ListViewAlertsByStartsAt(ctx context.Context, arg ListViewAlertsByStartsAtParams) ([]ListViewAlertsByStartsAtRow, error) {
+	rows, err := q.db.Query(ctx, listViewAlertsByStartsAt,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.ResolvedSince,
+		arg.Status,
+		arg.Contains,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListViewAlertsByStartsAtRow{}
+	for rows.Next() {
+		var i ListViewAlertsByStartsAtRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Fingerprint,
+			&i.Labels,
+			&i.Annotations,
+			&i.StaticLabelConflicts,
+			&i.Status,
+			&i.StartsAt,
+			&i.LastSeenAt,
+			&i.FiredAt,
+			&i.ResolvedAt,
+			&i.ResolveReason,
+			&i.ResolveReasonText,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listViewAlertsByStartsAtAsc = `-- name: ListViewAlertsByStartsAtAsc :many
+SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
+       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text
+FROM alerts a
+WHERE a.org_id = $1 AND a.integration_id = $2
+  AND (a.status = 'firing' OR a.resolved_at >= $3::timestamptz)
+  AND ($4::text IS NULL OR a.status = $4::text)
+  AND a.labels @> $5::jsonb
+  AND ($6::timestamptz IS NULL
+       OR (a.starts_at, a.id) > ($6::timestamptz, $7::bigint))
+ORDER BY a.starts_at, a.id
+LIMIT $8
+`
+
+type ListViewAlertsByStartsAtAscParams struct {
+	OrgID         int64
+	IntegrationID int64
+	ResolvedSince time.Time
+	Status        pgtype.Text
+	Contains      []byte
+	AfterAt       pgtype.Timestamptz
+	AfterID       pgtype.Int8
+	BatchSize     int32
+}
+
+type ListViewAlertsByStartsAtAscRow struct {
+	ID                   int64
+	Fingerprint          string
+	Labels               []byte
+	Annotations          []byte
+	StaticLabelConflicts []string
+	Status               string
+	StartsAt             time.Time
+	LastSeenAt           time.Time
+	FiredAt              time.Time
+	ResolvedAt           pgtype.Timestamptz
+	ResolveReason        pgtype.Text
+	ResolveReasonText    pgtype.Text
+}
+
+// ListViewAlertsByStartsAtAsc is ListViewAlertsByLastSeen sorted by startsAt, oldest first.
+func (q *Queries) ListViewAlertsByStartsAtAsc(ctx context.Context, arg ListViewAlertsByStartsAtAscParams) ([]ListViewAlertsByStartsAtAscRow, error) {
+	rows, err := q.db.Query(ctx, listViewAlertsByStartsAtAsc,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.ResolvedSince,
+		arg.Status,
+		arg.Contains,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListViewAlertsByStartsAtAscRow{}
+	for rows.Next() {
+		var i ListViewAlertsByStartsAtAscRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Fingerprint,
+			&i.Labels,
+			&i.Annotations,
+			&i.StaticLabelConflicts,
+			&i.Status,
+			&i.StartsAt,
+			&i.LastSeenAt,
+			&i.FiredAt,
+			&i.ResolvedAt,
+			&i.ResolveReason,
+			&i.ResolveReasonText,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listViewGroupKeys = `-- name: ListViewGroupKeys :many
+SELECT p.alert_id, g.group_key
+FROM alert_presences p
+JOIN alerts a ON a.org_id = $1 AND a.id = p.alert_id
+JOIN alertmanager_groups g ON g.org_id = $1 AND g.id = p.alertmanager_group_id
+WHERE p.org_id = $1 AND p.alert_id = ANY($2::bigint[]) AND p.last_seen_at >= a.fired_at
+ORDER BY p.alert_id, g.group_key
+`
+
+type ListViewGroupKeysParams struct {
+	OrgID    int64
+	AlertIds []int64
+}
+
+type ListViewGroupKeysRow struct {
+	AlertID  int64
+	GroupKey string
+}
+
+// ListViewGroupKeys lists the groupKeys that listed each Alert during its current or last firing.
+func (q *Queries) ListViewGroupKeys(ctx context.Context, arg ListViewGroupKeysParams) ([]ListViewGroupKeysRow, error) {
+	rows, err := q.db.Query(ctx, listViewGroupKeys, arg.OrgID, arg.AlertIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListViewGroupKeysRow{}
+	for rows.Next() {
+		var i ListViewGroupKeysRow
+		if err := rows.Scan(&i.AlertID, &i.GroupKey); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markPresencesMissed = `-- name: MarkPresencesMissed :exec
+UPDATE alert_presences
+SET state = 'missed', missed_since = $1
+WHERE org_id = $2 AND alertmanager_group_id = $3 AND alert_id = ANY($4::bigint[])
+  AND state = 'listed'
+`
+
+type MarkPresencesMissedParams struct {
+	MissedSince         pgtype.Timestamptz
+	OrgID               int64
+	AlertmanagerGroupID int64
+	AlertIds            []int64
+}
+
+// MarkPresencesMissed records listed presences of a groupKey as missed since the start of its current window.
+func (q *Queries) MarkPresencesMissed(ctx context.Context, arg MarkPresencesMissedParams) error {
+	_, err := q.db.Exec(ctx, markPresencesMissed,
+		arg.MissedSince,
+		arg.OrgID,
+		arg.AlertmanagerGroupID,
+		arg.AlertIds,
+	)
+	return err
+}
+
+const nextPendingSnapshot = `-- name: NextPendingSnapshot :one
+SELECT s.id, s.public_id, s.received_at, b.body
+FROM stored_snapshots s
+JOIN snapshot_bodies b ON b.org_id = $1 AND b.body_sha256 = s.body_sha256 AND b.body_day = s.body_day
+WHERE s.org_id = $1 AND s.integration_id = $2 AND s.state = 'pending'
+  AND s.received_at >= $3::timestamptz
+ORDER BY s.received_at, s.id
+LIMIT 1
+`
+
+type NextPendingSnapshotParams struct {
+	OrgID         int64
+	IntegrationID int64
+	Horizon       time.Time
+}
+
+type NextPendingSnapshotRow struct {
+	ID         int64
+	PublicID   string
+	ReceivedAt time.Time
+	Body       []byte
+}
+
+// NextPendingSnapshot reads the oldest pending Stored Snapshot of an Integration with its body.
+func (q *Queries) NextPendingSnapshot(ctx context.Context, arg NextPendingSnapshotParams) (NextPendingSnapshotRow, error) {
+	row := q.db.QueryRow(ctx, nextPendingSnapshot, arg.OrgID, arg.IntegrationID, arg.Horizon)
+	var i NextPendingSnapshotRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.ReceivedAt,
+		&i.Body,
+	)
+	return i, err
+}
+
 const notifySnapshot = `-- name: NotifySnapshot :exec
 SELECT pg_notify($1::text, $2::text)
 `
@@ -275,5 +1124,313 @@ type NotifySnapshotParams struct {
 // NotifySnapshot wakes the processing workers once the transaction commits.
 func (q *Queries) NotifySnapshot(ctx context.Context, arg NotifySnapshotParams) error {
 	_, err := q.db.Exec(ctx, notifySnapshot, arg.Channel, arg.Payload)
+	return err
+}
+
+const releaseIngestClaim = `-- name: ReleaseIngestClaim :exec
+UPDATE ingest_claims
+SET lease_owner = NULL, lease_until = NULL
+WHERE org_id = $1 AND integration_id = $2 AND lease_owner = $3
+`
+
+type ReleaseIngestClaimParams struct {
+	OrgID         int64
+	IntegrationID int64
+	Owner         pgtype.Text
+}
+
+// ReleaseIngestClaim frees the lease this replica holds.
+func (q *Queries) ReleaseIngestClaim(ctx context.Context, arg ReleaseIngestClaimParams) error {
+	_, err := q.db.Exec(ctx, releaseIngestClaim, arg.OrgID, arg.IntegrationID, arg.Owner)
+	return err
+}
+
+const renewIngestLease = `-- name: RenewIngestLease :one
+UPDATE ingest_claims c
+SET lease_until = $1
+FROM integrations i
+WHERE c.org_id = $2 AND c.integration_id = $3 AND c.lease_owner = $4
+  AND i.org_id = $2 AND i.id = c.integration_id
+RETURNING i.public_id, i.static_labels, i.duplicate_window_seconds, i.liveness_clock_ms
+`
+
+type RenewIngestLeaseParams struct {
+	LeaseUntil    pgtype.Timestamptz
+	OrgID         int64
+	IntegrationID int64
+	Owner         pgtype.Text
+}
+
+type RenewIngestLeaseRow struct {
+	PublicID               string
+	StaticLabels           []byte
+	DuplicateWindowSeconds int64
+	LivenessClockMs        int64
+}
+
+// RenewIngestLease extends the lease this replica holds and locks the claim row until the Snapshot's transaction
+// ends, so that no other replica processes the Integration meanwhile; it returns what processing needs of the
+// Integration. No row means the lease went to another replica.
+func (q *Queries) RenewIngestLease(ctx context.Context, arg RenewIngestLeaseParams) (RenewIngestLeaseRow, error) {
+	row := q.db.QueryRow(ctx, renewIngestLease,
+		arg.LeaseUntil,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.Owner,
+	)
+	var i RenewIngestLeaseRow
+	err := row.Scan(
+		&i.PublicID,
+		&i.StaticLabels,
+		&i.DuplicateWindowSeconds,
+		&i.LivenessClockMs,
+	)
+	return i, err
+}
+
+const updateAlertmanagerGroup = `-- name: UpdateAlertmanagerGroup :exec
+UPDATE alertmanager_groups
+SET last_snapshot_at = $1, last_snapshot_clock_ms = $2, window_seq = $3,
+    window_started_at = $4, window_truncated = $5,
+    truncated = $6, truncated_since = $7,
+    last_repeat_at = $8, last_content_sha256 = $9,
+    last_content_at = $10
+WHERE org_id = $11 AND id = $12
+`
+
+type UpdateAlertmanagerGroupParams struct {
+	LastSnapshotAt      time.Time
+	LastSnapshotClockMs int64
+	WindowSeq           int64
+	WindowStartedAt     pgtype.Timestamptz
+	WindowTruncated     bool
+	Truncated           bool
+	TruncatedSince      pgtype.Timestamptz
+	LastRepeatAt        pgtype.Timestamptz
+	LastContentSha256   []byte
+	LastContentAt       pgtype.Timestamptz
+	OrgID               int64
+	ID                  int64
+}
+
+// UpdateAlertmanagerGroup writes the duplicate window, truncation and repeat bookkeeping of a groupKey.
+func (q *Queries) UpdateAlertmanagerGroup(ctx context.Context, arg UpdateAlertmanagerGroupParams) error {
+	_, err := q.db.Exec(ctx, updateAlertmanagerGroup,
+		arg.LastSnapshotAt,
+		arg.LastSnapshotClockMs,
+		arg.WindowSeq,
+		arg.WindowStartedAt,
+		arg.WindowTruncated,
+		arg.Truncated,
+		arg.TruncatedSince,
+		arg.LastRepeatAt,
+		arg.LastContentSha256,
+		arg.LastContentAt,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
+const updateAlerts = `-- name: UpdateAlerts :exec
+UPDATE alerts a
+SET labels = u.labels, annotations = u.annotations, generator_url = u.generator_url,
+    static_label_conflicts = u.static_label_conflicts, status = u.status, starts_at = u.starts_at,
+    ends_at = u.ends_at, episode = u.episode, fired_at = u.fired_at, last_seen_at = u.last_seen_at,
+    resolved_at = u.resolved_at, resolve_reason = u.resolve_reason, resolve_reason_text = u.resolve_reason_text,
+    updated_at = $1
+FROM jsonb_to_recordset($3::jsonb) AS u(id bigint, labels jsonb, annotations jsonb, generator_url text,
+                                           static_label_conflicts text[], status text, starts_at timestamptz,
+                                           ends_at timestamptz, episode bigint, fired_at timestamptz,
+                                           last_seen_at timestamptz, resolved_at timestamptz,
+                                           resolve_reason text, resolve_reason_text text)
+WHERE a.org_id = $2 AND a.id = u.id
+`
+
+type UpdateAlertsParams struct {
+	UpdatedAt time.Time
+	OrgID     int64
+	Rows      []byte
+}
+
+// UpdateAlerts writes the new state of existing Alerts, given as a JSON array of rows.
+func (q *Queries) UpdateAlerts(ctx context.Context, arg UpdateAlertsParams) error {
+	_, err := q.db.Exec(ctx, updateAlerts, arg.UpdatedAt, arg.OrgID, arg.Rows)
+	return err
+}
+
+const updateRepeatInterval = `-- name: UpdateRepeatInterval :exec
+UPDATE alertmanager_routes
+SET learned_repeat_interval_ms = $1, repeat_observations = $2,
+    recent_repeat_gaps_ms = $3::bigint[]
+WHERE org_id = $4 AND id = $5
+`
+
+type UpdateRepeatIntervalParams struct {
+	LearnedRepeatIntervalMs pgtype.Int8
+	RepeatObservations      int64
+	RecentRepeatGapsMs      []int64
+	OrgID                   int64
+	ID                      int64
+}
+
+// UpdateRepeatInterval stores a learned repeat interval and the ring of gaps it is the median of.
+func (q *Queries) UpdateRepeatInterval(ctx context.Context, arg UpdateRepeatIntervalParams) error {
+	_, err := q.db.Exec(ctx, updateRepeatInterval,
+		arg.LearnedRepeatIntervalMs,
+		arg.RepeatObservations,
+		arg.RecentRepeatGapsMs,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
+const upsertAlertmanagerGroup = `-- name: UpsertAlertmanagerGroup :one
+INSERT INTO alertmanager_groups (
+    org_id, integration_id, alertmanager_route_id, group_key, group_key_sha256, first_seen_at, last_snapshot_at,
+    last_snapshot_clock_ms
+)
+VALUES (
+    $1, $2, $3, $4, $5, $6, $6,
+    $7
+)
+ON CONFLICT (integration_id, group_key_sha256) DO UPDATE
+SET alertmanager_route_id = alertmanager_groups.alertmanager_route_id
+RETURNING id, window_seq, window_started_at, window_truncated, truncated, truncated_since, last_repeat_at,
+    last_content_sha256, last_content_at, last_snapshot_at, last_snapshot_clock_ms
+`
+
+type UpsertAlertmanagerGroupParams struct {
+	OrgID               int64
+	IntegrationID       int64
+	AlertmanagerRouteID int64
+	GroupKey            string
+	GroupKeySha256      []byte
+	SeenAt              time.Time
+	ClockMs             int64
+}
+
+type UpsertAlertmanagerGroupRow struct {
+	ID                  int64
+	WindowSeq           int64
+	WindowStartedAt     pgtype.Timestamptz
+	WindowTruncated     bool
+	Truncated           bool
+	TruncatedSince      pgtype.Timestamptz
+	LastRepeatAt        pgtype.Timestamptz
+	LastContentSha256   []byte
+	LastContentAt       pgtype.Timestamptz
+	LastSnapshotAt      time.Time
+	LastSnapshotClockMs int64
+}
+
+// UpsertAlertmanagerGroup finds or creates the Alertmanager group of a groupKey and locks its row.
+func (q *Queries) UpsertAlertmanagerGroup(ctx context.Context, arg UpsertAlertmanagerGroupParams) (UpsertAlertmanagerGroupRow, error) {
+	row := q.db.QueryRow(ctx, upsertAlertmanagerGroup,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.AlertmanagerRouteID,
+		arg.GroupKey,
+		arg.GroupKeySha256,
+		arg.SeenAt,
+		arg.ClockMs,
+	)
+	var i UpsertAlertmanagerGroupRow
+	err := row.Scan(
+		&i.ID,
+		&i.WindowSeq,
+		&i.WindowStartedAt,
+		&i.WindowTruncated,
+		&i.Truncated,
+		&i.TruncatedSince,
+		&i.LastRepeatAt,
+		&i.LastContentSha256,
+		&i.LastContentAt,
+		&i.LastSnapshotAt,
+		&i.LastSnapshotClockMs,
+	)
+	return i, err
+}
+
+const upsertAlertmanagerRoute = `-- name: UpsertAlertmanagerRoute :one
+INSERT INTO alertmanager_routes (org_id, integration_id, route_path, route_path_sha256, first_seen_at, last_seen_at)
+VALUES ($1, $2, $3, $4, $5, $5)
+ON CONFLICT (integration_id, route_path_sha256) DO UPDATE
+SET last_seen_at = greatest(alertmanager_routes.last_seen_at, excluded.last_seen_at)
+RETURNING id, learned_repeat_interval_ms, repeat_observations, recent_repeat_gaps_ms
+`
+
+type UpsertAlertmanagerRouteParams struct {
+	OrgID           int64
+	IntegrationID   int64
+	RoutePath       string
+	RoutePathSha256 []byte
+	SeenAt          time.Time
+}
+
+type UpsertAlertmanagerRouteRow struct {
+	ID                      int64
+	LearnedRepeatIntervalMs pgtype.Int8
+	RepeatObservations      int64
+	RecentRepeatGapsMs      []int64
+}
+
+// UpsertAlertmanagerRoute finds or creates the Alertmanager route of a groupKey and refreshes when it was seen.
+func (q *Queries) UpsertAlertmanagerRoute(ctx context.Context, arg UpsertAlertmanagerRouteParams) (UpsertAlertmanagerRouteRow, error) {
+	row := q.db.QueryRow(ctx, upsertAlertmanagerRoute,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.RoutePath,
+		arg.RoutePathSha256,
+		arg.SeenAt,
+	)
+	var i UpsertAlertmanagerRouteRow
+	err := row.Scan(
+		&i.ID,
+		&i.LearnedRepeatIntervalMs,
+		&i.RepeatObservations,
+		&i.RecentRepeatGapsMs,
+	)
+	return i, err
+}
+
+const upsertListedPresences = `-- name: UpsertListedPresences :exec
+INSERT INTO alert_presences (
+    alert_id, alertmanager_group_id, org_id, integration_id, state, first_listed_at, last_seen_at,
+    last_seen_clock_ms, last_listed_window
+)
+SELECT u.alert_id, $1, $2, $3, 'listed', $4, $4, $5,
+       $6
+FROM unnest($7::bigint[]) AS u(alert_id)
+ON CONFLICT (alert_id, alertmanager_group_id) DO UPDATE
+SET state = 'listed',
+    first_listed_at = CASE WHEN alert_presences.state IN ('gone', 'stale') THEN excluded.first_listed_at
+                           ELSE alert_presences.first_listed_at END,
+    last_seen_at = excluded.last_seen_at, last_seen_clock_ms = excluded.last_seen_clock_ms,
+    last_listed_window = excluded.last_listed_window, missed_since = NULL
+`
+
+type UpsertListedPresencesParams struct {
+	AlertmanagerGroupID int64
+	OrgID               int64
+	IntegrationID       int64
+	SeenAt              time.Time
+	ClockMs             int64
+	WindowSeq           int64
+	AlertIds            []int64
+}
+
+// UpsertListedPresences records the Alerts a Snapshot lists as listed in its groupKey and current window.
+func (q *Queries) UpsertListedPresences(ctx context.Context, arg UpsertListedPresencesParams) error {
+	_, err := q.db.Exec(ctx, upsertListedPresences,
+		arg.AlertmanagerGroupID,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.SeenAt,
+		arg.ClockMs,
+		arg.WindowSeq,
+		arg.AlertIds,
+	)
 	return err
 }

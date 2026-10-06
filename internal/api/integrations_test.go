@@ -10,12 +10,14 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
 )
@@ -389,6 +391,100 @@ func TestStoredSnapshotsAPI(t *testing.T) {
 	if a = x.call(t, http.MethodGet, "/api/v1/stored-snapshots/"+snapshotID, "", "Cookie", adminCookie); a.status !=
 		http.StatusInternalServerError {
 		t.Errorf("failing get = %d", a.status)
+	}
+}
+
+// fakeAlerts stands for the Alerts view of internal/ingest.
+type fakeAlerts struct {
+	page   ingest.AlertPage
+	filter ingest.AlertFilter
+	err    error
+}
+
+func (f *fakeAlerts) List(_ context.Context, fl ingest.AlertFilter) (ingest.AlertPage, error) {
+	f.filter = fl
+	return f.page, f.err
+}
+
+// TestIntegrationAlertsAPI is C-06.FR-19 and C-05.FR-7 at the API: the Alerts view with its fields, the state,
+// Matcher, text and sort parameters, the cursor of the sort it belongs to, and Matchers that do not parse.
+func TestIntegrationAlertsAPI(t *testing.T) {
+	x, _, _ := newIntegrationsAPI(t)
+	fa := &fakeAlerts{}
+	x.srv.alerts = fa
+	// Every Role holds alerts:read (reference.md); the Roles of these tests predate the Alerts view.
+	viewer := roles[auth.RoleViewer]
+	roles[auth.RoleViewer] = append(slices.Clone(viewer), "alerts:read")
+	t.Cleanup(func() { roles[auth.RoleViewer] = viewer })
+	reason, text, resolvedAt := "gone", "Alertmanager no longer reports this alert", t0.Add(time.Hour)
+	fa.page = ingest.AlertPage{Alerts: []ingest.ViewAlert{
+		{ID: 1, Fingerprint: "0123456789abcdef", Labels: map[string]string{"instance": "db-a", "cluster": "a"},
+			Annotations: map[string]string{"summary": "full"}, State: "firing", StartsAt: t0, LastSeenAt: t0,
+			GroupKeys: []string{`{}:{alertname="DiskFull"}`}, Warnings: []string{"cluster"}},
+		{ID: 2, Fingerprint: "1123456789abcdef", Labels: map[string]string{"instance": "db-c"}, State: "resolved",
+			Reason: &reason, ReasonText: &text, ResolvedAt: &resolvedAt, StartsAt: t0, LastSeenAt: t0,
+			GroupKeys: []string{}, Warnings: []string{}},
+	}, Next: &ingest.AlertPosition{At: t0, ID: 2}}
+	q := "/api/v1/integrations/" + integrationID + "/alerts?state=firing&q=DB&sort=starts_at&limit=2&label=" +
+		url.QueryEscape(`instance=~"db-.*"`) + "&label=" + url.QueryEscape(`cluster!="b"`)
+	a := x.call(t, http.MethodGet, q, "", "Cookie", viewerCookie)
+	if a.status != http.StatusOK || fa.filter.Integration != integrationID || fa.filter.State != "firing" ||
+		fa.filter.Query != "DB" || fa.filter.Sort != ingest.SortStarts || fa.filter.Limit != 2 ||
+		len(fa.filter.Matchers) != 2 || fa.filter.Matchers[0].String() != `instance=~"db-.*"` {
+		t.Fatalf("list = %d %s %+v", a.status, a.body, fa.filter)
+	}
+	var page gen.IntegrationAlertList
+	decodeInto(t, a, &page)
+	first, second := page.Items[0], page.Items[1]
+	if first.Fingerprint != "0123456789abcdef" || first.State != gen.AlertStateFiring || first.Labels["instance"] != "db-a" ||
+		(*first.Annotations)["summary"] != "full" || !first.ResolveReason.IsNull() || !first.ResolvedAt.IsNull() ||
+		len(*first.StaticLabelWarnings) != 1 || first.AlertmanagerGroups[0] != `{}:{alertname="DiskFull"}` ||
+		first.Route != nil || first.AlertGroup != nil {
+		t.Errorf("first %s", a.body)
+	}
+	if r, _ := second.ResolveReason.Get(); r != gen.NullableResolveReasonGone || second.ResolveReasonText.MustGet() != text ||
+		!second.ResolvedAt.MustGet().Equal(resolvedAt) || second.AlertmanagerGroups == nil {
+		t.Errorf("second %s", a.body)
+	}
+	cursor := page.NextCursor.MustGet()
+	fa.page = ingest.AlertPage{}
+	a = x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID+"/alerts?sort=starts_at&cursor="+
+		url.QueryEscape(cursor), "", "Cookie", viewerCookie)
+	if a.status != http.StatusOK || fa.filter.After == nil || fa.filter.After.ID != 2 || !fa.filter.After.At.Equal(t0) ||
+		a.json(t)["next_cursor"] != nil || fa.filter.Sort != ingest.SortStarts || fa.filter.State != "" {
+		t.Errorf("page 2 = %d %s %+v", a.status, a.body, fa.filter)
+	}
+	if fa.filter = (ingest.AlertFilter{}); x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID+"/alerts",
+		"", "Cookie", viewerCookie).status != http.StatusOK || fa.filter.Sort != ingest.SortLastSeenDesc ||
+		fa.filter.Limit != 50 {
+		t.Errorf("defaults %+v", fa.filter)
+	}
+	a = x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID+"/alerts?cursor="+url.QueryEscape(cursor), "",
+		"Cookie", viewerCookie)
+	if a.status != http.StatusBadRequest || !strings.Contains(string(a.body), "invalid_cursor") {
+		t.Errorf("a cursor of another sort = %d %s", a.status, a.body)
+	}
+	for _, tt := range []struct{ label, code, pointer string }{
+		{`instance`, "invalid_format", "/query/label/0"},
+		{`pod=~"api-(.*"`, "invalid_regex", "/query/label/0"},
+	} {
+		a = x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID+"/alerts?label=a%3D%22b%22&label="+
+			url.QueryEscape(tt.label), "", "Cookie", viewerCookie)
+		want := strings.Replace(tt.pointer, "0", "1", 1)
+		if a.status != http.StatusBadRequest || !strings.Contains(string(a.body), tt.code) ||
+			!strings.Contains(string(a.body), want) {
+			t.Errorf("label %s = %d %s", tt.label, a.status, a.body)
+		}
+	}
+	fa.err = integrations.ErrNotFound
+	if a = x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID+"/alerts", "", "Cookie",
+		viewerCookie); a.status != http.StatusNotFound {
+		t.Errorf("unknown integration = %d", a.status)
+	}
+	fa.err = errors.New("down")
+	if a = x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID+"/alerts", "", "Cookie",
+		viewerCookie); a.status != http.StatusInternalServerError {
+		t.Errorf("failing list = %d", a.status)
 	}
 }
 

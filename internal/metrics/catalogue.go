@@ -186,6 +186,62 @@ var IngestRequestDuration = newHistogram(Definition{
 	Capability: "C-05",
 })
 
+// IngestProcessingDelay observes the time from the receipt of a Stored Snapshot to the end of its processing.
+var IngestProcessingDelay = newHistogram(Definition{
+	Name:       "muster_ingest_processing_delay_seconds",
+	Help:       "Time from the receipt of a Stored Snapshot to the end of its processing, processed or failed, by Integration.",
+	Labels:     []Label{entity("integration")},
+	Buckets:    []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600},
+	Capability: "C-06",
+})
+
+// IngestBacklog is the number of pending Stored Snapshots, exported by the Leader.
+var IngestBacklog = newGauge(Definition{
+	Name:       "muster_ingest_backlog",
+	Help:       "Stored Snapshots waiting for processing in every Organization, counted by the Leader.",
+	Capability: "C-06",
+	LeaderOnly: true,
+})
+
+// IngestTruncatedSnapshots counts the Snapshots with truncatedAlerts above 0 (C-06.FR-6).
+var IngestTruncatedSnapshots = newCounter(Definition{
+	Name:       "muster_ingest_truncated_snapshots_total",
+	Help:       "Processed Snapshots that Alertmanager truncated (truncatedAlerts above 0), by Integration.",
+	Labels:     []Label{entity("integration")},
+	Capability: "C-06",
+})
+
+// IngestFailedSnapshots counts the Stored Snapshots that could not be processed (C-06.FR-20).
+var IngestFailedSnapshots = newCounter(Definition{
+	Name: "muster_ingest_failed_snapshots_total",
+	Help: "Stored Snapshots that could not be processed and were marked failed — a body that is not an " +
+		"Alertmanager webhook, or an error of processing — by Integration.",
+	Labels:     []Label{entity("integration")},
+	Capability: "C-06",
+})
+
+// AlertsResolved counts the Alerts that resolved, by Integration and reason.
+var AlertsResolved = newCounter(Definition{
+	Name: "muster_alerts_resolved_total",
+	Help: "Alerts that resolved, by Integration and reason.",
+	Labels: []Label{
+		entity("integration"),
+		closed("reason", "resolved is a resolve from Alertmanager, for the Alert or its whole Alertmanager group; gone "+
+			"an Alert Alertmanager no longer lists; stale one not seen for stale_after with a live Heartbeat; "+
+			"integration_deleted one of a deleted Integration", "resolved", "gone", "stale", "integration_deleted"),
+	},
+	Capability: "C-06",
+})
+
+// IngestResolvedDropped counts the resolves of fingerprints that fire nowhere (C-06.FR-4).
+var IngestResolvedDropped = newCounter(Definition{
+	Name: "muster_ingest_resolved_dropped_total",
+	Help: "Alerts sent as resolved whose fingerprint fires nowhere and that were dropped, by Integration; a re-sent " +
+		"resolve of an Alert already resolved is not counted.",
+	Labels:     []Label{entity("integration")},
+	Capability: "C-06",
+})
+
 // IntegrationInfo is 1 for every Integration that is not deleted; its labels carry the Integration's name.
 var IntegrationInfo = newGauge(Definition{
 	Name: "muster_integration_info",

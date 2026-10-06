@@ -626,3 +626,241 @@ func TestLoadToAReceiver(t *testing.T) {
 		t.Errorf("load to an unknown receiver = %d", status)
 	}
 }
+
+func send(t *testing.T, method, url, body string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+type groupWebhook struct {
+	webhook
+	RouteLabels map[string]string `json:"routeLabels"`
+	Reason      *string           `json:"notification_reason"`
+}
+
+// TestGroups is the group model of C-01.FR-13: a group and its groupKey rendered as Alertmanager does, Alerts with
+// the group labels merged in, Snapshots in Alertmanager's order, cut to max_alerts, with the group's status, the
+// notification_reason and identical copies.
+func TestGroups(t *testing.T) {
+	f := startFake(t)
+	s := newSink(t, always(http.StatusAccepted))
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	f.SetClock(func() time.Time { return now })
+	fam := f.URL() + "/_fake"
+	if code, body := post(t, fam+"/receivers", `{"name":"lab","url":"`+s.URL+`"}`); code != http.StatusNoContent {
+		t.Fatalf("receiver = %d %s", code, body)
+	}
+	code, body := send(t, http.MethodPut, fam+"/groups/g1",
+		`{"receiver":"lab","route":"{}/{team=\"db\"}","labels":{"alertname":"DiskFull","env":"a\"b"}}`)
+	if code != http.StatusOK || body != `{"group_key":"{}/{team=\"db\"}:{alertname=\"DiskFull\", env=\"a\\\"b\"}"}`+"\n" {
+		t.Fatalf("group = %d %s", code, body)
+	}
+	for _, a := range []struct{ name, body string }{
+		{"c", `{"labels":{"instance":"db-c"},"annotations":{"summary":"c"}}`},
+		{"a", `{"labels":{"instance":"db-a","job":"node"},"annotations":{"summary":"a"}}`},
+		{"b", `{"labels":{"instance":"db-b"},"annotations":{"summary":"b"},"starts_at":"2026-10-06T11:00:00Z"}`},
+		{"d", `{"labels":{"zone":"z"},"fingerprint":"00000000000000dd"}`},
+	} {
+		if code, body := send(t, http.MethodPut, fam+"/groups/g1/alerts/"+a.name, a.body); code != http.StatusNoContent {
+			t.Fatalf("alert %s = %d %s", a.name, code, body)
+		}
+	}
+	code, body = post(t, fam+"/groups/g1/notify", `{"reason":"first notification","max_alerts":3,"copies":2}`)
+	var res fakealertmanager.NotifyResult
+	if err := json.Unmarshal([]byte(body), &res); err != nil || code != http.StatusOK || len(res.Sent) != 2 ||
+		res.Sent[0] != (fakealertmanager.Sent{Status: 202, Listed: 3, Truncated: 1}) {
+		t.Fatalf("notify = %d %s", code, body)
+	}
+	got := s.received()
+	if len(got) != 2 || string(got[0].body) != string(got[1].body) {
+		t.Fatalf("copies differ: %d", len(got))
+	}
+	var w groupWebhook
+	if err := json.Unmarshal(got[0].body, &w); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, a := range w.Alerts {
+		order = append(order, a.Labels["instance"])
+		if a.Labels["alertname"] != "DiskFull" || a.Status != "firing" || a.EndsAt != "0001-01-01T00:00:00Z" {
+			t.Errorf("alert %+v", a)
+		}
+	}
+	if strings.Join(order, ",") != "db-a,db-b,db-c" || *w.TruncatedAlerts != 1 || w.Status != "firing" ||
+		*w.Reason != "first notification" || w.RouteLabels == nil || w.CommonLabels["alertname"] != "DiskFull" ||
+		w.CommonLabels["instance"] != "" || w.GroupLabels["env"] != `a"b` || w.Receiver != "lab" {
+		t.Errorf("webhook %s", got[0].body)
+	}
+	if w.Alerts[0].StartsAt != "2026-10-06T12:00:00Z" || w.Alerts[1].StartsAt != "2026-10-06T11:00:00Z" ||
+		!hex16.MatchString(w.Alerts[0].Fingerprint) || f.Fingerprint("g1", "d") != "00000000000000dd" {
+		t.Errorf("times or fingerprints: %+v", w.Alerts)
+	}
+
+	// A resolve keeps startsAt and ends now; a removed Alert is no longer listed; a list picks Alerts by name.
+	now = now.Add(time.Minute)
+	send(t, http.MethodPut, fam+"/groups/g1/alerts/a", `{"labels":{"instance":"db-a","job":"node"},"status":"resolved"}`)
+	if code, _ := send(t, http.MethodDelete, fam+"/groups/g1/alerts/c", ""); code != http.StatusNoContent {
+		t.Fatalf("delete = %d", code)
+	}
+	post(t, fam+"/groups/g1/notify", `{"reason":"some alerts resolved","omit_reason":true}`)
+	w = groupWebhook{}
+	if err := json.Unmarshal(s.received()[2].body, &w); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.Alerts) != 3 || w.Reason != nil || w.Alerts[0].Status != "resolved" ||
+		w.Alerts[0].StartsAt != "2026-10-06T12:00:00Z" || w.Alerts[0].EndsAt != "2026-10-06T12:01:00Z" || w.Status != "firing" {
+		t.Errorf("after the resolve: %s", s.received()[2].body)
+	}
+	for _, name := range []string{"b", "d"} {
+		send(t, http.MethodPut, fam+"/groups/g1/alerts/"+name, `{"labels":{},"status":"resolved"}`)
+	}
+	post(t, fam+"/groups/g1/notify", `{"reason":"all alerts resolved","list":["c","a"]}`)
+	w = groupWebhook{}
+	if err := json.Unmarshal(s.received()[3].body, &w); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.Alerts) != 2 || w.Status != "resolved" || w.Alerts[0].Labels["instance"] != "db-a" {
+		t.Errorf("listed: %s", s.received()[3].body)
+	}
+	// A new firing after a resolve starts now; "now" is accepted for both times.
+	now = now.Add(time.Minute)
+	send(t, http.MethodPut, fam+"/groups/g1/alerts/a", `{"labels":{"instance":"db-a"},"ends_at":"now"}`)
+	key, _, snaps, err := f.Snapshots("g1", fakealertmanager.NotifyOptions{List: []string{"a"}, Status: "firing"})
+	if err != nil || !strings.HasPrefix(key, "{}/") || !strings.Contains(string(snaps[0].Body), `"startsAt":"2026-10-06T12:02:00Z"`) ||
+		!strings.Contains(string(snaps[0].Body), `"endsAt":"2026-10-06T12:02:00Z"`) {
+		t.Errorf("new firing %s, %v", snaps[0].Body, err)
+	}
+}
+
+func TestGroupErrors(t *testing.T) {
+	f := startFake(t)
+	fam := f.URL() + "/_fake"
+	for _, tt := range []struct {
+		method, path, body string
+		want               int
+	}{
+		{http.MethodPut, "/groups/g", `{"route":"{}"}`, http.StatusBadRequest},
+		{http.MethodPut, "/groups/g", `{"receiver":`, http.StatusBadRequest},
+		{http.MethodPut, "/groups/nope/alerts/a", `{"labels":{}}`, http.StatusBadRequest},
+		{http.MethodDelete, "/groups/nope/alerts/a", ``, http.StatusNotFound},
+		{http.MethodPost, "/groups/nope/notify", `{}`, http.StatusBadRequest},
+		{http.MethodPost, "/groups/nope/notify", `{`, http.StatusBadRequest},
+		{http.MethodPut, "/groups/nope/alerts/a", `{`, http.StatusBadRequest},
+	} {
+		if code, body := send(t, tt.method, fam+tt.path, tt.body); code != tt.want {
+			t.Errorf("%s %s = %d %s", tt.method, tt.path, code, body)
+		}
+	}
+	if _, err := f.PutGroup("g", fakealertmanager.GroupSpec{Receiver: "missing"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []fakealertmanager.AlertSpec{{Status: "maybe"}, {StartsAt: "yesterday"}, {EndsAt: "x"}} {
+		if err := f.PutAlert("g", "a", s); err == nil {
+			t.Errorf("PutAlert(%+v) = nil", s)
+		}
+	}
+	if err := f.RemoveAlert("g", "nope"); err == nil {
+		t.Error("RemoveAlert of an unknown alert")
+	}
+	if _, _, _, err := f.Snapshots("g", fakealertmanager.NotifyOptions{}); err == nil {
+		t.Error("Snapshots without the receiver")
+	}
+	if err := f.Register(fakealertmanager.Receiver{Name: "missing", URL: "http://127.0.0.1:1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := f.Snapshots("g", fakealertmanager.NotifyOptions{List: []string{"x"}}); err == nil {
+		t.Error("Snapshots of an unknown alert")
+	}
+	if _, err := f.Notify(t.Context(), "g", fakealertmanager.NotifyOptions{}); err == nil {
+		t.Error("Notify to a closed port")
+	}
+	if code, _ := post(t, fam+"/groups/g/notify", `{}`); code != http.StatusBadGateway {
+		t.Errorf("notify to a closed port = %d", code)
+	}
+	if f.Fingerprint("nope", "a") != "" {
+		t.Error("Fingerprint of an unknown group")
+	}
+}
+
+// TestScenarios checks the scenario library: one scenario per fact that processing relies on, steps in time order,
+// groups defined before use and every expectation naming an Alert that a step set; every notification builds.
+func TestScenarios(t *testing.T) {
+	want := []string{"F-033", "F-034", "F-035", "F-036", "F-037", "F-038", "F-039", "F-040", "F-041", "F-042", "F-043",
+		"F-044", "F-046", "F-048", "F-049", "F-050", "F-051", "F-052", "F-053"}
+	var facts []string
+	for _, sc := range fakealertmanager.Scenarios() {
+		facts = append(facts, sc.Fact)
+		if !strings.HasPrefix(sc.Requirement, "C-06.FR-") || sc.Title == "" {
+			t.Errorf("%s: requirement %q, title %q", sc.Fact, sc.Requirement, sc.Title)
+		}
+		f := fakealertmanager.New()
+		start := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+		var now time.Time
+		f.SetClock(func() time.Time { return now })
+		if err := f.Register(fakealertmanager.Receiver{Name: fakealertmanager.ScenarioReceiver, URL: "http://x"}); err != nil {
+			t.Fatal(err)
+		}
+		set := map[string]bool{}
+		var last time.Duration
+		for i, st := range sc.Steps {
+			if st.At < last {
+				t.Errorf("%s step %d goes back in time", sc.Fact, i)
+			}
+			last, now = st.At, start.Add(st.At)
+			switch {
+			case st.PutGroup != nil:
+				if _, err := f.PutGroup(st.Group, *st.PutGroup); err != nil {
+					t.Errorf("%s step %d: %v", sc.Fact, i, err)
+				}
+			case st.PutAlert != nil:
+				if err := f.PutAlert(st.Group, st.Alert, *st.PutAlert); err != nil {
+					t.Errorf("%s step %d: %v", sc.Fact, i, err)
+				}
+				set[st.Group+"/"+st.Alert] = true
+			case st.Remove:
+				if err := f.RemoveAlert(st.Group, st.Alert); err != nil {
+					t.Errorf("%s step %d: %v", sc.Fact, i, err)
+				}
+			case st.Notify != nil:
+				if _, _, _, err := f.Snapshots(st.Group, *st.Notify); err != nil {
+					t.Errorf("%s step %d: %v", sc.Fact, i, err)
+				}
+			case st.Expect != nil:
+				e := st.Expect
+				var named []string
+				named = append(named, e.Firing...)
+				for _, m := range []map[string]string{e.Resolved} {
+					for k := range m {
+						named = append(named, k)
+					}
+				}
+				for k := range e.Episodes {
+					named = append(named, k)
+				}
+				for k := range e.StartsAt {
+					named = append(named, k)
+				}
+				for _, n := range named {
+					if !set[n] {
+						t.Errorf("%s step %d names %s, which no step set", sc.Fact, i, n)
+					}
+				}
+			default:
+				t.Errorf("%s step %d does nothing", sc.Fact, i)
+			}
+		}
+	}
+	if strings.Join(facts, " ") != strings.Join(want, " ") {
+		t.Errorf("facts %v, want %v", facts, want)
+	}
+}

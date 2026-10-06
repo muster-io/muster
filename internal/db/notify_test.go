@@ -50,6 +50,8 @@ func TestNotifyHint(t *testing.T) {
 type step struct {
 	payload string
 	err     error
+	// channel is the channel of the notification, HintChannel when empty.
+	channel string
 }
 
 // listenConn plays its steps, then blocks until the context ends.
@@ -84,7 +86,11 @@ func (c *listenConn) WaitForNotification(ctx context.Context) (*pgconn.Notificat
 	case s.payload == "":
 		return nil, context.DeadlineExceeded
 	}
-	return &pgconn.Notification{Channel: HintChannel, Payload: s.payload}, nil
+	channel := s.channel
+	if channel == "" {
+		channel = HintChannel
+	}
+	return &pgconn.Notification{Channel: channel, Payload: s.payload}, nil
 }
 
 func (c *listenConn) Close(context.Context) error {
@@ -217,4 +223,63 @@ func (w *syncLog) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.buf.Write(p)
+}
+
+// TestListenerChannels: the Listener also listens on the channels given to Listen and passes each payload to their
+// function; a notification on any other channel is skipped.
+func TestListenerChannels(t *testing.T) {
+	c := &listenConn{steps: []step{{channel: "muster_snapshots", payload: `{"org_id":1}`},
+		{channel: "dev_clock", payload: "600"}, {channel: "other", payload: "x"},
+		{payload: `{"org_id":1,"type":"organization"}`}}}
+	l := NewListener(func(context.Context) (ListenConn, error) { return c, nil },
+		logging.New(&bytes.Buffer{}, logging.LevelInfo))
+	var mu sync.Mutex
+	var got []string
+	record := func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, s)
+	}
+	l.Listen("muster_snapshots", func(p string) { record("snapshots " + p) })
+	l.Listen("dev_clock", func(p string) { record("clock " + p) })
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		l.Run(ctx, func(h Hint) {
+			record("hint " + h.Type)
+			cancel()
+		}, func(bool) {})
+		close(done)
+	}()
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(got, "|") != `snapshots {"org_id":1}|clock 600|hint organization` {
+		t.Errorf("received %q", got)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if strings.Join(c.execs[:3], "|") != `LISTEN "muster_hints"|LISTEN "dev_clock"|LISTEN "muster_snapshots"` {
+		t.Errorf("execs %q", c.execs)
+	}
+}
+
+// TestListenerChannelFails: a LISTEN on an added channel that fails is a loss like the hint channel's.
+func TestListenerChannelFails(t *testing.T) {
+	broken := errors.New("permission denied")
+	c := &listenConn{execErr: map[string]error{`LISTEN "dev_clock"`: broken}}
+	l := NewListener(func(context.Context) (ListenConn, error) { return c, nil },
+		logging.New(&bytes.Buffer{}, logging.LevelInfo))
+	l.Listen("dev_clock", func(string) {})
+	ctx, cancel := context.WithCancel(t.Context())
+	l.wait = func(context.Context, time.Duration) bool {
+		cancel()
+		return false
+	}
+	l.Run(ctx, func(Hint) {}, func(bool) { t.Error("listening without the channel") })
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		t.Error("the connection stayed open")
+	}
 }

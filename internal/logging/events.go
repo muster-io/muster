@@ -285,6 +285,46 @@ var IngestFailed = newEvent("ingest_failed", LevelError, "C-05",
 		"Integration, or unknown when the lookup failed; route_pattern is the route it came by.",
 	"integration", "route_pattern", "error")
 
+// SnapshotProcessed is logged once for every Stored Snapshot that processing applied, never once per Alert.
+var SnapshotProcessed = newEvent("snapshot_processed", LevelInfo, "C-06",
+	"A Stored Snapshot was processed: integration and stored_snapshot are public_ids, group_key the Alertmanager "+
+		"group it came for, alerts how many Alerts it listed, fired, resolved, gone and continued how many new "+
+		"firings, resolutions from Alertmanager, Alerts resolved as Gone and Continuations it made, dropped the "+
+		"resolves of fingerprints that fire nowhere, truncated its truncatedAlerts, and duration_ms how long "+
+		"processing took.",
+	"integration", "stored_snapshot", "group_key", "alerts", "fired", "resolved", "gone", "continued", "dropped",
+	"truncated", "duration_ms")
+
+// SnapshotFailed is logged when a Stored Snapshot could not be processed and was marked failed.
+var SnapshotFailed = newEvent("snapshot_failed", LevelWarn, "C-06",
+	"A Stored Snapshot could not be processed and was marked failed with the error: its body is not JSON, lacks the "+
+		"fields of an Alertmanager webhook, or processing failed. It is not retried by itself, the Snapshots behind "+
+		"it are processed, and muster ingest replay processes it again after a fix. integration and "+
+		"stored_snapshot are public_ids.",
+	"integration", "stored_snapshot", "error")
+
+// SnapshotProcessingInterrupted is logged when the processing worker could not finish a round or an Integration
+// because the database failed; the Stored Snapshot stays pending and is processed again.
+var SnapshotProcessingInterrupted = newEvent("snapshot_processing_interrupted", LevelWarn, "C-06",
+	"The processing worker stopped a round or an Integration because the database failed or the connection was "+
+		"lost; the Stored Snapshots stay pending and are processed at the next attempt, after a growing pause. "+
+		"integration is the public_id of the Integration, empty when the round failed.",
+	"integration", "error")
+
+// DevClockLoaded is logged when a process in development mode reads the development clock: at start and after each
+// change on any replica.
+var DevClockLoaded = newEvent("dev_clock_loaded", LevelInfo, "C-01",
+	"Development mode only: this process runs on the development clock, offset_seconds ahead of the system time, as "+
+		"stored in the database for every replica; logged at start and after each advance.",
+	"offset_seconds")
+
+// DevClockLoadFailed is logged when a process in development mode could not read the development clock after a
+// change.
+var DevClockLoadFailed = newEvent("dev_clock_load_failed", LevelWarn, "C-01",
+	"Development mode only: the development clock could not be read after a change on another replica; this process "+
+		"keeps its offset until the next change or the next LISTEN.",
+	"error")
+
 // Event is a registered log event. Its zero value is not registered, and the logger refuses it.
 type Event struct {
 	def *eventDef

@@ -60,7 +60,7 @@ func run(args []string, stdout, stderr io.Writer, development bool) int {
 	case "dev":
 		return runDev(args[1:], stdout, stderr)
 	case "admin":
-		return runAdmin(args[1:], stdout, stderr)
+		return runAdmin(args[1:], stdout, stderr, development)
 	case "version":
 		if len(args) > 1 {
 			fmt.Fprintf(stderr, "muster: version takes no arguments\n\n%s", usage)

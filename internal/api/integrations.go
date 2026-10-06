@@ -5,10 +5,15 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
+	"github.com/muster-io/muster/internal/matchers"
 )
 
 // integrationsCursor names the cursors of listIntegrations.
@@ -175,6 +180,101 @@ func (s *Server) RevokeIntegrationToken(ctx context.Context, req gen.RevokeInteg
 		return nil, err
 	}
 	return gen.RevokeIntegrationToken204Response{}, nil
+}
+
+// integrationAlertsCursor names the cursors of listIntegrationAlerts; the sort is part of the name, so that a cursor
+// never continues a list in another order.
+const integrationAlertsCursor = "integration-alerts"
+
+// integrationAlertKey is the sort key of a listIntegrationAlerts cursor: the sorted time, then the id.
+type integrationAlertKey struct {
+	At time.Time `json:"t"`
+	ID int64     `json:"i"`
+}
+
+// ListIntegrationAlerts is listIntegrationAlerts: the Alerts view of an Integration, filtered by state, Matchers and
+// text, sorted by the last time seen (newest first by default) or startsAt.
+func (s *Server) ListIntegrationAlerts(ctx context.Context, req gen.ListIntegrationAlertsRequestObject) (
+	gen.ListIntegrationAlertsResponseObject, error) {
+	p := req.Params
+	f := ingest.AlertFilter{Integration: req.IntegrationId, Sort: ingest.SortLastSeenDesc, Limit: pageSize(p.Limit)}
+	if p.Sort != nil {
+		f.Sort = string(*p.Sort)
+	}
+	if p.State != nil {
+		f.State = string(*p.State)
+	}
+	if p.Q != nil {
+		f.Query = *p.Q
+	}
+	if p.Label != nil {
+		for i, raw := range *p.Label {
+			m, err := matchers.Parse(raw)
+			if err != nil {
+				return nil, matcherProblem(i, err)
+			}
+			f.Matchers = append(f.Matchers, m)
+		}
+	}
+	var key integrationAlertKey
+	list := integrationAlertsCursor + ":" + f.Sort
+	if ok, err := decodeCursor(p.Cursor, list, &key); err != nil {
+		return nil, err
+	} else if ok {
+		f.After = &ingest.AlertPosition{At: key.At, ID: key.ID}
+	}
+	page, err := s.alerts.List(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.IntegrationAlertList{Items: make([]gen.IntegrationAlert, 0, len(page.Alerts))}
+	for _, a := range page.Alerts {
+		out.Items = append(out.Items, integrationAlertOf(a))
+	}
+	if page.Next != nil {
+		out.NextCursor.Set(encodeCursor(list, integrationAlertKey{At: page.Next.At, ID: page.Next.ID}))
+	} else {
+		out.NextCursor.SetNull()
+	}
+	return gen.ListIntegrationAlerts200JSONResponse(out), nil
+}
+
+// fieldInvalidRegex is the validation code of a Matcher whose regular expression does not compile.
+const fieldInvalidRegex = "invalid_regex"
+
+// matcherProblem is the 400 of a label Matcher that does not parse, or whose regular expression does not compile.
+func matcherProblem(i int, err error) *Problem {
+	pointer := fmt.Sprintf("/query/label/%d", i)
+	if re, ok := errors.AsType[*matchers.RegexpError](err); ok {
+		return fieldProblem(http.StatusBadRequest, pointer, fieldInvalidRegex, re.Error())
+	}
+	return fieldProblem(http.StatusBadRequest, pointer, fieldInvalidFormat,
+		`A label filter is one Alertmanager matcher such as namespace="payments" or pod=~"api-.*".`)
+}
+
+func integrationAlertOf(a ingest.ViewAlert) gen.IntegrationAlert {
+	annotations, warnings, groupKeys := gen.Labels(a.Annotations), a.Warnings, a.GroupKeys
+	if annotations == nil {
+		annotations = gen.Labels{}
+	}
+	if warnings == nil {
+		warnings = []string{}
+	}
+	if groupKeys == nil {
+		groupKeys = []string{}
+	}
+	out := gen.IntegrationAlert{
+		Fingerprint: a.Fingerprint, Labels: a.Labels, Annotations: &annotations, State: gen.AlertState(a.State),
+		StartsAt: a.StartsAt.UTC(), LastSeenAt: a.LastSeenAt.UTC(), ResolvedAt: nullableTime(a.ResolvedAt),
+		ResolveReasonText: nullableString(a.ReasonText), AlertmanagerGroups: groupKeys,
+		StaticLabelWarnings: &warnings,
+	}
+	if a.Reason != nil {
+		out.ResolveReason.Set(gen.NullableResolveReason(*a.Reason))
+	} else {
+		out.ResolveReason.SetNull()
+	}
+	return out
 }
 
 func integrationInputOf(in gen.IntegrationInput) integrations.Input {

@@ -17,18 +17,21 @@ files_touched:
   - internal/ingest/alertsview.go
   - internal/ingest/query.sql
   - internal/ingest/worker_test.go
+  - internal/ingest/worker_integration_test.go
   - internal/ingest/payload_test.go
   - internal/ingest/process_test.go
   - internal/ingest/presence_test.go
   - internal/ingest/repeat_test.go
+  - internal/ingest/alertsview_test.go
   - internal/ingest/facts_test.go
+  - internal/ingest/ingest_integration_test.go
   - internal/matchers/matchers.go
   - internal/matchers/matchers_test.go
   - internal/api/integrations.go
   - internal/api/integrations_test.go
-  - internal/clock/clock.go
-  - internal/clock/clock_test.go
-  - internal/server/server.go
+  - internal/api/server.go
+  - internal/db/notify.go
+  - internal/db/notify_test.go
   - internal/devmode/devmode.go
   - internal/devmode/query.sql
   - internal/devmode/devmode_test.go
@@ -37,10 +40,19 @@ files_touched:
   - internal/fakes/fakealertmanager/scenarios.go
   - internal/fakes/fakealertmanager/fakealertmanager_test.go
   - internal/leader/tasks.go
+  - internal/leader/leader_test.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
+  - internal/cli/cli.go
+  - internal/cli/admin.go
+  - internal/cli/admin_test.go
+  - sqlc.yaml
   - test/e2e/processing_test.go
+  - test/e2e/ingest_test.go
+  - web/e2e/integrations.spec.ts
+  - web/e2e/stored-snapshots.spec.ts
 acceptance:
   - "[C-06.FR-1] Stored Snapshots of one Integration are processed in arrival order and never two at a time, also with two replicas; a Snapshot of another Integration is not held up by them."
   - "[C-06.FR-2, C-06.FR-13] A Snapshot is split into Alerts by fingerprint, and the identical copy of an HA pair, or the same Snapshot sent again, changes nothing (`fingerprint + status + startsAt`)."
@@ -97,11 +109,16 @@ issue: 20
   Snapshots, leases one
   through its `ingest_claims` row (created with the Integration if missing) using the claim helper of S-062, and
   processes that Integration's pending Snapshots in `(received_at, id)` order, one transaction each, renewing the lease.
-  Shutdown releases the lease. The Integration's `snapshot_count` and `last_snapshot_at` are updated in the same
-  transaction.
+  The renewal at the start of each transaction locks the claim row until it ends, so a lease that ran out cannot let a
+  second replica in mid-Snapshot. A replica processes up to 4 Integrations at the same time, so that the backlog of one
+  never holds up the others. Shutdown releases the lease. The Integration's `snapshot_count` and `last_snapshot_at` are
+  updated in the same transaction, for processed and failed Snapshots alike (C-05.FR-7 counts the Snapshots received).
+  A round or an Integration that the database interrupts is logged as `snapshot_processing_interrupted` and retried
+  after a growing pause; its Snapshots stay pending.
 - **Payload** (C-06.FR-20, `AlertmanagerWebhook`): `groupKey`, `status` and `alerts` are required, each Alert needs
   `labels`, `status` and `startsAt`; `truncatedAlerts`, `notification_reason` and `fingerprint` are optional. A body
-  that is not JSON or lacks these fields, and an error raised by the processing code, mark the Stored Snapshot `failed`
+  that is not JSON, lacks these fields or carries a NUL character (which PostgreSQL cannot store), and an error raised
+  by the processing code, mark the Stored Snapshot `failed`
   with `processing_error`; it is never retried by itself and never blocks the Snapshots behind it. A lost database
   connection rolls back and leaves the Snapshot pending. `group_key`, `alert_count` and `truncated_alerts` are written
   back.
@@ -114,16 +131,22 @@ issue: 20
   | firing | none; resolved with an older `startsAt`; resolved as Gone or Stale with the same `startsAt` | a new firing: `episode` + 1, `fired_at` now | `fired` |
   | firing | firing, same `startsAt` | `last_seen_at`, annotations refreshed | `annotations_changed` when they differ |
   | firing | firing, newer `startsAt` | Continuation: `starts_at` updated | `continued` |
-  | firing | any, with a newer `startsAt` than listed; resolved by a `resolved` with the same `startsAt` | nothing (an old copy) | — |
+  | firing | any, with a newer `startsAt` than listed; resolved by a `resolved` with the same `startsAt` | nothing (an old copy); a firing Alert's presence stays listed | — |
   | resolved | firing, `startsAt` not older | resolved, reason `resolved` | `resolved` |
   | resolved | resolved, or firing with a newer `startsAt` | nothing, not counted | — |
   | resolved | no row | dropped, `muster_ingest_resolved_dropped_total` + 1 | — |
 
-  Resolved Alerts never create rows. A Snapshot with `status: resolved` (C-06.FR-21) resolves every Alert still
-  firing with an active presence in its `groupKey`, listed or not, as if each were listed as resolved. A late Snapshot
-  — received before the current window of its `groupKey` started, as in a replay — applies only the `resolved` rows of
-  the table and changes no presence, window or learned interval; this is what makes replay (S-021) change nothing.
-- **Presence and the duplicate window** (C-06.FR-5, FR-6, FR-7; `alertmanager_groups`, `alert_presences`): a Snapshot of
+  Resolved Alerts never create rows; times are kept to the microsecond, as PostgreSQL stores them. A Snapshot with
+  `status: resolved` (C-06.FR-21) resolves every Alert still firing with an active presence in its `groupKey`, listed or
+  not, as if each were listed as resolved. A late Snapshot — received more than the duplicate window before the
+  current window of its `groupKey` started, as in a replay — applies only the `resolved` rows of the table and changes
+  no presence, window or learned interval; this is what makes replay (S-021) change nothing. A Snapshot received less
+  than that before the window started is a request that committed after a later one (schema.md §5): it counts in the
+  current window — its Alerts are listed there and a truncated one marks the window — but opens no window, learns
+  nothing and decides no absence.
+- **Presence and the duplicate window** (C-06.FR-5, FR-6, FR-7; `alertmanager_groups`, `alert_presences`): an Alert that
+  resolves, for any reason, ends its active presences (`gone`), so that only the presences of its current firing decide
+  its absence. A Snapshot of
   a `groupKey` received at t opens a new window unless t is within `duplicate_window_seconds` of `window_started_at`. A
   listed Alert is `listed` (`last_listed_window`, `last_seen_at`, `last_seen_clock_ms` = the Integration's liveness
   clock at receipt, as S-023 defines it; `missed_since` cleared). Absence is evaluated at receipt, and only when neither
@@ -147,9 +170,11 @@ issue: 20
 - **Clock** (C-06.FR-13): windows, absence and gaps use `received_at`; `startsAt` and `endsAt` only order events of the
   same source and are shown.
 - **Alerts view** (C-06.FR-19, `listIntegrationAlerts`): the Integration's `alerts` rows, firing and those resolved
-  within `retention.alert_details`, with `alertmanager_groups` from their presences; `state`; `label` Matchers in
+  within `retention.alert_details`, with `alertmanager_groups` from the presences listed during the current or last
+  firing; `state`; `label` Matchers in
   Alertmanager syntax matched against each Alert's labels; `q` (case-insensitive over label values); sorted by
-  `-last_seen_at` (default) or `starts_at` with a cursor on `(value, id)`. `route`, `severity_level` and `alert_group`
+  `-last_seen_at` (default) or `starts_at` with a cursor on `(value, id)`. One request reads at most 10,000 Alerts to
+  fill its page; a filter that matches few gets a shorter page with a cursor to continue from. `route`, `severity_level` and `alert_group`
   stay absent until S-025 and S-028.
 - **Matchers** (`internal/matchers`): parsing the Alertmanager matcher syntax (`=`, `!=`, `=~`, `!~`, RE2 anchored as in
   Alertmanager, a missing label counting as an empty value) and matching label sets; routing reuses it.
@@ -160,17 +185,24 @@ issue: 20
   `muster_ingest_resolved_dropped_total{integration}`.
 - **Log events** (C-06.FR-15): exactly one per Snapshot — `snapshot_processed` (INFO: `integration`,
   `stored_snapshot`, `group_key`, `alerts`, `fired`, `resolved`, `gone`, `continued`, `dropped`, `truncated`,
-  `duration_ms`) or `snapshot_failed` (WARN: `integration`, `stored_snapshot`, `error`).
+  `duration_ms`) or `snapshot_failed` (WARN: `integration`, `stored_snapshot`, `error`); besides them
+  `snapshot_processing_interrupted` (WARN: `integration`, `error`) when the database interrupts a round, and in
+  development mode `dev_clock_loaded` (INFO: `offset_seconds`) and `dev_clock_load_failed` (WARN: `error`).
+- **Leader task** `ingest_backlog` (every 15 seconds) sets `muster_ingest_backlog`, one of the database gauges of
+  ADR-0007.
 - **Development clock**: in development mode only (`muster dev`, also with `--replica`), the internal listener serves
   `GET /_dev/clock` and `POST /_dev/clock` with `{"advance_seconds": N}`, both answering `{"now", "offset_seconds"}`.
   The business clock of `internal/clock` (S-006) is then real time plus the offset, and `now` is its time; the real
   clock is never offset. The offset lives in the database
   (`runtime_state.dev_clock_offset_seconds`, `internal/devmode/query.sql`), so every replica of one database runs on
   the same clock (the nightly two-replica run of S-004). A `POST` first runs the partition maintenance step itself — it
-  is idempotent — so that rows written at the new time have their partitions, then adds N to the stored offset (an
-  upsert of the singleton row) and sends `NOTIFY dev_clock` in the same transaction. Every replica in development mode
-  listens on that channel through the hub of S-012 and reads the offset at start and on each notification, then wakes
-  the workers, timers and Leader tasks that wait on the clock. The `POST` answers once its own replica runs on the new
+  is idempotent — as at the new time, so that rows written at the new time have their partitions, then adds N (0 to ten
+  years) to the stored offset (an upsert of the singleton row) and sends `NOTIFY dev_clock` in the same transaction.
+  Every replica in development mode listens on that channel through the Listener of S-012 (`internal/db`), which also
+  listens on the processing channel of S-018 (`muster_snapshots`), and reads the offset at start, on each notification
+  and when the LISTEN is back after a loss, then wakes what waits on the clock — in this story the processing worker.
+  CLI subcommands run as `muster dev <subcommand>` read the offset too, so that what they write agrees with the
+  replicas. The `POST` answers once its own replica runs on the new
   offset; a check that drives two replicas reads `GET /_dev/clock` on the other one until it shows the same
   `offset_seconds`. Outside development mode the path does not exist (`404`) and the column stays 0.
 - **Clock consumers** (S-006): which of the two clocks each consumer reads, and so what an advance of the development
@@ -309,6 +341,12 @@ for k in 1 2 3; do ADV 300; NOTIFY g6 '{"reason":"repeat interval elapsed"}'; do
 psql "$MUSTER_DATABASE_URL" -Atc "SELECT learned_repeat_interval_ms / 1000 FROM alertmanager_routes WHERE route_path = '{}/{team=\"web\"}'"
 # 30x                                                                  (300 s plus the seconds the commands took)
 curl -s -b jar "$API/integrations/$INT" | jq '.snapshot_count > 0'                               # true
+
+# the notices of S-014 on the development clock: an alive mark older than leader.absence_notice, then a downtime
+curl -s -b jar "$API/system-notices" | jq -c '[.items[].kind]'                                   # []
+ADV 180; curl -s -b jar "$API/system-notices" | jq -c '[.items[].kind]'                         # ["no_replica_leading"]
+ADV 600; kill %1; wait; make dev > dev.log 2>&1 &    # stop every replica, then start again: the next Leader records it
+curl -s -b jar "$API/system-notices" | jq -c '[.items[].kind]'                   # ["recovering_after_downtime"]
 ```
 
 `make test-integration` runs `facts_test.go`; the pull request records which fact each scenario reproduces.

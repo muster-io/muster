@@ -18,7 +18,9 @@ import (
 // fakeReset replaces the runtime entry point of reset-password and standard input for one test.
 type fakeReset struct {
 	calls []runtime.PasswordReset
-	err   error
+	// development records whether each call ran under muster dev.
+	development []bool
+	err         error
 }
 
 func newFakeReset(t *testing.T, input io.Reader) *fakeReset {
@@ -30,7 +32,7 @@ func newFakeReset(t *testing.T, input io.Reader) *fakeReset {
 		if len(opts.Environ) != 1 || opts.Environ[0] != "MUSTER_DATABASE_URL=x" {
 			t.Errorf("environ = %v", opts.Environ)
 		}
-		f.calls = append(f.calls, r)
+		f.calls, f.development = append(f.calls, r), append(f.development, opts.Development)
 		return "SRBBBBBBBBBBBB", f.err
 	}
 	stdin = input
@@ -211,5 +213,36 @@ func TestResetTOTP(t *testing.T) {
 	if code := Run([]string{"admin", "reset-totp", "--actor", "ops", "bob"}, &stdout, &stderr); code != exitFailure ||
 		!strings.Contains(stderr.String(), "no such user") {
 		t.Errorf("a refused reset: %d, %q", code, stderr.String())
+	}
+}
+
+// TestAdminUnderDev: `muster dev admin …` runs the command in development mode, whose development clock it follows
+// (D245); a bare `muster admin …` does not.
+func TestAdminUnderDev(t *testing.T) {
+	f := newFakeReset(t, strings.NewReader("a-good-password-1\n"))
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"admin", "reset-password", "--actor", "ops", "bob"}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	stdin = strings.NewReader("a-good-password-1\n")
+	d := devMode{env: mapEnv{}}
+	if code := d.run([]string{"admin", "reset-password", "--actor", "ops", "bob"}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if len(f.development) != 2 || f.development[0] || !f.development[1] {
+		t.Errorf("development = %v", f.development)
+	}
+	var totp []bool
+	orig := runResetTOTP
+	t.Cleanup(func() { runResetTOTP = orig })
+	runResetTOTP = func(_ context.Context, opts runtime.Options, _ runtime.TOTPReset) (string, bool, error) {
+		totp = append(totp, opts.Development)
+		return "SRBBBBBBBBBBBB", true, nil
+	}
+	if code := d.run([]string{"admin", "reset-totp", "--actor", "ops", "bob"}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if len(totp) != 1 || !totp[0] {
+		t.Errorf("reset-totp development = %v", totp)
 	}
 }
