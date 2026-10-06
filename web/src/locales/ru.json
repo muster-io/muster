@@ -21,7 +21,11 @@
     "emptyValue": "(пусто)",
     "erased": "[стёрто]",
     "fields": {
+      "deletedAt": "Время удаления",
+      "duplicateWindowSeconds": "Окно дубликатов (секунды)",
       "email": "Почта",
+      "heartbeatEnabled": "Heartbeat",
+      "heartbeatTimeoutSeconds": "Тайм-аут Heartbeat (секунды)",
       "login": "Логин",
       "name": "Имя",
       "oidcEnabled": "Вход через OIDC",

@@ -21,7 +21,11 @@
     "emptyValue": "(empty)",
     "erased": "[erased]",
     "fields": {
+      "deletedAt": "Deleted at",
+      "duplicateWindowSeconds": "Duplicate window (seconds)",
       "email": "Email",
+      "heartbeatEnabled": "Heartbeat",
+      "heartbeatTimeoutSeconds": "Heartbeat timeout (seconds)",
       "login": "Login",
       "name": "Name",
       "oidcEnabled": "OIDC sign-in",
