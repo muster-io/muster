@@ -115,6 +115,7 @@ export const ListServiceAccountsResponse = zod.object({
 })
 
 /**
+ * A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
  * @summary Create a Service account
  */
 
@@ -164,6 +165,7 @@ export const GetServiceAccountResponse = zod.object({
 }).describe('A non-person identity with a Role and tokens. It cannot sign in and has no Account links. It can never become the Owner of an Alert Group: Acknowledge and "Still on it" from it are refused with `command-refused` `owner_must_be_user`; it may Resolve, Snooze and add Notes.')
 
 /**
+ * A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
  * @summary Update a Service account
  */
 export const updateServiceAccountPathServiceAccountIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');

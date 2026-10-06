@@ -1343,3 +1343,28 @@ func TestOIDCSessionEnded(t *testing.T) {
 		}
 	}
 }
+
+// TestMayAssign is the Role assignment rule of C-04.FR-7: a token may only assign a Role whose Permissions it holds
+// itself, so a token narrowed to users:write cannot assign the Admin Role, and can assign the Viewer Role once it also
+// holds the Viewer's Permissions; the web session is not limited by the rule.
+func TestMayAssign(t *testing.T) {
+	roles := Roles{RoleAdmin: {"alert-groups:read", "users:read", "users:write"}, RoleViewer: {"alert-groups:read"}}
+	token := &Identity{Permissions: []Permission{"users:write"}, Token: &Token{ID: 1}}
+	if p, ok := token.MayAssign(roles, RoleAdmin); ok || p != "alert-groups:read" {
+		t.Errorf("users:write assigns Admin: %q, %v", p, ok)
+	}
+	if _, ok := token.MayAssign(roles, RoleViewer); ok {
+		t.Error("users:write alone assigns Viewer")
+	}
+	token.Permissions = []Permission{"alert-groups:read", "users:write"}
+	if p, ok := token.MayAssign(roles, RoleViewer); !ok || p != "" {
+		t.Errorf("a token with the Viewer's Permissions: %q, %v", p, ok)
+	}
+	if _, ok := token.MayAssign(roles, RoleAdmin); ok {
+		t.Error("the token assigns Admin without users:read")
+	}
+	session := &Identity{Permissions: []Permission{"users:write"}}
+	if _, ok := session.MayAssign(roles, RoleAdmin); !ok {
+		t.Error("the web session is limited by the rule")
+	}
+}

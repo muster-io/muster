@@ -459,6 +459,7 @@ export const getCreateServiceAccountUrl = () => {
 }
 
 /**
+ * A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
  * @summary Create a Service account
  */
 export const createServiceAccount = async (serviceAccountInput: ServiceAccountInput, options?: Parameters<typeof apiFetch>[1]): Promise<ServiceAccount> => {
@@ -646,6 +647,7 @@ export const getUpdateServiceAccountUrl = (serviceAccountId: string,) => {
 }
 
 /**
+ * A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
  * @summary Update a Service account
  */
 export const updateServiceAccount = async (serviceAccountId: string,

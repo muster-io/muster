@@ -783,7 +783,7 @@ paths:
       tags:
       - Users
       summary: Create a local user
-      description: Returns a single-use password setup link; Muster sends no email.
+      description: Returns a single-use password setup link; Muster sends no email. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
       x-permission: users:write
       x-listener: app
       security:
@@ -858,7 +858,7 @@ paths:
       summary: Update a user
       description: Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`)
         for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a
-        lower Role.
+        lower Role. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
       x-permission: users:write
       x-listener: app
       security:
@@ -1427,6 +1427,7 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
     post:
       operationId: createServiceAccount
+      description: A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
       tags:
       - API tokens
       summary: Create a Service account
@@ -1499,6 +1500,7 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
     put:
       operationId: updateServiceAccount
+      description: A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
       tags:
       - API tokens
       summary: Update a Service account
@@ -7400,7 +7402,8 @@ components:
         - code: one_of_required
           description: Exactly one of several fields must be given, such as `until` or `no_end`.
         - code: permission_not_held
-          description: A token asks for a Permission its owner does not hold.
+          description: A token asks for a Permission its owner does not hold, or a token assigns a Role holding a Permission
+            the token does not hold (`/role`).
         - code: route_set_mismatch
           description: The Routes in a reorder differ from the current set.
         - code: column_mismatch

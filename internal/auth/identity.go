@@ -52,6 +52,22 @@ func (id *Identity) Actor() audit.Actor {
 	return audit.User(id.Session.User.ID, id.Session.User.PublicID).Via(id.Token.ID, id.Token.Name)
 }
 
+// MayAssign reports whether the identity may give someone the Role role, and the first Permission of the Role it
+// lacks when it may not: a token may only assign a Role whose Permissions it holds itself, so that a narrowed token
+// never creates or changes a User or a Service account with more than the token (C-04.FR-7). The web session is not
+// limited by this rule; the Permission of the operation decides.
+func (id *Identity) MayAssign(roles Roles, role string) (Permission, bool) {
+	if id.Token == nil {
+		return "", true
+	}
+	for _, p := range roles.Permissions(role) {
+		if !id.Can(p) {
+			return p, false
+		}
+	}
+	return "", true
+}
+
 // Can reports whether the identity holds p.
 func (id *Identity) Can(p Permission) bool {
 	return slices.Contains(id.Permissions, p)

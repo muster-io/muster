@@ -572,3 +572,58 @@ func TestProblemCodesOfTokens(t *testing.T) {
 		}
 	}
 }
+
+// TestRoleAssignmentByToken is the Role assignment rule of C-04.FR-7 at the API: a token narrowed to users:write
+// cannot create an Admin (422 permission_not_held at /role) but can create a Viewer once it holds all of the Viewer's
+// Permissions; the rule covers updating a user and creating and updating a Service account, and the web session is
+// unaffected.
+func TestRoleAssignmentByToken(t *testing.T) {
+	x, ft, fa, _ := newTokensAPI(t)
+	admin := ft.idents[fullToken].Session
+	narrow := func(name string, perms ...auth.Permission) {
+		ft.idents[name] = &auth.Identity{Session: admin, Permissions: perms, Transport: audit.TransportAPI,
+			Token: &auth.Token{ID: int64(len(ft.idents) + 20), Name: name}}
+	}
+	narrow("mstr_pat_users", "users:write")
+	narrow("mstr_pat_viewer", "alert-groups:read", "integrations:read", "users:write")
+	narrow("mstr_pat_accounts", "service-accounts:write")
+	refused := func(a answer) bool {
+		return a.status == http.StatusUnprocessableEntity && strings.Contains(string(a.body), `"permission_not_held"`) &&
+			strings.Contains(string(a.body), `"pointer":"/role"`)
+	}
+	created := len(fa.created)
+	for _, c := range [][2]string{{"mstr_pat_users", "admin"}, {"mstr_pat_viewer", "admin"},
+		{"mstr_pat_users", "viewer"}} {
+		a := x.call(t, http.MethodPost, "/api/v1/users", `{"name":"Eve","login":"eve","role":"`+c[1]+`"}`,
+			bearer(c[0])...)
+		if !refused(a) {
+			t.Errorf("%s creates a %s: %d %s", c[0], c[1], a.status, a.body)
+		}
+	}
+	if len(fa.created) != created {
+		t.Fatal("a refused user reached the domain")
+	}
+	if a := x.call(t, http.MethodPost, "/api/v1/users", `{"name":"Eve","login":"eve","role":"viewer"}`,
+		bearer("mstr_pat_viewer")...); a.status != http.StatusCreated {
+		t.Errorf("a token with the Viewer's Permissions creates a Viewer: %d %s", a.status, a.body)
+	}
+	if a := x.call(t, http.MethodPut, "/api/v1/users/"+bobPublicID, `{"name":"Bob","role":"admin"}`,
+		append(bearer("mstr_pat_viewer"), "If-Match", `"1"`)...); !refused(a) {
+		t.Errorf("a token makes Bob an Admin: %d %s", a.status, a.body)
+	}
+	if a := x.call(t, http.MethodPost, "/api/v1/service-accounts", `{"name":"tf","role":"viewer"}`,
+		bearer("mstr_pat_accounts")...); !refused(a) {
+		t.Errorf("a token creates a Viewer Service account without its Permissions: %d %s", a.status, a.body)
+	}
+	if a := x.call(t, http.MethodPut, "/api/v1/service-accounts/"+saPublicID, `{"name":"tf","role":"admin"}`,
+		append(bearer("mstr_pat_accounts"), "If-Match", `"1"`)...); !refused(a) {
+		t.Errorf("a token makes a Service account an Admin: %d %s", a.status, a.body)
+	}
+	if len(ft.inputs) != 0 {
+		t.Error("a refused Service account reached the domain")
+	}
+	if a := x.mutate(t, adminCookie, http.MethodPost, "/api/v1/users", `{"name":"Ada","login":"ada","role":"admin"}`); a.status !=
+		http.StatusCreated {
+		t.Errorf("the Admin's session creates an Admin: %d %s", a.status, a.body)
+	}
+}

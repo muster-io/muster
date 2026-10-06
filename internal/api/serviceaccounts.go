@@ -56,6 +56,9 @@ func (s *Server) CreateServiceAccount(ctx context.Context, req gen.CreateService
 	if req.Body == nil {
 		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
 	}
+	if err := s.roleAssignable(ctx, string(req.Body.Role)); err != nil {
+		return nil, err
+	}
 	sa, err := s.tokens.CreateServiceAccount(ctx, r, serviceAccountInputOf(*req.Body))
 	if err != nil {
 		return nil, err
@@ -92,6 +95,9 @@ func (s *Server) UpdateServiceAccount(ctx context.Context, req gen.UpdateService
 	}
 	if req.Body == nil {
 		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	if err := s.roleAssignable(ctx, string(req.Body.Role)); err != nil {
+		return nil, err
 	}
 	sa, err := s.tokens.UpdateServiceAccount(ctx, r, req.ServiceAccountId, version, serviceAccountInputOf(*req.Body))
 	if err != nil {

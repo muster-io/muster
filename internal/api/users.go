@@ -75,6 +75,9 @@ func (s *Server) CreateUser(ctx context.Context, req gen.CreateUserRequestObject
 	if req.Body == nil {
 		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
 	}
+	if err := s.roleAssignable(ctx, string(req.Body.Role)); err != nil {
+		return nil, err
+	}
 	n := users.NewUser{Name: req.Body.Name, Login: req.Body.Login, Role: string(req.Body.Role)}
 	if req.Body.Email.IsSpecified() && !req.Body.Email.IsNull() {
 		email := req.Body.Email.MustGet()
@@ -114,6 +117,9 @@ func (s *Server) UpdateUser(ctx context.Context, req gen.UpdateUserRequestObject
 	}
 	if req.Body == nil {
 		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	if err := s.roleAssignable(ctx, string(req.Body.Role)); err != nil {
+		return nil, err
 	}
 	c := users.Changes{Name: req.Body.Name, Role: string(req.Body.Role), EmailSet: req.Body.Email.IsSpecified()}
 	if c.EmailSet && !req.Body.Email.IsNull() {

@@ -20,6 +20,8 @@ files_touched:
   - internal/api/tokens.go
   - internal/api/serviceaccounts.go
   - internal/api/tokens_test.go
+  - internal/api/users.go
+  - internal/auth/auth_test.go
   - internal/api/middleware.go
   - internal/api/server.go
   - internal/api/problem.go
@@ -36,6 +38,8 @@ files_touched:
   - api/openapi.yaml
   - test/e2e/tokens_test.go
   - design/prd/l1/defaults.md
+  - design/prd/l1/reference.md
+  - design/prd/l1/C-04-api-tokens.md
   - design/prd/L1.md
 acceptance:
   - "[C-04.FR-1, C-04.FR-7, C-04.AC-1] A Personal access token of an Admin, created with read-only Permissions, gets 403 when creating a User; the same Admin's session succeeds."
@@ -45,6 +49,7 @@ acceptance:
   - "[C-04.FR-1, C-03.FR-13, C-04.AC-4] Tokens of a deleted user answer 401 and are recorded as revoked with the reason `owner_deleted`; tokens of a disabled user answer 401 until the user is enabled again."
   - "[C-04.FR-6, C-04.AC-5] Creating a User with a Personal access token writes an Audit log entry shown as \"{user} via token {name}\"; issuing and revoking tokens are Audit log entries."
   - "[C-04.FR-7, C-04.AC-7] A Personal access token cannot create or revoke tokens (403 `session_required`); a session can, and asking for a Permission its User does not hold answers 422 `permission_not_held`."
+  - "[C-04.FR-7] A token may only assign a Role whose Permissions it holds: a token narrowed to `users:write` gets 422 `permission_not_held` at `/role` when creating an Admin, and creates a Viewer once it holds all of the Viewer's Permissions; the same applies to updating a User and to creating and updating a Service account, and the web session is unaffected."
   - "[C-04.FR-2, C-04.AC-8] Admins create, update, disable, enable and delete Service accounts with a Role and any number of tokens; a disabled Service account's tokens answer 401 until `enable` is called."
   - "[C-04.FR-4] The API accepts `Authorization: Bearer` with a Personal access token or a Service account token and refuses an Integration token (`mstr_int_`) with 401."
   - "[C-03.FR-27, C-03.AC-14] A Personal access token — even an Admin's with all Permissions — gets 403 `session_required` on creating a token, changing the password and enrolling or removing TOTP; a Service account token gets 403 `service_account_not_allowed` on `GET /api/v1/me`."
@@ -93,6 +98,10 @@ issue: 16
   permission_not_held`, pointer `/permissions/<n>`); the effective Permissions are the token's intersected with the
   owner's current Role at each request. A disabled owner's tokens answer `401` until the owner is enabled; deleting the
   owner revokes them with `owner_deleted`.
+- **Role assignment by a token** (C-04.FR-7): a token may only assign a Role whose Permissions it holds itself —
+  `createUser`, `updateUser`, `createServiceAccount` and `updateServiceAccount` with a request whose `role` holds a
+  Permission the token lacks answer `422`, `errors[].code = permission_not_held`, pointer `/role`. The web session is
+  not limited by this rule.
 - **Service accounts** (C-04.FR-2; `service_accounts`): a name unique among accounts that are not deleted
   (`409 name_taken`), a Role, the status `active`, `disabled` or `deleted`; updates need `If-Match`; a disabled
   account's tokens answer `401` until it is enabled; deleting revokes its tokens. A Service account never signs in to
@@ -217,6 +226,16 @@ None.
 
 - Suggested commit: `feat(tokens): add personal access tokens, service accounts and token authentication`.
 - P-09 (`api.rate_limit`) is confirmed or changed here.
+- Live updates stay web-session only in L1 (maintainer decision): the Hub limits and ends streams per session. If
+  automation needs the stream later, token subscriptions are keyed by the token and re-checked periodically, as the
+  Hub re-checks sessions.
+- Revoking the tokens of a deleted user or Service account is recorded as `tokens_revoked`, a count in the
+  `user.deleted` or `service_account.deleted` entry, not as one `api_token.revoked` entry per token (maintainer
+  decision).
+- A Personal access token keeps working while its owner's web session would have to enrol TOTP first: a token can only
+  be created from a full web session (maintainer decision, C-04.FR-4).
+- The API rate limiter counts on the real clock, so a development clock advance never refills it; S-020's table of
+  clock consumers lists it.
 - "Usable" Personal access tokens — not expired, not revoked, owner active — are what the background re-checks of S-062
   count when deciding whether to re-check a user.
 

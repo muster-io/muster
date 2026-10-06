@@ -24,6 +24,21 @@ func tokenRequester(ctx context.Context) (tokens.Requester, *auth.Identity, erro
 	return tokens.Requester{Actor: id.Actor(), Transport: id.Transport, Address: clientAddress(ctx)}, id, nil
 }
 
+// roleAssignable refuses a token that gives a User or a Service account a Role holding a Permission the token lacks:
+// 422 permission_not_held at /role. The web session passes; the Permission of the operation decides for it.
+func (s *Server) roleAssignable(ctx context.Context, role string) error {
+	id, err := identity(ctx)
+	if err != nil {
+		return err
+	}
+	if p, ok := id.MayAssign(s.sessions.Roles(), role); !ok {
+		return fieldProblem(http.StatusUnprocessableEntity, "/role", tokens.CodePermissionNotHeld,
+			"The token does not hold the Permission "+string(p)+" of the Role "+role+"; it may only assign a Role "+
+				"whose Permissions it holds.")
+	}
+	return nil
+}
+
 // ownerOf is the user whose Personal access tokens the identity manages: the user of the session, or the owner of
 // the Personal access token the request uses.
 func ownerOf(id *auth.Identity) tokens.Owner {

@@ -196,7 +196,7 @@ export const getCreateUserUrl = () => {
 }
 
 /**
- * Returns a single-use password setup link; Muster sends no email.
+ * Returns a single-use password setup link; Muster sends no email. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
  * @summary Create a local user
  */
 export const createUser = async (userCreate: UserCreate, options?: Parameters<typeof apiFetch>[1]): Promise<UserCreated> => {
@@ -384,7 +384,7 @@ export const getUpdateUserUrl = (userId: string,) => {
 }
 
 /**
- * Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+ * Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
  * @summary Update a user
  */
 export const updateUser = async (userId: string,
