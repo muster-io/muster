@@ -8,6 +8,11 @@
 
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 
+import {
+  getGetIntegrationQueryKey,
+  getListIntegrationTokensQueryKey,
+  getListIntegrationsQueryKey,
+} from "../api/gen/endpoints/integrations/integrations";
 import { getGetOrganizationQueryKey } from "../api/gen/endpoints/organization/organization";
 import { getListSystemNoticesQueryKey } from "../api/gen/endpoints/system/system";
 import { HintEventType, type HintEvent } from "../api/gen/model";
@@ -37,6 +42,16 @@ export function registerHint(type: HintEventType, queries: HintQueries): () => v
 
 registerHint("system-notices", () => [getListSystemNoticesQueryKey()]);
 registerHint("organization", () => [getGetOrganizationQueryKey()]);
+// An Integration or its tokens changed: the list, and the Integration's page with its tokens.
+registerHint("integration", (id) =>
+  id === null
+    ? [getListIntegrationsQueryKey()]
+    : [
+        getListIntegrationsQueryKey(),
+        getGetIntegrationQueryKey(id),
+        getListIntegrationTokensQueryKey(id),
+      ],
+);
 
 /** Invalidates the queries registered for a hint. */
 export function applyHint(queryClient: QueryClient, hint: HintEvent): void {

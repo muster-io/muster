@@ -9,7 +9,7 @@ covers: [C-05.FR-1, C-05.FR-2, C-05.FR-5, C-05.FR-7, C-05.FR-8, C-05.AC-3, C-05.
 files_touched:
   - web/src/routes/integrations.index.tsx
   - web/src/routes/integrations.new.tsx
-  - web/src/routes/integrations.$integrationId.tsx
+  - web/src/routes/integrations.$integrationId.index.tsx
   - web/src/routes/integrations.$integrationId.edit.tsx
   - web/src/routes/integrations.$integrationId.snapshots.$storedSnapshotId.tsx
   - web/src/components/integration-form.tsx
@@ -20,6 +20,7 @@ files_touched:
   - web/src/components/stored-snapshots.tsx
   - web/src/components/integration-delete-dialog.tsx
   - web/src/lib/live.ts
+  - web/src/components/app-shell.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/e2e/integrations.spec.ts
@@ -127,6 +128,11 @@ None.
 - The token dialog differs from the one of S-017 only by the snippet; it may reuse its parts.
 - The precision text names the built-in values `processing.gone_min_absence` and `processing.stale_after_factor`; if
   either changes, the text changes with it.
+- The Integration page is `integrations.$integrationId.index.tsx`: with TanStack file routes, a file
+  `integrations.$integrationId.tsx` would be the layout of the edit page and the viewer, which would then render inside
+  it. The navigation entry lives in the shell's registry in `app-shell.tsx`.
+- `snapshot_count` is kept by Snapshot processing (S-020), so ingestion stays insert-only; until S-020 the page shows
+  the count the API returns, and the last Snapshot time comes from the Stored Snapshots.
 
 ## Coverage
 
