@@ -69,13 +69,21 @@ export interface NavEntry {
 }
 
 /** The labels of the entries; each page's story adds its own. */
-export type NavLabel = "home" | "profile" | "users" | "oidc" | "security" | "auditLog";
+export type NavLabel =
+  | "home"
+  | "profile"
+  | "users"
+  | "serviceAccounts"
+  | "oidc"
+  | "security"
+  | "auditLog";
 
 /** The pages register their entries here, in the order of the navigation. */
 export const NAVIGATION: readonly NavEntry[] = [
   { to: "/", label: "home", exact: true },
   { to: "/profile", label: "profile" },
   { to: "/admin/users", label: "users", permission: "users:read" },
+  { to: "/admin/service-accounts", label: "serviceAccounts", permission: "service-accounts:read" },
   { to: "/admin/oidc", label: "oidc", permission: "oidc:read" },
   { to: "/admin/organization/security", label: "security", permission: "organization:write" },
   { to: "/admin/audit-log", label: "auditLog", permission: "audit-log:read" },
@@ -97,6 +105,8 @@ function navLabel(t: (key: string) => string, label: NavLabel): string {
       return t("nav.profile");
     case "users":
       return t("nav.users");
+    case "serviceAccounts":
+      return t("nav.serviceAccounts");
     case "oidc":
       return t("nav.oidc");
     case "security":

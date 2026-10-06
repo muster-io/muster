@@ -18,6 +18,8 @@ import { Route as AdminAuditLogRouteImport } from './routes/admin.audit-log'
 import { Route as AdminOidcRouteImport } from './routes/admin.oidc'
 import { Route as SignInTotpRouteImport } from './routes/sign-in.totp'
 import { Route as AdminOrganizationSecurityRouteImport } from './routes/admin.organization.security'
+import { Route as AdminServiceAccountsIndexRouteImport } from './routes/admin.service-accounts.index'
+import { Route as AdminServiceAccountsServiceAccountIdRouteImport } from './routes/admin.service-accounts.$serviceAccountId'
 import { Route as AdminUsersIndexRouteImport } from './routes/admin.users.index'
 import { Route as AdminUsersUserIdRouteImport } from './routes/admin.users.$userId'
 
@@ -67,6 +69,18 @@ const AdminOrganizationSecurityRoute =
     path: '/admin/organization/security',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AdminServiceAccountsIndexRoute =
+  AdminServiceAccountsIndexRouteImport.update({
+    id: '/admin/service-accounts/',
+    path: '/admin/service-accounts/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AdminServiceAccountsServiceAccountIdRoute =
+  AdminServiceAccountsServiceAccountIdRouteImport.update({
+    id: '/admin/service-accounts/$serviceAccountId',
+    path: '/admin/service-accounts/$serviceAccountId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AdminUsersIndexRoute = AdminUsersIndexRouteImport.update({
   id: '/admin/users/',
   path: '/admin/users/',
@@ -88,7 +102,9 @@ export interface FileRoutesByFullPath {
   '/admin/oidc': typeof AdminOidcRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
+  '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
+  '/admin/service-accounts/': typeof AdminServiceAccountsIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
 }
 export interface FileRoutesByTo {
@@ -101,7 +117,9 @@ export interface FileRoutesByTo {
   '/admin/oidc': typeof AdminOidcRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
+  '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
+  '/admin/service-accounts': typeof AdminServiceAccountsIndexRoute
   '/admin/users': typeof AdminUsersIndexRoute
 }
 export interface FileRoutesById {
@@ -115,7 +133,9 @@ export interface FileRoutesById {
   '/admin/oidc': typeof AdminOidcRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
+  '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
+  '/admin/service-accounts/': typeof AdminServiceAccountsIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
 }
 export interface FileRouteTypes {
@@ -130,7 +150,9 @@ export interface FileRouteTypes {
     | '/admin/oidc'
     | '/sign-in/totp'
     | '/admin/organization/security'
+    | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
+    | '/admin/service-accounts/'
     | '/admin/users/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -143,7 +165,9 @@ export interface FileRouteTypes {
     | '/admin/oidc'
     | '/sign-in/totp'
     | '/admin/organization/security'
+    | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
+    | '/admin/service-accounts'
     | '/admin/users'
   id:
     | '__root__'
@@ -156,7 +180,9 @@ export interface FileRouteTypes {
     | '/admin/oidc'
     | '/sign-in/totp'
     | '/admin/organization/security'
+    | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
+    | '/admin/service-accounts/'
     | '/admin/users/'
   fileRoutesById: FileRoutesById
 }
@@ -169,7 +195,9 @@ export interface RootRouteChildren {
   AdminAuditLogRoute: typeof AdminAuditLogRoute
   AdminOidcRoute: typeof AdminOidcRoute
   AdminOrganizationSecurityRoute: typeof AdminOrganizationSecurityRoute
+  AdminServiceAccountsServiceAccountIdRoute: typeof AdminServiceAccountsServiceAccountIdRoute
   AdminUsersUserIdRoute: typeof AdminUsersUserIdRoute
+  AdminServiceAccountsIndexRoute: typeof AdminServiceAccountsIndexRoute
   AdminUsersIndexRoute: typeof AdminUsersIndexRoute
 }
 
@@ -238,6 +266,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminOrganizationSecurityRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/service-accounts/': {
+      id: '/admin/service-accounts/'
+      path: '/admin/service-accounts'
+      fullPath: '/admin/service-accounts/'
+      preLoaderRoute: typeof AdminServiceAccountsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/service-accounts/$serviceAccountId': {
+      id: '/admin/service-accounts/$serviceAccountId'
+      path: '/admin/service-accounts/$serviceAccountId'
+      fullPath: '/admin/service-accounts/$serviceAccountId'
+      preLoaderRoute: typeof AdminServiceAccountsServiceAccountIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/users/': {
       id: '/admin/users/'
       path: '/admin/users'
@@ -275,7 +317,10 @@ const rootRouteChildren: RootRouteChildren = {
   AdminAuditLogRoute: AdminAuditLogRoute,
   AdminOidcRoute: AdminOidcRoute,
   AdminOrganizationSecurityRoute: AdminOrganizationSecurityRoute,
+  AdminServiceAccountsServiceAccountIdRoute:
+    AdminServiceAccountsServiceAccountIdRoute,
   AdminUsersUserIdRoute: AdminUsersUserIdRoute,
+  AdminServiceAccountsIndexRoute: AdminServiceAccountsIndexRoute,
   AdminUsersIndexRoute: AdminUsersIndexRoute,
 }
 export const routeTree = rootRouteImport

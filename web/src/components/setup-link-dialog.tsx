@@ -23,18 +23,19 @@ import {
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
-/** How long the button says "Copied". */
-const COPIED_MS = 3000;
+/** How long a copy button says "Copied". */
+export const COPIED_MS = 3000;
 
 /**
- * Copies the link: through the clipboard in a secure context, else (a plain-http installation) by selecting the field
- * and the browser's copy command. Resolves whether it worked; the field stays selected for a manual copy either way.
+ * Copies the text of a read-only field: through the clipboard in a secure context, else (a plain-http installation) by
+ * selecting the field and the browser's copy command. Resolves whether it worked; the field stays selected for a
+ * manual copy either way. The token dialog shares it.
  */
-async function copyLink(url: string, field: HTMLInputElement | null): Promise<boolean> {
+export async function copyField(text: string, field: HTMLInputElement | null): Promise<boolean> {
   field?.select();
   if (window.isSecureContext) {
     try {
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(text);
       return true;
     } catch {
       return false;
@@ -75,7 +76,7 @@ export function SetupLinkContent({
           <Button
             variant="outline"
             onClick={() => {
-              void copyLink(link.url, field.current).then((done) => {
+              void copyField(link.url, field.current).then((done) => {
                 setCopied(done);
                 if (done) {
                   setTimeout(() => setCopied(false), COPIED_MS);

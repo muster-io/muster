@@ -12,8 +12,10 @@ files_touched:
   - web/src/components/token-created-dialog.tsx
   - web/src/components/token-created-dialog.test.tsx
   - web/src/components/service-account-dialog.tsx
+  - web/src/components/setup-link-dialog.tsx
+  - web/src/components/app-shell.tsx
   - web/src/routes/profile.tsx
-  - web/src/routes/admin.service-accounts.tsx
+  - web/src/routes/admin.service-accounts.index.tsx
   - web/src/routes/admin.service-accounts.$serviceAccountId.tsx
   - web/src/routes/admin.audit-log.tsx
   - web/src/locales/en.json
