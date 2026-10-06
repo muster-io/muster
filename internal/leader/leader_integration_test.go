@@ -144,9 +144,11 @@ func (b *blackhole) through(t *testing.T, u string) string {
 	return parsed.String()
 }
 
-// testKeeper is a Keeper on the real clock with short intervals and a task that counts the leaderships it runs in.
+// testKeeper is a Keeper whose lease runs on a manual clock and whose steps the test takes itself, with a task that
+// counts the leaderships it runs in.
 type testKeeper struct {
 	*Keeper
+	clock   *clock.Manual
 	log     *syncBuffer
 	running atomic.Int64
 }
@@ -168,16 +170,14 @@ func (s *syncBuffer) String() string {
 	return s.buf.String()
 }
 
-const (
-	testPing       = 100 * time.Millisecond
-	testFencing    = time.Second
-	testServerSide = 2 * time.Second
-)
+// testServerBound is leader.server_bound for the lock sessions of the test. It is PostgreSQL's own timer, which no
+// clock of Muster moves, so the test keeps it short.
+const testServerBound = 2 * time.Second
 
-func startKeeper(t *testing.T, id, dbURL string) *testKeeper {
+func newTestKeeper(t *testing.T, id, dbURL string) *testKeeper {
 	t.Helper()
-	k := &testKeeper{log: &syncBuffer{}}
-	connect := Dial(func(ctx context.Context) (*pgx.Conn, error) { return pgx.Connect(ctx, dbURL) }, testServerSide)
+	k := &testKeeper{clock: clock.NewManual(time.Now()), log: &syncBuffer{}}
+	connect := Dial(func(ctx context.Context) (*pgx.Conn, error) { return pgx.Connect(ctx, dbURL) }, testServerBound)
 	tasks := func() []Task {
 		return []Task{{Name: "lead", Every: time.Hour, Run: func(ctx context.Context) error {
 			k.running.Add(1)
@@ -186,71 +186,81 @@ func startKeeper(t *testing.T, id, dbURL string) *testKeeper {
 			return nil
 		}}}
 	}
-	k.Keeper = NewKeeper(connect, clock.Real{}, logging.New(k.log, logging.LevelInfo), id, tasks)
-	k.pingInterval, k.fencingTimeout = testPing, testFencing
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{})
-	ticker := time.NewTicker(testPing)
-	go func() {
-		defer close(done)
-		defer ticker.Stop()
-		k.Run(ctx, ticker.C)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
+	k.Keeper = NewKeeper(connect, k.clock, logging.New(k.log, logging.LevelInfo), id, tasks)
+	t.Cleanup(func() { k.release(context.WithoutCancel(t.Context())) })
 	return k
 }
 
-func waitFor(t *testing.T, within time.Duration, what string, cond func() bool) time.Duration {
+// eventually polls cond until it holds and returns how long that took. The deadline only stops a test that hangs; it
+// is no bound of the behaviour under test, so a slow, busy machine does not fail it.
+func eventually(t *testing.T, what string, cond func() bool) time.Duration {
 	t.Helper()
+	const deadline = 30 * time.Second
 	begin := time.Now()
 	for !cond() {
-		if time.Since(begin) > within {
-			t.Fatalf("%s did not happen within %v", what, within)
+		if time.Since(begin) > deadline {
+			t.Fatalf("%s did not happen within %v", what, deadline)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	return time.Since(begin)
 }
 
-// TestIntegrationLeaderLease: one of two replicas takes the lock; when the Leader's network goes silent, it stops its
-// tasks within the fencing timeout, PostgreSQL ends its silent session within the server-side bound, and the other
-// replica takes over.
+// TestIntegrationLeaderLease: one of two replicas takes the lock and pings it through the network. When that network
+// goes silent, the Leader's next ping waits no longer than what is left of leader.fencing_timeout since the last ping
+// that succeeded, counted on the lease's clock, and the Leader stops its tasks. PostgreSQL then ends the silent lock
+// session, which nothing but the session's server-side bound does here, as the blackhole keeps the connection open,
+// and the other replica takes the lock. The test takes every step of both replicas itself and moves the lease's clock,
+// so no assertion depends on how fast the machine is; TestLeaderFailover in the e2e suite measures the bounds of
+// C-02.AC-3 on running replicas.
 func TestIntegrationLeaderLease(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		_, u := migrated(t, s)
-		hole := newBlackhole(t, func() string { p, _ := url.Parse(u); return p.Host }())
-		a := startKeeper(t, "a", hole.through(t, u))
-		waitFor(t, 5*time.Second, "a taking the lock", a.Leading)
-		waitFor(t, time.Second, "a starting its tasks", func() bool { return a.running.Load() == 1 })
-		b := startKeeper(t, "b", u)
-		time.Sleep(5 * testPing)
+		parsed, err := url.Parse(u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hole := newBlackhole(t, parsed.Host)
+		a := newTestKeeper(t, "a", hole.through(t, u))
+		b := newTestKeeper(t, "b", u)
+		ctx := t.Context()
+
+		a.step(ctx)
+		if !a.Leading() {
+			t.Fatalf("a did not take the free lock; log of a: %s", a.log.String())
+		}
+		eventually(t, "a starting its tasks", func() bool { return a.running.Load() == 1 })
+		if !strings.Contains(a.log.String(), `"event":"leadership_acquired","replica":"a"`) {
+			t.Errorf("log of a: %s", a.log.String())
+		}
+		b.step(ctx)
 		if b.Leading() {
 			t.Fatal("b took the lock that a holds")
 		}
+		a.clock.Advance(PingInterval)
+		a.step(ctx)
+		if !a.Leading() {
+			t.Fatalf("a stopped leading on a ping through the network; log of a: %s", a.log.String())
+		}
 
+		// The network goes silent shortly before the fencing deadline: the ping waits for the rest, then a fences.
 		hole.Cut()
-		fenced := waitFor(t, 3*testFencing, "a fencing", func() bool { return !a.Leading() })
-		if fenced > testFencing+2*testPing {
-			t.Errorf("a fenced %v after the cut, want within the fencing timeout %v", fenced, testFencing)
+		const rest = 200 * time.Millisecond
+		a.clock.Advance(FencingTimeout - rest)
+		a.step(ctx)
+		if a.Leading() || a.running.Load() != 0 {
+			t.Fatalf("after the fencing deadline a leads %v with %d tasks running", a.Leading(), a.running.Load())
 		}
-		if a.running.Load() != 0 {
-			t.Error("a's tasks still run after fencing")
-		}
-		if !strings.Contains(a.log.String(), `"level":"WARN","event":"leadership_lost","replica":"a"`) {
+		if !strings.Contains(a.log.String(),
+			`"level":"WARN","event":"leadership_lost","replica":"a","error":"no ping succeeded for 15s: `) {
 			t.Errorf("log of a: %s", a.log.String())
 		}
-		took := fenced + waitFor(t, 3*testServerSide, "b taking the lock", b.Leading)
-		if took > testServerSide+testPing+time.Second {
-			t.Errorf("b took the lock %v after the cut, want within the server-side bound %v", took, testServerSide)
-		}
-		t.Logf("after the cut: a fenced in %v (fencing timeout %v), b led after %v (server-side bound %v)", fenced,
-			testFencing, took, testServerSide)
-		if a.Leading() {
-			t.Error("a leads again through the cut network")
-		}
+
+		took := eventually(t, "b taking the lock", func() bool {
+			b.step(ctx)
+			return b.Leading()
+		})
+		t.Logf("b took the lock %v after a fenced (server-side bound %v)", took, testServerBound)
 		if !strings.Contains(b.log.String(), `"event":"leadership_acquired","replica":"b"`) {
 			t.Errorf("log of b: %s", b.log.String())
 		}
@@ -331,8 +341,17 @@ func TestIntegrationOverlappingLeaders(t *testing.T) {
 		if err := errors.Join(errs...); err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(log.String(), "partition_maintenance_failed") {
-			t.Errorf("partition maintenance failed: %s", log.String())
+		// The overlapping runs of partition maintenance take turns on the maintenance lock. A run that waits for it
+		// longer than lock_timeout, behind a run that is still creating the partitions on a busy machine, gives up and
+		// is retried at the next run, as designed; any other failure is an error. One run created every partition.
+		for line := range strings.Lines(log.String()) {
+			if strings.Contains(line, `"event":"partition_maintenance_failed"`) && !strings.Contains(line,
+				`"error":"take the partition maintenance lock: ERROR: canceling statement due to lock timeout (SQLSTATE 55P03)"`) {
+				t.Errorf("partition maintenance failed: %s", line)
+			}
+		}
+		if n := strings.Count(log.String(), `"event":"partitions_maintained"`); n != 1 {
+			t.Errorf("partitions_maintained logged %d times: %s", n, log.String())
 		}
 		count := func(sql string) int {
 			var n int
