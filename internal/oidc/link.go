@@ -110,7 +110,7 @@ func linkFailure(code string) Outcome {
 // only when sess started it, exchanges the code, verifies the ID token and adds the identity to the account, wiping
 // the password in the same update; the TOTP enrolment stays. The user's other sessions end (oidc_linked) and sess
 // continues as an OIDC session; an offline token is kept as at a sign-in. An identity that another user holds is
-// refused with identity_linked_elsewhere. Every outcome is a redirect to the profile; a failure of the identity
+// refused with identity_linked_elsewhere, and one whose groups map to no Role with no_access. Every outcome is a redirect to the profile; a failure of the identity
 // provider or of Muster itself is idp_error and is logged as oidc_sign_in_failed.
 func (s *Service) CompleteLink(ctx context.Context, sess auth.Session, cb Callback) Outcome {
 	out, reason, err := s.completeLink(ctx, sess, cb)
@@ -175,7 +175,21 @@ func (s *Service) completeLink(ctx context.Context, sess auth.Session, cb Callba
 	if err != nil {
 		return Outcome{}, "id token", err
 	}
-	return s.link(ctx, sess, cb, identityOf(d.Issuer, idt, nil, offlineToken(tokens)))
+	groups, found, err := s.groups(ctx, p, d, st.GroupsClaim, idt, tokens.AccessToken)
+	if err != nil {
+		return Outcome{}, "userinfo", err
+	}
+	if found == st.GroupsClaimMissing {
+		if err := s.setGroupsClaimMissing(ctx, !found); err != nil {
+			return Outcome{}, "settings", err
+		}
+	}
+	id := identityOf(d.Issuer, idt, groups, offlineToken(tokens))
+	// An identity whose groups map to no Role could not sign in afterwards, so the link is refused as a sign-in is.
+	if _, mapped := MapRole(groups, st.GroupMappings, st.UnmatchedRole); !mapped {
+		return s.refuseLink(ctx, sess, cb, id, ErrorNoAccess)
+	}
+	return s.link(ctx, sess, cb, id)
 }
 
 var (
@@ -252,7 +266,7 @@ func (s *Service) link(ctx context.Context, sess auth.Session, cb Callback, id i
 	})
 	switch {
 	case errors.Is(err, errLinkedElsewhere):
-		return s.refuseLink(ctx, sess, cb, id)
+		return s.refuseLink(ctx, sess, cb, id, ErrorIdentityLinkedElsewhere)
 	case errors.Is(err, ErrAlreadyLinked) || errors.Is(err, errSessionEnded):
 		return linkFailure(ErrorInvalidRequest), "", nil
 	case err != nil:
@@ -261,18 +275,22 @@ func (s *Service) link(ctx context.Context, sess auth.Session, cb Callback, id i
 	return Outcome{Redirect: ProfilePage}, "", nil
 }
 
-// refuseLink records user.oidc_link_refused for an identity that another account holds; the account of the session
-// is unchanged.
-func (s *Service) refuseLink(ctx context.Context, sess auth.Session, cb Callback, id identity) (Outcome, string,
-	error) {
+// refuseLink records user.oidc_link_refused with the reason code — an identity that another account holds, or groups
+// that map to no Role, which the entry lists as a refused sign-in does — and fails the link with code; the account of
+// the session is unchanged.
+func (s *Service) refuseLink(ctx context.Context, sess auth.Session, cb Callback, id identity, code string) (Outcome,
+	string, error) {
+	details := map[string]any{"reason": code, "issuer": id.issuer}
+	if code == ErrorNoAccess {
+		details["groups"] = auditGroups(id.groups)
+	}
 	if err := s.cfg.Audit.Record(ctx, s.cfg.Store, audit.Entry{
 		OrgID: s.cfg.OrgID, Actor: audit.User(sess.User.ID, sess.User.PublicID), Transport: audit.TransportUI,
-		Action:        ActionLinkRefused,
-		Resource:      audit.Resource{Type: audit.ResourceUser, PublicID: sess.User.PublicID, Name: sess.User.Name},
-		Details:       map[string]any{"reason": ErrorIdentityLinkedElsewhere, "issuer": id.issuer},
-		SourceAddress: cb.Address,
+		Action:   ActionLinkRefused,
+		Resource: audit.Resource{Type: audit.ResourceUser, PublicID: sess.User.PublicID, Name: sess.User.Name},
+		Details:  details, SourceAddress: cb.Address,
 	}); err != nil {
 		return Outcome{}, "audit", err
 	}
-	return linkFailure(ErrorIdentityLinkedElsewhere), "", nil
+	return linkFailure(code), "", nil
 }

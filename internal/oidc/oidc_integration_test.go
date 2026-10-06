@@ -474,12 +474,23 @@ func TestIntegrationLinkAndConvert(t *testing.T) {
 		}
 		// A callback replayed in another session.
 		carol, carolSess, _ := w.local(t, "carol", "carol-password-1")
-		_, cb := w.link(t, carolSess, fakeoidc.User{Subject: "u-4", PreferredUsername: "carol"})
+		_, cb := w.link(t, carolSess, fakeoidc.User{Subject: "u-4", PreferredUsername: "carol",
+			Groups: []string{"oncall"}})
 		if out := w.svc.CompleteLink(ctx, bobSess, cb); out.Redirect != "/profile?error=invalid_request" {
 			t.Errorf("a replayed callback = %+v", out)
 		}
 		if got := w.scalar(t, `SELECT oidc_subject FROM users WHERE id = $1`, carol.ID); got != "u-4" {
 			t.Errorf("carol = %v", got)
+		}
+
+		// Groups that map to no Role refuse the link with no_access, recorded with the groups.
+		if out, _ := w.link(t, bobSess, fakeoidc.User{Subject: "u-6", PreferredUsername: "bob",
+			Groups: []string{"contractors"}}); out.Redirect != "/profile?error=no_access" {
+			t.Errorf("a link without access = %+v", out)
+		}
+		if refused := w.actions(t, oidc.ActionLinkRefused); len(refused) != 2 || refused[1]["reason"] != "no_access" ||
+			len(refused[1]["groups"].([]any)) != 1 {
+			t.Errorf("user.oidc_link_refused = %v", refused)
 		}
 
 		// Conversion back to local (C-03.AC-21).

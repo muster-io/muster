@@ -263,7 +263,7 @@ func TestOIDCLinkingAndConversion(t *testing.T) {
 		localUser(t, admin, "carol", "carol-password-1")
 		carol := newAgent(t, base)
 		carol.signIn("carol", "carol-password-1")
-		nextUser(t, "u-4", "carol")
+		nextUser(t, "u-4", "carol", "oncall")
 		start = carol.json(http.MethodPost, "/api/v1/me/oidc-identity", "", http.StatusCreated)
 		idp := carol.do(http.MethodGet, start["authorization_url"].(string), "")
 		cb, _ := url.Parse(idp.header.Get("Location"))
@@ -272,6 +272,12 @@ func TestOIDCLinkingAndConversion(t *testing.T) {
 		}
 		if a := carol.do(http.MethodGet, cb.RequestURI(), ""); a.header.Get("Location") != "/profile" {
 			t.Errorf("the callback in Carol's session went to %s", a.header.Get("Location"))
+		}
+		// Groups that map to no Role refuse the link, as at a sign-in.
+		nextUser(t, "u-7", "bob", "contractors")
+		start = bob.json(http.MethodPost, "/api/v1/me/oidc-identity", "", http.StatusCreated)
+		if to := bob.back(start["authorization_url"].(string)); to != "/profile?error=no_access" {
+			t.Errorf("a link without access ended at %s", to)
 		}
 	})
 

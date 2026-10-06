@@ -448,13 +448,15 @@ func (s *Service) failed(ctx context.Context, user, reason string, err error) {
 		logging.F("error", masked(err)))
 }
 
-// refusedBy says whether a failed refresh is a refusal of the identity provider — invalid_grant or another 4xx answer
-// except 408 and 429 — and names it; anything else, the budget spent included, is unavailability. A 407 comes from the
-// OIDC proxy, not from the identity provider, so it is unavailability too.
+// refusedBy says whether a failed refresh is a refusal of the user by the identity provider — a 4xx answer about the
+// user's grant, such as invalid_grant — and names it (C-03.FR-30). Anything else is unavailability: 408 and 429, the
+// budget spent, a 407 of the OIDC proxy, and errors about Muster's client rather than the user — invalid_client,
+// unauthorized_client, or a 401, which the token endpoint answers only to a failed client authentication (RFC 6749
+// §5.2) — so that a broken client secret never signs everyone out.
 func refusedBy(err error) (string, bool) {
 	be, ok := errors.AsType[*BackChannelError](err)
-	if !ok || be.Step != refreshStep || be.Status < 400 || be.Status > 499 || be.Status == 408 || be.Status == 429 ||
-		be.Status == 407 {
+	if !ok || be.Step != refreshStep || be.Status < 400 || be.Status > 499 || clientError(be) ||
+		slices.Contains([]int{401, 407, 408, 429}, be.Status) {
 		return "", false
 	}
 	if be.Code != "" {
@@ -512,4 +514,9 @@ func (s *Service) storeToken(ctx context.Context, q Queries, userID int64, token
 		return fmt.Errorf("store the offline token: %w", err)
 	}
 	return nil
+}
+
+// clientError reports whether a token endpoint answer is about Muster's client rather than the user.
+func clientError(be *BackChannelError) bool {
+	return be.Code == "invalid_client" || be.Code == "unauthorized_client"
 }

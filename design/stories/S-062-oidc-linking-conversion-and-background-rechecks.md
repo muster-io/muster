@@ -46,11 +46,11 @@ files_touched:
   - api/openapi.yaml
   - test/e2e/oidc_test.go
 acceptance:
-  - "[C-03.FR-9, C-03.FR-29, C-03.AC-20] When Alice links OIDC from her session, her other sessions end, her password no longer signs in (401), she signs in through OIDC into the same account with TOTP still asked, and `GET /api/v1/users` shows her `sign_in_method` `oidc`; the same identity linked from Bob's session ends with `identity_linked_elsewhere`; a link callback replayed in another session ends with `invalid_request`."
+  - "[C-03.FR-9, C-03.FR-29, C-03.AC-20] When Alice links OIDC from her session, her other sessions end, her password no longer signs in (401), she signs in through OIDC into the same account with TOTP still asked, and `GET /api/v1/users` shows her `sign_in_method` `oidc`; the same identity linked from Bob's session ends with `identity_linked_elsewhere`; a link callback replayed in another session ends with `invalid_request`; a link whose groups map to no Role ends with `no_access`."
   - "[C-03.FR-11, C-03.FR-29, C-03.AC-21] `POST /api/v1/users/{user_id}/convert-to-local` removes Alice's identity, ends her sessions and returns a password setup link, and her next OIDC sign-in is refused with `login_taken`; `muster admin reset-password --actor ops` on an account created through OIDC sets a password, removes the identity and writes an Audit log entry naming `ops`."
   - "[C-03.FR-29] `updateUser` answers 409 `role_locked` for a Role change of an OIDC account while OIDC and `oidc.sync_role` are both on; `changePassword` and `createPasswordSetupLink` answer 409 `local_user_only` for an account that signs in through OIDC."
   - "[C-03.FR-30, C-03.AC-22] After the fake IdP disables a signed-in user who holds an offline token, the next re-check — within one `auth.oidc_recheck_interval` — ends all of the user's sessions, the next request answers 401 `oidc_session_ended`, and the Audit log records the refusal; after a new OIDC sign-in the user's sessions work again."
-  - "[C-03.FR-30, C-03.AC-23] While the fake IdP answers 503 to refresh requests, sessions stay active across several intervals, `muster_oidc_checks_total{outcome=\"unavailable\"}` grows and `oidc_check_failed` is logged; after the IdP recovers, the next check succeeds."
+  - "[C-03.FR-30, C-03.AC-23] While the fake IdP answers 503 to refresh requests, sessions stay active across several intervals, `muster_oidc_checks_total{outcome=\"unavailable\"}` grows and `oidc_check_failed` is logged; after the IdP recovers, the next check succeeds. A refresh refused with `invalid_client` (a broken client secret) is unavailable as well."
   - "[C-03.FR-30, C-03.AC-24] When the fake IdP grants no `offline_access`, an OIDC session ends `auth.oidc_fallback_session_lifetime` after sign-in although it is in use, and no background check runs for the user."
   - "[C-03.FR-32, C-03.AC-26] With `oidc.sync_role` on, when the fake IdP maps the last active Admin to a lower Role at a background re-check, the Role stays Admin and the sessions continue, the Audit log records `user.role_sync_kept_admin` with the mapped Role, and the OIDC settings carry the warning `last_admin_kept`; once a second Admin is active, the next re-check applies the lower Role and the warning is gone."
 verify: "make ci test-integration e2e"
@@ -83,7 +83,8 @@ issue: 114
   `409 oidc_already_linked`, `409 oidc_not_enabled`) returns `OidcLinkStart` for a request with purpose `link`,
   `link_user_id` and `link_session_id`, with the PKCE, state and nonce of S-013 and `offline_access` requested.
   `completeOidcLink` is accepted only in the session that started it (`invalid_request` otherwise); an identity held by
-  another user ends with `identity_linked_elsewhere` (Audit `user.oidc_link_refused`); success sets the identity and
+  another user ends with `identity_linked_elsewhere` (Audit `user.oidc_link_refused`), and groups that map to no Role,
+  with no Role for unmatched users, with `no_access` (the same entry, with the groups); success sets the identity and
   wipes the password in one update, ends the user's other sessions (`oidc_linked`) and continues the current one as an
   OIDC session, then redirects to `/profile` (failures to `/profile?error=<code>`). The TOTP enrolment stays.
   `convertUserToLocal` (`users:write`) removes the identity, wipes the offline token and its `oidc_checks` row, ends
@@ -107,10 +108,12 @@ issue: 114
   iterates over the Organizations (one in L1) and passes `org_id` to every claim and query (lint 1). A user with no
   live session and no usable Personal access token is `skipped` without calling the IdP. The refresh goes through the
   background class and the OIDC proxy with a budget of 10 s for its attempts, and the lease (60 s) outlasts it; a
-  rotated refresh token is stored. A refusal (`invalid_grant` or another `4xx` except `408` and `429`) ends every
+  rotated refresh token is stored. A refusal (a `4xx` about the user's grant such as `invalid_grant`; not `408`,
+  `429`, the proxy's `407` or a client error) ends every
   session of the user (`idp_refused`; the next request answers `401 oidc_session_ended`), sets `oidc_refused_at`, wipes
   the token, removes the row and writes `user.oidc_refused`. Unavailability (unreachable, timeout, `408`, `429`, `5xx`,
-  the budget spent) changes nothing; the next attempt is one interval later and `oidc_check_failed` (WARN) is logged. A
+  the budget spent, and client errors: `invalid_client`, `unauthorized_client` or a `401` of the token endpoint, so a
+  broken client secret never signs everyone out) changes nothing; the next attempt is one interval later and `oidc_check_failed` (WARN) is logged. A
   success records the contact and, with `sync_role` and a groups claim in a refreshed ID token, updates the Role — a
   changed Role ends the sessions, and groups that map to nothing with no Role for unmatched users count as a refusal; a
   refresh that returns no ID token, or an ID token without the groups claim, leaves the Role unchanged (D247). Every
@@ -197,6 +200,15 @@ None. Where the groups claim is read was settled in S-013 (D247).
     lost its lease still keeps the refresh token the IdP rotated while the user holds the token it refreshed, so a
     rotation is never lost into a false refusal at the next check.
   - A `407` from the OIDC proxy is unavailability: it is not an answer of the IdP.
+  - Maintainer decision (PR review): an error about Muster's client — `invalid_client`, `unauthorized_client`, or a
+    `401` of the token endpoint (RFC 6749 §5.2 uses it only for a failed client authentication) — counts as
+    `unavailable`, not as a refusal; C-03.FR-30 is amended. The outcome label stays `unavailable`: a new label would
+    also change the `oidc_checks.last_outcome` CHECK and the metric table of `reference.md`.
+  - Maintainer decision: a link whose groups map to no Role, with no Role for unmatched users, is refused with
+    `no_access` (`/profile?error=no_access`, Audit `user.oidc_link_refused` with the groups), as at a sign-in, so that a
+    user cannot link an identity that would lock them out.
+  - Maintainer decision: no re-authentication before a link; the active web session with CSRF and the IdP round trip
+    are the proof.
   - While OIDC is switched off, due re-checks are `skipped` without calling the IdP: the IdP decides nothing then,
     as `role_locked` says.
   - A refresh whose ID token does not verify, or names another subject, decides nothing: the check is
@@ -205,7 +217,7 @@ None. Where the groups claim is read was settled in S-013 (D247).
   - A sign-in without an offline token wipes the previous one and its re-check, as "each new OIDC sign-in replaces
     it" says, and bounds the user's open OIDC sessions to `auth.oidc_fallback_session_lifetime`, since nothing
     re-checks them any more.
-  - Linking applies no Role sync; the next sign-in or re-check does. The link callback answers every outcome with a
+  - Linking applies no Role sync, though groups that map to no Role refuse it; the next sign-in or re-check syncs. The link callback answers every outcome with a
     redirect: a callback without a usable web session goes to `/profile?error=invalid_request`.
   - While Role sync keeps the last active Admin, each re-check records `user.role_sync_kept_admin`, which keeps the
     warning `last_admin_kept` current (it compares the entry with the last OIDC contact).

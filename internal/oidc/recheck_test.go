@@ -579,7 +579,11 @@ func TestRefusedBy(t *testing.T) {
 	}{
 		{&BackChannelError{Step: refreshStep, Status: 400, Code: "invalid_grant"}, "invalid_grant", true},
 		{&BackChannelError{Step: refreshStep, Status: 403}, "http_403", true},
-		{&BackChannelError{Step: refreshStep, Status: 401, Code: "invalid_client"}, "invalid_client", true},
+		{&BackChannelError{Step: refreshStep, Status: 401, Code: "invalid_client"}, "", false},
+		{&BackChannelError{Step: refreshStep, Status: 400, Code: "invalid_client"}, "", false},
+		{&BackChannelError{Step: refreshStep, Status: 400, Code: "unauthorized_client"}, "", false},
+		{&BackChannelError{Step: refreshStep, Status: 401}, "", false},
+		{&BackChannelError{Step: refreshStep, Status: 400, Code: "invalid_scope"}, "invalid_scope", true},
 		{&BackChannelError{Step: refreshStep, Status: 408}, "", false},
 		{&BackChannelError{Step: refreshStep, Status: 429}, "", false},
 		{&BackChannelError{Step: refreshStep, Status: 407}, "", false},
@@ -668,5 +672,29 @@ func TestRecheckKeepsTheRotatedToken(t *testing.T) {
 	}
 	if c := e.store.checks[olga.id]; c.outcome != CheckUnavailable || c.owner != "" {
 		t.Errorf("the outcome after the worker stopped = %+v", c)
+	}
+}
+
+// TestRecheckClientError is the maintainer's decision on C-03.FR-30: a refresh refused with invalid_client — a broken
+// client secret — is about Muster's client, not the user: nothing changes, the check is unavailable and logged.
+func TestRecheckClientError(t *testing.T) {
+	e := newEnv(t)
+	e.configure(t, nil)
+	olga := e.signedInWithToken(t)
+	if err := e.idp.SetFault(fakeserver.Fault{Path: "/token", Status: http.StatusUnauthorized,
+		Body: `{"error":"invalid_client"}`}); err != nil {
+		t.Fatal(err)
+	}
+	before := checks(CheckUnavailable)
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if c := e.store.checks[olga.id]; c == nil || c.outcome != CheckUnavailable || olga.liveSessions != 2 ||
+		olga.refusedAt != nil || olga.token == nil || len(e.store.audited(ActionUserRefused)) != 0 ||
+		checks(CheckUnavailable) != before+1 {
+		t.Fatalf("a client error = %+v, %+v", c, olga)
+	}
+	if !strings.Contains(e.log.String(), `"level":"WARN","event":"oidc_check_failed","user":"`+olga.publicID+
+		`","reason":"refresh","error":"the token endpoint answered 401 with the error invalid_client"`) {
+		t.Errorf("no oidc_check_failed for the client error:\n%s", e.log)
 	}
 }

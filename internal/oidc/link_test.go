@@ -101,7 +101,7 @@ func TestLinkRefusals(t *testing.T) {
 	alice.issuer, alice.subject, alice.password = e.idp.URL(), "u-3", false
 	bob, bobSess := e.local(2, "Bob")
 	out := e.svc.CompleteLink(t.Context(), bobSess, e.startLink(t, bobSess, fakeoidc.User{Subject: "u-3",
-		PreferredUsername: "alice"}))
+		PreferredUsername: "alice", Groups: []string{"oncall"}}))
 	if out.Redirect != ProfilePage+"?error="+ErrorIdentityLinkedElsewhere || bob.subject != "" || !bob.password ||
 		bob.liveSessions != 3 {
 		t.Fatalf("the identity of another user = %+v, bob %+v", out, bob)
@@ -113,7 +113,7 @@ func TestLinkRefusals(t *testing.T) {
 
 	// A parallel link of the same identity that commits first: the unique index refuses the second.
 	carl, carlSess := e.local(3, "Carl")
-	cb := e.startLink(t, carlSess, fakeoidc.User{Subject: "u-7", PreferredUsername: "carl"})
+	cb := e.startLink(t, carlSess, fakeoidc.User{Subject: "u-7", PreferredUsername: "carl", Groups: []string{"oncall"}})
 	other := &memUser{id: 9, publicID: "SR00000000000Z", login: "zed", name: "zed", status: "active",
 		issuer: e.idp.URL(), subject: "u-7"}
 	e.store.users = append(e.store.users, other)
@@ -124,7 +124,7 @@ func TestLinkRefusals(t *testing.T) {
 
 	// A callback replayed in another session.
 	dave, daveSess := e.local(4, "Dave")
-	cb = e.startLink(t, daveSess, fakeoidc.User{Subject: "u-4", PreferredUsername: "dave"})
+	cb = e.startLink(t, daveSess, fakeoidc.User{Subject: "u-4", PreferredUsername: "dave", Groups: []string{"oncall"}})
 	if out := e.svc.CompleteLink(t.Context(), aliceSess, cb); out.Redirect != ProfilePage+"?error="+ErrorInvalidRequest {
 		t.Errorf("a callback in another session = %+v", out)
 	}
@@ -145,7 +145,7 @@ func TestLinkWithoutOfflineAccess(t *testing.T) {
 	e.idp.Configure(fakeoidc.Config{GrantOfflineAccess: &no})
 	erin, sess := e.local(5, "Erin")
 	out := e.svc.CompleteLink(t.Context(), sess, e.startLink(t, sess, fakeoidc.User{Subject: "u-5",
-		PreferredUsername: "erin"}))
+		PreferredUsername: "erin", Groups: []string{"oncall"}}))
 	if out.Redirect != ProfilePage || erin.token != nil || e.store.checks[erin.id] != nil {
 		t.Fatalf("outcome %+v, erin %+v", out, erin)
 	}
@@ -165,7 +165,7 @@ func TestLinkFailures(t *testing.T) {
 	}
 	e.configure(t, nil)
 	_, sess := e.local(2, "Bob")
-	who := fakeoidc.User{Subject: "u-2", PreferredUsername: "bob"}
+	who := fakeoidc.User{Subject: "u-2", PreferredUsername: "bob", Groups: []string{"oncall"}}
 
 	cb := e.startLink(t, sess, who)
 	cb.Error, cb.Code = "access_denied", ""
@@ -198,7 +198,7 @@ func TestLinkFailures(t *testing.T) {
 	// The session that started the link ended before the callback: nothing is linked.
 	e.configure(t, nil)
 	_, gsess := e.local(7, "Gina")
-	cb = e.startLink(t, gsess, fakeoidc.User{Subject: "u-17", PreferredUsername: "gina"})
+	cb = e.startLink(t, gsess, fakeoidc.User{Subject: "u-17", PreferredUsername: "gina", Groups: []string{"oncall"}})
 	e.store.sessionGone = true
 	if out := e.svc.CompleteLink(t.Context(), gsess, cb); out.Error != ErrorInvalidRequest {
 		t.Errorf("a link whose session ended = %+v", out)
@@ -208,12 +208,37 @@ func TestLinkFailures(t *testing.T) {
 	// The account lost its password between the start and the callback: nothing is linked.
 	e.configure(t, nil)
 	frank, fsess := e.local(6, "Frank")
-	cb = e.startLink(t, fsess, fakeoidc.User{Subject: "u-6", PreferredUsername: "frank"})
+	cb = e.startLink(t, fsess, fakeoidc.User{Subject: "u-6", PreferredUsername: "frank", Groups: []string{"oncall"}})
 	frank.password = false
 	if out := e.svc.CompleteLink(t.Context(), fsess, cb); out.Error != ErrorInvalidRequest || frank.subject != "" {
 		t.Errorf("a link of an account without a password = %+v", out)
 	}
 	if _, err := e.svc.StartLink(t.Context(), fsess); !errors.Is(err, ErrAlreadyLinked) {
 		t.Errorf("a link start of an account without a password = %v", err)
+	}
+}
+
+// TestLinkNoAccess is the maintainer's decision on C-03.FR-29: a link whose groups map to no Role, with no Role for
+// unmatched users, is refused with no_access and recorded with the groups, as a sign-in is; the account is unchanged.
+func TestLinkNoAccess(t *testing.T) {
+	e := newEnv(t)
+	e.configure(t, nil)
+	hank, sess := e.local(8, "Hank")
+	who := fakeoidc.User{Subject: "u-8", PreferredUsername: "hank", Groups: []string{"contractors"}}
+	out := e.svc.CompleteLink(t.Context(), sess, e.startLink(t, sess, who))
+	if out.Redirect != ProfilePage+"?error="+ErrorNoAccess || hank.subject != "" || !hank.password ||
+		hank.liveSessions != 3 || hank.token != nil {
+		t.Fatalf("a link without access = %+v, hank %+v", out, hank)
+	}
+	r := e.store.audited(ActionLinkRefused)
+	if len(r) != 1 || r[0]["details"].(map[string]any)["reason"] != ErrorNoAccess ||
+		len(r[0]["details"].(map[string]any)["groups"].([]any)) != 1 {
+		t.Errorf("user.oidc_link_refused = %v", r)
+	}
+	// With a Role for unmatched users the same groups link.
+	e.configure(t, func(in *Input) { in.UnmatchedRole = UnmatchedViewer })
+	if out := e.svc.CompleteLink(t.Context(), sess, e.startLink(t, sess, who)); out.Redirect != ProfilePage ||
+		hank.subject != "u-8" {
+		t.Errorf("a link with a Role for unmatched users = %+v", out)
 	}
 }

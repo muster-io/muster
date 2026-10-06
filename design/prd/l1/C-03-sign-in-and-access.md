@@ -189,13 +189,15 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   rows with deadlines that any replica claims with `FOR UPDATE SKIP LOCKED` and a lease, like timers, so one check per
   user runs at a time; it calls the IdP through the back channel (the background client class and the OIDC proxy,
   C-02.FR-20) and stores a rotated refresh token back.
-  - **Refusal** — `invalid_grant` or another `4xx` answer except `408` and `429`, as when the user is banned or
-    disabled at the IdP: all of the user's sessions end (their next request gets `401` with `oidc_session_ended` and the
+  - **Refusal** — a `4xx` answer about the user's grant, such as `invalid_grant`, as when the user is banned or
+    disabled at the IdP (any `4xx` except `408`, `429`, the proxy's `407` and the client errors below): all of the user's sessions end (their next request gets `401` with `oidc_session_ended` and the
     SPA lands on the sign-in page), the user's Personal access tokens are refused with `401` and
     `oidc_recheck_required` until the next successful OIDC sign-in (C-04.FR-8; they are not revoked), the offline token
     is wiped, and the Audit log records the refusal.
-  - **IdP unavailable** — unreachable, a timeout, `408`, `429` or `5xx`: nothing changes, and the next attempt comes one
-    interval later. Each check is counted in `muster_oidc_checks_total{outcome}`, and each unavailable one is logged as
+  - **IdP unavailable** — unreachable, a timeout, `408`, `429` or `5xx`, and errors about Muster's client itself
+    rather than the user (`invalid_client` or `unauthorized_client`, or a `401` from the token endpoint, which signals
+    a failed client authentication), so that a broken client secret never signs everyone out: nothing changes, and
+    the next attempt comes one interval later. Each check is counted in `muster_oidc_checks_total{outcome}`, and each unavailable one is logged as
     the registered event `oidc_check_failed`, so an IdP incident never signs everybody out.
   - **Success** — the user's last successful contact with the IdP is recorded; with `oidc.sync_role` on, the Role
     follows the groups in the refreshed tokens when they carry the groups claim: a changed Role ends the user's sessions
