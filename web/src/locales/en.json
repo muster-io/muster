@@ -4,8 +4,9 @@
       "bootstrap": "Bootstrap",
       "cli": "{{name}} (CLI)",
       "serviceAccount": "{{name}} (service account)",
+      "serviceAccountToken": "{{account}} (service account) · token {{name}}",
       "system": "Muster",
-      "token": "with the token {{name}}"
+      "viaToken": "{{user}} via token {{name}}"
     },
     "columns": {
       "action": "Action",
@@ -116,6 +117,7 @@
     "oidc": "OIDC",
     "profile": "Profile",
     "security": "Security",
+    "serviceAccounts": "Service accounts",
     "users": "Users"
   },
   "notices": {
@@ -306,6 +308,48 @@
       "title": "Two-factor authentication"
     }
   },
+  "serviceAccounts": {
+    "actions": {
+      "delete": "Delete",
+      "deleteConfirm": "Its tokens are revoked at once and the scripts that use them stop working. Audit log entries stay. This cannot be undone.",
+      "deleteTitle": "Delete {{name}}?",
+      "disable": "Disable",
+      "enable": "Enable"
+    },
+    "create": {
+      "hint": "A service account cannot sign in to the UI; it acts through its tokens.",
+      "start": "Create service account",
+      "submit": "Create",
+      "title": "Create service account"
+    },
+    "empty": "No service accounts yet.",
+    "errors": {
+      "nameTaken": "Another service account has this name.",
+      "roleNotHeld": "You cannot give a Role with Permissions you do not hold.",
+      "stale": "Someone else changed this service account. Reload to see the changes."
+    },
+    "fields": {
+      "created": "Created",
+      "name": "Name",
+      "role": "Role",
+      "roleHint": "The account's tokens act with this Role.",
+      "status": "Status",
+      "tokens": "Tokens"
+    },
+    "hint": "Identities for automation, such as Terraform. Their tokens act with the account's Role.",
+    "page": {
+      "actions": "Actions",
+      "actionsHint": "A disabled account's tokens stop working until it is enabled again.",
+      "createTokenHint": "The token acts as {{name}}, with its Role. Its value is shown once.",
+      "details": "Details",
+      "noTokens": "This account has no tokens.",
+      "roleHint": "A new Role applies to every token of the account at once.",
+      "title": "Service account",
+      "tokens": "Tokens",
+      "tokensHint": "Each value is shown once, when the token is created."
+    },
+    "title": "Service accounts"
+  },
   "setupLink": {
     "copied": "Copied",
     "copy": "Copy",
@@ -338,6 +382,64 @@
   },
   "table": {
     "loadMore": "Load more"
+  },
+  "tokens": {
+    "create": {
+      "start": "Create token",
+      "submit": "Create",
+      "title": "Create token"
+    },
+    "created": {
+      "hint": "Copy the value of {{name}} now and keep it somewhere safe.",
+      "once": "You will not see this token again.",
+      "title": "Token created",
+      "value": "Token"
+    },
+    "errors": {
+      "expiryPast": "Choose a date in the future.",
+      "permissionNotHeld": "You no longer hold some of these Permissions. Reload the page and choose again.",
+      "permissionsRequired": "Choose at least one Permission."
+    },
+    "expiry": {
+      "choices": "Quick expiry choices",
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days",
+      "none": "No expiry"
+    },
+    "fields": {
+      "expiry": "Expires on",
+      "name": "Name",
+      "nameHint": "Say where the token is used, such as \"laptop-scripts\".",
+      "permissions": "Permissions"
+    },
+    "list": {
+      "created": "Created {{time}}",
+      "expired": "Expired {{time}}",
+      "expires": "Expires {{time}}",
+      "lastUsed": "Last used {{time}}",
+      "lastUsedFrom": "Last used {{time}} from {{address}}",
+      "neverUsed": "Never used"
+    },
+    "neverExpires": "This token never expires.",
+    "oidcGrace": "Your tokens work until {{time}} unless you sign in through OIDC again.",
+    "oidcGraceOver": "Your tokens stopped working on {{time}}. Sign in through OIDC again to make them work.",
+    "permissions": {
+      "all": "Select all",
+      "hint": "Only the Permissions you hold. The token never gets more than you have, and loses what your Role loses.",
+      "none": "Clear"
+    },
+    "personal": {
+      "createHint": "The token acts as you, with the Permissions you choose. Its value is shown once.",
+      "empty": "You have no Personal access tokens.",
+      "hint": "Tokens let scripts call the Muster API as you, with the Permissions you choose.",
+      "title": "Personal access tokens"
+    },
+    "revoke": {
+      "action": "Revoke",
+      "confirm": "Scripts that use this token stop working at once. This cannot be undone.",
+      "label": "Revoke {{name}}",
+      "title": "Revoke {{name}}?"
+    }
   },
   "totp": {
     "alreadyEnrolled": "TOTP is already set up for your account.",

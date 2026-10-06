@@ -2,8 +2,8 @@
 // Copyright The Muster Authors
 
 // The Audit log (C-03.FR-15): entries newest first for a time range, by default the last 7 days, filtered by actor,
-// action and resource, with the filters in the URL. Each row shows the actor, the Transport and the diff, in which a
-// Secret appears only as changed (C-03.FR-21).
+// action and resource, with the filters in the URL. Each row shows the actor, with the token it acted through
+// (C-04.FR-6), the Transport and the diff, in which a Secret appears only as changed (C-03.FR-21).
 
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
@@ -47,6 +47,8 @@ const DEFAULT_DAYS = 7;
 
 /** Action types to suggest; the field takes any other, as every capability adds its own. */
 const KNOWN_ACTIONS = [
+  "api_token.created",
+  "api_token.revoked",
   "oidc_settings.updated",
   "organization.updated",
   "session.signed_in",
@@ -55,6 +57,11 @@ const KNOWN_ACTIONS = [
   "session.second_factor_failed",
   "session.oidc_refused",
   "session.ended_all",
+  "service_account.created",
+  "service_account.updated",
+  "service_account.disabled",
+  "service_account.enabled",
+  "service_account.deleted",
   "totp.enrolled",
   "totp.removed",
   "totp.reset",
@@ -77,7 +84,7 @@ const KNOWN_ACTIONS = [
   "user.profile_updated",
 ];
 
-const KNOWN_RESOURCES = ["user", "oidc_settings", "organization"];
+const KNOWN_RESOURCES = ["user", "service_account", "api_token", "oidc_settings", "organization"];
 
 function transportLabel(t: TFunction, transport: Transport): string {
   switch (transport) {
@@ -109,6 +116,24 @@ function actorText(t: TFunction, actor: AuditActor): string {
     default:
       return t("audit.actor.cli", { name: actor.name });
   }
+}
+
+/**
+ * The actor with the token it acted through (C-04.FR-6): "{user} via token {name}" for a Personal access token, the
+ * Service account and its token for a Service account token.
+ */
+function actorWithToken(
+  t: TFunction,
+  actor: AuditActor,
+  tokenName: string | null | undefined,
+): string {
+  if (!tokenName) {
+    return actorText(t, actor);
+  }
+  if (actor.kind === "service_account") {
+    return t("audit.actor.serviceAccountToken", { account: actor.name, name: tokenName });
+  }
+  return t("audit.actor.viaToken", { user: actorText(t, actor), name: tokenName });
 }
 
 /** The text filters, applied together on Enter or with "Apply". */
@@ -295,14 +320,9 @@ function AtCell({ row }: { row: AuditEntry }) {
 function ActorCell({ row }: { row: AuditEntry }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col">
-      <span data-testid="audit-actor">{actorText(t, row.actor)}</span>
-      {row.token_name && (
-        <span className="text-muted-foreground">
-          {t("audit.actor.token", { name: row.token_name })}
-        </span>
-      )}
-    </div>
+    <span data-testid="audit-actor" className="break-words">
+      {actorWithToken(t, row.actor, row.token_name)}
+    </span>
   );
 }
 
