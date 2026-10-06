@@ -14,23 +14,39 @@ files_touched:
   - internal/api/sessions.go
   - internal/api/users.go
   - internal/api/middleware.go
+  - internal/api/server.go
+  - internal/api/problem.go
   - internal/api/totp_test.go
   - internal/api/organization_test.go
+  - internal/api/live_test.go
+  - internal/api/server_test.go
   - internal/totp/totp.go
   - internal/totp/recovery.go
   - internal/totp/query.sql
   - internal/totp/totp_test.go
+  - internal/totp/totp_integration_test.go
   - internal/auth/session.go
+  - internal/auth/query.sql
+  - internal/auth/throttle.go
+  - internal/auth/auth_test.go
   - internal/organization/organization.go
   - internal/organization/query.sql
+  - internal/organization/organization_test.go
   - internal/db/notify.go
+  - internal/db/notify_test.go
   - internal/live/hub.go
   - internal/live/stream.go
   - internal/live/notices.go
   - internal/live/live_test.go
+  - internal/live/live_integration_test.go
   - internal/cli/admin.go
+  - internal/cli/admin_test.go
+  - internal/cli/cli.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/logging/events.go
+  - internal/archlint/secretleak.go
+  - sqlc.yaml
   - design/prd/l1/defaults.md
   - design/prd/L1.md
 acceptance:
@@ -93,8 +109,11 @@ issue: 12
   `confirmTotpEnrolment`); every other call answers `403` with `totp_required` or `totp_enrolment_required`. A wrong
   code is `401 invalid_credentials`, counts towards throttling and increments
   `muster_login_failures_total{method="totp"}`.
-- **Resets** (C-03.FR-11): `resetUserTotp` (`users:write`) deletes the enrolment and the recovery codes;
-  `muster admin reset-totp --actor <name> <login>` does the same from the CLI (exit 2 without `--actor`).
+- **Resets** (C-03.FR-11): `resetUserTotp` (`users:write`) deletes the enrolment and the recovery codes and ends the
+  user's sessions (`end_reason` `totp_reset`), so that the user signs in again and enrols under a covering policy;
+  `muster admin reset-totp --actor <name> <login>` does the same from the CLI (exit 2 without `--actor`). A user
+  without TOTP is left as it is, and nothing is recorded. An Admin's reset of their own TOTP answers `403`: it goes
+  through `removeTotp` with its proof, so that a stolen session cannot drop the second factor.
 - **Organization** (C-03.FR-20, `organizations`): `getOrganization` for every signed-in identity, the outgoing
   heartbeat URL shown only as `SecretStatus`. `updateOrganization` needs `organization:write` and `If-Match`; in this
   story it applies `totp_required` and refuses any other changed value with `422` and `errors[].code = unsupported`
@@ -110,7 +129,10 @@ issue: 12
   the session connection, reconnects after a loss and fans hints out to its streams; writers send `NOTIFY` in their
   transaction. Because notices also change with time, each replica re-evaluates them every 5 seconds and sends a
   `system-notices` hint when the set changes. Hint types in this story: `system-notices` and `organization`; later
-  capabilities add theirs. A stream ends when its session ends, and the reconnect answers `401`.
+  capabilities add theirs. A stream ends when its session ends — each replica checks the sessions of its streams
+  every 5 seconds (`live.check_interval`), without counting it as a use — and the reconnect answers `401`. A replica
+  serves at most `live.max_streams` streams, and a session `live.max_streams_per_session`; beyond them the stream
+  answers `429`.
 
 ## Steps
 
@@ -137,7 +159,7 @@ H=(-b jar -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json')
 curl -s "${H[@]}" -X POST localhost:8080/api/v1/me/totp | tee /tmp/enrol.json | jq -r .otpauth_uri
 # otpauth://totp/Muster:admin@example.org?secret=…&issuer=Muster
 SECRET=$(jq -r .secret /tmp/enrol.json)
-curl -s "${H[@]}" -d "{\"totp_code\":\"$(oathtool --totp -b "$SECRET")\"}" localhost:8080/api/v1/me/totp/confirmation \
+curl -s "${H[@]}" -d "{\"code\":\"$(oathtool --totp -b "$SECRET")\"}" localhost:8080/api/v1/me/totp/confirmation \
   | jq '.codes | length'
 # 10
 

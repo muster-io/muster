@@ -16,7 +16,10 @@ import (
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
 )
 
@@ -52,11 +55,16 @@ const (
 	codeLastAdmin             = "last_admin"
 	codeLinkExpired           = "link_expired"
 	codeLinkUsed              = "link_used"
+	codeTOTPAlreadyEnrolled   = "totp_already_enrolled"
+	codeTOTPNotEnrolled       = "totp_not_enrolled"
+	codeTOTPNotStarted        = "totp_enrolment_not_started"
+	codeTOTPNotPending        = "totp_not_pending"
 
 	fieldRequired      = "required"
 	fieldInvalidFormat = "invalid_format"
 	fieldTooShort      = "too_short"
 	fieldTooLong       = "too_long"
+	fieldUnsupported   = "unsupported"
 )
 
 const (
@@ -121,7 +129,7 @@ var (
 	errSessionExpired  = problem(http.StatusUnauthorized, typeUnauthenticated, codeSessionExpired,
 		"The session expired; sign in again.")
 	errInvalidCredentials = problem(http.StatusUnauthorized, typeUnauthenticated, codeInvalidCredentials,
-		"The login or the password is wrong.")
+		"The login, the password or the code is wrong.")
 	errCSRF = problem(http.StatusForbidden, typeForbidden, codeCSRFInvalid,
 		"The X-CSRF-Token header is missing or wrong.")
 	errSessionRequired = problem(http.StatusForbidden, typeForbidden, codeSessionRequired,
@@ -173,6 +181,14 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	if f, ok := errors.AsType[*users.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
+	if u, ok := errors.AsType[*organization.UnsupportedError](err); ok {
+		p := problem(http.StatusUnprocessableEntity, typeValidationFailed, "", detailSemanticValidation)
+		detail := "This setting cannot be changed yet."
+		for _, pointer := range u.Pointers {
+			p.Errors = append(p.Errors, gen.ProblemError{Pointer: pointer, Code: fieldUnsupported, Detail: &detail})
+		}
+		return p
+	}
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		return errInvalidCredentials
@@ -204,6 +220,27 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	case errors.Is(err, users.ErrLinkUsed):
 		return problem(http.StatusGone, typeGone, codeLinkUsed,
 			"The password setup link was used or replaced by a newer one.")
+	case errors.Is(err, auth.ErrTOTPNotPending):
+		return problem(http.StatusConflict, typeConflict, codeTOTPNotPending, "The session is not waiting for a code.")
+	case errors.Is(err, totp.ErrAlreadyEnrolled):
+		return problem(http.StatusConflict, typeConflict, codeTOTPAlreadyEnrolled, "TOTP is already on.")
+	case errors.Is(err, totp.ErrNotStarted):
+		return problem(http.StatusConflict, typeConflict, codeTOTPNotStarted,
+			"No TOTP enrolment was begun, or another one replaced it; begin the enrolment again.")
+	case errors.Is(err, totp.ErrNotEnrolled):
+		return problem(http.StatusConflict, typeConflict, codeTOTPNotEnrolled, "There is no TOTP to use or change.")
+	case errors.Is(err, totp.ErrOwnTOTP):
+		return problem(http.StatusForbidden, typeForbidden, "",
+			"Remove your own TOTP from your profile, with your password or a code.")
+	case errors.Is(err, totp.ErrUserNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such user.")
+	case errors.Is(err, organization.ErrVersionMismatch):
+		return errPreconditionFailed
+	case errors.Is(err, live.ErrTooManyStreams):
+		p := problem(http.StatusTooManyRequests, typeRateLimited, "",
+			"Too many live-updates streams are open; close a tab or try again later.")
+		p.RetryAfter = int(live.CheckInterval.Seconds())
+		return p
 	}
 	s.log.Log(ctx, logging.APIRequestFailed, logging.F("operation", operation), logging.F("error", err.Error()))
 	return errInternal
@@ -346,6 +383,7 @@ var fieldDetails = map[string]string{
 	fieldInvalidFormat: "The value does not have the expected type, format or one of the allowed values.",
 	fieldTooShort:      "The value is too short.",
 	fieldTooLong:       "The value is too long.",
+	fieldUnsupported:   "This setting cannot be changed yet.",
 }
 
 func item(pointer, code string) gen.ProblemError {

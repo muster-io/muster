@@ -38,6 +38,8 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/runtime"
+	"github.com/muster-io/muster/internal/totp"
+	tdb "github.com/muster-io/muster/internal/totp/dbgen"
 	"github.com/muster-io/muster/internal/users"
 	udb "github.com/muster-io/muster/internal/users/dbgen"
 )
@@ -66,6 +68,7 @@ var registry = []Probe{
 	{Name: "doctor", Run: probeDoctor},
 	{Name: "outbound_http", Run: probeOutbound},
 	{Name: "sign_in", Run: probeSignIn},
+	{Name: "totp", Run: probeTOTP},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -421,12 +424,23 @@ func (s *probeUsers) InsertAuditEntry(context.Context, adb.InsertAuditEntryParam
 type probeAuth struct {
 	auth.Store
 	hash     string
+	totp     bool
 	fail     error
 	blocked  bool
 	sessions []authdb.CreateSessionParams
 }
 
 func (s *probeAuth) InTx(_ context.Context, f func(auth.Queries) error) error { return f(s) }
+
+func (s *probeAuth) TryLockSignInSubject(context.Context, authdb.TryLockSignInSubjectParams) (bool, error) {
+	return true, nil
+}
+
+func (s *probeAuth) BlockSignIn(context.Context, authdb.BlockSignInParams) error { return nil }
+
+func (s *probeAuth) CompleteSecondFactor(context.Context, authdb.CompleteSecondFactorParams) (int64, error) {
+	return 1, nil
+}
 
 func (s *probeAuth) GetThrottles(context.Context, authdb.GetThrottlesParams) ([]authdb.GetThrottlesRow, error) {
 	if !s.blocked {
@@ -444,7 +458,8 @@ func (s *probeAuth) GetSignInUser(_ context.Context, arg authdb.GetSignInUserPar
 		return authdb.GetSignInUserRow{}, pgx.ErrNoRows
 	}
 	return authdb.GetSignInUserRow{ID: 1, PublicID: "SR0000000000P1", Name: "probe", Role: auth.RoleAdmin,
-		Status: "active", PasswordHash: pgtype.Text{String: s.hash, Valid: true}}, nil
+		Status: "active", PasswordHash: pgtype.Text{String: s.hash, Valid: true}, TotpEnrolled: s.totp,
+		TotpRequired: "nobody"}, nil
 }
 
 func (s *probeAuth) RecordSignInFailure(context.Context, authdb.RecordSignInFailureParams) (int64, error) {
@@ -489,6 +504,141 @@ func (s *probeAuth) EndOtherUserSessions(context.Context, authdb.EndOtherUserSes
 }
 
 func (s *probeAuth) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error { return nil }
+
+// probeTOTP gives the secrets to the second factor — as the password, TOTP codes and recovery codes of sign-in, of
+// the second step, of the enrolment and of the removal, directly and through the API — and checks that the seed of an
+// enrolment reaches neither the log nor an error.
+func probeTOTP(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	business := clock.NewManual(now)
+	w := audit.NewWriter(logger, business)
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	hash, err := auth.HashPassword(ctx, secrets[0])
+	if err != nil {
+		return err
+	}
+	as := &probeAuth{hash: hash}
+	roles := auth.Roles{auth.RoleAdmin: {"users:write"}, auth.RoleResponder: {"alerts:read"},
+		auth.RoleViewer: {"alerts:read"}}
+	sessions := auth.NewService(1, as, k, w, business, roles)
+	ts := &probeTOTPStore{codeHash: hash}
+	factors := totp.New(1, ts, k, w, clock.Clocks{Business: business, Real: clock.NewManual(now)}, sessions)
+	sessions.UseSecondFactor(factors)
+	addr := netip.MustParseAddr("192.0.2.1")
+	sess, err := sessions.SignIn(ctx, auth.SignInRequest{Login: "probe@example.org", Password: secrets[0],
+		Address: addr})
+	if err != nil {
+		return err
+	}
+	e, err := factors.Begin(ctx, sess)
+	if err != nil {
+		return err
+	}
+	_, err1 := factors.Confirm(ctx, sess, secrets[1], addr)
+	as.totp, ts.enrolled = true, true
+	_, err2 := sessions.SignIn(ctx, auth.SignInRequest{Login: "probe@example.org", Password: secrets[0],
+		Proof: auth.Proof{RecoveryCode: secrets[1]}, Address: addr})
+	limited, err3 := sessions.SignIn(ctx, auth.SignInRequest{Login: "probe@example.org", Password: secrets[0],
+		Address: addr})
+	_, err4 := sessions.SubmitSecondFactor(ctx, limited, auth.Proof{TOTPCode: secrets[2]}, addr)
+	errs := []error{err1, err2, err3, err4,
+		factors.Remove(ctx, sess, totp.Removal{Password: secrets[1]}, addr),
+		factors.Remove(ctx, sess, totp.Removal{RecoveryCode: secrets[2]}, addr),
+	}
+	_, err = factors.RegenerateRecoveryCodes(ctx, sess, secrets[2], addr)
+	errs = append(errs, err)
+	h, err := api.New(api.Config{Sessions: sessions, Users: users.NewService(1, &probeUsers{}, w, business),
+		TOTP: factors, Log: logger, Real: clock.Real{}})
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	csrf, err := sessions.CSRFToken(sess)
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	var answers []string
+	for _, req := range [][3]string{
+		{"/api/v1/me/totp/removal", `{"password":"` + secrets[1] + `"}`, sess.Cookie()},
+		{"/api/v1/me/totp/confirmation", `{"code":"` + secrets[2] + `"}`, sess.Cookie()},
+		{"/api/v1/sessions/current/totp", `{"recovery_code":"` + secrets[2] + `"}`, limited.Cookie()},
+		{"/api/v1/sessions", `{"login":"probe@example.org","password":"` + secrets[0] + `","totp_code":"` +
+			secrets[1] + `"}`, ""},
+	} {
+		r, err := http.NewRequestWithContext(ctx, http.MethodPost, req[0], strings.NewReader(req[1]))
+		if err != nil {
+			return err
+		}
+		r.Header.Set("Content-Type", "application/json")
+		if req[2] != "" {
+			r.Header.Set("Cookie", auth.CookieName+"="+req[2])
+			r.Header.Set(auth.CSRFHeader, csrf)
+		}
+		rec := &probeRecorder{header: http.Header{}}
+		h.ServeHTTP(rec, r)
+		answers = append(answers, rec.body.String())
+	}
+	errs = append(errs, fmt.Errorf("answers: %s", strings.Join(answers, " | ")))
+	if out := errors.Join(errs...); out != nil && strings.Contains(out.Error(), e.Secret) {
+		return errors.New("the seed of the enrolment reached a returned error")
+	}
+	if lw, ok := log.(interface{ String() string }); ok && strings.Contains(lw.String(), e.Secret) {
+		return errors.New("the seed of the enrolment reached the log")
+	}
+	return errors.Join(errs...)
+}
+
+// probeTOTPStore is the TOTP of probeTOTP in memory: one user, whose recovery code hash is codeHash.
+type probeTOTPStore struct {
+	totp.Store
+	codeHash string
+	row      tdb.GetTOTPRow
+	enrolled bool
+}
+
+func (s *probeTOTPStore) InTx(_ context.Context, f func(totp.Queries) error) error { return f(s) }
+
+func (s *probeTOTPStore) GetTOTPUser(context.Context, tdb.GetTOTPUserParams) (tdb.GetTOTPUserRow, error) {
+	return tdb.GetTOTPUserRow{ID: 1, PublicID: "SR0000000000P1", Login: "probe@example.org", Name: "probe",
+		Status: "active"}, nil
+}
+
+func (s *probeTOTPStore) SetPendingSeed(_ context.Context, arg tdb.SetPendingSeedParams) (int64, error) {
+	s.row.PendingSeedCiphertext = arg.Ciphertext
+	s.row.PendingSeedKeyID = pgtype.Text{String: arg.KeyID, Valid: true}
+	return 1, nil
+}
+
+// GetTOTP answers the pending seed until enrolled is set, then the same ciphertext as the seed, which does not open
+// for that field: the code paths of a TOTP code then fail on the decryption, and those of a recovery code go on.
+func (s *probeTOTPStore) GetTOTP(context.Context, tdb.GetTOTPParams) (tdb.GetTOTPRow, error) {
+	if !s.enrolled {
+		return s.row, nil
+	}
+	return tdb.GetTOTPRow{SeedCiphertext: s.row.PendingSeedCiphertext, SeedKeyID: s.row.PendingSeedKeyID}, nil
+}
+
+func (s *probeTOTPStore) ListUnusedRecoveryCodes(context.Context, tdb.ListUnusedRecoveryCodesParams) (
+	[]tdb.ListUnusedRecoveryCodesRow, error) {
+	return []tdb.ListUnusedRecoveryCodesRow{{ID: 1, CodeHash: s.codeHash}}, nil
+}
+
+func (s *probeTOTPStore) UseStep(context.Context, tdb.UseStepParams) (int64, error) { return 1, nil }
+
+func (s *probeTOTPStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
+	return nil
+}
 
 func Probes() []Probe {
 	return slices.Clone(registry)

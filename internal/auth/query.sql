@@ -7,11 +7,18 @@ SELECT role, permission
 FROM role_permissions
 ORDER BY role, permission;
 
--- GetSignInUser finds the account of a login, compared lowercased.
+-- GetSignInUser finds the account of a login, compared lowercased, with whether it has TOTP and the Organization's
+-- TOTP policy.
 -- name: GetSignInUser :one
-SELECT id, public_id, name, role, status, password_hash
-FROM users
-WHERE org_id = @org_id AND lower(login) = lower(@login);
+SELECT u.id, u.public_id, u.name, u.role, u.status, u.password_hash,
+       EXISTS (
+           SELECT 1 FROM user_totp t
+           WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.enrolled_at IS NOT NULL
+       ) AS totp_enrolled,
+       o.totp_required
+FROM users u
+JOIN organizations o ON o.id = u.org_id
+WHERE u.org_id = @org_id AND lower(u.login) = lower(@login);
 
 -- name: GetUserPassword :one
 SELECT login, password_hash, (oidc_subject IS NOT NULL)::boolean AS has_oidc_identity
@@ -55,6 +62,21 @@ UPDATE sessions
 SET last_used_at = @now, idle_expires_at = @idle_expires_at
 WHERE org_id = @org_id AND id = @id AND ended_at IS NULL;
 
+-- CompleteSecondFactor makes a session that waited for the TOTP code active.
+-- name: CompleteSecondFactor :execrows
+UPDATE sessions
+SET state = 'active'
+WHERE org_id = @org_id AND id = @id AND state = 'totp_required' AND ended_at IS NULL;
+
+-- LiveSessions returns which of the sessions are still usable at @now: active, neither ended nor expired, of an active
+-- user. Reading them does not count as a use.
+-- name: LiveSessions :many
+SELECT s.id
+FROM sessions s
+JOIN users u ON u.org_id = s.org_id AND u.id = s.user_id
+WHERE s.org_id = @org_id AND u.org_id = @org_id AND s.id = ANY(@ids::bigint[]) AND s.state = 'active'
+  AND s.ended_at IS NULL AND s.idle_expires_at > @now AND s.expires_at > @now AND u.status = 'active';
+
 -- name: EndSession :execrows
 UPDATE sessions
 SET ended_at = @now::timestamptz, end_reason = @end_reason
@@ -76,6 +98,12 @@ SELECT id, public_id, method, address, user_agent, created_at, last_used_at
 FROM sessions
 WHERE org_id = @org_id AND user_id = @user_id AND ended_at IS NULL AND idle_expires_at > @now AND expires_at > @now
 ORDER BY last_used_at DESC, id DESC;
+
+-- TryLockSignInSubject takes the attempt lock of an account until the transaction ends, without waiting; false means
+-- that another attempt of the account is being evaluated. The two-key advisory locks do not overlap the one-key locks
+-- of the migrations and the Leader.
+-- name: TryLockSignInSubject :one
+SELECT pg_try_advisory_xact_lock(@lock_class::int, hashtext(@subject::text))::boolean AS locked;
 
 -- name: GetThrottles :many
 SELECT subject_kind, consecutive_failures, blocked_until

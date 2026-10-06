@@ -5,6 +5,7 @@ package auth
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -38,6 +39,7 @@ type fakeUser struct {
 	status            string
 	hash              string
 	oidc              bool
+	totp              bool
 	lastSignIn        time.Time
 	passwordChangedAt time.Time
 }
@@ -64,6 +66,10 @@ type fakeStore struct {
 	roles     []dbgen.RolePermission
 	fail      map[string]error
 	touches   int
+	// policy is the Organization's TOTP policy.
+	policy string
+	// lockedAccount is the account subject whose attempt lock another attempt holds.
+	lockedAccount string
 }
 
 func newFakeStore(users ...*fakeUser) *fakeStore {
@@ -101,7 +107,8 @@ func (s *fakeStore) GetSignInUser(_ context.Context, arg dbgen.GetSignInUserPara
 	for _, u := range s.users {
 		if strings.EqualFold(u.login, arg.Login) && arg.OrgID == orgID {
 			return dbgen.GetSignInUserRow{ID: u.id, PublicID: u.publicID, Name: u.name, Role: u.role, Status: u.status,
-				PasswordHash: pgtype.Text{String: u.hash, Valid: u.hash != ""}}, nil
+				PasswordHash: pgtype.Text{String: u.hash, Valid: u.hash != ""}, TotpEnrolled: u.totp,
+				TotpRequired: cmp.Or(s.policy, "nobody")}, nil
 		}
 	}
 	return dbgen.GetSignInUserRow{}, pgx.ErrNoRows
@@ -203,6 +210,41 @@ func (s *fakeStore) EndUserSessions(_ context.Context, arg dbgen.EndUserSessions
 		return 0, err
 	}
 	return s.end(func(ss *fakeSession) bool { return ss.UserID == arg.UserID }, arg.Now, arg.EndReason.String), nil
+}
+
+func (s *fakeStore) TryLockSignInSubject(_ context.Context, arg dbgen.TryLockSignInSubjectParams) (bool, error) {
+	if err := s.err("TryLockSignInSubject"); err != nil {
+		return false, err
+	}
+	return arg.Subject != s.lockedAccount, nil
+}
+
+func (s *fakeStore) CompleteSecondFactor(_ context.Context, arg dbgen.CompleteSecondFactorParams) (int64, error) {
+	if err := s.err("CompleteSecondFactor"); err != nil {
+		return 0, err
+	}
+	for _, ss := range s.sessions {
+		if ss.id == arg.ID && ss.State == string(StateTOTPRequired) && ss.endedAt.IsZero() {
+			ss.State = string(StateActive)
+			return 1, nil
+		}
+	}
+	return 0, nil
+}
+
+func (s *fakeStore) LiveSessions(_ context.Context, arg dbgen.LiveSessionsParams) ([]int64, error) {
+	if err := s.err("LiveSessions"); err != nil {
+		return nil, err
+	}
+	out := []int64{}
+	for _, ss := range s.sessions {
+		u := s.user(ss.UserID)
+		if slices.Contains(arg.Ids, ss.id) && ss.State == string(StateActive) && ss.endedAt.IsZero() &&
+			ss.IdleExpiresAt.After(arg.Now) && ss.ExpiresAt.After(arg.Now) && u.status == "active" {
+			out = append(out, ss.id)
+		}
+	}
+	return out, nil
 }
 
 func (s *fakeStore) EndOtherUserSessions(_ context.Context, arg dbgen.EndOtherUserSessionsParams) (int64, error) {
@@ -986,5 +1028,301 @@ func TestHashingGivesUpWhenTheContextEnds(t *testing.T) {
 	}
 	if err := verifyDummy(ctx, "x"); !errors.Is(err, context.Canceled) {
 		t.Errorf("verifyDummy = %v", err)
+	}
+}
+
+// fakeFactor accepts the TOTP code "123456" and the recovery code "rc" once each.
+type fakeFactor struct {
+	used  map[string]bool
+	err   error
+	calls int
+}
+
+func (f *fakeFactor) Verify(_ context.Context, _ int64, p Proof) (bool, error) {
+	f.calls++
+	if f.err != nil {
+		return false, f.err
+	}
+	code := p.TOTPCode
+	if code == "" {
+		code = p.RecoveryCode
+	}
+	if (code != "123456" && code != "rc") || f.used[code] {
+		return false, nil
+	}
+	if f.used == nil {
+		f.used = map[string]bool{}
+	}
+	f.used[code] = true
+	return true, nil
+}
+
+func (h *harness) withTOTP() *fakeFactor {
+	f := &fakeFactor{}
+	h.alice.totp = true
+	h.svc.UseSecondFactor(f)
+	return f
+}
+
+// TestSignInSecondStep is C-03.FR-24 and C-03.AC-13: the right password of a user with TOTP opens a session in the
+// state totp_required without a code, an active one with a right code; a wrong code opens nothing, counts in the
+// throttle and in muster_login_failures_total{method="totp"} and writes session.second_factor_failed. Only an active
+// session resets the throttle.
+func TestSignInSecondStep(t *testing.T) {
+	h := newHarness(t)
+	f := h.withTOTP()
+	h.store.throttles["address|192.0.2.10"] = &fakeThrottle{failures: 2}
+	sess, err := h.signIn(t, "alice@example.org", alicePassword)
+	if err != nil || sess.State != StateTOTPRequired || len(h.svc.Permissions(sess)) != 0 {
+		t.Fatalf("without a code = %+v, %v", sess, err)
+	}
+	if len(h.store.throttles) != 1 || f.calls != 0 {
+		t.Errorf("a limited session reset the throttle %v or checked a code", h.store.throttles)
+	}
+	totp := metrics.LoginFailures.With(FailureTOTP)
+	before := totp.Get()
+	_, err = h.svc.SignIn(t.Context(), SignInRequest{Login: "alice@example.org", Password: alicePassword,
+		Proof: Proof{TOTPCode: "000000"}, Address: addr})
+	if !errors.Is(err, ErrInvalidCredentials) || totp.Get()-before != 1 || len(h.store.sessions) != 1 {
+		t.Fatalf("a wrong code = %v, metric +%d, %d sessions", err, totp.Get()-before, len(h.store.sessions))
+	}
+	if th := h.store.throttles["account|"+accountSubject("alice@example.org")]; th == nil || th.failures != 1 {
+		t.Errorf("the wrong code was not counted: %+v", th)
+	}
+	if got := h.store.actions(); !slices.Equal(got, []string{audit.ActionSignedIn, ActionSecondFactorFailed}) {
+		t.Errorf("audit = %v", got)
+	}
+	h.clock.Advance(time.Minute)
+	sess, err = h.svc.SignIn(t.Context(), SignInRequest{Login: "alice@example.org", Password: alicePassword,
+		Proof: Proof{TOTPCode: "123456"}, Address: addr})
+	if err != nil || sess.State != StateActive || len(h.store.throttles) != 0 {
+		t.Fatalf("a right code = %+v, %v, throttles %v", sess, err, h.store.throttles)
+	}
+	f.err = errors.New("db down")
+	if _, err := h.svc.SignIn(t.Context(), SignInRequest{Login: "alice@example.org", Password: alicePassword,
+		Proof: Proof{RecoveryCode: "rc"}, Address: addr}); err == nil || errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("a failed check: %v", err)
+	}
+	h.svc.UseSecondFactor(nil)
+	if _, err := h.svc.SignIn(t.Context(), SignInRequest{Login: "alice@example.org", Password: alicePassword,
+		Proof: Proof{TOTPCode: "123456"}, Address: addr}); !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("without a SecondFactor a code is right: %v", err)
+	}
+}
+
+// TestSignInEnrolmentRequired is C-03.FR-10 and FR-20: under a policy that covers local users, a user without TOTP
+// gets a session in the state totp_enrolment_required; under nobody an active one.
+func TestSignInEnrolmentRequired(t *testing.T) {
+	for policy, want := range map[string]SessionState{
+		"nobody": StateActive, "local_users": StateTOTPEnrolmentRequired, "everyone": StateTOTPEnrolmentRequired,
+	} {
+		h := newHarness(t)
+		h.store.policy = policy
+		sess, err := h.signIn(t, "alice@example.org", alicePassword)
+		if err != nil || sess.State != want {
+			t.Errorf("%s: %s, %v; want %s", policy, sess.State, err, want)
+		}
+		if h.store.audit[0].Details == nil || !strings.Contains(string(h.store.audit[0].Details), string(want)) {
+			t.Errorf("%s: the sign-in entry does not record the state: %s", policy, h.store.audit[0].Details)
+		}
+	}
+}
+
+// TestSubmitSecondFactor is C-03.AC-13: the right code or an unused recovery code makes a totp_required session
+// active; a wrong one is ErrInvalidCredentials and throttled; a session that waits for nothing is ErrTOTPNotPending.
+func TestSubmitSecondFactor(t *testing.T) {
+	h := newHarness(t)
+	h.withTOTP()
+	sess, err := h.signIn(t, "alice@example.org", alicePassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := h.svc.SubmitSecondFactor(t.Context(), sess, Proof{TOTPCode: "999999"}, addr); !errors.Is(err,
+			ErrInvalidCredentials) {
+			t.Fatalf("a wrong code: %v", err)
+		}
+	}
+	if _, err := h.svc.SubmitSecondFactor(t.Context(), sess, Proof{RecoveryCode: "rc"}, addr); err == nil {
+		t.Fatal("a code during the block was evaluated")
+	} else if _, ok := errors.AsType[*ThrottledError](err); !ok {
+		t.Fatalf("during the block: %v", err)
+	}
+	h.clock.Advance(time.Second)
+	active, err := h.svc.SubmitSecondFactor(t.Context(), sess, Proof{RecoveryCode: "rc"}, addr)
+	if err != nil || active.State != StateActive || h.store.sessions[0].State != string(StateActive) {
+		t.Fatalf("a recovery code = %+v, %v", active, err)
+	}
+	if len(h.store.throttles) != 0 {
+		t.Error("a right code did not reset the throttle")
+	}
+	if _, err := h.svc.SubmitSecondFactor(t.Context(), active, Proof{TOTPCode: "123456"}, addr); !errors.Is(err,
+		ErrTOTPNotPending) {
+		t.Errorf("an active session: %v", err)
+	}
+	if _, err := h.svc.SubmitSecondFactor(t.Context(), sess, Proof{TOTPCode: "123456"}, addr); !errors.Is(err,
+		ErrTOTPNotPending) {
+		t.Errorf("a session completed meanwhile: %v", err)
+	}
+	for _, method := range []string{"GetUserPassword", "GetThrottles", "CompleteSecondFactor", "ResetSignInThrottles",
+		"Verify"} {
+		h := newHarness(t)
+		f := h.withTOTP()
+		sess, _ := h.signIn(t, "alice@example.org", alicePassword)
+		if method == "Verify" {
+			f.err = errors.New("db down")
+		} else {
+			h.store.fail[method] = errors.New("db down")
+		}
+		if _, err := h.svc.SubmitSecondFactor(t.Context(), sess, Proof{TOTPCode: "123456"}, addr); err == nil {
+			t.Errorf("%s: no error", method)
+		}
+	}
+	h = newHarness(t)
+	h.withTOTP()
+	sess, _ = h.signIn(t, "alice@example.org", alicePassword)
+	h.store.fail["InsertAuditEntry"] = errors.New("db down")
+	if _, err := h.svc.SubmitSecondFactor(t.Context(), sess, Proof{TOTPCode: "1"}, addr); err == nil ||
+		errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("a wrong code whose entry fails: %v", err)
+	}
+	h.store.fail = map[string]error{"RecordSignInFailure": errors.New("db down")}
+	if _, err := h.svc.SubmitSecondFactor(t.Context(), sess, Proof{TOTPCode: "1"}, addr); err == nil ||
+		errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("a wrong code whose count fails: %v", err)
+	}
+}
+
+// TestAttempt: a proof on the caller's own account is checked under the sign-in throttle and counted by its method.
+func TestAttempt(t *testing.T) {
+	h := newHarness(t)
+	sess, err := h.signIn(t, "alice@example.org", alicePassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter := metrics.LoginFailures.With(FailureTOTP)
+	before := counter.Get()
+	wrong := func(context.Context) (bool, error) { return false, nil }
+	for range 3 {
+		if err := h.svc.Attempt(t.Context(), sess, addr, FailureTOTP, wrong); !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatal(err)
+		}
+	}
+	ran := false
+	err = h.svc.Attempt(t.Context(), sess, addr, FailureTOTP, func(context.Context) (bool, error) {
+		ran = true
+		return true, nil
+	})
+	if _, ok := errors.AsType[*ThrottledError](err); !ok || ran {
+		t.Fatalf("during the block: %v, ran %v", err, ran)
+	}
+	if counter.Get()-before != 3 {
+		t.Errorf("the metric rose by %d, want 3", counter.Get()-before)
+	}
+	h.clock.Advance(time.Second)
+	if err := h.svc.Attempt(t.Context(), sess, addr, FailureTOTP, func(context.Context) (bool, error) {
+		return true, nil
+	}); err != nil {
+		t.Errorf("a right proof: %v", err)
+	}
+	h.clock.Advance(time.Minute)
+	boom := errors.New("boom")
+	if err := h.svc.Attempt(t.Context(), sess, addr, FailureTOTP, func(context.Context) (bool, error) {
+		return false, boom
+	}); !errors.Is(err, boom) {
+		t.Errorf("a failed check: %v", err)
+	}
+	for _, method := range []string{"GetUserPassword", "GetThrottles", "RecordSignInFailure"} {
+		h.store.fail = map[string]error{method: errors.New("db down")}
+		if err := h.svc.Attempt(t.Context(), sess, addr, FailureTOTP, wrong); err == nil ||
+			errors.Is(err, ErrInvalidCredentials) {
+			t.Errorf("%s: %v", method, err)
+		}
+	}
+	h.store.fail = map[string]error{}
+	for pw, want := range map[string]bool{alicePassword: true, "wrong": false} {
+		if ok, err := h.svc.CheckPassword(t.Context(), sess, pw); err != nil || ok != want {
+			t.Errorf("CheckPassword(%q) = %v, %v", pw, ok, err)
+		}
+	}
+	h.alice.hash = ""
+	if ok, err := h.svc.CheckPassword(t.Context(), sess, alicePassword); ok || err != nil {
+		t.Errorf("an account without a password: %v, %v", ok, err)
+	}
+	h.alice.hash = "$argon2id$broken"
+	if _, err := h.svc.CheckPassword(t.Context(), sess, alicePassword); err == nil {
+		t.Error("a malformed hash: no error")
+	}
+	h.store.fail["GetUserPassword"] = errors.New("db down")
+	if _, err := h.svc.CheckPassword(t.Context(), sess, alicePassword); err == nil {
+		t.Error("a failed read: no error")
+	}
+}
+
+// TestLiveSessions: the streams' check keeps active sessions that neither ended nor expired, without touching them.
+func TestLiveSessions(t *testing.T) {
+	h := newHarness(t)
+	a, _ := h.signIn(t, "alice@example.org", alicePassword)
+	b, _ := h.signIn(t, "alice@example.org", alicePassword)
+	h.alice.totp = true
+	h.svc.UseSecondFactor(&fakeFactor{})
+	limited, _ := h.signIn(t, "alice@example.org", alicePassword)
+	if err := h.svc.SignOut(t.Context(), b, addr); err != nil {
+		t.Fatal(err)
+	}
+	live, err := h.svc.LiveSessions(t.Context(), []int64{a.ID, b.ID, limited.ID, 99})
+	if err != nil || !slices.Equal(live, []int64{a.ID}) || h.store.touches != 0 {
+		t.Errorf("LiveSessions = %v, %v; touches %d", live, err, h.store.touches)
+	}
+	h.clock.Advance(SessionIdleTimeout)
+	if live, _ := h.svc.LiveSessions(t.Context(), []int64{a.ID}); len(live) != 0 {
+		t.Errorf("an idle session is live: %v", live)
+	}
+	h.store.fail["LiveSessions"] = errors.New("db down")
+	if _, err := h.svc.LiveSessions(t.Context(), []int64{a.ID}); err == nil {
+		t.Error("a failed check: no error")
+	}
+}
+
+// TestAttemptLock: while another attempt of the account is being evaluated, a sign-in, a second factor, a proof or a
+// password change is refused as throttled without being evaluated, so that a burst of parallel guesses cannot slip
+// past the throttle.
+func TestAttemptLock(t *testing.T) {
+	h := newHarness(t)
+	f := h.withTOTP()
+	sess, err := h.signIn(t, "alice@example.org", alicePassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.store.lockedAccount = accountSubject("alice@example.org")
+	ran := false
+	for name, call := range map[string]func() error{
+		"sign-in": func() error { _, err := h.signIn(t, "alice@example.org", alicePassword); return err },
+		"second factor": func() error {
+			_, err := h.svc.SubmitSecondFactor(t.Context(), sess, Proof{TOTPCode: "123456"}, addr)
+			return err
+		},
+		"proof": func() error {
+			return h.svc.Attempt(t.Context(), sess, addr, FailureTOTP, func(context.Context) (bool, error) {
+				ran = true
+				return true, nil
+			})
+		},
+		"password change": func() error {
+			return h.svc.ChangePassword(t.Context(), sess, PasswordChange{Current: alicePassword,
+				New: "a new long password", Address: addr})
+		},
+	} {
+		if _, ok := errors.AsType[*ThrottledError](call()); !ok {
+			t.Errorf("%s while the account is locked was evaluated", name)
+		}
+	}
+	if ran || f.calls != 0 || len(h.store.throttles) != 0 {
+		t.Errorf("an attempt ran: proof %v, %d codes checked, throttles %v", ran, f.calls, h.store.throttles)
+	}
+	h.store.lockedAccount = ""
+	h.store.fail["TryLockSignInSubject"] = errors.New("db down")
+	if _, err := h.signIn(t, "alice@example.org", alicePassword); err == nil || errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("a failed lock: %v", err)
 	}
 }

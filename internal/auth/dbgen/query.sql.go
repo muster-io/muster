@@ -36,6 +36,26 @@ func (q *Queries) BlockSignIn(ctx context.Context, arg BlockSignInParams) error 
 	return err
 }
 
+const completeSecondFactor = `-- name: CompleteSecondFactor :execrows
+UPDATE sessions
+SET state = 'active'
+WHERE org_id = $1 AND id = $2 AND state = 'totp_required' AND ended_at IS NULL
+`
+
+type CompleteSecondFactorParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// CompleteSecondFactor makes a session that waited for the TOTP code active.
+func (q *Queries) CompleteSecondFactor(ctx context.Context, arg CompleteSecondFactorParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeSecondFactor, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (
     org_id, public_id, user_id, token_hash, state, method, address, user_agent, created_at, last_used_at,
@@ -222,9 +242,15 @@ func (q *Queries) GetSessionByToken(ctx context.Context, arg GetSessionByTokenPa
 }
 
 const getSignInUser = `-- name: GetSignInUser :one
-SELECT id, public_id, name, role, status, password_hash
-FROM users
-WHERE org_id = $1 AND lower(login) = lower($2)
+SELECT u.id, u.public_id, u.name, u.role, u.status, u.password_hash,
+       EXISTS (
+           SELECT 1 FROM user_totp t
+           WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.enrolled_at IS NOT NULL
+       ) AS totp_enrolled,
+       o.totp_required
+FROM users u
+JOIN organizations o ON o.id = u.org_id
+WHERE u.org_id = $1 AND lower(u.login) = lower($2)
 `
 
 type GetSignInUserParams struct {
@@ -239,9 +265,12 @@ type GetSignInUserRow struct {
 	Role         string
 	Status       string
 	PasswordHash pgtype.Text
+	TotpEnrolled bool
+	TotpRequired string
 }
 
-// GetSignInUser finds the account of a login, compared lowercased.
+// GetSignInUser finds the account of a login, compared lowercased, with whether it has TOTP and the Organization's
+// TOTP policy.
 func (q *Queries) GetSignInUser(ctx context.Context, arg GetSignInUserParams) (GetSignInUserRow, error) {
 	row := q.db.QueryRow(ctx, getSignInUser, arg.OrgID, arg.Login)
 	var i GetSignInUserRow
@@ -252,6 +281,8 @@ func (q *Queries) GetSignInUser(ctx context.Context, arg GetSignInUserParams) (G
 		&i.Role,
 		&i.Status,
 		&i.PasswordHash,
+		&i.TotpEnrolled,
+		&i.TotpRequired,
 	)
 	return i, err
 }
@@ -394,6 +425,42 @@ func (q *Queries) ListUserSessions(ctx context.Context, arg ListUserSessionsPara
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const liveSessions = `-- name: LiveSessions :many
+SELECT s.id
+FROM sessions s
+JOIN users u ON u.org_id = s.org_id AND u.id = s.user_id
+WHERE s.org_id = $1 AND u.org_id = $1 AND s.id = ANY($2::bigint[]) AND s.state = 'active'
+  AND s.ended_at IS NULL AND s.idle_expires_at > $3 AND s.expires_at > $3 AND u.status = 'active'
+`
+
+type LiveSessionsParams struct {
+	OrgID int64
+	Ids   []int64
+	Now   time.Time
+}
+
+// LiveSessions returns which of the sessions are still usable at @now: active, neither ended nor expired, of an active
+// user. Reading them does not count as a use.
+func (q *Queries) LiveSessions(ctx context.Context, arg LiveSessionsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, liveSessions, arg.OrgID, arg.Ids, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -568,4 +635,23 @@ func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) erro
 		arg.ID,
 	)
 	return err
+}
+
+const tryLockSignInSubject = `-- name: TryLockSignInSubject :one
+SELECT pg_try_advisory_xact_lock($1::int, hashtext($2::text))::boolean AS locked
+`
+
+type TryLockSignInSubjectParams struct {
+	LockClass int32
+	Subject   string
+}
+
+// TryLockSignInSubject takes the attempt lock of an account until the transaction ends, without waiting; false means
+// that another attempt of the account is being evaluated. The two-key advisory locks do not overlap the one-key locks
+// of the migrations and the Leader.
+func (q *Queries) TryLockSignInSubject(ctx context.Context, arg TryLockSignInSubjectParams) (bool, error) {
+	row := q.db.QueryRow(ctx, tryLockSignInSubject, arg.LockClass, arg.Subject)
+	var locked bool
+	err := row.Scan(&locked)
+	return locked, err
 }

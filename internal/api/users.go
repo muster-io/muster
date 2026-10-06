@@ -191,3 +191,17 @@ func (s *Server) CreatePasswordSetupLink(ctx context.Context, req gen.CreatePass
 func linkOf(l users.SetupLink) gen.PasswordSetupLink {
 	return gen.PasswordSetupLink{Url: l.URL, ExpiresAt: l.ExpiresAt.UTC()}
 }
+
+// ResetUserTotp is resetUserTotp: an Admin removes a user's TOTP and recovery codes, which ends the user's sessions
+// and is recorded in the Audit log (C-03.FR-11).
+func (s *Server) ResetUserTotp(ctx context.Context, req gen.ResetUserTotpRequestObject) (
+	gen.ResetUserTotpResponseObject, error) {
+	r, err := requester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.totp.Reset(ctx, r.Actor, r.Transport, r.Address, req.UserId); err != nil {
+		return nil, err
+	}
+	return gen.ResetUserTotp204Response{}, nil
+}

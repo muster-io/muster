@@ -224,6 +224,26 @@ var APIRequestFailed = newEvent("api_request_failed", LevelError, "C-03",
 		"500 internal; operation is the operationId of the specification.",
 	"operation", "error")
 
+// LiveUpdatesListenFailed is logged when a replica loses, or cannot open, the LISTEN connection of the live-update
+// hints.
+var LiveUpdatesListenFailed = newEvent("live_updates_listen_failed", LevelWarn, "C-03",
+	"A replica lost the session connection that listens for live-update hints, or could not open it, usually because "+
+		"the database was unavailable; it connects again with a growing delay, up to 30 seconds. Until then the "+
+		"browsers connected to it miss the hints of changes and see them at their next read.",
+	"error")
+
+// LiveUpdatesListenRestored is logged when a replica listens for live-update hints again after a loss.
+var LiveUpdatesListenRestored = newEvent("live_updates_listen_restored", LevelInfo, "C-03",
+	"A replica listens for live-update hints again after live_updates_listen_failed; it sent every connected browser "+
+		"the hints of everything, so that they read it again.")
+
+// SystemNoticesCheckFailed is logged when a replica cannot read the state of the Organization-wide notices.
+var SystemNoticesCheckFailed = newEvent("system_notices_check_failed", LevelWarn, "C-03",
+	"A replica could not read the state of the Organization-wide notices, usually because the database was "+
+		"unavailable, so the live-updates streams get no hint of a notice that started or ended; logged once until "+
+		"a check succeeds again.",
+	"error")
+
 // Event is a registered log event. Its zero value is not registered, and the logger refuses it.
 type Event struct {
 	def *eventDef

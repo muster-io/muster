@@ -40,6 +40,9 @@ table in the same pull request.
 | `recovery.banner_duration` | from the takeover of the Leader that records the downtime until the longest learned repeat interval has passed, at most 1 h; 15 min when nothing is learned | built in | C-02 | decided |
 | `process.clock_skew_warning` | 2 s | built in | C-02 | decided |
 | `process.shutdown_grace` | 20 s (the chart's termination grace period is 30 s) | built in | C-02 | decided |
+| `live.check_interval` | 5 s: each replica checks that the sessions of its live-updates streams are still usable, closing the others, and evaluates the Organization-wide notices, sending a hint when they changed | built in | C-02, C-03 | decided |
+| `live.keepalive_interval` / `live.retry` | 25 s / 3 s: a stream without hints sends a comment every 25 s; the stream asks the browser to reconnect 3 s after it closes | built in | C-03, C-09 | decided |
+| `live.max_streams` / `live.max_streams_per_session` | 1000 per replica / 10 per session (one per open tab); a stream beyond them gets `429`, and a stream that falls 32 hints behind is closed, so that its client reconnects and reads everything again | built in | C-03, C-09 | decided |
 | Helm `replicas` | 1 | Helm chart | C-01 | decided |
 
 ## Sign-in and tokens
@@ -54,9 +57,9 @@ table in the same pull request.
 | `auth.password_setup_link_ttl` | single use, 24 h | built in | C-03 | decided |
 | `auth.password_setup_prune_after` | 7 days after a password setup link expired, used and superseded links included, so that a late click still answers `410` instead of `404`; then the Leader deletes the row (`short_lived_pruning`, hourly) | built in | C-03 | decided |
 | `auth.password_min_length` | 12 characters | built in | C-03 | decided |
-| `auth.signin_throttle` | after 3 consecutive failures per account or source address, each attempt waits twice as long as the previous, from 1 s up to 60 s | built in | C-03 | decided |
+| `auth.signin_throttle` | after 3 consecutive failures per account or source address, each attempt waits twice as long as the previous, from 1 s up to 60 s; a password, TOTP code or recovery code counts alike, and while one attempt of an account is evaluated, another one of it waits 1 s, so that parallel guesses cannot pass the block | built in | C-03 | decided |
 | `auth.session_prune_after` / `auth.signin_throttle_prune_after` | 7 days after a session ended, by sign-out, an administrative action or its idle timeout or lifetime / 24 h after a throttle's last failure, once its block has passed; then the Leader deletes the row (`short_lived_pruning`, hourly) | built in | C-02, C-03 | decided |
-| `auth.totp_recovery_codes` | 10 | built in | C-03 | P-08 |
+| `auth.totp_recovery_codes` | 10 single-use codes of ten characters, argon2id-hashed; regenerating replaces the unused ones | built in | C-03 | decided |
 | `oidc.unmatched_role` | none (refuse sign-in) | OIDC settings | C-03 | decided |
 | `oidc.sync_role` | on | OIDC settings | C-03 | decided |
 | `oidc.skip_totp_with_idp_mfa` | off | OIDC settings | C-03 | decided |

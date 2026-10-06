@@ -144,3 +144,72 @@ func TestReadPasswordFromFile(t *testing.T) {
 type errReader struct{}
 
 func (errReader) Read([]byte) (int, error) { return 0, errors.New("broken pipe") }
+
+// fakeTOTPReset replaces the runtime entry point of reset-totp for one test.
+type fakeTOTPReset struct {
+	calls   []runtime.TOTPReset
+	removed bool
+	err     error
+}
+
+func newFakeTOTPReset(t *testing.T) *fakeTOTPReset {
+	t.Helper()
+	f := &fakeTOTPReset{removed: true}
+	origReset, origEnv := runResetTOTP, environ
+	t.Cleanup(func() { runResetTOTP, environ = origReset, origEnv })
+	runResetTOTP = func(_ context.Context, opts runtime.Options, r runtime.TOTPReset) (string, bool, error) {
+		if len(opts.Environ) != 1 || opts.Environ[0] != "MUSTER_DATABASE_URL=x" {
+			t.Errorf("environ = %v", opts.Environ)
+		}
+		f.calls = append(f.calls, r)
+		return "SRBBBBBBBBBBBB", f.removed, f.err
+	}
+	environ = func() []string { return []string{"MUSTER_DATABASE_URL=x"} }
+	return f
+}
+
+// TestResetTOTP is C-03.FR-11 and C-02.FR-15: `muster admin reset-totp --actor <name> <login>` passes the actor and
+// the login to the runtime and says what it did; without --actor, or without exactly one login, it exits 2 before it
+// reaches the database.
+func TestResetTOTP(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no actor":     {"admin", "reset-totp", "bob"},
+		"empty actor":  {"admin", "reset-totp", "--actor", "", "bob"},
+		"no login":     {"admin", "reset-totp", "--actor", "ops"},
+		"two logins":   {"admin", "reset-totp", "--actor", "ops", "bob", "alice"},
+		"unknown flag": {"admin", "reset-totp", "--all"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeTOTPReset(t)
+			var stdout, stderr bytes.Buffer
+			if code := Run(args, &stdout, &stderr); code != exitUsage {
+				t.Errorf("exit code = %d", code)
+			}
+			if len(f.calls) != 0 || !strings.HasPrefix(stderr.String(), "muster admin reset-totp: ") ||
+				!strings.Contains(stderr.String(), "muster admin reset-totp --actor <name> <login>") {
+				t.Errorf("calls %v, stderr %q", f.calls, stderr.String())
+			}
+		})
+	}
+	f := newFakeTOTPReset(t)
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"admin", "reset-totp", "--actor", "ops", "bob"}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code = %d, stderr %q", code, stderr.String())
+	}
+	if len(f.calls) != 1 || f.calls[0] != (runtime.TOTPReset{Actor: "ops", Login: "bob"}) ||
+		!strings.Contains(stderr.String(), "the TOTP of bob (SRBBBBBBBBBBBB) is removed and its sessions ended") {
+		t.Errorf("calls %+v, stderr %q", f.calls, stderr.String())
+	}
+	f.removed = false
+	stderr.Reset()
+	if code := Run([]string{"admin", "reset-totp", "--actor=ops", "bob"}, &stdout, &stderr); code != exitOK ||
+		!strings.Contains(stderr.String(), "has no TOTP; nothing changed") {
+		t.Errorf("without TOTP: %d, %q", code, stderr.String())
+	}
+	f.err = errors.New("no such user")
+	stderr.Reset()
+	if code := Run([]string{"admin", "reset-totp", "--actor", "ops", "bob"}, &stdout, &stderr); code != exitFailure ||
+		!strings.Contains(stderr.String(), "no such user") {
+		t.Errorf("a refused reset: %d, %q", code, stderr.String())
+	}
+}
