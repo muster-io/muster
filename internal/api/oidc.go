@@ -11,6 +11,7 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/oidc"
@@ -25,6 +26,8 @@ type OIDC interface {
 	SignInOptions(ctx context.Context) (bool, string, error)
 	StartSignIn(ctx context.Context, returnTo string) (oidc.Start, error)
 	CompleteSignIn(ctx context.Context, cb oidc.Callback) oidc.Outcome
+	StartLink(ctx context.Context, sess auth.Session) (oidc.LinkStart, error)
+	CompleteLink(ctx context.Context, sess auth.Session, cb oidc.Callback) oidc.Outcome
 }
 
 // GetOidcSettings is getOidcSettings: the client secret and the proxy password only as their status (C-03.FR-21).

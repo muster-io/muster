@@ -23,6 +23,7 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_db_pool_max_connections` | gauge | — | C-02 | no | The most connections the main database pool of this replica opens. |
 | `muster_leader` | gauge | — | C-02 | no | 1 while this replica is the Leader and runs the Leader tasks, 0 otherwise. |
 | `muster_login_failures_total` | counter | method | C-03 | no | Failed sign-ins that were evaluated, by method; attempts refused by the sign-in throttle are not counted. |
+| `muster_oidc_checks_total` | counter | outcome | C-03 | no | Background re-checks of OIDC users at the identity provider, by outcome. |
 | `muster_short_lived_rows_pruned_total` | counter | table | C-02 | no | Short-lived rows that could no longer be used and that the Leader deleted, by table. |
 
 ## Label values
@@ -42,4 +43,5 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_client_requests_total` | `outcome` | `ok`, `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect` — the classified outcome of the request |
 | `muster_db_pool_connections` | `state` | `acquired`, `idle`, `constructing` — the state of the connection |
 | `muster_login_failures_total` | `method` | `local`, `oidc`, `totp` — local is a wrong login or password, oidc a refused OIDC sign-in, totp a wrong TOTP or recovery code |
+| `muster_oidc_checks_total` | `outcome` | `ok`, `refused`, `unavailable`, `skipped` — ok is a refresh the identity provider granted, refused one it refused (the user's sessions ended), unavailable one that reached no decision, skipped a user without a live session or a usable Personal access token, not sent to the identity provider |
 | `muster_short_lived_rows_pruned_total` | `table` | `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests` — the short-lived table the rows were deleted from |

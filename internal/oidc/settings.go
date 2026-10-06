@@ -4,7 +4,8 @@
 // Package oidc is sign-in through an OpenID Connect identity provider (C-03): the OIDC settings with their write-only
 // client secret, proxy, warnings and connection check, the back channel to the identity provider through the outbound
 // HTTP package, and the redirect flow with PKCE that creates users on their first sign-in, maps their groups to a Role
-// and opens their sessions. Linking an identity, conversion to local and the background re-checks come with S-062.
+// and opens their sessions, linking an identity to an account from its web session, and the offline token with the
+// background re-checks of OIDC users at the identity provider.
 package oidc
 
 import (
@@ -82,6 +83,8 @@ var (
 	ErrNotEnabled = errors.New("OIDC sign-in is switched off")
 	// ErrTooManyRequests is a start while MaxPendingRequests redirects of the Organization are in flight.
 	ErrTooManyRequests = errors.New("too many OIDC sign-ins are in flight")
+	// ErrAlreadyLinked is a link started by an account that signs in through OIDC already, or has no password.
+	ErrAlreadyLinked = errors.New("the account already signs in through OIDC")
 )
 
 // FieldError is a field of the settings that is not valid, at a JSON pointer of the request body.
@@ -194,6 +197,21 @@ type Queries interface {
 	SetRole(ctx context.Context, arg dbgen.SetRoleParams) (int64, error)
 	EndUserSessions(ctx context.Context, arg dbgen.EndUserSessionsParams) (int64, error)
 	RecordContact(ctx context.Context, arg dbgen.RecordContactParams) error
+	TakeLinkRequest(ctx context.Context, arg dbgen.TakeLinkRequestParams) (dbgen.TakeLinkRequestRow, error)
+	LockLinkUser(ctx context.Context, arg dbgen.LockLinkUserParams) (dbgen.LockLinkUserRow, error)
+	LinkIdentity(ctx context.Context, arg dbgen.LinkIdentityParams) (int64, error)
+	EndOtherUserSessions(ctx context.Context, arg dbgen.EndOtherUserSessionsParams) (int64, error)
+	ContinueAsOIDCSession(ctx context.Context, arg dbgen.ContinueAsOIDCSessionParams) (int64, error)
+	StoreOfflineToken(ctx context.Context, arg dbgen.StoreOfflineTokenParams) error
+	WipeOfflineToken(ctx context.Context, arg dbgen.WipeOfflineTokenParams) error
+	ScheduleCheck(ctx context.Context, arg dbgen.ScheduleCheckParams) error
+	DeleteCheck(ctx context.Context, arg dbgen.DeleteCheckParams) error
+	GetCheckUser(ctx context.Context, arg dbgen.GetCheckUserParams) (dbgen.GetCheckUserRow, error)
+	LockCheckUser(ctx context.Context, arg dbgen.LockCheckUserParams) (dbgen.LockCheckUserRow, error)
+	FinishCheck(ctx context.Context, arg dbgen.FinishCheckParams) (int64, error)
+	DropCheck(ctx context.Context, arg dbgen.DropCheckParams) (int64, error)
+	RefuseUser(ctx context.Context, arg dbgen.RefuseUserParams) error
+	CapOIDCSessions(ctx context.Context, arg dbgen.CapOIDCSessionsParams) (int64, error)
 	InsertDemoSettings(ctx context.Context, arg dbgen.InsertDemoSettingsParams) (int64, error)
 	AllowNetwork(ctx context.Context, arg dbgen.AllowNetworkParams) (int64, error)
 	audit.Store
@@ -244,6 +262,8 @@ type Config struct {
 	Sessions Sessions
 	// PublicURL is MUSTER_PUBLIC_URL, the base of the redirect URIs.
 	PublicURL *url.URL
+	// RecheckBudget bounds the refresh of a background re-check; zero is RecheckBudget, tests make it shorter.
+	RecheckBudget time.Duration
 }
 
 // Service holds the OIDC settings and the sign-in flow of the Organization.

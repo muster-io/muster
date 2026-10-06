@@ -38,7 +38,7 @@ const (
 	// AuthRequestPruneAfter is how long after its expiry a request is deleted by short-lived pruning.
 	AuthRequestPruneAfter = time.Hour
 	// FallbackSessionLifetime is auth.oidc_fallback_session_lifetime: an OIDC session of a user without an offline
-	// token ends this long after sign-in. Until the offline token is stored (S-062), that is every OIDC session.
+	// token ends this long after sign-in, since no background re-check can end it earlier.
 	FallbackSessionLifetime = 12 * time.Hour
 
 	// MaxPendingRequests bounds the OIDC redirects in flight per Organization: a start needs no credentials, and each
@@ -62,6 +62,10 @@ const (
 	loginIndex          = "users_login_key"
 	identityIndex       = "users_oidc_subject_key"
 	endReasonRoleChange = "role_changed"
+
+	// The places Role sync runs at, as user.role_sync_kept_admin records them.
+	syncAtSignIn  = "sign_in"
+	syncAtRecheck = "recheck"
 )
 
 // The callback errors of a failed sign-in (C-03.FR-25), as /sign-in?error=<code> carries them.
@@ -252,7 +256,20 @@ func (s *Service) complete(ctx context.Context, cb Callback) (Outcome, string, e
 			return Outcome{}, "settings", err
 		}
 	}
-	return s.signIn(ctx, cb, st, d.Issuer, idt, groups, req.ReturnTo.String)
+	return s.signIn(ctx, cb, st, identityOf(d.Issuer, idt, groups, offlineToken(tokens)), req.ReturnTo.String)
+}
+
+// identity is what a verified callback says about the person: the identity, its claims, its groups and the offline
+// token the identity provider granted, if any.
+type identity struct {
+	issuer  string
+	idt     IDToken
+	groups  []string
+	offline logging.Secret
+}
+
+func identityOf(issuer string, idt IDToken, groups []string, offline logging.Secret) identity {
+	return identity{issuer: issuer, idt: idt, groups: groups, offline: offline}
 }
 
 // groups reads the groups claim from the ID token, and from userinfo when the ID token lacks it (D247); found is false
@@ -295,10 +312,11 @@ type refusal struct {
 	details map[string]any
 }
 
-// signIn resolves the account of the identity and opens its session.
-func (s *Service) signIn(ctx context.Context, cb Callback, st Settings, issuer string, idt IDToken, groups []string,
-	returnTo string) (Outcome, string, error) {
-	role, mapped := MapRole(groups, st.GroupMappings, st.UnmatchedRole)
+// signIn resolves the account of the identity and opens its session: with an offline token it lives
+// auth.session_lifetime, since the re-checks can end it, and auth.oidc_fallback_session_lifetime without one.
+func (s *Service) signIn(ctx context.Context, cb Callback, st Settings, id identity, returnTo string) (Outcome, string,
+	error) {
+	role, mapped := MapRole(id.groups, st.GroupMappings, st.UnmatchedRole)
 	var (
 		user dbgen.GetIdentityUserRow
 		ref  *refusal
@@ -311,7 +329,7 @@ func (s *Service) signIn(ctx context.Context, cb Callback, st Settings, issuer s
 		ref = nil
 		err = s.cfg.Store.InTx(ctx, func(q Queries) error {
 			var err error
-			user, ref, err = s.resolve(ctx, q, st, issuer, idt, groups, role, mapped)
+			user, ref, err = s.resolve(ctx, q, st, id, role, mapped)
 			return err
 		})
 		if c, ok := errors.AsType[*conflict](err); ok {
@@ -329,7 +347,11 @@ func (s *Service) signIn(ctx context.Context, cb Callback, st Settings, issuer s
 	if ref != nil {
 		return s.refuse(ctx, cb, ref)
 	}
-	mfa := assertsMFA(idt.AMR)
+	mfa := assertsMFA(id.idt.AMR)
+	lifetime := FallbackSessionLifetime
+	if id.offline != "" {
+		lifetime = auth.SessionLifetime
+	}
 	state := auth.StateActive
 	switch {
 	case user.TotpEnrolled && (!st.SkipTOTPWithIDPMFA || !mfa):
@@ -339,7 +361,7 @@ func (s *Service) signIn(ctx context.Context, cb Callback, st Settings, issuer s
 	}
 	sess, err := s.cfg.Sessions.OpenOIDCSession(ctx, auth.OIDCSignIn{
 		User:  auth.Principal{ID: user.ID, PublicID: user.PublicID, Name: user.Name, Role: user.Role},
-		State: state, IDPMFA: mfa, Lifetime: FallbackSessionLifetime, Address: cb.Address, UserAgent: cb.UserAgent,
+		State: state, IDPMFA: mfa, Lifetime: lifetime, Address: cb.Address, UserAgent: cb.UserAgent,
 	})
 	if err != nil {
 		return Outcome{}, "session", err
@@ -350,12 +372,13 @@ func (s *Service) signIn(ctx context.Context, cb Callback, st Settings, issuer s
 	return Outcome{Session: &sess, Redirect: returnTo}, "", nil
 }
 
-// resolve finds or creates the account of the identity inside a transaction and applies Role sync. Accounts are never
-// merged by login or email: a new identity whose login is taken is refused (C-03.FR-28).
-func (s *Service) resolve(ctx context.Context, q Queries, st Settings, issuer string, idt IDToken, groups []string,
-	role string, mapped bool) (dbgen.GetIdentityUserRow, *refusal, error) {
-	identity := dbgen.GetIdentityUserParams{OrgID: s.cfg.OrgID, Issuer: optText(issuer), Subject: optText(idt.Subject)}
-	user, err := q.GetIdentityUser(ctx, identity)
+// resolve finds or creates the account of the identity inside a transaction, applies Role sync and keeps the offline
+// token. Accounts are never merged by login or email: a new identity whose login is taken is refused (C-03.FR-28).
+func (s *Service) resolve(ctx context.Context, q Queries, st Settings, id identity, role string,
+	mapped bool) (dbgen.GetIdentityUserRow, *refusal, error) {
+	issuer, idt, groups := id.issuer, id.idt, id.groups
+	key := dbgen.GetIdentityUserParams{OrgID: s.cfg.OrgID, Issuer: optText(issuer), Subject: optText(idt.Subject)}
+	user, err := q.GetIdentityUser(ctx, key)
 	known := err == nil
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return user, nil, fmt.Errorf("find the account of the identity: %w", err)
@@ -372,7 +395,7 @@ func (s *Service) resolve(ctx context.Context, q Queries, st Settings, issuer st
 		return user, r, nil
 	case known:
 		if st.SyncRole && role != user.Role {
-			if err := s.syncRole(ctx, q, user, role, now); err != nil {
+			if err := s.syncRole(ctx, q, user, role, now, syncAtSignIn); err != nil {
 				return user, nil, err
 			}
 		}
@@ -389,13 +412,13 @@ func (s *Service) resolve(ctx context.Context, q Queries, st Settings, issuer st
 			return user, nil, err
 		}
 	}
-	if user, err = q.GetIdentityUser(ctx, identity); err != nil {
+	if user, err = q.GetIdentityUser(ctx, key); err != nil {
 		return user, nil, fmt.Errorf("read the account of the identity: %w", err)
 	}
 	if err := q.RecordContact(ctx, dbgen.RecordContactParams{OrgID: s.cfg.OrgID, ID: user.ID, Now: now}); err != nil {
 		return user, nil, fmt.Errorf("record the contact with the identity provider: %w", err)
 	}
-	return user, nil, nil
+	return user, nil, s.keepOfflineToken(ctx, q, user.ID, id.offline, now)
 }
 
 // create creates the account of a new identity with the mapped Role and records user.created.
@@ -432,11 +455,15 @@ func (s *Service) create(ctx context.Context, q Queries, issuer string, idt IDTo
 	})
 }
 
-// syncRole gives the user the Role the identity provider maps them to (oidc.sync_role), under the lock of the
-// last_admin check: it never lowers the last active Admin, and records user.role_sync_kept_admin instead
-// (C-03.FR-32). A changed Role ends the user's other sessions (C-03.FR-9).
-func (s *Service) syncRole(ctx context.Context, q Queries, u dbgen.GetIdentityUserRow, mapped string,
-	now time.Time) error {
+// syncRole gives the user the Role the identity provider maps them to (oidc.sync_role) at a sign-in or a re-check, at,
+// under the lock of the last_admin check: it never lowers the last active Admin, and records user.role_sync_kept_admin
+// instead (C-03.FR-32). A changed Role ends the user's sessions (C-03.FR-9); at a sign-in the new one opens after.
+func (s *Service) syncRole(ctx context.Context, q Queries, u dbgen.GetIdentityUserRow, mapped string, now time.Time,
+	at string) error {
+	transport := audit.TransportUI
+	if at == syncAtRecheck {
+		transport = audit.TransportSystem
+	}
 	admins, err := q.LockActiveAdmins(ctx, s.cfg.OrgID)
 	if err != nil {
 		return fmt.Errorf("lock the active admins: %w", err)
@@ -451,8 +478,8 @@ func (s *Service) syncRole(ctx context.Context, q Queries, u dbgen.GetIdentityUs
 	resource := audit.Resource{Type: audit.ResourceUser, PublicID: u.PublicID, Name: u.Name}
 	if cur.Role == auth.RoleAdmin && cur.Status == "active" && len(admins) <= 1 {
 		return s.cfg.Audit.Record(ctx, q, audit.Entry{
-			OrgID: s.cfg.OrgID, Actor: audit.System, Transport: audit.TransportUI, Action: ActionRoleSyncKeptAdmin,
-			Resource: resource, Details: map[string]any{"mapped_role": mapped, "at": "sign_in"},
+			OrgID: s.cfg.OrgID, Actor: audit.System, Transport: transport, Action: ActionRoleSyncKeptAdmin,
+			Resource: resource, Details: map[string]any{"mapped_role": mapped, "at": at},
 		})
 	}
 	if _, err := q.SetRole(ctx, dbgen.SetRoleParams{OrgID: s.cfg.OrgID, ID: u.ID, Role: mapped, Now: now}); err != nil {
@@ -464,9 +491,9 @@ func (s *Service) syncRole(ctx context.Context, q Queries, u dbgen.GetIdentityUs
 		return fmt.Errorf("end the sessions of %s: %w", u.PublicID, err)
 	}
 	return s.cfg.Audit.Record(ctx, q, audit.Entry{
-		OrgID: s.cfg.OrgID, Actor: audit.System, Transport: audit.TransportUI, Action: audit.ActionUserRoleChanged,
+		OrgID: s.cfg.OrgID, Actor: audit.System, Transport: transport, Action: audit.ActionUserRoleChanged,
 		Resource: resource, Diff: []audit.Change{{Pointer: "/role", Before: cur.Role, After: mapped}},
-		Details: map[string]any{"source": "oidc_sync", "sessions_ended": ended},
+		Details: map[string]any{"source": "oidc_sync", "at": at, "sessions_ended": ended},
 	})
 }
 

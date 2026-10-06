@@ -9,7 +9,10 @@ SELECT u.id, u.public_id, u.login, u.name, u.email, u.role, u.source, u.status, 
        EXISTS (
            SELECT 1 FROM user_totp t
            WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.enrolled_at IS NOT NULL
-       ) AS totp_enabled
+       ) AS totp_enabled,
+       (u.oidc_subject IS NOT NULL AND EXISTS (
+           SELECT 1 FROM oidc_settings o WHERE o.org_id = u.org_id AND o.enabled AND o.sync_role
+       ))::boolean AS role_locked
 FROM users u
 WHERE u.org_id = @org_id AND u.id = @id;
 
@@ -46,7 +49,10 @@ SELECT u.id, u.public_id, u.login, u.name, u.email, u.role, u.source, u.status, 
        EXISTS (
            SELECT 1 FROM user_totp t
            WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.enrolled_at IS NOT NULL
-       ) AS totp_enabled
+       ) AS totp_enabled,
+       (u.oidc_subject IS NOT NULL AND EXISTS (
+           SELECT 1 FROM oidc_settings o WHERE o.org_id = u.org_id AND o.enabled AND o.sync_role
+       ))::boolean AS role_locked
 FROM users u
 WHERE u.org_id = @org_id AND u.public_id = @public_id;
 
@@ -67,6 +73,9 @@ SELECT u.id, u.public_id, u.login, u.name, u.email, u.role, u.source, u.status, 
            SELECT 1 FROM user_totp t
            WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.enrolled_at IS NOT NULL
        ) AS totp_enabled,
+       (u.oidc_subject IS NOT NULL AND EXISTS (
+           SELECT 1 FROM oidc_settings o WHERE o.org_id = u.org_id AND o.enabled AND o.sync_role
+       ))::boolean AS role_locked,
        lower(u.name)::text AS sort_name
 FROM users u
 WHERE u.org_id = @org_id
@@ -173,3 +182,33 @@ WHERE p.org_id = @org_id AND p.id IN (
     LIMIT @batch_size
     FOR UPDATE SKIP LOCKED
 );
+
+-- RoleSyncOn reports whether the identity provider decides the Role of OIDC accounts: OIDC and oidc.sync_role are both
+-- on.
+-- name: RoleSyncOn :one
+SELECT EXISTS (
+    SELECT 1 FROM oidc_settings WHERE org_id = @org_id AND enabled AND sync_role
+)::boolean AS role_sync_on;
+
+-- ConvertToLocal removes the OIDC identity of an account that is not deleted, with its offline token, so that the
+-- account signs in with a password once one is set.
+-- name: ConvertToLocal :execrows
+UPDATE users
+SET oidc_issuer = NULL, oidc_subject = NULL, oidc_offline_token_ciphertext = NULL, oidc_offline_token_key_id = NULL,
+    oidc_offline_token_updated_at = NULL, updated_at = @now::timestamptz, version = version + 1
+WHERE org_id = @org_id AND id = @id AND status <> 'deleted' AND oidc_subject IS NOT NULL;
+
+-- ResetUserPassword is the emergency reset of the CLI: it sets the password of any account that is not deleted and
+-- removes an OIDC identity and its offline token in the same update, so that the account never holds both.
+-- name: ResetUserPassword :execrows
+UPDATE users
+SET password_hash = @password_hash, password_changed_at = @now::timestamptz, oidc_issuer = NULL, oidc_subject = NULL,
+    oidc_offline_token_ciphertext = NULL, oidc_offline_token_key_id = NULL, oidc_offline_token_updated_at = NULL,
+    updated_at = @now::timestamptz, version = version + 1
+WHERE org_id = @org_id AND id = @id AND status <> 'deleted';
+
+-- DeleteOIDCCheck removes the background re-check of a user whose offline token was wiped: disabled, deleted or
+-- converted to local.
+-- name: DeleteOIDCCheck :exec
+DELETE FROM oidc_checks
+WHERE org_id = @org_id AND user_id = @user_id;

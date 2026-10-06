@@ -34,6 +34,9 @@ const (
 	StatusDeleted  = "deleted"
 )
 
+// ActionConvertedToLocal is the Audit log action of an OIDC account an Admin converted back to local.
+const ActionConvertedToLocal = "user.converted_to_local"
+
 // SourceLocal is a user an Admin created.
 const SourceLocal = "local"
 
@@ -55,6 +58,11 @@ var (
 	ErrLastAdmin = errors.New("the last active Admin cannot be disabled, deleted or given a lower Role")
 	// ErrVersionMismatch is an If-Match that names another version of the user.
 	ErrVersionMismatch = errors.New("the user changed since it was read")
+	// ErrRoleLocked is a Role change of an account that signs in through OIDC while OIDC and oidc.sync_role are both
+	// on: the identity provider decides its Role (C-03.FR-29).
+	ErrRoleLocked = errors.New("the identity provider decides the Role of this account")
+	// ErrNotLinked is a conversion to local of an account that does not sign in through OIDC.
+	ErrNotLinked = errors.New("the account does not sign in through OIDC")
 )
 
 // AdminQueries are the queries of user administration, with the insert of the Audit log.
@@ -71,6 +79,10 @@ type AdminQueries interface {
 	PseudonymizeUser(ctx context.Context, arg dbgen.PseudonymizeUserParams) (int64, error)
 	SetUserPassword(ctx context.Context, arg dbgen.SetUserPasswordParams) (int64, error)
 	EndSessionsOfUser(ctx context.Context, arg dbgen.EndSessionsOfUserParams) (int64, error)
+	RoleSyncOn(ctx context.Context, orgID int64) (bool, error)
+	ConvertToLocal(ctx context.Context, arg dbgen.ConvertToLocalParams) (int64, error)
+	ResetUserPassword(ctx context.Context, arg dbgen.ResetUserPasswordParams) (int64, error)
+	DeleteOIDCCheck(ctx context.Context, arg dbgen.DeleteOIDCCheckParams) error
 	InsertPasswordSetup(ctx context.Context, arg dbgen.InsertPasswordSetupParams) error
 	SupersedePasswordSetups(ctx context.Context, arg dbgen.SupersedePasswordSetupsParams) (int64, error)
 	GetPasswordSetup(ctx context.Context, arg dbgen.GetPasswordSetupParams) (dbgen.GetPasswordSetupRow, error)
@@ -171,6 +183,7 @@ func (a *Admin) List(ctx context.Context, f ListFilter) (Page, error) {
 			Source: row.Source, Status: row.Status, HasPassword: row.HasPassword, HasOidcIdentity: row.HasOidcIdentity,
 			HasOfflineToken: row.HasOfflineToken, TimeZone: row.TimeZone, Language: row.Language,
 			LastSignInAt: row.LastSignInAt, CreatedAt: row.CreatedAt, Version: row.Version, TotpEnabled: row.TotpEnabled,
+			RoleLocked: row.RoleLocked,
 		}))
 	}
 	return page, nil
@@ -256,9 +269,9 @@ type Changes struct {
 }
 
 // Update changes the name, the email and the Role of the user id at version, the version its If-Match names, or at
-// any version when version is nil. A Role
-// change ends the user's sessions; giving the last active Admin a lower Role is ErrLastAdmin. Nothing changes, and
-// nothing is recorded, when the values are the ones the user has.
+// any version when version is nil. A Role change ends the user's sessions; giving the last active Admin a lower Role
+// is ErrLastAdmin, and changing the Role of an account that signs in through OIDC while OIDC and oidc.sync_role are
+// both on is ErrRoleLocked. Nothing changes, and nothing is recorded, when the values are the ones the user has.
 func (a *Admin) Update(ctx context.Context, r Requester, id string, version *int64, c Changes) (User, error) {
 	var updated User
 	err := a.store.InTx(ctx, func(q AdminQueries) error {
@@ -283,6 +296,15 @@ func (a *Admin) Update(ctx context.Context, r Requester, id string, version *int
 		if len(diff) == 0 {
 			updated = before
 			return nil
+		}
+		if after.Role != before.Role && before.HasOIDCIdentity {
+			locked, err := q.RoleSyncOn(ctx, a.orgID)
+			if err != nil {
+				return fmt.Errorf("read whether the identity provider decides the Role: %w", err)
+			}
+			if locked {
+				return ErrRoleLocked
+			}
 		}
 		if lowersAdmin(before, after.Role, after.Status) && len(admins) <= 1 {
 			return ErrLastAdmin
@@ -356,6 +378,10 @@ func (a *Admin) setStatus(ctx context.Context, r Requester, id, status string) (
 			if details["sessions_ended"], err = a.endSessions(ctx, q, before, auth.EndUserDisabled, now); err != nil {
 				return err
 			}
+			// Disabling wiped the offline token, so the user is no longer re-checked.
+			if err := a.dropCheck(ctx, q, before); err != nil {
+				return err
+			}
 		}
 		if changed, err = get(ctx, q, a.orgID, before.ID); err != nil {
 			return err
@@ -396,6 +422,9 @@ func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int
 		}
 		ended, err := a.endSessions(ctx, q, before, auth.EndUserDeleted, now)
 		if err != nil {
+			return err
+		}
+		if err := a.dropCheck(ctx, q, before); err != nil {
 			return err
 		}
 		if _, err := q.SupersedePasswordSetups(ctx, dbgen.SupersedePasswordSetupsParams{
@@ -460,6 +489,67 @@ func (a *Admin) endSessions(ctx context.Context, q AdminQueries, u User, reason 
 		return 0, fmt.Errorf("end the sessions of %s: %w", u.PublicID, err)
 	}
 	return n, nil
+}
+
+// dropCheck removes the background re-check of u, whose offline token was wiped.
+func (a *Admin) dropCheck(ctx context.Context, q AdminQueries, u User) error {
+	if err := q.DeleteOIDCCheck(ctx, dbgen.DeleteOIDCCheckParams{OrgID: a.orgID, UserID: u.ID}); err != nil {
+		return fmt.Errorf("remove the OIDC re-check of %s: %w", u.PublicID, err)
+	}
+	return nil
+}
+
+// ConvertToLocal converts the account id, which signs in through OIDC, back to local (C-03.FR-29): the identity and
+// the offline token are removed with its re-check, the sessions end (converted_to_local), and the returned password
+// setup link sets its first password, as at creation. The TOTP enrolment stays. An account without an identity is
+// ErrNotLinked.
+func (a *Admin) ConvertToLocal(ctx context.Context, r Requester, id string) (User, SetupLink, error) {
+	var (
+		converted User
+		link      SetupLink
+	)
+	err := a.store.InTx(ctx, func(q AdminQueries) error {
+		_, before, err := a.lock(ctx, q, id, false)
+		if err != nil {
+			return err
+		}
+		if !before.HasOIDCIdentity {
+			return ErrNotLinked
+		}
+		now := a.clock.Now().UTC()
+		n, err := q.ConvertToLocal(ctx, dbgen.ConvertToLocalParams{OrgID: a.orgID, ID: before.ID, Now: now})
+		if err != nil {
+			return fmt.Errorf("convert %s to local: %w", before.PublicID, err)
+		}
+		if n == 0 {
+			return ErrNotLinked
+		}
+		if err := a.dropCheck(ctx, q, before); err != nil {
+			return err
+		}
+		ended, err := a.endSessions(ctx, q, before, auth.EndConvertedToLocal, now)
+		if err != nil {
+			return err
+		}
+		if converted, err = get(ctx, q, a.orgID, before.ID); err != nil {
+			return err
+		}
+		if link, err = a.issueLink(ctx, q, r, converted); err != nil {
+			return err
+		}
+		return a.audit.Record(ctx, q, audit.Entry{
+			OrgID: a.orgID, Actor: r.Actor, Transport: r.Transport, Action: ActionConvertedToLocal,
+			Resource: resourceOf(converted),
+			Diff:     []audit.Change{{Pointer: "/sign_in_method", Before: auth.MethodOIDC, After: auth.MethodLocal}},
+			Details: map[string]any{"sessions_ended": ended, "offline_token_wiped": before.OfflineAccess,
+				"expires_at": link.ExpiresAt.Format(time.RFC3339)},
+			SourceAddress: r.Address,
+		})
+	})
+	if err != nil {
+		return User{}, SetupLink{}, err
+	}
+	return converted, link, nil
 }
 
 // view is what the Audit log diff of a user shows.

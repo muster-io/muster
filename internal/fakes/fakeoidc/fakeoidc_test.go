@@ -188,6 +188,14 @@ func TestCodeFlowWithPKCEAndRefreshRotation(t *testing.T) {
 	if status, _ := post(t, f.URL()+"/token", refresh, ""); status != http.StatusBadRequest {
 		t.Fatalf("a rotated refresh token was accepted again: %d", status)
 	}
+	// A refresh answers with the person as last scripted for the subject.
+	f.SetNextUser(User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"muster-admins"}})
+	refresh.Set("refresh_token", rotated["refresh_token"].(string))
+	status, rotated = post(t, f.URL()+"/token", refresh, "")
+	if groups, _ := verify(t, f, rotated["id_token"].(string))["groups"].([]any); status != http.StatusOK ||
+		len(groups) != 1 || groups[0] != "muster-admins" {
+		t.Fatalf("refresh after the user changed = %d, groups %v", status, groups)
+	}
 	if code, _ := post(t, f.URL()+"/_fake/users/u-1/disable", nil, ""); code != http.StatusNoContent {
 		t.Fatalf("disable = %d", code)
 	}

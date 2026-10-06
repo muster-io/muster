@@ -49,6 +49,9 @@ type adminStore struct {
 	audit    []auditdb.InsertAuditEntryParams
 	fail     map[string]error
 	locked   []string
+	// roleSync is whether OIDC and oidc.sync_role are both on; dropped are the users whose re-check was removed.
+	roleSync bool
+	dropped  []int64
 }
 
 func (s *adminStore) InTx(_ context.Context, f func(AdminQueries) error) error {
@@ -226,6 +229,44 @@ func (s *adminStore) SetUserPassword(_ context.Context, arg dbgen.SetUserPasswor
 	u.HasPassword = arg.PasswordHash.Valid
 	u.Version++
 	return 1, nil
+}
+
+func (s *adminStore) RoleSyncOn(context.Context, int64) (bool, error) {
+	return s.roleSync, s.fail["RoleSyncOn"]
+}
+
+func (s *adminStore) ConvertToLocal(_ context.Context, arg dbgen.ConvertToLocalParams) (int64, error) {
+	if err := s.fail["ConvertToLocal"]; err != nil {
+		return 0, err
+	}
+	u := s.user(arg.ID)
+	if u == nil || u.Status == StatusDeleted || !u.HasOidcIdentity {
+		return 0, nil
+	}
+	u.HasOidcIdentity, u.HasOfflineToken, u.RoleLocked = false, false, false
+	u.Version++
+	return 1, nil
+}
+
+func (s *adminStore) ResetUserPassword(_ context.Context, arg dbgen.ResetUserPasswordParams) (int64, error) {
+	if err := s.fail["ResetUserPassword"]; err != nil {
+		return 0, err
+	}
+	u := s.user(arg.ID)
+	if u == nil || u.Status == StatusDeleted {
+		return 0, nil
+	}
+	u.HasPassword, u.HasOidcIdentity, u.HasOfflineToken, u.RoleLocked = true, false, false, false
+	u.Version++
+	return 1, nil
+}
+
+func (s *adminStore) DeleteOIDCCheck(_ context.Context, arg dbgen.DeleteOIDCCheckParams) error {
+	if err := s.fail["DeleteOIDCCheck"]; err != nil {
+		return err
+	}
+	s.dropped = append(s.dropped, arg.UserID)
+	return nil
 }
 
 func (s *adminStore) EndSessionsOfUser(_ context.Context, arg dbgen.EndSessionsOfUserParams) (int64, error) {
@@ -808,13 +849,25 @@ func TestResetPassword(t *testing.T) {
 		ErrNotFound) {
 		t.Errorf("a deleted account: %v", err)
 	}
-	s.users[1].Status, s.users[1].HasOidcIdentity = StatusActive, true
-	if _, err := a.ResetPassword(t.Context(), "ops", "bob@example.org", "a-good-password-1"); !errors.Is(err,
-		auth.ErrNotLocal) {
-		t.Errorf("an OIDC account: %v", err)
+	// C-03.FR-11, AC-21: on an account that signs in through OIDC the reset removes the identity and the offline
+	// token in the same update, with the re-check, and the entry says so.
+	s.users[1].Status, s.users[1].HasOidcIdentity, s.users[1].HasPassword = StatusActive, true, false
+	s.users[1].HasOfflineToken, s.sessions[2] = true, 1
+	if _, err := a.ResetPassword(t.Context(), "ops", "bob@example.org", "a-good-password-1"); err != nil {
+		t.Fatalf("a reset of an OIDC account: %v", err)
 	}
-	s.users[1].HasOidcIdentity = false
-	for _, method := range []string{"GetUserByLogin", "SetUserPassword", "EndSessionsOfUser",
+	if u := s.user(2); u.HasOidcIdentity || u.HasOfflineToken || !u.HasPassword || s.sessions[2] != 0 ||
+		!slices.Equal(s.dropped, []int64{2}) {
+		t.Errorf("after the reset of an OIDC account: %+v, dropped %v", u, s.dropped)
+	}
+	e, diff = lastAudit(t, s)
+	var details map[string]any
+	_ = json.Unmarshal(e.Details, &details)
+	if e.ActorName.String != "ops" || details["oidc_identity_removed"] != true || len(diff) != 2 ||
+		diff[1].Pointer != "/sign_in_method" || diff[1].After != "local" {
+		t.Errorf("entry of the reset of an OIDC account: %+v %s", diff, e.Details)
+	}
+	for _, method := range []string{"GetUserByLogin", "LockUser", "ResetUserPassword", "EndSessionsOfUser",
 		"SupersedePasswordSetups", "InsertAuditEntry"} {
 		s.fail = map[string]error{method: errors.New("boom")}
 		if _, err := a.ResetPassword(t.Context(), "ops", "bob@example.org", "a-good-password-1"); err == nil {
@@ -896,5 +949,109 @@ func TestSetupLinkUsedMeanwhile(t *testing.T) {
 	}
 	if s.user(1).Version != before {
 		t.Error("the password was set twice")
+	}
+}
+
+// TestConvertToLocal is C-03.FR-29 and C-03.AC-21: an Admin's conversion removes the identity and the offline token
+// with the re-check, ends the sessions with converted_to_local and returns a password setup link; the TOTP enrolment
+// stays. An account without an identity is ErrNotLinked.
+func TestConvertToLocal(t *testing.T) {
+	alice := adminRow(2, bobID, "Alice")
+	alice.Role, alice.HasPassword, alice.HasOidcIdentity, alice.HasOfflineToken, alice.TotpEnabled =
+		auth.RoleResponder, false, true, true, true
+	s := &adminStore{users: []dbgen.GetUserRow{adminRow(1, adminID, "admin"), alice}, sessions: map[int64]int64{2: 2}}
+	a, _ := newAdmin(t, s)
+	u, link, err := a.ConvertToLocal(t.Context(), byAdmin, bobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.SignInMethod() != "local" || u.HasOIDCIdentity || u.OfflineAccess || !u.TOTPEnabled || s.sessions[2] != 0 ||
+		!slices.Equal(s.reasons, []string{auth.EndConvertedToLocal}) || !slices.Equal(s.dropped, []int64{2}) ||
+		!strings.HasPrefix(link.URL, "https://muster.example.org/base/password-setup#token=") || len(s.setups) != 1 {
+		t.Fatalf("converted %+v, link %+v, reasons %v", u, link, s.reasons)
+	}
+	e, diff := lastAudit(t, s)
+	var details map[string]any
+	_ = json.Unmarshal(e.Details, &details)
+	if e.Action != ActionConvertedToLocal || len(diff) != 1 || diff[0].Before != "oidc" || diff[0].After != "local" ||
+		details["sessions_ended"] != 2.0 || details["offline_token_wiped"] != true {
+		t.Errorf("entry %+v %s", diff, e.Details)
+	}
+	if _, _, err := a.ConvertToLocal(t.Context(), byAdmin, bobID); !errors.Is(err, ErrNotLinked) {
+		t.Errorf("a second conversion = %v, want ErrNotLinked", err)
+	}
+	if _, _, err := a.ConvertToLocal(t.Context(), byAdmin, "SRNOBODY000000"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an unknown user = %v", err)
+	}
+	for _, method := range []string{"ConvertToLocal", "DeleteOIDCCheck", "EndSessionsOfUser", "InsertPasswordSetup",
+		"InsertAuditEntry"} {
+		s := &adminStore{users: []dbgen.GetUserRow{adminRow(1, adminID, "admin"), alice}}
+		a, _ := newAdmin(t, s)
+		s.fail[method] = errors.New("boom")
+		if _, _, err := a.ConvertToLocal(t.Context(), byAdmin, bobID); err == nil || !s.user(2).HasOidcIdentity {
+			t.Errorf("%s failed but the conversion did not: %v", method, err)
+		}
+	}
+	s.users[1].Status = StatusDeleted
+	s.users[1].HasOidcIdentity = true
+	if _, _, err := a.ConvertToLocal(t.Context(), byAdmin, bobID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a deleted account = %v", err)
+	}
+}
+
+// TestRoleLocked is C-03.FR-29: while OIDC and oidc.sync_role are both on, the Role of an account that signs in
+// through OIDC is refused with ErrRoleLocked; its name still changes, and a local account's Role changes.
+func TestRoleLocked(t *testing.T) {
+	olga := adminRow(2, bobID, "Olga")
+	olga.Role, olga.HasPassword, olga.HasOidcIdentity, olga.RoleLocked = auth.RoleResponder, false, true, true
+	s := &adminStore{users: []dbgen.GetUserRow{adminRow(1, adminID, "admin"), olga}, roleSync: true}
+	a, _ := newAdmin(t, s)
+	if _, err := a.Update(t.Context(), byAdmin, bobID, nil, Changes{Name: "Olga", Role: auth.RoleViewer}); !errors.Is(
+		err, ErrRoleLocked) {
+		t.Errorf("a Role change of an OIDC account = %v, want ErrRoleLocked", err)
+	}
+	u, err := a.Update(t.Context(), byAdmin, bobID, nil, Changes{Name: "Olga K", Role: auth.RoleResponder})
+	if err != nil || u.Name != "Olga K" || !u.RoleLocked {
+		t.Errorf("a name change of an OIDC account = %+v, %v", u, err)
+	}
+	s.fail["RoleSyncOn"] = errors.New("boom")
+	if _, err := a.Update(t.Context(), byAdmin, bobID, nil, Changes{Name: "Olga", Role: auth.RoleViewer}); err == nil {
+		t.Error("a failed read of the Role sync")
+	}
+	s.fail = map[string]error{}
+	s.roleSync = false
+	if u, err := a.Update(t.Context(), byAdmin, bobID, nil, Changes{Name: "Olga", Role: auth.RoleViewer}); err != nil ||
+		u.Role != auth.RoleViewer {
+		t.Errorf("a Role change while the IdP does not decide it = %+v, %v", u, err)
+	}
+}
+
+// TestDisableAndDeleteDropTheCheck is C-03.FR-30: disabling or deleting a user removes the re-check with the token.
+func TestDisableAndDeleteDropTheCheck(t *testing.T) {
+	s := &adminStore{users: []dbgen.GetUserRow{adminRow(1, adminID, "admin"), adminRow(2, bobID, "Bob")}}
+	a, _ := newAdmin(t, s)
+	if _, err := a.Disable(t.Context(), byAdmin, bobID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Enable(t.Context(), byAdmin, bobID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Delete(t.Context(), byAdmin, bobID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(s.dropped, []int64{2, 2}) {
+		t.Errorf("dropped re-checks = %v", s.dropped)
+	}
+	for _, f := range []func() error{
+		func() error { _, err := a.Disable(t.Context(), byAdmin, adminID); return err },
+	} {
+		s.users = append(s.users, adminRow(3, "SRC0000000000C", "carol"))
+		s.fail["DeleteOIDCCheck"] = errors.New("boom")
+		if err := f(); err == nil {
+			t.Error("a failed removal of the re-check")
+		}
+	}
+	if err := a.Delete(t.Context(), byAdmin, "SRC0000000000C", nil); err == nil {
+		t.Error("a delete whose re-check removal failed")
 	}
 }

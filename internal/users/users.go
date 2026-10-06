@@ -62,12 +62,15 @@ type User struct {
 	HasPassword     bool
 	HasOIDCIdentity bool
 	OfflineAccess   bool
-	TOTPEnabled     bool
-	TimeZone        *string
-	Language        *string
-	LastSignInAt    *time.Time
-	CreatedAt       time.Time
-	Version         int64
+	// RoleLocked says that the identity provider decides the Role: the account signs in through OIDC while OIDC and
+	// oidc.sync_role are both on.
+	RoleLocked   bool
+	TOTPEnabled  bool
+	TimeZone     *string
+	Language     *string
+	LastSignInAt *time.Time
+	CreatedAt    time.Time
+	Version      int64
 }
 
 // SignInMethod is how the user signs in now: oidc with an identity, local otherwise.
@@ -158,7 +161,8 @@ func userOf(row dbgen.GetUserRow) User {
 	u := User{
 		ID: row.ID, PublicID: row.PublicID, Login: row.Login, Name: row.Name, Email: row.Email.String, Role: row.Role,
 		Source: row.Source, Status: row.Status, HasPassword: row.HasPassword, HasOIDCIdentity: row.HasOidcIdentity,
-		OfflineAccess: row.HasOfflineToken, TOTPEnabled: row.TotpEnabled, TimeZone: textPtr(row.TimeZone),
+		OfflineAccess: row.HasOfflineToken, RoleLocked: row.RoleLocked, TOTPEnabled: row.TotpEnabled,
+		TimeZone: textPtr(row.TimeZone),
 		Language: textPtr(row.Language), CreatedAt: row.CreatedAt, Version: row.Version,
 	}
 	if row.LastSignInAt.Valid {

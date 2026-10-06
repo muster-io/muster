@@ -3,6 +3,8 @@
 
 // Package fakeoidc is the fake OpenID Connect identity provider: discovery, a key set, an authorization endpoint that
 // approves the scripted next user at once, a token endpoint that checks PKCE and rotates refresh tokens, and userinfo.
+// A refresh answers with the person as last scripted for the subject, so that a test can change the groups of a user
+// who holds a refresh token.
 // Control endpoints under /_fake/ script the next user, disable and enable users, grant or withhold offline_access,
 // leave the groups claim out of discovery and rotate the signing key. The same server runs in Go tests and in
 // `muster dev`. It is a test double: it accepts any client secret and keeps everything in memory.
@@ -74,6 +76,7 @@ type Fake struct {
 	kid      string
 	old      []jose.JSONWebKey // keys rotated out, still published
 	next     *User
+	profiles map[string]User // the last scripted user of each subject
 	disabled map[string]bool
 	offline  bool
 	omit     bool
@@ -86,7 +89,7 @@ type Fake struct {
 // New returns a fake identity provider with a fresh signing key; it grants offline_access by default.
 func New() *Fake {
 	f := &Fake{disabled: map[string]bool{}, offline: true, codes: map[string]grant{}, refresh: map[string]grant{},
-		access: map[string]User{}, now: time.Now}
+		access: map[string]User{}, profiles: map[string]User{}, now: time.Now}
 	f.rotate()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", f.discovery)
@@ -112,11 +115,13 @@ func New() *Fake {
 	return f
 }
 
-// SetNextUser scripts the user the authorization endpoint approves, for every authorization until the next call.
+// SetNextUser scripts the user the authorization endpoint approves, for every authorization until the next call; the
+// refresh tokens of the same subject answer with it from then on.
 func (f *Fake) SetNextUser(u User) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.next = &u
+	f.profiles[u.Subject] = u
 }
 
 // SetDisabled disables or enables a user: the refresh tokens of a disabled user answer invalid_grant, and the
@@ -315,6 +320,9 @@ func (f *Fake) refreshTokens(w http.ResponseWriter, r *http.Request, clientID st
 	g, ok := f.refresh[token]
 	delete(f.refresh, token) // rotation: a refresh token works once
 	disabled := ok && f.disabled[g.user.Subject]
+	if p, scripted := f.profiles[g.user.Subject]; ok && scripted {
+		g.user = p
+	}
 	f.mu.Unlock()
 	if !ok || disabled || g.clientID != clientID {
 		tokenError(w, http.StatusBadRequest, "invalid_grant")

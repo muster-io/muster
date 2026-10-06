@@ -464,8 +464,10 @@ paths:
         on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit
         log records it; the redirect goes to `/profile`. A failure
         redirects to `/profile?error=<code>`, with one of `identity_linked_elsewhere` (the identity belongs to another user;
-        the Audit log records the refusal), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`,
-        no web session, or a `state` started by another session) and `idp_error`.
+        the Audit log records the refusal), `no_access` (the identity's groups map to no Role and there is no Role for
+        unmatched users, so the account could not sign in through OIDC; the redirect is `/profile?error=no_access` and
+        the Audit log records the refusal with the groups), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`, no
+        web session, or a `state` started by another session) and `idp_error`.
       x-permission: authenticated
       x-listener: app
       security:
@@ -488,7 +490,7 @@ paths:
           type: string
       responses:
         '302':
-          description: Redirect to the profile page, with `oidc_link` or `oidc_link_error`.
+          description: Redirect to `/profile`, or to `/profile?error=<code>` after a failure.
           headers:
             Location:
               $ref: '#/components/headers/Location'

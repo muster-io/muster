@@ -244,13 +244,24 @@ var SystemNoticesCheckFailed = newEvent("system_notices_check_failed", LevelWarn
 		"a check succeeds again.",
 	"error")
 
-// OIDCSignInFailed is logged when an OIDC sign-in ends with idp_error: the identity provider or the way to it failed,
-// or its answer did not verify.
+// OIDCSignInFailed is logged when an OIDC sign-in or link ends with idp_error: the identity provider or the way to it
+// failed, or its answer did not verify.
 var OIDCSignInFailed = newEvent("oidc_sign_in_failed", LevelWarn, "C-03",
-	"An OIDC sign-in ended at the sign-in page with idp_error: the identity provider reported an error, could not be "+
-		"reached through the back channel or its proxy, or answered with an ID token that did not verify. The reason "+
-		"names the step; the error is masked and carries no token or secret.",
+	"An OIDC sign-in ended at the sign-in page, or the linking of an OIDC identity at the profile page, with "+
+		"idp_error: the identity provider reported an error, could not be reached through the back channel or its "+
+		"proxy, or answered with an ID token that did not verify. The reason names the step, prefixed with link for a "+
+		"link; the error is masked and carries no token or secret.",
 	"reason", "error")
+
+// OIDCCheckFailed is logged when a background re-check of an OIDC user could not reach a decision.
+var OIDCCheckFailed = newEvent("oidc_check_failed", LevelWarn, "C-03",
+	"A background re-check of an OIDC user at the identity provider found it unavailable — unreachable, a timeout, "+
+		"408, 429 or 5xx, or the 10-second budget of the refresh spent — or could not run. Nothing changes for the "+
+		"user: sessions and Personal access tokens keep working, and the next attempt comes one "+
+		"auth.oidc_recheck_interval later, so an incident at the identity provider never signs everybody out. user is "+
+		"the public_id of the user, empty when a round of the worker failed; reason names the step; the error is "+
+		"masked and carries no token or secret.",
+	"user", "reason", "error")
 
 // Event is a registered log event. Its zero value is not registered, and the logger refuses it.
 type Event struct {

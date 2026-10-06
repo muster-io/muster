@@ -184,9 +184,10 @@ func (a *Admin) usableLink(ctx context.Context, q AdminQueries, hash []byte) (db
 }
 
 // ResetPassword is `muster admin reset-password` (C-03.FR-11): it sets password on the account whose login is login,
-// compared lowercased, ends its sessions, supersedes its password setup links and records user.password_reset by the
-// CLI actor named actor. It returns the public_id of the account. A deleted or unknown account is ErrNotFound; an
-// account that signs in through OIDC is auth.ErrNotLocal until the OIDC story lets the reset remove the identity.
+// compared lowercased — an account that signs in through OIDC included, whose identity and offline token it removes in
+// the same update, with its re-check, so that the account never holds both — ends its sessions, supersedes its
+// password setup links and records user.password_reset by the CLI actor named actor, with whether an identity was
+// removed. It returns the public_id of the account. A deleted or unknown account is ErrNotFound.
 func (a *Admin) ResetPassword(ctx context.Context, actor, login, password string) (string, error) {
 	if actor == "" {
 		return "", errors.New("the reset needs the --actor name")
@@ -201,38 +202,48 @@ func (a *Admin) ResetPassword(ctx context.Context, actor, login, password string
 	if err != nil {
 		return "", fmt.Errorf("find the account: %w", err)
 	}
-	if row.HasOidcIdentity {
-		return "", auth.ErrNotLocal
-	}
 	passwordHash, err := auth.HashPassword(ctx, password)
 	if err != nil {
 		return "", err
 	}
 	return row.PublicID, a.store.InTx(ctx, func(q AdminQueries) error {
+		_, before, err := a.lock(ctx, q, row.PublicID, false)
+		if err != nil {
+			return err
+		}
 		now := a.clock.Now().UTC()
-		n, err := q.SetUserPassword(ctx, dbgen.SetUserPasswordParams{
-			OrgID: a.orgID, ID: row.ID, PasswordHash: pgtype.Text{String: passwordHash, Valid: true}, Now: now,
+		n, err := q.ResetUserPassword(ctx, dbgen.ResetUserPasswordParams{
+			OrgID: a.orgID, ID: before.ID, PasswordHash: pgtype.Text{String: passwordHash, Valid: true}, Now: now,
 		})
 		if err != nil {
-			return fmt.Errorf("set the password of %s: %w", row.PublicID, err)
+			return fmt.Errorf("set the password of %s: %w", before.PublicID, err)
 		}
 		if n == 0 {
 			return ErrNotFound
 		}
-		u := User{ID: row.ID, PublicID: row.PublicID, Name: row.Name}
-		ended, err := a.endSessions(ctx, q, u, auth.EndPasswordChanged, now)
+		if before.HasOIDCIdentity {
+			if err := a.dropCheck(ctx, q, before); err != nil {
+				return err
+			}
+		}
+		ended, err := a.endSessions(ctx, q, before, auth.EndPasswordChanged, now)
 		if err != nil {
 			return err
 		}
 		if _, err := q.SupersedePasswordSetups(ctx, dbgen.SupersedePasswordSetupsParams{
-			OrgID: a.orgID, UserID: row.ID, Now: now,
+			OrgID: a.orgID, UserID: before.ID, Now: now,
 		}); err != nil {
-			return fmt.Errorf("supersede the password setup links of %s: %w", row.PublicID, err)
+			return fmt.Errorf("supersede the password setup links of %s: %w", before.PublicID, err)
+		}
+		diff := []audit.Change{{Pointer: "/password", SecretChanged: true}}
+		if before.HasOIDCIdentity {
+			diff = append(diff, audit.Change{Pointer: "/sign_in_method", Before: auth.MethodOIDC,
+				After: auth.MethodLocal})
 		}
 		return a.audit.Record(ctx, q, audit.Entry{
 			OrgID: a.orgID, Actor: audit.CLI(actor), Transport: audit.TransportCLI, Action: audit.ActionPasswordReset,
-			Resource: resourceOf(u), Diff: []audit.Change{{Pointer: "/password", SecretChanged: true}},
-			Details: map[string]any{"sessions_ended": ended},
+			Resource: resourceOf(before), Diff: diff,
+			Details: map[string]any{"sessions_ended": ended, "oidc_identity_removed": before.HasOIDCIdentity},
 		})
 	})
 }

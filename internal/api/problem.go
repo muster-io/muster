@@ -61,6 +61,10 @@ const (
 	codeTOTPNotStarted        = "totp_enrolment_not_started"
 	codeTOTPNotPending        = "totp_not_pending"
 	codeOIDCNotEnabled        = "oidc_not_enabled"
+	codeOIDCSessionEnded      = "oidc_session_ended"
+	codeOIDCAlreadyLinked     = "oidc_already_linked"
+	codeOIDCNotLinked         = "oidc_not_linked"
+	codeRoleLocked            = "role_locked"
 
 	fieldRequired      = "required"
 	fieldInvalidFormat = "invalid_format"
@@ -200,6 +204,9 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		return errInvalidCredentials
 	case errors.Is(err, auth.ErrSessionExpired):
 		return errSessionExpired
+	case errors.Is(err, auth.ErrOIDCSessionEnded):
+		return problem(http.StatusUnauthorized, typeUnauthenticated, codeOIDCSessionEnded,
+			"The identity provider no longer accepts your account; sign in again.")
 	case errors.Is(err, auth.ErrUnauthenticated):
 		return errUnauthenticated
 	case errors.Is(err, auth.ErrPasswordTooShort):
@@ -218,6 +225,12 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 			"The Organization needs an active Admin: the last one cannot be disabled, deleted or given a lower Role.")
 	case errors.Is(err, users.ErrVersionMismatch):
 		return errPreconditionFailed
+	case errors.Is(err, users.ErrRoleLocked):
+		return problem(http.StatusConflict, typeConflict, codeRoleLocked,
+			"The identity provider decides the Role of this account while OIDC and Role sync are on.")
+	case errors.Is(err, users.ErrNotLinked):
+		return problem(http.StatusConflict, typeConflict, codeOIDCNotLinked,
+			"The account does not sign in through OIDC, so there is nothing to convert to local.")
 	case errors.Is(err, users.ErrLinkNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such password setup link.")
 	case errors.Is(err, users.ErrLinkExpired):
@@ -244,6 +257,9 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		return errPreconditionFailed
 	case errors.Is(err, oidc.ErrNotEnabled):
 		return errOIDCNotEnabled
+	case errors.Is(err, oidc.ErrAlreadyLinked):
+		return problem(http.StatusConflict, typeConflict, codeOIDCAlreadyLinked,
+			"The account already signs in through OIDC.")
 	case errors.Is(err, oidc.ErrTooManyRequests):
 		p := problem(http.StatusTooManyRequests, typeRateLimited, "",
 			"Too many OIDC sign-ins are in progress; try again in a minute.")

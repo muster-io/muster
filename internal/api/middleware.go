@@ -19,6 +19,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/oidc"
 )
 
 // MaxBodyBytes bounds the body of an API request on the app listener; a larger one is 413 payload-too-large.
@@ -40,6 +41,9 @@ type operation struct {
 
 // operationStreamLiveUpdates is the live-updates stream, which the request duration metric leaves out.
 const operationStreamLiveUpdates = "streamLiveUpdates"
+
+// operationCompleteOidcLink is the callback of a link, which answers every outcome with a redirect.
+const operationCompleteOidcLink = "completeOidcLink"
 
 // limitedOperations are the operations a limited session may call, per state (SessionState in the specification).
 var limitedOperations = map[auth.SessionState][]string{
@@ -176,6 +180,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 	if !op.public {
 		id, p := s.authenticate(rec, r, op)
+		if p != nil && op.id == operationCompleteOidcLink {
+			// The identity provider sends the browser back here: every outcome is a redirect to the profile, and a
+			// link without a usable web session is refused like one from another session.
+			rec.Header().Set("Location", oidc.ProfilePage+"?error="+oidc.ErrorInvalidRequest)
+			rec.WriteHeader(http.StatusFound)
+			return
+		}
 		if p != nil {
 			writeProblem(rec, r, p)
 			return

@@ -84,7 +84,7 @@ func TestFirstSignInCreatesTheUser(t *testing.T) {
 		t.Fatalf("user = %+v", olga)
 	}
 	opened := e.sessions.opened[0]
-	if opened.State != auth.StateActive || opened.User.ID != olga.id || opened.Lifetime != FallbackSessionLifetime {
+	if opened.State != auth.StateActive || opened.User.ID != olga.id || opened.Lifetime != auth.SessionLifetime {
 		t.Errorf("session = %+v", opened)
 	}
 	created := e.store.audited("user.created")

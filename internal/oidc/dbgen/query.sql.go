@@ -34,6 +34,56 @@ func (q *Queries) AllowNetwork(ctx context.Context, arg AllowNetworkParams) (int
 	return result.RowsAffected(), nil
 }
 
+const capOIDCSessions = `-- name: CapOIDCSessions :execrows
+UPDATE sessions
+SET expires_at = least(expires_at, $1::timestamptz)
+WHERE org_id = $2 AND user_id = $3 AND method = 'oidc' AND ended_at IS NULL
+`
+
+type CapOIDCSessionsParams struct {
+	ExpiresAt time.Time
+	OrgID     int64
+	UserID    int64
+}
+
+// CapOIDCSessions bounds the open OIDC sessions of a user who no longer holds an offline token to @expires_at, since no
+// background re-check can end them any more.
+func (q *Queries) CapOIDCSessions(ctx context.Context, arg CapOIDCSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, capOIDCSessions, arg.ExpiresAt, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const continueAsOIDCSession = `-- name: ContinueAsOIDCSession :execrows
+UPDATE sessions
+SET method = 'oidc', idp_mfa = $1, expires_at = least(expires_at, $2::timestamptz)
+WHERE org_id = $3 AND id = $4 AND ended_at IS NULL
+`
+
+type ContinueAsOIDCSessionParams struct {
+	IdpMfa    bool
+	ExpiresAt time.Time
+	OrgID     int64
+	ID        int64
+}
+
+// ContinueAsOIDCSession turns the web session that linked an identity into an OIDC session; without an offline token
+// it ends at @expires_at at the latest.
+func (q *Queries) ContinueAsOIDCSession(ctx context.Context, arg ContinueAsOIDCSessionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, continueAsOIDCSession,
+		arg.IdpMfa,
+		arg.ExpiresAt,
+		arg.OrgID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createIdentityUser = `-- name: CreateIdentityUser :one
 INSERT INTO users (
     org_id, public_id, login, name, email, role, source, status, oidc_issuer, oidc_subject, created_at, updated_at
@@ -75,6 +125,122 @@ func (q *Queries) CreateIdentityUser(ctx context.Context, arg CreateIdentityUser
 	return id, err
 }
 
+const deleteCheck = `-- name: DeleteCheck :exec
+DELETE FROM oidc_checks
+WHERE org_id = $1 AND user_id = $2
+`
+
+type DeleteCheckParams struct {
+	OrgID  int64
+	UserID int64
+}
+
+// DeleteCheck removes the re-check of a user who holds no offline token any more.
+func (q *Queries) DeleteCheck(ctx context.Context, arg DeleteCheckParams) error {
+	_, err := q.db.Exec(ctx, deleteCheck, arg.OrgID, arg.UserID)
+	return err
+}
+
+const dropCheck = `-- name: DropCheck :execrows
+DELETE FROM oidc_checks
+WHERE org_id = $1 AND user_id = $2 AND lease_owner = $3 AND lease_until > $4::timestamptz
+`
+
+type DropCheckParams struct {
+	OrgID  int64
+	UserID int64
+	Owner  pgtype.Text
+	Now    time.Time
+}
+
+// DropCheck removes a re-check that still holds its lease, when the identity provider refused the user; no row means
+// the lease was lost.
+func (q *Queries) DropCheck(ctx context.Context, arg DropCheckParams) (int64, error) {
+	result, err := q.db.Exec(ctx, dropCheck,
+		arg.OrgID,
+		arg.UserID,
+		arg.Owner,
+		arg.Now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const dueChecks = `-- name: DueChecks :many
+SELECT user_id
+FROM oidc_checks
+WHERE org_id = $1 AND deadline <= $2::timestamptz
+    AND (lease_until IS NULL OR lease_until <= $3::timestamptz)
+ORDER BY deadline, user_id
+LIMIT $4
+FOR UPDATE SKIP LOCKED
+`
+
+type DueChecksParams struct {
+	OrgID     int64
+	Due       time.Time
+	Now       time.Time
+	BatchSize int32
+}
+
+// DueChecks locks up to batch_size re-checks that are due on the business clock and not leased on the real clock,
+// skipping those another replica holds.
+func (q *Queries) DueChecks(ctx context.Context, arg DueChecksParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, dueChecks,
+		arg.OrgID,
+		arg.Due,
+		arg.Now,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var user_id int64
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const endOtherUserSessions = `-- name: EndOtherUserSessions :execrows
+UPDATE sessions
+SET ended_at = $1::timestamptz, end_reason = $2
+WHERE org_id = $3 AND user_id = $4 AND id <> $5 AND ended_at IS NULL
+`
+
+type EndOtherUserSessionsParams struct {
+	Now       time.Time
+	EndReason pgtype.Text
+	OrgID     int64
+	UserID    int64
+	KeepID    int64
+}
+
+// EndOtherUserSessions ends every session of a user but the one that made the change, with the reason.
+func (q *Queries) EndOtherUserSessions(ctx context.Context, arg EndOtherUserSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, endOtherUserSessions,
+		arg.Now,
+		arg.EndReason,
+		arg.OrgID,
+		arg.UserID,
+		arg.KeepID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const endUserSessions = `-- name: EndUserSessions :execrows
 UPDATE sessions
 SET ended_at = $1::timestamptz, end_reason = $2
@@ -100,6 +266,99 @@ func (q *Queries) EndUserSessions(ctx context.Context, arg EndUserSessionsParams
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const finishCheck = `-- name: FinishCheck :execrows
+UPDATE oidc_checks
+SET deadline = $1::timestamptz, last_outcome = $2, lease_owner = NULL, lease_until = NULL,
+    updated_at = $3::timestamptz
+WHERE org_id = $4 AND user_id = $5 AND lease_owner = $6 AND lease_until > $7::timestamptz
+`
+
+type FinishCheckParams struct {
+	Deadline  time.Time
+	Outcome   pgtype.Text
+	UpdatedAt time.Time
+	OrgID     int64
+	UserID    int64
+	Owner     pgtype.Text
+	Now       time.Time
+}
+
+// FinishCheck records the outcome of a re-check that still holds its lease, makes it due again at @deadline and
+// releases the lease; no row means the lease was lost and the outcome must not be recorded.
+func (q *Queries) FinishCheck(ctx context.Context, arg FinishCheckParams) (int64, error) {
+	result, err := q.db.Exec(ctx, finishCheck,
+		arg.Deadline,
+		arg.Outcome,
+		arg.UpdatedAt,
+		arg.OrgID,
+		arg.UserID,
+		arg.Owner,
+		arg.Now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getCheckUser = `-- name: GetCheckUser :one
+SELECT u.id, u.public_id, u.name, u.role, u.status, u.oidc_subject, u.oidc_offline_token_ciphertext,
+       u.oidc_offline_token_key_id, u.oidc_offline_token_updated_at,
+       EXISTS (
+           SELECT 1 FROM sessions s
+           WHERE s.org_id = u.org_id AND s.user_id = u.id AND s.ended_at IS NULL
+               AND s.expires_at > $1::timestamptz AND s.idle_expires_at > $1::timestamptz
+       ) AS live_session,
+       EXISTS (
+           SELECT 1 FROM api_tokens t
+           WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.kind = 'personal' AND t.revoked_at IS NULL
+               AND (t.expires_at IS NULL OR t.expires_at > $1::timestamptz)
+       ) AS usable_token
+FROM users u
+WHERE u.org_id = $2 AND u.id = $3
+`
+
+type GetCheckUserParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+}
+
+type GetCheckUserRow struct {
+	ID                         int64
+	PublicID                   string
+	Name                       string
+	Role                       string
+	Status                     string
+	OidcSubject                pgtype.Text
+	OidcOfflineTokenCiphertext []byte
+	OidcOfflineTokenKeyID      pgtype.Text
+	OidcOfflineTokenUpdatedAt  pgtype.Timestamptz
+	LiveSession                bool
+	UsableToken                bool
+}
+
+// GetCheckUser reads the user of a claimed re-check: the offline token and when it was stored, and whether the user
+// has a live session or a Personal access token that has not expired, at @now on the business clock.
+func (q *Queries) GetCheckUser(ctx context.Context, arg GetCheckUserParams) (GetCheckUserRow, error) {
+	row := q.db.QueryRow(ctx, getCheckUser, arg.Now, arg.OrgID, arg.ID)
+	var i GetCheckUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.Role,
+		&i.Status,
+		&i.OidcSubject,
+		&i.OidcOfflineTokenCiphertext,
+		&i.OidcOfflineTokenKeyID,
+		&i.OidcOfflineTokenUpdatedAt,
+		&i.LiveSession,
+		&i.UsableToken,
+	)
+	return i, err
 }
 
 const getIdentityUser = `-- name: GetIdentityUser :one
@@ -401,6 +660,61 @@ func (q *Queries) LatestKeptAdmin(ctx context.Context, orgID int64) (LatestKeptA
 	return i, err
 }
 
+const leaseChecks = `-- name: LeaseChecks :exec
+UPDATE oidc_checks
+SET lease_owner = $1, lease_until = $2::timestamptz
+WHERE org_id = $3 AND user_id = ANY ($4::bigint[])
+`
+
+type LeaseChecksParams struct {
+	Owner      pgtype.Text
+	LeaseUntil time.Time
+	OrgID      int64
+	UserIds    []int64
+}
+
+// LeaseChecks leases the re-checks DueChecks locked to this replica until @lease_until on the real clock.
+func (q *Queries) LeaseChecks(ctx context.Context, arg LeaseChecksParams) error {
+	_, err := q.db.Exec(ctx, leaseChecks,
+		arg.Owner,
+		arg.LeaseUntil,
+		arg.OrgID,
+		arg.UserIds,
+	)
+	return err
+}
+
+const linkIdentity = `-- name: LinkIdentity :execrows
+UPDATE users
+SET oidc_issuer = $1, oidc_subject = $2, password_hash = NULL, oidc_last_contact_at = $3::timestamptz,
+    oidc_refused_at = NULL, updated_at = $3::timestamptz, version = version + 1
+WHERE org_id = $4 AND id = $5 AND status = 'active' AND password_hash IS NOT NULL AND oidc_subject IS NULL
+`
+
+type LinkIdentityParams struct {
+	Issuer  pgtype.Text
+	Subject pgtype.Text
+	Now     time.Time
+	OrgID   int64
+	ID      int64
+}
+
+// LinkIdentity adds the OIDC identity to an active account with a password and wipes the password in the same update,
+// so that the account never holds both (users_one_credential_check).
+func (q *Queries) LinkIdentity(ctx context.Context, arg LinkIdentityParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkIdentity,
+		arg.Issuer,
+		arg.Subject,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const lockActiveAdmins = `-- name: LockActiveAdmins :many
 SELECT id
 FROM users
@@ -429,6 +743,70 @@ func (q *Queries) LockActiveAdmins(ctx context.Context, orgID int64) ([]int64, e
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockCheckUser = `-- name: LockCheckUser :one
+SELECT role, status, oidc_offline_token_updated_at
+FROM users
+WHERE org_id = $1 AND id = $2
+FOR NO KEY UPDATE
+`
+
+type LockCheckUserParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type LockCheckUserRow struct {
+	Role                      string
+	Status                    string
+	OidcOfflineTokenUpdatedAt pgtype.Timestamptz
+}
+
+// LockCheckUser locks the user whose re-check ends and reads the offline token it holds now.
+func (q *Queries) LockCheckUser(ctx context.Context, arg LockCheckUserParams) (LockCheckUserRow, error) {
+	row := q.db.QueryRow(ctx, lockCheckUser, arg.OrgID, arg.ID)
+	var i LockCheckUserRow
+	err := row.Scan(&i.Role, &i.Status, &i.OidcOfflineTokenUpdatedAt)
+	return i, err
+}
+
+const lockLinkUser = `-- name: LockLinkUser :one
+SELECT id, public_id, name, status, (password_hash IS NOT NULL)::boolean AS has_password,
+       (oidc_subject IS NOT NULL)::boolean AS has_identity
+FROM users
+WHERE org_id = $1 AND id = $2
+FOR NO KEY UPDATE
+`
+
+type LockLinkUserParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type LockLinkUserRow struct {
+	ID          int64
+	PublicID    string
+	Name        string
+	Status      string
+	HasPassword bool
+	HasIdentity bool
+}
+
+// LockLinkUser locks the account a link adds the identity to and reads whether it can take one: active, with a
+// password and without an identity.
+func (q *Queries) LockLinkUser(ctx context.Context, arg LockLinkUserParams) (LockLinkUserRow, error) {
+	row := q.db.QueryRow(ctx, lockLinkUser, arg.OrgID, arg.ID)
+	var i LockLinkUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.Status,
+		&i.HasPassword,
+		&i.HasIdentity,
+	)
+	return i, err
 }
 
 const lockSettings = `-- name: LockSettings :one
@@ -533,6 +911,52 @@ func (q *Queries) RecordContact(ctx context.Context, arg RecordContactParams) er
 	return err
 }
 
+const refuseUser = `-- name: RefuseUser :exec
+UPDATE users
+SET oidc_refused_at = $1::timestamptz, oidc_offline_token_ciphertext = NULL, oidc_offline_token_key_id = NULL,
+    oidc_offline_token_updated_at = NULL
+WHERE org_id = $2 AND id = $3
+`
+
+type RefuseUserParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+}
+
+// RefuseUser records that the identity provider refused the user at a re-check and wipes the offline token.
+func (q *Queries) RefuseUser(ctx context.Context, arg RefuseUserParams) error {
+	_, err := q.db.Exec(ctx, refuseUser, arg.Now, arg.OrgID, arg.ID)
+	return err
+}
+
+const scheduleCheck = `-- name: ScheduleCheck :exec
+INSERT INTO oidc_checks (user_id, org_id, deadline, created_at, updated_at)
+VALUES ($1, $2, $3::timestamptz, $4::timestamptz, $4::timestamptz)
+ON CONFLICT (user_id) DO UPDATE
+SET deadline = excluded.deadline, lease_owner = NULL, lease_until = NULL, last_outcome = NULL,
+    updated_at = excluded.updated_at
+`
+
+type ScheduleCheckParams struct {
+	UserID   int64
+	OrgID    int64
+	Deadline time.Time
+	Now      time.Time
+}
+
+// ScheduleCheck makes the re-check of a user who holds an offline token due at @deadline; a re-check in flight for
+// the token it replaced loses its lease, so that its outcome is not recorded.
+func (q *Queries) ScheduleCheck(ctx context.Context, arg ScheduleCheckParams) error {
+	_, err := q.db.Exec(ctx, scheduleCheck,
+		arg.UserID,
+		arg.OrgID,
+		arg.Deadline,
+		arg.Now,
+	)
+	return err
+}
+
 const setGroupsClaimMissing = `-- name: SetGroupsClaimMissing :exec
 UPDATE oidc_settings
 SET groups_claim_missing_since = CASE
@@ -581,6 +1005,33 @@ func (q *Queries) SetRole(ctx context.Context, arg SetRoleParams) (int64, error)
 	return result.RowsAffected(), nil
 }
 
+const storeOfflineToken = `-- name: StoreOfflineToken :exec
+UPDATE users
+SET oidc_offline_token_ciphertext = $1, oidc_offline_token_key_id = $2,
+    oidc_offline_token_updated_at = $3::timestamptz
+WHERE org_id = $4 AND id = $5
+`
+
+type StoreOfflineTokenParams struct {
+	Ciphertext []byte
+	KeyID      pgtype.Text
+	Now        time.Time
+	OrgID      int64
+	ID         int64
+}
+
+// StoreOfflineToken keeps the offline token the identity provider granted, encrypted, in place of the previous one.
+func (q *Queries) StoreOfflineToken(ctx context.Context, arg StoreOfflineTokenParams) error {
+	_, err := q.db.Exec(ctx, storeOfflineToken,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
 const takeAuthRequest = `-- name: TakeAuthRequest :one
 DELETE FROM oidc_auth_requests
 WHERE org_id = $1 AND state_hash = $2
@@ -616,6 +1067,46 @@ func (q *Queries) TakeAuthRequest(ctx context.Context, arg TakeAuthRequestParams
 		&i.CodeVerifierCiphertext,
 		&i.CodeVerifierKeyID,
 		&i.ReturnTo,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
+const takeLinkRequest = `-- name: TakeLinkRequest :one
+DELETE FROM oidc_auth_requests
+WHERE org_id = $1 AND state_hash = $2 AND purpose = 'link' AND link_session_id = $3
+    AND link_user_id = $4
+RETURNING nonce, code_verifier_ciphertext, code_verifier_key_id, expires_at
+`
+
+type TakeLinkRequestParams struct {
+	OrgID     int64
+	StateHash []byte
+	SessionID pgtype.Int8
+	UserID    pgtype.Int8
+}
+
+type TakeLinkRequestRow struct {
+	Nonce                  string
+	CodeVerifierCiphertext []byte
+	CodeVerifierKeyID      string
+	ExpiresAt              time.Time
+}
+
+// TakeLinkRequest removes and returns the link request of a state only for the web session that started it, so that
+// a callback in another session neither uses nor spends it.
+func (q *Queries) TakeLinkRequest(ctx context.Context, arg TakeLinkRequestParams) (TakeLinkRequestRow, error) {
+	row := q.db.QueryRow(ctx, takeLinkRequest,
+		arg.OrgID,
+		arg.StateHash,
+		arg.SessionID,
+		arg.UserID,
+	)
+	var i TakeLinkRequestRow
+	err := row.Scan(
+		&i.Nonce,
+		&i.CodeVerifierCiphertext,
+		&i.CodeVerifierKeyID,
 		&i.ExpiresAt,
 	)
 	return i, err
@@ -693,4 +1184,21 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const wipeOfflineToken = `-- name: WipeOfflineToken :exec
+UPDATE users
+SET oidc_offline_token_ciphertext = NULL, oidc_offline_token_key_id = NULL, oidc_offline_token_updated_at = NULL
+WHERE org_id = $1 AND id = $2
+`
+
+type WipeOfflineTokenParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// WipeOfflineToken removes the offline token of a user whose sign-in granted none.
+func (q *Queries) WipeOfflineToken(ctx context.Context, arg WipeOfflineTokenParams) error {
+	_, err := q.db.Exec(ctx, wipeOfflineToken, arg.OrgID, arg.ID)
+	return err
 }

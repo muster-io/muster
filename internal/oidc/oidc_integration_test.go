@@ -8,10 +8,13 @@ package oidc_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +25,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/fakes/fakeoidc"
+	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/oidc"
@@ -43,6 +47,8 @@ type world struct {
 	idp      *fakeoidc.Fake
 	business *clock.Manual
 	admin    *users.Admin
+	sessions *auth.Service
+	keyring  *keyring.Keyring
 }
 
 // setup migrates a new database with the Organization, the Audit log partition of October 2026 and the bootstrap
@@ -112,7 +118,7 @@ func setupWith(t *testing.T, s dbtest.Server, wrap func(oidc.Store, *users.Admin
 		store = wrap(store, admin)
 	}
 	svc := oidc.NewService(oidc.Config{OrgID: org.ID, Store: store, Keyring: k, Audit: w,
-		Clocks: clocks, Log: log, Sessions: sessions, PublicURL: public,
+		Clocks: clocks, Log: log, Sessions: sessions, PublicURL: public, RecheckBudget: 500 * time.Millisecond,
 		Network: oidc.Network{Policy: organization.NewOutboundPolicies(organization.NewStore(d.Pool), org.ID,
 			clock.Real{}), Log: log, Real: clock.Real{}}})
 	if err := svc.EnsureDemo(ctx, oidc.Demo{IssuerURL: idp.URL(), ClientID: "muster-dev", ClientSecret: "dev",
@@ -120,7 +126,8 @@ func setupWith(t *testing.T, s dbtest.Server, wrap func(oidc.Store, *users.Admin
 			{Group: "muster-admins", Role: auth.RoleAdmin}, {Group: "oncall", Role: auth.RoleResponder}}}); err != nil {
 		t.Fatal(err)
 	}
-	return &world{d: d, orgID: org.ID, svc: svc, idp: idp, business: business, admin: admin}
+	return &world{d: d, orgID: org.ID, svc: svc, idp: idp, business: business, admin: admin, sessions: sessions,
+		keyring: k}
 }
 
 var browser = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -185,7 +192,7 @@ func TestIntegrationSignIn(t *testing.T) {
 		}
 		if got := w.scalar(t, `SELECT method || '/' || idp_mfa::text || '/' ||
 			(extract(epoch FROM expires_at - created_at) / 3600)::int FROM sessions WHERE public_id = $1`,
-			out.Session.PublicID); got != "oidc/true/12" {
+			out.Session.PublicID); got != "oidc/true/168" {
 			t.Errorf("session = %v", got)
 		}
 		if got := w.scalar(t, `SELECT oidc_last_contact_at IS NOT NULL FROM users WHERE login = 'olga'`); got != true {
@@ -360,6 +367,346 @@ func TestIntegrationLoginTakenMeanwhile(t *testing.T) {
 		}
 		if refused := w.actions(t, oidc.ActionSignInRefused); len(refused) != 1 || refused[0]["reason"] != "login_taken" {
 			t.Errorf("refusal = %v", refused)
+		}
+	})
+}
+
+// local creates a local user with a password through a setup link and signs it in twice; it returns the user and
+// the two sessions.
+func (w *world) local(t *testing.T, login, password string) (users.User, auth.Session, auth.Session) {
+	t.Helper()
+	r := users.Requester{Actor: audit.System, Transport: audit.TransportUI}
+	u, link, err := w.admin.Create(t.Context(), r, users.NewUser{Name: login, Login: login, Role: auth.RoleResponder})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := link.URL[strings.Index(link.URL, "#token=")+len("#token="):]
+	if err := w.admin.CompleteSetup(t.Context(), token, password, netip.Addr{}); err != nil {
+		t.Fatal(err)
+	}
+	var sess [2]auth.Session
+	for i := range sess {
+		if sess[i], err = w.sessions.SignIn(t.Context(), auth.SignInRequest{Login: login, Password: password}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return u, sess[0], sess[1]
+}
+
+// link runs a link in sess through the fake IdP, which approves who.
+func (w *world) link(t *testing.T, sess auth.Session, who fakeoidc.User) (oidc.Outcome, oidc.Callback) {
+	t.Helper()
+	w.idp.SetNextUser(who)
+	start, err := w.svc.StartLink(t.Context(), sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, start.URL, nil)
+	resp, err := browser.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	back, _ := url.Parse(resp.Header.Get("Location"))
+	cb := oidc.Callback{Code: back.Query().Get("code"), State: back.Query().Get("state")}
+	return w.svc.CompleteLink(t.Context(), sess, cb), cb
+}
+
+// TestIntegrationLinkAndConvert is C-03.AC-20 and C-03.AC-21 against PostgreSQL: Alice links OIDC from her session —
+// her other session ends, her password no longer signs in, she signs in through OIDC into the same account; Bob's link
+// of her identity is refused; a callback in another session is invalid_request; conversion to local removes the
+// identity, ends the sessions and returns a setup link, after which her OIDC sign-in is login_taken; the CLI reset of
+// an OIDC account removes the identity.
+func TestIntegrationLinkAndConvert(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		w := setup(t, s)
+		alice, aliceSess, aliceOther := w.local(t, "alice", "alice-password-1")
+		aliceIDP := fakeoidc.User{Subject: "u-3", PreferredUsername: "alice", Groups: []string{"oncall"}}
+		if out, _ := w.link(t, aliceSess, aliceIDP); out.Redirect != oidc.ProfilePage {
+			t.Fatalf("link = %+v", out)
+		}
+		if got := w.scalar(t, `SELECT (oidc_subject = 'u-3' AND password_hash IS NULL
+			AND oidc_offline_token_ciphertext IS NOT NULL)::text FROM users WHERE id = $1`, alice.ID); got != "true" {
+			t.Fatalf("alice after the link: %v", got)
+		}
+		if got := w.scalar(t, `SELECT string_agg(public_id || ':' || method || ':' || coalesce(end_reason, 'live'), ',' ORDER BY id)
+			FROM sessions WHERE user_id = $1`, alice.ID); got != aliceSess.PublicID+":oidc:live,"+aliceOther.PublicID+
+			":local:oidc_linked" {
+			t.Errorf("sessions = %v", got)
+		}
+		if _, err := w.sessions.Authenticate(ctx, aliceSess.Cookie()); err != nil {
+			t.Errorf("the session that linked: %v", err)
+		}
+		if n := w.scalar(t, `SELECT count(*) FROM oidc_checks WHERE user_id = $1`, alice.ID); n != int64(1) {
+			t.Errorf("%v re-checks", n)
+		}
+		if _, err := w.sessions.SignIn(ctx, auth.SignInRequest{Login: "alice", Password: "alice-password-1"}); !errors.Is(
+			err, auth.ErrInvalidCredentials) {
+			t.Errorf("the password after the link: %v", err)
+		}
+		if out := w.signIn(t, aliceIDP, ""); out.Session == nil || out.Session.User.ID != alice.ID {
+			t.Errorf("the OIDC sign-in after the link = %+v", out)
+		}
+		if u, _ := w.admin.Get(ctx, alice.PublicID); u.SignInMethod() != "oidc" || !u.RoleLocked {
+			t.Errorf("users shows %+v", u)
+		}
+		admin := users.Requester{Actor: audit.System, Transport: audit.TransportUI}
+		if _, err := w.admin.Update(ctx, admin, alice.PublicID, nil, users.Changes{Name: "alice",
+			Role: auth.RoleViewer}); !errors.Is(err, users.ErrRoleLocked) {
+			t.Errorf("a Role change of the linked account = %v, want role_locked", err)
+		}
+		if linked := w.actions(t, oidc.ActionLinked); len(linked) != 1 || linked[0]["sessions_ended"] != 1.0 {
+			t.Errorf("user.oidc_linked = %v", linked)
+		}
+
+		bob, bobSess, _ := w.local(t, "bob", "bob-password-12")
+		if out, _ := w.link(t, bobSess, aliceIDP); out.Redirect != "/profile?error=identity_linked_elsewhere" {
+			t.Errorf("Bob's link of Alice's identity = %+v", out)
+		}
+		if got := w.scalar(t, `SELECT (oidc_subject IS NULL AND password_hash IS NOT NULL)::text FROM users
+			WHERE id = $1`, bob.ID); got != "true" {
+			t.Errorf("bob changed: %v", got)
+		}
+		if refused := w.actions(t, oidc.ActionLinkRefused); len(refused) != 1 ||
+			refused[0]["reason"] != "identity_linked_elsewhere" {
+			t.Errorf("user.oidc_link_refused = %v", refused)
+		}
+		// A callback replayed in another session.
+		carol, carolSess, _ := w.local(t, "carol", "carol-password-1")
+		_, cb := w.link(t, carolSess, fakeoidc.User{Subject: "u-4", PreferredUsername: "carol",
+			Groups: []string{"oncall"}})
+		if out := w.svc.CompleteLink(ctx, bobSess, cb); out.Redirect != "/profile?error=invalid_request" {
+			t.Errorf("a replayed callback = %+v", out)
+		}
+		if got := w.scalar(t, `SELECT oidc_subject FROM users WHERE id = $1`, carol.ID); got != "u-4" {
+			t.Errorf("carol = %v", got)
+		}
+
+		// Groups that map to no Role refuse the link with no_access, recorded with the groups.
+		if out, _ := w.link(t, bobSess, fakeoidc.User{Subject: "u-6", PreferredUsername: "bob",
+			Groups: []string{"contractors"}}); out.Redirect != "/profile?error=no_access" {
+			t.Errorf("a link without access = %+v", out)
+		}
+		if refused := w.actions(t, oidc.ActionLinkRefused); len(refused) != 2 || refused[1]["reason"] != "no_access" ||
+			len(refused[1]["groups"].([]any)) != 1 {
+			t.Errorf("user.oidc_link_refused = %v", refused)
+		}
+
+		// Conversion back to local (C-03.AC-21).
+		r := users.Requester{Actor: audit.System, Transport: audit.TransportUI}
+		converted, link, err := w.admin.ConvertToLocal(ctx, r, alice.PublicID)
+		if err != nil || converted.SignInMethod() != "local" || !strings.Contains(link.URL, "#token=") {
+			t.Fatalf("convert = %+v, %+v, %v", converted, link, err)
+		}
+		if got := w.scalar(t, `SELECT (oidc_subject IS NULL AND oidc_offline_token_ciphertext IS NULL)::text
+			FROM users WHERE id = $1`, alice.ID); got != "true" {
+			t.Errorf("alice after the conversion: %v", got)
+		}
+		if n := w.scalar(t, `SELECT count(*) FROM sessions WHERE user_id = $1 AND ended_at IS NULL`, alice.ID); n !=
+			int64(0) {
+			t.Errorf("%v sessions live after the conversion", n)
+		}
+		if n := w.scalar(t, `SELECT count(*) FROM sessions WHERE user_id = $1 AND end_reason = 'converted_to_local'`,
+			alice.ID); n != int64(2) {
+			t.Errorf("%v sessions ended converted_to_local", n)
+		}
+		if n := w.scalar(t, `SELECT count(*) FROM oidc_checks WHERE user_id = $1`, alice.ID); n != int64(0) {
+			t.Errorf("the re-check stayed")
+		}
+		if out := w.signIn(t, aliceIDP, ""); out.Redirect != "/sign-in?error=login_taken" {
+			t.Errorf("the OIDC sign-in after the conversion = %+v", out)
+		}
+
+		// The CLI reset of an account created through OIDC.
+		if out := w.signIn(t, fakeoidc.User{Subject: "u-5", PreferredUsername: "dan", Groups: []string{"oncall"}},
+			""); out.Session == nil {
+			t.Fatal(out)
+		}
+		if _, err := w.admin.ResetPassword(ctx, "ops", "dan", "dan-password-123"); err != nil {
+			t.Fatal(err)
+		}
+		if got := w.scalar(t, `SELECT (oidc_subject IS NULL AND password_hash IS NOT NULL
+			AND oidc_offline_token_ciphertext IS NULL)::text FROM users WHERE login = 'dan'`); got != "true" {
+			t.Errorf("dan after the reset: %v", got)
+		}
+		if got := w.scalar(t, `SELECT actor_name || ':' || (details ->> 'oidc_identity_removed') FROM audit_log
+			WHERE action = 'user.password_reset'`); got != "ops:true" {
+			t.Errorf("user.password_reset = %v", got)
+		}
+		if _, err := w.sessions.SignIn(ctx, auth.SignInRequest{Login: "dan", Password: "dan-password-123"}); err != nil {
+			t.Errorf("dan signs in with the password: %v", err)
+		}
+	})
+}
+
+// TestIntegrationRecheck is C-03.AC-22, AC-23, AC-24 and AC-26 at a re-check against PostgreSQL, with the shared claim
+// and a manual business clock.
+func TestIntegrationRecheck(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		w := setup(t, s)
+		lease := db.Lease{Owner: "r1", Duration: oidc.RecheckLease,
+			Clocks: clock.Clocks{Business: w.business, Real: clock.Real{}}}
+		claim := oidc.NewClaimer(w.d.Pool, lease)
+		recheck := func() int {
+			t.Helper()
+			n, err := w.svc.Recheck(ctx, claim, "r1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		olgaIDP := fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"}}
+		out := w.signIn(t, olgaIDP, "")
+		if out.Session == nil {
+			t.Fatal(out)
+		}
+		if got := w.scalar(t, `SELECT (deadline = $1)::text FROM oidc_checks`, t0.Add(oidc.RecheckInterval)); got != "true" {
+			t.Fatalf("the re-check is not due one interval after the sign-in")
+		}
+		var ct []byte
+		var keyID string
+		if err := w.d.Pool.QueryRow(ctx, `SELECT oidc_offline_token_ciphertext, oidc_offline_token_key_id FROM users
+			WHERE login = 'olga'`).Scan(&ct, &keyID); err != nil {
+			t.Fatal(err)
+		}
+		if plain, err := w.keyring.Decrypt("users.oidc_offline_token", keyID, ct); err != nil ||
+			bytes.Contains(ct, plain) {
+			t.Fatalf("the offline token is not encrypted: %v", err)
+		}
+		if n := recheck(); n != 0 {
+			t.Fatalf("%d re-checks before the interval", n)
+		}
+
+		// Unavailable (C-03.AC-23): nothing changes, and the next attempt is one interval later.
+		if err := w.idp.SetFault(fakeserver.Fault{Path: "/token", Status: http.StatusServiceUnavailable}); err != nil {
+			t.Fatal(err)
+		}
+		w.business.Advance(oidc.RecheckInterval)
+		if n := recheck(); n != 1 {
+			t.Fatalf("%d re-checks at the interval", n)
+		}
+		if got := w.scalar(t, `SELECT last_outcome || ':' || (deadline = $1)::text || ':' || (lease_owner IS NULL)::text
+			FROM oidc_checks`, w.business.Now().Add(oidc.RecheckInterval)); got != "unavailable:true:true" {
+			t.Errorf("after an unavailable IdP: %v", got)
+		}
+		if _, err := w.sessions.Authenticate(ctx, out.Session.Cookie()); err != nil {
+			t.Errorf("the session after an unavailable IdP: %v", err)
+		}
+		w.idp.ResetFaults()
+		w.business.Advance(oidc.RecheckInterval)
+		recheck()
+		if got := w.scalar(t, `SELECT last_outcome FROM oidc_checks`); got != "ok" {
+			t.Errorf("after the IdP recovered: %v", got)
+		}
+
+		// Refusal (C-03.AC-22).
+		w.idp.SetDisabled("u-1", true)
+		w.business.Advance(oidc.RecheckInterval)
+		recheck()
+		if _, err := w.sessions.Authenticate(ctx, out.Session.Cookie()); !errors.Is(err, auth.ErrOIDCSessionEnded) {
+			t.Errorf("the session after the refusal: %v", err)
+		}
+		if got := w.scalar(t, `SELECT (oidc_refused_at IS NOT NULL AND oidc_offline_token_ciphertext IS NULL)::text
+			FROM users WHERE login = 'olga'`); got != "true" {
+			t.Errorf("olga after the refusal: %v", got)
+		}
+		if n := w.scalar(t, `SELECT count(*) FROM oidc_checks`); n != int64(0) {
+			t.Errorf("the re-check stayed after the refusal")
+		}
+		if refused := w.actions(t, oidc.ActionUserRefused); len(refused) != 1 || refused[0]["reason"] != "invalid_grant" {
+			t.Errorf("user.oidc_refused = %v", refused)
+		}
+		w.idp.SetDisabled("u-1", false)
+		again := w.signIn(t, olgaIDP, "")
+		if _, err := w.sessions.Authenticate(ctx, again.Session.Cookie()); err != nil {
+			t.Errorf("the session after a new sign-in: %v", err)
+		}
+		if got := w.scalar(t, `SELECT (oidc_refused_at IS NULL)::text FROM users WHERE login = 'olga'`); got != "true" {
+			t.Error("the new sign-in did not lift the refusal")
+		}
+
+		// Skipped: no live session and no Personal access token; the IdP is not called.
+		if _, err := w.d.Pool.Exec(ctx, `UPDATE sessions SET ended_at = $1, end_reason = 'sign_out'
+			WHERE ended_at IS NULL`, w.business.Now()); err != nil {
+			t.Fatal(err)
+		}
+		w.idp.ResetRequests()
+		w.business.Advance(oidc.RecheckInterval)
+		recheck()
+		if got := w.scalar(t, `SELECT last_outcome FROM oidc_checks`); got != "skipped" || len(w.idp.Requests()) != 0 {
+			t.Errorf("without a live session: %v, %d requests to the IdP", got, len(w.idp.Requests()))
+		}
+
+		// Without offline_access (C-03.AC-24): the session ends at the fallback lifetime and no re-check exists.
+		withToken := w.signIn(t, olgaIDP, "")
+		w.idp.Configure(fakeoidc.Config{GrantOfflineAccess: new(false)})
+		fallback := w.signIn(t, olgaIDP, "")
+		// The session opened with the token wiped now is no longer re-checked: it gets the fallback lifetime too.
+		if got := w.scalar(t, `SELECT (expires_at <= $2)::text FROM sessions WHERE public_id = $1`,
+			withToken.Session.PublicID, w.business.Now().Add(oidc.FallbackSessionLifetime)); got != "true" {
+			t.Errorf("the earlier session kept its lifetime")
+		}
+		if got := w.scalar(t, `SELECT (extract(epoch FROM expires_at - created_at) / 3600)::int FROM sessions
+			WHERE public_id = $1`, fallback.Session.PublicID); got != int32(12) && got != int64(12) {
+			t.Errorf("the fallback session lives %v hours", got)
+		}
+		if n := w.scalar(t, `SELECT count(*) FROM oidc_checks`); n != int64(0) {
+			t.Errorf("a re-check exists without an offline token")
+		}
+		w.idp.Configure(fakeoidc.Config{GrantOfflineAccess: new(true)})
+
+		// The last active Admin at a re-check (C-03.AC-26).
+		ada := fakeoidc.User{Subject: "u-9", PreferredUsername: "ada", Groups: []string{"muster-admins"}}
+		adaOut := w.signIn(t, ada, "")
+		if _, err := w.d.Pool.Exec(ctx, `UPDATE users SET status = 'disabled' WHERE login = 'ops@example.org'`); err != nil {
+			t.Fatal(err)
+		}
+		ada.Groups = []string{"oncall"}
+		w.idp.SetNextUser(ada)
+		w.business.Advance(oidc.RecheckInterval)
+		recheck()
+		if role := w.scalar(t, `SELECT role FROM users WHERE login = 'ada'`); role != "admin" {
+			t.Fatalf("the last active Admin was lowered at a re-check: %v", role)
+		}
+		if _, err := w.sessions.Authenticate(ctx, adaOut.Session.Cookie()); err != nil {
+			t.Errorf("ada's session after the kept Role: %v", err)
+		}
+		kept := w.actions(t, oidc.ActionRoleSyncKeptAdmin)
+		if len(kept) != 1 || kept[0]["mapped_role"] != "responder" || kept[0]["at"] != "recheck" {
+			t.Errorf("user.role_sync_kept_admin = %v", kept)
+		}
+		st, _ := w.svc.Get(ctx)
+		if !slices.ContainsFunc(st.Warnings, func(x oidc.Warning) bool { return x.Kind == oidc.WarningLastAdminKept }) {
+			t.Errorf("warnings = %+v", st.Warnings)
+		}
+		if _, err := w.d.Pool.Exec(ctx, `UPDATE users SET status = 'active' WHERE login = 'ops@example.org'`); err != nil {
+			t.Fatal(err)
+		}
+		w.business.Advance(oidc.RecheckInterval)
+		recheck()
+		if role := w.scalar(t, `SELECT role FROM users WHERE login = 'ada'`); role != "responder" {
+			t.Errorf("with a second Admin ada is %v", role)
+		}
+		if _, err := w.sessions.Authenticate(ctx, adaOut.Session.Cookie()); !errors.Is(err, auth.ErrUnauthenticated) {
+			t.Errorf("ada's session after the Role change: %v", err)
+		}
+		st, _ = w.svc.Get(ctx)
+		if slices.ContainsFunc(st.Warnings, func(x oidc.Warning) bool { return x.Kind == oidc.WarningLastAdminKept }) {
+			t.Error("the warning stayed")
+		}
+
+		// Disabling the user wipes the token and the re-check.
+		r := users.Requester{Actor: audit.System, Transport: audit.TransportUI}
+		adaUser, _ := w.admin.List(ctx, users.ListFilter{Q: "ada", Limit: 1})
+		if _, err := w.admin.Disable(ctx, r, adaUser.Users[0].PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if got := w.scalar(t, `SELECT (oidc_offline_token_ciphertext IS NULL)::text || ':' ||
+			(SELECT count(*) FROM oidc_checks c WHERE c.user_id = u.id)::text FROM users u WHERE login = 'ada'`); got !=
+			"true:0" {
+			t.Errorf("ada after disable: %v", got)
 		}
 	})
 }

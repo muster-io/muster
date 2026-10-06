@@ -152,6 +152,10 @@ func (f *fakeDB) UsersPruner() users.PruneQueries { return nil }
 
 func (f *fakeDB) OIDCPruner() oidc.PruneQueries { return nil }
 
+func (f *fakeDB) OIDCClaimer(db.Lease) oidc.Claimer {
+	return func(context.Context, int64, int32) ([]int64, error) { return nil, nil }
+}
+
 func (f *fakeDB) OIDCStore() oidc.Store { return &f.oidc }
 
 func (f *fakeDB) AdminStore() users.AdminStore { return f.admin }
@@ -979,7 +983,13 @@ func (s *fakeAdminStore) GetUserByLogin(_ context.Context, arg udb.GetUserByLogi
 
 func (s *fakeAdminStore) InTx(_ context.Context, f func(users.AdminQueries) error) error { return f(s) }
 
-func (s *fakeAdminStore) SetUserPassword(context.Context, udb.SetUserPasswordParams) (int64, error) {
+func (s *fakeAdminStore) LockUser(context.Context, udb.LockUserParams) (int64, error) { return 2, nil }
+
+func (s *fakeAdminStore) GetUser(context.Context, udb.GetUserParams) (udb.GetUserRow, error) {
+	return udb.GetUserRow{ID: 2, PublicID: "SRBBBBBBBBBBBB", Name: "Bob", Status: "active", HasPassword: true}, nil
+}
+
+func (s *fakeAdminStore) ResetUserPassword(context.Context, udb.ResetUserPasswordParams) (int64, error) {
 	return 1, nil
 }
 
