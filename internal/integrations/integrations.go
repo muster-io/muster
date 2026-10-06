@@ -6,7 +6,8 @@
 // random bytes; only its SHA-256 is stored and the value is shown once, with the Alertmanager snippet that carries it
 // (ADR-0011). Deletion is soft: the Integration leaves every list and its tokens stop working at once, while its
 // Stored Snapshots stay until retention. Every change is recorded in the Audit log and announced with the live hint
-// integration; the package also exports muster_integration_info.
+// integration; the package also exports muster_integration_info. The built-in "Muster" Integration of the Internal
+// alerts exists from the first start and cannot be changed, deleted or given a token.
 package integrations
 
 import (
@@ -32,6 +33,8 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/integrations/dbgen"
+	"github.com/muster-io/muster/internal/internalalerts"
+	idb "github.com/muster-io/muster/internal/internalalerts/dbgen"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
 )
@@ -41,6 +44,10 @@ const ConnectionWebhookOnly = "webhook_only"
 
 // HeartbeatNotConfigured is the Heartbeat state of an Integration whose Heartbeat is off.
 const HeartbeatNotConfigured = "not_configured"
+
+// LongRepeatWarning is processing.long_repeat_warning: a learned repeat interval above it warns about its
+// Alertmanager route (C-06.FR-18).
+const LongRepeatWarning = time.Hour
 
 // The defaults of the forms and of an omitted Heartbeat timeout: integration.duplicate_window and
 // integration.heartbeat_timeout.
@@ -89,7 +96,27 @@ var (
 	ErrNameTaken = errors.New("another integration has this name")
 	// ErrVersionMismatch is an If-Match that names another version of the Integration.
 	ErrVersionMismatch = errors.New("the integration changed since it was read")
+	// ErrBuiltinImmutable is a change, a deletion or a token of the built-in Integration.
+	ErrBuiltinImmutable = errors.New("the built-in integration cannot be changed, deleted or given a token")
 )
+
+// BuiltinName is the name of the built-in Integration of the Internal alerts (integrations.builtin).
+const BuiltinName = "Muster"
+
+// The kinds of the warnings of an Integration (C-06.FR-18).
+const (
+	WarningSnapshotTruncated  = "snapshot_truncated"
+	WarningLongRepeatInterval = "long_repeat_interval"
+)
+
+// Warning is a warning of an Integration: snapshot_truncated with the count of truncated groupKeys, or
+// long_repeat_interval with the Alertmanager route and its learned repeat interval.
+type Warning struct {
+	Kind                  string
+	TruncatedGroupCount   int64
+	RoutePath             string
+	RepeatIntervalSeconds int64
+}
 
 // FieldError is a field of a request that is not valid, at a JSON pointer of the request body, with a stable code of
 // the validation-failed problem.
@@ -125,8 +152,10 @@ type Integration struct {
 	SnapshotCount          int64
 	// LastSnapshotAt is the receipt time of its newest Stored Snapshot; nil before the first one.
 	LastSnapshotAt *time.Time
-	CreatedAt      time.Time
-	Version        int64
+	// Warnings apply while a groupKey is truncated or a route repeats less often than LongRepeatWarning.
+	Warnings  []Warning
+	CreatedAt time.Time
+	Version   int64
 }
 
 // Heartbeat is the stored Heartbeat of an Integration: its settings and its state.
@@ -195,7 +224,13 @@ type Queries interface {
 		dbgen.RevokeIntegrationTokenRow, error)
 	FindIngestToken(ctx context.Context, arg dbgen.FindIngestTokenParams) (dbgen.FindIngestTokenRow, error)
 	TouchIntegrationToken(ctx context.Context, arg dbgen.TouchIntegrationTokenParams) error
+	EnsureBuiltin(ctx context.Context, arg dbgen.EnsureBuiltinParams) (string, error)
+	CountTruncatedGroupsOf(ctx context.Context, arg dbgen.CountTruncatedGroupsOfParams) (
+		[]dbgen.CountTruncatedGroupsOfRow, error)
+	ListLongRepeatRoutes(ctx context.Context, arg dbgen.ListLongRepeatRoutesParams) (
+		[]dbgen.ListLongRepeatRoutesRow, error)
 	audit.Store
+	internalalerts.Store
 	Notify(ctx context.Context, h db.Hint) error
 }
 
@@ -213,11 +248,37 @@ func NewStore(pool *pgxpool.Pool) Store {
 type pgQueries struct {
 	*dbgen.Queries
 	audit.Store
-	exec db.Execer
+	internal internalalerts.Store
+	exec     db.Execer
 }
 
 func newQueries(d dbgen.DBTX) pgQueries {
-	return pgQueries{Queries: dbgen.New(d), Store: audit.NewStore(d), exec: d}
+	return pgQueries{Queries: dbgen.New(d), Store: audit.NewStore(d), internal: internalalerts.NewStore(d), exec: d}
+}
+
+func (q pgQueries) FindBuiltinIntegration(ctx context.Context, orgID int64) (int64, error) {
+	return q.internal.FindBuiltinIntegration(ctx, orgID)
+}
+
+func (q pgQueries) InsertInternalBody(ctx context.Context, arg idb.InsertInternalBodyParams) error {
+	return q.internal.InsertInternalBody(ctx, arg)
+}
+
+func (q pgQueries) InsertInternalSnapshot(ctx context.Context, arg idb.InsertInternalSnapshotParams) error {
+	return q.internal.InsertInternalSnapshot(ctx, arg)
+}
+
+func (q pgQueries) NotifyInternalSnapshot(ctx context.Context, arg idb.NotifyInternalSnapshotParams) error {
+	return q.internal.NotifyInternalSnapshot(ctx, arg)
+}
+
+func (q pgQueries) ListPendingInternalRaises(ctx context.Context, orgID int64) ([][]byte, error) {
+	return q.internal.ListPendingInternalRaises(ctx, orgID)
+}
+
+func (q pgQueries) ListOpenInternalAlerts(ctx context.Context, arg idb.ListOpenInternalAlertsParams) (
+	[]idb.ListOpenInternalAlertsRow, error) {
+	return q.internal.ListOpenInternalAlerts(ctx, arg)
 }
 
 func (q pgQueries) Notify(ctx context.Context, h db.Hint) error {
@@ -244,6 +305,9 @@ type Config struct {
 	Business clock.Clock
 	// IngestURL is MUSTER_INGEST_URL, the base of the ingestion and Heartbeat URLs.
 	IngestURL *url.URL
+	// RunbookBase is MUSTER_RUNBOOK_BASE_URL, the base of the runbook_url of the Internal alerts a rename raises
+	// again.
+	RunbookBase string
 }
 
 // Service holds the Integrations and Integration tokens of the Organization.
@@ -253,6 +317,7 @@ type Service struct {
 	audit     *audit.Writer
 	clock     clock.Clock
 	ingestURL string
+	internal  *internalalerts.Raiser
 
 	// info holds the muster_integration_info series this replica exports, by public_id to name.
 	infoMu sync.Mutex
@@ -271,7 +336,8 @@ func New(cfg Config) *Service {
 	}
 	return &Service{
 		orgID: cfg.OrgID, store: cfg.Store, audit: cfg.Audit, clock: cfg.Business, ingestURL: base,
-		info: map[string]string{}, infoChanged: make(chan struct{}, 1),
+		internal: internalalerts.NewRaiser(cfg.OrgID, cfg.RunbookBase),
+		info:     map[string]string{}, infoChanged: make(chan struct{}, 1),
 		touches: newTouches(),
 	}
 }
@@ -306,7 +372,7 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 		}
 		page.Integrations = append(page.Integrations, in)
 	}
-	if err := s.withLastSnapshot(ctx, s.store, page.Integrations); err != nil {
+	if err := s.decorate(ctx, s.store, page.Integrations); err != nil {
 		return Page{}, err
 	}
 	return page, nil
@@ -334,10 +400,56 @@ func (s *Service) get(ctx context.Context, q Queries, publicID string) (Integrat
 		return Integration{}, err
 	}
 	list := []Integration{in}
-	if err := s.withLastSnapshot(ctx, q, list); err != nil {
+	if err := s.decorate(ctx, q, list); err != nil {
 		return Integration{}, err
 	}
 	return list[0], nil
+}
+
+// decorate sets what every read of an Integration carries besides its row: the receipt time of its newest Stored
+// Snapshot and its warnings.
+func (s *Service) decorate(ctx context.Context, q Queries, list []Integration) error {
+	if err := s.withLastSnapshot(ctx, q, list); err != nil {
+		return err
+	}
+	return s.withWarnings(ctx, q, list)
+}
+
+// withWarnings sets the warnings of each Integration (C-06.FR-18): snapshot_truncated while any of its groupKeys is
+// truncated, and one long_repeat_interval per Alertmanager route whose learned repeat interval is above
+// LongRepeatWarning.
+func (s *Service) withWarnings(ctx context.Context, q Queries, list []Integration) error {
+	if len(list) == 0 {
+		return nil
+	}
+	ids := make([]int64, len(list))
+	for i, in := range list {
+		ids[i] = in.ID
+		list[i].Warnings = []Warning{}
+	}
+	truncated, err := q.CountTruncatedGroupsOf(ctx, dbgen.CountTruncatedGroupsOfParams{OrgID: s.orgID,
+		IntegrationIds: ids})
+	if err != nil {
+		return fmt.Errorf("count the truncated groupkeys: %w", err)
+	}
+	for _, r := range truncated {
+		if i := slices.Index(ids, r.IntegrationID); i >= 0 {
+			list[i].Warnings = append(list[i].Warnings, Warning{Kind: WarningSnapshotTruncated,
+				TruncatedGroupCount: r.TruncatedGroupCount})
+		}
+	}
+	routes, err := q.ListLongRepeatRoutes(ctx, dbgen.ListLongRepeatRoutesParams{OrgID: s.orgID, IntegrationIds: ids,
+		ThresholdMs: LongRepeatWarning.Milliseconds()})
+	if err != nil {
+		return fmt.Errorf("list the routes with long repeat intervals: %w", err)
+	}
+	for _, r := range routes {
+		if i := slices.Index(ids, r.IntegrationID); i >= 0 {
+			list[i].Warnings = append(list[i].Warnings, Warning{Kind: WarningLongRepeatInterval,
+				RoutePath: r.RoutePath, RepeatIntervalSeconds: (r.LearnedRepeatIntervalMs + 500) / 1000})
+		}
+	}
+	return nil
 }
 
 // withLastSnapshot sets the receipt time of the newest Stored Snapshot of each Integration.
@@ -487,7 +599,8 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input) (Integration,
 }
 
 // Update replaces the configured fields of the Integration publicID; a non-nil version must be its current one
-// (If-Match).
+// (If-Match). The built-in Integration is ErrBuiltinImmutable. A new name raises every open Internal alert about the
+// Integration again with it, in the same transaction, so that its name label follows (C-06.AC-11).
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Integration,
 	error) {
 	in.Name = strings.TrimSpace(in.Name)
@@ -499,6 +612,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		var err error
 		if before, err = s.lock(ctx, q, publicID); err != nil {
 			return err
+		}
+		if before.Builtin {
+			return ErrBuiltinImmutable
 		}
 		if version != nil && *version != before.Version {
 			return ErrVersionMismatch
@@ -530,6 +646,12 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if updated, err = s.get(ctx, q, before.PublicID); err != nil {
 			return err
 		}
+		if updated.Name != before.Name {
+			if err := s.internal.Renamed(ctx, q, s.clock.Now(), internalalerts.EntityIntegration, updated.PublicID,
+				updated.Name); err != nil {
+				return fmt.Errorf("rename the internal alerts of %s: %w", updated.PublicID, err)
+			}
+		}
 		if err := s.audit.Record(ctx, q, audit.Entry{
 			OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport, Action: ActionUpdated,
 			Resource: resourceOf(updated), Diff: changes, SourceAddress: r.Address,
@@ -549,13 +671,18 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 }
 
 // Delete deletes the Integration publicID; a non-nil version must be its current one. Its tokens stop working at
-// once and it leaves every list; the row and its Stored Snapshots stay.
+// once and it leaves every list; the row and its Stored Snapshots stay. The marker of the deletion goes into its queue
+// in the same transaction: processing reaches it after the Stored Snapshots the Integration accepted before and then
+// resolves its Alerts and Internal alerts (C-06.FR-16). The built-in Integration is ErrBuiltinImmutable.
 func (s *Service) Delete(ctx context.Context, r Requester, publicID string, version *int64) error {
 	var before Integration
 	err := s.store.InTx(ctx, func(q Queries) error {
 		var err error
 		if before, err = s.lock(ctx, q, publicID); err != nil {
 			return err
+		}
+		if before.Builtin {
+			return ErrBuiltinImmutable
 		}
 		if version != nil && *version != before.Version {
 			return ErrVersionMismatch
@@ -564,6 +691,9 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		if err := q.DeleteIntegration(ctx, dbgen.DeleteIntegrationParams{OrgID: s.orgID, ID: before.ID,
 			Now: now}); err != nil {
 			return fmt.Errorf("delete the integration %s: %w", before.PublicID, err)
+		}
+		if err := s.internal.MarkDeleted(ctx, q, now, before.ID, before.PublicID, before.Name); err != nil {
+			return fmt.Errorf("mark the deletion of the integration %s: %w", before.PublicID, err)
 		}
 		if err := s.audit.Record(ctx, q, audit.Entry{
 			OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport, Action: ActionDeleted,
@@ -578,6 +708,22 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		return err
 	}
 	s.unexportInfo(before.PublicID)
+	return nil
+}
+
+// EnsureBuiltin creates the built-in "Muster" Integration of the Internal alerts once per Organization
+// (C-06.FR-14), as a start-up ensure step: webhook-only, without Static labels and with the Heartbeat off. It changes
+// nothing when the Integration exists; an Integration that is not deleted and already has its name stops the start
+// with ErrNameTaken.
+func EnsureBuiltin(ctx context.Context, q Queries, orgID int64, now time.Time) error {
+	_, err := q.EnsureBuiltin(ctx, dbgen.EnsureBuiltinParams{OrgID: orgID,
+		PublicID: publicid.New(publicid.Integration), Name: BuiltinName,
+		Description:             "Internal alerts: problems Muster reports about itself through its own pipeline.",
+		DuplicateWindowSeconds:  int64(DefaultDuplicateWindow.Seconds()),
+		HeartbeatTimeoutSeconds: int64(DefaultHeartbeatTimeout.Seconds()), Now: now.UTC()})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("create the built-in integration %s: %w", BuiltinName, nameTaken(err))
+	}
 	return nil
 }
 

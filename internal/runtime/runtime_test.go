@@ -69,6 +69,8 @@ type fakeDB struct {
 	// devOffset is the offset of the development clock in runtime_state; nil has no row. devErr fails its read.
 	devOffset *int64
 	devErr    error
+	// replayAudit records the Audit log entries of muster ingest replay.
+	replayAudit []auditdb.InsertAuditEntryParams
 }
 
 // fakeIntegrationsStore records the demo Integration of development mode: the Integration once, then its token.
@@ -78,6 +80,28 @@ type fakeIntegrationsStore struct {
 	created []idb.InsertIntegrationParams
 	tokens  []idb.EnsureIntegrationTokenParams
 	audited []string
+	// builtin records the ensures of the built-in Integration; only the first creates it.
+	builtin []idb.EnsureBuiltinParams
+}
+
+func (s *fakeIntegrationsStore) EnsureBuiltin(_ context.Context, arg idb.EnsureBuiltinParams) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.builtin = append(s.builtin, arg)
+	if len(s.builtin) > 1 {
+		return "", pgx.ErrNoRows
+	}
+	return arg.PublicID, nil
+}
+
+func (s *fakeIntegrationsStore) CountTruncatedGroupsOf(context.Context, idb.CountTruncatedGroupsOfParams) (
+	[]idb.CountTruncatedGroupsOfRow, error) {
+	return nil, nil
+}
+
+func (s *fakeIntegrationsStore) ListLongRepeatRoutes(context.Context, idb.ListLongRepeatRoutesParams) (
+	[]idb.ListLongRepeatRoutesRow, error) {
+	return nil, nil
 }
 
 func (s *fakeIntegrationsStore) InTx(_ context.Context, f func(integrations.Queries) error) error {
@@ -306,6 +330,33 @@ func (f *fakeDB) IngestStore() ingest.Store { return nil }
 
 // ProcessStore has no pending Stored Snapshots.
 func (f *fakeDB) ProcessStore() ingest.ProcessStore { return fakeProcessStore{} }
+
+func (f *fakeDB) ReplayStore() ingest.ReplayStore { return &fakeReplayStore{f: f} }
+
+// fakeReplayStore replays two Stored Snapshots of every Integration and records the Audit log entry.
+type fakeReplayStore struct {
+	ingest.ReplayQueries
+	f *fakeDB
+}
+
+func (s *fakeReplayStore) InTx(_ context.Context, fn func(ingest.ReplayQueries) error) error {
+	return fn(s)
+}
+
+func (s *fakeReplayStore) GetRetention(context.Context, int64) (int64, error) { return 14, nil }
+
+func (s *fakeReplayStore) ReplaySnapshots(context.Context, ingestdb.ReplaySnapshotsParams) ([]int64, error) {
+	return []int64{1, 2}, nil
+}
+
+func (s *fakeReplayStore) NotifySnapshot(context.Context, ingestdb.NotifySnapshotParams) error {
+	return nil
+}
+
+func (s *fakeReplayStore) InsertAuditEntry(_ context.Context, arg auditdb.InsertAuditEntryParams) error {
+	s.f.replayAudit = append(s.f.replayAudit, arg)
+	return nil
+}
 
 type fakeProcessStore struct{ ingest.ProcessStore }
 
@@ -1193,6 +1244,44 @@ func TestResetPasswordUnderDev(t *testing.T) {
 	tf.devErr = nil
 	if _, _, err := ResetTOTP(t.Context(), topts, TOTPReset{Actor: "ops", Login: "bob"}); err != nil {
 		t.Errorf("reset-totp under dev: %v", err)
+	}
+}
+
+// TestReplayIngest is muster ingest replay in the runtime: the checks, the Organization and the business clock, then
+// the replay recorded with the --actor name; under muster dev the development clock dates it.
+func TestReplayIngest(t *testing.T) {
+	offset := int64(86400)
+	fake := &fakeDB{devOffset: &offset}
+	fake.org.org = &odb.CreateOrganizationParams{PublicID: "RG0000000000AA", Name: "Muster"}
+	var out syncBuffer
+	opts := options(fake, &out, env())
+	opts.Development = true
+	replay := IngestReplay{Since: time.Hour, SinceText: "1h", Actor: "ops-alice"}
+	got, err := ReplayIngest(t.Context(), opts, replay)
+	if err != nil || got.Count != 2 || !fake.checked || !fake.schema || fake.closed != 1 {
+		t.Fatalf("= %+v, %v, database %+v", got, err, fake)
+	}
+	if len(fake.replayAudit) != 1 || fake.replayAudit[0].ActorName.String != "ops-alice" ||
+		fake.replayAudit[0].Action != "ingest.replayed" || time.Until(fake.replayAudit[0].At) < 23*time.Hour {
+		t.Errorf("audit = %+v", fake.replayAudit)
+	}
+	for name, f := range map[string]*fakeDB{
+		"check":        {checkErr: errors.New("pooler")},
+		"schema":       {schemaErr: errors.New("newer")},
+		"organization": {},
+		"dev clock":    {devErr: errors.New("down")},
+	} {
+		if name == "dev clock" {
+			f.org.org = fake.org.org
+		}
+		o := options(f, &out, env())
+		o.Development = true
+		if _, err := ReplayIngest(t.Context(), o, replay); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+	if _, err := ReplayIngest(t.Context(), options(fake, &out, nil), replay); err == nil {
+		t.Error("without settings")
 	}
 }
 

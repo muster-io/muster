@@ -129,3 +129,34 @@ WHERE t.org_id = @org_id AND t.token_hash = @token_hash;
 UPDATE integration_tokens
 SET last_used_at = @now::timestamptz
 WHERE org_id = @org_id AND id = @id AND (last_used_at IS NULL OR last_used_at <= @stale_before::timestamptz);
+
+-- EnsureBuiltin creates the built-in "Muster" Integration of the Organization once: webhook-only, without Static
+-- labels and with the Heartbeat off. It returns no row when it exists.
+-- name: EnsureBuiltin :one
+INSERT INTO integrations (
+    org_id, public_id, name, description, builtin, connection_mode, static_labels, duplicate_window_seconds,
+    heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, created_at, updated_at
+)
+VALUES (
+    @org_id, @public_id, @name, @description, true, 'webhook_only', '{}'::jsonb, @duplicate_window_seconds, false,
+    @heartbeat_timeout_seconds, 'not_configured', @now::timestamptz, @now::timestamptz
+)
+ON CONFLICT (org_id) WHERE builtin DO NOTHING
+RETURNING public_id;
+
+-- CountTruncatedGroupsOf counts the truncated groupKeys of each of the Integrations that has one (the warning
+-- snapshot_truncated).
+-- name: CountTruncatedGroupsOf :many
+SELECT g.integration_id, count(*)::bigint AS truncated_group_count
+FROM alertmanager_groups g
+WHERE g.org_id = @org_id AND g.integration_id = ANY(@integration_ids::bigint[]) AND g.truncated
+GROUP BY g.integration_id;
+
+-- ListLongRepeatRoutes lists the Alertmanager routes of the Integrations whose learned repeat interval is above
+-- @threshold_ms (the warning long_repeat_interval), in the order of their paths.
+-- name: ListLongRepeatRoutes :many
+SELECT r.integration_id, r.route_path, r.learned_repeat_interval_ms::bigint AS learned_repeat_interval_ms
+FROM alertmanager_routes r
+WHERE r.org_id = @org_id AND r.integration_id = ANY(@integration_ids::bigint[])
+  AND r.learned_repeat_interval_ms > @threshold_ms::bigint
+ORDER BY r.integration_id, r.route_path, r.id;

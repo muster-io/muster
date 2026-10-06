@@ -321,12 +321,13 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		names = append(names, task.Name)
 	}
 	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning",
-		"ingest_backlog"}
+		"ingest_backlog", "alert_retention"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
 	if tasks[0].Every != time.Hour || tasks[1].Every != AliveMarkInterval || tasks[2].Every != time.Hour ||
-		tasks[3].Every != MaintenanceInterval || tasks[4].Every != BacklogInterval {
+		tasks[3].Every != MaintenanceInterval || tasks[4].Every != BacklogInterval ||
+		tasks[5].Every != MaintenanceInterval {
 		t.Errorf("intervals %v %v %v %v", tasks[0].Every, tasks[1].Every, tasks[2].Every, tasks[3].Every)
 	}
 	// Partition maintenance logs its own failures; the runner gets none to log twice.
@@ -343,6 +344,43 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	// Without a backlog counter the task does nothing.
 	if err := tasks[4].Run(t.Context()); err != nil {
 		t.Errorf("backlog without a counter: %v", err)
+	}
+	// Without a retention the task does nothing.
+	if err := tasks[5].Run(t.Context()); err != nil {
+		t.Errorf("alert retention without a retention: %v", err)
+	}
+}
+
+// TestAlertRetentionTask: the retention of the Alerts view runs in every Organization at the same now on the business
+// clock, goes on past an Organization that fails and reports the failure.
+func TestAlertRetentionTask(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	type call struct {
+		org int64
+		now time.Time
+	}
+	var calls []call
+	failed := errors.New("locked")
+	w := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		Business:      clock.NewManual(now),
+		AlertRetention: func(_ context.Context, org int64, at time.Time) (int64, error) {
+			calls = append(calls, call{org, at})
+			if org == 1 {
+				return 0, failed
+			}
+			return 3, nil
+		},
+	}
+	task := Tasks(w)()[5]
+	if err := task.Run(t.Context()); !errors.Is(err, failed) ||
+		!slices.Equal(calls, []call{{1, now}, {2, now}}) {
+		t.Errorf("calls %v, err %v", calls, err)
+	}
+	orgsErr := errors.New("down")
+	w.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
+	if err := Tasks(w)()[5].Run(t.Context()); !errors.Is(err, orgsErr) {
+		t.Errorf("= %v", err)
 	}
 }
 

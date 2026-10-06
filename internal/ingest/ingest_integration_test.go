@@ -109,6 +109,9 @@ func setup(t *testing.T, s dbtest.Server) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := integrations.EnsureBuiltin(ctx, integrations.NewStore(d.Pool), org.ID, t0); err != nil {
+		t.Fatal(err)
+	}
 	c := clock.NewManual(t0)
 	u, _ := url.Parse("http://localhost:8081")
 	e := &env{d: d, clock: c, orgID: org.ID, log: &log,
@@ -193,7 +196,8 @@ func TestIntegrationIntegrations(t *testing.T) {
 			t.Errorf("token of a deleted integration = %+v, %v", caller, err)
 		}
 		page, err := e.ints.List(ctx, integrations.ListFilter{Limit: 10})
-		if err != nil || len(page.Integrations) != 1 || page.Integrations[0].PublicID != other.PublicID {
+		if err != nil || len(page.Integrations) != 2 || !page.Integrations[0].Builtin ||
+			page.Integrations[1].PublicID != other.PublicID {
 			t.Errorf("list = %+v, %v", page, err)
 		}
 		if _, err := e.ints.Create(ctx, by, input("prod-eu")); err != nil {
@@ -310,8 +314,9 @@ func TestIntegrationIngestion(t *testing.T) {
 			t.Errorf("token of a deleted integration = %d", code)
 		}
 		page, _ = e.snapshots.List(ctx, ingest.ListFilter{Integration: in.PublicID, Limit: 10})
-		if len(page.Snapshots) != 3 {
-			t.Errorf("snapshots after deletion = %d, want 3", len(page.Snapshots))
+		// The three it accepted, and the marker of its deletion (C-06.FR-16).
+		if len(page.Snapshots) != 4 {
+			t.Errorf("snapshots after deletion = %d, want 4", len(page.Snapshots))
 		}
 		if strings.Contains(e.log.String(), tok.Value) {
 			t.Error("the token reached the log")

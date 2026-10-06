@@ -200,9 +200,10 @@ func TestIngestion(t *testing.T) {
 			t.Error("the deleted Integration is listed")
 		}
 	}
+	// The four it accepted, and the marker of its deletion (C-06.FR-16).
 	left := admin.json(http.MethodGet, "/api/v1/stored-snapshots?integration="+id, "", http.StatusOK)
-	if n := len(left["items"].([]any)); n != 4 {
-		t.Errorf("stored snapshots after the deletion = %d, want 4", n)
+	if n := len(left["items"].([]any)); n != 5 {
+		t.Errorf("stored snapshots after the deletion = %d, want 5", n)
 	}
 	if v := r.Metric(t, `muster_integration_info{integration="`+id+`",name="prod-eu"}`); v != "" {
 		t.Errorf("muster_integration_info of the deleted Integration = %q", v)

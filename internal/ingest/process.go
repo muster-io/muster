@@ -15,6 +15,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/ingest/dbgen"
+	"github.com/muster-io/muster/internal/internalalerts"
+)
+
+// The sources of a Stored Snapshot: a webhook received on the ingest listener, or a synthetic one that raises or
+// resolves an Internal alert or marks the deletion of an Integration.
+const (
+	SourceWebhook  = "webhook"
+	SourceInternal = "internal"
 )
 
 // The reasons an Alert resolves (NullableResolveReason).
@@ -57,12 +65,21 @@ type snapshotIn struct {
 	DuplicateWindow  time.Duration
 	// ClockMs is the Integration's liveness clock at receipt (S-023).
 	ClockMs int64
+	// Internal is a synthetic Snapshot of an Internal alert (C-06.FR-14); Integration is the Integration it was
+	// received for, with its current name.
+	Internal    bool
+	Integration internalalerts.Entity
+	// Deleted is a Snapshot of a deleted Integration, which raises and resolves no Internal alert about it: its
+	// deletion resolved them. AlertsSince bounds the startsAt of a raise that fires an Internal alert anew.
+	Deleted     bool
+	AlertsSince time.Time
 }
 
-// Stats count what one Snapshot did, for its log line and the metrics.
+// Stats count what one Snapshot did, for its log line and the metrics; Deleted are the Alerts the deletion of their
+// Integration resolved.
 type Stats struct {
-	Alerts, Fired, Resolved, Gone, Continued, Dropped int
-	Truncated                                         int64
+	Alerts, Fired, Resolved, Gone, Continued, Dropped, Deleted int
+	Truncated                                                  int64
 }
 
 // engine applies one Snapshot to the state of its groupKey in memory (ADR-0002, C-06): the rows it touches are read
@@ -78,6 +95,9 @@ type engine struct {
 	presences map[int64]*presence
 	// late and early place a Snapshot received before the current window started (timing).
 	late, early bool
+	// wasTruncated is the truncation of the groupKey before the Snapshot, so that a change raises or resolves
+	// MusterSnapshotTruncated.
+	wasTruncated bool
 
 	// listedSet and listedAlerts are the firing Alerts the Snapshot lists, whose presences become listed;
 	// listedResolved the fingerprints it lists as resolved.
@@ -113,8 +133,16 @@ func newEngine(in snapshotIn, g *group, r *route, rows []*alert, presences []*pr
 }
 
 // run applies the Snapshot: its window, truncation and repeat learning, every Alert it lists, the resolve of its
-// whole Alertmanager group, and absence. A late Snapshot applies only its explicit resolves.
+// whole Alertmanager group, and absence. A late Snapshot applies only its explicit resolves. A synthetic Snapshot of
+// an Internal alert applies only its Alert: it is never evidence of absence and feeds no repeat learning.
 func (e *engine) run() {
+	e.wasTruncated = e.group.Truncated
+	if e.in.Internal {
+		for _, pa := range e.in.Payload.Alerts {
+			e.applyInternal(pa)
+		}
+		return
+	}
 	e.late, e.early = e.timing()
 	switch {
 	case e.early:
@@ -189,6 +217,50 @@ func (e *engine) apply(pa PayloadAlert) {
 	}
 }
 
+// applyInternal is the table of the rules for the Alert of a synthetic Snapshot (C-06.FR-14). A resolve resolves
+// the Internal alert while it fires and changes nothing otherwise. A raise of an Internal alert that already fires is
+// the same firing whatever its startsAt: a raise whose labels or annotations differ, such as a renamed entity's name
+// label, updates them in place as an annotation change, and one received before the latest raise that was applied, as
+// in a replay, changes nothing. A raise of a resolved one fires it again only with a newer startsAt, so that a
+// replayed raise never reopens it.
+func (e *engine) applyInternal(pa PayloadAlert) {
+	a := e.alerts[pa.Fingerprint]
+	if pa.Status == StatusResolved {
+		e.listedResolved[pa.Fingerprint] = true
+		if a != nil && a.Status == StatusFiring && !a.StartsAt.After(pa.StartsAt) {
+			e.resolve(a, ResolveResolved, "", nil)
+		}
+		return
+	}
+	t := e.in.ReceivedAt
+	switch {
+	case a == nil && pa.StartsAt.Before(e.in.AlertsSince):
+		// A replayed raise of an Internal alert that retention has removed since.
+		return
+	case a == nil:
+		a = &alert{Fingerprint: pa.Fingerprint, Status: StatusFiring, StartsAt: pa.StartsAt, Episode: 1, FiredAt: t}
+		e.alerts[pa.Fingerprint] = a
+		e.refresh(a, pa, pa.Labels, []string{}, false)
+		e.change(ChangeFired, a)
+	case a.Status == StatusFiring:
+		if t.Before(a.LastSeenAt) {
+			return
+		}
+		if !maps.Equal(a.Labels, pa.Labels) || !maps.Equal(a.Annotations, pa.Annotations) {
+			e.change(ChangeAnnotations, a)
+		}
+		e.refresh(a, pa, pa.Labels, []string{}, false)
+	case !pa.StartsAt.After(a.StartsAt):
+		return
+	default:
+		a.Status, a.StartsAt, a.Episode, a.FiredAt = StatusFiring, pa.StartsAt, a.Episode+1, t
+		a.ResolvedAt, a.Reason, a.ReasonText = nil, "", ""
+		e.refresh(a, pa, pa.Labels, []string{}, false)
+		e.change(ChangeFired, a)
+	}
+	e.markListed(a)
+}
+
 // refresh takes what a listing as firing carries; a changed annotation is an Alert change of its own when report.
 func (e *engine) refresh(a *alert, pa PayloadAlert, labels map[string]string, conflicts []string, report bool) {
 	if report && !maps.Equal(a.Annotations, pa.Annotations) {
@@ -261,10 +333,18 @@ func withStaticLabels(labels, static map[string]string) (map[string]string, []st
 	return out, conflicts
 }
 
-// processedSnapshot is what applying a Snapshot made, for the metrics and the log line after the commit.
+// processedSnapshot is what applying a Snapshot made, for the metrics and the log lines after the commit.
 type processedSnapshot struct {
 	Stats   Stats
 	Changes []AlertChange
+	// Internal are the Internal alerts a synthetic Snapshot raised or resolved.
+	Internal []internalChange
+}
+
+// internalChange is an Internal alert that fired or resolved, for its log line.
+type internalChange struct {
+	Resolved                       bool
+	Alertname, Fingerprint, Entity string
 }
 
 // applySnapshot reads the state a Snapshot touches, applies it and writes the result, in the Snapshot's transaction.
@@ -304,11 +384,20 @@ func (p *Processor) applySnapshot(ctx context.Context, q ProcessQueries, tx dbge
 	if err := p.write(ctx, q, integrationID, e); err != nil {
 		return processedSnapshot{}, err
 	}
+	if e.group.Truncated != e.wasTruncated && !in.Deleted {
+		if err := p.truncationChanged(ctx, q, integrationID, in, e.group.Truncated); err != nil {
+			return processedSnapshot{}, err
+		}
+	}
 	out := processedSnapshot{Stats: e.stats, Changes: make([]AlertChange, len(e.changes))}
 	for i, c := range e.changes {
 		out.Changes[i] = AlertChange{Kind: c.kind, AlertID: c.alert.ID, Fingerprint: c.alert.Fingerprint,
 			Episode: c.alert.Episode, StoredSnapshotID: in.StoredSnapshotID, Reason: c.reason,
 			ReasonText: c.reasonText}
+		if in.Internal && (c.kind == ChangeFired || c.kind == ChangeResolved) {
+			out.Internal = append(out.Internal, internalChangeOf(c.kind == ChangeResolved, c.alert.Fingerprint,
+				c.alert.Labels))
+		}
 	}
 	if p.sink != nil && len(out.Changes) > 0 {
 		if err := p.sink.AlertChanges(ctx, tx, out.Changes); err != nil {
@@ -503,7 +592,7 @@ func (p *Processor) writePresences(ctx context.Context, q ProcessQueries, integr
 }
 
 func (p *Processor) writeGroup(ctx context.Context, q ProcessQueries, e *engine) error {
-	if e.late {
+	if e.late || e.in.Internal {
 		return nil
 	}
 	g, r := e.group, e.route

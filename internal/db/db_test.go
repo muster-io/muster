@@ -297,8 +297,8 @@ func TestCheckSchema(t *testing.T) {
 
 func TestKnownVersion(t *testing.T) {
 	v, err := KnownVersion()
-	if err != nil || v != 1 {
-		t.Errorf("KnownVersion = %d, %v; want 1", v, err)
+	if err != nil || v != 2 {
+		t.Errorf("KnownVersion = %d, %v; want 2", v, err)
 	}
 	fsys := fstest.MapFS{
 		"m/0001_init.up.sql":   {Data: []byte("SELECT 1;")},
@@ -578,7 +578,7 @@ func TestSchemaVersion(t *testing.T) {
 	pool.rows["SELECT version, dirty"] = stubRow{values: []any{int64(7), false}}
 	var out bytes.Buffer
 	err := d.CheckSchema(t.Context(), logging.New(&out, logging.LevelInfo))
-	if err == nil || !strings.Contains(err.Error(), "database schema version 7 is newer than this binary knows (1)") ||
+	if err == nil || !strings.Contains(err.Error(), "database schema version 7 is newer than this binary knows (2)") ||
 		!strings.Contains(out.String(), `"event":"schema_too_new"`) {
 		t.Errorf("CheckSchema on version 7: %v, logged %s", err, out.String())
 	}
@@ -624,12 +624,12 @@ func TestMigrate(t *testing.T) {
 		wantLine string
 		wantUps  int
 	}{
-		{name: "new database", m: &fakeMigrator{versions: []uint{0, 1}}, wantUps: 1,
-			wantLine: `"event":"migrations_applied","from":0,"to":1`},
-		{name: "current", m: &fakeMigrator{versions: []uint{1, 1}, upErr: migrate.ErrNoChange}, wantUps: 1,
-			wantLine: `"event":"migrations_current","version":1`},
+		{name: "new database", m: &fakeMigrator{versions: []uint{0, 2}}, wantUps: 1,
+			wantLine: `"event":"migrations_applied","from":0,"to":2`},
+		{name: "current", m: &fakeMigrator{versions: []uint{2, 2}, upErr: migrate.ErrNoChange}, wantUps: 1,
+			wantLine: `"event":"migrations_current","version":2`},
 		{name: "newer", m: &fakeMigrator{versions: []uint{999}},
-			wantErr: "database schema version 999 is newer than this binary knows (1)", wantLine: `"event":"schema_too_new"`},
+			wantErr: "database schema version 999 is newer than this binary knows (2)", wantLine: `"event":"schema_too_new"`},
 		{name: "dirty", m: &fakeMigrator{versions: []uint{1}, dirty: true},
 			wantErr: "the database schema is dirty at version 1", wantLine: `"event":"schema_dirty"`},
 		{name: "up fails", m: &fakeMigrator{versions: []uint{0}, upErr: errors.New("syntax error")}, wantUps: 1,
@@ -699,10 +699,13 @@ func TestDriver(t *testing.T) {
 		t.Fatalf("Up: %v", err)
 	}
 	_, _ = m.Close()
-	if len(c.execs) != 4 || !strings.HasPrefix(c.execs[0], "CREATE TABLE IF NOT EXISTS schema_migrations") ||
+	if len(c.execs) != 7 || !strings.HasPrefix(c.execs[0], "CREATE TABLE IF NOT EXISTS schema_migrations") ||
 		c.execs[1] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (1, true)" ||
 		!strings.Contains(c.execs[2], "CREATE EXTENSION IF NOT EXISTS pg_trgm") ||
-		c.execs[3] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (1, false)" {
+		c.execs[3] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (1, false)" ||
+		c.execs[4] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (2, true)" ||
+		!strings.Contains(c.execs[5], "ADD COLUMN replayed_at") ||
+		c.execs[6] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (2, false)" {
 		t.Errorf("statements %q", c.execs)
 	}
 

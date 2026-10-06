@@ -102,7 +102,7 @@ SET lease_until = @lease_until
 FROM integrations i
 WHERE c.org_id = @org_id AND c.integration_id = @integration_id AND c.lease_owner = @owner
   AND i.org_id = @org_id AND i.id = c.integration_id
-RETURNING i.public_id, i.static_labels, i.duplicate_window_seconds, i.liveness_clock_ms;
+RETURNING i.public_id, i.name, i.static_labels, i.duplicate_window_seconds, i.liveness_clock_ms, i.deleted_at;
 
 -- ReleaseIngestClaim frees the lease this replica holds.
 -- name: ReleaseIngestClaim :exec
@@ -110,9 +110,9 @@ UPDATE ingest_claims
 SET lease_owner = NULL, lease_until = NULL
 WHERE org_id = @org_id AND integration_id = @integration_id AND lease_owner = @owner;
 
--- NextPendingSnapshot reads the oldest pending Stored Snapshot of an Integration with its body.
+-- NextPendingSnapshot reads the oldest pending Stored Snapshot of an Integration with its body and its source.
 -- name: NextPendingSnapshot :one
-SELECT s.id, s.public_id, s.received_at, b.body
+SELECT s.id, s.public_id, s.received_at, s.source, b.body
 FROM stored_snapshots s
 JOIN snapshot_bodies b ON b.org_id = @org_id AND b.body_sha256 = s.body_sha256 AND b.body_day = s.body_day
 WHERE s.org_id = @org_id AND s.integration_id = @integration_id AND s.state = 'pending'
@@ -120,16 +120,19 @@ WHERE s.org_id = @org_id AND s.integration_id = @integration_id AND s.state = 'p
 ORDER BY s.received_at, s.id
 LIMIT 1;
 
--- FinishSnapshot marks a pending Stored Snapshot processed or failed, with what processing read of its payload.
--- name: FinishSnapshot :execrows
+-- FinishSnapshot marks a pending Stored Snapshot processed or failed, with what processing read of its payload, and
+-- returns whether it leaves pending for the first time: a replayed one was counted when it did. No row means it is
+-- no longer pending.
+-- name: FinishSnapshot :one
 UPDATE stored_snapshots
 SET state = @state, processed_at = @processed_at, processing_error = sqlc.narg('processing_error'),
     group_key = sqlc.narg('group_key'), alert_count = sqlc.narg('alert_count'),
     truncated_alerts = sqlc.narg('truncated_alerts')
-WHERE org_id = @org_id AND id = @id AND received_at = @received_at::timestamptz AND state = 'pending';
+WHERE org_id = @org_id AND id = @id AND received_at = @received_at::timestamptz AND state = 'pending'
+RETURNING (replayed_at IS NULL)::boolean AS first_time;
 
--- CountSnapshot counts a Stored Snapshot on its Integration; processing is serialized per Integration, so the
--- ingestion path never updates the Integration row.
+-- CountSnapshot counts a Stored Snapshot on its Integration when it leaves pending for the first time; processing
+-- is serialized per Integration, so the ingestion path never updates the Integration row.
 -- name: CountSnapshot :exec
 UPDATE integrations
 SET snapshot_count = snapshot_count + 1, last_snapshot_at = greatest(last_snapshot_at, @received_at::timestamptz)
@@ -175,8 +178,9 @@ SET learned_repeat_interval_ms = @learned_repeat_interval_ms, repeat_observation
     recent_repeat_gaps_ms = @recent_repeat_gaps_ms::bigint[]
 WHERE org_id = @org_id AND id = @id;
 
--- ListSnapshotAlerts reads the Alerts a Snapshot touches: those it lists by fingerprint and those with an active
--- presence in its groupKey.
+-- ListSnapshotAlerts reads the Alerts a Snapshot touches, and locks them until the Snapshot's transaction ends so that
+-- the retention of the Alerts view skips them: those it lists by fingerprint and those with an active presence in its
+-- groupKey.
 -- name: ListSnapshotAlerts :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.generator_url, a.static_label_conflicts, a.status,
        a.starts_at, a.ends_at, a.episode, a.fired_at, a.first_seen_at, a.last_seen_at, a.resolved_at,
@@ -187,7 +191,8 @@ WHERE a.org_id = @org_id AND a.integration_id = @integration_id
        OR a.id IN (SELECT p.alert_id
                    FROM alert_presences p
                    WHERE p.org_id = @org_id AND p.alertmanager_group_id = @alertmanager_group_id
-                     AND p.state IN ('listed', 'missed')));
+                     AND p.state IN ('listed', 'missed')))
+FOR NO KEY UPDATE OF a;
 
 -- ListActivePresences reads the active presences of a groupKey, and whether each Alert has an active presence in
 -- another groupKey.
@@ -266,13 +271,13 @@ SELECT count(*)
 FROM stored_snapshots
 WHERE org_id = @org_id AND state = 'pending';
 
--- FindViewIntegration finds an Integration that is not deleted, for its Alerts view, with the Organization's
--- retention.alert_details.
+-- FindViewIntegration finds an Integration for its Alerts view, a deleted one included: its Alerts stay readable
+-- until retention (C-06.FR-16). It returns the Organization's retention.alert_details.
 -- name: FindViewIntegration :one
 SELECT i.id, o.retention_alert_details_days
 FROM integrations i
 JOIN organizations o ON o.id = i.org_id
-WHERE i.org_id = @org_id AND i.public_id = @public_id AND i.deleted_at IS NULL;
+WHERE i.org_id = @org_id AND i.public_id = @public_id;
 
 -- ListViewAlertsByLastSeen is a batch of the Alerts view, newest last seen first, after the cursor when given:
 -- firing Alerts and those resolved since @resolved_since, in the state when given, whose labels contain @contains.
@@ -339,3 +344,82 @@ JOIN alerts a ON a.org_id = @org_id AND a.id = p.alert_id
 JOIN alertmanager_groups g ON g.org_id = @org_id AND g.id = p.alertmanager_group_id
 WHERE p.org_id = @org_id AND p.alert_id = ANY(@alert_ids::bigint[]) AND p.last_seen_at >= a.fired_at
 ORDER BY p.alert_id, g.group_key;
+
+-- CountTruncatedGroups counts the truncated groupKeys of an Integration (MusterSnapshotTruncated).
+-- name: CountTruncatedGroups :one
+SELECT count(*)
+FROM alertmanager_groups
+WHERE org_id = @org_id AND integration_id = @integration_id AND truncated;
+
+-- ResolveIntegrationAlerts resolves every firing Alert of a deleted Integration with the reason integration_deleted
+-- and returns them (C-06.FR-16).
+-- name: ResolveIntegrationAlerts :many
+UPDATE alerts
+SET status = 'resolved', resolved_at = @resolved_at::timestamptz, resolve_reason = 'integration_deleted',
+    resolve_reason_text = @reason_text::text, updated_at = @updated_at::timestamptz
+WHERE org_id = @org_id AND integration_id = @integration_id AND status = 'firing'
+RETURNING id, fingerprint, episode;
+
+-- ClearTruncation ends the truncation of every groupKey of a deleted Integration and returns how many were truncated.
+-- name: ClearTruncation :execrows
+UPDATE alertmanager_groups
+SET truncated = false, truncated_since = NULL
+WHERE org_id = @org_id AND integration_id = @integration_id AND truncated;
+
+-- FindReplayIntegration finds an Integration that is not deleted by its name, for muster ingest replay.
+-- name: FindReplayIntegration :one
+SELECT id, public_id, name
+FROM integrations
+WHERE org_id = @org_id AND name = @name AND deleted_at IS NULL;
+
+-- ReplaySnapshots sets the Stored Snapshots received since @since that left pending, of one Integration when it is
+-- given, back to pending and marks them replayed (C-06.FR-17); it returns the Integration of each.
+-- name: ReplaySnapshots :many
+UPDATE stored_snapshots
+SET state = 'pending', processed_at = NULL, processing_error = NULL, replayed_at = @replayed_at::timestamptz
+WHERE org_id = @org_id AND received_at >= @since::timestamptz AND state <> 'pending'
+  AND (sqlc.narg('integration_id')::bigint IS NULL OR integration_id = sqlc.narg('integration_id')::bigint)
+RETURNING integration_id;
+
+-- FindRoutesIntegration finds an Integration that is not deleted, for its learned Alertmanager routes.
+-- name: FindRoutesIntegration :one
+SELECT id, builtin
+FROM integrations
+WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL;
+
+-- ListAlertmanagerRoutes lists the Alertmanager routes of an Integration in the order of their paths, with the
+-- learned repeat interval and the count of their truncated groupKeys.
+-- name: ListAlertmanagerRoutes :many
+SELECT r.route_path, r.learned_repeat_interval_ms,
+       (SELECT count(*)
+        FROM alertmanager_groups g
+        WHERE g.org_id = @org_id AND g.alertmanager_route_id = r.id AND g.truncated)::bigint AS truncated_group_count
+FROM alertmanager_routes r
+WHERE r.org_id = @org_id AND r.integration_id = @integration_id
+ORDER BY r.route_path, r.id;
+
+-- GetAlertRetention returns retention.alert_details of an Organization, in days.
+-- name: GetAlertRetention :one
+SELECT retention_alert_details_days
+FROM organizations
+WHERE id = @org_id;
+
+-- DeleteExpiredAlerts deletes at most @batch_size Alerts resolved before @cutoff, with their presences (the foreign
+-- key cascades); rows another transaction holds wait for the next run.
+-- name: DeleteExpiredAlerts :execrows
+DELETE FROM alerts a
+WHERE a.org_id = @org_id AND a.id IN (
+    SELECT e.id
+    FROM alerts e
+    WHERE e.org_id = @org_id AND e.status = 'resolved' AND e.resolved_at < @cutoff::timestamptz
+    ORDER BY e.resolved_at
+    LIMIT @batch_size
+    FOR UPDATE SKIP LOCKED);
+
+-- LockIntegrationName reads the current name of an Integration for an Internal alert about it, after a rename that is
+-- in progress commits; a rename that starts later waits for the Snapshot's transaction and then sees its raise.
+-- name: LockIntegrationName :one
+SELECT name
+FROM integrations
+WHERE org_id = @org_id AND id = @integration_id
+FOR KEY SHARE;

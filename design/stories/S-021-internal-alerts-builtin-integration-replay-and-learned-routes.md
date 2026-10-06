@@ -9,28 +9,51 @@ covers: [C-06.FR-6, C-06.FR-14, C-06.FR-15, C-06.FR-16, C-06.FR-17, C-06.FR-18, 
 files_touched:
   - internal/internalalerts/registry.go
   - internal/internalalerts/raise.go
+  - internal/internalalerts/query.sql
   - internal/internalalerts/internalalerts_test.go
+  - sqlc.yaml
   - internal/tools/refgen/main.go
+  - internal/tools/refgen/refgen_test.go
+  - internal/db/migrations/0002_stored_snapshots_replayed_at.up.sql
+  - internal/db/migrations/0002_stored_snapshots_replayed_at.down.sql
+  - internal/db/db_test.go
+  - internal/db/migrate_test.go
+  - design/db/schema.md
   - internal/ingest/process.go
   - internal/ingest/truncation.go
   - internal/ingest/deletion.go
   - internal/ingest/replay.go
   - internal/ingest/routes.go
   - internal/ingest/retention.go
+  - internal/ingest/worker.go
+  - internal/ingest/alertsview.go
   - internal/ingest/query.sql
   - internal/ingest/internal_test.go
   - internal/ingest/replay_test.go
+  - internal/ingest/worker_test.go
+  - internal/ingest/internal_integration_test.go
+  - internal/ingest/ingest_integration_test.go
+  - internal/ingest/facts_test.go
   - internal/integrations/integrations.go
+  - internal/integrations/tokens.go
   - internal/integrations/query.sql
   - internal/integrations/integrations_test.go
   - internal/runtime/bootstrap.go
+  - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/api/integrations.go
   - internal/api/integrations_test.go
+  - internal/api/problem.go
+  - internal/api/server.go
+  - internal/archlint/secretleak.go
   - internal/cli/cli.go
   - internal/cli/ingest.go
+  - internal/cli/ingest_test.go
   - internal/leader/tasks.go
+  - internal/leader/leader_test.go
   - internal/logging/events.go
   - test/e2e/internal_alerts_test.go
+  - test/e2e/ingest_test.go
 acceptance:
   - "[C-06.FR-14] The built-in Integration \"Muster\" exists from the first start, is listed with `builtin: true`, has no tokens and no Heartbeat, and `updateIntegration`, `deleteIntegration` and `createIntegrationToken` on it answer 409 `builtin_immutable`."
   - "[C-06.FR-14] Internal alerts form a closed registry in code with a generated reference page that `make generate-check` keeps current; a raise and a resolve are synthetic Stored Snapshots of the built-in Integration, marked `internal`, processed in order with its other Snapshots, listed by `listStoredSnapshots`, and never resolved as Gone or Stale."
@@ -91,27 +114,38 @@ issue: 21
 - **`MusterSnapshotTruncated`** (C-06.FR-6): processing of S-020 raises it when an Integration's count of truncated
   `groupKey`s goes from 0 to 1 and resolves it when the count returns to 0 (after S-023, also when truncation ends with
   time). Rename (C-06.AC-11): `updateIntegration` that changes the name raises again every open Internal alert carrying
-  `integration=<id>`, with the new `integration_name`.
+  `integration=<id>`, with the new `integration_name`, and every one whose raise still waits for processing; processing
+  reads the Integration's name for a raise under a key-share lock, so a rename in progress is never missed.
 - **Deletion** (C-05.FR-8, C-06.FR-16, ADR-0003): `deleteIntegration` also inserts, in its transaction, an internal
   Stored Snapshot of the deleted Integration that marks the deletion. The worker keeps processing a deleted
   Integration's pending Snapshots in order; the marker resolves every Alert of the Integration that still fires with the
   reason `integration_deleted` and the text "Integration {name} deleted" (Alert changes `resolved`, counted in
   `muster_alerts_resolved_total{reason="integration_deleted"}`) and resolves the Integration's open Internal alerts
   (`MusterSnapshotTruncated`; `MusterHeartbeatLost` joins in S-023). Like its Stored Snapshots, its Alerts stay readable
-  through `listIntegrationAlerts` by its id until retention.
+  through `listIntegrationAlerts` by its id until retention. The marker is an Alertmanager-format body with the
+  `groupKey` `{}/{muster="internal"}:{event="integration_deleted"}`, no Alerts, and the Integration's id and name in
+  `commonLabels`. The marker resolves the Internal alerts about the Integration that fire or whose raise still waits
+  in the built-in Integration's queue, and ends the truncation of its `groupKey`s; a deleted Integration raises no
+  Internal alert afterwards, so a replayed marker resolves nothing again. A webhook that authenticated before the
+  deletion but was stored after it (`received_at` at or after `deleted_at`) is marked `failed` and fires nothing.
 - **Replay** (C-06.FR-17, C-02.FR-15): `muster ingest replay --since <duration> [--integration <name>] --actor <name>`
   runs against the database like the other CLI commands; without `--actor` it exits 2. In one transaction it sets the
   Stored Snapshots received within the period (and within `retention.stored_snapshots`) back to `pending`, clearing
   `processed_at` and `processing_error`, sends `NOTIFY`, writes `ingest.replayed` (actor kind `cli`, Transport `cli`,
   details: `since`, `integration`, `count`) and prints the count. The workers process them in arrival order as late
   Snapshots (S-020): only their `resolved` rows apply, under the `startsAt` rule, so Snapshots already processed change
-  nothing, while a Snapshot that failed is processed with the fixed code.
+  nothing, while a Snapshot that failed is processed with the fixed code. A replayed Stored Snapshot is not counted in
+  `snapshot_count` again (D257): replay also sets `stored_snapshots.replayed_at` (migration
+  `0002_stored_snapshots_replayed_at`, `design/db/schema.md`), and processing counts a Stored Snapshot only when it
+  leaves `pending` for the first time.
 - **Learned routes** (C-06.FR-18; `alertmanager_routes`, `alertmanager_groups`): `listAlertmanagerRoutes` returns the
-  Integration's routes ordered by route path: `route_path`, `learned_repeat_interval_seconds` (null before learning),
+  Integration's routes ordered by route path (none for the built-in Integration, whose synthetic Snapshots teach
+  nothing): `route_path`, `learned_repeat_interval_seconds` (null before learning),
   `resolve_by_absence_after_seconds` (`stale_after`: `processing.stale_after_factor` times the interval, or
   `processing.stale_after_unlearned`), `truncated_group_count`, `long_interval_warning` (interval above
   `processing.long_repeat_warning`) and, with it, `recommended_snippet` — an Alertmanager route fragment for that route
-  path with `repeat_interval` set to `snippet.repeat_interval`.
+  path with `repeat_interval` set to `snippet.repeat_interval`; the route path and every matcher are written as
+  double-quoted ASCII YAML scalars, because the `groupKey` is received text.
 - **Warnings** (C-06.FR-18): every read of an Integration carries `snapshot_truncated` (with `truncated_group_count`)
   while any of its `groupKey`s is truncated and one `long_repeat_interval` (with `route_path` and
   `repeat_interval_seconds`) per route above the threshold.
@@ -179,16 +213,17 @@ NOTIFY g7 '{"reason":"first notification"}'; ADV 7200; NOTIFY g7 '{"reason":"rep
 curl -s -b jar "$API/integrations/$INT/alertmanager-routes" | jq -c '.items[] | select(.long_interval_warning) | {route_path, learned_repeat_interval_seconds}'
 # {"route_path":"{}/{kind=\"info\"}","learned_repeat_interval_seconds":720x}
 curl -s -b jar "$API/integrations/$INT/alertmanager-routes" | jq -r '.items[] | select(.long_interval_warning) | .recommended_snippet' | grep repeat_interval
-#     repeat_interval: 10m
+#       repeat_interval: 10m
 
-# C-06.AC-6: replay twice, with the development defaults (muster dev <subcommand>, S-004)
-./bin/muster dev ingest replay --since 1h --integration lab-eu; echo "exit=$?"
+# C-06.AC-6: replay twice, with the development defaults (muster dev <subcommand>, S-004); the development clock moved
+# more than 2 hours since the first Snapshots, so the period is 3 hours to reach all of them
+./bin/muster dev ingest replay --since 3h --integration lab-eu; echo "exit=$?"
 # --actor is required
 # exit=2
-./bin/muster dev ingest replay --since 1h --integration lab-eu --actor ops-alice
-# replayed 4x Stored Snapshots of lab-eu
+./bin/muster dev ingest replay --since 3h --integration lab-eu --actor ops-alice
+# replayed 1x Stored Snapshots of lab-eu
 sleep 5; N0=$(grep -c '"event":"snapshot_processed"' dev.log)
-./bin/muster dev ingest replay --since 1h --integration lab-eu --actor ops-alice; sleep 5
+./bin/muster dev ingest replay --since 3h --integration lab-eu --actor ops-alice; sleep 5
 grep '"event":"snapshot_processed"' dev.log | tail -n +$((N0 + 1)) \
   | jq -s 'map(.fired + .resolved + .gone + .continued) | add'                                       # 0
 curl -s -b jar "$API/audit-log?action=ingest.replayed" | jq -c '.items[0] | {actor: .actor.name, transport}'
@@ -202,7 +237,7 @@ curl -s -o /dev/null -w '%{http_code}\n' "${H[@]}" -X DELETE "$API/integrations/
 sleep 1
 curl -s -b jar "$API/integrations/$INT/alerts?state=resolved&label=pod%3D%22p0%22" | jq -c '.items[0] | {resolve_reason, resolve_reason_text}'
 # {"resolve_reason":"integration_deleted","resolve_reason_text":"Integration lab-eu deleted"}
-curl -s localhost:8082/metrics | grep "muster_alerts_resolved_total{integration=\"$INT\",reason=\"integration_deleted\"}" | awk -v d=$D0 -v o=$OPEN '{print ($2 - d) == o}'
+curl -s localhost:8082/metrics | grep "muster_alerts_resolved_total{integration=\"$INT\",reason=\"integration_deleted\"}" | awk -v d=${D0:-0} -v o=$OPEN '{print (($2 - d) == o)}'
 # 1
 curl -s -b jar "$API/integrations/$BI/alerts?state=firing" | jq '.items | length'                    # 0
 ```

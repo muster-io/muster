@@ -15,8 +15,8 @@ import (
 	"github.com/muster-io/muster/internal/metrics"
 )
 
-// MaintenanceInterval is how often the hourly Leader tasks run: partition maintenance, replica pruning and short-lived
-// pruning.
+// MaintenanceInterval is how often the hourly Leader tasks run: partition maintenance, replica pruning, short-lived
+// pruning and the retention of the Alerts view.
 const MaintenanceInterval = time.Hour
 
 // BacklogInterval is how often the Leader counts the pending Stored Snapshots for muster_ingest_backlog.
@@ -59,6 +59,9 @@ type Work struct {
 
 	// IngestBacklog sets muster_ingest_backlog from the pending Stored Snapshots of the Organizations.
 	IngestBacklog func(ctx context.Context, orgs []int64) error
+	// AlertRetention deletes, in batches, the Alerts of the Organization orgID resolved longer than
+	// retention.alert_details before now (C-06.FR-19) and returns how many it deleted.
+	AlertRetention func(ctx context.Context, orgID int64, now time.Time) (int64, error)
 }
 
 // PruneTable is one short-lived table of short-lived pruning.
@@ -114,7 +117,8 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 }
 
 // Tasks returns the closed list of Leader tasks (ADR-0007): partition maintenance and retention, the alive mark, the
-// pruning of replica records, the pruning of short-lived state and the ingestion backlog. Later capabilities add
+// pruning of replica records, the pruning of short-lived state, the ingestion backlog and the retention of the Alerts
+// view. Later capabilities add
 // theirs here: the Heartbeat lost and Stale checks, Telegram polling, the outgoing heartbeat and the OIDC client secret
 // expiry check. The Keeper calls the result at every
 // leadership, so each one starts with a takeover.
@@ -139,6 +143,7 @@ func Tasks(w Work) func() []Task {
 			{Name: "replica_pruning", Every: MaintenanceInterval, Run: w.PruneReplicas},
 			{Name: "short_lived_pruning", Every: MaintenanceInterval, Run: w.pruneShortLived},
 			{Name: "ingest_backlog", Every: BacklogInterval, Run: w.ingestBacklog},
+			{Name: "alert_retention", Every: MaintenanceInterval, Run: w.alertRetention},
 		}
 	}
 }
@@ -153,4 +158,24 @@ func (w Work) ingestBacklog(ctx context.Context) error {
 		return fmt.Errorf("list the organizations to count the backlog of: %w", err)
 	}
 	return w.IngestBacklog(ctx, orgs)
+}
+
+// alertRetention runs the retention of the Alerts view in every Organization at the same now, on the business clock;
+// a failed Organization does not stop the others. Running it twice deletes nothing more.
+func (w Work) alertRetention(ctx context.Context) error {
+	if w.AlertRetention == nil {
+		return nil
+	}
+	orgs, err := w.Organizations(ctx)
+	if err != nil {
+		return fmt.Errorf("list the organizations for the alert retention: %w", err)
+	}
+	now := w.Business.Now()
+	var errs []error
+	for _, org := range orgs {
+		if _, err := w.AlertRetention(ctx, org, now); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }

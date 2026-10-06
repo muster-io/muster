@@ -12,6 +12,45 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countTruncatedGroupsOf = `-- name: CountTruncatedGroupsOf :many
+SELECT g.integration_id, count(*)::bigint AS truncated_group_count
+FROM alertmanager_groups g
+WHERE g.org_id = $1 AND g.integration_id = ANY($2::bigint[]) AND g.truncated
+GROUP BY g.integration_id
+`
+
+type CountTruncatedGroupsOfParams struct {
+	OrgID          int64
+	IntegrationIds []int64
+}
+
+type CountTruncatedGroupsOfRow struct {
+	IntegrationID       int64
+	TruncatedGroupCount int64
+}
+
+// CountTruncatedGroupsOf counts the truncated groupKeys of each of the Integrations that has one (the warning
+// snapshot_truncated).
+func (q *Queries) CountTruncatedGroupsOf(ctx context.Context, arg CountTruncatedGroupsOfParams) ([]CountTruncatedGroupsOfRow, error) {
+	rows, err := q.db.Query(ctx, countTruncatedGroupsOf, arg.OrgID, arg.IntegrationIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountTruncatedGroupsOfRow{}
+	for rows.Next() {
+		var i CountTruncatedGroupsOfRow
+		if err := rows.Scan(&i.IntegrationID, &i.TruncatedGroupCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteIntegration = `-- name: DeleteIntegration :exec
 UPDATE integrations
 SET deleted_at = $1::timestamptz, updated_at = $1::timestamptz, version = version + 1
@@ -28,6 +67,46 @@ type DeleteIntegrationParams struct {
 func (q *Queries) DeleteIntegration(ctx context.Context, arg DeleteIntegrationParams) error {
 	_, err := q.db.Exec(ctx, deleteIntegration, arg.Now, arg.OrgID, arg.ID)
 	return err
+}
+
+const ensureBuiltin = `-- name: EnsureBuiltin :one
+INSERT INTO integrations (
+    org_id, public_id, name, description, builtin, connection_mode, static_labels, duplicate_window_seconds,
+    heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, created_at, updated_at
+)
+VALUES (
+    $1, $2, $3, $4, true, 'webhook_only', '{}'::jsonb, $5, false,
+    $6, 'not_configured', $7::timestamptz, $7::timestamptz
+)
+ON CONFLICT (org_id) WHERE builtin DO NOTHING
+RETURNING public_id
+`
+
+type EnsureBuiltinParams struct {
+	OrgID                   int64
+	PublicID                string
+	Name                    string
+	Description             string
+	DuplicateWindowSeconds  int64
+	HeartbeatTimeoutSeconds int64
+	Now                     time.Time
+}
+
+// EnsureBuiltin creates the built-in "Muster" Integration of the Organization once: webhook-only, without Static
+// labels and with the Heartbeat off. It returns no row when it exists.
+func (q *Queries) EnsureBuiltin(ctx context.Context, arg EnsureBuiltinParams) (string, error) {
+	row := q.db.QueryRow(ctx, ensureBuiltin,
+		arg.OrgID,
+		arg.PublicID,
+		arg.Name,
+		arg.Description,
+		arg.DuplicateWindowSeconds,
+		arg.HeartbeatTimeoutSeconds,
+		arg.Now,
+	)
+	var public_id string
+	err := row.Scan(&public_id)
+	return public_id, err
 }
 
 const ensureIntegrationToken = `-- name: EnsureIntegrationToken :one
@@ -444,6 +523,48 @@ func (q *Queries) ListIntegrations(ctx context.Context, arg ListIntegrationsPara
 			&i.CreatedAt,
 			&i.Version,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLongRepeatRoutes = `-- name: ListLongRepeatRoutes :many
+SELECT r.integration_id, r.route_path, r.learned_repeat_interval_ms::bigint AS learned_repeat_interval_ms
+FROM alertmanager_routes r
+WHERE r.org_id = $1 AND r.integration_id = ANY($2::bigint[])
+  AND r.learned_repeat_interval_ms > $3::bigint
+ORDER BY r.integration_id, r.route_path, r.id
+`
+
+type ListLongRepeatRoutesParams struct {
+	OrgID          int64
+	IntegrationIds []int64
+	ThresholdMs    int64
+}
+
+type ListLongRepeatRoutesRow struct {
+	IntegrationID           int64
+	RoutePath               string
+	LearnedRepeatIntervalMs int64
+}
+
+// ListLongRepeatRoutes lists the Alertmanager routes of the Integrations whose learned repeat interval is above
+// @threshold_ms (the warning long_repeat_interval), in the order of their paths.
+func (q *Queries) ListLongRepeatRoutes(ctx context.Context, arg ListLongRepeatRoutesParams) ([]ListLongRepeatRoutesRow, error) {
+	rows, err := q.db.Query(ctx, listLongRepeatRoutes, arg.OrgID, arg.IntegrationIds, arg.ThresholdMs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLongRepeatRoutesRow{}
+	for rows.Next() {
+		var i ListLongRepeatRoutesRow
+		if err := rows.Scan(&i.IntegrationID, &i.RoutePath, &i.LearnedRepeatIntervalMs); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

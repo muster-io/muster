@@ -394,11 +394,18 @@ func TestStoredSnapshotsAPI(t *testing.T) {
 	}
 }
 
-// fakeAlerts stands for the Alerts view of internal/ingest.
+// fakeAlerts stands for the Alerts view of internal/ingest and its learned Alertmanager routes.
 type fakeAlerts struct {
-	page   ingest.AlertPage
-	filter ingest.AlertFilter
-	err    error
+	page        ingest.AlertPage
+	filter      ingest.AlertFilter
+	err         error
+	routes      []ingest.AlertmanagerRoute
+	integration string
+}
+
+func (f *fakeAlerts) Routes(_ context.Context, integration string) ([]ingest.AlertmanagerRoute, error) {
+	f.integration = integration
+	return f.routes, f.err
 }
 
 func (f *fakeAlerts) List(_ context.Context, fl ingest.AlertFilter) (ingest.AlertPage, error) {
@@ -515,5 +522,76 @@ func decodeInto(t *testing.T, a answer, v any) {
 	t.Helper()
 	if err := json.Unmarshal(a.body, v); err != nil {
 		t.Fatalf("%s: %v", a.body, err)
+	}
+}
+
+// TestBuiltinAndWarningsAPI is C-06.FR-14 and C-06.FR-18 at the API: the built-in Integration is marked builtin and
+// its refusals are 409 builtin_immutable; the warnings carry their own fields only.
+func TestBuiltinAndWarningsAPI(t *testing.T) {
+	x, fi, _ := newIntegrationsAPI(t)
+	fi.in.Builtin = true
+	fi.in.Warnings = []integrations.Warning{{Kind: integrations.WarningSnapshotTruncated, TruncatedGroupCount: 1},
+		{Kind: integrations.WarningLongRepeatInterval, RoutePath: `{}/{kind="info"}`, RepeatIntervalSeconds: 7200}}
+	a := x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID, "", "Cookie", viewerCookie)
+	var got gen.Integration
+	decodeInto(t, a, &got)
+	if a.status != http.StatusOK || !got.Builtin || len(got.Warnings) != 2 ||
+		got.Warnings[0].Kind != gen.IntegrationWarningKindSnapshotTruncated ||
+		got.Warnings[0].TruncatedGroupCount.MustGet() != 1 || got.Warnings[0].RoutePath.IsSpecified() ||
+		got.Warnings[1].RoutePath.MustGet() != `{}/{kind="info"}` || got.Warnings[1].RepeatIntervalSeconds.MustGet() != 7200 ||
+		got.Warnings[1].TruncatedGroupCount.IsSpecified() {
+		t.Errorf("get = %d %s", a.status, a.body)
+	}
+	fi.err = integrations.ErrBuiltinImmutable
+	path := "/api/v1/integrations/" + integrationID
+	for _, a := range []answer{
+		x.mutate(t, adminCookie, http.MethodPut, path, integrationBody, "If-Match", `"1"`),
+		x.mutate(t, adminCookie, http.MethodDelete, path, ""),
+		x.mutate(t, adminCookie, http.MethodPost, path+"/tokens", `{}`),
+	} {
+		if m := a.json(t); a.status != http.StatusConflict || m["code"] != "builtin_immutable" ||
+			m["type"] != "https://muster-io.github.io/muster/problems/conflict" {
+			t.Errorf("refusal = %d %s", a.status, a.body)
+		}
+	}
+}
+
+// TestAlertmanagerRoutesAPI is C-06.FR-18 and C-06.AC-3 at the API: each learned route with its interval and time to
+// resolve by absence in seconds, null before learning, and the warning with its snippet.
+func TestAlertmanagerRoutesAPI(t *testing.T) {
+	x, _, _ := newIntegrationsAPI(t)
+	fa := &fakeAlerts{}
+	x.srv.alerts = fa
+	five := 5*time.Minute + 400*time.Millisecond
+	two := 2 * time.Hour
+	fa.routes = []ingest.AlertmanagerRoute{
+		{RoutePath: "{}", ResolveByAbsenceAfter: 25 * time.Hour, TruncatedGroupCount: 1},
+		{RoutePath: `{}/{team="web"}`, LearnedRepeatInterval: &five, ResolveByAbsenceAfter: 3 * five},
+		{RoutePath: `{}/{kind="info"}`, LearnedRepeatInterval: &two, ResolveByAbsenceAfter: 3 * two,
+			LongIntervalWarning: true, RecommendedSnippet: "route:\n  repeat_interval: 10m\n"},
+	}
+	a := x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID+"/alertmanager-routes", "", "Cookie",
+		viewerCookie)
+	var page gen.AlertmanagerRouteList
+	decodeInto(t, a, &page)
+	if a.status != http.StatusOK || fa.integration != integrationID || len(page.Items) != 3 {
+		t.Fatalf("list = %d %s", a.status, a.body)
+	}
+	unlearned, web, info := page.Items[0], page.Items[1], page.Items[2]
+	if !unlearned.LearnedRepeatIntervalSeconds.IsNull() || unlearned.ResolveByAbsenceAfterSeconds.MustGet() != 90000 ||
+		unlearned.TruncatedGroupCount != 1 || unlearned.LongIntervalWarning || !unlearned.RecommendedSnippet.IsNull() {
+		t.Errorf("unlearned %s", a.body)
+	}
+	if web.LearnedRepeatIntervalSeconds.MustGet() != 300 || web.ResolveByAbsenceAfterSeconds.MustGet() != 901 {
+		t.Errorf("web %s", a.body)
+	}
+	if info.LearnedRepeatIntervalSeconds.MustGet() != 7200 || !info.LongIntervalWarning ||
+		info.RecommendedSnippet.MustGet() != "route:\n  repeat_interval: 10m\n" {
+		t.Errorf("info %s", a.body)
+	}
+	fa.err = integrations.ErrNotFound
+	if a := x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID+"/alertmanager-routes", "", "Cookie",
+		viewerCookie); a.status != http.StatusNotFound {
+		t.Errorf("unknown = %d %s", a.status, a.body)
 	}
 }

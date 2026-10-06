@@ -22,6 +22,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/ingest/dbgen"
+	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 )
@@ -56,7 +57,7 @@ type ProcessQueries interface {
 	ReleaseIngestClaim(ctx context.Context, arg dbgen.ReleaseIngestClaimParams) error
 	RenewIngestLease(ctx context.Context, arg dbgen.RenewIngestLeaseParams) (dbgen.RenewIngestLeaseRow, error)
 	NextPendingSnapshot(ctx context.Context, arg dbgen.NextPendingSnapshotParams) (dbgen.NextPendingSnapshotRow, error)
-	FinishSnapshot(ctx context.Context, arg dbgen.FinishSnapshotParams) (int64, error)
+	FinishSnapshot(ctx context.Context, arg dbgen.FinishSnapshotParams) (bool, error)
 	CountSnapshot(ctx context.Context, arg dbgen.CountSnapshotParams) error
 	UpsertAlertmanagerRoute(ctx context.Context, arg dbgen.UpsertAlertmanagerRouteParams) (
 		dbgen.UpsertAlertmanagerRouteRow, error)
@@ -73,7 +74,26 @@ type ProcessQueries interface {
 	MarkPresencesMissed(ctx context.Context, arg dbgen.MarkPresencesMissedParams) error
 	EndPresences(ctx context.Context, arg dbgen.EndPresencesParams) error
 	CountPendingSnapshots(ctx context.Context, orgID int64) (int64, error)
+	CountTruncatedGroups(ctx context.Context, arg dbgen.CountTruncatedGroupsParams) (int64, error)
+	ResolveIntegrationAlerts(ctx context.Context, arg dbgen.ResolveIntegrationAlertsParams) (
+		[]dbgen.ResolveIntegrationAlertsRow, error)
+	ClearTruncation(ctx context.Context, arg dbgen.ClearTruncationParams) (int64, error)
+	LockIntegrationName(ctx context.Context, arg dbgen.LockIntegrationNameParams) (string, error)
 	viewQueries
+	routeQueries
+	retentionQueries
+	internalalerts.Store
+}
+
+// processQueries are the queries of processing over one pool or transaction: those of the package and those that
+// raise and resolve Internal alerts.
+type processQueries struct {
+	*dbgen.Queries
+	internalalerts.Store
+}
+
+func newProcessQueries(d dbgen.DBTX) processQueries {
+	return processQueries{Queries: dbgen.New(d), Store: internalalerts.NewStore(d)}
 }
 
 // ProcessStore runs the queries of processing alone or in one transaction, and claims Integrations.
@@ -94,17 +114,17 @@ type Claimed struct {
 
 // NewProcessStore is the ProcessStore over the main pool.
 func NewProcessStore(pool *pgxpool.Pool) ProcessStore {
-	return pgProcessStore{Queries: dbgen.New(pool), pool: pool}
+	return pgProcessStore{processQueries: newProcessQueries(pool), pool: pool}
 }
 
 type pgProcessStore struct {
-	*dbgen.Queries
+	processQueries
 	pool *pgxpool.Pool
 }
 
 func (s pgProcessStore) InTx(ctx context.Context, f func(ProcessQueries, dbgen.DBTX) error) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		return f(dbgen.New(tx), tx)
+		return f(newProcessQueries(tx), tx)
 	})
 }
 
@@ -133,6 +153,8 @@ type ProcessorConfig struct {
 	Log   *logging.Logger
 	// Sink takes the Alert changes; nil records them on the Alerts only.
 	Sink Sink
+	// RunbookBase is MUSTER_RUNBOOK_BASE_URL, the base of the runbook_url of the Internal alerts processing raises.
+	RunbookBase string
 }
 
 // Processor processes the Stored Snapshots of one Organization (C-06.FR-1): per Integration under a lease, in
@@ -144,12 +166,14 @@ type Processor struct {
 	lease db.Lease
 	log   *logging.Logger
 	sink  Sink
+	// internal raises and resolves the Internal alerts of processing.
+	internal *internalalerts.Raiser
 }
 
 // NewProcessor returns the Processor of an Organization.
 func NewProcessor(cfg ProcessorConfig) *Processor {
 	return &Processor{orgID: cfg.OrgID, store: cfg.Store, clock: cfg.Business, lease: cfg.Lease, log: cfg.Log,
-		sink: cfg.Sink}
+		sink: cfg.Sink, internal: internalalerts.NewRaiser(cfg.OrgID, cfg.RunbookBase)}
 }
 
 // horizon is the oldest receipt time that can still be pending: retention.stored_snapshots before now.
@@ -248,12 +272,13 @@ func (p *Processor) ProcessPending(ctx context.Context, integrationID int64) (in
 	return n, ctx.Err()
 }
 
-// attempt is one Stored Snapshot in processing.
+// attempt is one Stored Snapshot in processing; internal marks a synthetic one (source internal).
 type attempt struct {
 	integration string
 	id          int64
 	publicID    string
 	receivedAt  time.Time
+	internal    bool
 	payload     *Payload
 	result      processedSnapshot
 }
@@ -277,7 +302,8 @@ func (p *Processor) processNext(ctx context.Context, integrationID int64, horizo
 		if err != nil {
 			return fmt.Errorf("read the next pending snapshot: %w", err)
 		}
-		a = &attempt{integration: info.PublicID, id: row.ID, publicID: row.PublicID, receivedAt: row.ReceivedAt.UTC()}
+		a = &attempt{integration: info.PublicID, id: row.ID, publicID: row.PublicID, receivedAt: row.ReceivedAt.UTC(),
+			internal: row.Source == SourceInternal}
 		payload, err := ParsePayload(row.Body)
 		if err != nil {
 			return err
@@ -287,7 +313,23 @@ func (p *Processor) processNext(ctx context.Context, integrationID int64, horizo
 		if err != nil {
 			return err
 		}
-		if a.result, err = p.applySnapshot(ctx, q, tx, integrationID, in); err != nil {
+		d, marker := internalalerts.DeletionOf(row.Body)
+		switch {
+		case marker && a.internal:
+			a.result, err = p.applyDeletion(ctx, q, tx, integrationID, in, d)
+		case !a.internal && info.DeletedAt.Valid && !a.receivedAt.Before(info.DeletedAt.Time):
+			// A request that authenticated before the deletion and was stored after it: the marker may already have
+			// resolved the Integration's Alerts, so nothing fires again.
+			return processingError(fmt.Errorf("the integration was deleted before the snapshot was received"))
+		default:
+			if a.internal {
+				if in.AlertsSince, err = p.alertsSince(ctx, q); err != nil {
+					return err
+				}
+			}
+			a.result, err = p.applySnapshot(ctx, q, tx, integrationID, in)
+		}
+		if err != nil {
 			return err
 		}
 		return p.finish(ctx, q, integrationID, a, StateProcessed, "")
@@ -302,6 +344,16 @@ func (p *Processor) processNext(ctx context.Context, integrationID int64, horizo
 		return false, err
 	}
 	return true, p.fail(ctx, integrationID, a, err)
+}
+
+// alertsSince is the oldest startsAt an Internal alert can have and still be in the Alerts view:
+// retention.alert_details before now. A replayed raise older than that never fires an Alert that retention removed.
+func (p *Processor) alertsSince(ctx context.Context, q ProcessQueries) (time.Time, error) {
+	days, err := q.GetAlertRetention(ctx, p.orgID)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read the retention of alert details: %w", err)
+	}
+	return p.clock.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour), nil
 }
 
 // renew extends the lease and reads what processing needs of the Integration.
@@ -326,11 +378,13 @@ func snapshotOf(a *attempt, payload Payload, info dbgen.RenewIngestLeaseRow) (sn
 		return snapshotIn{}, processingError(fmt.Errorf("read the static labels: %w", err))
 	}
 	return snapshotIn{StoredSnapshotID: a.id, ReceivedAt: a.receivedAt, Payload: payload, StaticLabels: static,
-		DuplicateWindow: time.Duration(info.DuplicateWindowSeconds) * time.Second, ClockMs: info.LivenessClockMs}, nil
+		DuplicateWindow: time.Duration(info.DuplicateWindowSeconds) * time.Second, ClockMs: info.LivenessClockMs,
+		Internal: a.internal, Integration: internalalerts.Entity{ID: info.PublicID, Name: info.Name},
+		Deleted: info.DeletedAt.Valid}, nil
 }
 
 // finish marks the Stored Snapshot processed or failed with what processing read of its payload, and counts it on
-// its Integration.
+// its Integration when it leaves pending for the first time, so that a replay never counts it again.
 func (p *Processor) finish(ctx context.Context, q ProcessQueries, integrationID int64, a *attempt, state,
 	reason string) error {
 	params := dbgen.FinishSnapshotParams{OrgID: p.orgID, ID: a.id, ReceivedAt: a.receivedAt, State: state,
@@ -343,12 +397,15 @@ func (p *Processor) finish(ctx context.Context, q ProcessQueries, integrationID 
 		params.AlertCount = pgtype.Int8{Int64: int64(len(a.payload.Alerts)), Valid: true}
 		params.TruncatedAlerts = pgtype.Int8{Int64: a.payload.TruncatedAlerts, Valid: true}
 	}
-	n, err := q.FinishSnapshot(ctx, params)
+	first, err := q.FinishSnapshot(ctx, params)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return processingError(fmt.Errorf("the snapshot %s is no longer pending", a.publicID))
+	}
 	if err != nil {
 		return fmt.Errorf("mark the snapshot %s: %w", state, err)
 	}
-	if n == 0 {
-		return processingError(fmt.Errorf("the snapshot %s is no longer pending", a.publicID))
+	if !first {
+		return nil
 	}
 	if err := q.CountSnapshot(ctx, dbgen.CountSnapshotParams{OrgID: p.orgID, IntegrationID: integrationID,
 		ReceivedAt: a.receivedAt}); err != nil {
@@ -397,6 +454,9 @@ func (p *Processor) processed(ctx context.Context, a *attempt, took time.Duratio
 	if s.Gone > 0 {
 		metrics.AlertsResolved.With(a.integration, ResolveGone).Add(s.Gone)
 	}
+	if s.Deleted > 0 {
+		metrics.AlertsResolved.With(a.integration, ResolveIntegrationDeleted).Add(s.Deleted)
+	}
 	if s.Dropped > 0 {
 		metrics.IngestResolvedDropped.With(a.integration).Add(s.Dropped)
 	}
@@ -405,9 +465,17 @@ func (p *Processor) processed(ctx context.Context, a *attempt, took time.Duratio
 	}
 	p.log.Log(ctx, logging.SnapshotProcessed, logging.F("integration", a.integration),
 		logging.F("stored_snapshot", a.publicID), logging.F("group_key", a.payload.GroupKey),
-		logging.F("alerts", s.Alerts), logging.F("fired", s.Fired), logging.F("resolved", s.Resolved),
+		logging.F("alerts", s.Alerts), logging.F("fired", s.Fired), logging.F("resolved", s.Resolved+s.Deleted),
 		logging.F("gone", s.Gone), logging.F("continued", s.Continued), logging.F("dropped", s.Dropped),
 		logging.F("truncated", s.Truncated), logging.F("duration_ms", took.Milliseconds()))
+	for _, c := range a.result.Internal {
+		event := logging.InternalAlertRaised
+		if c.Resolved {
+			event = logging.InternalAlertResolved
+		}
+		p.log.Log(ctx, event, logging.F("alertname", c.Alertname), logging.F("fingerprint", c.Fingerprint),
+			logging.F("entity", c.Entity))
+	}
 }
 
 // observeDelay observes the time from receipt to the end of processing on the business clock.
