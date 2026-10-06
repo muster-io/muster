@@ -41,6 +41,7 @@ files_touched:
   - design/db/schema.md
   - design/prd/l1/defaults.md
   - design/prd/L1.md
+  - design/prd/l1/C-03-sign-in-and-access.md
 acceptance:
   - "[C-03.FR-3] `POST /api/v1/users` by an Admin creates a local user and returns a single-use link `MUSTER_PUBLIC_URL/password-setup#token=…` valid for `auth.password_setup_link_ttl`; `POST /api/v1/password-setups` with that token and a password of at least `auth.password_min_length` characters sets it, and the user signs in."
   - "[C-03.AC-19] A user created with the login `Alice.Smith` signs in as `alice.smith` and keeps the login as entered; creating a user `ALICE.SMITH` answers 409 `name_taken`."
@@ -216,6 +217,12 @@ curl -s -b jar 'localhost:8080/api/v1/audit-log?action=user.password_reset' | jq
     show `deleted-user-<id>` too.
   - `If-Match: *` matches any version; a weak tag `W/"n"` is read as `"n"`.
   - `muster admin reset-password` reads the password without echo through `golang.org/x/term` (BSD-3-Clause).
+- Maintainer decision (on the pull request): when the Audit log is read, the entries about a user who is now deleted
+  show the values the deletion erased — the email, the former name and login — as `[erased]` in `before` and
+  `after`; the rows stay unchanged. The list query joins the status of a user resource, so the masking needs no query
+  per row. C-03.FR-13 says so.
+- Follow-up for S-020: `muster admin reset-password` dates its entry with the business clock without the development
+  clock's offset; the CLI loads the offset once S-020 shares it.
 
 ## Coverage
 

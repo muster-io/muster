@@ -171,6 +171,7 @@ func listed(row dbgen.ListAuditEntriesRow) (Listed, error) {
 	if row.ResourceUserName.Valid {
 		e.ResourceName = row.ResourceUserName.String
 	}
+	erased := row.ResourceUserStatus.String == deletedStatus
 	switch e.Actor.Kind {
 	case ActorUser:
 		e.Actor.PublicID, e.Actor.Name = row.ActorUserPublicID.String, row.ActorUserName.String
@@ -192,10 +193,43 @@ func listed(row dbgen.ListAuditEntriesRow) (Listed, error) {
 	if e.Diff == nil {
 		e.Diff = []Change{}
 	}
+	if erased {
+		e.Diff = maskErased(e.Diff, e.ResourceName)
+	}
 	if e.Details == nil {
 		e.Details = map[string]any{}
 	}
 	return e, nil
+}
+
+// Erased replaces, when the Audit log is read, a value that deleting a user erased (C-03.FR-13).
+const Erased = "[erased]"
+
+// deletedStatus is the status of a deleted user.
+const deletedStatus = "deleted"
+
+// erasedPointers are the fields of a user that deleting it erases: the email, and the name and login it replaces
+// with its pseudonym.
+var erasedPointers = map[string]bool{"/name": true, "/login": true, "/email": true}
+
+// maskErased returns diff with every value of the erased fields replaced by Erased, before and after, except an absent
+// value and the pseudonym itself, which deletion wrote. The rows of the table are never changed (append-only).
+func maskErased(diff []Change, pseudonym string) []Change {
+	out := make([]Change, len(diff))
+	for i, c := range diff {
+		if erasedPointers[c.Pointer] {
+			c.Before, c.After = erase(c.Before, pseudonym), erase(c.After, pseudonym)
+		}
+		out[i] = c
+	}
+	return out
+}
+
+func erase(v any, pseudonym string) any {
+	if v == nil || v == pseudonym {
+		return v
+	}
+	return Erased
 }
 
 // normalizeID reads a public_id in any case, with O as 0 and I and L as 1, when it is one; anything else is kept and

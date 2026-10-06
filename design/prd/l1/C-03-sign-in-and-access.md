@@ -90,8 +90,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   links (C-18) join it in their capabilities.
 - **C-03.FR-13** Deleting a user deactivates and pseudonymizes it: the name becomes `deleted-user-<id>`, the email is
   erased and all sessions end; Personal access tokens (C-04.FR-1) and Account links (C-18.FR-8) follow in their
-  capabilities. Audit log rows are never changed; they store the user id and show the current name, and earlier
-  Timeline entries show a deleted user as "(deactivated)". A disabled user cannot sign in. Disabling or deleting a user
+  capabilities. Audit log rows are never changed; they store the user id and show the current name, and the values
+  that deleting the user erased (the email, the former name and login) are shown as `[erased]` in earlier diffs when
+  the Audit log is read. Earlier Timeline entries show a deleted user as "(deactivated)". A disabled user cannot sign
+  in. Disabling or deleting a user
   releases their acknowledgements: each acknowledged Alert Group they own becomes firing without an Owner, with a Loud
   Thread message and a Timeline entry by the system with the reason `owner_disabled` or `owner_deleted` (C-09.FR-22);
   its Reminders end (C-17.FR-8) and its ack timeout starts over, so that it can become Unclaimed again (C-17.FR-1,

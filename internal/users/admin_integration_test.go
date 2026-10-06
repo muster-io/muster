@@ -530,6 +530,59 @@ func TestIntegrationAuditLog(t *testing.T) {
 		if strings.Join(paged, ",") != want {
 			t.Errorf("paged = %v", paged)
 		}
+
+		// Deleting a user masks the values it erased in the earlier diffs when they are read; the rows stay.
+		e.clock.Advance(time.Minute)
+		erin, _, err := e.admin.Create(ctx, e.byOps, users.NewUser{Name: "Erin", Login: "erin",
+			Email: ptr("erin@example.org"), Role: auth.RoleViewer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.admin.Update(ctx, e.byOps, erin.PublicID, nil, users.Changes{Name: "Erin", Role: auth.RoleViewer,
+			Email: ptr("erin@example.com"), EmailSet: true}); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.admin.Delete(ctx, e.byOps, erin.PublicID, nil); err != nil {
+			t.Fatal(err)
+		}
+		about, err = e.reader.List(ctx, audit.Filter{ResourceID: erin.PublicID, Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		diffs := map[string][]audit.Change{}
+		for _, en := range about.Entries {
+			diffs[en.Action] = en.Diff
+		}
+		find := func(action, pointer string) audit.Change {
+			for _, c := range diffs[action] {
+				if c.Pointer == pointer {
+					return c
+				}
+			}
+			t.Fatalf("%s has no %s in %+v", action, pointer, diffs[action])
+			return audit.Change{}
+		}
+		for _, p := range []string{"/name", "/login", "/email"} {
+			if c := find(audit.ActionUserCreated, p); c.After != audit.Erased || c.Before != nil {
+				t.Errorf("user.created %s = %+v", p, c)
+			}
+		}
+		if c := find(audit.ActionUserCreated, "/role"); c.After != auth.RoleViewer {
+			t.Errorf("user.created /role = %+v", c)
+		}
+		if c := find(audit.ActionUserUpdated, "/email"); c.Before != audit.Erased || c.After != audit.Erased {
+			t.Errorf("user.updated /email = %+v", c)
+		}
+		var raw string
+		if err := e.d.Pool.QueryRow(ctx, `SELECT string_agg(diff::text, ' ' ORDER BY id) FROM audit_log
+			WHERE resource_public_id = $1`, erin.PublicID).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range []string{"erin@example.org", "erin@example.com", `"Erin"`, `"erin"`} {
+			if !strings.Contains(raw, v) {
+				t.Errorf("the stored rows lost %s: %s", v, raw)
+			}
+		}
 	})
 }
 

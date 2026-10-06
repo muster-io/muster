@@ -354,3 +354,47 @@ func TestListFailures(t *testing.T) {
 		}
 	}
 }
+
+// TestMaskErased is C-03.FR-13 at read time: the entries about a deleted user show [erased] for the email, the name
+// and the login it had, before and after, while other fields, absent values and the pseudonym stay; a user who is not
+// deleted, and other resources, are shown as written.
+func TestMaskErased(t *testing.T) {
+	const pseudonym = "deleted-user-SR0000000000BB"
+	diff := `[{"pointer":"/name","after":"Bob"},{"pointer":"/login","after":"bob"},` +
+		`{"pointer":"/email","before":"bob@example.org","after":"b@example.org"},{"pointer":"/role","before":"viewer","after":"admin"},` +
+		`{"pointer":"/password","secret_changed":true}]`
+	row := func(status string) dbgen.ListAuditEntriesRow {
+		r := entryRow(1, "system", "user.updated")
+		r.ResourceType, r.ResourcePublicID, r.Diff = txt("user"), txt("SR0000000000BB"), []byte(diff)
+		r.ResourceUserName, r.ResourceUserStatus = txt(pseudonym), txt(status)
+		return r
+	}
+	deleted := row("deleted")
+	deletion := entryRow(2, "user", "user.deleted")
+	deletion.ResourceType, deletion.ResourcePublicID = txt("user"), txt("SR0000000000BB")
+	deletion.ResourceUserName, deletion.ResourceUserStatus = txt(pseudonym), txt("deleted")
+	deletion.Diff = []byte(`[{"pointer":"/status","before":"active","after":"deleted"},{"pointer":"/name","after":"` +
+		pseudonym + `"}]`)
+	page, err := NewReader(7, &fakeList{rows: []dbgen.ListAuditEntriesRow{deletion, deleted, row("active")}}).
+		List(t.Context(), Filter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(page.Entries[1].Diff)
+	want := `[{"pointer":"/name","after":"[erased]"},{"pointer":"/login","after":"[erased]"},` +
+		`{"pointer":"/email","before":"[erased]","after":"[erased]"},{"pointer":"/role","before":"viewer","after":"admin"},` +
+		`{"pointer":"/password","secret_changed":true}]`
+	if string(b) != want {
+		t.Errorf("deleted user's diff\n %s\nwant\n %s", b, want)
+	}
+	if b, _ := json.Marshal(page.Entries[0].Diff); !strings.Contains(string(b), `"after":"`+pseudonym+`"`) ||
+		!strings.Contains(string(b), `"before":"active"`) {
+		t.Errorf("the deletion's diff = %s", b)
+	}
+	if b, _ := json.Marshal(page.Entries[2].Diff); string(b) != diff {
+		t.Errorf("an active user's diff = %s", b)
+	}
+	if string(deleted.Diff) != diff {
+		t.Error("the row was changed")
+	}
+}

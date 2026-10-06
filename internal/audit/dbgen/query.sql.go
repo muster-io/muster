@@ -107,7 +107,8 @@ func (q *Queries) InsertAuditEntry(ctx context.Context, arg InsertAuditEntryPara
 
 const listAuditEntries = `-- name: ListAuditEntries :many
 SELECT a.id, a.public_id, a.at, a.actor_kind, a.actor_name, a.token_name, a.transport, a.action, a.resource_type,
-       a.resource_public_id, a.resource_name, ru.name AS resource_user_name, a.diff, a.details,
+       a.resource_public_id, a.resource_name, ru.name AS resource_user_name, ru.status AS resource_user_status,
+       a.diff, a.details,
        u.public_id AS actor_user_public_id, u.name AS actor_user_name,
        sa.public_id AS actor_service_account_public_id, sa.name AS actor_service_account_name,
        t.public_id AS token_public_id
@@ -158,6 +159,7 @@ type ListAuditEntriesRow struct {
 	ResourcePublicID            pgtype.Text
 	ResourceName                pgtype.Text
 	ResourceUserName            pgtype.Text
+	ResourceUserStatus          pgtype.Text
 	Diff                        []byte
 	Details                     []byte
 	ActorUserPublicID           pgtype.Text
@@ -169,7 +171,8 @@ type ListAuditEntriesRow struct {
 
 // ListAuditEntries is a page of entries, newest first by time and id, after the cursor (before_at, before_id) when
 // one is given, with the filters that are set. The actor, and a user as the resource, show their current name, so
-// that a deleted user appears as deleted-user-<id> (C-03.FR-13); rows are never rewritten.
+// that a deleted user appears as deleted-user-<id> (C-03.FR-13); rows are never rewritten. The status of a user
+// resource lets the reader mask what deleting the user erased, for the whole page at once.
 func (q *Queries) ListAuditEntries(ctx context.Context, arg ListAuditEntriesParams) ([]ListAuditEntriesRow, error) {
 	rows, err := q.db.Query(ctx, listAuditEntries,
 		arg.OrgID,
@@ -204,6 +207,7 @@ func (q *Queries) ListAuditEntries(ctx context.Context, arg ListAuditEntriesPara
 			&i.ResourcePublicID,
 			&i.ResourceName,
 			&i.ResourceUserName,
+			&i.ResourceUserStatus,
 			&i.Diff,
 			&i.Details,
 			&i.ActorUserPublicID,
