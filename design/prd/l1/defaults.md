@@ -51,7 +51,8 @@ table in the same pull request.
 | `auth.oidc_recheck_interval` | 15 min; a background re-check of every OIDC user with an offline token and a live session or a usable Personal access token | built in | C-03 | decided |
 | `auth.oidc_fallback_session_lifetime` | 12 h from sign-in, for an OIDC session of a user without an offline token | built in | C-03 | decided |
 | `auth.oidc_token_grace` | 7 days since the owner's last OIDC sign-in; only for OIDC accounts without an offline token | Organization | C-04, C-20 | decided |
-| `auth.password_setup_link_ttl` | single use, 24 h | built in | C-03 | P-05 |
+| `auth.password_setup_link_ttl` | single use, 24 h | built in | C-03 | decided |
+| `auth.password_setup_prune_after` | 7 days after a password setup link expired, used and superseded links included, so that a late click still answers `410` instead of `404`; then the Leader deletes the row (`short_lived_pruning`, hourly) | built in | C-03 | decided |
 | `auth.password_min_length` | 12 characters | built in | C-03 | decided |
 | `auth.signin_throttle` | after 3 consecutive failures per account or source address, each attempt waits twice as long as the previous, from 1 s up to 60 s | built in | C-03 | decided |
 | `auth.session_prune_after` / `auth.signin_throttle_prune_after` | 7 days after a session ended, by sign-out, an administrative action or its idle timeout or lifetime / 24 h after a throttle's last failure, once its block has passed; then the Leader deletes the row (`short_lived_pruning`, hourly) | built in | C-02, C-03 | decided |

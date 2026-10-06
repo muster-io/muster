@@ -121,3 +121,21 @@ func (s *Server) sessionOf(ctx context.Context, sess auth.Session) (gen.Session,
 		Permissions: permissionsOf(s.sessions.Permissions(sess)),
 	}, nil
 }
+
+// CompletePasswordSetup is completePasswordSetup, public: it sets the password from the token of a setup link
+// (C-03.FR-26).
+func (s *Server) CompletePasswordSetup(ctx context.Context, req gen.CompletePasswordSetupRequestObject) (
+	gen.CompletePasswordSetupResponseObject, error) {
+	switch {
+	case req.Body == nil:
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	case req.Body.Token == nil:
+		return nil, fieldProblem(http.StatusBadRequest, "/token", fieldRequired, "The token is missing.")
+	case req.Body.Password == nil:
+		return nil, fieldProblem(http.StatusBadRequest, "/password", fieldRequired, "The password is missing.")
+	}
+	if err := s.admin.CompleteSetup(ctx, *req.Body.Token, *req.Body.Password, clientAddress(ctx)); err != nil {
+		return nil, err
+	}
+	return gen.CompletePasswordSetup204Response{}, nil
+}

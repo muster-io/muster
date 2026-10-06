@@ -49,6 +49,8 @@ type Work struct {
 	// short-lived table adds a field for its domain here, lists it in shortLived and adds the table name to
 	// metrics.ShortLivedTables.
 	PruneAuth []PruneTable
+	// PruneUsers are the short-lived tables of internal/users: password setup links.
+	PruneUsers []PruneTable
 }
 
 // PruneTable is one short-lived table of short-lived pruning.
@@ -61,7 +63,7 @@ type PruneTable struct {
 }
 
 func (w Work) shortLived() []PruneTable {
-	return slices.Concat(w.PruneAuth)
+	return slices.Concat(w.PruneAuth, w.PruneUsers)
 }
 
 // pruneShortLived runs every short-lived table in every Organization at the same now, deleting in batches until a

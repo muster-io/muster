@@ -21,6 +21,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/audit"
+	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/auth"
 	adb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/config"
@@ -33,6 +35,7 @@ import (
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/internal/users"
+	udb "github.com/muster-io/muster/internal/users/dbgen"
 )
 
 type fakeDB struct {
@@ -46,6 +49,8 @@ type fakeDB struct {
 	// partitionErr fails the partition maintenance session; ddl counts its statements.
 	partitionErr error
 	ddl          int
+	// admin answers the administration of users; nil without a test that needs it.
+	admin users.AdminStore
 }
 
 func (f *fakeDB) LeaderSession(context.Context) (leader.Session, error) {
@@ -66,6 +71,12 @@ func (f *fakeDB) LeaderStore() leader.Store { return nil }
 func (f *fakeDB) ReplicaPruner() keyring.Pruner { return nil }
 
 func (f *fakeDB) AuthPruner() auth.PruneQueries { return nil }
+
+func (f *fakeDB) UsersPruner() users.PruneQueries { return nil }
+
+func (f *fakeDB) AdminStore() users.AdminStore { return f.admin }
+
+func (f *fakeDB) AuditReader() audit.ListQueries { return nil }
 
 func (f *fakeDB) Clock() rowQuerier { return fakeClockRow{} }
 
@@ -847,5 +858,77 @@ func TestBootstrapFailures(t *testing.T) {
 				t.Errorf("closed %d times", tt.fake.closed)
 			}
 		})
+	}
+}
+
+// fakeAdminStore finds the account bob and records the password reset of the CLI.
+type fakeAdminStore struct {
+	users.AdminStore
+	audit []auditdb.InsertAuditEntryParams
+}
+
+func (s *fakeAdminStore) GetUserByLogin(_ context.Context, arg udb.GetUserByLoginParams) (udb.GetUserByLoginRow,
+	error) {
+	if arg.Login != "bob" || arg.OrgID != 1 {
+		return udb.GetUserByLoginRow{}, pgx.ErrNoRows
+	}
+	return udb.GetUserByLoginRow{ID: 2, PublicID: "SRBBBBBBBBBBBB", Name: "Bob", Status: "active"}, nil
+}
+
+func (s *fakeAdminStore) InTx(_ context.Context, f func(users.AdminQueries) error) error { return f(s) }
+
+func (s *fakeAdminStore) SetUserPassword(context.Context, udb.SetUserPasswordParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *fakeAdminStore) EndSessionsOfUser(context.Context, udb.EndSessionsOfUserParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *fakeAdminStore) SupersedePasswordSetups(context.Context, udb.SupersedePasswordSetupsParams) (int64, error) {
+	return 0, nil
+}
+
+func (s *fakeAdminStore) InsertAuditEntry(_ context.Context, arg auditdb.InsertAuditEntryParams) error {
+	s.audit = append(s.audit, arg)
+	return nil
+}
+
+// TestResetPassword is the runtime of `muster admin reset-password` (C-03.FR-11): settings, connection and schema
+// checks, the Organization, then the reset recorded by the CLI actor; it needs no master key.
+func TestResetPassword(t *testing.T) {
+	admin := &fakeAdminStore{}
+	fake := &fakeDB{admin: admin}
+	fake.org.org = &odb.CreateOrganizationParams{PublicID: "RG0000000000AA", Name: "Muster"}
+	var out syncBuffer
+	reset := PasswordReset{Actor: "ops", Login: "bob", Password: "bob-new-password"}
+	id, err := ResetPassword(t.Context(), options(fake, &out, env("MUSTER_SECRET_KEYS=")), reset)
+	if err != nil || id != "SRBBBBBBBBBBBB" || !fake.checked || !fake.schema || fake.migrated || fake.closed != 1 {
+		t.Fatalf("= %s, %v, database %+v", id, err, fake)
+	}
+	if len(admin.audit) != 1 || admin.audit[0].ActorName.String != "ops" || admin.audit[0].Transport != "cli" {
+		t.Errorf("audit = %+v", admin.audit)
+	}
+	out.mu.Lock()
+	log := out.buf.String()
+	out.mu.Unlock()
+	if strings.Contains(log, "bob-new-password") || !strings.Contains(log, `"actor_kind":"cli"`) {
+		t.Errorf("log %s", log)
+	}
+	reset.Login = "nobody"
+	if _, err := ResetPassword(t.Context(), options(fake, &out, env()), reset); !errors.Is(err, users.ErrNotFound) {
+		t.Errorf("an unknown login: %v", err)
+	}
+	for name, f := range map[string]*fakeDB{
+		"check":        {checkErr: errors.New("pooler"), admin: admin},
+		"schema":       {schemaErr: errors.New("newer"), admin: admin},
+		"organization": {admin: admin},
+	} {
+		if _, err := ResetPassword(t.Context(), options(f, &out, env()), reset); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+	if _, err := ResetPassword(t.Context(), options(fake, &out, nil), reset); err == nil {
+		t.Error("without settings")
 	}
 }

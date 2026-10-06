@@ -614,7 +614,8 @@ Serves C-03 (FR-3–FR-27), C-18.FR-8; [ADR-0008](../adr/0008-spec-first-openapi
   (`auth.signin_throttle`), shared by all replicas. The account subject is the SHA-256 of the lowercased login in hex,
   so that its key has a fixed size; the address subject is an IPv4 address or the /64 network of an IPv6 address.
 - **`password_setups`** — single-use setup links: token hash, expiry (`auth.password_setup_link_ttl`), `used_at`, and
-  `superseded_at` when a newer link replaced it (both answer `410 link_used`).
+  `superseded_at` when a newer link replaced it, a newer reset, or the deletion of the user (all answer `410
+  link_used`). A row is deleted `auth.password_setup_prune_after` past its expiry.
 - **`oidc_auth_requests`** — in-flight OIDC redirects, keyed by the hash of `state` and valid for
   `oidc.auth_request_ttl`, with the nonce, the PKCE verifier (a Secret) and a `return_to` that a `CHECK` restricts to a relative path (no `//host`, no `/\host`). In the database
   because the callback may reach another replica. `purpose` is `sign_in` or `link`; a link names the account
@@ -1081,7 +1082,7 @@ bumping `next_probe_at` by `delivery.broken_probe_interval` as the lease. **OIDC
 | Alert Group summary rows | `alert_groups` | — | `retention.alert_group_summaries`, 2 years after resolution | batched `DELETE` (cascades Notes, deliveries, timers, queues) |
 | Notes | `notes` | — | as long as their summary row | the cascade from the summary row; never the details purge |
 | Queue rows | `thread_replies`, `webhook_events`, `deliveries` of long-resolved Alert Groups | — | while needed, then `retention.alert_details` | batched `DELETE` |
-| Short-lived state | sessions, OIDC requests, setup links, link requests, throttles, Telegram copies, stale replicas | — | until expiry; sessions `auth.session_prune_after` after they ended, throttles `auth.signin_throttle_prune_after` after the last failure | batched `DELETE`; the hourly Leader task `short_lived_pruning` for sessions and throttles, each later short-lived table added by its story |
+| Short-lived state | sessions, OIDC requests, setup links, link requests, throttles, Telegram copies, stale replicas | — | until expiry; sessions `auth.session_prune_after` after they ended, throttles `auth.signin_throttle_prune_after` after the last failure, setup links `auth.password_setup_prune_after` after they expired | batched `DELETE`; the hourly Leader task `short_lived_pruning` for sessions, throttles and setup links, each later short-lived table added by its story |
 
 **Partition maintenance** is runtime work, never a migration ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md),
 C-02.FR-11). At startup, under the migration advisory lock and before serving, and then hourly on the Leader, Muster

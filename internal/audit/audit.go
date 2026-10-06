@@ -54,6 +54,15 @@ const (
 	ActionSessionsEnded   = "session.ended_all"
 	ActionProfileUpdated  = "user.profile_updated"
 	ActionPasswordChanged = "user.password_changed"
+
+	ActionUserUpdated       = "user.updated"
+	ActionUserRoleChanged   = "user.role_changed"
+	ActionUserDisabled      = "user.disabled"
+	ActionUserEnabled       = "user.enabled"
+	ActionUserDeleted       = "user.deleted"
+	ActionPasswordSetupLink = "user.password_setup_link_created"
+	ActionPasswordSet       = "user.password_set"
+	ActionPasswordReset     = "user.password_reset"
 )
 
 // The resource types of C-03.
@@ -86,6 +95,11 @@ var System = Actor{Kind: ActorSystem}
 
 // Bootstrap is the start-up step that creates the bootstrap Admin.
 var Bootstrap = Actor{Kind: ActorBootstrap}
+
+// CLI is a CLI command run by the person its --actor names; its entries take the Transport cli.
+func CLI(name string) Actor {
+	return Actor{Kind: ActorCLI, Name: name}
+}
 
 // Resource is what an entry is about.
 type Resource struct {

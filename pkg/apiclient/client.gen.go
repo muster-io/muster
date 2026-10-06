@@ -9070,7 +9070,7 @@ type ClientInterface interface {
 
 	// CompletePasswordSetupWithBody Set a password from a setup link
 	//
-	// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`).
+	// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`). Like the sign-in, a request that a browser marks as cross-site is `403` (`csrf_invalid`).
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -9079,7 +9079,7 @@ type ClientInterface interface {
 
 	// CompletePasswordSetup Set a password from a setup link
 	//
-	// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`).
+	// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`). Like the sign-in, a request that a browser marks as cross-site is `403` (`csrf_invalid`).
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -11911,7 +11911,7 @@ func (c *Client) ListSeverityValues(ctx context.Context, reqEditors ...RequestEd
 
 // CompletePasswordSetupWithBody Set a password from a setup link
 //
-// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`).
+// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`). Like the sign-in, a request that a browser marks as cross-site is `403` (`csrf_invalid`).
 //
 // Takes any type of body and a specified content type.
 //
@@ -11930,7 +11930,7 @@ func (c *Client) CompletePasswordSetupWithBody(ctx context.Context, contentType 
 
 // CompletePasswordSetup Set a password from a setup link
 //
-// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`).
+// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`). Like the sign-in, a request that a browser marks as cross-site is `403` (`csrf_invalid`).
 //
 // Takes a body of the `application/json` content type.
 //
@@ -21309,7 +21309,7 @@ type ClientWithResponsesInterface interface {
 
 	// CompletePasswordSetupWithBodyWithResponse Set a password from a setup link
 	//
-	// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`).
+	// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`). Like the sign-in, a request that a browser marks as cross-site is `403` (`csrf_invalid`).
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21318,7 +21318,7 @@ type ClientWithResponsesInterface interface {
 
 	// CompletePasswordSetupWithResponse Set a password from a setup link
 	//
-	// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`).
+	// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`). Like the sign-in, a request that a browser marks as cross-site is `403` (`csrf_invalid`).
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -30046,6 +30046,8 @@ type CompletePasswordSetupResponse struct {
 	HTTPResponse *http.Response
 	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
 	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
 	// ApplicationproblemJSON404 the response for an HTTP 404 `application/problem+json` response
 	ApplicationproblemJSON404 *NotFound
 	// ApplicationproblemJSON410 the response for an HTTP 410 `application/problem+json` response
@@ -30061,6 +30063,11 @@ type CompletePasswordSetupResponse struct {
 // GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
 func (r CompletePasswordSetupResponse) GetApplicationproblemJSON400() *BadRequest {
 	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r CompletePasswordSetupResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
 }
 
 // GetApplicationproblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
@@ -35913,7 +35920,7 @@ func (c *ClientWithResponses) ListSeverityValuesWithResponse(ctx context.Context
 
 // CompletePasswordSetupWithBodyWithResponse Set a password from a setup link
 //
-// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`).
+// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`). Like the sign-in, a request that a browser marks as cross-site is `403` (`csrf_invalid`).
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -35928,7 +35935,7 @@ func (c *ClientWithResponses) CompletePasswordSetupWithBodyWithResponse(ctx cont
 
 // CompletePasswordSetupWithResponse Set a password from a setup link
 //
-// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`).
+// Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`). Like the sign-in, a request that a browser marks as cross-site is `403` (`csrf_invalid`).
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -44251,6 +44258,13 @@ func ParseCompletePasswordSetupResponse(rsp *http.Response) (*CompletePasswordSe
 			return nil, err
 		}
 		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest NotFound

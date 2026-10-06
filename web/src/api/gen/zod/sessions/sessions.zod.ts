@@ -180,7 +180,7 @@ export const CompleteOidcSignInQueryParams = zod.object({
 export const CompleteOidcSignInResponse = zod.void()
 
 /**
- * Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`).
+ * Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`). Like the sign-in, a request that a browser marks as cross-site is `403` (`csrf_invalid`).
  * @summary Set a password from a setup link
  */
 export const CompletePasswordSetupBody = zod.object({
