@@ -9,41 +9,20 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
-  ADMIN_LOGIN,
-  ADMIN_PASSWORD,
   APP,
-  Api,
   FAKE_IDP,
+  adminApi,
   expectNoHorizontalScroll,
   nextIdpUser,
   scalar,
   shot,
+  signInAdmin,
   signInLocally,
   watchCsp,
 } from "./support";
 
 // The API by the IPv4 loopback address, so that the last use names 127.0.0.1.
 const API_V4 = "http://127.0.0.1:8080/api/v1";
-
-/**
- * Signs the Admin in. The sign-in spec ends with a throttled source address; a success resets it, so a refused attempt
- * is made again once the wait the page names has passed.
- */
-async function signInAdmin(page: Page): Promise<void> {
-  await page.goto("/sign-in");
-  const tooMany = page.getByText(/^Too many attempts\. Try again in (\d+) seconds?\.$/);
-  const menu = page.getByTestId("user-menu-name");
-  for (let attempt = 0; attempt < 5; attempt++) {
-    await signInLocally(page, ADMIN_LOGIN, ADMIN_PASSWORD);
-    await expect(menu.or(tooMany)).toBeVisible();
-    if (await menu.isVisible()) {
-      break;
-    }
-    const seconds = Number(/(\d+) second/.exec((await tooMany.textContent()) ?? "")?.[1] ?? "1");
-    await page.waitForTimeout(seconds * 1000 + 200);
-  }
-  await expect(menu).toHaveText("admin");
-}
 
 function tokens(page: Page) {
   return page.getByRole("list", { name: "Personal access tokens" });
@@ -188,7 +167,7 @@ test("creates, uses and revokes Personal access tokens, and the Audit log names 
 test("the Permission picker offers a Responder only the Responder's Permissions", async ({
   page,
 }) => {
-  const admin = await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
+  const admin = await adminApi();
   const { token } = await admin.createUser("rita", "responder");
   await admin.call("POST", "/api/v1/password-setups", { token, password: "rita-password-1" });
   await admin.dispose();

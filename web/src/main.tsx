@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
+// oxlint-disable-next-line import/no-unassigned-import -- configures zod before any module builds a schema
+import "./zod-config";
 // oxlint-disable-next-line import/no-unassigned-import -- the stylesheet is imported for Vite to bundle it
 import "./styles.css";
 

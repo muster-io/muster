@@ -208,6 +208,50 @@ export async function signInLocally(page: Page, login: string, password: string)
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 }
 
+/** The refusal of the sign-in form while sign-in throttling holds a login back. */
+const TOO_MANY_ATTEMPTS = /^Too many attempts\. Try again in (\d+) seconds?\.$/;
+
+/**
+ * Signs a local user in through the form and waits for the shell. A spec that refuses sign-ins may leave the source
+ * address throttled; a success resets it, so a refused attempt is made again once the wait the page names has passed.
+ */
+export async function signIn(page: Page, login: string, password: string): Promise<void> {
+  await page.goto("/sign-in");
+  const tooMany = page.getByText(TOO_MANY_ATTEMPTS);
+  const menu = page.getByTestId("user-menu-name");
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await signInLocally(page, login, password);
+    await expect(menu.or(tooMany)).toBeVisible();
+    if (await menu.isVisible()) {
+      return;
+    }
+    const seconds = Number(TOO_MANY_ATTEMPTS.exec((await tooMany.textContent()) ?? "")?.[1] ?? "1");
+    await page.waitForTimeout(seconds * 1000 + 200);
+  }
+  await expect(menu).toBeVisible();
+}
+
+/** Signs in as the development Admin through the local form, retrying after sign-in throttling. */
+export async function signInAdmin(page: Page): Promise<void> {
+  await signIn(page, ADMIN_LOGIN, ADMIN_PASSWORD);
+  await expect(page.getByTestId("user-menu-name")).toHaveText("admin");
+}
+
+/**
+ * The API as the development Admin. A spec that refuses sign-ins may leave the source address throttled for a moment,
+ * so a refused sign-in is tried again shortly.
+ */
+export async function adminApi(): Promise<Api> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      return await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
+    } catch {
+      await new Promise((done) => setTimeout(done, 1500));
+    }
+  }
+  return Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
+}
+
 /** Saves a screenshot for the pull request next to the other test output. */
 export async function shot(page: Page, name: string): Promise<void> {
   const dir = process.env.MUSTER_E2E_SCREENSHOTS;

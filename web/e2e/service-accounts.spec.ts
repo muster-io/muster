@@ -6,37 +6,9 @@
 
 import { expect, test, type Page } from "@playwright/test";
 
-import {
-  ADMIN_LOGIN,
-  ADMIN_PASSWORD,
-  APP,
-  expectNoHorizontalScroll,
-  shot,
-  signInLocally,
-  watchCsp,
-} from "./support";
+import { APP, expectNoHorizontalScroll, shot, signInAdmin, watchCsp } from "./support";
 
 const API_V4 = "http://127.0.0.1:8080/api/v1";
-
-/**
- * Signs the Admin in. A spec that refuses sign-ins may leave the source address throttled; a success resets it, so a
- * refused attempt is made again once the wait the page names has passed.
- */
-async function signInAdmin(page: Page): Promise<void> {
-  await page.goto("/sign-in");
-  const tooMany = page.getByText(/^Too many attempts\. Try again in (\d+) seconds?\.$/);
-  const menu = page.getByTestId("user-menu-name");
-  for (let attempt = 0; attempt < 5; attempt++) {
-    await signInLocally(page, ADMIN_LOGIN, ADMIN_PASSWORD);
-    await expect(menu.or(tooMany)).toBeVisible();
-    if (await menu.isVisible()) {
-      break;
-    }
-    const seconds = Number(/(\d+) second/.exec((await tooMany.textContent()) ?? "")?.[1] ?? "1");
-    await page.waitForTimeout(seconds * 1000 + 200);
-  }
-  await expect(menu).toHaveText("admin");
-}
 
 function accountRow(page: Page, name: string) {
   return page
@@ -139,6 +111,12 @@ test("creates a Service account with a token, changes its Role, disables, enable
     "terraform (service account) · token ci",
   );
   await shot(page, "service-account-audit-log");
+
+  // The Role change names its field.
+  await page.goto("/admin/audit-log?action=service_account.updated");
+  const updated = page.getByRole("table", { name: "Audit log" }).getByRole("row").nth(1);
+  await expect(updated.getByTestId("audit-diff")).toContainText("Role:");
+  await expect(updated.getByTestId("audit-diff")).not.toContainText("/role");
 
   // The list shows the Role, the status and the token count.
   await page.goto("/admin/service-accounts");

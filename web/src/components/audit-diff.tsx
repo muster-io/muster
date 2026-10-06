@@ -29,6 +29,48 @@ function userField(t: TFunction, pointer: string): string | undefined {
       return t("audit.fields.password");
     case "/sign_in_method":
       return t("audit.fields.signInMethod");
+    case "/time_zone":
+      return t("profile.preferences.timeZone");
+    case "/language":
+      return t("profile.preferences.language");
+    default:
+      return undefined;
+  }
+}
+
+/** The names of the changed fields of a Service account. */
+function serviceAccountField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/name":
+      return t("serviceAccounts.fields.name");
+    case "/role":
+      return t("serviceAccounts.fields.role");
+    case "/status":
+      return t("audit.fields.status");
+    default:
+      return undefined;
+  }
+}
+
+/** The names of the changed fields of an Integration. */
+function integrationField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/name":
+      return t("integrations.fields.name");
+    case "/description":
+      return t("integrations.fields.description");
+    case "/connection_mode":
+      return t("integrations.fields.connectionMode");
+    case "/static_labels":
+      return t("integrations.fields.staticLabels");
+    case "/duplicate_window_seconds":
+      return t("audit.fields.duplicateWindowSeconds");
+    case "/heartbeat/enabled":
+      return t("audit.fields.heartbeatEnabled");
+    case "/heartbeat/timeout_seconds":
+      return t("audit.fields.heartbeatTimeoutSeconds");
+    case "/deleted_at":
+      return t("audit.fields.deletedAt");
     default:
       return undefined;
   }
@@ -77,8 +119,8 @@ function oidcField(t: TFunction, pointer: string): string | undefined {
 }
 
 /**
- * The name of a changed field of a resource type; a field without a name of its own shows its JSON pointer. The
- * pages of later resource types add their own names here.
+ * The name of a changed field of a resource type; a field without a name of its own shows its JSON pointer. Each
+ * resource type whose changes the Audit log records names its fields here.
  */
 export function fieldLabel(
   t: TFunction,
@@ -89,6 +131,12 @@ export function fieldLabel(
   switch (resourceType) {
     case "user":
       label = userField(t, pointer);
+      break;
+    case "service_account":
+      label = serviceAccountField(t, pointer);
+      break;
+    case "integration":
+      label = integrationField(t, pointer);
       break;
     case "oidc_settings":
       label = oidcField(t, pointer);

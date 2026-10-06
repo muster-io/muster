@@ -8,53 +8,17 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
 import {
-  ADMIN_LOGIN,
-  ADMIN_PASSWORD,
   APP,
-  Api,
+  adminApi,
   expectNoHorizontalScroll,
   shot,
-  signInLocally,
+  signIn,
+  signInAdmin,
   watchCsp,
 } from "./support";
 
 const FAKE_ALERTMANAGER = "http://127.0.0.1:19093/_fake";
 const INGEST_URL = "http://localhost:8081/api/v1/ingest";
-
-/**
- * Signs a local user in. A spec that refuses sign-ins may leave the source address throttled; a success resets it, so
- * a refused attempt is made again once the wait the page names has passed.
- */
-async function signIn(page: Page, login: string, password: string): Promise<void> {
-  await page.goto("/sign-in");
-  const tooMany = page.getByText(/^Too many attempts\. Try again in (\d+) seconds?\.$/);
-  const menu = page.getByTestId("user-menu-name");
-  for (let attempt = 0; attempt < 5; attempt++) {
-    await signInLocally(page, login, password);
-    await expect(menu.or(tooMany)).toBeVisible();
-    if (await menu.isVisible()) {
-      return;
-    }
-    const seconds = Number(/(\d+) second/.exec((await tooMany.textContent()) ?? "")?.[1] ?? "1");
-    await page.waitForTimeout(seconds * 1000 + 200);
-  }
-  await expect(menu).toBeVisible();
-}
-
-/**
- * The API as the development Admin. A spec that refuses sign-ins may leave the source address throttled for a moment,
- * so a refused sign-in is tried again shortly.
- */
-async function adminApi(): Promise<Api> {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      return await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
-    } catch {
-      await new Promise((done) => setTimeout(done, 1500));
-    }
-  }
-  return Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
-}
 
 /** Asks the fake Alertmanager to send to a registered receiver and returns the status Muster answered. */
 async function fakeSend(body: Record<string, unknown>): Promise<number> {
@@ -109,7 +73,7 @@ async function at360(page: Page, name: string): Promise<void> {
 async function saveElsewhere(browser: Browser, integrationId: string): Promise<void> {
   const context = await browser.newContext({ baseURL: APP, locale: "en-US" });
   const other = await context.newPage();
-  await signIn(other, ADMIN_LOGIN, ADMIN_PASSWORD);
+  await signInAdmin(other);
   await other.goto(`/integrations/${integrationId}/edit`);
   await other.getByLabel("Description").fill("changed elsewhere");
   await other.getByRole("button", { name: "Save" }).click();
@@ -123,7 +87,7 @@ test("creates an Integration with a token, receives webhooks, edits, revokes and
 }) => {
   const csp = watchCsp(page);
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await signIn(page, ADMIN_LOGIN, ADMIN_PASSWORD);
+  await signInAdmin(page);
 
   // 1. The navigation shows "Integrations"; the list shows the demo Integration.
   await page

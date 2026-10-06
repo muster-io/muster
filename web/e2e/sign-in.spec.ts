@@ -10,7 +10,7 @@ import {
   ADMIN_LOGIN,
   ADMIN_PASSWORD,
   APP,
-  Api,
+  adminApi,
   expectNoHorizontalScroll,
   freshCode,
   nextIdpUser,
@@ -129,7 +129,7 @@ test("completes a setup link and shows the texts of a used and an expired link",
   browser,
   page,
 }) => {
-  const admin = await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
+  const admin = await adminApi();
   const dave = await admin.createUser("dave");
   await page.goto(`/password-setup#token=${dave.token}`);
   // The page takes the token out of the address.
@@ -170,7 +170,7 @@ test("completes a setup link and shows the texts of a used and an expired link",
 test("TOTP required for everyone: a new user reaches only the enrolment, then signs in with a code", async ({
   page,
 }) => {
-  const admin = await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
+  const admin = await adminApi();
   await admin.setTotpPolicy("everyone");
   try {
     const carol = await admin.createUser("carol");

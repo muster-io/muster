@@ -9,13 +9,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
-  ADMIN_LOGIN,
-  ADMIN_PASSWORD,
   APP,
-  Api,
+  adminApi,
   expectNoHorizontalScroll,
   shot,
-  signInLocally,
+  signIn,
+  signInAdmin,
   watchCsp,
 } from "./support";
 
@@ -28,21 +27,6 @@ BINARY.set([0xff, 0xfe, 0x00, 0x41]);
 const BIDI = "abc\u202Edef";
 const LARGE = "x".repeat(300_000);
 
-/**
- * The API as the development Admin. A spec that refuses sign-ins may leave the source address throttled for a moment,
- * so a refused sign-in is tried again shortly.
- */
-async function adminApi(): Promise<Api> {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      return await Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
-    } catch {
-      await new Promise((done) => setTimeout(done, 1500));
-    }
-  }
-  return Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
-}
-
 async function ingest(
   token: string,
   body: string | Uint8Array<ArrayBuffer>,
@@ -54,22 +38,6 @@ async function ingest(
   }
   const res = await fetch(INGEST_URL, { method: "POST", headers, body });
   expect(res.status).toBe(202);
-}
-
-async function signIn(page: Page, login: string, password: string): Promise<void> {
-  await page.goto("/sign-in");
-  const tooMany = page.getByText(/^Too many attempts\. Try again in (\d+) seconds?\.$/);
-  const menu = page.getByTestId("user-menu-name");
-  for (let attempt = 0; attempt < 5; attempt++) {
-    await signInLocally(page, login, password);
-    await expect(menu.or(tooMany)).toBeVisible();
-    if (await menu.isVisible()) {
-      return;
-    }
-    const seconds = Number(/(\d+) second/.exec((await tooMany.textContent()) ?? "")?.[1] ?? "1");
-    await page.waitForTimeout(seconds * 1000 + 200);
-  }
-  await expect(menu).toBeVisible();
 }
 
 /** An Integration with a token, and one Snapshot of each kind sent with it, oldest first. */
@@ -116,7 +84,7 @@ test("lists, filters and shows Stored Snapshots as inert text", async ({ page })
   });
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   const { id } = await prepare("snapshots-test");
-  await signIn(page, ADMIN_LOGIN, ADMIN_PASSWORD);
+  await signInAdmin(page);
 
   // The table: newest first, every one pending, with its size and group key.
   await page.goto(`/integrations/${id}`);
