@@ -306,16 +306,27 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		Alive:              nil,
 		MaintainPartitions: func(context.Context) error { calls = append(calls, "partitions"); return errors.New("x") },
 		PruneReplicas:      record("prune"),
+		Organizations:      func(context.Context) ([]int64, error) { return []int64{1}, nil },
+		Business:           clock.NewManual(time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)),
+		Log:                logging.New(&bytes.Buffer{}, logging.LevelInfo),
+		PruneAuth: []PruneTable{{Name: "sessions", Delete: func(context.Context, int64, time.Time, int32) (int64,
+			error,
+		) {
+			calls = append(calls, "short-lived")
+			return 0, nil
+		}}},
 	})()
 	var names []string
 	for _, task := range tasks {
 		names = append(names, task.Name)
 	}
-	if want := []string{"partition_maintenance", "alive_mark", "replica_pruning"}; !slices.Equal(names, want) {
+	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning"}
+	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
-	if tasks[0].Every != time.Hour || tasks[1].Every != AliveMarkInterval || tasks[2].Every != time.Hour {
-		t.Errorf("intervals %v %v %v", tasks[0].Every, tasks[1].Every, tasks[2].Every)
+	if tasks[0].Every != time.Hour || tasks[1].Every != AliveMarkInterval || tasks[2].Every != time.Hour ||
+		tasks[3].Every != MaintenanceInterval {
+		t.Errorf("intervals %v %v %v %v", tasks[0].Every, tasks[1].Every, tasks[2].Every, tasks[3].Every)
 	}
 	// Partition maintenance logs its own failures; the runner gets none to log twice.
 	if err := tasks[0].Run(t.Context()); err != nil {
@@ -323,6 +334,124 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	}
 	if err := tasks[2].Run(t.Context()); err != nil || !slices.Equal(calls, []string{"partitions", "prune"}) {
 		t.Errorf("calls %v, err %v", calls, err)
+	}
+	if err := tasks[3].Run(t.Context()); err != nil ||
+		!slices.Equal(calls, []string{"partitions", "prune", "short-lived"}) {
+		t.Errorf("calls %v, err %v", calls, err)
+	}
+}
+
+// pruneCall is one call of a fake short-lived delete.
+type pruneCall struct {
+	table string
+	org   int64
+	now   time.Time
+	limit int32
+}
+
+// fakeTable deletes from a backlog of rows per Organization, at most limit at a time, and fails once failAfter
+// calls are made when failAfter is set.
+func fakeTable(name string, backlog map[int64]int64, calls *[]pruneCall, failAfter int) PruneTable {
+	return PruneTable{Name: name, Delete: func(_ context.Context, org int64, now time.Time, limit int32) (int64,
+		error,
+	) {
+		*calls = append(*calls, pruneCall{name, org, now, limit})
+		if failAfter > 0 && len(*calls) >= failAfter {
+			return 0, errors.New("connection reset")
+		}
+		n := min(backlog[org], int64(limit))
+		backlog[org] -= n
+		return n, nil
+	}}
+}
+
+func TestShortLivedPruning(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	var log bytes.Buffer
+	var calls []pruneCall
+	backlog := map[int64]int64{1: 2*PruneBatch + 3, 2: 5}
+	idle := map[int64]int64{}
+	before := metrics.ShortLivedRowsPruned.With("sessions").Get()
+	idleBefore := metrics.ShortLivedRowsPruned.With("sign_in_throttles").Get()
+	w := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		Business:      clock.NewManual(now),
+		Log:           logging.New(&log, logging.LevelInfo),
+		PruneAuth: []PruneTable{
+			fakeTable("sessions", backlog, &calls, 0),
+			fakeTable("sign_in_throttles", idle, &calls, 0),
+		},
+	}
+	if err := w.pruneShortLived(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// Organization 1 takes three batches, the last one short; Organization 2 one; the empty table one per
+	// Organization. Every call has the same now and the batch size.
+	want := []pruneCall{
+		{"sessions", 1, now, PruneBatch}, {"sessions", 1, now, PruneBatch}, {"sessions", 1, now, PruneBatch},
+		{"sessions", 2, now, PruneBatch}, {"sign_in_throttles", 1, now, PruneBatch},
+		{"sign_in_throttles", 2, now, PruneBatch},
+	}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("calls\n %v\nwant %v", calls, want)
+	}
+	if backlog[1] != 0 || backlog[2] != 0 {
+		t.Errorf("backlog left %v", backlog)
+	}
+	if got := metrics.ShortLivedRowsPruned.With("sessions").Get() - before; got != 2*PruneBatch+8 {
+		t.Errorf("sessions counted %d", got)
+	}
+	if got := metrics.ShortLivedRowsPruned.With("sign_in_throttles").Get() - idleBefore; got != 0 {
+		t.Errorf("sign_in_throttles counted %d", got)
+	}
+	if !strings.Contains(log.String(), `"event":"short_lived_pruned","table":"sessions","rows":2008`) ||
+		strings.Count(log.String(), "short_lived_pruned") != 1 {
+		t.Errorf("log: %s", log.String())
+	}
+
+	// A second run finds nothing: it deletes, logs and counts nothing more.
+	log.Reset()
+	if err := w.pruneShortLived(t.Context()); err != nil || log.Len() != 0 {
+		t.Errorf("second run: err %v, log %s", err, log.String())
+	}
+	if got := metrics.ShortLivedRowsPruned.With("sessions").Get() - before; got != 2*PruneBatch+8 {
+		t.Errorf("sessions counted %d after the second run", got)
+	}
+}
+
+func TestShortLivedPruningFailures(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	var log bytes.Buffer
+	var calls []pruneCall
+	w := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		Business:      clock.NewManual(now),
+		Log:           logging.New(&log, logging.LevelInfo),
+	}
+	// A failed table stops at its failure, keeps what it deleted before it, and the next table still runs.
+	w.PruneAuth = []PruneTable{
+		fakeTable("sessions", map[int64]int64{1: PruneBatch + 1, 2: 1}, &calls, 2),
+		fakeTable("sign_in_throttles", map[int64]int64{1: 4, 2: 0}, &calls, 0),
+	}
+	err := w.pruneShortLived(t.Context())
+	if err == nil || err.Error() != "prune sessions: connection reset" {
+		t.Fatalf("err %v", err)
+	}
+	if len(calls) != 4 || calls[2].table != "sign_in_throttles" {
+		t.Errorf("calls %v", calls)
+	}
+	for _, want := range []string{`"table":"sessions","rows":1000`, `"table":"sign_in_throttles","rows":4`} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("log misses %s: %s", want, log.String())
+		}
+	}
+
+	// Without the Organizations nothing is deleted.
+	calls = nil
+	w.Organizations = func(context.Context) ([]int64, error) { return nil, errors.New("database unavailable") }
+	if err := w.pruneShortLived(t.Context()); err == nil ||
+		err.Error() != "list the organizations to prune: database unavailable" || len(calls) != 0 {
+		t.Errorf("err %v, calls %v", err, calls)
 	}
 }
 

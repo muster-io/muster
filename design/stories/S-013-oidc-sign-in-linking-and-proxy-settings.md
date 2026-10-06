@@ -32,6 +32,7 @@ files_touched:
   - internal/fakes/fakeoidc/fakeoidc_test.go
   - internal/devmode/devmode.go
   - internal/runtime/runtime.go
+  - internal/leader/tasks.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
   - internal/archlint/secretleak.go
@@ -111,6 +112,9 @@ issue: 13
   the hash of `state`, with the nonce, the PKCE verifier (a Secret), `return_to` (kept only when it is a relative path
   starting with a single `/`) and purpose `sign_in`, valid for `oidc.auth_request_ttl`, and redirects with the
   configured scopes plus `openid` and `offline_access` (`409 oidc_not_enabled` when OIDC is off).
+  The story adds `oidc_auth_requests` to the `short_lived_pruning` Leader task (a `PruneOIDC` field of `leader.Work`
+  and the table in `metrics.ShortLivedTables`): a request is deleted once its `expires_at` is more than 1 h past; a
+  link request also goes with its web session, by the cascade from `sessions`.
   `completeOidcSignIn` exchanges the code (interactive class), verifies the ID token (signature, issuer, audience,
   nonce, and `exp` and `iat` against the real clock of S-006) and maps the groups claim to a Role (the highest wins, C-03.FR-5). Outcomes, always a `302`: success to `return_to`
   or `/` with the session cookie; failures to `/sign-in?error=` `no_access` (Audit `session.oidc_refused` with the

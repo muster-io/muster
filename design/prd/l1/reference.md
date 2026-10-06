@@ -181,6 +181,7 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 | `muster_db_pool_max_connections` | gauge | — | C-02 |
 | `muster_db_pool_acquires_total` | counter | — | C-02 |
 | `muster_db_pool_acquire_wait_seconds_total` | counter | — (the total time spent waiting for a free connection) | C-02 |
+| `muster_short_lived_rows_pruned_total` | counter | `table` — the short-lived table the Leader deleted rows from (`short_lived_pruning`) | C-02 |
 | process and Go runtime metrics (`process_*`, `go_*`) | — | — | C-02 |
 | `muster_api_requests_total` | counter | `route_pattern`, `method`, `code` | C-03 |
 | `muster_api_request_duration_seconds` | histogram | `route_pattern`, `method` | C-03 |

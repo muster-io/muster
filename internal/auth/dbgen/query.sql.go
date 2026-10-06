@@ -418,6 +418,61 @@ func (q *Queries) MarkSignedIn(ctx context.Context, arg MarkSignedInParams) erro
 	return err
 }
 
+const pruneSessions = `-- name: PruneSessions :execrows
+DELETE FROM sessions s
+WHERE s.org_id = $1 AND s.id IN (
+    SELECT e.id FROM sessions e
+    WHERE e.org_id = $1 AND LEAST(e.ended_at, e.idle_expires_at, e.expires_at) < $2::timestamptz
+    ORDER BY e.id
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type PruneSessionsParams struct {
+	OrgID     int64
+	Before    time.Time
+	BatchSize int32
+}
+
+// PruneSessions deletes up to batch_size sessions that could no longer be used before @before: ended, past their idle
+// timeout or past their lifetime. A session row being used is skipped and taken at the next run.
+func (q *Queries) PruneSessions(ctx context.Context, arg PruneSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneSessions, arg.OrgID, arg.Before, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const pruneSignInThrottles = `-- name: PruneSignInThrottles :execrows
+DELETE FROM sign_in_throttles t
+WHERE t.org_id = $1 AND (t.subject_kind, t.subject) IN (
+    SELECT o.subject_kind, o.subject FROM sign_in_throttles o
+    WHERE o.org_id = $1 AND o.last_failure_at < $2::timestamptz
+      AND (o.blocked_until IS NULL OR o.blocked_until < $2::timestamptz)
+    ORDER BY o.subject_kind, o.subject
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type PruneSignInThrottlesParams struct {
+	OrgID     int64
+	Before    time.Time
+	BatchSize int32
+}
+
+// PruneSignInThrottles deletes up to batch_size throttle rows whose last failure, and whose block, are older than
+// @before. A row being counted is skipped and taken at the next run.
+func (q *Queries) PruneSignInThrottles(ctx context.Context, arg PruneSignInThrottlesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneSignInThrottles, arg.OrgID, arg.Before, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const recordSignInFailure = `-- name: RecordSignInFailure :one
 INSERT INTO sign_in_throttles (org_id, subject_kind, subject, consecutive_failures, last_failure_at)
 VALUES ($1, $2, $3, 1, $4)

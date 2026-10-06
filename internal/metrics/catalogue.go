@@ -70,6 +70,18 @@ var ClockSkew = newGauge(Definition{
 	Capability: "C-02",
 })
 
+// ShortLivedTables are the table values of muster_short_lived_rows_pruned_total: the short-lived tables that the
+// short_lived_pruning Leader task prunes. A story that adds a table to the task adds it here.
+var ShortLivedTables = []string{"sessions", "sign_in_throttles"}
+
+// ShortLivedRowsPruned counts the rows the short_lived_pruning Leader task deleted, by table.
+var ShortLivedRowsPruned = newCounter(Definition{
+	Name:       "muster_short_lived_rows_pruned_total",
+	Help:       "Short-lived rows that could no longer be used and that the Leader deleted, by table.",
+	Labels:     []Label{closed("table", "the short-lived table the rows were deleted from", ShortLivedTables...)},
+	Capability: "C-02",
+})
+
 // clientLabels are the labels of the outbound HTTP metrics: the client classes and the outcomes of ADR-0015.
 var clientLabels = []Label{
 	closed("client", "the client class of ADR-0015", "delivery", "interactive", "background", "heartbeat"),

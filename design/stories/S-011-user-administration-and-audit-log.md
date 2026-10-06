@@ -19,6 +19,9 @@ files_touched:
   - internal/users/query.sql
   - internal/users/admin_test.go
   - internal/auth/session.go
+  - internal/leader/tasks.go
+  - internal/runtime/runtime.go
+  - internal/metrics/catalogue.go
   - internal/audit/list.go
   - internal/audit/diff.go
   - internal/audit/query.sql
@@ -85,6 +88,9 @@ issue: 11
   (`MUSTER_PUBLIC_URL/password-setup#token=<token>`), single use and valid for `auth.password_setup_link_ttl`. A new
   link supersedes the older ones. `completePasswordSetup` is public: unknown token `404`; expired `410 link_expired`;
   used or superseded `410 link_used`; password shorter than `auth.password_min_length` `422`.
+  The story adds `password_setups` to the `short_lived_pruning` Leader task (a `PruneUsers` field of `leader.Work`
+  and the table in `metrics.ShortLivedTables`): a link is deleted once its `expires_at` is more than 7 days past, used
+  and superseded links included, so a late click answers `410` rather than `404` for a week.
 - **Audit log** (C-03.FR-14, FR-15, `audit_log`): `listAuditLog` returns entries newest first, by a cursor on the time
   and id, filtered by `from`, `to`, `actor` (a user's or Service account's `public_id`), `action`, `resource_type` and
   `resource_id`. Diffs list the changed fields with their old and new values; a Secret appears only as changed

@@ -54,6 +54,7 @@ table in the same pull request.
 | `auth.password_setup_link_ttl` | single use, 24 h | built in | C-03 | P-05 |
 | `auth.password_min_length` | 12 characters | built in | C-03 | decided |
 | `auth.signin_throttle` | after 3 consecutive failures per account or source address, each attempt waits twice as long as the previous, from 1 s up to 60 s | built in | C-03 | decided |
+| `auth.session_prune_after` / `auth.signin_throttle_prune_after` | 7 days after a session ended, by sign-out, an administrative action or its idle timeout or lifetime / 24 h after a throttle's last failure, once its block has passed; then the Leader deletes the row (`short_lived_pruning`, hourly) | built in | C-02, C-03 | decided |
 | `auth.totp_recovery_codes` | 10 | built in | C-03 | P-08 |
 | `oidc.unmatched_role` | none (refuse sign-in) | OIDC settings | C-03 | decided |
 | `oidc.sync_role` | on | OIDC settings | C-03 | decided |

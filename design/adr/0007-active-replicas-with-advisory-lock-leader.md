@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-02
 - Amended: 2026-10-03 — the OIDC client secret expiry check (`MusterOIDCSecretExpiring`) is a Leader task
+- Amended: 2026-10-05 — pruning short-lived rows and the records of gone replicas are Leader tasks
 
 ## Context
 
@@ -12,7 +13,8 @@ Snooze ends, Grace periods). A few tasks must run exactly once across all replic
 
 - Telegram `getUpdates` long polling — Telegram answers `409 Conflict` when two clients poll the same bot token;
 - periodic checks over all Integrations and Alerts: Heartbeat lost and Stale Alerts;
-- creating and dropping partitions;
+- creating and dropping partitions, and pruning short-lived rows (ended sessions, expired requests and links) and the
+  records of gone replicas;
 - gauges computed from the database;
 - a periodic "alive" mark that tells a restarted Muster how long it was down;
 - Muster's own outgoing heartbeat to an external dead man's switch (ADR-0014);
@@ -70,7 +72,7 @@ without anyone having to run HA in production.
 **Health.** Liveness performs no checks; readiness checks only the database. Unreachable messengers or Alertmanagers
 raise alerts; they do not take replicas out of load balancing. The `muster_leader` metric shows which replica leads.
 The chart's `MusterNoLeader` rule fires when no replica has led for 2 minutes (ADR-0014): Telegram polling, the
-Heartbeat lost and Stale checks, partition maintenance, the database gauges, the outgoing heartbeat and the OIDC secret
+Heartbeat lost and Stale checks, partition maintenance and pruning, the database gauges, the outgoing heartbeat and the OIDC secret
 expiry check have stopped, while ingestion, delivery and timers keep working.
 
 ## Consequences
