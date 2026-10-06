@@ -44,7 +44,9 @@ func App(api http.Handler, dist fs.FS, hsts bool) http.Handler {
 }
 
 // SPA serves the single-page application in dist: a file that exists as itself, any other path as index.html, so
-// that the SPA's router handles it. Without a built index.html it answers 503.
+// that the SPA's router handles it. A missing file under assets/ answers 404 instead: a page left open across an
+// upgrade asks for chunks of the old build, and index.html in their place would fail as a script of the wrong type.
+// Without a built index.html it answers 503.
 func SPA(dist fs.FS) http.Handler {
 	files := http.FileServerFS(dist)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +54,10 @@ func SPA(dist fs.FS) http.Handler {
 		if name != "" && name != "index.html" {
 			if fi, err := fs.Stat(dist, name); err == nil && !fi.IsDir() {
 				files.ServeHTTP(w, r)
+				return
+			}
+			if strings.HasPrefix(name, "assets/") {
+				http.NotFound(w, r)
 				return
 			}
 		}

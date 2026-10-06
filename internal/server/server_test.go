@@ -260,18 +260,24 @@ func TestSPA(t *testing.T) {
 		Handlers{App: SPA(dist), Ingest: stub("ingest"), Internal: stub("internal")})
 	app := "http://" + s.Addrs().App
 	for p, want := range map[string]string{
-		"/":                       "<html>muster</html>",
-		"/index.html":             "<html>muster</html>",
-		"/alert-groups/AG1":       "<html>muster</html>",
-		"/assets":                 "<html>muster</html>",
-		"/assets/app-1.js":        "console.log(1)",
-		"/favicon.svg":            "<svg/>",
-		"/../../etc/passwd":       "<html>muster</html>",
-		"/assets/dir/x.txt":       "x",
-		"/assets/missing-file.js": "<html>muster</html>",
+		"/":                 "<html>muster</html>",
+		"/index.html":       "<html>muster</html>",
+		"/alert-groups/AG1": "<html>muster</html>",
+		"/assets":           "<html>muster</html>",
+		"/assets/app-1.js":  "console.log(1)",
+		"/favicon.svg":      "<svg/>",
+		"/../../etc/passwd": "<html>muster</html>",
+		"/assets/dir/x.txt": "x",
+		"/some/route":       "<html>muster</html>",
 	} {
 		if code, body := get(t, app+p); code != http.StatusOK || body != want {
 			t.Errorf("GET %s = %d %q, want %q", p, code, body, want)
+		}
+	}
+	// A chunk of another build is missing, not a page of the SPA.
+	for _, p := range []string{"/assets/x.js", "/assets/missing-file.js", "/assets/dir", "/assets/../assets/x.js"} {
+		if code, body := get(t, app+p); code != http.StatusNotFound || strings.Contains(body, "muster") {
+			t.Errorf("GET %s = %d %q, want 404", p, code, body)
 		}
 	}
 
@@ -296,6 +302,7 @@ func TestApp(t *testing.T) {
 			"/api":                "api /api",
 			"/apiary":             "<html>index</html>",
 			"/api/v1/sign-in-opt": "api /api/v1/sign-in-opt",
+			"/assets/x.js":        "404 page not found\n",
 		} {
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))

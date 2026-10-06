@@ -153,7 +153,7 @@ issue: 10
   browser marks as cross-site (`Sec-Fetch-Site: cross-site`) answers `403` `csrf_invalid`, which also keeps the public
   `createSession` out of reach of login CSRF; the spec lists `403` for `createSession`.
 - **SPA and spec** (C-03.FR-16, FR-23): the app listener serves the embedded SPA for every path outside `/api/` with
-  the index as fallback, and an unknown path under `/api/v1` answers a `404` `Problem`. Every SPA response carries
+  the index as fallback (a missing file under `/assets/` answers `404` instead), and an unknown path under `/api/v1` answers a `404` `Problem`. Every SPA response carries
   `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;
   connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
