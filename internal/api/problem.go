@@ -16,6 +16,8 @@ import (
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/ingest"
+	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/oidc"
@@ -202,6 +204,9 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	if f, ok := errors.AsType[*oidc.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
+	if f, ok := errors.AsType[*integrations.FieldError](err); ok {
+		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
 	if f, ok := errors.AsType[*users.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
@@ -236,6 +241,14 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 			"Another Service account has this name; names are compared case-insensitively.")
 	case errors.Is(err, tokens.ErrVersionMismatch):
 		return errPreconditionFailed
+	case errors.Is(err, integrations.ErrNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Integration or Integration token.")
+	case errors.Is(err, integrations.ErrNameTaken):
+		return problem(http.StatusConflict, typeConflict, codeNameTaken, "Another Integration has this name.")
+	case errors.Is(err, integrations.ErrVersionMismatch):
+		return errPreconditionFailed
+	case errors.Is(err, ingest.ErrNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Stored Snapshot, or it is past retention.")
 	case errors.Is(err, auth.ErrPasswordTooShort):
 		return fieldProblem(http.StatusUnprocessableEntity, "/new_password", fieldTooShort,
 			"The password is shorter than "+strconv.Itoa(auth.PasswordMinLength)+" characters.")

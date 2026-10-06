@@ -483,3 +483,146 @@ func TestFakeServerHarness(t *testing.T) {
 		t.Errorf("Name() = %q", f.Name())
 	}
 }
+
+// receivedRequest is a request a pathSink received.
+type receivedRequest struct {
+	path, authorization, contentType string
+	size                             int
+	body                             string
+}
+
+// pathSink stands for Muster's ingestion endpoint, keeping the path of each request: 202 with a token, 401 without.
+func pathSink(t *testing.T) (*httptest.Server, func() []receivedRequest) {
+	t.Helper()
+	var mu sync.Mutex
+	var got []receivedRequest
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		got = append(got, receivedRequest{path: r.URL.Path, authorization: r.Header.Get("Authorization"),
+			contentType: r.Header.Get("Content-Type"), size: len(body), body: string(body)})
+		mu.Unlock()
+		if r.Header.Get("Authorization") == "" && !strings.HasPrefix(r.URL.Path, "/api/v1/ingest/") {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(s.Close)
+	return s, func() []receivedRequest {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]receivedRequest(nil), got...)
+	}
+}
+
+// TestReceivers is C-01.FR-13: receivers registered with the token in the header or in the path; a send to a
+// receiver with a JSON payload, a raw body with its content type, a filler of a given size, another token or none.
+func TestReceivers(t *testing.T) {
+	f := startFake(t)
+	s, got := pathSink(t)
+	for _, body := range []string{
+		`{"name":"prod-eu","url":"` + s.URL + `/api/v1/ingest","token":"tok"}`,
+		`{"name":"in-path","url":"` + s.URL + `/api/v1/ingest/","token":"t/k","token_in":"path"}`,
+	} {
+		if status, answer := post(t, f.URL()+"/_fake/receivers", body); status != http.StatusNoContent {
+			t.Fatalf("POST /_fake/receivers %s = %d %s", body, status, answer)
+		}
+	}
+	sends := []struct{ body, want string }{
+		{`{"receiver":"prod-eu","payload":{"version":"4","alerts":[]}}`, `{"status":202}`},
+		{`{"receiver":"prod-eu","raw":"not json","content_type":"text/plain"}`, `{"status":202}`},
+		{`{"receiver":"prod-eu","raw":"{}"}`, `{"status":202}`},
+		{`{"receiver":"prod-eu","size_bytes":1000}`, `{"status":202}`},
+		{`{"receiver":"prod-eu","raw":"{}","token":"other"}`, `{"status":202}`},
+		{`{"receiver":"prod-eu","raw":"{}","no_token":true}`, `{"status":401}`},
+		{`{"receiver":"in-path"}`, `{"status":202}`},
+		{`{"receiver":"in-path","raw":"{}","no_token":true}`, `{"status":202}`},
+	}
+	for _, tt := range sends {
+		if status, answer := post(t, f.URL()+"/_fake/send", tt.body); status != http.StatusOK ||
+			strings.TrimSpace(answer) != tt.want {
+			t.Errorf("send %s = %d %s, want %s", tt.body, status, answer, tt.want)
+		}
+	}
+	r := got()
+	if len(r) != len(sends) {
+		t.Fatalf("received %d, want %d", len(r), len(sends))
+	}
+	checks := []struct {
+		ok   bool
+		what string
+	}{
+		{r[0].path == "/api/v1/ingest" && r[0].authorization == "Bearer tok" &&
+			r[0].body == `{"version":"4","alerts":[]}` && r[0].contentType == "application/json", "payload"},
+		{r[1].body == "not json" && r[1].contentType == "text/plain", "raw with a content type"},
+		{r[2].body == "{}" && r[2].contentType == "", "raw without a content type"},
+		{r[3].size == 1000, "filler"},
+		{r[4].authorization == "Bearer other", "another token"},
+		{r[5].authorization == "", "no token"},
+		{r[6].path == "/api/v1/ingest/t/k" && r[6].authorization == "", "token in the path"},
+		{r[7].path == "/api/v1/ingest/", "no token in the path"},
+	}
+	for _, c := range checks {
+		if !c.ok {
+			t.Errorf("%s: %+v", c.what, r)
+		}
+	}
+	// A webhook generated for a path receiver carries no Authorization header.
+	checkWebhook(t, []byte(r[6].body), f.URL())
+}
+
+func TestReceiverErrors(t *testing.T) {
+	f := startFake(t)
+	s, _ := pathSink(t)
+	for _, bad := range []string{
+		`{"name":"","url":"` + s.URL + `"}`,
+		`{"name":"x","url":"http://example.org"}`,
+		`{"name":"x","url":"` + s.URL + `","token_in":"query"}`,
+		`{"name":"x","url":"` + s.URL + `","other":1}`,
+	} {
+		if status, body := post(t, f.URL()+"/_fake/receivers", bad); status != http.StatusBadRequest {
+			t.Errorf("POST /_fake/receivers %s = %d %s, want 400", bad, status, body)
+		}
+	}
+	if err := f.Register(fakealertmanager.Receiver{URL: s.URL}); err == nil {
+		t.Error("a receiver without a name was registered")
+	}
+	if status, _ := post(t, f.URL()+"/_fake/receivers", `{"name":"ok","url":"`+s.URL+`"}`); status != http.StatusNoContent {
+		t.Fatal("no receiver")
+	}
+	for _, bad := range []string{
+		`{"receiver":"missing"}`,
+		`{"receiver":"ok","url":"` + s.URL + `"}`,
+		`{"receiver":"ok","raw":"x","size_bytes":1}`,
+		`{"receiver":"ok","payload":{},"raw":"x"}`,
+		`{"receiver":"ok","size_bytes":-1}`,
+		`{"receiver":"ok","size_bytes":100000000}`,
+	} {
+		if status, body := post(t, f.URL()+"/_fake/send", bad); status != http.StatusBadRequest {
+			t.Errorf("POST /_fake/send %s = %d %s, want 400", bad, status, body)
+		}
+	}
+}
+
+// TestLoadToAReceiver: the load mode sends to a registered receiver.
+func TestLoadToAReceiver(t *testing.T) {
+	f := startFake(t)
+	s, got := pathSink(t)
+	if err := f.Register(fakealertmanager.Receiver{Name: "muster", URL: s.URL + "/api/v1/ingest", Token: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	status, body := post(t, f.URL()+"/_fake/load", `{"receiver":"muster","rate_per_second":100,"duration_seconds":0.03}`)
+	if status != http.StatusOK || !strings.Contains(body, `"accepted":3`) {
+		t.Errorf("load = %d %s", status, body)
+	}
+	for _, r := range got() {
+		if r.authorization != "Bearer tok" {
+			t.Errorf("load request %+v", r)
+		}
+	}
+	if status, _ := post(t, f.URL()+"/_fake/load", `{"receiver":"none","rate_per_second":1,"duration_seconds":1}`); status !=
+		http.StatusBadRequest {
+		t.Errorf("load to an unknown receiver = %d", status)
+	}
+}

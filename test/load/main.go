@@ -2,9 +2,10 @@
 // Copyright The Muster Authors
 
 // Command load is the load test: its own fake Alertmanager sends webhooks at a steady rate to Muster's ingestion
-// endpoint, and it reports accepted, rejected and failed requests with latency percentiles. It signs in as the
-// bootstrap Admin and creates the Personal access token, Integration and Integration token it needs. Until ingestion
-// exists it reports that it skipped.
+// endpoint through a receiver registered with an Integration token, and it reports accepted, rejected and failed
+// requests with latency percentiles. It signs in as the bootstrap Admin and creates the Personal access token,
+// Integration and Integration token it needs, and fails unless every webhook was accepted. When nothing listens at the
+// ingestion endpoint it reports that it skipped.
 package main
 
 import (
@@ -83,14 +84,23 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	receiver := fakealertmanager.Receiver{Name: "muster", URL: endpoint, Token: token}
+	if err := fake.Register(receiver); err != nil {
+		fmt.Fprintf(stderr, "load test: %v\n", err)
+		return 1
+	}
 	fmt.Fprintf(stdout, "load test: %d/s to %s for %v\n", *rate, endpoint, *duration)
 	report := fake.Load(ctx, fakealertmanager.LoadOptions{
-		Endpoint: fakealertmanager.Endpoint{URL: endpoint, Token: token},
+		Endpoint: receiver.Endpoint(),
 		Rate:     *rate,
 		Duration: *duration,
 	})
 	counts, latencies, _ := strings.Cut(report.String(), "\n")
 	fmt.Fprintf(stdout, "load test: %s\nload test: ingest %s\n", counts, latencies)
+	if report.Accepted != report.Sent {
+		fmt.Fprintln(stderr, "load test: failed: not every webhook was accepted")
+		return 1
+	}
 	return 0
 }
 
@@ -98,8 +108,8 @@ func env(name, fallback string) string {
 	return cmp.Or(os.Getenv(name), fallback)
 }
 
-// probe sends a webhook without a token. Ingestion answers 401. A server without it refuses the connection or
-// answers 404 or 501, and probe returns why to skip; any other outcome is an error, so a broken target fails the run.
+// probe sends a webhook without a token, which ingestion answers 401. When nothing listens, probe returns why to skip;
+// any other answer is an error, so a broken target fails the run.
 func probe(ctx context.Context, fake *fakealertmanager.Fake, endpoint string) (skip string, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -115,10 +125,8 @@ func probe(ctx context.Context, fake *fakealertmanager.Fake, endpoint string) (s
 		return "", fmt.Errorf("probe %s: %w", endpoint, err)
 	case status == http.StatusUnauthorized:
 		return "", nil
-	case status == http.StatusNotFound || status == http.StatusNotImplemented:
-		return fmt.Sprintf("%s answered %d %s", endpoint, status, http.StatusText(status)), nil
 	}
-	return "", fmt.Errorf("probe %s: answered %d %s without a token; want 401 from ingestion, or 404 or 501 without it",
+	return "", fmt.Errorf("probe %s: answered %d %s without a token; want 401 from ingestion",
 		endpoint, status, http.StatusText(status))
 }
 

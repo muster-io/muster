@@ -36,7 +36,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   against the API specification, which excludes ingestion from request validation.
 - **C-05.FR-4** A body larger than `ingest.body_limit` gets `413`; a missing or wrong token gets `401`. Every request is
   counted in `muster_ingest_requests_total{integration,outcome}` with the outcome `accepted`, `unauthorized` or
-  `too_large`; a request whose token matches no Integration carries `integration="unknown"` (_provisional_, P-10).
+  `too_large`; `integration` is the id of the token's Integration when the token is known, a revoked one included, so
+  that a sender still using an old token is named, and `unknown` when the token matches no Integration or only a deleted
+  one.
   Neither refusal raises an Internal alert; the chart rule `MusterIngestRejected` reports them (C-19). Ingestion has no
   rate limit. A body that is not JSON, or does not look like an Alertmanager payload, is accepted and stored; it fails
   later as a processing error (C-06.FR-20), because Alertmanager does not retry a `4xx` and the notification would be

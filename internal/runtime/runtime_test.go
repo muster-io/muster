@@ -27,6 +27,9 @@ import (
 	adb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/ingest"
+	"github.com/muster-io/muster/internal/integrations"
+	idb "github.com/muster-io/muster/internal/integrations/dbgen"
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/leader"
@@ -60,6 +63,71 @@ type fakeDB struct {
 	admin users.AdminStore
 	totp  totp.Store
 	oidc  fakeOIDCStore
+	integ fakeIntegrationsStore
+}
+
+// fakeIntegrationsStore records the demo Integration of development mode: the Integration once, then its token.
+type fakeIntegrationsStore struct {
+	integrations.Store
+	mu      sync.Mutex
+	created []idb.InsertIntegrationParams
+	tokens  []idb.EnsureIntegrationTokenParams
+	audited []string
+}
+
+func (s *fakeIntegrationsStore) InTx(_ context.Context, f func(integrations.Queries) error) error {
+	return f(s)
+}
+
+func (s *fakeIntegrationsStore) FindIntegrationByName(context.Context, idb.FindIntegrationByNameParams) (string,
+	error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.created) == 0 {
+		return "", pgx.ErrNoRows
+	}
+	return s.created[0].PublicID, nil
+}
+
+func (s *fakeIntegrationsStore) InsertIntegration(_ context.Context, arg idb.InsertIntegrationParams) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.created = append(s.created, arg)
+	return 1, nil
+}
+
+func (s *fakeIntegrationsStore) GetIntegration(context.Context, idb.GetIntegrationParams) (idb.GetIntegrationRow,
+	error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return idb.GetIntegrationRow{ID: 1, PublicID: s.created[0].PublicID, Name: s.created[0].Name,
+		ConnectionMode: s.created[0].ConnectionMode, StaticLabels: s.created[0].StaticLabels, Version: 1}, nil
+}
+
+func (s *fakeIntegrationsStore) LastSnapshotTimes(context.Context, idb.LastSnapshotTimesParams) (
+	[]idb.LastSnapshotTimesRow, error) {
+	return nil, nil
+}
+
+func (s *fakeIntegrationsStore) EnsureIntegrationToken(_ context.Context, arg idb.EnsureIntegrationTokenParams) (
+	string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tokens = append(s.tokens, arg)
+	return arg.PublicID, nil
+}
+
+func (s *fakeIntegrationsStore) LockDemo(context.Context, int64) error { return nil }
+
+func (s *fakeIntegrationsStore) ListIntegrationInfo(context.Context, int64) ([]idb.ListIntegrationInfoRow, error) {
+	return nil, nil
+}
+
+func (s *fakeIntegrationsStore) InsertAuditEntry(_ context.Context, arg auditdb.InsertAuditEntryParams) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.audited = append(s.audited, arg.Action)
+	return nil
 }
 
 // fakeOIDCStore records the demo OIDC configuration of development mode.
@@ -226,6 +294,10 @@ func (f *fakeDB) UsersStore() users.Store { return fakeUsersStore{} }
 func (f *fakeDB) AuthStore() auth.Store { return fakeAuthStore{} }
 
 func (f *fakeDB) TokensStore() tokens.Store { return nil }
+
+func (f *fakeDB) IntegrationsStore() integrations.Store { return &f.integ }
+
+func (f *fakeDB) IngestStore() ingest.Store { return nil }
 
 // fakeUsersStore has an Admin, so the bootstrap step creates nothing.
 type fakeUsersStore struct{ users.Store }
@@ -878,6 +950,16 @@ func TestDevelopmentKeyInDevelopmentMode(t *testing.T) {
 	if len(fake.oidc.audited) != 1 || fake.oidc.audited[0] != "oidc_settings.updated" {
 		t.Errorf("audited = %v", fake.oidc.audited)
 	}
+	if len(fake.integ.created) != 1 || fake.integ.created[0].Name != "dev-alertmanager" ||
+		string(fake.integ.created[0].StaticLabels) != `{"cluster":"dev"}` {
+		t.Errorf("demo integration = %+v", fake.integ.created)
+	}
+	if len(fake.integ.tokens) != 1 || len(fake.integ.tokens[0].TokenHash) != 32 {
+		t.Errorf("demo integration token = %+v", fake.integ.tokens)
+	}
+	if !slices.Equal(fake.integ.audited, []string{"integration.created", "integration_token.created"}) {
+		t.Errorf("integration audited = %v", fake.integ.audited)
+	}
 
 	plain := &fakeDB{}
 	_, cancel, done = running(t, options(plain, io.Discard, env()))
@@ -885,8 +967,9 @@ func TestDevelopmentKeyInDevelopmentMode(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if len(plain.oidc.demo) != 0 || len(plain.oidc.allowed) != 0 {
-		t.Errorf("a server outside development mode stored the demo: %v, %v", plain.oidc.demo, plain.oidc.allowed)
+	if len(plain.oidc.demo) != 0 || len(plain.oidc.allowed) != 0 || len(plain.integ.created) != 0 {
+		t.Errorf("a server outside development mode stored the demo: %v, %v, %v", plain.oidc.demo, plain.oidc.allowed,
+			plain.integ.created)
 	}
 }
 

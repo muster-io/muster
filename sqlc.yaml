@@ -81,3 +81,17 @@ sql:
       go:
         <<: *go
         out: internal/tokens/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/integrations/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/integrations/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/ingest/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/ingest/dbgen

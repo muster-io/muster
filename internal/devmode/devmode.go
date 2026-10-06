@@ -4,7 +4,7 @@
 // Package devmode is the development mode of `muster dev`: its published defaults, the rule that lets the environment
 // replace them, the fake Alertmanager, Mattermost, Telegram and OIDC servers and the fake HTTP and SOCKS5 proxies on
 // fixed loopback addresses, the demo OIDC configuration, and Muster itself in the same process, against the
-// development database and migrated on start.
+// development database and migrated on start, with the demo Integration that the fake Alertmanager sends to.
 package devmode
 
 import (
@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/muster-io/muster/internal/fakes/fakealertmanager"
@@ -21,6 +22,7 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
+	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/oidc"
 )
@@ -39,6 +41,13 @@ const (
 	OIDCClientID     = "muster-dev"
 	OIDCClientSecret = "muster-dev-oidc-secret"
 	OIDCDisplayName  = "Dev IdP"
+	// IngestURL is MUSTER_INGEST_URL in development mode: the ingest listener of `muster dev`.
+	IngestURL = "http://localhost:8081"
+	// IntegrationName is the demo Integration, IntegrationToken its published token and IntegrationReceiver the
+	// fake Alertmanager's receiver that sends with it.
+	IntegrationName     = "dev-alertmanager"
+	IntegrationToken    = "mstr_int_devdevdevdevdevdevdevdevdevdevdevdevdevdevdevdevdevd"
+	IntegrationReceiver = "muster"
 )
 
 const (
@@ -83,6 +92,7 @@ type setting struct {
 
 var settings = []setting{
 	{name: "MUSTER_PUBLIC_URL", value: PublicURL},
+	{name: "MUSTER_INGEST_URL", value: IngestURL},
 	{name: "MUSTER_DATABASE_URL", value: DatabaseURL, alternatives: []string{
 		"MUSTER_DATABASE_HOST", "MUSTER_DATABASE_PORT", "MUSTER_DATABASE_NAME", "MUSTER_DATABASE_USER",
 		"MUSTER_DATABASE_PASSWORD", "MUSTER_DATABASE_PASSWORD_FILE", "MUSTER_DATABASE_SSLMODE",
@@ -157,6 +167,20 @@ func OIDCDemo() oidc.Demo {
 	}
 }
 
+// IntegrationDemo is the demo Integration that `muster dev` ensures at start: dev-alertmanager with the Static label
+// cluster=dev and the published token that the fake Alertmanager's receiver muster sends with.
+func IntegrationDemo() integrations.Demo {
+	return integrations.Demo{Name: IntegrationName, StaticLabels: map[string]string{"cluster": "dev"},
+		Token: IntegrationToken, TokenName: "dev"}
+}
+
+// RegisterReceiver registers the receiver muster with the fake Alertmanager: the ingestion endpoint under ingestURL
+// with the demo Integration's token.
+func RegisterReceiver(f *fakealertmanager.Fake, ingestURL string) error {
+	return f.Register(fakealertmanager.Receiver{Name: IntegrationReceiver,
+		URL: strings.TrimSuffix(ingestURL, "/") + integrations.IngestPath, Token: IntegrationToken})
+}
+
 // Fakes are the running fake servers and fake proxies.
 type Fakes struct {
 	Alertmanager *fakealertmanager.Fake
@@ -215,12 +239,20 @@ func closeAll(ctx context.Context, servers []*fakeserver.Server) error {
 	return errors.Join(errs...)
 }
 
-// Run starts the fake servers at addrs, prints their addresses, then runs Muster in the same process with serve until
-// ctx ends or serve fails; the fake servers stop after it.
+// Run starts the fake servers at addrs, registers the receiver muster with the fake Alertmanager for MUSTER_INGEST_URL,
+// prints their addresses, then runs Muster in the same process with serve until ctx ends or serve fails; the fake
+// servers stop after it.
 func Run(ctx context.Context, w io.Writer, addrs Addresses, serve func(context.Context) error) error {
 	f, err := StartFakes(ctx, addrs)
 	if err != nil {
 		return err
+	}
+	ingestURL, ok := OSEnv{}.LookupEnv("MUSTER_INGEST_URL")
+	if !ok || ingestURL == "" {
+		ingestURL = IngestURL
+	}
+	if err := RegisterReceiver(f.Alertmanager, ingestURL); err != nil {
+		return errors.Join(err, f.Close(context.WithoutCancel(ctx)))
 	}
 	// Telegram comes last: the end-to-end harness waits for its line, printed once every fake listens.
 	fmt.Fprintf(w, "muster dev: fake Alertmanager %s\n", f.Alertmanager.URL())

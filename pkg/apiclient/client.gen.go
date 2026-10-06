@@ -26521,6 +26521,8 @@ type CreateIntegrationTokenResponse struct {
 	ApplicationproblemJSON404 *NotFound
 	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
 	ApplicationproblemJSON409 *Conflict
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
 	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
 	ApplicationproblemJSON429 *TooManyRequests
 	// Headers429 the parsed response headers for an HTTP 429 response
@@ -26555,6 +26557,11 @@ func (r CreateIntegrationTokenResponse) GetApplicationproblemJSON404() *NotFound
 // GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
 func (r CreateIntegrationTokenResponse) GetApplicationproblemJSON409() *Conflict {
 	return r.ApplicationproblemJSON409
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r CreateIntegrationTokenResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
 }
 
 // GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
@@ -41081,6 +41088,13 @@ func ParseCreateIntegrationTokenResponse(rsp *http.Response) (*CreateIntegration
 			return nil, err
 		}
 		response.ApplicationproblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
 		var dest TooManyRequests

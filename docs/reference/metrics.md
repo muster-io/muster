@@ -21,6 +21,9 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_db_pool_acquires_total` | counter | — | C-02 | no | Connections taken from the main database pool of this replica. |
 | `muster_db_pool_connections` | gauge | state | C-02 | no | Connections of the main database pool of this replica, by state. |
 | `muster_db_pool_max_connections` | gauge | — | C-02 | no | The most connections the main database pool of this replica opens. |
+| `muster_ingest_request_duration_seconds` | histogram | — | C-05 | no | Time from the arrival of an ingestion request to the end of its answer, the commit of the Stored Snapshot included. Buckets (le): 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10. |
+| `muster_ingest_requests_total` | counter | integration, outcome | C-05 | no | Requests to the ingestion endpoint, by the token's Integration and the outcome. |
+| `muster_integration_info` | gauge | integration, name | C-05 | no | Always 1, one series per Integration that is not deleted; the labels carry its public_id and name. |
 | `muster_leader` | gauge | — | C-02 | no | 1 while this replica is the Leader and runs the Leader tasks, 0 otherwise. |
 | `muster_login_failures_total` | counter | method | C-03 | no | Failed sign-ins that were evaluated, by method; attempts refused by the sign-in throttle are not counted. |
 | `muster_oidc_checks_total` | counter | outcome | C-03 | no | Background re-checks of OIDC users at the identity provider, by outcome. |
@@ -42,6 +45,10 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_client_requests_total` | `client` | `delivery`, `interactive`, `background`, `heartbeat` — the client class of ADR-0015 |
 | `muster_client_requests_total` | `outcome` | `ok`, `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect` — the classified outcome of the request |
 | `muster_db_pool_connections` | `state` | `acquired`, `idle`, `constructing` — the state of the connection |
+| `muster_ingest_requests_total` | `integration` | entity: the public_id of the token's Integration, a revoked token's included, or unknown when the token matches no Integration that is not deleted |
+| `muster_ingest_requests_total` | `outcome` | `accepted`, `unauthorized`, `too_large` — accepted is a body stored as a Stored Snapshot, unauthorized a missing or wrong token, too_large a body above ingest.body_limit |
+| `muster_integration_info` | `integration` | entity: the public_id of the integration |
+| `muster_integration_info` | `name` | info: the name of the Integration |
 | `muster_login_failures_total` | `method` | `local`, `oidc`, `totp` — local is a wrong login or password, oidc a refused OIDC sign-in, totp a wrong TOTP or recovery code |
 | `muster_oidc_checks_total` | `outcome` | `ok`, `refused`, `unavailable`, `skipped` — ok is a refresh the identity provider granted, refused one it refused (the user's sessions ended), unavailable one that reached no decision, skipped a user without a live session or a usable Personal access token, not sent to the identity provider |
 | `muster_short_lived_rows_pruned_total` | `table` | `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests` — the short-lived table the rows were deleted from |

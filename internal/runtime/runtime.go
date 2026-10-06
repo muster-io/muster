@@ -27,6 +27,8 @@ import (
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/ingest"
+	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/leader"
@@ -44,6 +46,10 @@ import (
 	usersdb "github.com/muster-io/muster/internal/users/dbgen"
 	"github.com/muster-io/muster/web"
 )
+
+// IntegrationInfoInterval is how often muster_integration_info is read again from the database besides the hints of
+// changes, which repairs a refresh that failed.
+const IntegrationInfoInterval = time.Minute
 
 // ShutdownGrace is process.shutdown_grace: from SIGTERM to exit, inside the chart's 30 s termination grace period.
 const ShutdownGrace = 20 * time.Second
@@ -86,6 +92,8 @@ type database interface {
 	SettingsStore() organization.SettingsStore
 	OIDCStore() oidc.Store
 	TokensStore() tokens.Store
+	IntegrationsStore() integrations.Store
+	IngestStore() ingest.Store
 	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
 	SessionListenConn(ctx context.Context) (db.ListenConn, error)
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
@@ -128,6 +136,10 @@ func (d pgDatabase) SettingsStore() organization.SettingsStore {
 func (d pgDatabase) OIDCStore() oidc.Store { return oidc.NewStore(d.Pool) }
 
 func (d pgDatabase) TokensStore() tokens.Store { return tokens.NewStore(d.Pool) }
+
+func (d pgDatabase) IntegrationsStore() integrations.Store { return integrations.NewStore(d.Pool) }
+
+func (d pgDatabase) IngestStore() ingest.Store { return ingest.NewStore(d.Pool) }
 
 func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
 	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
@@ -282,6 +294,9 @@ type process struct {
 	// orgID and signIn are the Organization and its OIDC service, for the background re-checks.
 	orgID  int64
 	signIn *oidc.Service
+	// integrations and snapshots serve ingestion on the ingest listener besides the API.
+	integrations *integrations.Service
+	snapshots    *ingest.Service
 }
 
 func setup(ctx context.Context, opts Options) (config.Config, *logging.Logger, error) {
@@ -372,8 +387,11 @@ func (p *process) serve(ctx context.Context) error {
 	srv, err := server.Start(context.WithoutCancel(ctx), server.Addresses{
 		App: p.cfg.ListenApp, Ingest: p.cfg.ListenIngest, Internal: p.cfg.ListenInternal,
 	}, server.Handlers{
-		App:      server.App(p.api, web.Dist(), p.cfg.PublicURL.Scheme == "https"),
-		Ingest:   http.NotFoundHandler(), // the ingestion routes arrive with C-05, C-07, C-13 and C-14
+		App: server.App(p.api, web.Dist(), p.cfg.PublicURL.Scheme == "https"),
+		Ingest: ingest.NewHandler(ingest.HandlerConfig{
+			Auth: p.integrations, Snapshots: p.snapshots, Log: p.log, Real: p.clocks.Real,
+			TrustedProxies: p.cfg.TrustedProxies,
+		}),
 		Internal: server.Internal(health, metrics.Handler(p.keeper.Leading)),
 	})
 	if err != nil {
@@ -490,9 +508,16 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		},
 	})
 	p.orgID, p.signIn = orgID, signIn
+	p.integrations = integrations.New(integrations.Config{
+		OrgID: orgID, Store: p.db.IntegrationsStore(), Audit: w, Business: p.clocks.Business, IngestURL: p.cfg.IngestURL,
+	})
+	p.snapshots = ingest.New(orgID, p.db.IngestStore(), p.clocks.Business)
 	if p.opts.Development {
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
 			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)
+		}
+		if err := p.integrations.EnsureDemo(ctx, devmode.IntegrationDemo()); err != nil {
+			return nil, fmt.Errorf("the demo integration: %w", err)
 		}
 	}
 	return api.New(api.Config{
@@ -507,6 +532,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		OIDC:         signIn,
 		Tokens: tokens.New(orgID, p.db.TokensStore(), w, p.clocks.Business, roles,
 			tokens.NewLimiter(p.clocks.Real)),
+		Integrations:   p.integrations,
+		Snapshots:      p.snapshots,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -542,8 +569,9 @@ func (p *process) newKeeper() *leader.Keeper {
 }
 
 // startWork starts the Leader lock keeper, the clock skew check, the live updates — the Hub's session check, the
-// notice watcher and the LISTEN of the hints — and the worker of the OIDC re-checks; the function it returns stops
-// them all and waits for them until its context ends.
+// notice watcher and the LISTEN of the hints — the worker of the OIDC re-checks, the writer of the use of Integration
+// tokens and the refresh of muster_integration_info; the function it returns stops them all and waits for them until
+// its context ends.
 func (p *process) startWork(ctx context.Context) func(context.Context) {
 	every := p.opts.every
 	if every == nil {
@@ -558,6 +586,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	skewTicks, stopSkewTicks := every(SkewInterval)
 	sessionTicks, stopSessionTicks := every(live.CheckInterval)
 	noticeTicks, stopNoticeTicks := every(live.CheckInterval)
+	infoTicks, stopInfoTicks := every(IntegrationInfoInterval)
 	wg.Go(func() {
 		defer stopLeaderTicks()
 		p.keeper.Run(ctx, leaderTicks)
@@ -575,8 +604,27 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 		defer stopNoticeTicks()
 		p.notices.Run(ctx, noticeTicks)
 	})
-	wg.Go(func() { p.listener.Run(ctx, p.hub.Receive, p.hub.Listening) })
+	// A hint about an Integration, maybe changed on another replica, refreshes muster_integration_info; so does a
+	// LISTEN that is back after a loss, which may have missed hints.
+	wg.Go(func() {
+		p.listener.Run(ctx, func(h db.Hint) {
+			p.hub.Receive(h)
+			if h.Type == integrations.Hint {
+				p.integrations.InfoChanged()
+			}
+		}, func(restored bool) {
+			p.hub.Listening(restored)
+			if restored {
+				p.integrations.InfoChanged()
+			}
+		})
+	})
 	wg.Go(func() { p.rechecker().Run(ctx) })
+	wg.Go(func() { p.integrations.RunTouches(ctx) })
+	wg.Go(func() {
+		defer stopInfoTicks()
+		p.integrations.RunInfo(ctx, infoTicks)
+	})
 	return func(wait context.Context) {
 		cancel()
 		done := make(chan struct{})

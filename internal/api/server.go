@@ -25,6 +25,8 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/ingest"
+	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
@@ -128,6 +130,27 @@ type Tokens interface {
 	RevokeServiceAccountToken(ctx context.Context, r tokens.Requester, publicID, tokenID string) error
 }
 
+// Integrations is what the API needs of internal/integrations: Integrations and their tokens.
+type Integrations interface {
+	List(ctx context.Context, f integrations.ListFilter) (integrations.Page, error)
+	Get(ctx context.Context, publicID string) (integrations.Integration, error)
+	Create(ctx context.Context, r integrations.Requester, in integrations.Input) (integrations.Integration, error)
+	Update(ctx context.Context, r integrations.Requester, publicID string, version *int64, in integrations.Input) (
+		integrations.Integration, error)
+	Delete(ctx context.Context, r integrations.Requester, publicID string, version *int64) error
+	ListTokens(ctx context.Context, publicID string) ([]integrations.Token, error)
+	CreateToken(ctx context.Context, r integrations.Requester, publicID, name string) (integrations.CreatedToken, error)
+	RevokeToken(ctx context.Context, r integrations.Requester, publicID, tokenID string) error
+	IngestURL() string
+	HeartbeatURL() string
+}
+
+// StoredSnapshots is what the API needs of the Stored Snapshot reads of internal/ingest.
+type StoredSnapshots interface {
+	List(ctx context.Context, f ingest.ListFilter) (ingest.Page, error)
+	Get(ctx context.Context, publicID string) (ingest.Snapshot, error)
+}
+
 // Config is what the API serves with.
 type Config struct {
 	Sessions     Sessions
@@ -140,6 +163,8 @@ type Config struct {
 	Live         Live
 	OIDC         OIDC
 	Tokens       Tokens
+	Integrations Integrations
+	Snapshots    StoredSnapshots
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -161,6 +186,8 @@ type Server struct {
 	live           Live
 	oidc           OIDC
 	tokens         Tokens
+	integrations   Integrations
+	snapshots      StoredSnapshots
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -188,6 +215,9 @@ var implemented = map[string]bool{
 	"ListServiceAccounts": true, "CreateServiceAccount": true, "GetServiceAccount": true, "UpdateServiceAccount": true,
 	"DeleteServiceAccount": true, "DisableServiceAccount": true, "EnableServiceAccount": true,
 	"ListServiceAccountTokens": true, "CreateServiceAccountToken": true, "RevokeServiceAccountToken": true,
+	"ListIntegrations": true, "CreateIntegration": true, "GetIntegration": true, "UpdateIntegration": true,
+	"DeleteIntegration": true, "ListIntegrationTokens": true, "CreateIntegrationToken": true,
+	"RevokeIntegrationToken": true, "ListStoredSnapshots": true, "GetStoredSnapshot": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -215,7 +245,8 @@ func New(cfg Config) (*Server, error) {
 	s := &Server{
 		sessions: cfg.Sessions, users: cfg.Users, admin: cfg.Admin, auditLog: cfg.AuditLog, totp: cfg.TOTP,
 		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, oidc: cfg.OIDC, tokens: cfg.Tokens,
-		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
+		integrations: cfg.Integrations, snapshots: cfg.Snapshots, trustedProxies: cfg.TrustedProxies, log: cfg.Log,
+		real:   cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}
 	mux := http.NewServeMux()
