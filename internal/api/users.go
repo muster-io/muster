@@ -205,3 +205,18 @@ func (s *Server) ResetUserTotp(ctx context.Context, req gen.ResetUserTotpRequest
 	}
 	return gen.ResetUserTotp204Response{}, nil
 }
+
+// ConvertUserToLocal is convertUserToLocal: an Admin converts an account that signs in through OIDC back to local; the
+// identity goes, the sessions end and the answer carries a password setup link (C-03.FR-29).
+func (s *Server) ConvertUserToLocal(ctx context.Context, req gen.ConvertUserToLocalRequestObject) (
+	gen.ConvertUserToLocalResponseObject, error) {
+	r, err := requester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, link, err := s.admin.ConvertToLocal(ctx, r, req.UserId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.ConvertUserToLocal200JSONResponse(gen.UserCreated{User: userOf(u), PasswordSetupLink: linkOf(link)}), nil
+}

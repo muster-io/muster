@@ -30,6 +30,9 @@ type fakeOIDC struct {
 	callbacks []oidc.Callback
 	outcome   oidc.Outcome
 	err       error
+	link      oidc.LinkStart
+	linkErr   error
+	linked    []auth.Session
 }
 
 func (f *fakeOIDC) Get(context.Context) (oidc.Settings, error) { return f.settings, f.err }
@@ -63,6 +66,16 @@ func (f *fakeOIDC) StartSignIn(_ context.Context, returnTo string) (oidc.Start, 
 
 func (f *fakeOIDC) CompleteSignIn(_ context.Context, cb oidc.Callback) oidc.Outcome {
 	f.callbacks = append(f.callbacks, cb)
+	return f.outcome
+}
+
+func (f *fakeOIDC) StartLink(_ context.Context, sess auth.Session) (oidc.LinkStart, error) {
+	f.linked = append(f.linked, sess)
+	return f.link, f.linkErr
+}
+
+func (f *fakeOIDC) CompleteLink(_ context.Context, sess auth.Session, cb oidc.Callback) oidc.Outcome {
+	f.linked, f.callbacks = append(f.linked, sess), append(f.callbacks, cb)
 	return f.outcome
 }
 
@@ -296,5 +309,80 @@ func TestOidcSignInRedirects(t *testing.T) {
 	if a = x.call(t, http.MethodGet, "/api/v1/sessions/oidc/callback", ""); a.header.Get("Location") !=
 		"/sign-in?error=oidc_disabled" {
 		t.Errorf("a callback without OIDC = %v", a.header)
+	}
+}
+
+// TestOidcLink is C-03.FR-29 and C-03.AC-20 at the API: startOidcLink answers the authorization URL bound to the web
+// session, with its refusals; completeOidcLink always redirects to the profile, and a callback without a usable web
+// session is invalid_request.
+func TestOidcLink(t *testing.T) {
+	x, f := newOIDCAPI(t)
+	f.link = oidc.LinkStart{URL: "http://127.0.0.1:18090/authorize?state=s", ExpiresAt: t0.Add(10 * time.Minute)}
+	a := x.call(t, http.MethodPost, "/api/v1/me/oidc-identity", "", "Cookie", adminCookie, "X-CSRF-Token",
+		"csrf-"+adminCookie)
+	if m := a.json(t); a.status != http.StatusCreated || m["authorization_url"] != f.link.URL ||
+		m["expires_at"] != f.link.ExpiresAt.Format(time.RFC3339) || len(f.linked) != 1 || f.linked[0].ID != 1 {
+		t.Fatalf("startOidcLink = %d %s", a.status, a.body)
+	}
+	for _, c := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{oidc.ErrAlreadyLinked, http.StatusConflict, codeOIDCAlreadyLinked},
+		{oidc.ErrNotEnabled, http.StatusConflict, codeOIDCNotEnabled},
+		{&oidc.BackChannelError{Step: "discovery"}, http.StatusInternalServerError, ""},
+	} {
+		f.linkErr = c.err
+		a := x.call(t, http.MethodPost, "/api/v1/me/oidc-identity", "", "Cookie", adminCookie, "X-CSRF-Token",
+			"csrf-"+adminCookie)
+		if a.status != c.status || (c.code != "" && a.code(t) != c.code) {
+			t.Errorf("%v = %d %s", c.err, a.status, a.body)
+		}
+	}
+	if !strings.Contains(x.log.String(), `"reason":"link discovery"`) {
+		t.Errorf("the failed discovery is not logged:\n%s", x.log)
+	}
+	if a := x.call(t, http.MethodPost, "/api/v1/me/oidc-identity", "", "Cookie", adminCookie); a.status !=
+		http.StatusForbidden || a.code(t) != codeCSRFInvalid {
+		t.Errorf("startOidcLink without the CSRF token = %d %s", a.status, a.body)
+	}
+
+	f.outcome = oidc.Outcome{Redirect: oidc.ProfilePage}
+	a = x.call(t, http.MethodGet, "/api/v1/me/oidc-identity/callback?code=c&state=s", "", "Cookie", adminCookie)
+	if a.status != http.StatusFound || a.header.Get("Location") != "/profile" || f.linked[len(f.linked)-1].ID != 1 ||
+		f.callbacks[len(f.callbacks)-1].Code != "c" || f.callbacks[len(f.callbacks)-1].State != "s" {
+		t.Fatalf("completeOidcLink = %d %v", a.status, a.header)
+	}
+	for _, cookie := range []string{"", "limited-cookie", "unknown"} {
+		headers := []string{}
+		if cookie != "" {
+			headers = []string{"Cookie", cookie}
+		}
+		a := x.call(t, http.MethodGet, "/api/v1/me/oidc-identity/callback?code=c&state=s", "", headers...)
+		if a.status != http.StatusFound || a.header.Get("Location") != "/profile?error=invalid_request" {
+			t.Errorf("a callback with the cookie %q = %d %v", cookie, a.status, a.header)
+		}
+	}
+	x.srv.oidc = nil
+	if a := x.call(t, http.MethodGet, "/api/v1/me/oidc-identity/callback?state=s", "", "Cookie", adminCookie); a.header.
+		Get("Location") != "/profile?error=invalid_request" {
+		t.Errorf("a callback without OIDC = %v", a.header)
+	}
+	if a := x.call(t, http.MethodPost, "/api/v1/me/oidc-identity", "", "Cookie", adminCookie, "X-CSRF-Token",
+		"csrf-"+adminCookie); a.status != http.StatusConflict || a.code(t) != codeOIDCNotEnabled {
+		t.Errorf("startOidcLink without OIDC = %d %s", a.status, a.body)
+	}
+}
+
+// TestOidcSessionEnded is C-03.FR-30 and C-03.AC-22: a session the IdP's refusal ended answers 401 with
+// oidc_session_ended and removes the cookie.
+func TestOidcSessionEnded(t *testing.T) {
+	x := newTestAPI(t)
+	x.sessions.authErr = auth.ErrOIDCSessionEnded
+	a := x.call(t, http.MethodGet, "/api/v1/me", "", "Cookie", adminCookie)
+	if a.status != http.StatusUnauthorized || a.code(t) != codeOIDCSessionEnded ||
+		!strings.Contains(a.header.Get("Set-Cookie"), "Max-Age=0") {
+		t.Errorf("= %d %s %v", a.status, a.body, a.header)
 	}
 }

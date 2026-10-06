@@ -94,6 +94,8 @@ type database interface {
 	AuthPruner() auth.PruneQueries
 	UsersPruner() users.PruneQueries
 	OIDCPruner() oidc.PruneQueries
+	// OIDCClaimer claims the due background re-checks of OIDC users with lease.
+	OIDCClaimer(lease db.Lease) oidc.Claimer
 	// Clock reads the database clock, for the clock skew check.
 	Clock() rowQuerier
 }
@@ -148,6 +150,8 @@ func (d pgDatabase) AuthPruner() auth.PruneQueries { return authdb.New(d.Pool) }
 func (d pgDatabase) UsersPruner() users.PruneQueries { return usersdb.New(d.Pool) }
 
 func (d pgDatabase) OIDCPruner() oidc.PruneQueries { return oidcdb.New(d.Pool) }
+
+func (d pgDatabase) OIDCClaimer(lease db.Lease) oidc.Claimer { return oidc.NewClaimer(d.Pool, lease) }
 
 func (d pgDatabase) Clock() rowQuerier { return d.Pool }
 
@@ -271,6 +275,9 @@ type process struct {
 	hub      *live.Hub
 	notices  *live.Notices
 	listener *db.Listener
+	// orgID and signIn are the Organization and its OIDC service, for the background re-checks.
+	orgID  int64
+	signIn *oidc.Service
 }
 
 func setup(ctx context.Context, opts Options) (config.Config, *logging.Logger, error) {
@@ -478,6 +485,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			Log:    p.log, Real: p.clocks.Real,
 		},
 	})
+	p.orgID, p.signIn = orgID, signIn
 	if p.opts.Development {
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
 			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)
@@ -527,9 +535,9 @@ func (p *process) newKeeper() *leader.Keeper {
 	}))
 }
 
-// startWork starts the Leader lock keeper, the clock skew check and the live updates — the Hub's session check, the
-// notice watcher and the LISTEN of the hints; the function it returns stops them all and waits for them until its
-// context ends.
+// startWork starts the Leader lock keeper, the clock skew check, the live updates — the Hub's session check, the
+// notice watcher and the LISTEN of the hints — and the worker of the OIDC re-checks; the function it returns stops
+// them all and waits for them until its context ends.
 func (p *process) startWork(ctx context.Context) func(context.Context) {
 	every := p.opts.every
 	if every == nil {
@@ -562,6 +570,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 		p.notices.Run(ctx, noticeTicks)
 	})
 	wg.Go(func() { p.listener.Run(ctx, p.hub.Receive, p.hub.Listening) })
+	wg.Go(func() { p.rechecker().Run(ctx) })
 	return func(wait context.Context) {
 		cancel()
 		done := make(chan struct{})
@@ -573,5 +582,21 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 		case <-done:
 		case <-wait.Done():
 		}
+	}
+}
+
+// rechecker is the worker of the background re-checks of OIDC users on this replica (C-03.FR-30): it claims the due
+// re-checks of the Organization with a lease held by this replica's id.
+func (p *process) rechecker() oidc.Rechecker {
+	id := p.replica.ID()
+	leaderStore := p.db.LeaderStore()
+	return oidc.Rechecker{
+		Claim:         p.db.OIDCClaimer(db.Lease{Owner: id, Duration: oidc.RecheckLease, Clocks: p.clocks}),
+		Owner:         id,
+		Organizations: leaderStore.ListOrganizationIDs,
+		Service: func(orgID int64) (*oidc.Service, bool) {
+			return p.signIn, p.signIn != nil && orgID == p.orgID
+		},
+		Log: p.log,
 	}
 }

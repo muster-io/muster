@@ -281,6 +281,13 @@ func (p *Provider) Exchange(ctx context.Context, d Discovery, code, verifier, re
 	return p.token(ctx, p.interactive, d, form, "token exchange")
 }
 
+// Refresh redeems an offline (refresh) token at the token endpoint through the background class, which retries
+// transient answers until ctx ends: the budget of a background re-check (C-03.FR-30).
+func (p *Provider) Refresh(ctx context.Context, d Discovery, refreshToken logging.Secret) (Tokens, error) {
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {string(refreshToken)}}
+	return p.token(ctx, p.background, d, form, "refresh")
+}
+
 // token posts form to the token endpoint, authenticating the client with client_secret_basic, or with
 // client_secret_post when discovery offers only that, or as a public client without a secret.
 func (p *Provider) token(ctx context.Context, c Doer, d Discovery, form url.Values, step string) (Tokens, error) {
@@ -367,6 +374,23 @@ func (e *TokenError) Error() string { return "the ID token does not verify: " + 
 // discovery, the client among the audiences (and as azp when there are several or azp is given), exp and iat present,
 // and exp, nbf and iat on the real clock with leeway; then the nonce, which must be the one of the request.
 func (p *Provider) Verify(ctx context.Context, d Discovery, raw logging.Secret, nonce string) (IDToken, error) {
+	out, err := p.verify(ctx, d, raw)
+	if err != nil {
+		return IDToken{}, err
+	}
+	if got, _ := out.Claims["nonce"].(string); nonce == "" || got != nonce {
+		return IDToken{}, ErrNonce
+	}
+	return out, nil
+}
+
+// VerifyRefreshed checks the ID token of a refresh as Verify does, without a nonce: a refresh has no request of its
+// own, and OpenID Connect Core §12.2 lets the token leave the nonce out.
+func (p *Provider) VerifyRefreshed(ctx context.Context, d Discovery, raw logging.Secret) (IDToken, error) {
+	return p.verify(ctx, d, raw)
+}
+
+func (p *Provider) verify(ctx context.Context, d Discovery, raw logging.Secret) (IDToken, error) {
 	tok, err := jwt.ParseSigned(string(raw), signatureAlgorithms)
 	if err != nil {
 		return IDToken{}, &TokenError{Reason: "not a signed JWT with an accepted algorithm"}
@@ -409,9 +433,6 @@ func (p *Provider) Verify(ctx context.Context, d Discovery, raw logging.Secret, 
 	azp, _ := claims["azp"].(string)
 	if (len(std.Audience) > 1 || azp != "") && azp != p.clientID {
 		return IDToken{}, &TokenError{Reason: "azp is not the client"}
-	}
-	if got, _ := claims["nonce"].(string); nonce == "" || got != nonce {
-		return IDToken{}, ErrNonce
 	}
 	out := IDToken{Subject: std.Subject, Claims: claims}
 	out.PreferredUsername, _ = claims["preferred_username"].(string)

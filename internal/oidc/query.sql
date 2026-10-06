@@ -189,3 +189,138 @@ ON CONFLICT (org_id) DO NOTHING;
 UPDATE outbound_policies
 SET allowed = array_append(allowed, @network::text), version = version + 1, updated_at = @updated_at
 WHERE org_id = @org_id AND NOT (@network::text = ANY (allowed));
+
+-- TakeLinkRequest removes and returns the link request of a state only for the web session that started it, so that
+-- a callback in another session neither uses nor spends it.
+-- name: TakeLinkRequest :one
+DELETE FROM oidc_auth_requests
+WHERE org_id = @org_id AND state_hash = @state_hash AND purpose = 'link' AND link_session_id = @session_id
+    AND link_user_id = @user_id
+RETURNING nonce, code_verifier_ciphertext, code_verifier_key_id, expires_at;
+
+-- LockLinkUser locks the account a link adds the identity to and reads whether it can take one: active, with a
+-- password and without an identity.
+-- name: LockLinkUser :one
+SELECT id, public_id, name, status, (password_hash IS NOT NULL)::boolean AS has_password,
+       (oidc_subject IS NOT NULL)::boolean AS has_identity
+FROM users
+WHERE org_id = @org_id AND id = @id
+FOR NO KEY UPDATE;
+
+-- LinkIdentity adds the OIDC identity to an active account with a password and wipes the password in the same update,
+-- so that the account never holds both (users_one_credential_check).
+-- name: LinkIdentity :execrows
+UPDATE users
+SET oidc_issuer = @issuer, oidc_subject = @subject, password_hash = NULL, oidc_last_contact_at = @now::timestamptz,
+    oidc_refused_at = NULL, updated_at = @now::timestamptz, version = version + 1
+WHERE org_id = @org_id AND id = @id AND status = 'active' AND password_hash IS NOT NULL AND oidc_subject IS NULL;
+
+-- EndOtherUserSessions ends every session of a user but the one that made the change, with the reason.
+-- name: EndOtherUserSessions :execrows
+UPDATE sessions
+SET ended_at = @now::timestamptz, end_reason = @end_reason
+WHERE org_id = @org_id AND user_id = @user_id AND id <> @keep_id AND ended_at IS NULL;
+
+-- ContinueAsOIDCSession turns the web session that linked an identity into an OIDC session; without an offline token
+-- it ends at @expires_at at the latest.
+-- name: ContinueAsOIDCSession :execrows
+UPDATE sessions
+SET method = 'oidc', idp_mfa = @idp_mfa, expires_at = least(expires_at, @expires_at::timestamptz)
+WHERE org_id = @org_id AND id = @id AND ended_at IS NULL;
+
+-- StoreOfflineToken keeps the offline token the identity provider granted, encrypted, in place of the previous one.
+-- name: StoreOfflineToken :exec
+UPDATE users
+SET oidc_offline_token_ciphertext = @ciphertext, oidc_offline_token_key_id = @key_id,
+    oidc_offline_token_updated_at = @now::timestamptz
+WHERE org_id = @org_id AND id = @id;
+
+-- WipeOfflineToken removes the offline token of a user whose sign-in granted none.
+-- name: WipeOfflineToken :exec
+UPDATE users
+SET oidc_offline_token_ciphertext = NULL, oidc_offline_token_key_id = NULL, oidc_offline_token_updated_at = NULL
+WHERE org_id = @org_id AND id = @id;
+
+-- ScheduleCheck makes the re-check of a user who holds an offline token due at @deadline; a re-check in flight for
+-- the token it replaced loses its lease, so that its outcome is not recorded.
+-- name: ScheduleCheck :exec
+INSERT INTO oidc_checks (user_id, org_id, deadline, created_at, updated_at)
+VALUES (@user_id, @org_id, @deadline::timestamptz, @now::timestamptz, @now::timestamptz)
+ON CONFLICT (user_id) DO UPDATE
+SET deadline = excluded.deadline, lease_owner = NULL, lease_until = NULL, last_outcome = NULL,
+    updated_at = excluded.updated_at;
+
+-- DeleteCheck removes the re-check of a user who holds no offline token any more.
+-- name: DeleteCheck :exec
+DELETE FROM oidc_checks
+WHERE org_id = @org_id AND user_id = @user_id;
+
+-- DueChecks locks up to batch_size re-checks that are due on the business clock and not leased on the real clock,
+-- skipping those another replica holds.
+-- name: DueChecks :many
+SELECT user_id
+FROM oidc_checks
+WHERE org_id = @org_id AND deadline <= @due::timestamptz
+    AND (lease_until IS NULL OR lease_until <= @now::timestamptz)
+ORDER BY deadline, user_id
+LIMIT @batch_size
+FOR UPDATE SKIP LOCKED;
+
+-- LeaseChecks leases the re-checks DueChecks locked to this replica until @lease_until on the real clock.
+-- name: LeaseChecks :exec
+UPDATE oidc_checks
+SET lease_owner = @owner, lease_until = @lease_until::timestamptz
+WHERE org_id = @org_id AND user_id = ANY (@user_ids::bigint[]);
+
+-- GetCheckUser reads the user of a claimed re-check: the offline token and when it was stored, and whether the user
+-- has a live session or a Personal access token that has not expired, at @now on the business clock.
+-- name: GetCheckUser :one
+SELECT u.id, u.public_id, u.name, u.role, u.status, u.oidc_subject, u.oidc_offline_token_ciphertext,
+       u.oidc_offline_token_key_id, u.oidc_offline_token_updated_at,
+       EXISTS (
+           SELECT 1 FROM sessions s
+           WHERE s.org_id = u.org_id AND s.user_id = u.id AND s.ended_at IS NULL
+               AND s.expires_at > @now::timestamptz AND s.idle_expires_at > @now::timestamptz
+       ) AS live_session,
+       EXISTS (
+           SELECT 1 FROM api_tokens t
+           WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.kind = 'personal' AND t.revoked_at IS NULL
+               AND (t.expires_at IS NULL OR t.expires_at > @now::timestamptz)
+       ) AS usable_token
+FROM users u
+WHERE u.org_id = @org_id AND u.id = @id;
+
+-- LockCheckUser locks the user whose re-check ends and reads the offline token it holds now.
+-- name: LockCheckUser :one
+SELECT role, status, oidc_offline_token_updated_at
+FROM users
+WHERE org_id = @org_id AND id = @id
+FOR NO KEY UPDATE;
+
+-- FinishCheck records the outcome of a re-check that still holds its lease, makes it due again at @deadline and
+-- releases the lease; no row means the lease was lost and the outcome must not be recorded.
+-- name: FinishCheck :execrows
+UPDATE oidc_checks
+SET deadline = @deadline::timestamptz, last_outcome = @outcome, lease_owner = NULL, lease_until = NULL,
+    updated_at = @updated_at::timestamptz
+WHERE org_id = @org_id AND user_id = @user_id AND lease_owner = @owner AND lease_until > @now::timestamptz;
+
+-- DropCheck removes a re-check that still holds its lease, when the identity provider refused the user; no row means
+-- the lease was lost.
+-- name: DropCheck :execrows
+DELETE FROM oidc_checks
+WHERE org_id = @org_id AND user_id = @user_id AND lease_owner = @owner AND lease_until > @now::timestamptz;
+
+-- RefuseUser records that the identity provider refused the user at a re-check and wipes the offline token.
+-- name: RefuseUser :exec
+UPDATE users
+SET oidc_refused_at = @now::timestamptz, oidc_offline_token_ciphertext = NULL, oidc_offline_token_key_id = NULL,
+    oidc_offline_token_updated_at = NULL
+WHERE org_id = @org_id AND id = @id;
+
+-- CapOIDCSessions bounds the open OIDC sessions of a user who no longer holds an offline token to @expires_at, since no
+-- background re-check can end them any more.
+-- name: CapOIDCSessions :execrows
+UPDATE sessions
+SET expires_at = least(expires_at, @expires_at::timestamptz)
+WHERE org_id = @org_id AND user_id = @user_id AND method = 'oidc' AND ended_at IS NULL;

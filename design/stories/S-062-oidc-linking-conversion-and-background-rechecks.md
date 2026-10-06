@@ -10,28 +10,40 @@ files_touched:
   - internal/oidc/link.go
   - internal/oidc/recheck.go
   - internal/oidc/signin.go
+  - internal/oidc/provider.go
+  - internal/oidc/settings.go
   - internal/oidc/query.sql
   - internal/oidc/link_test.go
   - internal/oidc/recheck_test.go
+  - internal/oidc/settings_test.go
+  - internal/oidc/signin_test.go
   - internal/oidc/oidc_integration_test.go
   - internal/db/claim.go
   - internal/db/claim_test.go
+  - internal/db/claim_integration_test.go
   - internal/api/profile.go
   - internal/api/users.go
+  - internal/api/oidc.go
   - internal/api/server.go
+  - internal/api/middleware.go
   - internal/api/problem.go
   - internal/api/oidc_test.go
   - internal/api/users_test.go
   - internal/auth/session.go
+  - internal/auth/auth_test.go
+  - internal/users/users.go
   - internal/users/admin.go
   - internal/users/setup.go
   - internal/users/query.sql
   - internal/users/admin_test.go
+  - internal/fakes/fakeoidc/fakeoidc.go
+  - internal/fakes/fakeoidc/fakeoidc_test.go
   - internal/runtime/runtime.go
   - internal/runtime/runtime_test.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
   - internal/archlint/secretleak.go
+  - api/openapi.yaml
   - test/e2e/oidc_test.go
 acceptance:
   - "[C-03.FR-9, C-03.FR-29, C-03.AC-20] When Alice links OIDC from her session, her other sessions end, her password no longer signs in (401), she signs in through OIDC into the same account with TOTP still asked, and `GET /api/v1/users` shows her `sign_in_method` `oidc`; the same identity linked from Bob's session ends with `identity_linked_elsewhere`; a link callback replayed in another session ends with `invalid_request`."
@@ -158,7 +170,7 @@ curl -s -b ada 'localhost:8080/api/v1/audit-log?action=user.role_sync_kept_admin
 # conversion (C-03.AC-21)
 curl -s "${H[@]}" -X POST "localhost:8080/api/v1/users/$OLGA_ID/convert-to-local" | jq -c '{m: .user.sign_in_method, link: (.password_setup_link.url | test("#token="))}'
 # {"m":"local","link":true}
-./bin/muster dev admin reset-password --actor ops --login ada   # prompts for the password
+./bin/muster dev admin reset-password --actor ops ada   # prompts for the password
 curl -s -b jar 'localhost:8080/api/v1/audit-log?action=user.password_reset' | jq -c '.items[0] | {actor: .actor.name, d: .details.oidc_identity_removed}'
 # {"actor":"ops","d":true}
 ```
@@ -176,6 +188,32 @@ None. Where the groups claim is read was settled in S-013 (D247).
 - Split from S-013 before implementation (S-013 kept settings, the proxy object and sign-in).
 - The claim helper written here — claim in a short transaction, lease, backoff with jitter, slow work outside the
   transaction — is the one of ADR-0006 that ingestion (S-020), timers (S-028) and delivery (S-034) reuse.
+- Decisions taken while implementing, within the contract:
+  - A re-check records its outcome only while it still holds its lease and the user still holds the token it
+    refreshed; otherwise the outcome is dropped and logged as `oidc_check_failed`, and the row runs again or is gone.
+    A replica claims at most 8 re-checks at a time and runs them at once, so each finishes within its 10 s budget
+    and well inside the 60 s lease.
+  - An outcome is recorded in a transaction that outlives the worker's stop (bounded to 10 s), and a re-check that
+    lost its lease still keeps the refresh token the IdP rotated while the user holds the token it refreshed, so a
+    rotation is never lost into a false refusal at the next check.
+  - A `407` from the OIDC proxy is unavailability: it is not an answer of the IdP.
+  - While OIDC is switched off, due re-checks are `skipped` without calling the IdP: the IdP decides nothing then,
+    as `role_locked` says.
+  - A refresh whose ID token does not verify, or names another subject, decides nothing: the check is
+    `unavailable`, and a rotated refresh token of the user is still stored, so the next check can refresh.
+  - A token answer without `scope` granted the scope requested (RFC 6749 §5.1), which includes `offline_access`.
+  - A sign-in without an offline token wipes the previous one and its re-check, as "each new OIDC sign-in replaces
+    it" says, and bounds the user's open OIDC sessions to `auth.oidc_fallback_session_lifetime`, since nothing
+    re-checks them any more.
+  - Linking applies no Role sync; the next sign-in or re-check does. The link callback answers every outcome with a
+    redirect: a callback without a usable web session goes to `/profile?error=invalid_request`.
+  - While Role sync keeps the last active Admin, each re-check records `user.role_sync_kept_admin`, which keeps the
+    warning `last_admin_kept` current (it compares the entry with the last OIDC contact).
+  - The internal files beyond the original list: `provider.go` (the refresh grant and the refreshed ID token),
+    `settings.go` (the queries and the refresh budget of tests), the fake IdP (a refresh answers with the person as
+    last scripted for the subject, which the Verification of C-03.AC-26 at a re-check needs), `api/oidc.go` and
+    `middleware.go` (the link operations and the callback's redirect), `users.go` (`role_locked`), and the tests of
+    those files; `api/openapi.yaml` fixes the `302` description of `completeOidcLink`.
 
 ## Coverage
 

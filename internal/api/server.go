@@ -66,6 +66,7 @@ type UserAdmin interface {
 	Enable(ctx context.Context, r users.Requester, id string) (users.User, error)
 	Delete(ctx context.Context, r users.Requester, id string, version *int64) error
 	CreateSetupLink(ctx context.Context, r users.Requester, id string) (users.SetupLink, error)
+	ConvertToLocal(ctx context.Context, r users.Requester, id string) (users.User, users.SetupLink, error)
 	CompleteSetup(ctx context.Context, token, password string, addr netip.Addr) error
 }
 
@@ -156,7 +157,7 @@ var implemented = map[string]bool{
 	"RegenerateTotpRecoveryCodes": true, "SubmitSessionTotp": true, "ResetUserTotp": true, "GetOrganization": true,
 	"UpdateOrganization": true, "ListSystemNotices": true, "StreamLiveUpdates": true,
 	"GetOidcSettings": true, "UpdateOidcSettings": true, "CheckOidcSettings": true, "StartOidcSignIn": true,
-	"CompleteOidcSignIn": true,
+	"CompleteOidcSignIn": true, "StartOidcLink": true, "CompleteOidcLink": true, "ConvertUserToLocal": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -246,11 +247,11 @@ func identity(ctx context.Context) (*auth.Identity, error) {
 func userOf(u users.User) gen.User {
 	tag := etag(u.Version)
 	method := gen.UserSignInMethod(u.SignInMethod())
-	offline := u.OfflineAccess
+	offline, locked := u.OfflineAccess, u.RoleLocked
 	out := gen.User{
 		Id: u.PublicID, Name: u.Name, Login: u.Login, Role: gen.RoleName(u.Role), Source: gen.UserSource(u.Source),
 		Status: gen.UserStatus(u.Status), TotpEnabled: u.TOTPEnabled, CreatedAt: u.CreatedAt.UTC(), Etag: &tag,
-		SignInMethod: &method,
+		SignInMethod: &method, RoleLocked: &locked,
 	}
 	if u.HasOIDCIdentity {
 		out.OidcOfflineAccess = &offline

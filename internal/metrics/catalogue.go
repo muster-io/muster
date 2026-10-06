@@ -143,6 +143,16 @@ var APIRequestDuration = newHistogram(Definition{
 	Capability: "C-03",
 })
 
+// OIDCChecks counts the background re-checks of OIDC users at the identity provider, by outcome.
+var OIDCChecks = newCounter(Definition{
+	Name: "muster_oidc_checks_total",
+	Help: "Background re-checks of OIDC users at the identity provider, by outcome.",
+	Labels: []Label{closed("outcome", "ok is a refresh the identity provider granted, refused one it refused (the "+
+		"user's sessions ended), unavailable one that reached no decision, skipped a user without a live session or a "+
+		"usable Personal access token, not sent to the identity provider", "ok", "refused", "unavailable", "skipped")},
+	Capability: "C-03",
+})
+
 // LoginFailures counts the failed sign-ins that were evaluated, by method.
 var LoginFailures = newCounter(Definition{
 	Name: "muster_login_failures_total",

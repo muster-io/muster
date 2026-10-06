@@ -76,6 +76,11 @@ const (
 	EndRoleChanged  = "role_changed"
 	EndUserDisabled = "user_disabled"
 	EndUserDeleted  = "user_deleted"
+	// The OIDC endings (C-03.FR-9, FR-29, FR-30): the user linked an OIDC identity (the other sessions), an Admin
+	// converted the account to local, or the identity provider refused the user at a background re-check.
+	EndOIDCLinked       = "oidc_linked"
+	EndConvertedToLocal = "converted_to_local"
+	EndIDPRefused       = "idp_refused"
 )
 
 var (
@@ -86,6 +91,9 @@ var (
 	ErrUnauthenticated = errors.New("no valid session")
 	// ErrSessionExpired is a session that ended by idle timeout or lifetime.
 	ErrSessionExpired = errors.New("the session expired")
+	// ErrOIDCSessionEnded is a session that ended because the identity provider refused its user at a background
+	// re-check (C-03.FR-30).
+	ErrOIDCSessionEnded = errors.New("the identity provider refused the user; sign in again")
 	// ErrNotLocal is a password change of an account that signs in through OIDC.
 	ErrNotLocal = errors.New("the account signs in through OIDC and has no password")
 	// ErrTOTPNotPending is a second factor given to a session that does not wait for one.
@@ -568,7 +576,8 @@ func (s *Service) LiveSessions(ctx context.Context, ids []int64) ([]int64, error
 
 // Authenticate returns the session of a cookie value. A value that names no session, an ended session or a user who
 // is no longer active is ErrUnauthenticated; a session past its idle timeout or lifetime ends with the reason
-// expired and is ErrSessionExpired. A session in use moves its idle expiry, written at most once a minute.
+// expired and is ErrSessionExpired, and one the identity provider's refusal ended is ErrOIDCSessionEnded. A session in
+// use moves its idle expiry, written at most once a minute.
 func (s *Service) Authenticate(ctx context.Context, cookie string) (Session, error) {
 	token, err := base64.RawURLEncoding.DecodeString(cookie)
 	if err != nil || len(token) != tokenBytes {
@@ -583,8 +592,11 @@ func (s *Service) Authenticate(ctx context.Context, cookie string) (Session, err
 		return Session{}, fmt.Errorf("find the session: %w", err)
 	}
 	if row.EndedAt.Valid {
-		if row.EndReason.String == EndExpired {
+		switch row.EndReason.String {
+		case EndExpired:
 			return Session{}, ErrSessionExpired
+		case EndIDPRefused:
+			return Session{}, ErrOIDCSessionEnded
 		}
 		return Session{}, ErrUnauthenticated
 	}

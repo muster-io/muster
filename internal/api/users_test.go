@@ -100,6 +100,20 @@ func (f *fakeAdmin) CreateSetupLink(_ context.Context, r users.Requester, id str
 	return setupLink, err
 }
 
+func (f *fakeAdmin) ConvertToLocal(_ context.Context, r users.Requester, id string) (users.User, users.SetupLink,
+	error) {
+	f.by = append(f.by, r)
+	u, err := f.Get(context.Background(), id) //nolint:usetesting // as above
+	if err != nil {
+		return users.User{}, users.SetupLink{}, err
+	}
+	if !u.HasOIDCIdentity {
+		return users.User{}, users.SetupLink{}, users.ErrNotLinked
+	}
+	u.HasOIDCIdentity, u.RoleLocked = false, false
+	return u, setupLink, nil
+}
+
 func (f *fakeAdmin) CompleteSetup(_ context.Context, token, password string, _ netip.Addr) error {
 	if err, ok := f.setups[token]; ok {
 		return err
@@ -375,6 +389,8 @@ func TestHandlersWithoutRequester(t *testing.T) {
 	errs = append(errs, err)
 	_, err = x.srv.CreatePasswordSetupLink(ctx, genLink())
 	errs = append(errs, err)
+	_, err = x.srv.ConvertUserToLocal(ctx, gen.ConvertUserToLocalRequestObject{UserId: bobPublicID})
+	errs = append(errs, err)
 	for i, err := range errs {
 		if !errors.Is(err, errUnauthenticated) {
 			t.Errorf("handler %d: %v", i, err)
@@ -462,7 +478,10 @@ func TestProblemCodesOfUsers(t *testing.T) {
 		}
 	}
 	for _, c := range []string{typeConflict + " " + codeNameTaken, typeConflict + " " + codeLastAdmin,
-		typeGone + " " + codeLinkExpired, typeGone + " " + codeLinkUsed, typeValidationFailed + " " + fieldInvalidCursor} {
+		typeGone + " " + codeLinkExpired, typeGone + " " + codeLinkUsed, typeValidationFailed + " " + fieldInvalidCursor,
+		typeConflict + " " + codeRoleLocked, typeConflict + " " + codeOIDCNotLinked,
+		typeConflict + " " + codeOIDCAlreadyLinked, typeConflict + " " + codeLocalUserOnly,
+		typeUnauthenticated + " " + codeOIDCSessionEnded} {
 		if !found[c] {
 			t.Errorf("%s is not catalogued", c)
 		}
@@ -489,4 +508,66 @@ func genLink() gen.CreatePasswordSetupLinkRequestObject {
 
 func genSetup() gen.CompletePasswordSetupRequestObject {
 	return gen.CompletePasswordSetupRequestObject{}
+}
+
+// TestConvertUserToLocal is C-03.FR-29 and C-03.AC-21: the converted user and a password setup link; an account that
+// does not sign in through OIDC is 409 oidc_not_linked.
+func TestConvertUserToLocal(t *testing.T) {
+	x, fa := newAdminAPI(t)
+	bob := fa.users[bobPublicID]
+	bob.HasOIDCIdentity, bob.HasPassword, bob.RoleLocked = true, false, true
+	fa.users[bobPublicID] = bob
+	a := x.mutate(t, adminCookie, http.MethodPost, "/api/v1/users/"+bobPublicID+"/convert-to-local", "")
+	m := a.json(t)
+	if a.status != http.StatusOK || m["user"].(map[string]any)["sign_in_method"] != "local" ||
+		m["user"].(map[string]any)["role_locked"] != false || m["password_setup_link"].(map[string]any)["url"] !=
+		setupLink.URL {
+		t.Fatalf("= %d %s", a.status, a.body)
+	}
+	bob.HasOIDCIdentity = false
+	fa.users[bobPublicID] = bob
+	a = x.mutate(t, adminCookie, http.MethodPost, "/api/v1/users/"+bobPublicID+"/convert-to-local", "")
+	if a.status != http.StatusConflict || a.code(t) != codeOIDCNotLinked {
+		t.Errorf("a local account = %d %s", a.status, a.body)
+	}
+	if a := x.mutate(t, viewerCookie, http.MethodPost, "/api/v1/users/"+bobPublicID+"/convert-to-local", ""); a.status !=
+		http.StatusForbidden {
+		t.Errorf("without users:write = %d", a.status)
+	}
+}
+
+// TestOIDCRefusalsOfUsers is C-03.FR-29: a Role change of an OIDC account while the IdP decides the Role is 409
+// role_locked, which User.role_locked announces; a password change or setup link of an OIDC account is 409
+// local_user_only.
+func TestOIDCRefusalsOfUsers(t *testing.T) {
+	x, fa := newAdminAPI(t)
+	bob := fa.users[bobPublicID]
+	bob.HasOIDCIdentity, bob.RoleLocked = true, true
+	fa.users[bobPublicID] = bob
+	if a := x.call(t, http.MethodGet, "/api/v1/users/"+bobPublicID, "", "Cookie", adminCookie); a.json(t)["role_locked"] !=
+		true || a.json(t)["sign_in_method"] != "oidc" {
+		t.Errorf("getUser = %s", a.body)
+	}
+	for _, c := range []struct {
+		err  error
+		code string
+	}{{users.ErrRoleLocked, codeRoleLocked}, {auth.ErrNotLocal, codeLocalUserOnly}} {
+		fa.err = c.err
+		a := x.mutate(t, adminCookie, http.MethodPut, "/api/v1/users/"+bobPublicID,
+			`{"name":"bob","role":"admin"}`, "If-Match", `"1"`)
+		if a.status != http.StatusConflict || a.code(t) != c.code {
+			t.Errorf("%v = %d %s", c.err, a.status, a.body)
+		}
+		a = x.mutate(t, adminCookie, http.MethodPost, "/api/v1/users/"+bobPublicID+"/password-setup-links", "")
+		if a.status != http.StatusConflict || a.code(t) != c.code {
+			t.Errorf("a setup link with %v = %d %s", c.err, a.status, a.body)
+		}
+	}
+	fa.err = nil
+	x.sessions.err = auth.ErrNotLocal
+	a := x.mutate(t, adminCookie, http.MethodPut, "/api/v1/me/password",
+		`{"current_password":"a-good-password-1","new_password":"a-good-password-2"}`)
+	if a.status != http.StatusConflict || a.code(t) != codeLocalUserOnly {
+		t.Errorf("changePassword of an OIDC account = %d %s", a.status, a.body)
+	}
 }

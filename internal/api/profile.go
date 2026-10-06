@@ -10,6 +10,8 @@ import (
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/oidc"
 	"github.com/muster-io/muster/internal/users"
 )
 
@@ -141,4 +143,46 @@ func (s *Server) self(ctx context.Context, id int64) (users.User, error) {
 		return users.User{}, errUnauthenticated
 	}
 	return u, err
+}
+
+// StartOidcLink is startOidcLink: the authorization URL of a link of the caller's account to an identity at the
+// identity provider, bound to this web session (C-03.FR-29).
+func (s *Server) StartOidcLink(ctx context.Context, _ gen.StartOidcLinkRequestObject) (
+	gen.StartOidcLinkResponseObject, error) {
+	id, err := identity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.oidc == nil {
+		return nil, errOIDCNotEnabled
+	}
+	start, err := s.oidc.StartLink(ctx, id.Session)
+	if be, ok := errors.AsType[*oidc.BackChannelError](err); ok {
+		s.log.Log(ctx, logging.OIDCSignInFailed, logging.F("reason", "link "+be.Step),
+			logging.F("error", be.Error()))
+		return nil, problem(http.StatusInternalServerError, typeInternal, "",
+			"The identity provider cannot be reached; try again later.")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return gen.StartOidcLink201JSONResponse(gen.OidcLinkStart{AuthorizationUrl: start.URL,
+		ExpiresAt: start.ExpiresAt.UTC()}), nil
+}
+
+func (r redirect) VisitCompleteOidcLinkResponse(w http.ResponseWriter) error { return r.write(w) }
+
+// CompleteOidcLink is completeOidcLink: the identity provider's redirect back to a link, accepted only in the web
+// session that started it; every outcome is a redirect to the profile, with ?error=<code> after a failure.
+func (s *Server) CompleteOidcLink(ctx context.Context, req gen.CompleteOidcLinkRequestObject) (
+	gen.CompleteOidcLinkResponseObject, error) {
+	id, ok := auth.IdentityFrom(ctx)
+	if !ok || s.oidc == nil {
+		return redirect{location: oidc.ProfilePage + "?error=" + oidc.ErrorInvalidRequest}, nil
+	}
+	out := s.oidc.CompleteLink(ctx, id.Session, oidc.Callback{
+		Code: deref(req.Params.Code), State: deref(req.Params.State), Error: deref(req.Params.Error),
+		Address: clientAddress(ctx), UserAgent: infoFrom(ctx).userAgent,
+	})
+	return redirect{location: out.Redirect}, nil
 }

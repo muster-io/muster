@@ -1326,3 +1326,20 @@ func TestAttemptLock(t *testing.T) {
 		t.Errorf("a failed lock: %v", err)
 	}
 }
+
+// TestOIDCSessionEnded is C-03.FR-30 and C-03.AC-22: a session that the identity provider's refusal ended answers
+// ErrOIDCSessionEnded, so the API says oidc_session_ended; other endings stay ErrUnauthenticated.
+func TestOIDCSessionEnded(t *testing.T) {
+	h := newHarness(t)
+	sess, err := h.signIn(t, "alice@example.org", alicePassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for reason, want := range map[string]error{EndIDPRefused: ErrOIDCSessionEnded, EndOIDCLinked: ErrUnauthenticated,
+		EndConvertedToLocal: ErrUnauthenticated} {
+		h.store.sessions[0].endReason, h.store.sessions[0].endedAt = reason, t0
+		if _, err := h.svc.Authenticate(t.Context(), sess.Cookie()); !errors.Is(err, want) {
+			t.Errorf("a session ended with %s: %v, want %v", reason, err, want)
+		}
+	}
+}

@@ -727,15 +727,79 @@ func probeOIDC(ctx context.Context, secrets []string, log io.Writer) error {
 	errs = append(errs, err)
 	_, err = p.Verify(ctx, d, logging.Secret(secrets[2]), secrets[2])
 	errs = append(errs, err, fmt.Errorf("outcomes: %+v %+v", out, out2))
+	_, err = p.Refresh(ctx, d, logging.Secret(secrets[2]))
+	errs = append(errs, err)
+	_, err = p.VerifyRefreshed(ctx, d, logging.Secret(secrets[2]))
+	errs = append(errs, err)
+
+	// A link: the code of the callback.
+	sess := auth.Session{ID: 7, User: auth.Principal{ID: 1, PublicID: "SR0000000000P1", Name: "probe"}}
+	link, err := svc.StartLink(ctx, sess)
+	errs = append(errs, err)
+	if u, perr := url.Parse(link.URL); perr == nil {
+		out3 := svc.CompleteLink(ctx, sess, oidc.Callback{Code: secrets[2], State: u.Query().Get("state")})
+		errs = append(errs, fmt.Errorf("link outcome: %+v", out3))
+	}
+
+	// A background re-check: the offline token, which the stand-in refuses with the secret in its answer.
+	ct, keyID, err := k.Encrypt("users.oidc_offline_token", []byte(secrets[2]))
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	store.token, store.tokenKey = ct, keyID
+	_, err = svc.Recheck(ctx, func(context.Context, int64, int32) ([]int64, error) { return []int64{1}, nil },
+		"probe")
+	errs = append(errs, err)
 	return errors.Join(errs...)
 }
 
-// probeOIDCStore is the OIDC settings and requests of probeOIDC in memory.
+// probeOIDCStore is the OIDC settings and requests of probeOIDC in memory, with one user who holds an offline token.
 type probeOIDCStore struct {
 	oidc.Store
 	row      *odb.OidcSetting
 	requests map[string]odb.InsertAuthRequestParams
+	token    []byte
+	tokenKey string
 }
+
+func (s *probeOIDCStore) LockLinkUser(context.Context, odb.LockLinkUserParams) (odb.LockLinkUserRow, error) {
+	return odb.LockLinkUserRow{ID: 1, PublicID: "SR0000000000P1", Name: "probe", Status: "active",
+		HasPassword: true}, nil
+}
+
+func (s *probeOIDCStore) TakeLinkRequest(_ context.Context, a odb.TakeLinkRequestParams) (odb.TakeLinkRequestRow,
+	error) {
+	r, ok := s.requests[string(a.StateHash)]
+	if !ok {
+		return odb.TakeLinkRequestRow{}, pgx.ErrNoRows
+	}
+	return odb.TakeLinkRequestRow{Nonce: r.Nonce, CodeVerifierCiphertext: r.CodeVerifierCiphertext,
+		CodeVerifierKeyID: r.CodeVerifierKeyID, ExpiresAt: r.ExpiresAt}, nil
+}
+
+func (s *probeOIDCStore) GetCheckUser(context.Context, odb.GetCheckUserParams) (odb.GetCheckUserRow, error) {
+	return odb.GetCheckUserRow{ID: 1, PublicID: "SR0000000000P1", Name: "probe", Role: "viewer", Status: "active",
+		OidcSubject: pgtype.Text{String: "probe", Valid: true}, OidcOfflineTokenCiphertext: s.token,
+		OidcOfflineTokenKeyID: pgtype.Text{String: s.tokenKey, Valid: true}, LiveSession: true}, nil
+}
+
+func (s *probeOIDCStore) LockCheckUser(context.Context, odb.LockCheckUserParams) (odb.LockCheckUserRow, error) {
+	return odb.LockCheckUserRow{Role: "viewer", Status: "active"}, nil
+}
+
+func (s *probeOIDCStore) DropCheck(context.Context, odb.DropCheckParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *probeOIDCStore) FinishCheck(context.Context, odb.FinishCheckParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *probeOIDCStore) EndUserSessions(context.Context, odb.EndUserSessionsParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *probeOIDCStore) RefuseUser(context.Context, odb.RefuseUserParams) error { return nil }
 
 func (s *probeOIDCStore) InTx(_ context.Context, f func(oidc.Queries) error) error { return f(s) }
 

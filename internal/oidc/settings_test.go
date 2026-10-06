@@ -45,6 +45,13 @@ type memUser struct {
 	lastContact              *time.Time
 	liveSessions, endedCount int
 	endReasons               []string
+	// password says the account has a password; token is the offline token, encrypted, stored at tokenAt.
+	password    bool
+	token       []byte
+	tokenKey    string
+	tokenAt     *time.Time
+	refusedAt   *time.Time
+	usableToken bool
 }
 
 // memStore is the tables of the package in memory, enough for the settings and the sign-in.
@@ -60,10 +67,18 @@ type memStore struct {
 	// raceLogin makes the next account creation fail on the unique login, as a concurrent one would; raceIdentity
 	// creates the account as a parallel callback would and fails on the unique identity.
 	raceLogin, raceIdentity bool
+	// checks are the rows of oidc_checks by user; continued are the sessions links turned into OIDC sessions.
+	checks    map[int64]*memCheck
+	continued []dbgen.ContinueAsOIDCSessionParams
+	// capped are the bounds given to the OIDC sessions of users whose token was wiped; sessionGone makes the session
+	// that linked end before the link continues it.
+	capped      []dbgen.CapOIDCSessionsParams
+	sessionGone bool
 }
 
 func newMemStore() *memStore {
-	return &memStore{requests: map[string]dbgen.InsertAuthRequestParams{}, policy: "nobody"}
+	return &memStore{requests: map[string]dbgen.InsertAuthRequestParams{}, policy: "nobody",
+		checks: map[int64]*memCheck{}}
 }
 
 func (s *memStore) InTx(_ context.Context, f func(Queries) error) error { return f(s) }
@@ -287,7 +302,8 @@ func (s *memStore) RecordContact(_ context.Context, a dbgen.RecordContactParams)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := a.Now
-	s.byID(a.ID).lastContact = &t
+	u := s.byID(a.ID)
+	u.lastContact, u.refusedAt = &t, nil
 	return nil
 }
 

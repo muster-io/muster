@@ -12,6 +12,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const convertToLocal = `-- name: ConvertToLocal :execrows
+UPDATE users
+SET oidc_issuer = NULL, oidc_subject = NULL, oidc_offline_token_ciphertext = NULL, oidc_offline_token_key_id = NULL,
+    oidc_offline_token_updated_at = NULL, updated_at = $1::timestamptz, version = version + 1
+WHERE org_id = $2 AND id = $3 AND status <> 'deleted' AND oidc_subject IS NOT NULL
+`
+
+type ConvertToLocalParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+}
+
+// ConvertToLocal removes the OIDC identity of an account that is not deleted, with its offline token, so that the
+// account signs in with a password once one is set.
+func (q *Queries) ConvertToLocal(ctx context.Context, arg ConvertToLocalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, convertToLocal, arg.Now, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countAdmins = `-- name: CountAdmins :one
 SELECT count(*)
 FROM users
@@ -67,6 +90,23 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, 
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const deleteOIDCCheck = `-- name: DeleteOIDCCheck :exec
+DELETE FROM oidc_checks
+WHERE org_id = $1 AND user_id = $2
+`
+
+type DeleteOIDCCheckParams struct {
+	OrgID  int64
+	UserID int64
+}
+
+// DeleteOIDCCheck removes the background re-check of a user whose offline token was wiped: disabled, deleted or
+// converted to local.
+func (q *Queries) DeleteOIDCCheck(ctx context.Context, arg DeleteOIDCCheckParams) error {
+	_, err := q.db.Exec(ctx, deleteOIDCCheck, arg.OrgID, arg.UserID)
+	return err
 }
 
 const endSessionsOfUser = `-- name: EndSessionsOfUser :execrows
@@ -145,7 +185,10 @@ SELECT u.id, u.public_id, u.login, u.name, u.email, u.role, u.source, u.status, 
        EXISTS (
            SELECT 1 FROM user_totp t
            WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.enrolled_at IS NOT NULL
-       ) AS totp_enabled
+       ) AS totp_enabled,
+       (u.oidc_subject IS NOT NULL AND EXISTS (
+           SELECT 1 FROM oidc_settings o WHERE o.org_id = u.org_id AND o.enabled AND o.sync_role
+       ))::boolean AS role_locked
 FROM users u
 WHERE u.org_id = $1 AND u.id = $2
 `
@@ -173,6 +216,7 @@ type GetUserRow struct {
 	CreatedAt       time.Time
 	Version         int64
 	TotpEnabled     bool
+	RoleLocked      bool
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -198,6 +242,7 @@ func (q *Queries) GetUser(ctx context.Context, arg GetUserParams) (GetUserRow, e
 		&i.CreatedAt,
 		&i.Version,
 		&i.TotpEnabled,
+		&i.RoleLocked,
 	)
 	return i, err
 }
@@ -243,7 +288,10 @@ SELECT u.id, u.public_id, u.login, u.name, u.email, u.role, u.source, u.status, 
        EXISTS (
            SELECT 1 FROM user_totp t
            WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.enrolled_at IS NOT NULL
-       ) AS totp_enabled
+       ) AS totp_enabled,
+       (u.oidc_subject IS NOT NULL AND EXISTS (
+           SELECT 1 FROM oidc_settings o WHERE o.org_id = u.org_id AND o.enabled AND o.sync_role
+       ))::boolean AS role_locked
 FROM users u
 WHERE u.org_id = $1 AND u.public_id = $2
 `
@@ -271,6 +319,7 @@ type GetUserByPublicIDRow struct {
 	CreatedAt       time.Time
 	Version         int64
 	TotpEnabled     bool
+	RoleLocked      bool
 }
 
 // GetUserByPublicID reads a user by the public_id of the API, deleted users included.
@@ -295,6 +344,7 @@ func (q *Queries) GetUserByPublicID(ctx context.Context, arg GetUserByPublicIDPa
 		&i.CreatedAt,
 		&i.Version,
 		&i.TotpEnabled,
+		&i.RoleLocked,
 	)
 	return i, err
 }
@@ -334,6 +384,9 @@ SELECT u.id, u.public_id, u.login, u.name, u.email, u.role, u.source, u.status, 
            SELECT 1 FROM user_totp t
            WHERE t.org_id = u.org_id AND t.user_id = u.id AND t.enrolled_at IS NOT NULL
        ) AS totp_enabled,
+       (u.oidc_subject IS NOT NULL AND EXISTS (
+           SELECT 1 FROM oidc_settings o WHERE o.org_id = u.org_id AND o.enabled AND o.sync_role
+       ))::boolean AS role_locked,
        lower(u.name)::text AS sort_name
 FROM users u
 WHERE u.org_id = $1
@@ -379,6 +432,7 @@ type ListUsersRow struct {
 	CreatedAt       time.Time
 	Version         int64
 	TotpEnabled     bool
+	RoleLocked      bool
 	SortName        string
 }
 
@@ -420,6 +474,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 			&i.CreatedAt,
 			&i.Version,
 			&i.TotpEnabled,
+			&i.RoleLocked,
 			&i.SortName,
 		); err != nil {
 			return nil, err
@@ -558,6 +613,51 @@ func (q *Queries) PseudonymizeUser(ctx context.Context, arg PseudonymizeUserPara
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const resetUserPassword = `-- name: ResetUserPassword :execrows
+UPDATE users
+SET password_hash = $1, password_changed_at = $2::timestamptz, oidc_issuer = NULL, oidc_subject = NULL,
+    oidc_offline_token_ciphertext = NULL, oidc_offline_token_key_id = NULL, oidc_offline_token_updated_at = NULL,
+    updated_at = $2::timestamptz, version = version + 1
+WHERE org_id = $3 AND id = $4 AND status <> 'deleted'
+`
+
+type ResetUserPasswordParams struct {
+	PasswordHash pgtype.Text
+	Now          time.Time
+	OrgID        int64
+	ID           int64
+}
+
+// ResetUserPassword is the emergency reset of the CLI: it sets the password of any account that is not deleted and
+// removes an OIDC identity and its offline token in the same update, so that the account never holds both.
+func (q *Queries) ResetUserPassword(ctx context.Context, arg ResetUserPasswordParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resetUserPassword,
+		arg.PasswordHash,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const roleSyncOn = `-- name: RoleSyncOn :one
+SELECT EXISTS (
+    SELECT 1 FROM oidc_settings WHERE org_id = $1 AND enabled AND sync_role
+)::boolean AS role_sync_on
+`
+
+// RoleSyncOn reports whether the identity provider decides the Role of OIDC accounts: OIDC and oidc.sync_role are both
+// on.
+func (q *Queries) RoleSyncOn(ctx context.Context, orgID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, roleSyncOn, orgID)
+	var role_sync_on bool
+	err := row.Scan(&role_sync_on)
+	return role_sync_on, err
 }
 
 const setUserPassword = `-- name: SetUserPassword :execrows
