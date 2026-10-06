@@ -169,7 +169,12 @@ The GitHub release lists the four archives, the checksums, and an SBOM per archi
 ## Open questions
 
 1. The first published version: a pre-release `v0.0.1-rc.1` exercises the pipeline without promising anything. The
-   operator decides when the first real release (`v0.1.0`) is cut.
+   operator decides when the first real release (`v0.1.0`) is cut. **Resolved:** no tags, releases or pre-releases
+   until L1 is complete; the first release is `v0.1.0` (`initial-version` in `release-please-config.json`), and the
+   release pull request stays open until then. Every commit on `master` is published as a development image
+   `ghcr.io/muster-io/muster:sha-<7 hex digits>`, with the floating tag `edge` on the newest, by
+   `.github/workflows/edge.yml`; these images are unsigned and are not releases. `latest` will follow the newest
+   release.
 
 ## Notes
 
