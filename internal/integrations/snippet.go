@@ -20,8 +20,10 @@ var plainScalar = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./:@%+~=?&-]*$`)
 
 // Snippet is the Alertmanager configuration of an Integration token (C-05.FR-5): an Alertmanager receiver
 // muster-<name> whose webhook sends every alert of an Alertmanager group (max_alerts 0) and its resolves to the
-// ingestion URL with the token as a bearer token, and a child route for it with continue, to be placed first so that
-// it runs beside the existing Alertmanager receivers, with snippet.repeat_interval and a comment on its range.
+// ingestion URL with the token as a bearer token, and a child route for it with continue, to be placed first, with
+// snippet.repeat_interval and a comment on its range. Because a first child route without matchers matches every
+// alert, Alertmanager no longer falls back to the top-level receiver: the snippet ends with a commented catch-all child
+// route for that receiver, to be kept last.
 func Snippet(integrationName, ingestURL, token string) string {
 	receiver := scalar("muster-" + integrationName)
 	var b strings.Builder
@@ -38,8 +40,11 @@ func Snippet(integrationName, ingestURL, token string) string {
 	b.WriteString("            type: Bearer\n")
 	b.WriteString("            credentials: " + scalar(token) + "\n")
 	b.WriteString("\n")
-	b.WriteString("# Place this child route first under the top-level route: with continue it sends every alert to Muster\n")
-	b.WriteString("# and lets the routes after it notify as before.\n")
+	b.WriteString("# Place this child route first under the top-level route. Without matchers it takes every alert, and\n")
+	b.WriteString("# continue: true passes each alert on to the child routes after it.\n")
+	b.WriteString("# Alertmanager uses the receiver of the top-level route only for an alert that no child route matches, and\n")
+	b.WriteString("# this route matches every alert: keep a catch-all child route for your default receiver last, or make sure\n")
+	b.WriteString("# a later child route catches everything, or your default receiver stops getting alerts.\n")
 	b.WriteString("route:\n")
 	b.WriteString("  routes:\n")
 	b.WriteString("    - receiver: " + receiver + "\n")
@@ -47,6 +52,9 @@ func Snippet(integrationName, ingestURL, token string) string {
 	b.WriteString("      # Keep repeat_interval between 5 and 15 minutes: Muster learns from the repeats that alerts still fire\n")
 	b.WriteString("      # and that missing ones are gone. Noise is controlled in Muster, not by long repeat intervals.\n")
 	b.WriteString("      repeat_interval: " + duration(RepeatInterval) + "\n")
+	b.WriteString("    # ... your existing child routes\n")
+	b.WriteString("    # The last child route: a catch-all without matchers for the receiver of the top-level route.\n")
+	b.WriteString("    # - receiver: <your default receiver>\n")
 	return b.String()
 }
 

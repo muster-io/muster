@@ -23,8 +23,11 @@ receivers:
             type: Bearer
             credentials: mstr_int_abc
 
-# Place this child route first under the top-level route: with continue it sends every alert to Muster
-# and lets the routes after it notify as before.
+# Place this child route first under the top-level route. Without matchers it takes every alert, and
+# continue: true passes each alert on to the child routes after it.
+# Alertmanager uses the receiver of the top-level route only for an alert that no child route matches, and
+# this route matches every alert: keep a catch-all child route for your default receiver last, or make sure
+# a later child route catches everything, or your default receiver stops getting alerts.
 route:
   routes:
     - receiver: muster-prod-eu
@@ -32,10 +35,14 @@ route:
       # Keep repeat_interval between 5 and 15 minutes: Muster learns from the repeats that alerts still fire
       # and that missing ones are gone. Noise is controlled in Muster, not by long repeat intervals.
       repeat_interval: 10m
+    # ... your existing child routes
+    # The last child route: a catch-all without matchers for the receiver of the top-level route.
+    # - receiver: <your default receiver>
 `
 
 // TestSnippet is C-05.FR-5 and C-05.AC-6: the receiver sends to MUSTER_INGEST_URL with send_resolved, max_alerts 0
-// and the token as a bearer credential; the route continues, with snippet.repeat_interval and the comment on its range.
+// and the token as a bearer credential; the route continues, with snippet.repeat_interval and the comment on its range,
+// and the snippet tells to keep a catch-all child route for the default receiver last.
 func TestSnippet(t *testing.T) {
 	got := Snippet("prod-eu", "http://localhost:8081/api/v1/ingest", "mstr_int_abc")
 	if got != goldenSnippet {

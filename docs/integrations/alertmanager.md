@@ -52,11 +52,46 @@ route:
     - receiver: muster-prod-eu
       continue: true
       repeat_interval: 10m
-    # ... your existing routes
+    # ... your existing child routes
+    # The last child route: a catch-all without matchers for the receiver of the top-level route.
+    # - receiver: <your default receiver>
 ```
 
-- With no matchers, the route takes every alert; `continue: true` lets the routes after it notify as before, so
-  Muster runs beside your current Alertmanager receivers while you try it.
+- With no matchers, the route takes every alert, and `continue: true` passes each alert on to the child routes after
+  it, so Muster runs beside your current Alertmanager receivers while you try it.
+- **Keep a catch-all child route last.** Alertmanager sends an alert to the receiver of the top-level `route` only when
+  no child route matches it. The Muster route matches every alert, so without a catch-all, an alert that none of your
+  other child routes matches goes to Muster alone and your default receiver stops getting it. Add a last child route
+  without matchers for your default receiver, or make sure an existing later child route already catches everything.
+
+For example, a configuration that sends critical alerts to `oncall` and everything else to the top-level `default`:
+
+```yaml
+route:
+  receiver: default
+  routes:
+    - receiver: oncall
+      matchers: ['severity="critical"']
+```
+
+becomes:
+
+```yaml
+route:
+  receiver: default
+  routes:
+    - receiver: muster-prod-eu
+      continue: true
+      repeat_interval: 10m
+    - receiver: oncall
+      matchers: ['severity="critical"']
+    - receiver: default
+```
+
+A critical alert goes to `muster-prod-eu` and `oncall`, any other alert to `muster-prod-eu` and `default`. Without the
+last line, a warning would reach only Muster. `amtool config routes test --config.file=alertmanager.yml
+severity=warning` prints the receivers an alert reaches; it should list Muster and your default receiver.
+
 - Keep `repeat_interval` between **5 and 15 minutes** (10 minutes in the snippet). Muster learns from the repeats that
   alerts still fire, and resolves an alert as Gone once its Alertmanager group stopped listing it for up to two repeat
   intervals. A long repeat interval does not reduce noise in Muster — Muster controls noise itself, with one message

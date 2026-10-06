@@ -45,9 +45,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   lost. The only `5xx` is a failed write, which Alertmanager retries.
 - **C-05.FR-5** The snippet contains an Alertmanager receiver with `webhook_configs` pointing at `MUSTER_INGEST_URL`,
   `send_resolved: true`, `max_alerts: 0` and `http_config.authorization`, and an Alertmanager child route for it with
-  `continue: true`, to be placed first, so that it runs beside the existing receiver, and `repeat_interval` set to
-  `snippet.repeat_interval`; the text explains the recommended range and that noise is controlled in Muster, not by long
-  repeat intervals.
+  `continue: true`, to be placed first, and `repeat_interval` set to `snippet.repeat_interval`; the text explains the
+  recommended range and that noise is controlled in Muster, not by long repeat intervals. Because that route matches
+  every alert, Alertmanager no longer falls back to the receiver of the top-level route (F-059): so that Muster runs
+  beside the existing receivers, the snippet ends with a commented catch-all child route for the default receiver,
+  `- receiver: <your default receiver>`, and the text tells to keep it as the last child route, or to make sure a later
+  child route catches everything.
 - **C-05.FR-6** Static labels are stored on the Integration; processing adds them to every Alert before routing
   (C-06.FR-3).
 - **C-05.FR-7** The Integration page shows the Connection mode and its precision, the time of the last Snapshot, the

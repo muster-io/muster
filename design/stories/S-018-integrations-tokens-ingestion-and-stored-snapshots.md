@@ -118,7 +118,9 @@ issue: 18
   has `url: <MUSTER_INGEST_URL>/api/v1/ingest`, `send_resolved: true`, `max_alerts: 0` and
   `http_config.authorization` (`type: Bearer`, `credentials: <token>`), and a child route for that receiver with
   `continue: true`, to be placed first, and `repeat_interval` set to `snippet.repeat_interval`, under a comment that
-  recommends 5–15 minutes and says that noise is controlled in Muster, not by long repeat intervals.
+  recommends 5–15 minutes and says that noise is controlled in Muster, not by long repeat intervals; after it, a
+  commented catch-all child route `- receiver: <your default receiver>`, with a comment that it stays the last child
+  route because the top-level receiver gets only alerts no child route matches (F-059).
 - **Ingestion** (C-05.FR-3, FR-4, ADR-0002; ingest listener): `POST /api/v1/ingest` with `Authorization: Bearer` and
   `POST /api/v1/ingest/{ingest_token}`. Order: the token — only `mstr_int_` tokens of an Integration that is not
   deleted and a token that is not revoked; any other credential, an API token included, is `401` — then the size: a
