@@ -31,8 +31,12 @@ import (
 	"github.com/muster-io/muster/internal/auth"
 	authdb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/doctor"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
+	"github.com/muster-io/muster/internal/ingest"
+	"github.com/muster-io/muster/internal/integrations"
+	intdb "github.com/muster-io/muster/internal/integrations/dbgen"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
@@ -76,6 +80,7 @@ var registry = []Probe{
 	{Name: "totp", Run: probeTOTP},
 	{Name: "oidc", Run: probeOIDC},
 	{Name: "api_tokens", Run: probeTokens},
+	{Name: "ingestion", Run: probeIngestion},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -955,6 +960,125 @@ func (s *probeTokenStore) GetTokenByHash(context.Context, tokdb.GetTokenByHashPa
 
 func (s *probeTokenStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
 	return nil
+}
+
+// probeIngestion sends known secrets as Integration tokens to the ingestion endpoint (C-05.FR-3, C-05.AC-5): in the
+// path, which only the route pattern may name, and as a bearer token, with and without the mstr_int_ prefix. It also
+// issues a token and sends with it in the path while the write succeeds and while it fails, and while the token
+// lookup fails. None of the answers, errors or log lines may carry a token. The issued value is not among the planted
+// secrets, so the probe looks for it itself and reports a leak as the first secret.
+func probeIngestion(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	business := clock.NewManual(time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC))
+	store := &probeIntegrationStore{}
+	svc := integrations.New(integrations.Config{OrgID: 1, Store: store, Audit: audit.NewWriter(logger, business),
+		Business: business})
+	by := integrations.Requester{Actor: audit.User(1, "SRAAAAAAAAAAAA"), Transport: audit.TransportUI}
+	issued, err := svc.CreateToken(ctx, by, "NTAAAAAAAAAAAA", "probe")
+	errs := []error{err}
+	store.hash = tokens.Hash(issued.Value)
+	snapshots := &probeSnapshots{}
+	h := ingest.NewHandler(ingest.HandlerConfig{Auth: svc, Snapshots: snapshots, Log: logger, Real: clock.Real{}})
+	var answers []string
+	send := func(path, bearer string) error {
+		r, err := http.NewRequestWithContext(ctx, http.MethodPost, path, strings.NewReader("{}"))
+		if err != nil {
+			return err
+		}
+		if bearer != "" {
+			r.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		rec := &probeRecorder{header: http.Header{}}
+		h.ServeHTTP(rec, r)
+		answers = append(answers, rec.body.String())
+		return nil
+	}
+	var values []string
+	for _, secret := range secrets {
+		values = append(values, secret, integrations.Unknown, "mstr_int_"+secret)
+	}
+	values = append(values, issued.Value)
+	for _, value := range values {
+		errs = append(errs, send("/api/v1/ingest/"+url.PathEscape(value), ""), send("/api/v1/ingest", value))
+	}
+	snapshots.fail = errors.New("the database is unavailable")
+	errs = append(errs, send("/api/v1/ingest/"+url.PathEscape(issued.Value), ""))
+	store.fail = errors.New("the database is unavailable")
+	errs = append(errs, send("/api/v1/ingest/"+url.PathEscape(issued.Value), ""))
+	errs = append(errs, fmt.Errorf("answers: %s", strings.Join(answers, " | ")))
+	out := errors.Join(errs...)
+	if issued.Value == "" || snapshots.stored == 0 {
+		return fmt.Errorf("no token was issued or accepted: %w", out)
+	}
+	lw, ok := log.(interface{ String() string })
+	if strings.Contains(out.Error(), issued.Value) || (ok && strings.Contains(lw.String(), issued.Value)) {
+		return fmt.Errorf("an issued token value leaked; reported as %s", secrets[0])
+	}
+	return out
+}
+
+// probeIntegrationStore is the database of probeIngestion: one Integration with the token whose hash is hash, and
+// every token lookup failing once fail is set.
+type probeIntegrationStore struct {
+	integrations.Store
+	hash []byte
+	fail error
+}
+
+func (s *probeIntegrationStore) InTx(_ context.Context, f func(integrations.Queries) error) error {
+	return f(s)
+}
+
+func (s *probeIntegrationStore) LockIntegration(context.Context, intdb.LockIntegrationParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *probeIntegrationStore) GetIntegration(context.Context, intdb.GetIntegrationParams) (intdb.GetIntegrationRow,
+	error) {
+	return intdb.GetIntegrationRow{ID: 1, PublicID: "NTAAAAAAAAAAAA", Name: "probe", ConnectionMode: "webhook_only",
+		StaticLabels: []byte("{}"), Version: 1}, nil
+}
+
+func (s *probeIntegrationStore) LastSnapshotTimes(context.Context, intdb.LastSnapshotTimesParams) (
+	[]intdb.LastSnapshotTimesRow, error) {
+	return nil, nil
+}
+
+func (s *probeIntegrationStore) InsertIntegrationToken(context.Context, intdb.InsertIntegrationTokenParams) (int64,
+	error) {
+	return 1, nil
+}
+
+func (s *probeIntegrationStore) Notify(context.Context, db.Hint) error { return nil }
+
+func (s *probeIntegrationStore) FindIngestToken(_ context.Context, arg intdb.FindIngestTokenParams) (
+	intdb.FindIngestTokenRow, error) {
+	if s.fail != nil {
+		return intdb.FindIngestTokenRow{}, s.fail
+	}
+	if !bytes.Equal(arg.TokenHash, s.hash) {
+		return intdb.FindIngestTokenRow{}, pgx.ErrNoRows
+	}
+	return intdb.FindIngestTokenRow{ID: 1, TokenHash: s.hash, IntegrationID: 1,
+		IntegrationPublicID: "NTAAAAAAAAAAAA"}, nil
+}
+
+func (s *probeIntegrationStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
+	return nil
+}
+
+// probeSnapshots stores bodies until fail is set.
+type probeSnapshots struct {
+	stored int
+	fail   error
+}
+
+func (s *probeSnapshots) Store(context.Context, ingest.Received) (ingest.Stored, error) {
+	if s.fail != nil {
+		return ingest.Stored{}, s.fail
+	}
+	s.stored++
+	return ingest.Stored{PublicID: "SSAAAAAAAAAAAA"}, nil
 }
 
 func Probes() []Probe {

@@ -686,7 +686,7 @@ return apiFetch<IntegrationTokenCreated>(getCreateIntegrationTokenUrl(integratio
 
 export const getCreateIntegrationTokenMutationKey = () => ['createIntegrationToken'] as const;
 
-export const getCreateIntegrationTokenMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
+export const getCreateIntegrationTokenMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIntegrationToken>>, TError,CreateIntegrationTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createIntegrationToken>>, TError,CreateIntegrationTokenMutationVariables, TContext> => {
 
@@ -715,13 +715,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateIntegrationTokenMutationResult = NonNullable<Awaited<ReturnType<typeof createIntegrationToken>>>
     export type CreateIntegrationTokenMutationBody = IntegrationTokenCreate | undefined
-    export type CreateIntegrationTokenMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse
+    export type CreateIntegrationTokenMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse
     export type CreateIntegrationTokenMutationVariables = {integrationId: string;data?: IntegrationTokenCreate}
 
     /**
  * @summary Create an Integration token
  */
-export const useCreateIntegrationToken = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
+export const useCreateIntegrationToken = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIntegrationToken>>, TError,CreateIntegrationTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createIntegrationToken>>,

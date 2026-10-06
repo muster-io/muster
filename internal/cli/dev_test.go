@@ -105,7 +105,7 @@ func TestDevFakeServers(t *testing.T) {
 	env := mapEnv{"MUSTER_SECRET_KEYS": "a2V5"}
 	stdout, stderr, stop := started(t, env, anyPort)
 	got := waitLines(t, stdout, 8)
-	re := regexp.MustCompile(`^muster dev: development defaults for MUSTER_PUBLIC_URL, MUSTER_DATABASE_URL, ` +
+	re := regexp.MustCompile(`^muster dev: development defaults for MUSTER_PUBLIC_URL, MUSTER_INGEST_URL, MUSTER_DATABASE_URL, ` +
 		`MUSTER_BOOTSTRAP_ADMIN_EMAIL, MUSTER_BOOTSTRAP_ADMIN_PASSWORD\n` +
 		`muster dev: from the environment: MUSTER_SECRET_KEYS\n` +
 		`muster dev: fake Alertmanager http://127\.0\.0\.1:\d+\n` +
@@ -182,7 +182,7 @@ func TestDevReplica(t *testing.T) {
 	env := mapEnv{"MUSTER_LISTEN_APP": ":9180"}
 	stdout, stderr, stop := started(t, env, anyPort, "--replica")
 	got := waitLines(t, stdout, 3)
-	want := "muster dev: development defaults for MUSTER_PUBLIC_URL, MUSTER_DATABASE_URL, " +
+	want := "muster dev: development defaults for MUSTER_PUBLIC_URL, MUSTER_INGEST_URL, MUSTER_DATABASE_URL, " +
 		"MUSTER_SECRET_KEYS (the published development key), MUSTER_BOOTSTRAP_ADMIN_EMAIL, " +
 		"MUSTER_BOOTSTRAP_ADMIN_PASSWORD, MUSTER_LISTEN_INGEST, MUSTER_LISTEN_INTERNAL\n" +
 		"muster dev: from the environment: MUSTER_LISTEN_APP\n" +

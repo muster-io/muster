@@ -188,7 +188,7 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 | `muster_api_request_duration_seconds` | histogram | `route_pattern`, `method` | C-03 |
 | `muster_login_failures_total` | counter | `method` (`local` — a wrong login or password; `oidc` — a refused OIDC sign-in; `totp` — a wrong TOTP or recovery code) | C-03 |
 | `muster_oidc_checks_total` | counter | `outcome` (`ok`, `refused`, `unavailable`, `skipped`) — background re-checks of OIDC users at the IdP; `skipped` when the user has no live session and no usable Personal access token (C-03.FR-30) | C-03 |
-| `muster_ingest_requests_total` | counter | `integration` (`unknown` without a matching token), `outcome` (`accepted`, `unauthorized`, `too_large`) | C-05 |
+| `muster_ingest_requests_total` | counter | `integration` (the token's Integration, a revoked token's included; `unknown` when the token matches no Integration or only a deleted one), `outcome` (`accepted`, `unauthorized`, `too_large`) | C-05 |
 | `muster_ingest_request_duration_seconds` | histogram | — | C-05 |
 | `muster_integration_info` | gauge | `integration`, `name` | C-05 |
 | `muster_ingest_processing_delay_seconds` | histogram | `integration` | C-06 |

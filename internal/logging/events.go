@@ -263,6 +263,28 @@ var OIDCCheckFailed = newEvent("oidc_check_failed", LevelWarn, "C-03",
 		"masked and carries no token or secret.",
 	"user", "reason", "error")
 
+// SnapshotAccepted is logged when the ingestion endpoint stored a webhook body as a Stored Snapshot and answered 202.
+var SnapshotAccepted = newEvent("snapshot_accepted", LevelInfo, "C-05",
+	"An ingestion request was stored as a pending Stored Snapshot and answered 202: integration and stored_snapshot "+
+		"are public_ids, size_bytes the size of the body, route_pattern the route it came by — never the path, which "+
+		"may carry the token.",
+	"integration", "stored_snapshot", "size_bytes", "route_pattern")
+
+// IngestRejected is logged when the ingestion endpoint refused a request: 401 or 413.
+var IngestRejected = newEvent("ingest_rejected", LevelInfo, "C-05",
+	"An ingestion request was refused: outcome unauthorized (401, a missing, wrong or revoked token, or one of a "+
+		"deleted Integration) or too_large (413, a body above ingest.body_limit). integration is the public_id of the "+
+		"token's Integration, or unknown; route_pattern is the route it came by — never the path, which may carry the "+
+		"token — and client_address the sender. The chart rule MusterIngestRejected reports them.",
+	"integration", "outcome", "route_pattern", "client_address")
+
+// IngestFailed is logged when the ingestion endpoint could not read the token or store the body and answered 500.
+var IngestFailed = newEvent("ingest_failed", LevelError, "C-05",
+	"An ingestion request answered 500 because the database could not look up the token or store the Stored Snapshot, "+
+		"usually because it was unavailable; Alertmanager retries it. integration is the public_id of the token's "+
+		"Integration, or unknown when the lookup failed; route_pattern is the route it came by.",
+	"integration", "route_pattern", "error")
+
 // Event is a registered log event. Its zero value is not registered, and the logger refuses it.
 type Event struct {
 	def *eventDef

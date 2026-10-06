@@ -161,3 +161,38 @@ var LoginFailures = newCounter(Definition{
 		"TOTP or recovery code", "local", "oidc", "totp")},
 	Capability: "C-03",
 })
+
+// IngestOutcomes are the outcome values of muster_ingest_requests_total.
+var IngestOutcomes = []string{"accepted", "unauthorized", "too_large"}
+
+// IngestRequests counts the requests to the ingestion endpoint by Integration and outcome (C-05.FR-4).
+var IngestRequests = newCounter(Definition{
+	Name: "muster_ingest_requests_total",
+	Help: "Requests to the ingestion endpoint, by the token's Integration and the outcome.",
+	Labels: []Label{
+		{Name: "integration", Kind: LabelEntity, Description: "the public_id of the token's Integration, a revoked " +
+			"token's included, or unknown when the token matches no Integration that is not deleted"},
+		closed("outcome", "accepted is a body stored as a Stored Snapshot, unauthorized a missing or wrong token, "+
+			"too_large a body above ingest.body_limit", IngestOutcomes...),
+	},
+	Capability: "C-05",
+})
+
+// IngestRequestDuration observes how long the ingestion endpoint took to answer.
+var IngestRequestDuration = newHistogram(Definition{
+	Name:       "muster_ingest_request_duration_seconds",
+	Help:       "Time from the arrival of an ingestion request to the end of its answer, the commit of the Stored Snapshot included.",
+	Buckets:    []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+	Capability: "C-05",
+})
+
+// IntegrationInfo is 1 for every Integration that is not deleted; its labels carry the Integration's name.
+var IntegrationInfo = newGauge(Definition{
+	Name: "muster_integration_info",
+	Help: "Always 1, one series per Integration that is not deleted; the labels carry its public_id and name.",
+	Labels: []Label{
+		entity("integration"),
+		info("name", "the name of the Integration"),
+	},
+	Capability: "C-05",
+})

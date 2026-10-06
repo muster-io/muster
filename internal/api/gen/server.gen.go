@@ -19999,6 +19999,22 @@ func (response CreateIntegrationToken409ApplicationProblemPlusJSONResponse) Visi
 	return err
 }
 
+type CreateIntegrationToken422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response CreateIntegrationToken422ApplicationProblemPlusJSONResponse) VisitCreateIntegrationTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreateIntegrationToken429ApplicationProblemPlusJSONResponse struct {
 	TooManyRequestsApplicationProblemPlusJSONResponse
 }

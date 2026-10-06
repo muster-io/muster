@@ -35,8 +35,9 @@ import (
 var t0 = time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 
 var roles = auth.Roles{
-	auth.RoleAdmin: {"alert-groups:read", "integrations:read", "organization:write", "service-accounts:read",
-		"service-accounts:write", "system-status:read", "users:read", "users:write"},
+	auth.RoleAdmin: {"alert-groups:read", "integrations:read", "integrations:write", "organization:write",
+		"service-accounts:read", "service-accounts:write", "stored-snapshots:read", "system-status:read", "users:read",
+		"users:write"},
 	auth.RoleResponder: {"alert-groups:acknowledge", "alert-groups:read", "integrations:read"},
 	auth.RoleViewer:    {"alert-groups:read", "integrations:read"},
 }
@@ -416,11 +417,11 @@ func TestNotFoundAndNotImplemented(t *testing.T) {
 			t.Errorf("%s %s = %d %s", c.method, c.path, a.status, a.body)
 		}
 	}
-	a := x.call(t, http.MethodGet, "/api/v1/integrations", "", "Cookie", "admin-cookie")
+	a := x.call(t, http.MethodGet, "/api/v1/alert-groups", "", "Cookie", "admin-cookie")
 	if a.status != http.StatusNotImplemented || a.json(t)["type"] != problemBase+"not-implemented" {
-		t.Errorf("GET /integrations = %d %s", a.status, a.body)
+		t.Errorf("GET /alert-groups = %d %s", a.status, a.body)
 	}
-	a = x.call(t, http.MethodGet, "/api/v1/integrations", "")
+	a = x.call(t, http.MethodGet, "/api/v1/alert-groups", "")
 	if a.status != http.StatusUnauthorized {
 		t.Errorf("an unimplemented operation without credentials = %d", a.status)
 	}
@@ -609,7 +610,7 @@ func TestPermissions(t *testing.T) {
 	}
 	_ = json.Unmarshal(a.body, &list)
 	if len(list.Items) != 3 || list.Items[0].Name != "admin" || list.Items[2].Name != "viewer" ||
-		len(list.Items[0].Permissions) != 8 || len(list.Items[2].Permissions) != 2 {
+		len(list.Items[0].Permissions) != 10 || len(list.Items[2].Permissions) != 2 {
 		t.Errorf("roles = %+v", list)
 	}
 	id := &auth.Identity{Permissions: []auth.Permission{"users:read"}}

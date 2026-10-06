@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Package fakealertmanager is the fake Alertmanager: it sends Alertmanager webhooks (version 4) to a URL, once or at
-// a steady rate, on request through its control endpoints or from Go.
+// Package fakealertmanager is the fake Alertmanager: it sends Alertmanager webhooks (version 4), or any body, to a URL
+// or to a registered receiver, once or at a steady rate, on request through its control endpoints or from Go.
 package fakealertmanager
 
 import (
@@ -36,18 +36,42 @@ const (
 	maxLoadDuration = time.Hour
 )
 
-// Endpoint is where a webhook goes; a Token is sent as Authorization: Bearer.
+// Endpoint is where a webhook goes; a Token is sent as Authorization: Bearer, or appended to the URL as a path segment
+// with TokenInPath.
 type Endpoint struct {
-	URL   string
-	Token string
+	URL         string
+	Token       string
+	TokenInPath bool
+}
+
+// The places of a receiver's token: the Authorization header or the path.
+const (
+	TokenInHeader = "header"
+	TokenInPath   = "path"
+)
+
+// Receiver is a webhook receiver of the fake's configuration, such as Muster's ingestion endpoint with an Integration
+// token.
+type Receiver struct {
+	Name  string `json:"name"`
+	URL   string `json:"url"`
+	Token string `json:"token"`
+	// TokenIn is TokenInHeader, the default, or TokenInPath.
+	TokenIn string `json:"token_in"`
+}
+
+// Endpoint is where the receiver's webhooks go.
+func (r Receiver) Endpoint() Endpoint {
+	return Endpoint{URL: r.URL, Token: r.Token, TokenInPath: r.TokenIn == TokenInPath}
 }
 
 type Fake struct {
 	*fakeserver.Server
 	client *http.Client
 
-	mu  sync.Mutex
-	seq int
+	mu        sync.Mutex
+	seq       int
+	receivers map[string]Receiver
 }
 
 func New() *Fake {
@@ -55,6 +79,7 @@ func New() *Fake {
 	t.Proxy = nil
 	t.MaxIdleConnsPerHost = 100
 	f := &Fake{
+		receivers: map[string]Receiver{},
 		client: &http.Client{
 			Transport: t,
 			Timeout:   sendTimeout,
@@ -64,6 +89,7 @@ func New() *Fake {
 		},
 	}
 	f.Server = fakeserver.New("Alertmanager", http.HandlerFunc(notImplemented))
+	f.HandleControl("POST /_fake/receivers", f.handleReceivers)
 	f.HandleControl("POST /_fake/send", f.handleSend)
 	f.HandleControl("POST /_fake/load", f.handleLoad)
 	return f
@@ -73,16 +99,52 @@ func notImplemented(w http.ResponseWriter, _ *http.Request) {
 	fakeserver.WriteError(w, http.StatusNotImplemented, "not implemented by the fake Alertmanager server")
 }
 
-// Send posts body to the endpoint as Alertmanager does and returns the answer's status. Unlike the control
+// Register adds the receiver r, or replaces the one of the same name. Unlike the control endpoint, it takes any URL.
+func (f *Fake) Register(r Receiver) error {
+	if r.Name == "" {
+		return errors.New("a receiver needs a name")
+	}
+	if r.TokenIn == "" {
+		r.TokenIn = TokenInHeader
+	}
+	if r.TokenIn != TokenInHeader && r.TokenIn != TokenInPath {
+		return errors.New(`token_in must be "header" or "path"`)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.receivers[r.Name] = r
+	return nil
+}
+
+// Receiver returns the receiver named name.
+func (f *Fake) Receiver(name string) (Receiver, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.receivers[name]
+	return r, ok
+}
+
+// Send posts body to the endpoint as Alertmanager does, as JSON, and returns the answer's status. Unlike the control
 // endpoints, it sends to any URL.
 func (f *Fake) Send(ctx context.Context, e Endpoint, body []byte) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.URL, bytes.NewReader(body))
+	return f.SendAs(ctx, e, body, "application/json")
+}
+
+// SendAs posts body with the Content-Type contentType, none when it is empty, and returns the answer's status.
+func (f *Fake) SendAs(ctx context.Context, e Endpoint, body []byte, contentType string) (int, error) {
+	target := e.URL
+	if e.TokenInPath && e.Token != "" {
+		target = strings.TrimSuffix(target, "/") + "/" + url.PathEscape(e.Token)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 	req.Header.Set("User-Agent", UserAgent)
-	if e.Token != "" {
+	if e.Token != "" && !e.TokenInPath {
 		req.Header.Set("Authorization", "Bearer "+e.Token)
 	}
 	resp, err := f.client.Do(req)
@@ -275,13 +337,22 @@ func percentile(sorted []time.Duration, p float64) time.Duration {
 }
 
 type sendInput struct {
-	URL     string          `json:"url"`
-	Token   string          `json:"token"`
-	Payload json.RawMessage `json:"payload"`
+	URL      string          `json:"url"`
+	Receiver string          `json:"receiver"`
+	Token    *string         `json:"token"`
+	NoToken  bool            `json:"no_token"`
+	Payload  json.RawMessage `json:"payload"`
+	Raw      *string         `json:"raw"`
+	// ContentType is the Content-Type of a raw body; none when it is empty.
+	ContentType string `json:"content_type"`
+	SizeBytes   *int   `json:"size_bytes"`
 }
 
-func (f *Fake) handleSend(w http.ResponseWriter, r *http.Request) {
-	var in sendInput
+// maxFillerBytes bounds a filler body: well above ingest.body_limit, so that its refusal can be checked.
+const maxFillerBytes = 64 << 20
+
+func (f *Fake) handleReceivers(w http.ResponseWriter, r *http.Request) {
+	var in Receiver
 	if err := fakeserver.DecodeJSON(w, r, &in); err != nil {
 		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -290,11 +361,58 @@ func (f *Fake) handleSend(w http.ResponseWriter, r *http.Request) {
 		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	body := []byte(in.Payload)
-	if len(body) == 0 || string(body) == "null" {
-		body = f.Webhook(f.nextSeq(1), time.Now())
+	if err := f.Register(in); err != nil {
+		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	status, err := f.Send(r.Context(), Endpoint{URL: in.URL, Token: in.Token}, body)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// endpoint is where a send or a load run goes: the registered receiver, or the URL with the token.
+func (f *Fake) endpoint(receiver, rawURL, token string) (Endpoint, error) {
+	if receiver == "" {
+		if err := checkURL(rawURL); err != nil {
+			return Endpoint{}, err
+		}
+		return Endpoint{URL: rawURL, Token: token}, nil
+	}
+	if rawURL != "" {
+		return Endpoint{}, errors.New("give either receiver or url")
+	}
+	rc, ok := f.Receiver(receiver)
+	if !ok {
+		return Endpoint{}, fmt.Errorf("no receiver %q is registered", receiver)
+	}
+	return rc.Endpoint(), nil
+}
+
+func (f *Fake) handleSend(w http.ResponseWriter, r *http.Request) {
+	var in sendInput
+	if err := fakeserver.DecodeJSON(w, r, &in); err != nil {
+		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	token := ""
+	if in.Token != nil {
+		token = *in.Token
+	}
+	e, err := f.endpoint(in.Receiver, in.URL, token)
+	if err != nil {
+		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	switch {
+	case in.NoToken:
+		e.Token = ""
+	case in.Token != nil:
+		e.Token = *in.Token
+	}
+	body, contentType, err := f.body(in)
+	if err != nil {
+		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	status, err := f.SendAs(r.Context(), e, body, contentType)
 	if err != nil {
 		fakeserver.WriteError(w, http.StatusBadGateway, err.Error())
 		return
@@ -302,8 +420,35 @@ func (f *Fake) handleSend(w http.ResponseWriter, r *http.Request) {
 	fakeserver.WriteJSON(w, http.StatusOK, map[string]int{"status": status})
 }
 
+// body is the body of a send: the payload as JSON, the raw text with its Content-Type, a filler of the given size, or
+// a generated webhook.
+func (f *Fake) body(in sendInput) ([]byte, string, error) {
+	given := 0
+	hasPayload := len(in.Payload) > 0 && string(in.Payload) != "null"
+	for _, set := range []bool{hasPayload, in.Raw != nil, in.SizeBytes != nil} {
+		if set {
+			given++
+		}
+	}
+	switch {
+	case given > 1:
+		return nil, "", errors.New("give one of payload, raw and size_bytes")
+	case hasPayload:
+		return []byte(in.Payload), "application/json", nil
+	case in.Raw != nil:
+		return []byte(*in.Raw), in.ContentType, nil
+	case in.SizeBytes != nil:
+		if *in.SizeBytes < 0 || *in.SizeBytes > maxFillerBytes {
+			return nil, "", fmt.Errorf("size_bytes must be between 0 and %d", maxFillerBytes)
+		}
+		return bytes.Repeat([]byte("x"), *in.SizeBytes), "application/json", nil
+	}
+	return f.Webhook(f.nextSeq(1), time.Now()), "application/json", nil
+}
+
 type loadInput struct {
 	URL             string  `json:"url"`
+	Receiver        string  `json:"receiver"`
 	Token           string  `json:"token"`
 	RatePerSecond   int     `json:"rate_per_second"`
 	DurationSeconds float64 `json:"duration_seconds"`
@@ -327,7 +472,8 @@ func (f *Fake) handleLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	duration := time.Duration(in.DurationSeconds * float64(time.Second))
-	switch err := checkURL(in.URL); {
+	e, err := f.endpoint(in.Receiver, in.URL, in.Token)
+	switch {
 	case err != nil:
 		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -341,7 +487,7 @@ func (f *Fake) handleLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rep := f.Load(r.Context(), LoadOptions{
-		Endpoint: Endpoint{URL: in.URL, Token: in.Token},
+		Endpoint: e,
 		Rate:     in.RatePerSecond,
 		Duration: duration,
 	})

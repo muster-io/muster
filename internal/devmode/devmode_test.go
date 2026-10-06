@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/fakes/fakealertmanager"
 )
 
 type mapEnv map[string]string
@@ -49,6 +50,7 @@ func TestDevelopmentKey(t *testing.T) {
 
 var defaults = map[string]string{
 	"MUSTER_PUBLIC_URL":               "http://localhost:8080",
+	"MUSTER_INGEST_URL":               "http://localhost:8081",
 	"MUSTER_DATABASE_URL":             "postgres://muster:muster@127.0.0.1:55432/muster?sslmode=disable",
 	"MUSTER_SECRET_KEYS":              devmode.DevelopmentKey,
 	"MUSTER_BOOTSTRAP_ADMIN_EMAIL":    "admin@example.org",
@@ -56,7 +58,7 @@ var defaults = map[string]string{
 }
 
 var allNames = []string{
-	"MUSTER_PUBLIC_URL", "MUSTER_DATABASE_URL", "MUSTER_SECRET_KEYS", "MUSTER_BOOTSTRAP_ADMIN_EMAIL",
+	"MUSTER_PUBLIC_URL", "MUSTER_INGEST_URL", "MUSTER_DATABASE_URL", "MUSTER_SECRET_KEYS", "MUSTER_BOOTSTRAP_ADMIN_EMAIL",
 	"MUSTER_BOOTSTRAP_ADMIN_PASSWORD",
 }
 
@@ -430,6 +432,25 @@ func TestRunBusyProxyPort(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "start the fake "+which+" proxy on "+busy.Addr().String()) {
 			t.Errorf("StartFakes = %v, want an error naming the fake %s proxy", err, which)
 		}
+	}
+}
+
+// TestIntegrationDemo is C-01.FR-13: the demo Integration dev-alertmanager with cluster=dev, and the fake
+// Alertmanager's receiver muster that sends to ingestion with its published token.
+func TestIntegrationDemo(t *testing.T) {
+	d := devmode.IntegrationDemo()
+	if d.Name != "dev-alertmanager" || d.StaticLabels["cluster"] != "dev" || d.Token != devmode.IntegrationToken ||
+		len(d.Token) != len("mstr_int_")+52 {
+		t.Errorf("demo = %+v", d)
+	}
+	f := fakealertmanager.New()
+	if err := devmode.RegisterReceiver(f, "http://localhost:8081/"); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := f.Receiver("muster")
+	if !ok || r.URL != "http://localhost:8081/api/v1/ingest" || r.Token != devmode.IntegrationToken ||
+		r.TokenIn != fakealertmanager.TokenInHeader {
+		t.Errorf("receiver = %+v", r)
 	}
 }
 

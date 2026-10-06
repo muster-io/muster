@@ -18,20 +18,30 @@ files_touched:
   - internal/ingest/snapshots.go
   - internal/ingest/query.sql
   - internal/ingest/handler_test.go
+  - internal/ingest/ingest_integration_test.go
   - internal/api/integrations.go
   - internal/api/storedsnapshots.go
   - internal/api/integrations_test.go
-  - internal/server/server.go
+  - internal/api/server.go
+  - internal/api/problem.go
+  - internal/api/server_test.go
+  - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
   - internal/archlint/secretleak.go
   - internal/fakes/fakealertmanager/fakealertmanager.go
   - internal/fakes/fakealertmanager/fakealertmanager_test.go
   - internal/devmode/devmode.go
+  - internal/devmode/devmode_test.go
+  - internal/cli/dev_test.go
+  - sqlc.yaml
+  - api/openapi.yaml
   - test/e2e/ingest_test.go
   - test/load/main.go
   - docs/integrations/alertmanager.md
   - design/prd/l1/C-05-integrations.md
+  - design/prd/l1/reference.md
   - design/prd/L1.md
 acceptance:
   - "[C-05.FR-1, C-05.FR-6] `createIntegration` stores the name (unique among Integrations that are not deleted, otherwise 409 `name_taken`), the description, the Connection mode `webhook_only`, the Static labels and the duplicate window; `updateIntegration` needs `If-Match` (412 when stale, 428 without); every change writes an Audit log entry with a diff; `heartbeat.enabled: true` answers 422 `unsupported` until S-023."
@@ -82,9 +92,10 @@ issue: 18
   `listStoredSnapshots`, `getStoredSnapshot`, `ingestSnapshot`, `ingestSnapshotWithPathToken`. Schemas:
   `Integration(List)`, `IntegrationBase`, `IntegrationInput`, `HeartbeatSettingsInput`, `HeartbeatInfo`,
   `IntegrationToken(List)`, `IntegrationTokenCreate`, `IntegrationTokenCreated`, `StoredSnapshotSummary`,
-  `StoredSnapshot`, `StoredSnapshotList`, `SnapshotState`.
+  `StoredSnapshot`, `StoredSnapshotList`, `SnapshotState`. `createIntegrationToken` also answers `422` (a name longer
+  than 200 characters, `too_long` at `/name`), which the spec now lists.
 - **Integrations** (C-05.FR-1, FR-6, FR-8; `integrations`): the name is unique among Integrations that are not deleted
-  (`409 name_taken`); `connection_mode` accepts only `webhook_only` (`integration.connection_mode`); Static labels are
+  (`409 name_taken`), at most 200 characters (`422 too_long`); `connection_mode` accepts only `webhook_only` (`integration.connection_mode`); Static labels are
   label names of the Prometheus form (`[a-zA-Z_][a-zA-Z0-9_]*`, otherwise `422 invalid_format` at
   `/static_labels/<name>`) with string values; `duplicate_window_seconds` is at least 1 (the forms pre-fill
   `integration.duplicate_window`). The Heartbeat settings are stored: `enabled: false` with `timeout_seconds`
@@ -126,19 +137,22 @@ issue: 18
   `too_large`; `integration` is the id of the token's Integration, or `unknown` when the token matches no Integration
   that is not deleted — P-10, open question 1), `muster_ingest_request_duration_seconds` (`le` buckets from 1 ms to
   10 s), `muster_integration_info{integration,name}` for every Integration that is not deleted.
-- **Log events**: `snapshot_accepted` (INFO: `integration`, `stored_snapshot`, `size_bytes`), `ingest_rejected` (INFO:
-  `integration`, `outcome`, `route_pattern`, `client_address`). Every line about an ingestion request names the route
-  pattern, never the path (C-05.FR-3); the lint-5 probe of S-005 gains a request with a known token in the path.
+- **Log events**: `snapshot_accepted` (INFO: `integration`, `stored_snapshot`, `size_bytes`, `route_pattern`),
+  `ingest_rejected` (INFO: `integration`, `outcome`, `route_pattern`, `client_address`), `ingest_failed` (ERROR:
+  `integration`, `route_pattern`, `error` — the token lookup or the write failed and the request answered `500`).
+  Every line about an ingestion request names the route pattern, never the path (C-05.FR-3); the lint-5 probe of
+  S-005 gains a request with a known token in the path.
 - **Listeners** (C-02.FR-3): the ingest handler of S-006 gets the two ingestion routes; with `MUSTER_LISTEN_INGEST`
   equal to `MUSTER_LISTEN_APP` the shared port routes `/api/v1/ingest` to it.
 - **Fake Alertmanager** (C-01.FR-13, `127.0.0.1:19093`): `POST /_fake/receivers`
-  `{"name", "url", "token", "token_in": "header"|"path"}` registers a receiver; `POST /_fake/send` sends one request to
+  `{"name", "url", "token", "token_in": "header"|"path"}` registers a receiver and answers `204`; `POST /_fake/send` sends one request to
   a receiver with `{"payload": <JSON>}`, `{"raw": "<text>", "content_type"}`, or `{"size_bytes": N}` (a filler body of
   that size), optionally `"token": "<other>"` or `"no_token": true`, and answers `{"status": <code>}`. The load mode of
   S-004 sends to a registered receiver.
 - **Development mode**: `MUSTER_INGEST_URL` defaults to `http://localhost:8081` in `muster dev`; at start it ensures the
   Integration `dev-alertmanager` (Static label `cluster=dev`) with a token and registers it with the fake Alertmanager
-  as the receiver `muster`. `make load-test` now drives real ingestion.
+  as the receiver `muster`. The token is a published development token, like the development master key, so that
+  every start registers the same receiver while only its hash is stored. `make load-test` now drives real ingestion.
 - **Documentation** (C-05.FR-11): `docs/integrations/alertmanager.md` — one Integration per Alertmanager cluster (an HA
   pair is one), the receiver and route of the snippet, `--dispatch.start-delay` of at least twice the longer of the
   rule evaluation interval and the rule evaluator's resend delay plus a margin (about 2.5 minutes or more at a 1-minute
@@ -243,10 +257,10 @@ summary.
 
 ## Open questions
 
-1. P-10: the contract labels a request with the id of the token's Integration when the token is known — a revoked
+1. ~~P-10: the contract labels a request with the id of the token's Integration when the token is known — a revoked
    token included — and with `unknown` when it matches no Integration or only a deleted one, so that
    `MusterIngestRejected` names an Integration whose old token is still in use. Confirm, and close P-10 in L1.md and
-   C-05.FR-4.
+   C-05.FR-4.~~ Resolved (D254): confirmed as stated; P-10 is closed in L1.md §5.3 and C-05.FR-4.
 
 ## Notes
 
@@ -255,6 +269,9 @@ summary.
   processing in S-020; until then `snapshot_count` is `0` while `last_snapshot_at` already shows the newest Snapshot.
 - In production `MUSTER_INGEST_URL` defaults to `MUSTER_PUBLIC_URL`; with separate listeners the reverse proxy routes
   `/api/v1/ingest` and `/api/v1/heartbeat` to the ingest port, which the documentation page says.
+- The ingest handler is wired in `internal/runtime`; `internal/server` already routes the ingest paths of a shared port
+  to it (S-006), so it needed no change.
+- The `ingest_claims` row of an Integration is left to processing (S-020), which creates it when missing.
 
 ## Coverage
 
