@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,6 +48,26 @@ type env struct {
 	snapshots *ingest.Service
 	handler   http.Handler
 	log       *bytes.Buffer
+	// processLog holds the lines of processing, which concurrent workers write.
+	processLog lockedBuffer
+}
+
+// lockedBuffer is a bytes.Buffer that concurrent writers share.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }
 
 var by = integrations.Requester{Actor: audit.System, Transport: audit.TransportSystem}

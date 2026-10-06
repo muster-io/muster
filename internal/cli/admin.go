@@ -42,17 +42,18 @@ var (
 	stdin            io.Reader = os.Stdin
 )
 
-// runAdmin is `muster admin <command>`.
-func runAdmin(args []string, stdout, stderr io.Writer) int {
+// runAdmin is `muster admin <command>`; development is set under `muster dev`, whose development clock the command
+// then follows.
+func runAdmin(args []string, stdout, stderr io.Writer, development bool) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, adminUsage)
 		return exitUsage
 	}
 	switch args[0] {
 	case "reset-password":
-		return runResetPasswordCommand(args[1:], stdout, stderr)
+		return runResetPasswordCommand(args[1:], stdout, stderr, development)
 	case "reset-totp":
-		return runResetTOTPCommand(args[1:], stdout, stderr)
+		return runResetTOTPCommand(args[1:], stdout, stderr, development)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, adminUsage)
 		return exitOK
@@ -64,7 +65,7 @@ func runAdmin(args []string, stdout, stderr io.Writer) int {
 
 // runResetPasswordCommand is `muster admin reset-password --actor <name> <login>`. Without --actor, or with anything
 // but one login, it exits 2 before it reads the password or connects.
-func runResetPasswordCommand(args []string, stdout, stderr io.Writer) int {
+func runResetPasswordCommand(args []string, stdout, stderr io.Writer, development bool) int {
 	fs := flag.NewFlagSet("reset-password", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	actor := fs.String("actor", "", "")
@@ -87,9 +88,10 @@ func runResetPasswordCommand(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signals()
 	defer stop()
 	context.AfterFunc(ctx, stop)
-	id, err := runResetPassword(ctx, runtime.Options{Environ: environ(), Stdout: stdout}, runtime.PasswordReset{
-		Actor: name, Login: login, Password: password,
-	})
+	id, err := runResetPassword(ctx, runtime.Options{Environ: environ(), Stdout: stdout, Development: development},
+		runtime.PasswordReset{
+			Actor: name, Login: login, Password: password,
+		})
 	if err != nil {
 		fmt.Fprintf(stderr, "muster admin reset-password: %v\n", err)
 		return exitFailure
@@ -122,7 +124,7 @@ func readPassword(r io.Reader, prompt io.Writer) (logging.Secret, error) {
 
 // runResetTOTPCommand is `muster admin reset-totp --actor <name> <login>`. Without --actor, or with anything but one
 // login, it exits 2 before it connects.
-func runResetTOTPCommand(args []string, stdout, stderr io.Writer) int {
+func runResetTOTPCommand(args []string, stdout, stderr io.Writer, development bool) int {
 	fs := flag.NewFlagSet("reset-totp", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	actor := fs.String("actor", "", "")
@@ -140,9 +142,10 @@ func runResetTOTPCommand(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signals()
 	defer stop()
 	context.AfterFunc(ctx, stop)
-	id, removed, err := runResetTOTP(ctx, runtime.Options{Environ: environ(), Stdout: stdout}, runtime.TOTPReset{
-		Actor: name, Login: login,
-	})
+	id, removed, err := runResetTOTP(ctx, runtime.Options{Environ: environ(), Stdout: stdout, Development: development},
+		runtime.TOTPReset{
+			Actor: name, Login: login,
+		})
 	if err != nil {
 		fmt.Fprintf(stderr, "muster admin reset-totp: %v\n", err)
 		return exitFailure

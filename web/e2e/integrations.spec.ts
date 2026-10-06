@@ -189,13 +189,15 @@ test("creates an Integration with a token, receives webhooks, edits, revokes and
     "Last Snapshot: never",
   );
   await expect(page.getByTestId("integration-last-snapshot")).toHaveText(/^Last Snapshot: .+/);
-  // The count is kept by Snapshot processing; until it runs, it may lag behind the Stored Snapshots.
-  await expect(page.getByTestId("integration-snapshot-count")).toHaveText(
-    /^Snapshots received: \d+$/,
-  );
   await expect(tokenRow(page, "rotation-1")).toContainText("Last used");
+  // Processing takes both: the webhook is processed, the body that is not JSON fails (C-06.FR-20).
   const snapshots = page.getByRole("table", { name: "Stored Snapshots" });
-  await expect(snapshots.getByTestId("snapshot-state")).toHaveText(["Pending", "Pending"]);
+  await expect(snapshots.getByTestId("snapshot-state")).toHaveText([
+    /^Failed: the body is not valid JSON: /,
+    "Processed",
+  ]);
+  await page.reload();
+  await expect(page.getByTestId("integration-snapshot-count")).toHaveText("Snapshots received: 2");
   await shot(page, "integration-page");
   await at360(page, "integration-page-360");
   // Newest first: the first row is the second webhook.
@@ -203,7 +205,9 @@ test("creates an Integration with a token, receives webhooks, edits, revokes and
   await expect(page.getByRole("heading", { name: "Stored Snapshot", level: 1 })).toBeVisible();
   await expect(page.getByTestId("snapshot-body")).toHaveText("not json");
   await expect(page.getByTestId("snapshot-content-type")).toHaveText("text/plain");
-  await expect(page.getByTestId("snapshot-state")).toHaveText("Pending");
+  await expect(page.getByTestId("snapshot-state")).toHaveText(
+    /^Failed: the body is not valid JSON: /,
+  );
   await expect(page.getByTestId("snapshot-received")).toHaveText(/^Received .+/);
   await page.getByRole("link", { name: "prod-eu" }).click();
 

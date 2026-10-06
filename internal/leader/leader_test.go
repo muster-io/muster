@@ -320,12 +320,13 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	for _, task := range tasks {
 		names = append(names, task.Name)
 	}
-	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning"}
+	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning",
+		"ingest_backlog"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
 	if tasks[0].Every != time.Hour || tasks[1].Every != AliveMarkInterval || tasks[2].Every != time.Hour ||
-		tasks[3].Every != MaintenanceInterval {
+		tasks[3].Every != MaintenanceInterval || tasks[4].Every != BacklogInterval {
 		t.Errorf("intervals %v %v %v %v", tasks[0].Every, tasks[1].Every, tasks[2].Every, tasks[3].Every)
 	}
 	// Partition maintenance logs its own failures; the runner gets none to log twice.
@@ -338,6 +339,31 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	if err := tasks[3].Run(t.Context()); err != nil ||
 		!slices.Equal(calls, []string{"partitions", "prune", "short-lived"}) {
 		t.Errorf("calls %v, err %v", calls, err)
+	}
+	// Without a backlog counter the task does nothing.
+	if err := tasks[4].Run(t.Context()); err != nil {
+		t.Errorf("backlog without a counter: %v", err)
+	}
+}
+
+// TestIngestBacklogTask: the backlog task counts the pending Stored Snapshots of every Organization.
+func TestIngestBacklogTask(t *testing.T) {
+	var counted [][]int64
+	orgsErr := errors.New("down")
+	w := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		IngestBacklog: func(_ context.Context, orgs []int64) error {
+			counted = append(counted, orgs)
+			return nil
+		},
+	}
+	backlog := Tasks(w)()[4]
+	if err := backlog.Run(t.Context()); err != nil || len(counted) != 1 || !slices.Equal(counted[0], []int64{1, 2}) {
+		t.Errorf("counted %v, %v", counted, err)
+	}
+	w.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
+	if err := Tasks(w)()[4].Run(t.Context()); !errors.Is(err, orgsErr) {
+		t.Errorf("= %v", err)
 	}
 }
 

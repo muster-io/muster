@@ -4,18 +4,27 @@
 // Package devmode is the development mode of `muster dev`: its published defaults, the rule that lets the environment
 // replace them, the fake Alertmanager, Mattermost, Telegram and OIDC servers and the fake HTTP and SOCKS5 proxies on
 // fixed loopback addresses, the demo OIDC configuration, and Muster itself in the same process, against the
-// development database and migrated on start, with the demo Integration that the fake Alertmanager sends to.
+// development database and migrated on start, with the demo Integration that the fake Alertmanager sends to; and the
+// development clock that every replica of the development database shares.
 package devmode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/devmode/dbgen"
 	"github.com/muster-io/muster/internal/fakes/fakealertmanager"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/fakes/fakeoidc"
@@ -273,4 +282,169 @@ func Run(ctx context.Context, w io.Writer, addrs Addresses, serve func(context.C
 func RunReplica(ctx context.Context, w io.Writer, serve func(context.Context) error) error {
 	fmt.Fprintln(w, ReplicaLine)
 	return serve(ctx)
+}
+
+// ClockChannel is the LISTEN/NOTIFY channel on which a change of the development clock reaches every replica.
+const ClockChannel = "dev_clock"
+
+// ClockPath is where the internal listener serves the development clock in development mode.
+const ClockPath = "/_dev/clock"
+
+// maxAdvance bounds one advance of the development clock: ten years.
+const maxAdvance = 10 * 365 * 24 * 60 * 60
+
+// ClockQueries are the queries of the development clock; *dbgen.Queries implements them.
+type ClockQueries interface {
+	GetDevClockOffset(ctx context.Context) (int64, error)
+	AdvanceDevClock(ctx context.Context, arg dbgen.AdvanceDevClockParams) (int64, error)
+	NotifyDevClock(ctx context.Context, arg dbgen.NotifyDevClockParams) error
+}
+
+// ClockStore runs the queries alone or in one transaction.
+type ClockStore interface {
+	ClockQueries
+	InTx(ctx context.Context, f func(ClockQueries) error) error
+}
+
+// NewClockStore is the ClockStore over the main pool.
+func NewClockStore(pool *pgxpool.Pool) ClockStore {
+	return clockStore{Queries: dbgen.New(pool), pool: pool}
+}
+
+type clockStore struct {
+	*dbgen.Queries
+	pool *pgxpool.Pool
+}
+
+func (s clockStore) InTx(ctx context.Context, f func(ClockQueries) error) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return f(dbgen.New(tx)) })
+}
+
+// Clock is the development clock (C-01.FR-13): the offset of the business clock, stored in
+// runtime_state.dev_clock_offset_seconds so that every replica of one database runs on the same clock. The real
+// clock is never offset.
+type Clock struct {
+	store    ClockStore
+	business *clock.Business
+	// maintain runs partition maintenance as at the given time, so that rows written at the new time have their
+	// partitions.
+	maintain func(ctx context.Context, at time.Time) error
+	// changed is told once this replica runs on a new offset, to wake what waits on the clock.
+	changed func()
+	mu      sync.Mutex
+}
+
+// NewClock returns the development clock that moves business; maintain runs partition maintenance as at a time, and
+// changed, which may be nil, is called after each change of the offset.
+func NewClock(s ClockStore, business *clock.Business, maintain func(ctx context.Context, at time.Time) error,
+	changed func()) *Clock {
+	return &Clock{store: s, business: business, maintain: maintain, changed: changed}
+}
+
+// Load sets the business clock to the stored offset: at start, on each notification on ClockChannel and when the
+// LISTEN is back after a loss.
+func (c *Clock) Load(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	offset, err := c.store.GetDevClockOffset(ctx)
+	if errors.Is(err, pgx.ErrNoRows) {
+		offset, err = 0, nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the development clock: %w", err)
+	}
+	c.set(offset)
+	return nil
+}
+
+func (c *Clock) set(offset int64) {
+	if c.business.Offset() == time.Duration(offset)*time.Second {
+		return
+	}
+	c.business.SetOffset(time.Duration(offset) * time.Second)
+	if c.changed != nil {
+		c.changed()
+	}
+}
+
+// Advance moves the clock of every replica forward by seconds: it runs partition maintenance as at the new time,
+// adds the seconds to the stored offset and notifies the replicas in one transaction, and returns once this replica
+// runs on the new offset.
+func (c *Clock) Advance(ctx context.Context, seconds int64) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// The new time is the stored offset plus the advance, which another replica may have moved since this one read it.
+	stored, err := c.store.GetDevClockOffset(ctx)
+	if errors.Is(err, pgx.ErrNoRows) {
+		stored, err = 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read the development clock: %w", err)
+	}
+	system := c.business.Now().Add(-c.business.Offset())
+	at := system.Add(time.Duration(stored+seconds) * time.Second)
+	if err := c.maintain(ctx, at); err != nil {
+		return 0, fmt.Errorf("create the partitions of the new time: %w", err)
+	}
+	var offset int64
+	err = c.store.InTx(ctx, func(q ClockQueries) error {
+		var err error
+		offset, err = q.AdvanceDevClock(ctx, dbgen.AdvanceDevClockParams{Seconds: seconds, UpdatedAt: at.UTC()})
+		if err != nil {
+			return fmt.Errorf("advance the development clock: %w", err)
+		}
+		if err := q.NotifyDevClock(ctx, dbgen.NotifyDevClockParams{Channel: ClockChannel,
+			Payload: fmt.Sprint(offset)}); err != nil {
+			return fmt.Errorf("notify the replicas: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	c.set(offset)
+	return offset, nil
+}
+
+// clockState is the answer of the development clock: the business time and the offset.
+type clockState struct {
+	Now           time.Time `json:"now"`
+	OffsetSeconds int64     `json:"offset_seconds"`
+}
+
+// Handler serves GET and POST on ClockPath: GET reads the clock, POST {"advance_seconds": N} advances it by N
+// seconds, N between 0 and ten years; both answer {"now", "offset_seconds"}.
+func (c *Clock) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+ClockPath, func(w http.ResponseWriter, _ *http.Request) {
+		c.answer(w)
+	})
+	mux.HandleFunc("POST "+ClockPath, func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			AdvanceSeconds *int64 `json:"advance_seconds"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&in); err != nil || in.AdvanceSeconds == nil || *in.AdvanceSeconds < 0 ||
+			*in.AdvanceSeconds > maxAdvance {
+			fakeserver.WriteError(w, http.StatusBadRequest,
+				fmt.Sprintf(`the body is {"advance_seconds": N} with N from 0 to %d`, maxAdvance))
+			return
+		}
+		if _, err := c.Advance(r.Context(), *in.AdvanceSeconds); err != nil {
+			fakeserver.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.answer(w)
+	})
+	return mux
+}
+
+func (c *Clock) answer(w http.ResponseWriter) {
+	fakeserver.WriteJSON(w, http.StatusOK, clockState{Now: c.business.Now().UTC(), OffsetSeconds: c.OffsetSeconds()})
+}
+
+// OffsetSeconds is how far the business clock of this replica runs ahead of the system time.
+func (c *Clock) OffsetSeconds() int64 {
+	return int64(c.business.Offset() / time.Second)
 }

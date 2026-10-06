@@ -86,22 +86,22 @@ test("lists, filters and shows Stored Snapshots as inert text", async ({ page })
   const { id } = await prepare("snapshots-test");
   await signInAdmin(page);
 
-  // The table: newest first, every one pending, with its size and group key.
+  // The table: newest first, processed — the bodies that are not webhooks failed — with its size and group key.
   await page.goto(`/integrations/${id}`);
   await expect(
     page.getByRole("table", { name: "Stored Snapshots" }).getByTestId("snapshot-state"),
-  ).toHaveText(["Pending", "Pending", "Pending", "Pending", "Pending"]);
+  ).toHaveText([/^Failed: /, /^Failed: /, /^Failed: /, /^Failed: /, "Processed"]);
   await expect(snapshotRows(page).nth(1).getByRole("cell").nth(1)).toHaveText("300 kB");
 
   // Filters in the URL: a state with no Snapshots, then a time range that starts tomorrow.
-  await page.getByLabel("State").selectOption({ label: "Failed" });
-  await expect(page).toHaveURL(/snapshot_state=failed/);
+  await page.getByLabel("State").selectOption({ label: "Pending" });
+  await expect(page).toHaveURL(/snapshot_state=pending/);
   await expect(page.getByText("No Stored Snapshots match these filters.")).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel("State")).toHaveValue("failed");
+  await expect(page.getByLabel("State")).toHaveValue("pending");
   await expect(page.getByText("No Stored Snapshots match these filters.")).toBeVisible();
-  await page.getByLabel("State").selectOption({ label: "Pending" });
-  await expect(snapshotRows(page)).toHaveCount(6);
+  await page.getByLabel("State").selectOption({ label: "Failed" });
+  await expect(snapshotRows(page)).toHaveCount(5);
   const tomorrow = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString().slice(0, 10);
   await page.getByLabel("From").fill(tomorrow);
   await expect(page).toHaveURL(new RegExp(`snapshot_from=${tomorrow}`));
@@ -198,7 +198,7 @@ test("shows the Integration pages in Russian", async ({ page }) => {
   await expect(page.getByTestId("integration-duplicate-window")).toHaveText("45 секунд");
   await expect(
     page.getByRole("table", { name: "Сохранённые снимки" }).getByTestId("snapshot-state").first(),
-  ).toHaveText("Ожидает");
+  ).toHaveText(/^Ошибка: /);
   await shot(page, "integration-page-ru");
   await page.setViewportSize({ width: 360, height: 740 });
   await expectNoHorizontalScroll(page);
