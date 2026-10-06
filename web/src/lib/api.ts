@@ -302,8 +302,36 @@ export function problemText(t: TFunction, err: unknown): string {
     if (err.status === 403 && err.code === "csrf_invalid") {
       return t("errors.reload");
     }
+    if (err.status === 403) {
+      return t("errors.forbidden");
+    }
+    if (err.status === 404) {
+      return t("errors.gone");
+    }
+    if (err.status === 412) {
+      return t("errors.stale");
+    }
+    switch (err.code) {
+      case "last_admin":
+        return t("errors.lastAdmin");
+      case "role_locked":
+        return t("errors.roleLocked");
+      case "name_taken":
+        return t("errors.loginTaken");
+      case "local_user_only":
+        return t("errors.localUserOnly");
+      case "oidc_not_linked":
+        return t("errors.oidcNotLinked");
+      default:
+        break;
+    }
   }
   return t("errors.generic");
+}
+
+/** A save refused because the item changed since it was read (412): the form offers to reload it. */
+export function isStale(err: unknown): boolean {
+  return isApiError(err) && err.status === 412;
 }
 
 /** The text of a field error code of a Problem (errors[].code). */
@@ -319,6 +347,8 @@ export function fieldErrorText(t: TFunction, code: string): string {
       return t("fieldErrors.invalidFormat");
     case "mismatch":
       return t("fieldErrors.mismatch");
+    case "unsupported":
+      return t("fieldErrors.unsupported");
     default:
       return t("fieldErrors.invalid");
   }

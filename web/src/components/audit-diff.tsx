@@ -1,0 +1,171 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright The Muster Authors
+
+// The before/after diff of an Audit log entry (C-03.FR-14, C-03.FR-15). A Secret shows only that it changed
+// (C-03.FR-21); a value that deleting a user erased arrives as "[erased]" and is shown as such, translated (C-03.FR-13).
+
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
+
+import type { AuditDiffEntry } from "../api/gen/model";
+
+/** The marker the API puts in place of a value that deleting a user erased. */
+export const ERASED = "[erased]";
+
+/** The names of the changed fields of a user. */
+function userField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/name":
+      return t("audit.fields.name");
+    case "/login":
+      return t("audit.fields.login");
+    case "/email":
+      return t("audit.fields.email");
+    case "/role":
+      return t("audit.fields.role");
+    case "/status":
+      return t("audit.fields.status");
+    case "/password":
+      return t("audit.fields.password");
+    case "/sign_in_method":
+      return t("audit.fields.signInMethod");
+    default:
+      return undefined;
+  }
+}
+
+/** The names of the changed fields of the OIDC settings. */
+function oidcField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/enabled":
+      return t("audit.fields.oidcEnabled");
+    case "/display_name":
+      return t("oidc.fields.displayName");
+    case "/issuer_url":
+      return t("oidc.fields.issuerUrl");
+    case "/client_id":
+      return t("oidc.fields.clientId");
+    case "/client_secret":
+      return t("oidc.fields.clientSecret");
+    case "/client_secret_expires_on":
+      return t("oidc.fields.secretExpiresOn");
+    case "/scopes":
+      return t("oidc.fields.scopes");
+    case "/groups_claim":
+      return t("oidc.fields.groupsClaim");
+    case "/group_mappings":
+      return t("oidc.mapping.title");
+    case "/unmatched_role":
+      return t("oidc.fields.unmatchedRole");
+    case "/sync_role":
+      return t("oidc.fields.syncRole");
+    case "/skip_totp_with_idp_mfa":
+      return t("oidc.fields.skipTotp");
+    case "/proxy/enabled":
+      return t("audit.fields.proxyEnabled");
+    case "/proxy/type":
+      return t("audit.fields.proxyType");
+    case "/proxy/address":
+      return t("audit.fields.proxyAddress");
+    case "/proxy/username":
+      return t("audit.fields.proxyUsername");
+    case "/proxy/password":
+      return t("audit.fields.proxyPassword");
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The name of a changed field of a resource type; a field without a name of its own shows its JSON pointer. The
+ * pages of later resource types add their own names here.
+ */
+export function fieldLabel(
+  t: TFunction,
+  resourceType: string | null | undefined,
+  pointer: string,
+): string {
+  let label: string | undefined;
+  switch (resourceType) {
+    case "user":
+      label = userField(t, pointer);
+      break;
+    case "oidc_settings":
+      label = oidcField(t, pointer);
+      break;
+    case "organization":
+      label = pointer === "/totp_required" ? t("audit.fields.totpRequired") : undefined;
+      break;
+    default:
+      break;
+  }
+  return label ?? pointer;
+}
+
+/** A value of a diff in one line: text as it is, other JSON compact. */
+function valueText(t: TFunction, value: unknown): string {
+  if (value === undefined || value === null) {
+    return "—";
+  }
+  if (value === "") {
+    return t("audit.emptyValue");
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "boolean") {
+    return value ? t("audit.yes") : t("audit.no");
+  }
+  return JSON.stringify(value);
+}
+
+function Value({ value }: { value: unknown }) {
+  const { t } = useTranslation();
+  if (value === ERASED) {
+    return (
+      <span className="text-muted-foreground italic" data-erased="true">
+        {t("audit.erased")}
+      </span>
+    );
+  }
+  const empty = value === undefined || value === null || value === "";
+  return (
+    <span className={empty ? "text-muted-foreground" : "font-mono text-xs break-all"}>
+      {valueText(t, value)}
+    </span>
+  );
+}
+
+export function AuditDiff({
+  diff,
+  resourceType,
+}: {
+  diff: readonly AuditDiffEntry[] | undefined;
+  resourceType: string | null | undefined;
+}) {
+  const { t } = useTranslation();
+  if (diff === undefined || diff.length === 0) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <dl className="flex flex-col gap-1" data-testid="audit-diff">
+      {diff.map((entry) => (
+        <div key={entry.pointer} className="flex flex-wrap items-baseline gap-x-1.5">
+          <dt className="font-medium">{fieldLabel(t, resourceType, entry.pointer)}:</dt>
+          <dd className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+            {entry.secret_changed === true ? (
+              <span>{t("audit.secretChanged")}</span>
+            ) : (
+              <>
+                <Value value={entry.before} />
+                <span aria-hidden="true">→</span>
+                <span className="sr-only">{t("audit.to")}</span>
+                <Value value={entry.after} />
+              </>
+            )}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
