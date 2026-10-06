@@ -289,7 +289,8 @@ var IngestFailed = newEvent("ingest_failed", LevelError, "C-05",
 var SnapshotProcessed = newEvent("snapshot_processed", LevelInfo, "C-06",
 	"A Stored Snapshot was processed: integration and stored_snapshot are public_ids, group_key the Alertmanager "+
 		"group it came for, alerts how many Alerts it listed, fired, resolved, gone and continued how many new "+
-		"firings, resolutions from Alertmanager, Alerts resolved as Gone and Continuations it made, dropped the "+
+		"firings, resolutions from Alertmanager or by the deletion of the Integration, Alerts resolved as Gone and "+
+		"Continuations it made, dropped the "+
 		"resolves of fingerprints that fire nowhere, truncated its truncatedAlerts, and duration_ms how long "+
 		"processing took.",
 	"integration", "stored_snapshot", "group_key", "alerts", "fired", "resolved", "gone", "continued", "dropped",
@@ -310,6 +311,27 @@ var SnapshotProcessingInterrupted = newEvent("snapshot_processing_interrupted", 
 		"lost; the Stored Snapshots stay pending and are processed at the next attempt, after a growing pause. "+
 		"integration is the public_id of the Integration, empty when the round failed.",
 	"integration", "error")
+
+// InternalAlertRaised is logged when processing fires an Internal alert of the built-in Integration.
+var InternalAlertRaised = newEvent("internal_alert_raised", LevelInfo, "C-06",
+	"An Internal alert fired as an Alert of the built-in Muster Integration: alertname names it, fingerprint is the "+
+		"Alert's, and entity the public_id of the Integration, Route or Destination it is about, empty when it is "+
+		"about none.",
+	"alertname", "fingerprint", "entity")
+
+// InternalAlertResolved is logged when processing resolves an Internal alert of the built-in Integration.
+var InternalAlertResolved = newEvent("internal_alert_resolved", LevelInfo, "C-06",
+	"An Internal alert resolved because its condition cleared or its entity was deleted: alertname names it, "+
+		"fingerprint is the Alert's, and entity the public_id of the Integration, Route or Destination it is about, "+
+		"empty when it is about none.",
+	"alertname", "fingerprint", "entity")
+
+// IngestReplayed is logged when muster ingest replay set Stored Snapshots back to pending.
+var IngestReplayed = newEvent("ingest_replayed", LevelInfo, "C-06",
+	"muster ingest replay set the Stored Snapshots received within the period back to pending, for processing again: "+
+		"actor is the --actor name, since the period as given, integration the public_id of the Integration it was "+
+		"limited to, empty for all, and count how many Stored Snapshots it set back.",
+	"actor", "since", "integration", "count")
 
 // DevClockLoaded is logged when a process in development mode reads the development clock: at start and after each
 // change on any replica.

@@ -96,6 +96,8 @@ type database interface {
 	IngestStore() ingest.Store
 	// ProcessStore serves Snapshot processing and the Alerts view; ClockStore the development clock.
 	ProcessStore() ingest.ProcessStore
+	// ReplayStore serves muster ingest replay.
+	ReplayStore() ingest.ReplayStore
 	ClockStore() devmode.ClockStore
 	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
 	SessionListenConn(ctx context.Context) (db.ListenConn, error)
@@ -145,6 +147,8 @@ func (d pgDatabase) IntegrationsStore() integrations.Store { return integrations
 func (d pgDatabase) IngestStore() ingest.Store { return ingest.NewStore(d.Pool) }
 
 func (d pgDatabase) ProcessStore() ingest.ProcessStore { return ingest.NewProcessStore(d.Pool) }
+
+func (d pgDatabase) ReplayStore() ingest.ReplayStore { return ingest.NewReplayStore(d.Pool) }
 
 func (d pgDatabase) ClockStore() devmode.ClockStore { return devmode.NewClockStore(d.Pool) }
 
@@ -287,6 +291,46 @@ func ResetTOTP(ctx context.Context, opts Options, r TOTPReset) (string, bool, er
 	}
 	factors := totp.New(org.ID, d.TOTPStore(), nil, audit.NewWriter(log, clocks.Business), clocks, nil)
 	return factors.ResetByLogin(ctx, r.Actor, r.Login)
+}
+
+// IngestReplay is what `muster ingest replay` asks for: the period, as a duration and as given, the name of one
+// Integration or empty for all, and the --actor name.
+type IngestReplay struct {
+	Since       time.Duration
+	SinceText   string
+	Integration string
+	Actor       string
+}
+
+// ReplayIngest is `muster ingest replay` (C-06.FR-17, C-02.FR-15): settings, logger, connections and checks and the
+// schema version check, then the Stored Snapshots of the period set back to pending in one transaction, recorded in
+// the Audit log with the --actor name; the processing workers of the running replicas process them again. It needs no
+// master key: the Keyring is not opened.
+func ReplayIngest(ctx context.Context, opts Options, r IngestReplay) (ingest.Replayed, error) {
+	cfg, log, err := setup(ctx, opts)
+	if err != nil {
+		return ingest.Replayed{}, err
+	}
+	d, err := connect(ctx, opts, cfg, log)
+	if err != nil {
+		return ingest.Replayed{}, err
+	}
+	defer d.Close()
+	if err := d.CheckSchema(ctx, log); err != nil {
+		return ingest.Replayed{}, failed(ctx, log, err)
+	}
+	org, err := d.OrganizationStore().GetOrganization(ctx)
+	if err != nil {
+		return ingest.Replayed{}, failed(ctx, log, fmt.Errorf("read the organization: %w", err))
+	}
+	clocks, err := commandClocks(ctx, opts, d, log)
+	if err != nil {
+		return ingest.Replayed{}, failed(ctx, log, err)
+	}
+	replayer := ingest.Replayer{OrgID: org.ID, Store: d.ReplayStore(), Audit: audit.NewWriter(log, clocks.Business),
+		Log: log, Business: clocks.Business}
+	return replayer.Replay(ctx, ingest.Replay{Since: r.Since, SinceText: r.SinceText, Integration: r.Integration,
+		Actor: r.Actor})
 }
 
 // commandClocks are the clocks of a subcommand: under `muster dev` the business clock runs on the development clock
@@ -567,6 +611,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.orgID, p.signIn = orgID, signIn
 	p.integrations = integrations.New(integrations.Config{
 		OrgID: orgID, Store: p.db.IntegrationsStore(), Audit: w, Business: p.clocks.Business, IngestURL: p.cfg.IngestURL,
+		RunbookBase: p.cfg.RunbookBaseURL.String(),
 	})
 	p.snapshots = ingest.New(orgID, p.db.IngestStore(), p.clocks.Business)
 	alerts := ingest.NewAlertsView(orgID, p.db.ProcessStore(), p.clocks.Business)
@@ -616,6 +661,9 @@ func (p *process) newKeeper() *leader.Keeper {
 		Log:      p.log,
 		IngestBacklog: func(ctx context.Context, orgs []int64) error {
 			return ingest.Backlog(ctx, p.db.ProcessStore(), orgs)
+		},
+		AlertRetention: func(ctx context.Context, orgID int64, now time.Time) (int64, error) {
+			return ingest.PruneAlerts(ctx, p.db.ProcessStore(), orgID, now)
 		},
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
@@ -726,7 +774,7 @@ func (p *process) loadDevClock(ctx context.Context) {
 // by this replica's id, once both are known and before anything serves or runs that could wake it.
 func (p *process) configureWorker() {
 	processor := ingest.NewProcessor(ingest.ProcessorConfig{OrgID: p.orgID, Store: p.db.ProcessStore(),
-		Business: p.clocks.Business, Log: p.log,
+		Business: p.clocks.Business, Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String(),
 		Lease: db.Lease{Owner: p.replica.ID(), Duration: ingest.Lease, Clocks: p.clocks}})
 	p.worker.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
 	p.worker.Processor = func(orgID int64) (*ingest.Processor, bool) { return processor, orgID == p.orgID }

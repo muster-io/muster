@@ -203,6 +203,9 @@ func (s *Service) CreateToken(ctx context.Context, r Requester, publicID, name s
 		if in, err = s.lock(ctx, q, publicID); err != nil {
 			return err
 		}
+		if in.Builtin {
+			return ErrBuiltinImmutable
+		}
 		if t.ID, err = q.InsertIntegrationToken(ctx, dbgen.InsertIntegrationTokenParams{
 			OrgID: s.orgID, PublicID: t.PublicID, IntegrationID: in.ID, Name: text(name), TokenHash: h, Now: now,
 		}); err != nil {

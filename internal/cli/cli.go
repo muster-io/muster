@@ -26,6 +26,7 @@ Commands:
   doctor    Check the database, its connections, the master keys and the clock; only reads
   admin     Emergency access with --actor <name> <login>: admin reset-password sets a password read from standard
             input, admin reset-totp removes a lost second factor
+  ingest    ingest replay --since <duration> [--integration <name>] --actor <name> reprocesses Stored Snapshots
   dev       Development mode: fake servers and development defaults (muster dev [--replica] | muster dev <command>)
   version   Print the version and commit
   help      Show this help
@@ -61,6 +62,8 @@ func run(args []string, stdout, stderr io.Writer, development bool) int {
 		return runDev(args[1:], stdout, stderr)
 	case "admin":
 		return runAdmin(args[1:], stdout, stderr, development)
+	case "ingest":
+		return runIngest(args[1:], stdout, stderr, development)
 	case "version":
 		if len(args) > 1 {
 			fmt.Fprintf(stderr, "muster: version takes no arguments\n\n%s", usage)

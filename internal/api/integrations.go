@@ -182,6 +182,35 @@ func (s *Server) RevokeIntegrationToken(ctx context.Context, req gen.RevokeInteg
 	return gen.RevokeIntegrationToken204Response{}, nil
 }
 
+// ListAlertmanagerRoutes is listAlertmanagerRoutes: the Alertmanager routes Muster learned for the Integration, with
+// the learned repeat interval, the time to resolve by absence and, above processing.long_repeat_warning, the warning
+// and a recommended route snippet.
+func (s *Server) ListAlertmanagerRoutes(ctx context.Context, req gen.ListAlertmanagerRoutesRequestObject) (
+	gen.ListAlertmanagerRoutesResponseObject, error) {
+	routes, err := s.alerts.Routes(ctx, req.IntegrationId)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.AlertmanagerRouteList{Items: make([]gen.AlertmanagerRoute, 0, len(routes))}
+	for _, r := range routes {
+		item := gen.AlertmanagerRoute{RoutePath: r.RoutePath, TruncatedGroupCount: int(r.TruncatedGroupCount),
+			LongIntervalWarning: r.LongIntervalWarning}
+		if r.LearnedRepeatInterval != nil {
+			item.LearnedRepeatIntervalSeconds.Set(int(r.LearnedRepeatInterval.Round(time.Second) / time.Second))
+		} else {
+			item.LearnedRepeatIntervalSeconds.SetNull()
+		}
+		item.ResolveByAbsenceAfterSeconds.Set(int(r.ResolveByAbsenceAfter.Round(time.Second) / time.Second))
+		if r.RecommendedSnippet != "" {
+			item.RecommendedSnippet.Set(r.RecommendedSnippet)
+		} else {
+			item.RecommendedSnippet.SetNull()
+		}
+		out.Items = append(out.Items, item)
+	}
+	return gen.ListAlertmanagerRoutes200JSONResponse(out), nil
+}
+
 // integrationAlertsCursor names the cursors of listIntegrationAlerts; the sort is part of the name, so that a cursor
 // never continues a list in another order.
 const integrationAlertsCursor = "integration-alerts"
@@ -288,8 +317,8 @@ func integrationInputOf(in gen.IntegrationInput) integrations.Input {
 	return out
 }
 
-// integrationOf is the API form of an Integration, with the URLs of the ingest listener. Warnings arrive with the
-// Heartbeat and the learned routes, and the count of open Alert Groups with them.
+// integrationOf is the API form of an Integration, with the URLs of the ingest listener and its warnings. The
+// Heartbeat warnings arrive with the Heartbeat, and the count of open Alert Groups with them.
 func (s *Server) integrationOf(in integrations.Integration) gen.Integration {
 	tag := etag(in.Version)
 	description, ingestURL, heartbeatURL := in.Description, s.integrations.IngestURL(), s.integrations.HeartbeatURL()
@@ -305,7 +334,19 @@ func (s *Server) integrationOf(in integrations.Integration) gen.Integration {
 			State: gen.HeartbeatState(in.Heartbeat.State), Url: &heartbeatURL,
 			LastSignalAt: nullableTime(in.Heartbeat.LastSignalAt), LostSince: nullableTime(in.Heartbeat.LostSince)},
 		LastSnapshotAt: nullableTime(in.LastSnapshotAt), SnapshotCount: int(in.SnapshotCount),
-		Warnings: []gen.IntegrationWarning{}, OpenAlertGroupCount: 0, CreatedAt: in.CreatedAt.UTC(), Etag: &tag,
+		Warnings: make([]gen.IntegrationWarning, 0, len(in.Warnings)), OpenAlertGroupCount: 0,
+		CreatedAt: in.CreatedAt.UTC(), Etag: &tag,
+	}
+	for _, w := range in.Warnings {
+		item := gen.IntegrationWarning{Kind: gen.IntegrationWarningKind(w.Kind)}
+		switch w.Kind {
+		case integrations.WarningSnapshotTruncated:
+			item.TruncatedGroupCount.Set(int(w.TruncatedGroupCount))
+		case integrations.WarningLongRepeatInterval:
+			item.RoutePath.Set(w.RoutePath)
+			item.RepeatIntervalSeconds.Set(int(w.RepeatIntervalSeconds))
+		}
+		out.Warnings = append(out.Warnings, item)
 	}
 	return out
 }

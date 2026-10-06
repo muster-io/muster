@@ -69,6 +69,26 @@ func (q *Queries) ClaimIntegrations(ctx context.Context, arg ClaimIntegrationsPa
 	return items, nil
 }
 
+const clearTruncation = `-- name: ClearTruncation :execrows
+UPDATE alertmanager_groups
+SET truncated = false, truncated_since = NULL
+WHERE org_id = $1 AND integration_id = $2 AND truncated
+`
+
+type ClearTruncationParams struct {
+	OrgID         int64
+	IntegrationID int64
+}
+
+// ClearTruncation ends the truncation of every groupKey of a deleted Integration and returns how many were truncated.
+func (q *Queries) ClearTruncation(ctx context.Context, arg ClearTruncationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, clearTruncation, arg.OrgID, arg.IntegrationID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countPendingSnapshots = `-- name: CountPendingSnapshots :one
 SELECT count(*)
 FROM stored_snapshots
@@ -95,11 +115,57 @@ type CountSnapshotParams struct {
 	IntegrationID int64
 }
 
-// CountSnapshot counts a Stored Snapshot on its Integration; processing is serialized per Integration, so the
-// ingestion path never updates the Integration row.
+// CountSnapshot counts a Stored Snapshot on its Integration when it leaves pending for the first time; processing
+// is serialized per Integration, so the ingestion path never updates the Integration row.
 func (q *Queries) CountSnapshot(ctx context.Context, arg CountSnapshotParams) error {
 	_, err := q.db.Exec(ctx, countSnapshot, arg.ReceivedAt, arg.OrgID, arg.IntegrationID)
 	return err
+}
+
+const countTruncatedGroups = `-- name: CountTruncatedGroups :one
+SELECT count(*)
+FROM alertmanager_groups
+WHERE org_id = $1 AND integration_id = $2 AND truncated
+`
+
+type CountTruncatedGroupsParams struct {
+	OrgID         int64
+	IntegrationID int64
+}
+
+// CountTruncatedGroups counts the truncated groupKeys of an Integration (MusterSnapshotTruncated).
+func (q *Queries) CountTruncatedGroups(ctx context.Context, arg CountTruncatedGroupsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTruncatedGroups, arg.OrgID, arg.IntegrationID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deleteExpiredAlerts = `-- name: DeleteExpiredAlerts :execrows
+DELETE FROM alerts a
+WHERE a.org_id = $1 AND a.id IN (
+    SELECT e.id
+    FROM alerts e
+    WHERE e.org_id = $1 AND e.status = 'resolved' AND e.resolved_at < $2::timestamptz
+    ORDER BY e.resolved_at
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED)
+`
+
+type DeleteExpiredAlertsParams struct {
+	OrgID     int64
+	Cutoff    time.Time
+	BatchSize int32
+}
+
+// DeleteExpiredAlerts deletes at most @batch_size Alerts resolved before @cutoff, with their presences (the foreign
+// key cascades); rows another transaction holds wait for the next run.
+func (q *Queries) DeleteExpiredAlerts(ctx context.Context, arg DeleteExpiredAlertsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredAlerts, arg.OrgID, arg.Cutoff, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const endPresences = `-- name: EndPresences :exec
@@ -142,6 +208,55 @@ func (q *Queries) EnsureIngestClaims(ctx context.Context, arg EnsureIngestClaims
 	return err
 }
 
+const findReplayIntegration = `-- name: FindReplayIntegration :one
+SELECT id, public_id, name
+FROM integrations
+WHERE org_id = $1 AND name = $2 AND deleted_at IS NULL
+`
+
+type FindReplayIntegrationParams struct {
+	OrgID int64
+	Name  string
+}
+
+type FindReplayIntegrationRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+}
+
+// FindReplayIntegration finds an Integration that is not deleted by its name, for muster ingest replay.
+func (q *Queries) FindReplayIntegration(ctx context.Context, arg FindReplayIntegrationParams) (FindReplayIntegrationRow, error) {
+	row := q.db.QueryRow(ctx, findReplayIntegration, arg.OrgID, arg.Name)
+	var i FindReplayIntegrationRow
+	err := row.Scan(&i.ID, &i.PublicID, &i.Name)
+	return i, err
+}
+
+const findRoutesIntegration = `-- name: FindRoutesIntegration :one
+SELECT id, builtin
+FROM integrations
+WHERE org_id = $1 AND public_id = $2 AND deleted_at IS NULL
+`
+
+type FindRoutesIntegrationParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+type FindRoutesIntegrationRow struct {
+	ID      int64
+	Builtin bool
+}
+
+// FindRoutesIntegration finds an Integration that is not deleted, for its learned Alertmanager routes.
+func (q *Queries) FindRoutesIntegration(ctx context.Context, arg FindRoutesIntegrationParams) (FindRoutesIntegrationRow, error) {
+	row := q.db.QueryRow(ctx, findRoutesIntegration, arg.OrgID, arg.PublicID)
+	var i FindRoutesIntegrationRow
+	err := row.Scan(&i.ID, &i.Builtin)
+	return i, err
+}
+
 const findSnapshotIntegration = `-- name: FindSnapshotIntegration :one
 SELECT id, public_id, name
 FROM integrations
@@ -172,7 +287,7 @@ const findViewIntegration = `-- name: FindViewIntegration :one
 SELECT i.id, o.retention_alert_details_days
 FROM integrations i
 JOIN organizations o ON o.id = i.org_id
-WHERE i.org_id = $1 AND i.public_id = $2 AND i.deleted_at IS NULL
+WHERE i.org_id = $1 AND i.public_id = $2
 `
 
 type FindViewIntegrationParams struct {
@@ -185,8 +300,8 @@ type FindViewIntegrationRow struct {
 	RetentionAlertDetailsDays int64
 }
 
-// FindViewIntegration finds an Integration that is not deleted, for its Alerts view, with the Organization's
-// retention.alert_details.
+// FindViewIntegration finds an Integration for its Alerts view, a deleted one included: its Alerts stay readable
+// until retention (C-06.FR-16). It returns the Organization's retention.alert_details.
 func (q *Queries) FindViewIntegration(ctx context.Context, arg FindViewIntegrationParams) (FindViewIntegrationRow, error) {
 	row := q.db.QueryRow(ctx, findViewIntegration, arg.OrgID, arg.PublicID)
 	var i FindViewIntegrationRow
@@ -194,12 +309,13 @@ func (q *Queries) FindViewIntegration(ctx context.Context, arg FindViewIntegrati
 	return i, err
 }
 
-const finishSnapshot = `-- name: FinishSnapshot :execrows
+const finishSnapshot = `-- name: FinishSnapshot :one
 UPDATE stored_snapshots
 SET state = $1, processed_at = $2, processing_error = $3,
     group_key = $4, alert_count = $5,
     truncated_alerts = $6
 WHERE org_id = $7 AND id = $8 AND received_at = $9::timestamptz AND state = 'pending'
+RETURNING (replayed_at IS NULL)::boolean AS first_time
 `
 
 type FinishSnapshotParams struct {
@@ -214,9 +330,11 @@ type FinishSnapshotParams struct {
 	ReceivedAt      time.Time
 }
 
-// FinishSnapshot marks a pending Stored Snapshot processed or failed, with what processing read of its payload.
-func (q *Queries) FinishSnapshot(ctx context.Context, arg FinishSnapshotParams) (int64, error) {
-	result, err := q.db.Exec(ctx, finishSnapshot,
+// FinishSnapshot marks a pending Stored Snapshot processed or failed, with what processing read of its payload, and
+// returns whether it leaves pending for the first time: a replayed one was counted when it did. No row means it is
+// no longer pending.
+func (q *Queries) FinishSnapshot(ctx context.Context, arg FinishSnapshotParams) (bool, error) {
+	row := q.db.QueryRow(ctx, finishSnapshot,
 		arg.State,
 		arg.ProcessedAt,
 		arg.ProcessingError,
@@ -227,10 +345,23 @@ func (q *Queries) FinishSnapshot(ctx context.Context, arg FinishSnapshotParams) 
 		arg.ID,
 		arg.ReceivedAt,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	var first_time bool
+	err := row.Scan(&first_time)
+	return first_time, err
+}
+
+const getAlertRetention = `-- name: GetAlertRetention :one
+SELECT retention_alert_details_days
+FROM organizations
+WHERE id = $1
+`
+
+// GetAlertRetention returns retention.alert_details of an Organization, in days.
+func (q *Queries) GetAlertRetention(ctx context.Context, orgID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, getAlertRetention, orgID)
+	var retention_alert_details_days int64
+	err := row.Scan(&retention_alert_details_days)
+	return retention_alert_details_days, err
 }
 
 const getRetention = `-- name: GetRetention :one
@@ -480,6 +611,49 @@ func (q *Queries) ListActivePresences(ctx context.Context, arg ListActivePresenc
 	return items, nil
 }
 
+const listAlertmanagerRoutes = `-- name: ListAlertmanagerRoutes :many
+SELECT r.route_path, r.learned_repeat_interval_ms,
+       (SELECT count(*)
+        FROM alertmanager_groups g
+        WHERE g.org_id = $1 AND g.alertmanager_route_id = r.id AND g.truncated)::bigint AS truncated_group_count
+FROM alertmanager_routes r
+WHERE r.org_id = $1 AND r.integration_id = $2
+ORDER BY r.route_path, r.id
+`
+
+type ListAlertmanagerRoutesParams struct {
+	OrgID         int64
+	IntegrationID int64
+}
+
+type ListAlertmanagerRoutesRow struct {
+	RoutePath               string
+	LearnedRepeatIntervalMs pgtype.Int8
+	TruncatedGroupCount     int64
+}
+
+// ListAlertmanagerRoutes lists the Alertmanager routes of an Integration in the order of their paths, with the
+// learned repeat interval and the count of their truncated groupKeys.
+func (q *Queries) ListAlertmanagerRoutes(ctx context.Context, arg ListAlertmanagerRoutesParams) ([]ListAlertmanagerRoutesRow, error) {
+	rows, err := q.db.Query(ctx, listAlertmanagerRoutes, arg.OrgID, arg.IntegrationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlertmanagerRoutesRow{}
+	for rows.Next() {
+		var i ListAlertmanagerRoutesRow
+		if err := rows.Scan(&i.RoutePath, &i.LearnedRepeatIntervalMs, &i.TruncatedGroupCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingIntegrations = `-- name: ListPendingIntegrations :many
 SELECT DISTINCT integration_id
 FROM stored_snapshots
@@ -524,6 +698,7 @@ WHERE a.org_id = $1 AND a.integration_id = $2
                    FROM alert_presences p
                    WHERE p.org_id = $1 AND p.alertmanager_group_id = $4
                      AND p.state IN ('listed', 'missed')))
+FOR NO KEY UPDATE OF a
 `
 
 type ListSnapshotAlertsParams struct {
@@ -552,8 +727,9 @@ type ListSnapshotAlertsRow struct {
 	ResolveReasonText    pgtype.Text
 }
 
-// ListSnapshotAlerts reads the Alerts a Snapshot touches: those it lists by fingerprint and those with an active
-// presence in its groupKey.
+// ListSnapshotAlerts reads the Alerts a Snapshot touches, and locks them until the Snapshot's transaction ends so that
+// the retention of the Alerts view skips them: those it lists by fingerprint and those with an active presence in its
+// groupKey.
 func (q *Queries) ListSnapshotAlerts(ctx context.Context, arg ListSnapshotAlertsParams) ([]ListSnapshotAlertsRow, error) {
 	rows, err := q.db.Query(ctx, listSnapshotAlerts,
 		arg.OrgID,
@@ -1051,6 +1227,27 @@ func (q *Queries) ListViewGroupKeys(ctx context.Context, arg ListViewGroupKeysPa
 	return items, nil
 }
 
+const lockIntegrationName = `-- name: LockIntegrationName :one
+SELECT name
+FROM integrations
+WHERE org_id = $1 AND id = $2
+FOR KEY SHARE
+`
+
+type LockIntegrationNameParams struct {
+	OrgID         int64
+	IntegrationID int64
+}
+
+// LockIntegrationName reads the current name of an Integration for an Internal alert about it, after a rename that is
+// in progress commits; a rename that starts later waits for the Snapshot's transaction and then sees its raise.
+func (q *Queries) LockIntegrationName(ctx context.Context, arg LockIntegrationNameParams) (string, error) {
+	row := q.db.QueryRow(ctx, lockIntegrationName, arg.OrgID, arg.IntegrationID)
+	var name string
+	err := row.Scan(&name)
+	return name, err
+}
+
 const markPresencesMissed = `-- name: MarkPresencesMissed :exec
 UPDATE alert_presences
 SET state = 'missed', missed_since = $1
@@ -1077,7 +1274,7 @@ func (q *Queries) MarkPresencesMissed(ctx context.Context, arg MarkPresencesMiss
 }
 
 const nextPendingSnapshot = `-- name: NextPendingSnapshot :one
-SELECT s.id, s.public_id, s.received_at, b.body
+SELECT s.id, s.public_id, s.received_at, s.source, b.body
 FROM stored_snapshots s
 JOIN snapshot_bodies b ON b.org_id = $1 AND b.body_sha256 = s.body_sha256 AND b.body_day = s.body_day
 WHERE s.org_id = $1 AND s.integration_id = $2 AND s.state = 'pending'
@@ -1096,10 +1293,11 @@ type NextPendingSnapshotRow struct {
 	ID         int64
 	PublicID   string
 	ReceivedAt time.Time
+	Source     string
 	Body       []byte
 }
 
-// NextPendingSnapshot reads the oldest pending Stored Snapshot of an Integration with its body.
+// NextPendingSnapshot reads the oldest pending Stored Snapshot of an Integration with its body and its source.
 func (q *Queries) NextPendingSnapshot(ctx context.Context, arg NextPendingSnapshotParams) (NextPendingSnapshotRow, error) {
 	row := q.db.QueryRow(ctx, nextPendingSnapshot, arg.OrgID, arg.IntegrationID, arg.Horizon)
 	var i NextPendingSnapshotRow
@@ -1107,6 +1305,7 @@ func (q *Queries) NextPendingSnapshot(ctx context.Context, arg NextPendingSnapsh
 		&i.ID,
 		&i.PublicID,
 		&i.ReceivedAt,
+		&i.Source,
 		&i.Body,
 	)
 	return i, err
@@ -1151,7 +1350,7 @@ SET lease_until = $1
 FROM integrations i
 WHERE c.org_id = $2 AND c.integration_id = $3 AND c.lease_owner = $4
   AND i.org_id = $2 AND i.id = c.integration_id
-RETURNING i.public_id, i.static_labels, i.duplicate_window_seconds, i.liveness_clock_ms
+RETURNING i.public_id, i.name, i.static_labels, i.duplicate_window_seconds, i.liveness_clock_ms, i.deleted_at
 `
 
 type RenewIngestLeaseParams struct {
@@ -1163,9 +1362,11 @@ type RenewIngestLeaseParams struct {
 
 type RenewIngestLeaseRow struct {
 	PublicID               string
+	Name                   string
 	StaticLabels           []byte
 	DuplicateWindowSeconds int64
 	LivenessClockMs        int64
+	DeletedAt              pgtype.Timestamptz
 }
 
 // RenewIngestLease extends the lease this replica holds and locks the claim row until the Snapshot's transaction
@@ -1181,11 +1382,105 @@ func (q *Queries) RenewIngestLease(ctx context.Context, arg RenewIngestLeasePara
 	var i RenewIngestLeaseRow
 	err := row.Scan(
 		&i.PublicID,
+		&i.Name,
 		&i.StaticLabels,
 		&i.DuplicateWindowSeconds,
 		&i.LivenessClockMs,
+		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const replaySnapshots = `-- name: ReplaySnapshots :many
+UPDATE stored_snapshots
+SET state = 'pending', processed_at = NULL, processing_error = NULL, replayed_at = $1::timestamptz
+WHERE org_id = $2 AND received_at >= $3::timestamptz AND state <> 'pending'
+  AND ($4::bigint IS NULL OR integration_id = $4::bigint)
+RETURNING integration_id
+`
+
+type ReplaySnapshotsParams struct {
+	ReplayedAt    time.Time
+	OrgID         int64
+	Since         time.Time
+	IntegrationID pgtype.Int8
+}
+
+// ReplaySnapshots sets the Stored Snapshots received since @since that left pending, of one Integration when it is
+// given, back to pending and marks them replayed (C-06.FR-17); it returns the Integration of each.
+func (q *Queries) ReplaySnapshots(ctx context.Context, arg ReplaySnapshotsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, replaySnapshots,
+		arg.ReplayedAt,
+		arg.OrgID,
+		arg.Since,
+		arg.IntegrationID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var integration_id int64
+		if err := rows.Scan(&integration_id); err != nil {
+			return nil, err
+		}
+		items = append(items, integration_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveIntegrationAlerts = `-- name: ResolveIntegrationAlerts :many
+UPDATE alerts
+SET status = 'resolved', resolved_at = $1::timestamptz, resolve_reason = 'integration_deleted',
+    resolve_reason_text = $2::text, updated_at = $3::timestamptz
+WHERE org_id = $4 AND integration_id = $5 AND status = 'firing'
+RETURNING id, fingerprint, episode
+`
+
+type ResolveIntegrationAlertsParams struct {
+	ResolvedAt    time.Time
+	ReasonText    string
+	UpdatedAt     time.Time
+	OrgID         int64
+	IntegrationID int64
+}
+
+type ResolveIntegrationAlertsRow struct {
+	ID          int64
+	Fingerprint string
+	Episode     int64
+}
+
+// ResolveIntegrationAlerts resolves every firing Alert of a deleted Integration with the reason integration_deleted
+// and returns them (C-06.FR-16).
+func (q *Queries) ResolveIntegrationAlerts(ctx context.Context, arg ResolveIntegrationAlertsParams) ([]ResolveIntegrationAlertsRow, error) {
+	rows, err := q.db.Query(ctx, resolveIntegrationAlerts,
+		arg.ResolvedAt,
+		arg.ReasonText,
+		arg.UpdatedAt,
+		arg.OrgID,
+		arg.IntegrationID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveIntegrationAlertsRow{}
+	for rows.Next() {
+		var i ResolveIntegrationAlertsRow
+		if err := rows.Scan(&i.ID, &i.Fingerprint, &i.Episode); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateAlertmanagerGroup = `-- name: UpdateAlertmanagerGroup :exec

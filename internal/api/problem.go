@@ -70,6 +70,7 @@ const (
 	codeRoleLocked            = "role_locked"
 	codeServiceAccountDenied  = "service_account_not_allowed"
 	codeOIDCRecheckRequired   = "oidc_recheck_required"
+	codeBuiltinImmutable      = "builtin_immutable"
 
 	fieldRequired      = "required"
 	fieldInvalidFormat = "invalid_format"
@@ -245,6 +246,9 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Integration or Integration token.")
 	case errors.Is(err, integrations.ErrNameTaken):
 		return problem(http.StatusConflict, typeConflict, codeNameTaken, "Another Integration has this name.")
+	case errors.Is(err, integrations.ErrBuiltinImmutable):
+		return problem(http.StatusConflict, typeConflict, codeBuiltinImmutable,
+			"The built-in Muster Integration cannot be changed, deleted or given a token.")
 	case errors.Is(err, integrations.ErrVersionMismatch):
 		return errPreconditionFailed
 	case errors.Is(err, ingest.ErrNotFound):

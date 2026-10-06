@@ -3,8 +3,10 @@
 - Status: Draft; the first migration is embedded in the binary and applied by `muster migrate`
 - Date: 2026-10-03
 - Migrations: [`0001_init.up.sql`](../../internal/db/migrations/0001_init.up.sql) and
-  [`0001_init.down.sql`](../../internal/db/migrations/0001_init.down.sql) in `internal/db/migrations/` — golang-migrate
-  format, hand-written SQL, embedded in the binary, the same directory `sqlc` reads
+  [`0001_init.down.sql`](../../internal/db/migrations/0001_init.down.sql), then
+  [`0002_stored_snapshots_replayed_at`](../../internal/db/migrations/0002_stored_snapshots_replayed_at.up.sql)
+  (`stored_snapshots.replayed_at`, S-021), in `internal/db/migrations/` — golang-migrate format, hand-written SQL,
+  embedded in the binary, the same directory `sqlc` reads
   ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md))
 - PostgreSQL 14 or newer; one extension, `pg_trgm`
 
@@ -247,6 +249,7 @@ erDiagram
         text source "webhook internal"
         bytea body_sha256
         text state "pending processed failed"
+        timestamptz replayed_at "set by replay"
         bigint_array route_ids
     }
     snapshot_bodies {
@@ -701,10 +704,12 @@ Serves C-05, C-06.FR-1, C-06.FR-17, C-06.FR-20, C-07; [ADR-0002](../adr/0002-web
   Stored Snapshot per Integration is processed at a time (C-06.FR-1). See [section 5](#5-queues-and-claims).
 - **`stored_snapshots`** (partitioned by day on `received_at`) — the ingestion queue itself: one row per accepted
   request with its processing state (`pending`, `processed`, `failed` with `processing_error`; the `CHECK` keeps
-  `processed_at` and the error consistent, and replay resets both). Values read during processing (`group_key`,
-  `alert_count`, `truncated_alerts`) and the Routes that took its Alerts (`route_ids`, GIN-indexed for template dry runs
-  over "the most recent Stored Snapshots that the Route took", C-12.FR-5) are written back. `source = 'internal'` marks
-  raises and resolves of Internal alerts ([section 7](#7-decisions-and-alternatives)).
+  `processed_at` and the error consistent, and replay resets both and sets `replayed_at`, so that processing counts a
+  Stored Snapshot in `integrations.snapshot_count` only when it leaves `pending` for the first time). Values read
+  during processing (`group_key`, `alert_count`, `truncated_alerts`) and the Routes that took its Alerts (`route_ids`,
+  GIN-indexed for template dry runs over "the most recent Stored Snapshots that the Route took", C-12.FR-5) are written
+  back. `source = 'internal'` marks raises and resolves of Internal alerts ([section 7](#7-decisions-and-alternatives))
+  and the marker that `deleteIntegration` writes into the queue of the deleted Integration (C-06.FR-16).
   Indexes: the partial `(org_id, integration_id, received_at, id) WHERE state = 'pending'` gives processing order per
   Integration and stays tiny; `(org_id, integration_id, received_at DESC, id DESC)` serves the Stored Snapshot list with
   cursor pagination and the time of the last Snapshot.

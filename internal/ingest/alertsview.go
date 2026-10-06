@@ -90,17 +90,19 @@ type AlertPage struct {
 	Next   *AlertPosition
 }
 
-// AlertsView reads the Alerts view of the Integrations of an Organization (C-06.FR-19).
+// AlertsView reads the Alerts view of the Integrations of an Organization (C-06.FR-19) and their learned
+// Alertmanager routes (C-06.FR-18).
 type AlertsView struct {
-	orgID int64
-	store viewQueries
-	clock clock.Clock
+	orgID  int64
+	store  viewQueries
+	routes routeQueries
+	clock  clock.Clock
 }
 
 // NewAlertsView returns the Alerts view of the Organization orgID; business is the business clock, which decides
 // the retention of resolved Alerts.
 func NewAlertsView(orgID int64, store ProcessQueries, business clock.Clock) *AlertsView {
-	return &AlertsView{orgID: orgID, store: store, clock: business}
+	return &AlertsView{orgID: orgID, store: store, routes: store, clock: business}
 }
 
 // viewRow is a row of any of the four sorted queries.

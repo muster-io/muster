@@ -1044,6 +1044,16 @@ func (s *probeIntegrationStore) LastSnapshotTimes(context.Context, intdb.LastSna
 	return nil, nil
 }
 
+func (s *probeIntegrationStore) CountTruncatedGroupsOf(context.Context, intdb.CountTruncatedGroupsOfParams) (
+	[]intdb.CountTruncatedGroupsOfRow, error) {
+	return nil, nil
+}
+
+func (s *probeIntegrationStore) ListLongRepeatRoutes(context.Context, intdb.ListLongRepeatRoutesParams) (
+	[]intdb.ListLongRepeatRoutesRow, error) {
+	return nil, nil
+}
+
 func (s *probeIntegrationStore) InsertIntegrationToken(context.Context, intdb.InsertIntegrationTokenParams) (int64,
 	error) {
 	return 1, nil

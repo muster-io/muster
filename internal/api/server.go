@@ -151,9 +151,10 @@ type StoredSnapshots interface {
 	Get(ctx context.Context, publicID string) (ingest.Snapshot, error)
 }
 
-// Alerts is what the API needs of the Alerts view of internal/ingest.
+// Alerts is what the API needs of the Alerts view of internal/ingest and of the learned Alertmanager routes.
 type Alerts interface {
 	List(ctx context.Context, f ingest.AlertFilter) (ingest.AlertPage, error)
+	Routes(ctx context.Context, integration string) ([]ingest.AlertmanagerRoute, error)
 }
 
 // Config is what the API serves with.
@@ -225,7 +226,7 @@ var implemented = map[string]bool{
 	"ListIntegrations": true, "CreateIntegration": true, "GetIntegration": true, "UpdateIntegration": true,
 	"DeleteIntegration": true, "ListIntegrationTokens": true, "CreateIntegrationToken": true,
 	"RevokeIntegrationToken": true, "ListStoredSnapshots": true, "GetStoredSnapshot": true,
-	"ListIntegrationAlerts": true,
+	"ListIntegrationAlerts": true, "ListAlertmanagerRoutes": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how

@@ -96,7 +96,9 @@ func runScenario(t *testing.T, e *env, sc fakealertmanager.Scenario) {
 					ContentType: "application/json"}); err != nil {
 					t.Fatal(err)
 				}
-				if n, err := p.Drain(ctx); err != nil || n != 1 {
+				// The built-in Integration's synthetic Snapshots, such as a raise of MusterSnapshotTruncated, are
+				// drained too.
+				if n, err := p.Drain(ctx); err != nil || n < 1 {
 					t.Fatalf("step %d: processed %d, %v", i, n, err)
 				}
 			}

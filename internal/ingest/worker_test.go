@@ -51,6 +51,8 @@ type fakeProcess struct {
 	// refusePayload refuses to mark a Snapshot with what processing read of its payload, like a value PostgreSQL
 	// cannot store.
 	refusePayload bool
+	// replayed marks every pending Snapshot as set back to pending by a replay: finishing it counts nothing.
+	replayed bool
 }
 
 func newFakeProcess() *fakeProcess {
@@ -127,21 +129,21 @@ func (f *fakeProcess) NextPendingSnapshot(context.Context, dbgen.NextPendingSnap
 	return f.pending[0], nil
 }
 
-func (f *fakeProcess) FinishSnapshot(_ context.Context, arg dbgen.FinishSnapshotParams) (int64, error) {
+func (f *fakeProcess) FinishSnapshot(_ context.Context, arg dbgen.FinishSnapshotParams) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.err("FinishSnapshot"); err != nil {
-		return 0, err
+		return false, err
 	}
 	if f.refusePayload && arg.GroupKey.Valid {
-		return 0, &pgconn.PgError{Code: "22021", Message: "invalid byte sequence"}
+		return false, &pgconn.PgError{Code: "22021", Message: "invalid byte sequence"}
 	}
 	if len(f.pending) == 0 || f.pending[0].ID != arg.ID {
-		return 0, nil
+		return false, pgx.ErrNoRows
 	}
 	f.pending = f.pending[1:]
 	f.finished = append(f.finished, arg)
-	return 1, nil
+	return !f.replayed, nil
 }
 
 func (f *fakeProcess) CountSnapshot(context.Context, dbgen.CountSnapshotParams) error {

@@ -26,6 +26,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/integrations/dbgen"
+	idb "github.com/muster-io/muster/internal/internalalerts/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/tokens"
@@ -62,10 +63,129 @@ type fakeStore struct {
 	touched []int64
 	fail    map[string]error
 	nextID  int64
+	// truncated counts the truncated groupKeys by Integration, routes are the learned Alertmanager routes, open the
+	// firing Internal alerts, and snapshots the synthetic Stored Snapshots written with their bodies.
+	truncated map[int64]int64
+	routes    []dbgen.ListLongRepeatRoutesRow
+	open      []idb.ListOpenInternalAlertsRow
+	snapshots []internalSnapshot
+	body      []byte
+}
+
+// internalSnapshot is a synthetic Stored Snapshot the fake stored.
+type internalSnapshot struct {
+	integrationID int64
+	receivedAt    time.Time
+	body          []byte
 }
 
 func newStore() *fakeStore {
-	return &fakeStore{last: map[int64]time.Time{}, fail: map[string]error{}}
+	return &fakeStore{last: map[int64]time.Time{}, fail: map[string]error{}, truncated: map[int64]int64{}}
+}
+
+func (s *fakeStore) EnsureBuiltin(_ context.Context, arg dbgen.EnsureBuiltinParams) (string, error) {
+	if err := s.fail["EnsureBuiltin"]; err != nil {
+		return "", err
+	}
+	if slices.ContainsFunc(s.rows, func(r *row) bool { return r.Builtin }) {
+		return "", pgx.ErrNoRows
+	}
+	if s.nameTaken(arg.Name, 0) {
+		return "", errUnique
+	}
+	s.nextID++
+	s.rows = append(s.rows, &row{GetIntegrationRow: dbgen.GetIntegrationRow{
+		ID: s.nextID, PublicID: arg.PublicID, Name: arg.Name, Description: arg.Description, Builtin: true,
+		ConnectionMode: ConnectionWebhookOnly, StaticLabels: []byte(`{}`),
+		DuplicateWindowSeconds: arg.DuplicateWindowSeconds, HeartbeatTimeoutSeconds: arg.HeartbeatTimeoutSeconds,
+		HeartbeatState: HeartbeatNotConfigured, CreatedAt: arg.Now, Version: 1,
+	}})
+	return arg.PublicID, nil
+}
+
+func (s *fakeStore) CountTruncatedGroupsOf(_ context.Context, arg dbgen.CountTruncatedGroupsOfParams) (
+	[]dbgen.CountTruncatedGroupsOfRow, error) {
+	if err := s.fail["CountTruncatedGroupsOf"]; err != nil {
+		return nil, err
+	}
+	var out []dbgen.CountTruncatedGroupsOfRow
+	for _, id := range arg.IntegrationIds {
+		if n := s.truncated[id]; n > 0 && arg.OrgID == orgID {
+			out = append(out, dbgen.CountTruncatedGroupsOfRow{IntegrationID: id, TruncatedGroupCount: n})
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) ListLongRepeatRoutes(_ context.Context, arg dbgen.ListLongRepeatRoutesParams) (
+	[]dbgen.ListLongRepeatRoutesRow, error) {
+	if err := s.fail["ListLongRepeatRoutes"]; err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListLongRepeatRoutesRow
+	for _, r := range s.routes {
+		if slices.Contains(arg.IntegrationIds, r.IntegrationID) && r.LearnedRepeatIntervalMs > arg.ThresholdMs {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) FindBuiltinIntegration(_ context.Context, org int64) (int64, error) {
+	for _, r := range s.rows {
+		if r.Builtin && org == orgID {
+			return r.ID, nil
+		}
+	}
+	return 0, pgx.ErrNoRows
+}
+
+func (s *fakeStore) InsertInternalBody(_ context.Context, arg idb.InsertInternalBodyParams) error {
+	s.body = arg.Body
+	return s.fail["InsertInternalBody"]
+}
+
+func (s *fakeStore) InsertInternalSnapshot(_ context.Context, arg idb.InsertInternalSnapshotParams) error {
+	if err := s.fail["InsertInternalSnapshot"]; err != nil {
+		return err
+	}
+	s.snapshots = append(s.snapshots, internalSnapshot{integrationID: arg.IntegrationID, receivedAt: arg.ReceivedAt,
+		body: s.body})
+	return nil
+}
+
+func (s *fakeStore) ListPendingInternalRaises(context.Context, int64) ([][]byte, error) {
+	return nil, s.fail["ListPendingInternalRaises"]
+}
+
+func (s *fakeStore) NotifyInternalSnapshot(context.Context, idb.NotifyInternalSnapshotParams) error {
+	return nil
+}
+
+func (s *fakeStore) ListOpenInternalAlerts(_ context.Context, arg idb.ListOpenInternalAlertsParams) (
+	[]idb.ListOpenInternalAlertsRow, error) {
+	if err := s.fail["ListOpenInternalAlerts"]; err != nil {
+		return nil, err
+	}
+	var want map[string]string
+	if err := json.Unmarshal(arg.Contains, &want); err != nil {
+		return nil, err
+	}
+	var out []idb.ListOpenInternalAlertsRow
+	for _, a := range s.open {
+		var labels map[string]string
+		if err := json.Unmarshal(a.Labels, &labels); err != nil {
+			return nil, err
+		}
+		match := true
+		for k, v := range want {
+			match = match && labels[k] == v
+		}
+		if match {
+			out = append(out, a)
+		}
+	}
+	return out, nil
 }
 
 func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error { return f(s) }
@@ -942,5 +1062,164 @@ func TestDecodeLabels(t *testing.T) {
 	}
 	if escapePointer("a~b/c") != "a~0b~1c" {
 		t.Error(escapePointer("a~b/c"))
+	}
+}
+
+// TestBuiltin is C-06.FR-14: the ensure step creates the built-in Integration once, it is listed marked builtin, and
+// changing, deleting it or giving it a token is ErrBuiltinImmutable.
+func TestBuiltin(t *testing.T) {
+	svc, store, _, _ := newService(t)
+	ctx := t.Context()
+	if err := EnsureBuiltin(ctx, store, orgID, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureBuiltin(ctx, store, orgID, t0.Add(time.Hour)); err != nil || len(store.rows) != 1 {
+		t.Fatalf("a second start: %v, %d rows", err, len(store.rows))
+	}
+	page, err := svc.List(ctx, ListFilter{Limit: 10})
+	if err != nil || len(page.Integrations) != 1 {
+		t.Fatalf("list %+v, %v", page, err)
+	}
+	b := page.Integrations[0]
+	if !b.Builtin || b.Name != BuiltinName || b.Heartbeat.Enabled || len(b.StaticLabels) != 0 ||
+		b.DuplicateWindowSeconds != 45 || len(b.Warnings) != 0 {
+		t.Errorf("built-in %+v", b)
+	}
+	if _, err := svc.Update(ctx, by, b.PublicID, nil, input("other")); !errors.Is(err, ErrBuiltinImmutable) {
+		t.Errorf("update = %v", err)
+	}
+	if err := svc.Delete(ctx, by, b.PublicID, nil); !errors.Is(err, ErrBuiltinImmutable) {
+		t.Errorf("delete = %v", err)
+	}
+	if _, err := svc.CreateToken(ctx, by, b.PublicID, ""); !errors.Is(err, ErrBuiltinImmutable) {
+		t.Errorf("token = %v", err)
+	}
+	if len(store.audit) != 0 || len(store.tokens) != 0 || len(store.hints) != 0 {
+		t.Errorf("a refusal wrote %+v %+v %+v", store.audit, store.tokens, store.hints)
+	}
+
+	// An Integration that already has the name stops the start; another failure is reported.
+	other := newStore()
+	if _, err := other.InsertIntegration(ctx, dbgen.InsertIntegrationParams{Name: BuiltinName,
+		PublicID: "NTAAAAAAAAAAAA"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureBuiltin(ctx, other, orgID, t0); !errors.Is(err, ErrNameTaken) {
+		t.Errorf("name taken = %v", err)
+	}
+	other = newStore()
+	other.fail["EnsureBuiltin"] = errors.New("down")
+	if err := EnsureBuiltin(ctx, other, orgID, t0); err == nil {
+		t.Error("a failure was ignored")
+	}
+}
+
+// TestWarnings is C-06.FR-18: every read of an Integration carries snapshot_truncated while a groupKey is truncated
+// and one long_repeat_interval per route above processing.long_repeat_warning.
+func TestWarnings(t *testing.T) {
+	svc, store, _, _ := newService(t)
+	ctx := t.Context()
+	a, err := svc.Create(ctx, by, input("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := svc.Create(ctx, by, input("b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.truncated[a.ID] = 2
+	store.routes = []dbgen.ListLongRepeatRoutesRow{
+		{IntegrationID: a.ID, RoutePath: `{}/{kind="info"}`, LearnedRepeatIntervalMs: 7_200_400},
+		{IntegrationID: b.ID, RoutePath: "{}", LearnedRepeatIntervalMs: 3_600_000},
+		{IntegrationID: b.ID, RoutePath: `{}/{x="y"}`, LearnedRepeatIntervalMs: 86_400_000},
+	}
+	got, err := svc.Get(ctx, a.PublicID)
+	want := []Warning{{Kind: WarningSnapshotTruncated, TruncatedGroupCount: 2},
+		{Kind: WarningLongRepeatInterval, RoutePath: `{}/{kind="info"}`, RepeatIntervalSeconds: 7200}}
+	if err != nil || !slices.Equal(got.Warnings, want) {
+		t.Errorf("warnings of a = %+v, %v", got.Warnings, err)
+	}
+	page, err := svc.List(ctx, ListFilter{Limit: 10})
+	if err != nil || len(page.Integrations[1].Warnings) != 1 || page.Integrations[1].Warnings[0].RoutePath != `{}/{x="y"}` {
+		t.Errorf("list %+v, %v", page, err)
+	}
+	for _, name := range []string{"CountTruncatedGroupsOf", "ListLongRepeatRoutes"} {
+		store.fail = map[string]error{name: errors.New("down")}
+		if _, err := svc.Get(ctx, a.PublicID); err == nil {
+			t.Errorf("%s failing: no error", name)
+		}
+	}
+}
+
+// TestRenameRaisesInternalAlerts is C-06.AC-11: a rename raises every open Internal alert about the Integration again
+// with the new name, in the same transaction; a change that keeps the name raises nothing.
+func TestRenameRaisesInternalAlerts(t *testing.T) {
+	svc, store, c, _ := newService(t)
+	ctx := t.Context()
+	if err := EnsureBuiltin(ctx, store, orgID, t0); err != nil {
+		t.Fatal(err)
+	}
+	in, err := svc.Create(ctx, by, input("lab"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := t0.Add(-time.Hour)
+	store.open = []idb.ListOpenInternalAlertsRow{{Fingerprint: "f", StartsAt: started,
+		Labels: []byte(`{"alertname":"MusterSnapshotTruncated","severity":"warning","integration":"` + in.PublicID +
+			`","integration_name":"lab"}`)}}
+	c.Advance(time.Minute)
+	keep := input("lab")
+	keep.DuplicateWindowSeconds = 60
+	if _, err := svc.Update(ctx, by, in.PublicID, nil, keep); err != nil || len(store.snapshots) != 0 {
+		t.Fatalf("an update that keeps the name: %v, %d", err, len(store.snapshots))
+	}
+	if _, err := svc.Update(ctx, by, in.PublicID, nil, input("lab-eu")); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.snapshots) != 1 || store.snapshots[0].integrationID != store.rows[0].ID ||
+		!store.snapshots[0].receivedAt.Equal(c.Now()) {
+		t.Fatalf("snapshots %+v", store.snapshots)
+	}
+	var w struct {
+		Alerts []struct {
+			Labels   map[string]string `json:"labels"`
+			StartsAt time.Time         `json:"startsAt"`
+		} `json:"alerts"`
+	}
+	if err := json.Unmarshal(store.snapshots[0].body, &w); err != nil || w.Alerts[0].Labels["integration_name"] !=
+		"lab-eu" || !w.Alerts[0].StartsAt.Equal(started) {
+		t.Errorf("raise %s, %v", store.snapshots[0].body, err)
+	}
+	store.fail["ListOpenInternalAlerts"] = errors.New("down")
+	if _, err := svc.Update(ctx, by, in.PublicID, nil, input("lab-us")); err == nil {
+		t.Error("a failed raise was ignored")
+	}
+}
+
+// TestDeleteMarksDeletion is C-06.FR-16: the deletion writes its marker into the Integration's own queue in the same
+// transaction.
+func TestDeleteMarksDeletion(t *testing.T) {
+	svc, store, c, _ := newService(t)
+	ctx := t.Context()
+	in, err := svc.Create(ctx, by, input("lab"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Advance(time.Minute)
+	if err := svc.Delete(ctx, by, in.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.snapshots) != 1 || store.snapshots[0].integrationID != in.ID ||
+		!store.snapshots[0].receivedAt.Equal(c.Now()) ||
+		!strings.Contains(string(store.snapshots[0].body), `"summary":"Integration lab deleted"`) {
+		t.Errorf("snapshots %+v", store.snapshots)
+	}
+	other, err := svc.Create(ctx, by, input("other"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.fail["InsertInternalSnapshot"] = errors.New("down")
+	if err := svc.Delete(ctx, by, other.PublicID, nil); err == nil {
+		t.Error("a failed marker was ignored")
 	}
 }

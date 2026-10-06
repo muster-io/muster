@@ -97,6 +97,13 @@ sql:
         out: internal/ingest/dbgen
   - engine: postgresql
     schema: internal/db/migrations
+    queries: internal/internalalerts/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/internalalerts/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
     queries: internal/devmode/query.sql
     gen:
       go:

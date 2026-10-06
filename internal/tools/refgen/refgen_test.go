@@ -24,6 +24,9 @@ func TestRunWritesPages(t *testing.T) {
 		logEventsPage: {"DO NOT EDIT", "| `process_started` | INFO | version, commit | C-02 | "},
 		metricsPage: {"DO NOT EDIT", "| `muster_build_info` | gauge | version, commit | C-02 | no | ",
 			"| `muster_build_info` | `version` | info: "},
+		internalAlertsPage: {"DO NOT EDIT",
+			"| `MusterSnapshotTruncated` | warning | `integration`, `integration_name` | C-06 | " +
+				"`operations/runbooks/MusterSnapshotTruncated/` | "},
 	}
 	for name, wants := range tests {
 		data, err := os.ReadFile(filepath.Join(dir, name))
