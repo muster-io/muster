@@ -37,48 +37,12 @@ import type {
   UnauthorizedResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
-export type previewTemplateResponse200 = {
-  data: TemplatePreviewResult
-  status: 200
-}
-
-export type previewTemplateResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type previewTemplateResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type previewTemplateResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type previewTemplateResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type previewTemplateResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type previewTemplateResponseSuccess = (previewTemplateResponse200) & {
-  headers: Headers;
-};
-export type previewTemplateResponseError = (previewTemplateResponse400 | previewTemplateResponse401 | previewTemplateResponse403 | previewTemplateResponse404 | previewTemplateResponse429) & {
-  headers: Headers;
-};
-
-export type previewTemplateResponse = (previewTemplateResponseSuccess | previewTemplateResponseError)
 
 export const getPreviewTemplateUrl = () => {
 
@@ -92,7 +56,7 @@ export const getPreviewTemplateUrl = () => {
  * Parses and renders a template in the sandbox against a recent Stored Snapshot, an Alert Group or a built-in example. Template errors are returned in `errors` with their position, not as a Problem, so an editor can show them next to the preview.
  * @summary Render a template against a sample
  */
-export const previewTemplate = async (templatePreviewRequest: TemplatePreviewRequest, options?: RequestInit): Promise<previewTemplateResponse> => {
+export const previewTemplate = async (templatePreviewRequest: TemplatePreviewRequest, options?: Parameters<typeof apiFetch>[1]): Promise<TemplatePreviewResult> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -108,21 +72,14 @@ export const previewTemplate = async (templatePreviewRequest: TemplatePreviewReq
     }
     return headers;
   };
-const res = await fetch(getPreviewTemplateUrl(),
+return apiFetch<TemplatePreviewResult>(getPreviewTemplateUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(templatePreviewRequest)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: previewTemplateResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as previewTemplateResponse
-}
+);}
 
 
 
@@ -131,15 +88,15 @@ const res = await fetch(getPreviewTemplateUrl(),
 export const getPreviewTemplateMutationKey = () => ['previewTemplate'] as const;
 
 export const getPreviewTemplateMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewTemplate>>, TError,PreviewTemplateMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewTemplate>>, TError,PreviewTemplateMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof previewTemplate>>, TError,PreviewTemplateMutationVariables, TContext> => {
 
 const mutationKey = getPreviewTemplateMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -147,7 +104,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof previewTemplate>>, PreviewTemplateMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  previewTemplate(data,fetchOptions)
+          return  previewTemplate(data,requestOptions)
         }
 
 
@@ -166,7 +123,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Render a template against a sample
  */
 export const usePreviewTemplate = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewTemplate>>, TError,PreviewTemplateMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewTemplate>>, TError,PreviewTemplateMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof previewTemplate>>,
         TError,

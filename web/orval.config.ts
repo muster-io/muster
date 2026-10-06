@@ -6,7 +6,8 @@ import { defineConfig } from "orval";
 const input = { target: "../api/openapi.yaml" };
 
 // Two outputs, each in a directory of its own because clean empties the directories it writes to. The output is
-// written raw, without a formatter, so that the same spec always gives the same files.
+// written raw, without a formatter, so that the same spec always gives the same files. Every request of the client
+// goes through apiFetch in src/lib/api.ts, which adds the CSRF token and turns problems into errors.
 export default defineConfig({
   client: {
     input,
@@ -19,6 +20,10 @@ export default defineConfig({
       baseUrl: "/api/v1",
       mock: true,
       clean: true,
+      override: {
+        mutator: { path: "src/lib/api.ts", name: "apiFetch" },
+        fetch: { includeHttpResponseReturnType: false },
+      },
     },
   },
   zod: {

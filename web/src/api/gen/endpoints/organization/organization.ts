@@ -51,6 +51,7 @@ import type {
   UnprocessableResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
 // https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
 type IfEquals<X, Y, A = X, B = never> = (<T>() => T extends X ? 1 : 2) extends <
@@ -80,6 +81,8 @@ type NonReadonly<T> = [T] extends [UnionToIntersection<T>] ? {
 
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
 
 
 const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKey: K } => {
@@ -97,35 +100,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type getOrganizationResponse200 = {
-  data: Organization
-  status: 200
-}
-
-export type getOrganizationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getOrganizationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getOrganizationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getOrganizationResponseSuccess = (getOrganizationResponse200) & {
-  headers: Headers;
-};
-export type getOrganizationResponseError = (getOrganizationResponse401 | getOrganizationResponse403 | getOrganizationResponse429) & {
-  headers: Headers;
-};
-
-export type getOrganizationResponse = (getOrganizationResponseSuccess | getOrganizationResponseError)
-
 export const getGetOrganizationUrl = () => {
 
 
@@ -138,23 +112,16 @@ export const getGetOrganizationUrl = () => {
  * Readable by every signed-in identity (the basic read of the Organization needs no Permission). Secrets (the outgoing heartbeat URL, proxy passwords) show only `set` and `updated_at`.
  * @summary Read the Organization
  */
-export const getOrganization = async ( options?: RequestInit): Promise<getOrganizationResponse> => {
+export const getOrganization = async ( options?: Parameters<typeof apiFetch>[1]): Promise<Organization> => {
 
-  const res = await fetch(getGetOrganizationUrl(),
+  return apiFetch<Organization>(getGetOrganizationUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getOrganizationResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getOrganizationResponse
-}
+);}
 
 
 
@@ -167,16 +134,16 @@ export const getGetOrganizationQueryKey = () => {
     }
 
 
-export const getGetOrganizationQueryOptions = <TData = Awaited<ReturnType<typeof getOrganization>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrganization>>, TError, TData>>, fetch?: RequestInit}
+export const getGetOrganizationQueryOptions = <TData = Awaited<ReturnType<typeof getOrganization>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrganization>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetOrganizationQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOrganization>>> = ({ signal }) => getOrganization({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOrganization>>> = ({ signal }) => getOrganization({ signal, ...requestOptions });
 
 
 
@@ -196,7 +163,7 @@ export function useGetOrganization<TData = Awaited<ReturnType<typeof getOrganiza
           TError,
           Awaited<ReturnType<typeof getOrganization>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetOrganization<TData = Awaited<ReturnType<typeof getOrganization>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -206,11 +173,11 @@ export function useGetOrganization<TData = Awaited<ReturnType<typeof getOrganiza
           TError,
           Awaited<ReturnType<typeof getOrganization>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetOrganization<TData = Awaited<ReturnType<typeof getOrganization>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrganization>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrganization>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -218,7 +185,7 @@ export function useGetOrganization<TData = Awaited<ReturnType<typeof getOrganiza
  */
 
 export function useGetOrganization<TData = Awaited<ReturnType<typeof getOrganization>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrganization>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOrganization>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -234,55 +201,6 @@ export function useGetOrganization<TData = Awaited<ReturnType<typeof getOrganiza
 
 
 
-export type updateOrganizationResponse200 = {
-  data: Organization
-  status: 200
-}
-
-export type updateOrganizationResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type updateOrganizationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type updateOrganizationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type updateOrganizationResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type updateOrganizationResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type updateOrganizationResponse428 = {
-  data: PreconditionRequiredResponse
-  status: 428
-}
-
-export type updateOrganizationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type updateOrganizationResponseSuccess = (updateOrganizationResponse200) & {
-  headers: Headers;
-};
-export type updateOrganizationResponseError = (updateOrganizationResponse400 | updateOrganizationResponse401 | updateOrganizationResponse403 | updateOrganizationResponse412 | updateOrganizationResponse422 | updateOrganizationResponse428 | updateOrganizationResponse429) & {
-  headers: Headers;
-};
-
-export type updateOrganizationResponse = (updateOrganizationResponseSuccess | updateOrganizationResponseError)
-
 export const getUpdateOrganizationUrl = () => {
 
 
@@ -295,7 +213,7 @@ export const getUpdateOrganizationUrl = () => {
  * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. The settings become editable in stages, starting with `totp_required`; while a field is not editable yet, a changed value in it gets `422` with `unsupported` pointing at that field.
  * @summary Update the Organization
  */
-export const updateOrganization = async (organizationInput: OrganizationInput, options?: RequestInit): Promise<updateOrganizationResponse> => {
+export const updateOrganization = async (organizationInput: OrganizationInput, options?: Parameters<typeof apiFetch>[1]): Promise<Organization> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -311,21 +229,14 @@ export const updateOrganization = async (organizationInput: OrganizationInput, o
     }
     return headers;
   };
-const res = await fetch(getUpdateOrganizationUrl(),
+return apiFetch<Organization>(getUpdateOrganizationUrl(),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(organizationInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: updateOrganizationResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as updateOrganizationResponse
-}
+);}
 
 
 
@@ -334,15 +245,15 @@ const res = await fetch(getUpdateOrganizationUrl(),
 export const getUpdateOrganizationMutationKey = () => ['updateOrganization'] as const;
 
 export const getUpdateOrganizationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOrganization>>, TError,UpdateOrganizationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOrganization>>, TError,UpdateOrganizationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateOrganization>>, TError,UpdateOrganizationMutationVariables, TContext> => {
 
 const mutationKey = getUpdateOrganizationMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -350,7 +261,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateOrganization>>, UpdateOrganizationMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  updateOrganization(data,fetchOptions)
+          return  updateOrganization(data,requestOptions)
         }
 
 
@@ -369,7 +280,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Update the Organization
  */
 export const useUpdateOrganization = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOrganization>>, TError,UpdateOrganizationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOrganization>>, TError,UpdateOrganizationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateOrganization>>,
         TError,
@@ -378,36 +289,7 @@ export const useUpdateOrganization = <TError = BadRequestResponse | Unauthorized
       > => {
       return useMutation(getUpdateOrganizationMutationOptions(options), queryClient);
     }
-    export type getOutboundPolicyResponse200 = {
-  data: OutboundPolicy
-  status: 200
-}
-
-export type getOutboundPolicyResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getOutboundPolicyResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getOutboundPolicyResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getOutboundPolicyResponseSuccess = (getOutboundPolicyResponse200) & {
-  headers: Headers;
-};
-export type getOutboundPolicyResponseError = (getOutboundPolicyResponse401 | getOutboundPolicyResponse403 | getOutboundPolicyResponse429) & {
-  headers: Headers;
-};
-
-export type getOutboundPolicyResponse = (getOutboundPolicyResponseSuccess | getOutboundPolicyResponseError)
-
-export const getGetOutboundPolicyUrl = () => {
+    export const getGetOutboundPolicyUrl = () => {
 
 
 
@@ -419,23 +301,16 @@ export const getGetOutboundPolicyUrl = () => {
  * The outbound address policy with the rules that always apply. Needs `organization:read`.
  * @summary Read the outbound address policy
  */
-export const getOutboundPolicy = async ( options?: RequestInit): Promise<getOutboundPolicyResponse> => {
+export const getOutboundPolicy = async ( options?: Parameters<typeof apiFetch>[1]): Promise<OutboundPolicy> => {
 
-  const res = await fetch(getGetOutboundPolicyUrl(),
+  return apiFetch<OutboundPolicy>(getGetOutboundPolicyUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getOutboundPolicyResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getOutboundPolicyResponse
-}
+);}
 
 
 
@@ -448,16 +323,16 @@ export const getGetOutboundPolicyQueryKey = () => {
     }
 
 
-export const getGetOutboundPolicyQueryOptions = <TData = Awaited<ReturnType<typeof getOutboundPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOutboundPolicy>>, TError, TData>>, fetch?: RequestInit}
+export const getGetOutboundPolicyQueryOptions = <TData = Awaited<ReturnType<typeof getOutboundPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOutboundPolicy>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetOutboundPolicyQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOutboundPolicy>>> = ({ signal }) => getOutboundPolicy({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOutboundPolicy>>> = ({ signal }) => getOutboundPolicy({ signal, ...requestOptions });
 
 
 
@@ -477,7 +352,7 @@ export function useGetOutboundPolicy<TData = Awaited<ReturnType<typeof getOutbou
           TError,
           Awaited<ReturnType<typeof getOutboundPolicy>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetOutboundPolicy<TData = Awaited<ReturnType<typeof getOutboundPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -487,11 +362,11 @@ export function useGetOutboundPolicy<TData = Awaited<ReturnType<typeof getOutbou
           TError,
           Awaited<ReturnType<typeof getOutboundPolicy>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetOutboundPolicy<TData = Awaited<ReturnType<typeof getOutboundPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOutboundPolicy>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOutboundPolicy>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -499,7 +374,7 @@ export function useGetOutboundPolicy<TData = Awaited<ReturnType<typeof getOutbou
  */
 
 export function useGetOutboundPolicy<TData = Awaited<ReturnType<typeof getOutboundPolicy>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOutboundPolicy>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOutboundPolicy>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -515,55 +390,6 @@ export function useGetOutboundPolicy<TData = Awaited<ReturnType<typeof getOutbou
 
 
 
-export type updateOutboundPolicyResponse200 = {
-  data: OutboundPolicy
-  status: 200
-}
-
-export type updateOutboundPolicyResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type updateOutboundPolicyResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type updateOutboundPolicyResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type updateOutboundPolicyResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type updateOutboundPolicyResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type updateOutboundPolicyResponse428 = {
-  data: PreconditionRequiredResponse
-  status: 428
-}
-
-export type updateOutboundPolicyResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type updateOutboundPolicyResponseSuccess = (updateOutboundPolicyResponse200) & {
-  headers: Headers;
-};
-export type updateOutboundPolicyResponseError = (updateOutboundPolicyResponse400 | updateOutboundPolicyResponse401 | updateOutboundPolicyResponse403 | updateOutboundPolicyResponse412 | updateOutboundPolicyResponse422 | updateOutboundPolicyResponse428 | updateOutboundPolicyResponse429) & {
-  headers: Headers;
-};
-
-export type updateOutboundPolicyResponse = (updateOutboundPolicyResponseSuccess | updateOutboundPolicyResponseError)
-
 export const getUpdateOutboundPolicyUrl = () => {
 
 
@@ -575,7 +401,7 @@ export const getUpdateOutboundPolicyUrl = () => {
 /**
  * @summary Update the outbound address policy
  */
-export const updateOutboundPolicy = async (outboundPolicy: NonReadonly<OutboundPolicy>, options?: RequestInit): Promise<updateOutboundPolicyResponse> => {
+export const updateOutboundPolicy = async (outboundPolicy: NonReadonly<OutboundPolicy>, options?: Parameters<typeof apiFetch>[1]): Promise<OutboundPolicy> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -591,21 +417,14 @@ export const updateOutboundPolicy = async (outboundPolicy: NonReadonly<OutboundP
     }
     return headers;
   };
-const res = await fetch(getUpdateOutboundPolicyUrl(),
+return apiFetch<OutboundPolicy>(getUpdateOutboundPolicyUrl(),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(outboundPolicy)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: updateOutboundPolicyResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as updateOutboundPolicyResponse
-}
+);}
 
 
 
@@ -614,15 +433,15 @@ const res = await fetch(getUpdateOutboundPolicyUrl(),
 export const getUpdateOutboundPolicyMutationKey = () => ['updateOutboundPolicy'] as const;
 
 export const getUpdateOutboundPolicyMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOutboundPolicy>>, TError,UpdateOutboundPolicyMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOutboundPolicy>>, TError,UpdateOutboundPolicyMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateOutboundPolicy>>, TError,UpdateOutboundPolicyMutationVariables, TContext> => {
 
 const mutationKey = getUpdateOutboundPolicyMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -630,7 +449,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateOutboundPolicy>>, UpdateOutboundPolicyMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  updateOutboundPolicy(data,fetchOptions)
+          return  updateOutboundPolicy(data,requestOptions)
         }
 
 
@@ -649,7 +468,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Update the outbound address policy
  */
 export const useUpdateOutboundPolicy = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOutboundPolicy>>, TError,UpdateOutboundPolicyMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOutboundPolicy>>, TError,UpdateOutboundPolicyMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateOutboundPolicy>>,
         TError,
@@ -658,36 +477,7 @@ export const useUpdateOutboundPolicy = <TError = BadRequestResponse | Unauthoriz
       > => {
       return useMutation(getUpdateOutboundPolicyMutationOptions(options), queryClient);
     }
-    export type getKeyringResponse200 = {
-  data: Keyring
-  status: 200
-}
-
-export type getKeyringResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getKeyringResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getKeyringResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getKeyringResponseSuccess = (getKeyringResponse200) & {
-  headers: Headers;
-};
-export type getKeyringResponseError = (getKeyringResponse401 | getKeyringResponse403 | getKeyringResponse429) & {
-  headers: Headers;
-};
-
-export type getKeyringResponse = (getKeyringResponseSuccess | getKeyringResponseError)
-
-export const getGetKeyringUrl = () => {
+    export const getGetKeyringUrl = () => {
 
 
 
@@ -699,23 +489,16 @@ export const getGetKeyringUrl = () => {
  * Every key id in the environment, which is active, which live replicas hold which, and whether anything still depends on an older key. Activation is the CLI command `muster secrets rotate-key --activate <id> --actor <name>`.
  * @summary Read the Keyring status
  */
-export const getKeyring = async ( options?: RequestInit): Promise<getKeyringResponse> => {
+export const getKeyring = async ( options?: Parameters<typeof apiFetch>[1]): Promise<Keyring> => {
 
-  const res = await fetch(getGetKeyringUrl(),
+  return apiFetch<Keyring>(getGetKeyringUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getKeyringResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getKeyringResponse
-}
+);}
 
 
 
@@ -728,16 +511,16 @@ export const getGetKeyringQueryKey = () => {
     }
 
 
-export const getGetKeyringQueryOptions = <TData = Awaited<ReturnType<typeof getKeyring>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getKeyring>>, TError, TData>>, fetch?: RequestInit}
+export const getGetKeyringQueryOptions = <TData = Awaited<ReturnType<typeof getKeyring>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getKeyring>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetKeyringQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKeyring>>> = ({ signal }) => getKeyring({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKeyring>>> = ({ signal }) => getKeyring({ signal, ...requestOptions });
 
 
 
@@ -757,7 +540,7 @@ export function useGetKeyring<TData = Awaited<ReturnType<typeof getKeyring>>, TE
           TError,
           Awaited<ReturnType<typeof getKeyring>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetKeyring<TData = Awaited<ReturnType<typeof getKeyring>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -767,11 +550,11 @@ export function useGetKeyring<TData = Awaited<ReturnType<typeof getKeyring>>, TE
           TError,
           Awaited<ReturnType<typeof getKeyring>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetKeyring<TData = Awaited<ReturnType<typeof getKeyring>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getKeyring>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getKeyring>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -779,7 +562,7 @@ export function useGetKeyring<TData = Awaited<ReturnType<typeof getKeyring>>, TE
  */
 
 export function useGetKeyring<TData = Awaited<ReturnType<typeof getKeyring>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getKeyring>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getKeyring>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -795,35 +578,6 @@ export function useGetKeyring<TData = Awaited<ReturnType<typeof getKeyring>>, TE
 
 
 
-export type listSeverityValuesResponse200 = {
-  data: SeverityValueList
-  status: 200
-}
-
-export type listSeverityValuesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listSeverityValuesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listSeverityValuesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listSeverityValuesResponseSuccess = (listSeverityValuesResponse200) & {
-  headers: Headers;
-};
-export type listSeverityValuesResponseError = (listSeverityValuesResponse401 | listSeverityValuesResponse403 | listSeverityValuesResponse429) & {
-  headers: Headers;
-};
-
-export type listSeverityValuesResponse = (listSeverityValuesResponseSuccess | listSeverityValuesResponseError)
-
 export const getListSeverityValuesUrl = () => {
 
 
@@ -836,23 +590,16 @@ export const getListSeverityValuesUrl = () => {
  * Values of the severity label seen in the last `organization.severity_values_window`, with counts; unmapped values count as warning.
  * @summary List severity values seen
  */
-export const listSeverityValues = async ( options?: RequestInit): Promise<listSeverityValuesResponse> => {
+export const listSeverityValues = async ( options?: Parameters<typeof apiFetch>[1]): Promise<SeverityValueList> => {
 
-  const res = await fetch(getListSeverityValuesUrl(),
+  return apiFetch<SeverityValueList>(getListSeverityValuesUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listSeverityValuesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listSeverityValuesResponse
-}
+);}
 
 
 
@@ -865,16 +612,16 @@ export const getListSeverityValuesQueryKey = () => {
     }
 
 
-export const getListSeverityValuesQueryOptions = <TData = Awaited<ReturnType<typeof listSeverityValues>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSeverityValues>>, TError, TData>>, fetch?: RequestInit}
+export const getListSeverityValuesQueryOptions = <TData = Awaited<ReturnType<typeof listSeverityValues>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSeverityValues>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListSeverityValuesQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSeverityValues>>> = ({ signal }) => listSeverityValues({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSeverityValues>>> = ({ signal }) => listSeverityValues({ signal, ...requestOptions });
 
 
 
@@ -894,7 +641,7 @@ export function useListSeverityValues<TData = Awaited<ReturnType<typeof listSeve
           TError,
           Awaited<ReturnType<typeof listSeverityValues>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListSeverityValues<TData = Awaited<ReturnType<typeof listSeverityValues>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -904,11 +651,11 @@ export function useListSeverityValues<TData = Awaited<ReturnType<typeof listSeve
           TError,
           Awaited<ReturnType<typeof listSeverityValues>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListSeverityValues<TData = Awaited<ReturnType<typeof listSeverityValues>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSeverityValues>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSeverityValues>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -916,7 +663,7 @@ export function useListSeverityValues<TData = Awaited<ReturnType<typeof listSeve
  */
 
 export function useListSeverityValues<TData = Awaited<ReturnType<typeof listSeverityValues>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSeverityValues>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSeverityValues>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 

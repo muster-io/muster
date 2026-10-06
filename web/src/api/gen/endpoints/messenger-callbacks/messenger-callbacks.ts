@@ -35,21 +35,12 @@ import type {
   UnauthorizedResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
 
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
-export type mattermostActionResponse200 = {
-  data: MattermostActionAnswer
-  status: 200
-}
-
-export type mattermostActionResponseSuccess = (mattermostActionResponse200) & {
-  headers: Headers;
-};
-;
-
-export type mattermostActionResponse = (mattermostActionResponseSuccess)
 
 export const getMattermostActionUrl = (connectionId: string,) => {
 
@@ -64,7 +55,7 @@ export const getMattermostActionUrl = (connectionId: string,) => {
  * @summary Receive a Mattermost button press
  */
 export const mattermostAction = async (connectionId: string,
-    mattermostActionRequest: MattermostActionRequest, options?: RequestInit): Promise<mattermostActionResponse> => {
+    mattermostActionRequest: MattermostActionRequest, options?: Parameters<typeof apiFetch>[1]): Promise<MattermostActionAnswer> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -80,21 +71,14 @@ export const mattermostAction = async (connectionId: string,
     }
     return headers;
   };
-const res = await fetch(getMattermostActionUrl(connectionId),
+return apiFetch<MattermostActionAnswer>(getMattermostActionUrl(connectionId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(mattermostActionRequest)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: mattermostActionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as mattermostActionResponse
-}
+);}
 
 
 
@@ -103,15 +87,15 @@ const res = await fetch(getMattermostActionUrl(connectionId),
 export const getMattermostActionMutationKey = () => ['mattermostAction'] as const;
 
 export const getMattermostActionMutationOptions = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof mattermostAction>>, TError,MattermostActionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof mattermostAction>>, TError,MattermostActionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof mattermostAction>>, TError,MattermostActionMutationVariables, TContext> => {
 
 const mutationKey = getMattermostActionMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -119,7 +103,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof mattermostAction>>, MattermostActionMutationVariables> = (props) => {
           const {connectionId,data} = props ?? {};
 
-          return  mattermostAction(connectionId,data,fetchOptions)
+          return  mattermostAction(connectionId,data,requestOptions)
         }
 
 
@@ -138,7 +122,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Receive a Mattermost button press
  */
 export const useMattermostAction = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof mattermostAction>>, TError,MattermostActionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof mattermostAction>>, TError,MattermostActionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof mattermostAction>>,
         TError,
@@ -147,31 +131,7 @@ export const useMattermostAction = <TError = unknown,
       > => {
       return useMutation(getMattermostActionMutationOptions(options), queryClient);
     }
-    export type telegramWebhookResponse200 = {
-  data: void
-  status: 200
-}
-
-export type telegramWebhookResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type telegramWebhookResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type telegramWebhookResponseSuccess = (telegramWebhookResponse200) & {
-  headers: Headers;
-};
-export type telegramWebhookResponseError = (telegramWebhookResponse400 | telegramWebhookResponse401) & {
-  headers: Headers;
-};
-
-export type telegramWebhookResponse = (telegramWebhookResponseSuccess | telegramWebhookResponseError)
-
-export const getTelegramWebhookUrl = (connectionId: string,) => {
+    export const getTelegramWebhookUrl = (connectionId: string,) => {
 
 
 
@@ -184,7 +144,7 @@ export const getTelegramWebhookUrl = (connectionId: string,) => {
  * @summary Receive a Telegram update (webhook update mode)
  */
 export const telegramWebhook = async (connectionId: string,
-    telegramUpdate: TelegramUpdate, options?: RequestInit): Promise<telegramWebhookResponse> => {
+    telegramUpdate: TelegramUpdate, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -200,21 +160,14 @@ export const telegramWebhook = async (connectionId: string,
     }
     return headers;
   };
-const res = await fetch(getTelegramWebhookUrl(connectionId),
+return apiFetch<void>(getTelegramWebhookUrl(connectionId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(telegramUpdate)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: telegramWebhookResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as telegramWebhookResponse
-}
+);}
 
 
 
@@ -223,15 +176,15 @@ const res = await fetch(getTelegramWebhookUrl(connectionId),
 export const getTelegramWebhookMutationKey = () => ['telegramWebhook'] as const;
 
 export const getTelegramWebhookMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof telegramWebhook>>, TError,TelegramWebhookMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof telegramWebhook>>, TError,TelegramWebhookMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof telegramWebhook>>, TError,TelegramWebhookMutationVariables, TContext> => {
 
 const mutationKey = getTelegramWebhookMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -239,7 +192,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof telegramWebhook>>, TelegramWebhookMutationVariables> = (props) => {
           const {connectionId,data} = props ?? {};
 
-          return  telegramWebhook(connectionId,data,fetchOptions)
+          return  telegramWebhook(connectionId,data,requestOptions)
         }
 
 
@@ -258,7 +211,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Receive a Telegram update (webhook update mode)
  */
 export const useTelegramWebhook = <TError = BadRequestResponse | UnauthorizedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof telegramWebhook>>, TError,TelegramWebhookMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof telegramWebhook>>, TError,TelegramWebhookMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof telegramWebhook>>,
         TError,

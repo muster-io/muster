@@ -54,7 +54,10 @@ import type {
   UnprocessableResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -73,25 +76,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type getSignInOptionsResponse200 = {
-  data: SignInOptions
-  status: 200
-}
-
-export type getSignInOptionsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getSignInOptionsResponseSuccess = (getSignInOptionsResponse200) & {
-  headers: Headers;
-};
-export type getSignInOptionsResponseError = (getSignInOptionsResponse429) & {
-  headers: Headers;
-};
-
-export type getSignInOptionsResponse = (getSignInOptionsResponseSuccess | getSignInOptionsResponseError)
-
 export const getGetSignInOptionsUrl = () => {
 
 
@@ -104,23 +88,16 @@ export const getGetSignInOptionsUrl = () => {
  * Whether the sign-in page shows the OIDC button next to the local form. Local sign-in is always available; no setting turns it off. Carries no version or other detail about the installation.
  * @summary Read sign-in options
  */
-export const getSignInOptions = async ( options?: RequestInit): Promise<getSignInOptionsResponse> => {
+export const getSignInOptions = async ( options?: Parameters<typeof apiFetch>[1]): Promise<SignInOptions> => {
 
-  const res = await fetch(getGetSignInOptionsUrl(),
+  return apiFetch<SignInOptions>(getGetSignInOptionsUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getSignInOptionsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getSignInOptionsResponse
-}
+);}
 
 
 
@@ -133,16 +110,16 @@ export const getGetSignInOptionsQueryKey = () => {
     }
 
 
-export const getGetSignInOptionsQueryOptions = <TData = Awaited<ReturnType<typeof getSignInOptions>>, TError = TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignInOptions>>, TError, TData>>, fetch?: RequestInit}
+export const getGetSignInOptionsQueryOptions = <TData = Awaited<ReturnType<typeof getSignInOptions>>, TError = TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignInOptions>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetSignInOptionsQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSignInOptions>>> = ({ signal }) => getSignInOptions({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSignInOptions>>> = ({ signal }) => getSignInOptions({ signal, ...requestOptions });
 
 
 
@@ -162,7 +139,7 @@ export function useGetSignInOptions<TData = Awaited<ReturnType<typeof getSignInO
           TError,
           Awaited<ReturnType<typeof getSignInOptions>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetSignInOptions<TData = Awaited<ReturnType<typeof getSignInOptions>>, TError = TooManyRequestsResponse>(
@@ -172,11 +149,11 @@ export function useGetSignInOptions<TData = Awaited<ReturnType<typeof getSignInO
           TError,
           Awaited<ReturnType<typeof getSignInOptions>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetSignInOptions<TData = Awaited<ReturnType<typeof getSignInOptions>>, TError = TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignInOptions>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignInOptions>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -184,7 +161,7 @@ export function useGetSignInOptions<TData = Awaited<ReturnType<typeof getSignInO
  */
 
 export function useGetSignInOptions<TData = Awaited<ReturnType<typeof getSignInOptions>>, TError = TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignInOptions>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignInOptions>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -200,40 +177,6 @@ export function useGetSignInOptions<TData = Awaited<ReturnType<typeof getSignInO
 
 
 
-export type createSessionResponse201 = {
-  data: Session
-  status: 201
-}
-
-export type createSessionResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createSessionResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createSessionResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createSessionResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createSessionResponseSuccess = (createSessionResponse201) & {
-  headers: Headers;
-};
-export type createSessionResponseError = (createSessionResponse400 | createSessionResponse401 | createSessionResponse403 | createSessionResponse429) & {
-  headers: Headers;
-};
-
-export type createSessionResponse = (createSessionResponseSuccess | createSessionResponseError)
-
 export const getCreateSessionUrl = () => {
 
 
@@ -246,7 +189,7 @@ export const getCreateSessionUrl = () => {
  * Creates a session cookie (`HttpOnly; Secure; SameSite=Lax`) and returns the CSRF token. If the user has TOTP and the request carries neither `totp_code` nor `recovery_code`, the session starts in the state `totp_required` and `POST /sessions/current/totp` completes it. Under a TOTP policy that covers a user without TOTP the state is `totp_enrolment_required`. A wrong login, password or code is `401` (`invalid_credentials`) without saying which one was wrong. Failed attempts slow down per account and per source address (`429` with `Retry-After`). A request a browser marks as cross-site (`Sec-Fetch-Site` set to `cross-site`) is refused with `403` (`csrf_invalid`).
  * @summary Sign in with a local account
  */
-export const createSession = async (sessionCreate: SessionCreate, options?: RequestInit): Promise<createSessionResponse> => {
+export const createSession = async (sessionCreate: SessionCreate, options?: Parameters<typeof apiFetch>[1]): Promise<Session> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -262,21 +205,14 @@ export const createSession = async (sessionCreate: SessionCreate, options?: Requ
     }
     return headers;
   };
-const res = await fetch(getCreateSessionUrl(),
+return apiFetch<Session>(getCreateSessionUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(sessionCreate)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createSessionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createSessionResponse
-}
+);}
 
 
 
@@ -285,15 +221,15 @@ const res = await fetch(getCreateSessionUrl(),
 export const getCreateSessionMutationKey = () => ['createSession'] as const;
 
 export const getCreateSessionMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSession>>, TError,CreateSessionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSession>>, TError,CreateSessionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createSession>>, TError,CreateSessionMutationVariables, TContext> => {
 
 const mutationKey = getCreateSessionMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -301,7 +237,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createSession>>, CreateSessionMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  createSession(data,fetchOptions)
+          return  createSession(data,requestOptions)
         }
 
 
@@ -320,7 +256,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Sign in with a local account
  */
 export const useCreateSession = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSession>>, TError,CreateSessionMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSession>>, TError,CreateSessionMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createSession>>,
         TError,
@@ -329,36 +265,7 @@ export const useCreateSession = <TError = BadRequestResponse | UnauthorizedRespo
       > => {
       return useMutation(getCreateSessionMutationOptions(options), queryClient);
     }
-    export type getCurrentSessionResponse200 = {
-  data: Session
-  status: 200
-}
-
-export type getCurrentSessionResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getCurrentSessionResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getCurrentSessionResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getCurrentSessionResponseSuccess = (getCurrentSessionResponse200) & {
-  headers: Headers;
-};
-export type getCurrentSessionResponseError = (getCurrentSessionResponse401 | getCurrentSessionResponse403 | getCurrentSessionResponse429) & {
-  headers: Headers;
-};
-
-export type getCurrentSessionResponse = (getCurrentSessionResponseSuccess | getCurrentSessionResponseError)
-
-export const getGetCurrentSessionUrl = () => {
+    export const getGetCurrentSessionUrl = () => {
 
 
 
@@ -370,23 +277,16 @@ export const getGetCurrentSessionUrl = () => {
  * Returns the session in any state, including the CSRF token the SPA sends on mutating requests.
  * @summary Read the current session
  */
-export const getCurrentSession = async ( options?: RequestInit): Promise<getCurrentSessionResponse> => {
+export const getCurrentSession = async ( options?: Parameters<typeof apiFetch>[1]): Promise<Session> => {
 
-  const res = await fetch(getGetCurrentSessionUrl(),
+  return apiFetch<Session>(getGetCurrentSessionUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getCurrentSessionResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getCurrentSessionResponse
-}
+);}
 
 
 
@@ -399,16 +299,16 @@ export const getGetCurrentSessionQueryKey = () => {
     }
 
 
-export const getGetCurrentSessionQueryOptions = <TData = Awaited<ReturnType<typeof getCurrentSession>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCurrentSession>>, TError, TData>>, fetch?: RequestInit}
+export const getGetCurrentSessionQueryOptions = <TData = Awaited<ReturnType<typeof getCurrentSession>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCurrentSession>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetCurrentSessionQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCurrentSession>>> = ({ signal }) => getCurrentSession({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCurrentSession>>> = ({ signal }) => getCurrentSession({ signal, ...requestOptions });
 
 
 
@@ -428,7 +328,7 @@ export function useGetCurrentSession<TData = Awaited<ReturnType<typeof getCurren
           TError,
           Awaited<ReturnType<typeof getCurrentSession>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetCurrentSession<TData = Awaited<ReturnType<typeof getCurrentSession>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -438,11 +338,11 @@ export function useGetCurrentSession<TData = Awaited<ReturnType<typeof getCurren
           TError,
           Awaited<ReturnType<typeof getCurrentSession>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetCurrentSession<TData = Awaited<ReturnType<typeof getCurrentSession>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCurrentSession>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCurrentSession>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -450,7 +350,7 @@ export function useGetCurrentSession<TData = Awaited<ReturnType<typeof getCurren
  */
 
 export function useGetCurrentSession<TData = Awaited<ReturnType<typeof getCurrentSession>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCurrentSession>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCurrentSession>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -466,35 +366,6 @@ export function useGetCurrentSession<TData = Awaited<ReturnType<typeof getCurren
 
 
 
-export type deleteCurrentSessionResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteCurrentSessionResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteCurrentSessionResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteCurrentSessionResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteCurrentSessionResponseSuccess = (deleteCurrentSessionResponse204) & {
-  headers: Headers;
-};
-export type deleteCurrentSessionResponseError = (deleteCurrentSessionResponse401 | deleteCurrentSessionResponse403 | deleteCurrentSessionResponse429) & {
-  headers: Headers;
-};
-
-export type deleteCurrentSessionResponse = (deleteCurrentSessionResponseSuccess | deleteCurrentSessionResponseError)
-
 export const getDeleteCurrentSessionUrl = () => {
 
 
@@ -507,23 +378,16 @@ export const getDeleteCurrentSessionUrl = () => {
  * Ends the session, in any state.
  * @summary Sign out
  */
-export const deleteCurrentSession = async ( options?: RequestInit): Promise<deleteCurrentSessionResponse> => {
+export const deleteCurrentSession = async ( options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteCurrentSessionUrl(),
+  return apiFetch<void>(getDeleteCurrentSessionUrl(),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteCurrentSessionResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteCurrentSessionResponse
-}
+);}
 
 
 
@@ -532,15 +396,15 @@ export const deleteCurrentSession = async ( options?: RequestInit): Promise<dele
 export const getDeleteCurrentSessionMutationKey = () => ['deleteCurrentSession'] as const;
 
 export const getDeleteCurrentSessionMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCurrentSession>>, TError,void, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCurrentSession>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteCurrentSession>>, TError,void, TContext> => {
 
 const mutationKey = getDeleteCurrentSessionMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -548,7 +412,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteCurrentSession>>, void> = () => {
 
 
-          return  deleteCurrentSession(fetchOptions)
+          return  deleteCurrentSession(requestOptions)
         }
 
 
@@ -567,7 +431,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Sign out
  */
 export const useDeleteCurrentSession = <TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCurrentSession>>, TError,void, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCurrentSession>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteCurrentSession>>,
         TError,
@@ -576,51 +440,7 @@ export const useDeleteCurrentSession = <TError = UnauthorizedResponse | Forbidde
       > => {
       return useMutation(getDeleteCurrentSessionMutationOptions(options), queryClient);
     }
-    export type submitSessionTotpResponse200 = {
-  data: Session
-  status: 200
-}
-
-export type submitSessionTotpResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type submitSessionTotpResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type submitSessionTotpResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type submitSessionTotpResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type submitSessionTotpResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type submitSessionTotpResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type submitSessionTotpResponseSuccess = (submitSessionTotpResponse200) & {
-  headers: Headers;
-};
-export type submitSessionTotpResponseError = (submitSessionTotpResponse400 | submitSessionTotpResponse401 | submitSessionTotpResponse403 | submitSessionTotpResponse409 | submitSessionTotpResponse422 | submitSessionTotpResponse429) & {
-  headers: Headers;
-};
-
-export type submitSessionTotpResponse = (submitSessionTotpResponseSuccess | submitSessionTotpResponseError)
-
-export const getSubmitSessionTotpUrl = () => {
+    export const getSubmitSessionTotpUrl = () => {
 
 
 
@@ -632,7 +452,7 @@ export const getSubmitSessionTotpUrl = () => {
  * Completes a session in the state `totp_required` with a current TOTP code or a single-use recovery code; works the same after a local and an OIDC sign-in. A wrong code is `401` (`invalid_credentials`) and slows down like a wrong password; `409` (`totp_not_pending`) when the session is not waiting for a code.
  * @summary Give the second factor
  */
-export const submitSessionTotp = async (sessionTotp: SessionTotp, options?: RequestInit): Promise<submitSessionTotpResponse> => {
+export const submitSessionTotp = async (sessionTotp: SessionTotp, options?: Parameters<typeof apiFetch>[1]): Promise<Session> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -648,21 +468,14 @@ export const submitSessionTotp = async (sessionTotp: SessionTotp, options?: Requ
     }
     return headers;
   };
-const res = await fetch(getSubmitSessionTotpUrl(),
+return apiFetch<Session>(getSubmitSessionTotpUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(sessionTotp)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: submitSessionTotpResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as submitSessionTotpResponse
-}
+);}
 
 
 
@@ -671,15 +484,15 @@ const res = await fetch(getSubmitSessionTotpUrl(),
 export const getSubmitSessionTotpMutationKey = () => ['submitSessionTotp'] as const;
 
 export const getSubmitSessionTotpMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitSessionTotp>>, TError,SubmitSessionTotpMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitSessionTotp>>, TError,SubmitSessionTotpMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof submitSessionTotp>>, TError,SubmitSessionTotpMutationVariables, TContext> => {
 
 const mutationKey = getSubmitSessionTotpMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -687,7 +500,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitSessionTotp>>, SubmitSessionTotpMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  submitSessionTotp(data,fetchOptions)
+          return  submitSessionTotp(data,requestOptions)
         }
 
 
@@ -706,7 +519,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Give the second factor
  */
 export const useSubmitSessionTotp = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitSessionTotp>>, TError,SubmitSessionTotpMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitSessionTotp>>, TError,SubmitSessionTotpMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof submitSessionTotp>>,
         TError,
@@ -715,29 +528,7 @@ export const useSubmitSessionTotp = <TError = BadRequestResponse | UnauthorizedR
       > => {
       return useMutation(getSubmitSessionTotpMutationOptions(options), queryClient);
     }
-    export type startOidcSignInResponse302 = {
-  data: void
-  status: 302
-}
-
-export type startOidcSignInResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type startOidcSignInResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-;
-export type startOidcSignInResponseError = (startOidcSignInResponse302 | startOidcSignInResponse409 | startOidcSignInResponse429) & {
-  headers: Headers;
-};
-
-export type startOidcSignInResponse = (startOidcSignInResponseError)
-
-export const getStartOidcSignInUrl = (params?: StartOidcSignInParams,) => {
+    export const getStartOidcSignInUrl = (params?: StartOidcSignInParams,) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -756,23 +547,16 @@ export const getStartOidcSignInUrl = (params?: StartOidcSignInParams,) => {
  * Redirects the browser to the identity provider with PKCE (`S256`), `state` and `nonce`, all mandatory, requesting `offline_access` besides the configured scopes; when the IdP grants it, the offline token is stored on the user, encrypted, replacing the previous one. Muster exchanges the code itself through the back channel. The redirect URI to register at the identity provider is `MUSTER_PUBLIC_URL/api/v1/sessions/oidc/callback`. `409` (`oidc_not_enabled`) while OIDC is off.
  * @summary Start OIDC sign-in
  */
-export const startOidcSignIn = async (params?: StartOidcSignInParams, options?: RequestInit): Promise<startOidcSignInResponse> => {
+export const startOidcSignIn = async (params?: StartOidcSignInParams, options?: Parameters<typeof apiFetch>[1]): Promise<unknown> => {
 
-  const res = await fetch(getStartOidcSignInUrl(params),
+  return apiFetch<unknown>(getStartOidcSignInUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: startOidcSignInResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as startOidcSignInResponse
-}
+);}
 
 
 
@@ -785,16 +569,16 @@ export const getStartOidcSignInQueryKey = (params?: StartOidcSignInParams,) => {
     }
 
 
-export const getStartOidcSignInQueryOptions = <TData = Awaited<ReturnType<typeof startOidcSignIn>>, TError = void | ConflictResponse | TooManyRequestsResponse>(params?: StartOidcSignInParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof startOidcSignIn>>, TError, TData>>, fetch?: RequestInit}
+export const getStartOidcSignInQueryOptions = <TData = Awaited<ReturnType<typeof startOidcSignIn>>, TError = void | ConflictResponse | TooManyRequestsResponse>(params?: StartOidcSignInParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof startOidcSignIn>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getStartOidcSignInQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof startOidcSignIn>>> = ({ signal }) => startOidcSignIn(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof startOidcSignIn>>> = ({ signal }) => startOidcSignIn(params, { signal, ...requestOptions });
 
 
 
@@ -814,7 +598,7 @@ export function useStartOidcSignIn<TData = Awaited<ReturnType<typeof startOidcSi
           TError,
           Awaited<ReturnType<typeof startOidcSignIn>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useStartOidcSignIn<TData = Awaited<ReturnType<typeof startOidcSignIn>>, TError = void | ConflictResponse | TooManyRequestsResponse>(
@@ -824,11 +608,11 @@ export function useStartOidcSignIn<TData = Awaited<ReturnType<typeof startOidcSi
           TError,
           Awaited<ReturnType<typeof startOidcSignIn>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useStartOidcSignIn<TData = Awaited<ReturnType<typeof startOidcSignIn>>, TError = void | ConflictResponse | TooManyRequestsResponse>(
- params?: StartOidcSignInParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof startOidcSignIn>>, TError, TData>>, fetch?: RequestInit}
+ params?: StartOidcSignInParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof startOidcSignIn>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -836,7 +620,7 @@ export function useStartOidcSignIn<TData = Awaited<ReturnType<typeof startOidcSi
  */
 
 export function useStartOidcSignIn<TData = Awaited<ReturnType<typeof startOidcSignIn>>, TError = void | ConflictResponse | TooManyRequestsResponse>(
- params?: StartOidcSignInParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof startOidcSignIn>>, TError, TData>>, fetch?: RequestInit}
+ params?: StartOidcSignInParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof startOidcSignIn>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -851,23 +635,6 @@ export function useStartOidcSignIn<TData = Awaited<ReturnType<typeof startOidcSi
 
 
 
-
-export type completeOidcSignInResponse302 = {
-  data: void
-  status: 302
-}
-
-export type completeOidcSignInResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-;
-export type completeOidcSignInResponseError = (completeOidcSignInResponse302 | completeOidcSignInResponse429) & {
-  headers: Headers;
-};
-
-export type completeOidcSignInResponse = (completeOidcSignInResponseError)
 
 export const getCompleteOidcSignInUrl = (params?: CompleteOidcSignInParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -888,23 +655,16 @@ export const getCompleteOidcSignInUrl = (params?: CompleteOidcSignInParams,) => 
  * Redirect target of the identity provider. Every outcome is a `302` to the SPA, so the browser never shows a raw error. On success it sets the session cookie (state `active`, or `totp_required` when the user has TOTP and the identity provider did not assert multi-factor authentication) and redirects to the `return_to` of the start or to `/`. The first sign-in of a new identity creates the user, with the login taken from `preferred_username`, else the email, else `sub`. Accounts are never merged by login or email; an identity reaches an existing account only by linking it from that account's profile (`startOidcLink`). A failure redirects to `/sign-in?error=<code>` with one of `no_access` (the person is in no mapped group; the Audit log records the groups from the claim), `login_taken` (a new identity's login belongs to an existing account; the page says "An account with this login already exists. Sign in with it and link OIDC in your profile.", and the Audit log records the refusal), `account_disabled`, `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`) and `idp_error` (the identity provider or the back channel failed).
  * @summary Complete OIDC sign-in
  */
-export const completeOidcSignIn = async (params?: CompleteOidcSignInParams, options?: RequestInit): Promise<completeOidcSignInResponse> => {
+export const completeOidcSignIn = async (params?: CompleteOidcSignInParams, options?: Parameters<typeof apiFetch>[1]): Promise<unknown> => {
 
-  const res = await fetch(getCompleteOidcSignInUrl(params),
+  return apiFetch<unknown>(getCompleteOidcSignInUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: completeOidcSignInResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as completeOidcSignInResponse
-}
+);}
 
 
 
@@ -917,16 +677,16 @@ export const getCompleteOidcSignInQueryKey = (params?: CompleteOidcSignInParams,
     }
 
 
-export const getCompleteOidcSignInQueryOptions = <TData = Awaited<ReturnType<typeof completeOidcSignIn>>, TError = void | TooManyRequestsResponse>(params?: CompleteOidcSignInParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof completeOidcSignIn>>, TError, TData>>, fetch?: RequestInit}
+export const getCompleteOidcSignInQueryOptions = <TData = Awaited<ReturnType<typeof completeOidcSignIn>>, TError = void | TooManyRequestsResponse>(params?: CompleteOidcSignInParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof completeOidcSignIn>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getCompleteOidcSignInQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof completeOidcSignIn>>> = ({ signal }) => completeOidcSignIn(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof completeOidcSignIn>>> = ({ signal }) => completeOidcSignIn(params, { signal, ...requestOptions });
 
 
 
@@ -946,7 +706,7 @@ export function useCompleteOidcSignIn<TData = Awaited<ReturnType<typeof complete
           TError,
           Awaited<ReturnType<typeof completeOidcSignIn>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useCompleteOidcSignIn<TData = Awaited<ReturnType<typeof completeOidcSignIn>>, TError = void | TooManyRequestsResponse>(
@@ -956,11 +716,11 @@ export function useCompleteOidcSignIn<TData = Awaited<ReturnType<typeof complete
           TError,
           Awaited<ReturnType<typeof completeOidcSignIn>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useCompleteOidcSignIn<TData = Awaited<ReturnType<typeof completeOidcSignIn>>, TError = void | TooManyRequestsResponse>(
- params?: CompleteOidcSignInParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof completeOidcSignIn>>, TError, TData>>, fetch?: RequestInit}
+ params?: CompleteOidcSignInParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof completeOidcSignIn>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -968,7 +728,7 @@ export function useCompleteOidcSignIn<TData = Awaited<ReturnType<typeof complete
  */
 
 export function useCompleteOidcSignIn<TData = Awaited<ReturnType<typeof completeOidcSignIn>>, TError = void | TooManyRequestsResponse>(
- params?: CompleteOidcSignInParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof completeOidcSignIn>>, TError, TData>>, fetch?: RequestInit}
+ params?: CompleteOidcSignInParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof completeOidcSignIn>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -984,50 +744,6 @@ export function useCompleteOidcSignIn<TData = Awaited<ReturnType<typeof complete
 
 
 
-export type completePasswordSetupResponse204 = {
-  data: void
-  status: 204
-}
-
-export type completePasswordSetupResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type completePasswordSetupResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type completePasswordSetupResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type completePasswordSetupResponse410 = {
-  data: GoneResponse
-  status: 410
-}
-
-export type completePasswordSetupResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type completePasswordSetupResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type completePasswordSetupResponseSuccess = (completePasswordSetupResponse204) & {
-  headers: Headers;
-};
-export type completePasswordSetupResponseError = (completePasswordSetupResponse400 | completePasswordSetupResponse403 | completePasswordSetupResponse404 | completePasswordSetupResponse410 | completePasswordSetupResponse422 | completePasswordSetupResponse429) & {
-  headers: Headers;
-};
-
-export type completePasswordSetupResponse = (completePasswordSetupResponseSuccess | completePasswordSetupResponseError)
-
 export const getCompletePasswordSetupUrl = () => {
 
 
@@ -1040,7 +756,7 @@ export const getCompletePasswordSetupUrl = () => {
  * Uses the single-use token of a password setup link (the link carries it in the URL fragment, so it reaches neither server logs nor referrers). The user is then asked to enrol TOTP if the policy requires it. An unknown token is `404`; a token past `auth.password_setup_link_ttl` is `410` (`link_expired`); one already used or replaced by a newer link is `410` (`link_used`). Like the sign-in, a request that a browser marks as cross-site is `403` (`csrf_invalid`).
  * @summary Set a password from a setup link
  */
-export const completePasswordSetup = async (passwordSetup: PasswordSetup, options?: RequestInit): Promise<completePasswordSetupResponse> => {
+export const completePasswordSetup = async (passwordSetup: PasswordSetup, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1056,21 +772,14 @@ export const completePasswordSetup = async (passwordSetup: PasswordSetup, option
     }
     return headers;
   };
-const res = await fetch(getCompletePasswordSetupUrl(),
+return apiFetch<void>(getCompletePasswordSetupUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(passwordSetup)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: completePasswordSetupResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as completePasswordSetupResponse
-}
+);}
 
 
 
@@ -1079,15 +788,15 @@ const res = await fetch(getCompletePasswordSetupUrl(),
 export const getCompletePasswordSetupMutationKey = () => ['completePasswordSetup'] as const;
 
 export const getCompletePasswordSetupMutationOptions = <TError = BadRequestResponse | ForbiddenResponse | NotFoundResponse | GoneResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completePasswordSetup>>, TError,CompletePasswordSetupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completePasswordSetup>>, TError,CompletePasswordSetupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof completePasswordSetup>>, TError,CompletePasswordSetupMutationVariables, TContext> => {
 
 const mutationKey = getCompletePasswordSetupMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1095,7 +804,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof completePasswordSetup>>, CompletePasswordSetupMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  completePasswordSetup(data,fetchOptions)
+          return  completePasswordSetup(data,requestOptions)
         }
 
 
@@ -1114,7 +823,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Set a password from a setup link
  */
 export const useCompletePasswordSetup = <TError = BadRequestResponse | ForbiddenResponse | NotFoundResponse | GoneResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completePasswordSetup>>, TError,CompletePasswordSetupMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completePasswordSetup>>, TError,CompletePasswordSetupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof completePasswordSetup>>,
         TError,

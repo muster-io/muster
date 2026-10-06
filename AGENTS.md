@@ -167,9 +167,10 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 |---|---|---|
 | `make help` | list the targets | S-001 |
 | `make fmt` | gofmt and goimports through `golangci-lint fmt` and oxfmt on the SPA | S-001, S-002 |
-| `make lint` | the licence headers (`internal/tools/licensecheck`, skipping the paths listed in `NOTICE`), golangci-lint, Redocly on the spec, the TypeScript type check, oxlint and the oxfmt check; later translations | S-001, S-002 |
+| `make lint` | the licence headers (`internal/tools/licensecheck`, skipping the paths listed in `NOTICE`), golangci-lint, Redocly on the spec, the TypeScript type check, oxlint and the oxfmt check, and the translations (i18next-cli) | S-001, S-002, S-014 |
 | `make lint-arch` | the architecture lints | S-001 |
-| `make test`, `make test-race` | unit tests with the coverage gate of `.testcoverage.yml`; the same with the race detector | S-001 |
+| `make test`, `make test-race` | unit tests with the coverage gate of `.testcoverage.yml`, and `make test-web`; the same with the race detector | S-001, S-014 |
+| `make test-web` | the SPA's component tests, Vitest in browser mode on Chromium | S-014 |
 | `make generate`, `make generate-check` | run the code generators (the sqlc queries, the OpenAPI server and clients, the route tree); fail on stale generated files, naming them | S-001, S-002, S-007 |
 | `make build` | the SPA, then `bin/muster` with version and commit | S-001, S-002 |
 | `make ci` | the pull-request tier, locally: `lint`, `lint-arch`, `generate-check`, `licenses`, `test-race`, `build`, and what later stories add | S-001, S-002 |
@@ -179,7 +180,7 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 | `make mutation` | run mutation testing over the core packages; the nightly workflow uploads the report as an artifact | S-002 |
 | `make helm-check`, `make compose-check` | render and validate the chart; check the compose example | S-003 |
 | `make dev-db`, `make dev` | the development PostgreSQL; PostgreSQL, build and `muster dev` | S-004 |
-| `make e2e` | the end-to-end suite; `E2E_REPLICAS=2` runs two replicas | S-004 |
+| `make e2e` | the end-to-end suites, Go and then Playwright (`web/e2e`); `E2E_REPLICAS=2` runs the Go suite with two replicas | S-004, S-014 |
 | `make load-test` | the load test against `muster dev` | S-004 |
 | `make test-integration` | integration tests on PostgreSQL 14 and 17 | S-006 |
 

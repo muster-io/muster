@@ -49,7 +49,10 @@ import type {
   UnprocessableResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -68,35 +71,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type getOidcSettingsResponse200 = {
-  data: OidcSettings
-  status: 200
-}
-
-export type getOidcSettingsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getOidcSettingsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getOidcSettingsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getOidcSettingsResponseSuccess = (getOidcSettingsResponse200) & {
-  headers: Headers;
-};
-export type getOidcSettingsResponseError = (getOidcSettingsResponse401 | getOidcSettingsResponse403 | getOidcSettingsResponse429) & {
-  headers: Headers;
-};
-
-export type getOidcSettingsResponse = (getOidcSettingsResponseSuccess | getOidcSettingsResponseError)
-
 export const getGetOidcSettingsUrl = () => {
 
 
@@ -109,23 +83,16 @@ export const getGetOidcSettingsUrl = () => {
  * The client secret is never returned; `client_secret_status` shows whether it is set and when it changed.
  * @summary Read OIDC settings
  */
-export const getOidcSettings = async ( options?: RequestInit): Promise<getOidcSettingsResponse> => {
+export const getOidcSettings = async ( options?: Parameters<typeof apiFetch>[1]): Promise<OidcSettings> => {
 
-  const res = await fetch(getGetOidcSettingsUrl(),
+  return apiFetch<OidcSettings>(getGetOidcSettingsUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getOidcSettingsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getOidcSettingsResponse
-}
+);}
 
 
 
@@ -138,16 +105,16 @@ export const getGetOidcSettingsQueryKey = () => {
     }
 
 
-export const getGetOidcSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getOidcSettings>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOidcSettings>>, TError, TData>>, fetch?: RequestInit}
+export const getGetOidcSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getOidcSettings>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOidcSettings>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetOidcSettingsQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOidcSettings>>> = ({ signal }) => getOidcSettings({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOidcSettings>>> = ({ signal }) => getOidcSettings({ signal, ...requestOptions });
 
 
 
@@ -167,7 +134,7 @@ export function useGetOidcSettings<TData = Awaited<ReturnType<typeof getOidcSett
           TError,
           Awaited<ReturnType<typeof getOidcSettings>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetOidcSettings<TData = Awaited<ReturnType<typeof getOidcSettings>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -177,11 +144,11 @@ export function useGetOidcSettings<TData = Awaited<ReturnType<typeof getOidcSett
           TError,
           Awaited<ReturnType<typeof getOidcSettings>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetOidcSettings<TData = Awaited<ReturnType<typeof getOidcSettings>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOidcSettings>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOidcSettings>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -189,7 +156,7 @@ export function useGetOidcSettings<TData = Awaited<ReturnType<typeof getOidcSett
  */
 
 export function useGetOidcSettings<TData = Awaited<ReturnType<typeof getOidcSettings>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOidcSettings>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOidcSettings>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -205,55 +172,6 @@ export function useGetOidcSettings<TData = Awaited<ReturnType<typeof getOidcSett
 
 
 
-export type updateOidcSettingsResponse200 = {
-  data: OidcSettings
-  status: 200
-}
-
-export type updateOidcSettingsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type updateOidcSettingsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type updateOidcSettingsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type updateOidcSettingsResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type updateOidcSettingsResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type updateOidcSettingsResponse428 = {
-  data: PreconditionRequiredResponse
-  status: 428
-}
-
-export type updateOidcSettingsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type updateOidcSettingsResponseSuccess = (updateOidcSettingsResponse200) & {
-  headers: Headers;
-};
-export type updateOidcSettingsResponseError = (updateOidcSettingsResponse400 | updateOidcSettingsResponse401 | updateOidcSettingsResponse403 | updateOidcSettingsResponse412 | updateOidcSettingsResponse422 | updateOidcSettingsResponse428 | updateOidcSettingsResponse429) & {
-  headers: Headers;
-};
-
-export type updateOidcSettingsResponse = (updateOidcSettingsResponseSuccess | updateOidcSettingsResponseError)
-
 export const getUpdateOidcSettingsUrl = () => {
 
 
@@ -266,7 +184,7 @@ export const getUpdateOidcSettingsUrl = () => {
  * Replaces the writable fields; omitted optional fields keep their value. Saving with an empty mapping and no Role for unmatched users returns the warning `nobody_can_sign_in` in the result. The Audit log diff shows only that the client secret changed.
  * @summary Update OIDC settings
  */
-export const updateOidcSettings = async (oidcSettingsInput: OidcSettingsInput, options?: RequestInit): Promise<updateOidcSettingsResponse> => {
+export const updateOidcSettings = async (oidcSettingsInput: OidcSettingsInput, options?: Parameters<typeof apiFetch>[1]): Promise<OidcSettings> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -282,21 +200,14 @@ export const updateOidcSettings = async (oidcSettingsInput: OidcSettingsInput, o
     }
     return headers;
   };
-const res = await fetch(getUpdateOidcSettingsUrl(),
+return apiFetch<OidcSettings>(getUpdateOidcSettingsUrl(),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(oidcSettingsInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: updateOidcSettingsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as updateOidcSettingsResponse
-}
+);}
 
 
 
@@ -305,15 +216,15 @@ const res = await fetch(getUpdateOidcSettingsUrl(),
 export const getUpdateOidcSettingsMutationKey = () => ['updateOidcSettings'] as const;
 
 export const getUpdateOidcSettingsMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOidcSettings>>, TError,UpdateOidcSettingsMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOidcSettings>>, TError,UpdateOidcSettingsMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateOidcSettings>>, TError,UpdateOidcSettingsMutationVariables, TContext> => {
 
 const mutationKey = getUpdateOidcSettingsMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -321,7 +232,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateOidcSettings>>, UpdateOidcSettingsMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  updateOidcSettings(data,fetchOptions)
+          return  updateOidcSettings(data,requestOptions)
         }
 
 
@@ -340,7 +251,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Update OIDC settings
  */
 export const useUpdateOidcSettings = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOidcSettings>>, TError,UpdateOidcSettingsMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateOidcSettings>>, TError,UpdateOidcSettingsMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateOidcSettings>>,
         TError,
@@ -349,36 +260,7 @@ export const useUpdateOidcSettings = <TError = BadRequestResponse | Unauthorized
       > => {
       return useMutation(getUpdateOidcSettingsMutationOptions(options), queryClient);
     }
-    export type checkOidcSettingsResponse200 = {
-  data: OidcCheckResult
-  status: 200
-}
-
-export type checkOidcSettingsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type checkOidcSettingsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type checkOidcSettingsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type checkOidcSettingsResponseSuccess = (checkOidcSettingsResponse200) & {
-  headers: Headers;
-};
-export type checkOidcSettingsResponseError = (checkOidcSettingsResponse401 | checkOidcSettingsResponse403 | checkOidcSettingsResponse429) & {
-  headers: Headers;
-};
-
-export type checkOidcSettingsResponse = (checkOidcSettingsResponseSuccess | checkOidcSettingsResponseError)
-
-export const getCheckOidcSettingsUrl = () => {
+    export const getCheckOidcSettingsUrl = () => {
 
 
 
@@ -390,23 +272,16 @@ export const getCheckOidcSettingsUrl = () => {
  * Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised (warning `groups_claim_missing`).
  * @summary Check the connection to the identity provider
  */
-export const checkOidcSettings = async ( options?: RequestInit): Promise<checkOidcSettingsResponse> => {
+export const checkOidcSettings = async ( options?: Parameters<typeof apiFetch>[1]): Promise<OidcCheckResult> => {
 
-  const res = await fetch(getCheckOidcSettingsUrl(),
+  return apiFetch<OidcCheckResult>(getCheckOidcSettingsUrl(),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: checkOidcSettingsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as checkOidcSettingsResponse
-}
+);}
 
 
 
@@ -415,15 +290,15 @@ export const checkOidcSettings = async ( options?: RequestInit): Promise<checkOi
 export const getCheckOidcSettingsMutationKey = () => ['checkOidcSettings'] as const;
 
 export const getCheckOidcSettingsMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkOidcSettings>>, TError,void, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkOidcSettings>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof checkOidcSettings>>, TError,void, TContext> => {
 
 const mutationKey = getCheckOidcSettingsMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -431,7 +306,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof checkOidcSettings>>, void> = () => {
 
 
-          return  checkOidcSettings(fetchOptions)
+          return  checkOidcSettings(requestOptions)
         }
 
 
@@ -450,7 +325,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Check the connection to the identity provider
  */
 export const useCheckOidcSettings = <TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkOidcSettings>>, TError,void, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkOidcSettings>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof checkOidcSettings>>,
         TError,

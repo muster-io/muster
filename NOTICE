@@ -14,7 +14,7 @@ licence and its copyright notice. Files copied into the repository unchanged kee
 own licence header and are listed below, so that the licence header check skips them.
 
 Third-party files excluded from the licence header check:
-  (none)
+  - web/src/components/ui/**  shadcn/ui components (https://github.com/shadcn-ui/ui), MIT, Copyright (c) 2023 shadcn
 
 The list above is read by `make lint` (internal/tools/licensecheck). It runs from its
 heading to the next blank line. Each entry is a line "  - <glob>  <origin and licence>":
@@ -26,4 +26,29 @@ after the glob is for readers. A single line "  (none)" stands for an empty list
 Ported code
 ===========
 
-None yet.
+web/src/styles.css takes the token names of the shadcn/ui theme and its custom variants data-horizontal and
+data-vertical from shadcn/ui (https://github.com/shadcn-ui/ui), licensed under the MIT License:
+
+  MIT License
+
+  Copyright (c) 2023 shadcn
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+The same licence covers the copied components in web/src/components/ui, listed above.

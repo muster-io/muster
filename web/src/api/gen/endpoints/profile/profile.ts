@@ -57,7 +57,10 @@ import type {
   UnprocessableResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -76,35 +79,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type getMeResponse200 = {
-  data: Me
-  status: 200
-}
-
-export type getMeResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getMeResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getMeResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getMeResponseSuccess = (getMeResponse200) & {
-  headers: Headers;
-};
-export type getMeResponseError = (getMeResponse401 | getMeResponse403 | getMeResponse429) & {
-  headers: Headers;
-};
-
-export type getMeResponse = (getMeResponseSuccess | getMeResponseError)
-
 export const getGetMeUrl = () => {
 
 
@@ -117,23 +91,16 @@ export const getGetMeUrl = () => {
  * The caller and the effective Permissions, narrowed by the token if one is used. Service account tokens get `403` (`service_account_not_allowed`).
  * @summary Read own profile
  */
-export const getMe = async ( options?: RequestInit): Promise<getMeResponse> => {
+export const getMe = async ( options?: Parameters<typeof apiFetch>[1]): Promise<Me> => {
 
-  const res = await fetch(getGetMeUrl(),
+  return apiFetch<Me>(getGetMeUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getMeResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getMeResponse
-}
+);}
 
 
 
@@ -146,16 +113,16 @@ export const getGetMeQueryKey = () => {
     }
 
 
-export const getGetMeQueryOptions = <TData = Awaited<ReturnType<typeof getMe>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>>, fetch?: RequestInit}
+export const getGetMeQueryOptions = <TData = Awaited<ReturnType<typeof getMe>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetMeQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMe>>> = ({ signal }) => getMe({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMe>>> = ({ signal }) => getMe({ signal, ...requestOptions });
 
 
 
@@ -175,7 +142,7 @@ export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = Una
           TError,
           Awaited<ReturnType<typeof getMe>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -185,11 +152,11 @@ export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = Una
           TError,
           Awaited<ReturnType<typeof getMe>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -197,7 +164,7 @@ export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = Una
  */
 
 export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -213,45 +180,6 @@ export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = Una
 
 
 
-export type updateMeResponse200 = {
-  data: Me
-  status: 200
-}
-
-export type updateMeResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type updateMeResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type updateMeResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type updateMeResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type updateMeResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type updateMeResponseSuccess = (updateMeResponse200) & {
-  headers: Headers;
-};
-export type updateMeResponseError = (updateMeResponse400 | updateMeResponse401 | updateMeResponse403 | updateMeResponse422 | updateMeResponse429) & {
-  headers: Headers;
-};
-
-export type updateMeResponse = (updateMeResponseSuccess | updateMeResponseError)
-
 export const getUpdateMeUrl = () => {
 
 
@@ -264,7 +192,7 @@ export const getUpdateMeUrl = () => {
  * Changes name, time zone and language. Web session only.
  * @summary Update own profile
  */
-export const updateMe = async (meUpdate: MeUpdate, options?: RequestInit): Promise<updateMeResponse> => {
+export const updateMe = async (meUpdate: MeUpdate, options?: Parameters<typeof apiFetch>[1]): Promise<Me> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -280,21 +208,14 @@ export const updateMe = async (meUpdate: MeUpdate, options?: RequestInit): Promi
     }
     return headers;
   };
-const res = await fetch(getUpdateMeUrl(),
+return apiFetch<Me>(getUpdateMeUrl(),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(meUpdate)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: updateMeResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as updateMeResponse
-}
+);}
 
 
 
@@ -303,15 +224,15 @@ const res = await fetch(getUpdateMeUrl(),
 export const getUpdateMeMutationKey = () => ['updateMe'] as const;
 
 export const getUpdateMeMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMe>>, TError,UpdateMeMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMe>>, TError,UpdateMeMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateMe>>, TError,UpdateMeMutationVariables, TContext> => {
 
 const mutationKey = getUpdateMeMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -319,7 +240,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateMe>>, UpdateMeMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  updateMe(data,fetchOptions)
+          return  updateMe(data,requestOptions)
         }
 
 
@@ -338,7 +259,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Update own profile
  */
 export const useUpdateMe = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMe>>, TError,UpdateMeMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMe>>, TError,UpdateMeMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateMe>>,
         TError,
@@ -347,51 +268,7 @@ export const useUpdateMe = <TError = BadRequestResponse | UnauthorizedResponse |
       > => {
       return useMutation(getUpdateMeMutationOptions(options), queryClient);
     }
-    export type changePasswordResponse204 = {
-  data: void
-  status: 204
-}
-
-export type changePasswordResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type changePasswordResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type changePasswordResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type changePasswordResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type changePasswordResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type changePasswordResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type changePasswordResponseSuccess = (changePasswordResponse204) & {
-  headers: Headers;
-};
-export type changePasswordResponseError = (changePasswordResponse400 | changePasswordResponse401 | changePasswordResponse403 | changePasswordResponse409 | changePasswordResponse422 | changePasswordResponse429) & {
-  headers: Headers;
-};
-
-export type changePasswordResponse = (changePasswordResponseSuccess | changePasswordResponseError)
-
-export const getChangePasswordUrl = () => {
+    export const getChangePasswordUrl = () => {
 
 
 
@@ -403,7 +280,7 @@ export const getChangePasswordUrl = () => {
  * Ends all other sessions of the user. Local users only (`409` `local_user_only` otherwise). Web session only.
  * @summary Change own password
  */
-export const changePassword = async (passwordChange: PasswordChange, options?: RequestInit): Promise<changePasswordResponse> => {
+export const changePassword = async (passwordChange: PasswordChange, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -419,21 +296,14 @@ export const changePassword = async (passwordChange: PasswordChange, options?: R
     }
     return headers;
   };
-const res = await fetch(getChangePasswordUrl(),
+return apiFetch<void>(getChangePasswordUrl(),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(passwordChange)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: changePasswordResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as changePasswordResponse
-}
+);}
 
 
 
@@ -442,15 +312,15 @@ const res = await fetch(getChangePasswordUrl(),
 export const getChangePasswordMutationKey = () => ['changePassword'] as const;
 
 export const getChangePasswordMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changePassword>>, TError,ChangePasswordMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changePassword>>, TError,ChangePasswordMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof changePassword>>, TError,ChangePasswordMutationVariables, TContext> => {
 
 const mutationKey = getChangePasswordMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -458,7 +328,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof changePassword>>, ChangePasswordMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  changePassword(data,fetchOptions)
+          return  changePassword(data,requestOptions)
         }
 
 
@@ -477,7 +347,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Change own password
  */
 export const useChangePassword = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changePassword>>, TError,ChangePasswordMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changePassword>>, TError,ChangePasswordMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof changePassword>>,
         TError,
@@ -486,41 +356,7 @@ export const useChangePassword = <TError = BadRequestResponse | UnauthorizedResp
       > => {
       return useMutation(getChangePasswordMutationOptions(options), queryClient);
     }
-    export type startOidcLinkResponse201 = {
-  data: OidcLinkStart
-  status: 201
-}
-
-export type startOidcLinkResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type startOidcLinkResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type startOidcLinkResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type startOidcLinkResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type startOidcLinkResponseSuccess = (startOidcLinkResponse201) & {
-  headers: Headers;
-};
-export type startOidcLinkResponseError = (startOidcLinkResponse401 | startOidcLinkResponse403 | startOidcLinkResponse409 | startOidcLinkResponse429) & {
-  headers: Headers;
-};
-
-export type startOidcLinkResponse = (startOidcLinkResponseSuccess | startOidcLinkResponseError)
-
-export const getStartOidcLinkUrl = () => {
+    export const getStartOidcLinkUrl = () => {
 
 
 
@@ -532,23 +368,16 @@ export const getStartOidcLinkUrl = () => {
  * Starts linking the caller's account to an identity at the OIDC provider: returns the authorization URL (PKCE `S256`, `state` and `nonce`) that the SPA opens after warning "After linking you will sign in only through OIDC; your password will be removed." The `state` is bound to this web session, so the callback adds the identity only to the account that started the link. A successful link removes the password: the account then signs in only through OIDC, keeps its TOTP enrolment, and `oidc.sync_role` applies to it. There is no unlinking by the user; an Admin can convert the account back to local (`convertUserToLocal`). Web session only: a token gets `403` (`session_required`). `409` with `oidc_not_enabled` while OIDC is off, or `oidc_already_linked` when the account already signs in through OIDC.
  * @summary Start linking an OIDC identity
  */
-export const startOidcLink = async ( options?: RequestInit): Promise<startOidcLinkResponse> => {
+export const startOidcLink = async ( options?: Parameters<typeof apiFetch>[1]): Promise<OidcLinkStart> => {
 
-  const res = await fetch(getStartOidcLinkUrl(),
+  return apiFetch<OidcLinkStart>(getStartOidcLinkUrl(),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: startOidcLinkResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as startOidcLinkResponse
-}
+);}
 
 
 
@@ -557,15 +386,15 @@ export const startOidcLink = async ( options?: RequestInit): Promise<startOidcLi
 export const getStartOidcLinkMutationKey = () => ['startOidcLink'] as const;
 
 export const getStartOidcLinkMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startOidcLink>>, TError,void, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startOidcLink>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof startOidcLink>>, TError,void, TContext> => {
 
 const mutationKey = getStartOidcLinkMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -573,7 +402,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof startOidcLink>>, void> = () => {
 
 
-          return  startOidcLink(fetchOptions)
+          return  startOidcLink(requestOptions)
         }
 
 
@@ -592,7 +421,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Start linking an OIDC identity
  */
 export const useStartOidcLink = <TError = UnauthorizedResponse | ForbiddenResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startOidcLink>>, TError,void, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startOidcLink>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof startOidcLink>>,
         TError,
@@ -601,24 +430,7 @@ export const useStartOidcLink = <TError = UnauthorizedResponse | ForbiddenRespon
       > => {
       return useMutation(getStartOidcLinkMutationOptions(options), queryClient);
     }
-    export type completeOidcLinkResponse302 = {
-  data: void
-  status: 302
-}
-
-export type completeOidcLinkResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-;
-export type completeOidcLinkResponseError = (completeOidcLinkResponse302 | completeOidcLinkResponse429) & {
-  headers: Headers;
-};
-
-export type completeOidcLinkResponse = (completeOidcLinkResponseError)
-
-export const getCompleteOidcLinkUrl = (params?: CompleteOidcLinkParams,) => {
+    export const getCompleteOidcLinkUrl = (params?: CompleteOidcLinkParams,) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -637,23 +449,16 @@ export const getCompleteOidcLinkUrl = (params?: CompleteOidcLinkParams,) => {
  * Redirect target of the identity provider for a link started by `startOidcLink`; register `MUSTER_PUBLIC_URL/api/v1/me/oidc-identity/callback` at the identity provider next to the sign-in callback. Every outcome is a `302` to the profile page. On success the identity (issuer and subject) is added to the account of the web session that started the link and the password is removed; an offline token granted by the link flow is kept on the user, as at sign-in; this session continues as an OIDC session, the user's other sessions end, and the Audit log records it; the redirect goes to `/profile`. A failure redirects to `/profile?error=<code>`, with one of `identity_linked_elsewhere` (the identity belongs to another user; the Audit log records the refusal), `no_access` (the identity's groups map to no Role and there is no Role for unmatched users, so the account could not sign in through OIDC; the redirect is `/profile?error=no_access` and the Audit log records the refusal with the groups), `oidc_disabled`, `invalid_request` (bad or missing `state`, `code` or `nonce`, no web session, or a `state` started by another session) and `idp_error`.
  * @summary Complete linking an OIDC identity
  */
-export const completeOidcLink = async (params?: CompleteOidcLinkParams, options?: RequestInit): Promise<completeOidcLinkResponse> => {
+export const completeOidcLink = async (params?: CompleteOidcLinkParams, options?: Parameters<typeof apiFetch>[1]): Promise<unknown> => {
 
-  const res = await fetch(getCompleteOidcLinkUrl(params),
+  return apiFetch<unknown>(getCompleteOidcLinkUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: completeOidcLinkResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as completeOidcLinkResponse
-}
+);}
 
 
 
@@ -666,16 +471,16 @@ export const getCompleteOidcLinkQueryKey = (params?: CompleteOidcLinkParams,) =>
     }
 
 
-export const getCompleteOidcLinkQueryOptions = <TData = Awaited<ReturnType<typeof completeOidcLink>>, TError = void | TooManyRequestsResponse>(params?: CompleteOidcLinkParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof completeOidcLink>>, TError, TData>>, fetch?: RequestInit}
+export const getCompleteOidcLinkQueryOptions = <TData = Awaited<ReturnType<typeof completeOidcLink>>, TError = void | TooManyRequestsResponse>(params?: CompleteOidcLinkParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof completeOidcLink>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getCompleteOidcLinkQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof completeOidcLink>>> = ({ signal }) => completeOidcLink(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof completeOidcLink>>> = ({ signal }) => completeOidcLink(params, { signal, ...requestOptions });
 
 
 
@@ -695,7 +500,7 @@ export function useCompleteOidcLink<TData = Awaited<ReturnType<typeof completeOi
           TError,
           Awaited<ReturnType<typeof completeOidcLink>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useCompleteOidcLink<TData = Awaited<ReturnType<typeof completeOidcLink>>, TError = void | TooManyRequestsResponse>(
@@ -705,11 +510,11 @@ export function useCompleteOidcLink<TData = Awaited<ReturnType<typeof completeOi
           TError,
           Awaited<ReturnType<typeof completeOidcLink>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useCompleteOidcLink<TData = Awaited<ReturnType<typeof completeOidcLink>>, TError = void | TooManyRequestsResponse>(
- params?: CompleteOidcLinkParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof completeOidcLink>>, TError, TData>>, fetch?: RequestInit}
+ params?: CompleteOidcLinkParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof completeOidcLink>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -717,7 +522,7 @@ export function useCompleteOidcLink<TData = Awaited<ReturnType<typeof completeOi
  */
 
 export function useCompleteOidcLink<TData = Awaited<ReturnType<typeof completeOidcLink>>, TError = void | TooManyRequestsResponse>(
- params?: CompleteOidcLinkParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof completeOidcLink>>, TError, TData>>, fetch?: RequestInit}
+ params?: CompleteOidcLinkParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof completeOidcLink>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -733,35 +538,6 @@ export function useCompleteOidcLink<TData = Awaited<ReturnType<typeof completeOi
 
 
 
-export type listMySessionsResponse200 = {
-  data: SessionInfoList
-  status: 200
-}
-
-export type listMySessionsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listMySessionsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listMySessionsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listMySessionsResponseSuccess = (listMySessionsResponse200) & {
-  headers: Headers;
-};
-export type listMySessionsResponseError = (listMySessionsResponse401 | listMySessionsResponse403 | listMySessionsResponse429) & {
-  headers: Headers;
-};
-
-export type listMySessionsResponse = (listMySessionsResponseSuccess | listMySessionsResponseError)
-
 export const getListMySessionsUrl = () => {
 
 
@@ -774,23 +550,16 @@ export const getListMySessionsUrl = () => {
  * Sessions of the user, the current one marked.
  * @summary List own sessions
  */
-export const listMySessions = async ( options?: RequestInit): Promise<listMySessionsResponse> => {
+export const listMySessions = async ( options?: Parameters<typeof apiFetch>[1]): Promise<SessionInfoList> => {
 
-  const res = await fetch(getListMySessionsUrl(),
+  return apiFetch<SessionInfoList>(getListMySessionsUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listMySessionsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listMySessionsResponse
-}
+);}
 
 
 
@@ -803,16 +572,16 @@ export const getListMySessionsQueryKey = () => {
     }
 
 
-export const getListMySessionsQueryOptions = <TData = Awaited<ReturnType<typeof listMySessions>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMySessions>>, TError, TData>>, fetch?: RequestInit}
+export const getListMySessionsQueryOptions = <TData = Awaited<ReturnType<typeof listMySessions>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMySessions>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListMySessionsQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMySessions>>> = ({ signal }) => listMySessions({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMySessions>>> = ({ signal }) => listMySessions({ signal, ...requestOptions });
 
 
 
@@ -832,7 +601,7 @@ export function useListMySessions<TData = Awaited<ReturnType<typeof listMySessio
           TError,
           Awaited<ReturnType<typeof listMySessions>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListMySessions<TData = Awaited<ReturnType<typeof listMySessions>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -842,11 +611,11 @@ export function useListMySessions<TData = Awaited<ReturnType<typeof listMySessio
           TError,
           Awaited<ReturnType<typeof listMySessions>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListMySessions<TData = Awaited<ReturnType<typeof listMySessions>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMySessions>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMySessions>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -854,7 +623,7 @@ export function useListMySessions<TData = Awaited<ReturnType<typeof listMySessio
  */
 
 export function useListMySessions<TData = Awaited<ReturnType<typeof listMySessions>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMySessions>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMySessions>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -870,35 +639,6 @@ export function useListMySessions<TData = Awaited<ReturnType<typeof listMySessio
 
 
 
-export type deleteMySessionsResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteMySessionsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteMySessionsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteMySessionsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteMySessionsResponseSuccess = (deleteMySessionsResponse204) & {
-  headers: Headers;
-};
-export type deleteMySessionsResponseError = (deleteMySessionsResponse401 | deleteMySessionsResponse403 | deleteMySessionsResponse429) & {
-  headers: Headers;
-};
-
-export type deleteMySessionsResponse = (deleteMySessionsResponseSuccess | deleteMySessionsResponseError)
-
 export const getDeleteMySessionsUrl = () => {
 
 
@@ -911,23 +651,16 @@ export const getDeleteMySessionsUrl = () => {
  * Ends every session of the user, the current one included. Web session only.
  * @summary Sign out everywhere
  */
-export const deleteMySessions = async ( options?: RequestInit): Promise<deleteMySessionsResponse> => {
+export const deleteMySessions = async ( options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteMySessionsUrl(),
+  return apiFetch<void>(getDeleteMySessionsUrl(),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteMySessionsResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteMySessionsResponse
-}
+);}
 
 
 
@@ -936,15 +669,15 @@ export const deleteMySessions = async ( options?: RequestInit): Promise<deleteMy
 export const getDeleteMySessionsMutationKey = () => ['deleteMySessions'] as const;
 
 export const getDeleteMySessionsMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMySessions>>, TError,void, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMySessions>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteMySessions>>, TError,void, TContext> => {
 
 const mutationKey = getDeleteMySessionsMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -952,7 +685,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteMySessions>>, void> = () => {
 
 
-          return  deleteMySessions(fetchOptions)
+          return  deleteMySessions(requestOptions)
         }
 
 
@@ -971,7 +704,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Sign out everywhere
  */
 export const useDeleteMySessions = <TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMySessions>>, TError,void, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMySessions>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteMySessions>>,
         TError,
@@ -980,36 +713,7 @@ export const useDeleteMySessions = <TError = UnauthorizedResponse | ForbiddenRes
       > => {
       return useMutation(getDeleteMySessionsMutationOptions(options), queryClient);
     }
-    export type getMyTotpResponse200 = {
-  data: TotpStatus
-  status: 200
-}
-
-export type getMyTotpResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getMyTotpResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getMyTotpResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getMyTotpResponseSuccess = (getMyTotpResponse200) & {
-  headers: Headers;
-};
-export type getMyTotpResponseError = (getMyTotpResponse401 | getMyTotpResponse403 | getMyTotpResponse429) & {
-  headers: Headers;
-};
-
-export type getMyTotpResponse = (getMyTotpResponseSuccess | getMyTotpResponseError)
-
-export const getGetMyTotpUrl = () => {
+    export const getGetMyTotpUrl = () => {
 
 
 
@@ -1021,23 +725,16 @@ export const getGetMyTotpUrl = () => {
  * Whether TOTP is enrolled, a first code is awaited, and how many recovery codes remain. Service account tokens get `403` (`service_account_not_allowed`).
  * @summary Read own TOTP status
  */
-export const getMyTotp = async ( options?: RequestInit): Promise<getMyTotpResponse> => {
+export const getMyTotp = async ( options?: Parameters<typeof apiFetch>[1]): Promise<TotpStatus> => {
 
-  const res = await fetch(getGetMyTotpUrl(),
+  return apiFetch<TotpStatus>(getGetMyTotpUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getMyTotpResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getMyTotpResponse
-}
+);}
 
 
 
@@ -1050,16 +747,16 @@ export const getGetMyTotpQueryKey = () => {
     }
 
 
-export const getGetMyTotpQueryOptions = <TData = Awaited<ReturnType<typeof getMyTotp>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyTotp>>, TError, TData>>, fetch?: RequestInit}
+export const getGetMyTotpQueryOptions = <TData = Awaited<ReturnType<typeof getMyTotp>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyTotp>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetMyTotpQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyTotp>>> = ({ signal }) => getMyTotp({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyTotp>>> = ({ signal }) => getMyTotp({ signal, ...requestOptions });
 
 
 
@@ -1079,7 +776,7 @@ export function useGetMyTotp<TData = Awaited<ReturnType<typeof getMyTotp>>, TErr
           TError,
           Awaited<ReturnType<typeof getMyTotp>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetMyTotp<TData = Awaited<ReturnType<typeof getMyTotp>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -1089,11 +786,11 @@ export function useGetMyTotp<TData = Awaited<ReturnType<typeof getMyTotp>>, TErr
           TError,
           Awaited<ReturnType<typeof getMyTotp>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetMyTotp<TData = Awaited<ReturnType<typeof getMyTotp>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyTotp>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyTotp>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1101,7 +798,7 @@ export function useGetMyTotp<TData = Awaited<ReturnType<typeof getMyTotp>>, TErr
  */
 
 export function useGetMyTotp<TData = Awaited<ReturnType<typeof getMyTotp>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyTotp>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyTotp>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1117,40 +814,6 @@ export function useGetMyTotp<TData = Awaited<ReturnType<typeof getMyTotp>>, TErr
 
 
 
-export type beginTotpEnrolmentResponse201 = {
-  data: TotpEnrolment
-  status: 201
-}
-
-export type beginTotpEnrolmentResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type beginTotpEnrolmentResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type beginTotpEnrolmentResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type beginTotpEnrolmentResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type beginTotpEnrolmentResponseSuccess = (beginTotpEnrolmentResponse201) & {
-  headers: Headers;
-};
-export type beginTotpEnrolmentResponseError = (beginTotpEnrolmentResponse401 | beginTotpEnrolmentResponse403 | beginTotpEnrolmentResponse409 | beginTotpEnrolmentResponse429) & {
-  headers: Headers;
-};
-
-export type beginTotpEnrolmentResponse = (beginTotpEnrolmentResponseSuccess | beginTotpEnrolmentResponseError)
-
 export const getBeginTotpEnrolmentUrl = () => {
 
 
@@ -1163,23 +826,16 @@ export const getBeginTotpEnrolmentUrl = () => {
  * Returns the seed and the `otpauth` URI once. Enrolment completes when `confirmTotpEnrolment` receives a first code. Allowed in the session state `totp_enrolment_required`. `409` (`totp_already_enrolled`) when TOTP is already on. Web session only.
  * @summary Begin TOTP enrolment
  */
-export const beginTotpEnrolment = async ( options?: RequestInit): Promise<beginTotpEnrolmentResponse> => {
+export const beginTotpEnrolment = async ( options?: Parameters<typeof apiFetch>[1]): Promise<TotpEnrolment> => {
 
-  const res = await fetch(getBeginTotpEnrolmentUrl(),
+  return apiFetch<TotpEnrolment>(getBeginTotpEnrolmentUrl(),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: beginTotpEnrolmentResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as beginTotpEnrolmentResponse
-}
+);}
 
 
 
@@ -1188,15 +844,15 @@ export const beginTotpEnrolment = async ( options?: RequestInit): Promise<beginT
 export const getBeginTotpEnrolmentMutationKey = () => ['beginTotpEnrolment'] as const;
 
 export const getBeginTotpEnrolmentMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof beginTotpEnrolment>>, TError,void, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof beginTotpEnrolment>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof beginTotpEnrolment>>, TError,void, TContext> => {
 
 const mutationKey = getBeginTotpEnrolmentMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1204,7 +860,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof beginTotpEnrolment>>, void> = () => {
 
 
-          return  beginTotpEnrolment(fetchOptions)
+          return  beginTotpEnrolment(requestOptions)
         }
 
 
@@ -1223,7 +879,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Begin TOTP enrolment
  */
 export const useBeginTotpEnrolment = <TError = UnauthorizedResponse | ForbiddenResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof beginTotpEnrolment>>, TError,void, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof beginTotpEnrolment>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof beginTotpEnrolment>>,
         TError,
@@ -1232,46 +888,7 @@ export const useBeginTotpEnrolment = <TError = UnauthorizedResponse | ForbiddenR
       > => {
       return useMutation(getBeginTotpEnrolmentMutationOptions(options), queryClient);
     }
-    export type removeTotpResponse204 = {
-  data: void
-  status: 204
-}
-
-export type removeTotpResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type removeTotpResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type removeTotpResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type removeTotpResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type removeTotpResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type removeTotpResponseSuccess = (removeTotpResponse204) & {
-  headers: Headers;
-};
-export type removeTotpResponseError = (removeTotpResponse400 | removeTotpResponse401 | removeTotpResponse403 | removeTotpResponse404 | removeTotpResponse429) & {
-  headers: Headers;
-};
-
-export type removeTotpResponse = (removeTotpResponseSuccess | removeTotpResponseError)
-
-export const getRemoveTotpUrl = () => {
+    export const getRemoveTotpUrl = () => {
 
 
 
@@ -1283,7 +900,7 @@ export const getRemoveTotpUrl = () => {
  * Needs proof that the person is at the keyboard: the current password (local users) or a current TOTP or recovery code. Under a TOTP policy that covers the user, the next sign-in demands enrolment again. A wrong proof is `401` (`invalid_credentials`). Web session only.
  * @summary Remove own TOTP
  */
-export const removeTotp = async (totpRemoval: TotpRemoval, options?: RequestInit): Promise<removeTotpResponse> => {
+export const removeTotp = async (totpRemoval: TotpRemoval, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1299,21 +916,14 @@ export const removeTotp = async (totpRemoval: TotpRemoval, options?: RequestInit
     }
     return headers;
   };
-const res = await fetch(getRemoveTotpUrl(),
+return apiFetch<void>(getRemoveTotpUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(totpRemoval)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: removeTotpResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as removeTotpResponse
-}
+);}
 
 
 
@@ -1322,15 +932,15 @@ const res = await fetch(getRemoveTotpUrl(),
 export const getRemoveTotpMutationKey = () => ['removeTotp'] as const;
 
 export const getRemoveTotpMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeTotp>>, TError,RemoveTotpMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeTotp>>, TError,RemoveTotpMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof removeTotp>>, TError,RemoveTotpMutationVariables, TContext> => {
 
 const mutationKey = getRemoveTotpMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1338,7 +948,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeTotp>>, RemoveTotpMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  removeTotp(data,fetchOptions)
+          return  removeTotp(data,requestOptions)
         }
 
 
@@ -1357,7 +967,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Remove own TOTP
  */
 export const useRemoveTotp = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeTotp>>, TError,RemoveTotpMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeTotp>>, TError,RemoveTotpMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof removeTotp>>,
         TError,
@@ -1366,51 +976,7 @@ export const useRemoveTotp = <TError = BadRequestResponse | UnauthorizedResponse
       > => {
       return useMutation(getRemoveTotpMutationOptions(options), queryClient);
     }
-    export type confirmTotpEnrolmentResponse200 = {
-  data: TotpRecoveryCodes
-  status: 200
-}
-
-export type confirmTotpEnrolmentResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type confirmTotpEnrolmentResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type confirmTotpEnrolmentResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type confirmTotpEnrolmentResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type confirmTotpEnrolmentResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type confirmTotpEnrolmentResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type confirmTotpEnrolmentResponseSuccess = (confirmTotpEnrolmentResponse200) & {
-  headers: Headers;
-};
-export type confirmTotpEnrolmentResponseError = (confirmTotpEnrolmentResponse400 | confirmTotpEnrolmentResponse401 | confirmTotpEnrolmentResponse403 | confirmTotpEnrolmentResponse409 | confirmTotpEnrolmentResponse422 | confirmTotpEnrolmentResponse429) & {
-  headers: Headers;
-};
-
-export type confirmTotpEnrolmentResponse = (confirmTotpEnrolmentResponseSuccess | confirmTotpEnrolmentResponseError)
-
-export const getConfirmTotpEnrolmentUrl = () => {
+    export const getConfirmTotpEnrolmentUrl = () => {
 
 
 
@@ -1422,7 +988,7 @@ export const getConfirmTotpEnrolmentUrl = () => {
  * Confirms with a first code and issues `auth.totp_recovery_codes` single-use recovery codes, shown once. Allowed in the session state `totp_enrolment_required`. `409` (`totp_enrolment_not_started`) without a begun enrolment, `totp_already_enrolled` if already confirmed. Web session only.
  * @summary Confirm TOTP enrolment
  */
-export const confirmTotpEnrolment = async (totpCode: TotpCode, options?: RequestInit): Promise<confirmTotpEnrolmentResponse> => {
+export const confirmTotpEnrolment = async (totpCode: TotpCode, options?: Parameters<typeof apiFetch>[1]): Promise<TotpRecoveryCodes> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1438,21 +1004,14 @@ export const confirmTotpEnrolment = async (totpCode: TotpCode, options?: Request
     }
     return headers;
   };
-const res = await fetch(getConfirmTotpEnrolmentUrl(),
+return apiFetch<TotpRecoveryCodes>(getConfirmTotpEnrolmentUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(totpCode)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: confirmTotpEnrolmentResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as confirmTotpEnrolmentResponse
-}
+);}
 
 
 
@@ -1461,15 +1020,15 @@ const res = await fetch(getConfirmTotpEnrolmentUrl(),
 export const getConfirmTotpEnrolmentMutationKey = () => ['confirmTotpEnrolment'] as const;
 
 export const getConfirmTotpEnrolmentMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmTotpEnrolment>>, TError,ConfirmTotpEnrolmentMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmTotpEnrolment>>, TError,ConfirmTotpEnrolmentMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof confirmTotpEnrolment>>, TError,ConfirmTotpEnrolmentMutationVariables, TContext> => {
 
 const mutationKey = getConfirmTotpEnrolmentMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1477,7 +1036,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof confirmTotpEnrolment>>, ConfirmTotpEnrolmentMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  confirmTotpEnrolment(data,fetchOptions)
+          return  confirmTotpEnrolment(data,requestOptions)
         }
 
 
@@ -1496,7 +1055,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Confirm TOTP enrolment
  */
 export const useConfirmTotpEnrolment = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmTotpEnrolment>>, TError,ConfirmTotpEnrolmentMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmTotpEnrolment>>, TError,ConfirmTotpEnrolmentMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof confirmTotpEnrolment>>,
         TError,
@@ -1505,51 +1064,7 @@ export const useConfirmTotpEnrolment = <TError = BadRequestResponse | Unauthoriz
       > => {
       return useMutation(getConfirmTotpEnrolmentMutationOptions(options), queryClient);
     }
-    export type regenerateTotpRecoveryCodesResponse200 = {
-  data: TotpRecoveryCodes
-  status: 200
-}
-
-export type regenerateTotpRecoveryCodesResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type regenerateTotpRecoveryCodesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type regenerateTotpRecoveryCodesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type regenerateTotpRecoveryCodesResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type regenerateTotpRecoveryCodesResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type regenerateTotpRecoveryCodesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type regenerateTotpRecoveryCodesResponseSuccess = (regenerateTotpRecoveryCodesResponse200) & {
-  headers: Headers;
-};
-export type regenerateTotpRecoveryCodesResponseError = (regenerateTotpRecoveryCodesResponse400 | regenerateTotpRecoveryCodesResponse401 | regenerateTotpRecoveryCodesResponse403 | regenerateTotpRecoveryCodesResponse409 | regenerateTotpRecoveryCodesResponse422 | regenerateTotpRecoveryCodesResponse429) & {
-  headers: Headers;
-};
-
-export type regenerateTotpRecoveryCodesResponse = (regenerateTotpRecoveryCodesResponseSuccess | regenerateTotpRecoveryCodesResponseError)
-
-export const getRegenerateTotpRecoveryCodesUrl = () => {
+    export const getRegenerateTotpRecoveryCodesUrl = () => {
 
 
 
@@ -1561,7 +1076,7 @@ export const getRegenerateTotpRecoveryCodesUrl = () => {
  * Invalidates the previous codes. Requires a current TOTP code. Web session only.
  * @summary Regenerate recovery codes
  */
-export const regenerateTotpRecoveryCodes = async (totpCode: TotpCode, options?: RequestInit): Promise<regenerateTotpRecoveryCodesResponse> => {
+export const regenerateTotpRecoveryCodes = async (totpCode: TotpCode, options?: Parameters<typeof apiFetch>[1]): Promise<TotpRecoveryCodes> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1577,21 +1092,14 @@ export const regenerateTotpRecoveryCodes = async (totpCode: TotpCode, options?: 
     }
     return headers;
   };
-const res = await fetch(getRegenerateTotpRecoveryCodesUrl(),
+return apiFetch<TotpRecoveryCodes>(getRegenerateTotpRecoveryCodesUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(totpCode)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: regenerateTotpRecoveryCodesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as regenerateTotpRecoveryCodesResponse
-}
+);}
 
 
 
@@ -1600,15 +1108,15 @@ const res = await fetch(getRegenerateTotpRecoveryCodesUrl(),
 export const getRegenerateTotpRecoveryCodesMutationKey = () => ['regenerateTotpRecoveryCodes'] as const;
 
 export const getRegenerateTotpRecoveryCodesMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof regenerateTotpRecoveryCodes>>, TError,RegenerateTotpRecoveryCodesMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof regenerateTotpRecoveryCodes>>, TError,RegenerateTotpRecoveryCodesMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof regenerateTotpRecoveryCodes>>, TError,RegenerateTotpRecoveryCodesMutationVariables, TContext> => {
 
 const mutationKey = getRegenerateTotpRecoveryCodesMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1616,7 +1124,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof regenerateTotpRecoveryCodes>>, RegenerateTotpRecoveryCodesMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  regenerateTotpRecoveryCodes(data,fetchOptions)
+          return  regenerateTotpRecoveryCodes(data,requestOptions)
         }
 
 
@@ -1635,7 +1143,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Regenerate recovery codes
  */
 export const useRegenerateTotpRecoveryCodes = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof regenerateTotpRecoveryCodes>>, TError,RegenerateTotpRecoveryCodesMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof regenerateTotpRecoveryCodes>>, TError,RegenerateTotpRecoveryCodesMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof regenerateTotpRecoveryCodes>>,
         TError,

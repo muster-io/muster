@@ -8,10 +8,15 @@ depends_on: [S-013, S-062]
 covers: [C-03.FR-7, C-03.FR-10, C-03.FR-12, C-03.FR-18, C-03.FR-24, C-03.FR-25, C-03.FR-26, C-03.FR-28, C-03.FR-29, C-03.AC-2, C-03.AC-9, C-03.AC-20, C-03.AC-22]
 files_touched:
   - web/package.json
+  - web/pnpm-workspace.yaml
+  - web/tsconfig.json
+  - web/vite.config.ts
+  - web/orval.config.ts
   - web/vitest.config.ts
   - web/playwright.config.ts
   - web/i18next.config.ts
   - web/src/main.tsx
+  - web/src/styles.css
   - web/src/i18n.ts
   - web/src/locales/en.json
   - web/src/locales/ru.json
@@ -33,11 +38,15 @@ files_touched:
   - web/src/routes/profile.tsx
   - web/src/components/profile-totp.tsx
   - web/src/components/profile-sessions.tsx
+  - web/e2e/global-setup.ts
+  - web/e2e/support.ts
   - web/e2e/sign-in.spec.ts
   - web/e2e/profile.spec.ts
   - NOTICE
   - Makefile
+  - AGENTS.md
   - .github/workflows/ci.yml
+  - .github/workflows/nightly.yml
 acceptance:
   - "[C-03.FR-24, C-03.FR-25] The sign-in page shows the local form and, while OIDC is enabled, the button \"Sign in with Dev IdP\"; signing in as the development Admin lands on the home page with \"admin\" in the user menu."
   - "[C-03.FR-7, C-03.FR-28] After a refused OIDC sign-in the page shows \"You have no access to Muster. Contact your administrator.\" for `no_access` and \"An account with this login already exists. Sign in with it and link OIDC in your profile.\" for `login_taken`."
@@ -81,9 +90,11 @@ issue: 14
   `startOidcSignIn` (by navigation), `completePasswordSetup`, `getMe`, `updateMe`, `changePassword`, `listMySessions`,
   `deleteMySessions`, `getMyTotp`, `beginTotpEnrolment`, `confirmTotpEnrolment`, `regenerateTotpRecoveryCodes`,
   `removeTotp`, `startOidcLink`, `listSystemNotices`, `streamLiveUpdates`, through the generated orval client.
-- **Client glue** (`web/src/lib/api.ts`): sends `X-CSRF-Token` from the current `Session` on mutating requests, maps a
-  `Problem` and its `errors[]` onto form fields, and sends the browser to `/sign-in` on a `401` (with "Your session
-  ended. Sign in again." for `session_expired` and `oidc_session_ended`).
+- **Client glue** (`web/src/lib/api.ts`, the orval mutator of `web/orval.config.ts`): sends `X-CSRF-Token` from the
+  current `Session` on mutating requests, maps a `Problem` and its `errors[]` onto form fields, and sends the browser to
+  `/sign-in` on a `401` (with "Your session ended. Sign in again." for `session_expired` and `oidc_session_ended`,
+  carried as `/sign-in?reason=session_ended`; the shell shows the same text when the session it showed is gone, as the
+  first answer after the end may have been the one that carried the code).
 - **Live hints** (`web/src/lib/live.ts`): one `EventSource` on `/api/v1/live-updates`; a hint invalidates the matching
   queries (`system-notices`, `organization`; later stories register theirs); after a reconnect every query is
   invalidated; a `401` closes it.
@@ -131,11 +142,14 @@ Run `make dev`, then in Playwright (desktop, 1280 × 800):
    "admin".
 3. Run `psql "$MUSTER_DATABASE_URL" -c "UPDATE runtime_state SET recovery_until = now() + interval '1 minute'"` → within
    5 seconds, without a reload, the page shows "Muster is recovering after downtime. Data may be incomplete until"
-   followed by the time; about a minute later the banner is gone, still without a reload.
+   followed by the time; set `recovery_until = now() - interval '1 second'` → within 5 seconds the banner is gone, still
+   without a reload. (The development clock arrives with S-020; until then the notice is ended through its data
+   instead of waiting a minute.)
 4. Profile → "Language" → "Русский" → the navigation shows "Профиль"; switch back to "English".
 5. Set "TOTP required" to everyone (`PUT /api/v1/organization` as in S-012), create the user `carol` through the API,
    open her setup link → "Set password" with `carol-password-1` → sign in as `carol` → the URL is `/totp-enrolment`;
-   open `/profile` → back on `/totp-enrolment`; enter the code from `oathtool --totp -b <secret shown>` → visible "Save
+   open `/profile` → back on `/totp-enrolment`; enter the code from `oathtool --totp -b <secret shown>` (the specs compute
+   the same RFC 6238 code in `web/e2e/support.ts`) → visible "Save
    these recovery codes" with 10 codes → "Continue" → the home page.
 6. Sign out; script the fake IdP's next user with the groups `["contractors"]`; click "Sign in with Dev IdP" → visible
    "You have no access to Muster. Contact your administrator."
@@ -148,7 +162,9 @@ Run `make dev`, then in Playwright (desktop, 1280 × 800):
    Sign in again."
 9. At 360 × 740 the sign-in page, the enrolment page and the profile scroll vertically only.
 
-`make e2e` runs steps 1–8 as `web/e2e/sign-in.spec.ts` and `web/e2e/profile.spec.ts`.
+`make e2e` runs steps 1–9 as `web/e2e/sign-in.spec.ts` and `web/e2e/profile.spec.ts`, on a `muster dev` that
+`web/e2e/global-setup.ts` starts on a fresh database, as the Go harness does. `make test` also runs the Vitest
+component tests (`make test-web`).
 
 ## Open questions
 
@@ -159,6 +175,11 @@ Run `make dev`, then in Playwright (desktop, 1280 × 800):
 ## Notes
 
 - Suggested commit: `feat(web): add application shell, sign-in, password setup, totp and profile pages`.
+- Files added to `files_touched` in the story's pull request: the orval mutator (`orval.config.ts`), Tailwind
+  (`vite.config.ts`, `src/styles.css`), the type check of the tests and configs (`tsconfig.json`), the build script
+  of i18next-cli's `@swc/core` denied (`pnpm-workspace.yaml`), the Playwright global setup and helpers
+  (`e2e/global-setup.ts`, `e2e/support.ts`), Chromium for the nightly two-replica run (`nightly.yml`) and the Make
+  targets table (`AGENTS.md`).
 - Texts quoted in the PRD are copied exactly; the Russian versions are written in the same pull request.
 
 ## Coverage

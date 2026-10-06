@@ -41,7 +41,10 @@ import type {
   UnauthorizedResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -59,40 +62,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
-
-export type listAuditLogResponse200 = {
-  data: AuditEntryList
-  status: 200
-}
-
-export type listAuditLogResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listAuditLogResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listAuditLogResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listAuditLogResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listAuditLogResponseSuccess = (listAuditLogResponse200) & {
-  headers: Headers;
-};
-export type listAuditLogResponseError = (listAuditLogResponse400 | listAuditLogResponse401 | listAuditLogResponse403 | listAuditLogResponse429) & {
-  headers: Headers;
-};
-
-export type listAuditLogResponse = (listAuditLogResponseSuccess | listAuditLogResponseError)
 
 export const getListAuditLogUrl = (params?: ListAuditLogParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -113,23 +82,16 @@ export const getListAuditLogUrl = (params?: ListAuditLogParams,) => {
  * Newest first. The log is append-only; configuration changes carry a before/after diff in which Secrets only show that they changed.
  * @summary List Audit log entries
  */
-export const listAuditLog = async (params?: ListAuditLogParams, options?: RequestInit): Promise<listAuditLogResponse> => {
+export const listAuditLog = async (params?: ListAuditLogParams, options?: Parameters<typeof apiFetch>[1]): Promise<AuditEntryList> => {
 
-  const res = await fetch(getListAuditLogUrl(params),
+  return apiFetch<AuditEntryList>(getListAuditLogUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listAuditLogResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listAuditLogResponse
-}
+);}
 
 
 
@@ -142,16 +104,16 @@ export const getListAuditLogQueryKey = (params?: ListAuditLogParams,) => {
     }
 
 
-export const getListAuditLogQueryOptions = <TData = Awaited<ReturnType<typeof listAuditLog>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListAuditLogParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLog>>, TError, TData>>, fetch?: RequestInit}
+export const getListAuditLogQueryOptions = <TData = Awaited<ReturnType<typeof listAuditLog>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListAuditLogParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLog>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListAuditLogQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAuditLog>>> = ({ signal }) => listAuditLog(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAuditLog>>> = ({ signal }) => listAuditLog(params, { signal, ...requestOptions });
 
 
 
@@ -171,7 +133,7 @@ export function useListAuditLog<TData = Awaited<ReturnType<typeof listAuditLog>>
           TError,
           Awaited<ReturnType<typeof listAuditLog>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListAuditLog<TData = Awaited<ReturnType<typeof listAuditLog>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -181,11 +143,11 @@ export function useListAuditLog<TData = Awaited<ReturnType<typeof listAuditLog>>
           TError,
           Awaited<ReturnType<typeof listAuditLog>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListAuditLog<TData = Awaited<ReturnType<typeof listAuditLog>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListAuditLogParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLog>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListAuditLogParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLog>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -193,7 +155,7 @@ export function useListAuditLog<TData = Awaited<ReturnType<typeof listAuditLog>>
  */
 
 export function useListAuditLog<TData = Awaited<ReturnType<typeof listAuditLog>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListAuditLogParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLog>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListAuditLogParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLog>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 

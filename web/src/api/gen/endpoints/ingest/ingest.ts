@@ -42,7 +42,10 @@ import type {
   UnauthorizedResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -61,35 +64,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type ingestSnapshotResponse202 = {
-  data: void
-  status: 202
-}
-
-export type ingestSnapshotResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type ingestSnapshotResponse413 = {
-  data: PayloadTooLargeResponse
-  status: 413
-}
-
-export type ingestSnapshotResponse500 = {
-  data: InternalErrorResponse
-  status: 500
-}
-
-export type ingestSnapshotResponseSuccess = (ingestSnapshotResponse202) & {
-  headers: Headers;
-};
-export type ingestSnapshotResponseError = (ingestSnapshotResponse401 | ingestSnapshotResponse413 | ingestSnapshotResponse500) & {
-  headers: Headers;
-};
-
-export type ingestSnapshotResponse = (ingestSnapshotResponseSuccess | ingestSnapshotResponseError)
-
 export const getIngestSnapshotUrl = () => {
 
 
@@ -102,7 +76,7 @@ export const getIngestSnapshotUrl = () => {
  * Checks the token, then the body size, stores the body as a Stored Snapshot exactly as received and answers `202` after the write commits, without waiting for processing. It never answers `400`: a body that is not JSON, or does not look like an Alertmanager payload, is stored and fails later as a processing error (log event, `muster_ingest_failed_snapshots_total`, Stored Snapshot state `failed`), because Alertmanager does not retry a `4xx` and the notification would be lost. Not rate-limited. Counted in `muster_ingest_requests_total` with the outcome `accepted`, `unauthorized` or `too_large`. The only `5xx` is a failed write, which Alertmanager retries. Ingestion is excluded from request validation by the spec: the handler reads the raw body and the generated types are not used for it.
  * @summary Receive an Alertmanager webhook
  */
-export const ingestSnapshot = async (ingestSnapshotBody: Blob, options?: RequestInit): Promise<ingestSnapshotResponse> => {
+export const ingestSnapshot = async (ingestSnapshotBody: Blob, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -118,21 +92,14 @@ export const ingestSnapshot = async (ingestSnapshotBody: Blob, options?: Request
     }
     return headers;
   };
-const res = await fetch(getIngestSnapshotUrl(),
+return apiFetch<void>(getIngestSnapshotUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': '*/*', ...getHeaders(options?.headers) },
     body: ingestSnapshotBody
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: ingestSnapshotResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as ingestSnapshotResponse
-}
+);}
 
 
 
@@ -141,15 +108,15 @@ const res = await fetch(getIngestSnapshotUrl(),
 export const getIngestSnapshotMutationKey = () => ['ingestSnapshot'] as const;
 
 export const getIngestSnapshotMutationOptions = <TError = UnauthorizedResponse | PayloadTooLargeResponse | InternalErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestSnapshot>>, TError,IngestSnapshotMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestSnapshot>>, TError,IngestSnapshotMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof ingestSnapshot>>, TError,IngestSnapshotMutationVariables, TContext> => {
 
 const mutationKey = getIngestSnapshotMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -157,7 +124,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof ingestSnapshot>>, IngestSnapshotMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  ingestSnapshot(data,fetchOptions)
+          return  ingestSnapshot(data,requestOptions)
         }
 
 
@@ -176,7 +143,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Receive an Alertmanager webhook
  */
 export const useIngestSnapshot = <TError = UnauthorizedResponse | PayloadTooLargeResponse | InternalErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestSnapshot>>, TError,IngestSnapshotMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestSnapshot>>, TError,IngestSnapshotMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof ingestSnapshot>>,
         TError,
@@ -185,36 +152,7 @@ export const useIngestSnapshot = <TError = UnauthorizedResponse | PayloadTooLarg
       > => {
       return useMutation(getIngestSnapshotMutationOptions(options), queryClient);
     }
-    export type ingestSnapshotWithPathTokenResponse202 = {
-  data: void
-  status: 202
-}
-
-export type ingestSnapshotWithPathTokenResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type ingestSnapshotWithPathTokenResponse413 = {
-  data: PayloadTooLargeResponse
-  status: 413
-}
-
-export type ingestSnapshotWithPathTokenResponse500 = {
-  data: InternalErrorResponse
-  status: 500
-}
-
-export type ingestSnapshotWithPathTokenResponseSuccess = (ingestSnapshotWithPathTokenResponse202) & {
-  headers: Headers;
-};
-export type ingestSnapshotWithPathTokenResponseError = (ingestSnapshotWithPathTokenResponse401 | ingestSnapshotWithPathTokenResponse413 | ingestSnapshotWithPathTokenResponse500) & {
-  headers: Headers;
-};
-
-export type ingestSnapshotWithPathTokenResponse = (ingestSnapshotWithPathTokenResponseSuccess | ingestSnapshotWithPathTokenResponseError)
-
-export const getIngestSnapshotWithPathTokenUrl = (ingestToken: string,) => {
+    export const getIngestSnapshotWithPathTokenUrl = (ingestToken: string,) => {
 
 
 
@@ -227,7 +165,7 @@ export const getIngestSnapshotWithPathTokenUrl = (ingestToken: string,) => {
  * @summary Receive an Alertmanager webhook (token in the path)
  */
 export const ingestSnapshotWithPathToken = async (ingestToken: string,
-    ingestSnapshotWithPathTokenBody: Blob, options?: RequestInit): Promise<ingestSnapshotWithPathTokenResponse> => {
+    ingestSnapshotWithPathTokenBody: Blob, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -243,21 +181,14 @@ export const ingestSnapshotWithPathToken = async (ingestToken: string,
     }
     return headers;
   };
-const res = await fetch(getIngestSnapshotWithPathTokenUrl(ingestToken),
+return apiFetch<void>(getIngestSnapshotWithPathTokenUrl(ingestToken),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': '*/*', ...getHeaders(options?.headers) },
     body: ingestSnapshotWithPathTokenBody
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: ingestSnapshotWithPathTokenResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as ingestSnapshotWithPathTokenResponse
-}
+);}
 
 
 
@@ -266,15 +197,15 @@ const res = await fetch(getIngestSnapshotWithPathTokenUrl(ingestToken),
 export const getIngestSnapshotWithPathTokenMutationKey = () => ['ingestSnapshotWithPathToken'] as const;
 
 export const getIngestSnapshotWithPathTokenMutationOptions = <TError = UnauthorizedResponse | PayloadTooLargeResponse | InternalErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestSnapshotWithPathToken>>, TError,IngestSnapshotWithPathTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestSnapshotWithPathToken>>, TError,IngestSnapshotWithPathTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof ingestSnapshotWithPathToken>>, TError,IngestSnapshotWithPathTokenMutationVariables, TContext> => {
 
 const mutationKey = getIngestSnapshotWithPathTokenMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -282,7 +213,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof ingestSnapshotWithPathToken>>, IngestSnapshotWithPathTokenMutationVariables> = (props) => {
           const {ingestToken,data} = props ?? {};
 
-          return  ingestSnapshotWithPathToken(ingestToken,data,fetchOptions)
+          return  ingestSnapshotWithPathToken(ingestToken,data,requestOptions)
         }
 
 
@@ -301,7 +232,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Receive an Alertmanager webhook (token in the path)
  */
 export const useIngestSnapshotWithPathToken = <TError = UnauthorizedResponse | PayloadTooLargeResponse | InternalErrorResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestSnapshotWithPathToken>>, TError,IngestSnapshotWithPathTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestSnapshotWithPathToken>>, TError,IngestSnapshotWithPathTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof ingestSnapshotWithPathToken>>,
         TError,
@@ -310,26 +241,7 @@ export const useIngestSnapshotWithPathToken = <TError = UnauthorizedResponse | P
       > => {
       return useMutation(getIngestSnapshotWithPathTokenMutationOptions(options), queryClient);
     }
-    export type heartbeatGetResponse204 = {
-  data: void
-  status: 204
-}
-
-export type heartbeatGetResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type heartbeatGetResponseSuccess = (heartbeatGetResponse204) & {
-  headers: Headers;
-};
-export type heartbeatGetResponseError = (heartbeatGetResponse401) & {
-  headers: Headers;
-};
-
-export type heartbeatGetResponse = (heartbeatGetResponseSuccess | heartbeatGetResponseError)
-
-export const getHeartbeatGetUrl = () => {
+    export const getHeartbeatGetUrl = () => {
 
 
 
@@ -341,23 +253,16 @@ export const getHeartbeatGetUrl = () => {
  * Any request carrying one of the Integration's tokens counts as a signal; the body is ignored. The first signal moves the Heartbeat from waiting to live. While the Integration's Heartbeat is off, the request is answered `204` and nothing is recorded.
  * @summary Heartbeat signal (GET)
  */
-export const heartbeatGet = async ( options?: RequestInit): Promise<heartbeatGetResponse> => {
+export const heartbeatGet = async ( options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getHeartbeatGetUrl(),
+  return apiFetch<void>(getHeartbeatGetUrl(),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: heartbeatGetResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as heartbeatGetResponse
-}
+);}
 
 
 
@@ -370,16 +275,16 @@ export const getHeartbeatGetQueryKey = () => {
     }
 
 
-export const getHeartbeatGetQueryOptions = <TData = Awaited<ReturnType<typeof heartbeatGet>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof heartbeatGet>>, TError, TData>>, fetch?: RequestInit}
+export const getHeartbeatGetQueryOptions = <TData = Awaited<ReturnType<typeof heartbeatGet>>, TError = UnauthorizedResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof heartbeatGet>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getHeartbeatGetQueryKey();
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof heartbeatGet>>> = ({ signal }) => heartbeatGet({ signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof heartbeatGet>>> = ({ signal }) => heartbeatGet({ signal, ...requestOptions });
 
 
 
@@ -399,7 +304,7 @@ export function useHeartbeatGet<TData = Awaited<ReturnType<typeof heartbeatGet>>
           TError,
           Awaited<ReturnType<typeof heartbeatGet>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useHeartbeatGet<TData = Awaited<ReturnType<typeof heartbeatGet>>, TError = UnauthorizedResponse>(
@@ -409,11 +314,11 @@ export function useHeartbeatGet<TData = Awaited<ReturnType<typeof heartbeatGet>>
           TError,
           Awaited<ReturnType<typeof heartbeatGet>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useHeartbeatGet<TData = Awaited<ReturnType<typeof heartbeatGet>>, TError = UnauthorizedResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof heartbeatGet>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof heartbeatGet>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -421,7 +326,7 @@ export function useHeartbeatGet<TData = Awaited<ReturnType<typeof heartbeatGet>>
  */
 
 export function useHeartbeatGet<TData = Awaited<ReturnType<typeof heartbeatGet>>, TError = UnauthorizedResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof heartbeatGet>>, TError, TData>>, fetch?: RequestInit}
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof heartbeatGet>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -437,25 +342,6 @@ export function useHeartbeatGet<TData = Awaited<ReturnType<typeof heartbeatGet>>
 
 
 
-export type heartbeatPostResponse204 = {
-  data: void
-  status: 204
-}
-
-export type heartbeatPostResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type heartbeatPostResponseSuccess = (heartbeatPostResponse204) & {
-  headers: Headers;
-};
-export type heartbeatPostResponseError = (heartbeatPostResponse401) & {
-  headers: Headers;
-};
-
-export type heartbeatPostResponse = (heartbeatPostResponseSuccess | heartbeatPostResponseError)
-
 export const getHeartbeatPostUrl = () => {
 
 
@@ -468,23 +354,16 @@ export const getHeartbeatPostUrl = () => {
  * Any request carrying one of the Integration's tokens counts as a signal; the body is ignored. The first signal moves the Heartbeat from waiting to live. While the Integration's Heartbeat is off, the request is answered `204` and nothing is recorded.
  * @summary Heartbeat signal (POST)
  */
-export const heartbeatPost = async ( options?: RequestInit): Promise<heartbeatPostResponse> => {
+export const heartbeatPost = async ( options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getHeartbeatPostUrl(),
+  return apiFetch<void>(getHeartbeatPostUrl(),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: heartbeatPostResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as heartbeatPostResponse
-}
+);}
 
 
 
@@ -493,15 +372,15 @@ export const heartbeatPost = async ( options?: RequestInit): Promise<heartbeatPo
 export const getHeartbeatPostMutationKey = () => ['heartbeatPost'] as const;
 
 export const getHeartbeatPostMutationOptions = <TError = UnauthorizedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof heartbeatPost>>, TError,void, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof heartbeatPost>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof heartbeatPost>>, TError,void, TContext> => {
 
 const mutationKey = getHeartbeatPostMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -509,7 +388,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof heartbeatPost>>, void> = () => {
 
 
-          return  heartbeatPost(fetchOptions)
+          return  heartbeatPost(requestOptions)
         }
 
 
@@ -528,7 +407,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Heartbeat signal (POST)
  */
 export const useHeartbeatPost = <TError = UnauthorizedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof heartbeatPost>>, TError,void, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof heartbeatPost>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof heartbeatPost>>,
         TError,
@@ -537,26 +416,7 @@ export const useHeartbeatPost = <TError = UnauthorizedResponse,
       > => {
       return useMutation(getHeartbeatPostMutationOptions(options), queryClient);
     }
-    export type heartbeatGetWithPathTokenResponse204 = {
-  data: void
-  status: 204
-}
-
-export type heartbeatGetWithPathTokenResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type heartbeatGetWithPathTokenResponseSuccess = (heartbeatGetWithPathTokenResponse204) & {
-  headers: Headers;
-};
-export type heartbeatGetWithPathTokenResponseError = (heartbeatGetWithPathTokenResponse401) & {
-  headers: Headers;
-};
-
-export type heartbeatGetWithPathTokenResponse = (heartbeatGetWithPathTokenResponseSuccess | heartbeatGetWithPathTokenResponseError)
-
-export const getHeartbeatGetWithPathTokenUrl = (ingestToken: string,) => {
+    export const getHeartbeatGetWithPathTokenUrl = (ingestToken: string,) => {
 
 
 
@@ -567,23 +427,16 @@ export const getHeartbeatGetWithPathTokenUrl = (ingestToken: string,) => {
 /**
  * @summary Heartbeat signal (GET, token in the path)
  */
-export const heartbeatGetWithPathToken = async (ingestToken: string, options?: RequestInit): Promise<heartbeatGetWithPathTokenResponse> => {
+export const heartbeatGetWithPathToken = async (ingestToken: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getHeartbeatGetWithPathTokenUrl(ingestToken),
+  return apiFetch<void>(getHeartbeatGetWithPathTokenUrl(ingestToken),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: heartbeatGetWithPathTokenResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as heartbeatGetWithPathTokenResponse
-}
+);}
 
 
 
@@ -596,16 +449,16 @@ export const getHeartbeatGetWithPathTokenQueryKey = (ingestToken: string,) => {
     }
 
 
-export const getHeartbeatGetWithPathTokenQueryOptions = <TData = Awaited<ReturnType<typeof heartbeatGetWithPathToken>>, TError = UnauthorizedResponse>(ingestToken: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof heartbeatGetWithPathToken>>, TError, TData>>, fetch?: RequestInit}
+export const getHeartbeatGetWithPathTokenQueryOptions = <TData = Awaited<ReturnType<typeof heartbeatGetWithPathToken>>, TError = UnauthorizedResponse>(ingestToken: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof heartbeatGetWithPathToken>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getHeartbeatGetWithPathTokenQueryKey(ingestToken);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof heartbeatGetWithPathToken>>> = ({ signal }) => heartbeatGetWithPathToken(ingestToken, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof heartbeatGetWithPathToken>>> = ({ signal }) => heartbeatGetWithPathToken(ingestToken, { signal, ...requestOptions });
 
 
 
@@ -625,7 +478,7 @@ export function useHeartbeatGetWithPathToken<TData = Awaited<ReturnType<typeof h
           TError,
           Awaited<ReturnType<typeof heartbeatGetWithPathToken>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useHeartbeatGetWithPathToken<TData = Awaited<ReturnType<typeof heartbeatGetWithPathToken>>, TError = UnauthorizedResponse>(
@@ -635,11 +488,11 @@ export function useHeartbeatGetWithPathToken<TData = Awaited<ReturnType<typeof h
           TError,
           Awaited<ReturnType<typeof heartbeatGetWithPathToken>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useHeartbeatGetWithPathToken<TData = Awaited<ReturnType<typeof heartbeatGetWithPathToken>>, TError = UnauthorizedResponse>(
- ingestToken: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof heartbeatGetWithPathToken>>, TError, TData>>, fetch?: RequestInit}
+ ingestToken: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof heartbeatGetWithPathToken>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -647,7 +500,7 @@ export function useHeartbeatGetWithPathToken<TData = Awaited<ReturnType<typeof h
  */
 
 export function useHeartbeatGetWithPathToken<TData = Awaited<ReturnType<typeof heartbeatGetWithPathToken>>, TError = UnauthorizedResponse>(
- ingestToken: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof heartbeatGetWithPathToken>>, TError, TData>>, fetch?: RequestInit}
+ ingestToken: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof heartbeatGetWithPathToken>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -663,25 +516,6 @@ export function useHeartbeatGetWithPathToken<TData = Awaited<ReturnType<typeof h
 
 
 
-export type heartbeatPostWithPathTokenResponse204 = {
-  data: void
-  status: 204
-}
-
-export type heartbeatPostWithPathTokenResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type heartbeatPostWithPathTokenResponseSuccess = (heartbeatPostWithPathTokenResponse204) & {
-  headers: Headers;
-};
-export type heartbeatPostWithPathTokenResponseError = (heartbeatPostWithPathTokenResponse401) & {
-  headers: Headers;
-};
-
-export type heartbeatPostWithPathTokenResponse = (heartbeatPostWithPathTokenResponseSuccess | heartbeatPostWithPathTokenResponseError)
-
 export const getHeartbeatPostWithPathTokenUrl = (ingestToken: string,) => {
 
 
@@ -693,23 +527,16 @@ export const getHeartbeatPostWithPathTokenUrl = (ingestToken: string,) => {
 /**
  * @summary Heartbeat signal (POST, token in the path)
  */
-export const heartbeatPostWithPathToken = async (ingestToken: string, options?: RequestInit): Promise<heartbeatPostWithPathTokenResponse> => {
+export const heartbeatPostWithPathToken = async (ingestToken: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getHeartbeatPostWithPathTokenUrl(ingestToken),
+  return apiFetch<void>(getHeartbeatPostWithPathTokenUrl(ingestToken),
   {
     ...options,
     method: 'POST'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: heartbeatPostWithPathTokenResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as heartbeatPostWithPathTokenResponse
-}
+);}
 
 
 
@@ -718,15 +545,15 @@ export const heartbeatPostWithPathToken = async (ingestToken: string, options?: 
 export const getHeartbeatPostWithPathTokenMutationKey = () => ['heartbeatPostWithPathToken'] as const;
 
 export const getHeartbeatPostWithPathTokenMutationOptions = <TError = UnauthorizedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof heartbeatPostWithPathToken>>, TError,HeartbeatPostWithPathTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof heartbeatPostWithPathToken>>, TError,HeartbeatPostWithPathTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof heartbeatPostWithPathToken>>, TError,HeartbeatPostWithPathTokenMutationVariables, TContext> => {
 
 const mutationKey = getHeartbeatPostWithPathTokenMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -734,7 +561,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof heartbeatPostWithPathToken>>, HeartbeatPostWithPathTokenMutationVariables> = (props) => {
           const {ingestToken} = props ?? {};
 
-          return  heartbeatPostWithPathToken(ingestToken,fetchOptions)
+          return  heartbeatPostWithPathToken(ingestToken,requestOptions)
         }
 
 
@@ -753,7 +580,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Heartbeat signal (POST, token in the path)
  */
 export const useHeartbeatPostWithPathToken = <TError = UnauthorizedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof heartbeatPostWithPathToken>>, TError,HeartbeatPostWithPathTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof heartbeatPostWithPathToken>>, TError,HeartbeatPostWithPathTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof heartbeatPostWithPathToken>>,
         TError,

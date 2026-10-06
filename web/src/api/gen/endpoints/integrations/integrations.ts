@@ -61,7 +61,10 @@ import type {
   UnprocessableResponse
 } from '../../model';
 
+import { apiFetch } from '../../../../lib/api';
 
+
+type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 
 
@@ -79,40 +82,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
-
-export type listIntegrationsResponse200 = {
-  data: IntegrationList
-  status: 200
-}
-
-export type listIntegrationsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listIntegrationsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listIntegrationsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listIntegrationsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listIntegrationsResponseSuccess = (listIntegrationsResponse200) & {
-  headers: Headers;
-};
-export type listIntegrationsResponseError = (listIntegrationsResponse400 | listIntegrationsResponse401 | listIntegrationsResponse403 | listIntegrationsResponse429) & {
-  headers: Headers;
-};
-
-export type listIntegrationsResponse = (listIntegrationsResponseSuccess | listIntegrationsResponseError)
 
 export const getListIntegrationsUrl = (params?: ListIntegrationsParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -133,23 +102,16 @@ export const getListIntegrationsUrl = (params?: ListIntegrationsParams,) => {
  * Includes the built-in "Muster" Integration, marked `builtin`.
  * @summary List integrations
  */
-export const listIntegrations = async (params?: ListIntegrationsParams, options?: RequestInit): Promise<listIntegrationsResponse> => {
+export const listIntegrations = async (params?: ListIntegrationsParams, options?: Parameters<typeof apiFetch>[1]): Promise<IntegrationList> => {
 
-  const res = await fetch(getListIntegrationsUrl(params),
+  return apiFetch<IntegrationList>(getListIntegrationsUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listIntegrationsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listIntegrationsResponse
-}
+);}
 
 
 
@@ -162,16 +124,16 @@ export const getListIntegrationsQueryKey = (params?: ListIntegrationsParams,) =>
     }
 
 
-export const getListIntegrationsQueryOptions = <TData = Awaited<ReturnType<typeof listIntegrations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListIntegrationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrations>>, TError, TData>>, fetch?: RequestInit}
+export const getListIntegrationsQueryOptions = <TData = Awaited<ReturnType<typeof listIntegrations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListIntegrationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrations>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListIntegrationsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listIntegrations>>> = ({ signal }) => listIntegrations(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listIntegrations>>> = ({ signal }) => listIntegrations(params, { signal, ...requestOptions });
 
 
 
@@ -191,7 +153,7 @@ export function useListIntegrations<TData = Awaited<ReturnType<typeof listIntegr
           TError,
           Awaited<ReturnType<typeof listIntegrations>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListIntegrations<TData = Awaited<ReturnType<typeof listIntegrations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -201,11 +163,11 @@ export function useListIntegrations<TData = Awaited<ReturnType<typeof listIntegr
           TError,
           Awaited<ReturnType<typeof listIntegrations>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListIntegrations<TData = Awaited<ReturnType<typeof listIntegrations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListIntegrationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrations>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListIntegrationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrations>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -213,7 +175,7 @@ export function useListIntegrations<TData = Awaited<ReturnType<typeof listIntegr
  */
 
 export function useListIntegrations<TData = Awaited<ReturnType<typeof listIntegrations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params?: ListIntegrationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrations>>, TError, TData>>, fetch?: RequestInit}
+ params?: ListIntegrationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrations>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -229,50 +191,6 @@ export function useListIntegrations<TData = Awaited<ReturnType<typeof listIntegr
 
 
 
-export type createIntegrationResponse201 = {
-  data: Integration
-  status: 201
-}
-
-export type createIntegrationResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createIntegrationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createIntegrationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createIntegrationResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type createIntegrationResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type createIntegrationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createIntegrationResponseSuccess = (createIntegrationResponse201) & {
-  headers: Headers;
-};
-export type createIntegrationResponseError = (createIntegrationResponse400 | createIntegrationResponse401 | createIntegrationResponse403 | createIntegrationResponse409 | createIntegrationResponse422 | createIntegrationResponse429) & {
-  headers: Headers;
-};
-
-export type createIntegrationResponse = (createIntegrationResponseSuccess | createIntegrationResponseError)
-
 export const getCreateIntegrationUrl = () => {
 
 
@@ -284,7 +202,7 @@ export const getCreateIntegrationUrl = () => {
 /**
  * @summary Create Integration
  */
-export const createIntegration = async (integrationInput: IntegrationInput, options?: RequestInit): Promise<createIntegrationResponse> => {
+export const createIntegration = async (integrationInput: IntegrationInput, options?: Parameters<typeof apiFetch>[1]): Promise<Integration> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -300,21 +218,14 @@ export const createIntegration = async (integrationInput: IntegrationInput, opti
     }
     return headers;
   };
-const res = await fetch(getCreateIntegrationUrl(),
+return apiFetch<Integration>(getCreateIntegrationUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(integrationInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createIntegrationResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createIntegrationResponse
-}
+);}
 
 
 
@@ -323,15 +234,15 @@ const res = await fetch(getCreateIntegrationUrl(),
 export const getCreateIntegrationMutationKey = () => ['createIntegration'] as const;
 
 export const getCreateIntegrationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIntegration>>, TError,CreateIntegrationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIntegration>>, TError,CreateIntegrationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createIntegration>>, TError,CreateIntegrationMutationVariables, TContext> => {
 
 const mutationKey = getCreateIntegrationMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -339,7 +250,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createIntegration>>, CreateIntegrationMutationVariables> = (props) => {
           const {data} = props ?? {};
 
-          return  createIntegration(data,fetchOptions)
+          return  createIntegration(data,requestOptions)
         }
 
 
@@ -358,7 +269,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Create Integration
  */
 export const useCreateIntegration = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIntegration>>, TError,CreateIntegrationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIntegration>>, TError,CreateIntegrationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createIntegration>>,
         TError,
@@ -367,41 +278,7 @@ export const useCreateIntegration = <TError = BadRequestResponse | UnauthorizedR
       > => {
       return useMutation(getCreateIntegrationMutationOptions(options), queryClient);
     }
-    export type getIntegrationResponse200 = {
-  data: Integration
-  status: 200
-}
-
-export type getIntegrationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getIntegrationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getIntegrationResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getIntegrationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getIntegrationResponseSuccess = (getIntegrationResponse200) & {
-  headers: Headers;
-};
-export type getIntegrationResponseError = (getIntegrationResponse401 | getIntegrationResponse403 | getIntegrationResponse404 | getIntegrationResponse429) & {
-  headers: Headers;
-};
-
-export type getIntegrationResponse = (getIntegrationResponseSuccess | getIntegrationResponseError)
-
-export const getGetIntegrationUrl = (integrationId: string,) => {
+    export const getGetIntegrationUrl = (integrationId: string,) => {
 
 
 
@@ -412,23 +289,16 @@ export const getGetIntegrationUrl = (integrationId: string,) => {
 /**
  * @summary Read Integration
  */
-export const getIntegration = async (integrationId: string, options?: RequestInit): Promise<getIntegrationResponse> => {
+export const getIntegration = async (integrationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<Integration> => {
 
-  const res = await fetch(getGetIntegrationUrl(integrationId),
+  return apiFetch<Integration>(getGetIntegrationUrl(integrationId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getIntegrationResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getIntegrationResponse
-}
+);}
 
 
 
@@ -441,16 +311,16 @@ export const getGetIntegrationQueryKey = (integrationId: string,) => {
     }
 
 
-export const getGetIntegrationQueryOptions = <TData = Awaited<ReturnType<typeof getIntegration>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIntegration>>, TError, TData>>, fetch?: RequestInit}
+export const getGetIntegrationQueryOptions = <TData = Awaited<ReturnType<typeof getIntegration>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIntegration>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetIntegrationQueryKey(integrationId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getIntegration>>> = ({ signal }) => getIntegration(integrationId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getIntegration>>> = ({ signal }) => getIntegration(integrationId, { signal, ...requestOptions });
 
 
 
@@ -470,7 +340,7 @@ export function useGetIntegration<TData = Awaited<ReturnType<typeof getIntegrati
           TError,
           Awaited<ReturnType<typeof getIntegration>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetIntegration<TData = Awaited<ReturnType<typeof getIntegration>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -480,11 +350,11 @@ export function useGetIntegration<TData = Awaited<ReturnType<typeof getIntegrati
           TError,
           Awaited<ReturnType<typeof getIntegration>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetIntegration<TData = Awaited<ReturnType<typeof getIntegration>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIntegration>>, TError, TData>>, fetch?: RequestInit}
+ integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIntegration>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -492,7 +362,7 @@ export function useGetIntegration<TData = Awaited<ReturnType<typeof getIntegrati
  */
 
 export function useGetIntegration<TData = Awaited<ReturnType<typeof getIntegration>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIntegration>>, TError, TData>>, fetch?: RequestInit}
+ integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIntegration>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -508,65 +378,6 @@ export function useGetIntegration<TData = Awaited<ReturnType<typeof getIntegrati
 
 
 
-export type updateIntegrationResponse200 = {
-  data: Integration
-  status: 200
-}
-
-export type updateIntegrationResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type updateIntegrationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type updateIntegrationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type updateIntegrationResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type updateIntegrationResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type updateIntegrationResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type updateIntegrationResponse422 = {
-  data: UnprocessableResponse
-  status: 422
-}
-
-export type updateIntegrationResponse428 = {
-  data: PreconditionRequiredResponse
-  status: 428
-}
-
-export type updateIntegrationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type updateIntegrationResponseSuccess = (updateIntegrationResponse200) & {
-  headers: Headers;
-};
-export type updateIntegrationResponseError = (updateIntegrationResponse400 | updateIntegrationResponse401 | updateIntegrationResponse403 | updateIntegrationResponse404 | updateIntegrationResponse409 | updateIntegrationResponse412 | updateIntegrationResponse422 | updateIntegrationResponse428 | updateIntegrationResponse429) & {
-  headers: Headers;
-};
-
-export type updateIntegrationResponse = (updateIntegrationResponseSuccess | updateIntegrationResponseError)
-
 export const getUpdateIntegrationUrl = (integrationId: string,) => {
 
 
@@ -580,7 +391,7 @@ export const getUpdateIntegrationUrl = (integrationId: string,) => {
  * @summary Update Integration
  */
 export const updateIntegration = async (integrationId: string,
-    integrationInput: IntegrationInput, options?: RequestInit): Promise<updateIntegrationResponse> => {
+    integrationInput: IntegrationInput, options?: Parameters<typeof apiFetch>[1]): Promise<Integration> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -596,21 +407,14 @@ export const updateIntegration = async (integrationId: string,
     }
     return headers;
   };
-const res = await fetch(getUpdateIntegrationUrl(integrationId),
+return apiFetch<Integration>(getUpdateIntegrationUrl(integrationId),
   {
     ...options,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(integrationInput)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: updateIntegrationResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as updateIntegrationResponse
-}
+);}
 
 
 
@@ -619,15 +423,15 @@ const res = await fetch(getUpdateIntegrationUrl(integrationId),
 export const getUpdateIntegrationMutationKey = () => ['updateIntegration'] as const;
 
 export const getUpdateIntegrationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIntegration>>, TError,UpdateIntegrationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIntegration>>, TError,UpdateIntegrationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateIntegration>>, TError,UpdateIntegrationMutationVariables, TContext> => {
 
 const mutationKey = getUpdateIntegrationMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -635,7 +439,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateIntegration>>, UpdateIntegrationMutationVariables> = (props) => {
           const {integrationId,data} = props ?? {};
 
-          return  updateIntegration(integrationId,data,fetchOptions)
+          return  updateIntegration(integrationId,data,requestOptions)
         }
 
 
@@ -654,7 +458,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Update Integration
  */
 export const useUpdateIntegration = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIntegration>>, TError,UpdateIntegrationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIntegration>>, TError,UpdateIntegrationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateIntegration>>,
         TError,
@@ -663,51 +467,7 @@ export const useUpdateIntegration = <TError = BadRequestResponse | UnauthorizedR
       > => {
       return useMutation(getUpdateIntegrationMutationOptions(options), queryClient);
     }
-    export type deleteIntegrationResponse204 = {
-  data: void
-  status: 204
-}
-
-export type deleteIntegrationResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type deleteIntegrationResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type deleteIntegrationResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type deleteIntegrationResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type deleteIntegrationResponse412 = {
-  data: PreconditionFailedResponse
-  status: 412
-}
-
-export type deleteIntegrationResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type deleteIntegrationResponseSuccess = (deleteIntegrationResponse204) & {
-  headers: Headers;
-};
-export type deleteIntegrationResponseError = (deleteIntegrationResponse401 | deleteIntegrationResponse403 | deleteIntegrationResponse404 | deleteIntegrationResponse409 | deleteIntegrationResponse412 | deleteIntegrationResponse429) & {
-  headers: Headers;
-};
-
-export type deleteIntegrationResponse = (deleteIntegrationResponseSuccess | deleteIntegrationResponseError)
-
-export const getDeleteIntegrationUrl = (integrationId: string,) => {
+    export const getDeleteIntegrationUrl = (integrationId: string,) => {
 
 
 
@@ -719,23 +479,16 @@ export const getDeleteIntegrationUrl = (integrationId: string,) => {
  * Soft delete: its tokens stop working at once, its open Alerts are resolved with the reason "Integration {name} deleted", its Internal alerts are resolved, and its open Alert Groups are resolved. The built-in Integration cannot be deleted (`409`, `builtin_immutable`).
  * @summary Delete Integration
  */
-export const deleteIntegration = async (integrationId: string, options?: RequestInit): Promise<deleteIntegrationResponse> => {
+export const deleteIntegration = async (integrationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getDeleteIntegrationUrl(integrationId),
+  return apiFetch<void>(getDeleteIntegrationUrl(integrationId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: deleteIntegrationResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as deleteIntegrationResponse
-}
+);}
 
 
 
@@ -744,15 +497,15 @@ export const deleteIntegration = async (integrationId: string, options?: Request
 export const getDeleteIntegrationMutationKey = () => ['deleteIntegration'] as const;
 
 export const getDeleteIntegrationMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIntegration>>, TError,DeleteIntegrationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIntegration>>, TError,DeleteIntegrationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteIntegration>>, TError,DeleteIntegrationMutationVariables, TContext> => {
 
 const mutationKey = getDeleteIntegrationMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -760,7 +513,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteIntegration>>, DeleteIntegrationMutationVariables> = (props) => {
           const {integrationId} = props ?? {};
 
-          return  deleteIntegration(integrationId,fetchOptions)
+          return  deleteIntegration(integrationId,requestOptions)
         }
 
 
@@ -779,7 +532,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Delete Integration
  */
 export const useDeleteIntegration = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIntegration>>, TError,DeleteIntegrationMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIntegration>>, TError,DeleteIntegrationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteIntegration>>,
         TError,
@@ -788,41 +541,7 @@ export const useDeleteIntegration = <TError = UnauthorizedResponse | ForbiddenRe
       > => {
       return useMutation(getDeleteIntegrationMutationOptions(options), queryClient);
     }
-    export type listIntegrationTokensResponse200 = {
-  data: IntegrationTokenList
-  status: 200
-}
-
-export type listIntegrationTokensResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listIntegrationTokensResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listIntegrationTokensResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type listIntegrationTokensResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listIntegrationTokensResponseSuccess = (listIntegrationTokensResponse200) & {
-  headers: Headers;
-};
-export type listIntegrationTokensResponseError = (listIntegrationTokensResponse401 | listIntegrationTokensResponse403 | listIntegrationTokensResponse404 | listIntegrationTokensResponse429) & {
-  headers: Headers;
-};
-
-export type listIntegrationTokensResponse = (listIntegrationTokensResponseSuccess | listIntegrationTokensResponseError)
-
-export const getListIntegrationTokensUrl = (integrationId: string,) => {
+    export const getListIntegrationTokensUrl = (integrationId: string,) => {
 
 
 
@@ -834,23 +553,16 @@ export const getListIntegrationTokensUrl = (integrationId: string,) => {
  * Values are never returned.
  * @summary List Integration tokens
  */
-export const listIntegrationTokens = async (integrationId: string, options?: RequestInit): Promise<listIntegrationTokensResponse> => {
+export const listIntegrationTokens = async (integrationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<IntegrationTokenList> => {
 
-  const res = await fetch(getListIntegrationTokensUrl(integrationId),
+  return apiFetch<IntegrationTokenList>(getListIntegrationTokensUrl(integrationId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listIntegrationTokensResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listIntegrationTokensResponse
-}
+);}
 
 
 
@@ -863,16 +575,16 @@ export const getListIntegrationTokensQueryKey = (integrationId: string,) => {
     }
 
 
-export const getListIntegrationTokensQueryOptions = <TData = Awaited<ReturnType<typeof listIntegrationTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrationTokens>>, TError, TData>>, fetch?: RequestInit}
+export const getListIntegrationTokensQueryOptions = <TData = Awaited<ReturnType<typeof listIntegrationTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrationTokens>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListIntegrationTokensQueryKey(integrationId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listIntegrationTokens>>> = ({ signal }) => listIntegrationTokens(integrationId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listIntegrationTokens>>> = ({ signal }) => listIntegrationTokens(integrationId, { signal, ...requestOptions });
 
 
 
@@ -892,7 +604,7 @@ export function useListIntegrationTokens<TData = Awaited<ReturnType<typeof listI
           TError,
           Awaited<ReturnType<typeof listIntegrationTokens>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListIntegrationTokens<TData = Awaited<ReturnType<typeof listIntegrationTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -902,11 +614,11 @@ export function useListIntegrationTokens<TData = Awaited<ReturnType<typeof listI
           TError,
           Awaited<ReturnType<typeof listIntegrationTokens>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListIntegrationTokens<TData = Awaited<ReturnType<typeof listIntegrationTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrationTokens>>, TError, TData>>, fetch?: RequestInit}
+ integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrationTokens>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -914,7 +626,7 @@ export function useListIntegrationTokens<TData = Awaited<ReturnType<typeof listI
  */
 
 export function useListIntegrationTokens<TData = Awaited<ReturnType<typeof listIntegrationTokens>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrationTokens>>, TError, TData>>, fetch?: RequestInit}
+ integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrationTokens>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -930,50 +642,6 @@ export function useListIntegrationTokens<TData = Awaited<ReturnType<typeof listI
 
 
 
-export type createIntegrationTokenResponse201 = {
-  data: IntegrationTokenCreated
-  status: 201
-}
-
-export type createIntegrationTokenResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type createIntegrationTokenResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type createIntegrationTokenResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type createIntegrationTokenResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type createIntegrationTokenResponse409 = {
-  data: ConflictResponse
-  status: 409
-}
-
-export type createIntegrationTokenResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type createIntegrationTokenResponseSuccess = (createIntegrationTokenResponse201) & {
-  headers: Headers;
-};
-export type createIntegrationTokenResponseError = (createIntegrationTokenResponse400 | createIntegrationTokenResponse401 | createIntegrationTokenResponse403 | createIntegrationTokenResponse404 | createIntegrationTokenResponse409 | createIntegrationTokenResponse429) & {
-  headers: Headers;
-};
-
-export type createIntegrationTokenResponse = (createIntegrationTokenResponseSuccess | createIntegrationTokenResponseError)
-
 export const getCreateIntegrationTokenUrl = (integrationId: string,) => {
 
 
@@ -987,7 +655,7 @@ export const getCreateIntegrationTokenUrl = (integrationId: string,) => {
  * @summary Create an Integration token
  */
 export const createIntegrationToken = async (integrationId: string,
-    integrationTokenCreate?: IntegrationTokenCreate, options?: RequestInit): Promise<createIntegrationTokenResponse> => {
+    integrationTokenCreate?: IntegrationTokenCreate, options?: Parameters<typeof apiFetch>[1]): Promise<IntegrationTokenCreated> => {
 
     const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
     if (!h) return {};
@@ -1003,21 +671,14 @@ export const createIntegrationToken = async (integrationId: string,
     }
     return headers;
   };
-const res = await fetch(getCreateIntegrationTokenUrl(integrationId),
+return apiFetch<IntegrationTokenCreated>(getCreateIntegrationTokenUrl(integrationId),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(integrationTokenCreate)
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: createIntegrationTokenResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as createIntegrationTokenResponse
-}
+);}
 
 
 
@@ -1026,15 +687,15 @@ const res = await fetch(getCreateIntegrationTokenUrl(integrationId),
 export const getCreateIntegrationTokenMutationKey = () => ['createIntegrationToken'] as const;
 
 export const getCreateIntegrationTokenMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIntegrationToken>>, TError,CreateIntegrationTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIntegrationToken>>, TError,CreateIntegrationTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createIntegrationToken>>, TError,CreateIntegrationTokenMutationVariables, TContext> => {
 
 const mutationKey = getCreateIntegrationTokenMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1042,7 +703,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof createIntegrationToken>>, CreateIntegrationTokenMutationVariables> = (props) => {
           const {integrationId,data} = props ?? {};
 
-          return  createIntegrationToken(integrationId,data,fetchOptions)
+          return  createIntegrationToken(integrationId,data,requestOptions)
         }
 
 
@@ -1061,7 +722,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Create an Integration token
  */
 export const useCreateIntegrationToken = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIntegrationToken>>, TError,CreateIntegrationTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createIntegrationToken>>, TError,CreateIntegrationTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createIntegrationToken>>,
         TError,
@@ -1070,41 +731,7 @@ export const useCreateIntegrationToken = <TError = BadRequestResponse | Unauthor
       > => {
       return useMutation(getCreateIntegrationTokenMutationOptions(options), queryClient);
     }
-    export type revokeIntegrationTokenResponse204 = {
-  data: void
-  status: 204
-}
-
-export type revokeIntegrationTokenResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type revokeIntegrationTokenResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type revokeIntegrationTokenResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type revokeIntegrationTokenResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type revokeIntegrationTokenResponseSuccess = (revokeIntegrationTokenResponse204) & {
-  headers: Headers;
-};
-export type revokeIntegrationTokenResponseError = (revokeIntegrationTokenResponse401 | revokeIntegrationTokenResponse403 | revokeIntegrationTokenResponse404 | revokeIntegrationTokenResponse429) & {
-  headers: Headers;
-};
-
-export type revokeIntegrationTokenResponse = (revokeIntegrationTokenResponseSuccess | revokeIntegrationTokenResponseError)
-
-export const getRevokeIntegrationTokenUrl = (integrationId: string,
+    export const getRevokeIntegrationTokenUrl = (integrationId: string,
     integrationTokenId: string,) => {
 
 
@@ -1117,23 +744,16 @@ export const getRevokeIntegrationTokenUrl = (integrationId: string,
  * @summary Revoke an Integration token
  */
 export const revokeIntegrationToken = async (integrationId: string,
-    integrationTokenId: string, options?: RequestInit): Promise<revokeIntegrationTokenResponse> => {
+    integrationTokenId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
 
-  const res = await fetch(getRevokeIntegrationTokenUrl(integrationId,integrationTokenId),
+  return apiFetch<void>(getRevokeIntegrationTokenUrl(integrationId,integrationTokenId),
   {
     ...options,
     method: 'DELETE'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: revokeIntegrationTokenResponse['data'] = body ? JSON.parse(body) : undefined
-  return { data, status: res.status, headers: res.headers } as revokeIntegrationTokenResponse
-}
+);}
 
 
 
@@ -1142,15 +762,15 @@ export const revokeIntegrationToken = async (integrationId: string,
 export const getRevokeIntegrationTokenMutationKey = () => ['revokeIntegrationToken'] as const;
 
 export const getRevokeIntegrationTokenMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeIntegrationToken>>, TError,RevokeIntegrationTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeIntegrationToken>>, TError,RevokeIntegrationTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof revokeIntegrationToken>>, TError,RevokeIntegrationTokenMutationVariables, TContext> => {
 
 const mutationKey = getRevokeIntegrationTokenMutationKey();
-const {mutation: mutationOptions, fetch: fetchOptions} = options ?
+const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
       : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, fetch: undefined};
+      : {mutation: { mutationKey, }, request: undefined};
 
 
 
@@ -1158,7 +778,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokeIntegrationToken>>, RevokeIntegrationTokenMutationVariables> = (props) => {
           const {integrationId,integrationTokenId} = props ?? {};
 
-          return  revokeIntegrationToken(integrationId,integrationTokenId,fetchOptions)
+          return  revokeIntegrationToken(integrationId,integrationTokenId,requestOptions)
         }
 
 
@@ -1177,7 +797,7 @@ const {mutation: mutationOptions, fetch: fetchOptions} = options ?
  * @summary Revoke an Integration token
  */
 export const useRevokeIntegrationToken = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeIntegrationToken>>, TError,RevokeIntegrationTokenMutationVariables, TContext>, fetch?: RequestInit}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeIntegrationToken>>, TError,RevokeIntegrationTokenMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof revokeIntegrationToken>>,
         TError,
@@ -1186,41 +806,7 @@ export const useRevokeIntegrationToken = <TError = UnauthorizedResponse | Forbid
       > => {
       return useMutation(getRevokeIntegrationTokenMutationOptions(options), queryClient);
     }
-    export type listAlertmanagerRoutesResponse200 = {
-  data: AlertmanagerRouteList
-  status: 200
-}
-
-export type listAlertmanagerRoutesResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listAlertmanagerRoutesResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listAlertmanagerRoutesResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type listAlertmanagerRoutesResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listAlertmanagerRoutesResponseSuccess = (listAlertmanagerRoutesResponse200) & {
-  headers: Headers;
-};
-export type listAlertmanagerRoutesResponseError = (listAlertmanagerRoutesResponse401 | listAlertmanagerRoutesResponse403 | listAlertmanagerRoutesResponse404 | listAlertmanagerRoutesResponse429) & {
-  headers: Headers;
-};
-
-export type listAlertmanagerRoutesResponse = (listAlertmanagerRoutesResponseSuccess | listAlertmanagerRoutesResponseError)
-
-export const getListAlertmanagerRoutesUrl = (integrationId: string,) => {
+    export const getListAlertmanagerRoutesUrl = (integrationId: string,) => {
 
 
 
@@ -1232,23 +818,16 @@ export const getListAlertmanagerRoutesUrl = (integrationId: string,) => {
  * Routes taken from the `groupKey` of Snapshots, with the learned repeat interval and the resulting time to resolve by absence.
  * @summary List learned Alertmanager routes
  */
-export const listAlertmanagerRoutes = async (integrationId: string, options?: RequestInit): Promise<listAlertmanagerRoutesResponse> => {
+export const listAlertmanagerRoutes = async (integrationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<AlertmanagerRouteList> => {
 
-  const res = await fetch(getListAlertmanagerRoutesUrl(integrationId),
+  return apiFetch<AlertmanagerRouteList>(getListAlertmanagerRoutesUrl(integrationId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listAlertmanagerRoutesResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listAlertmanagerRoutesResponse
-}
+);}
 
 
 
@@ -1261,16 +840,16 @@ export const getListAlertmanagerRoutesQueryKey = (integrationId: string,) => {
     }
 
 
-export const getListAlertmanagerRoutesQueryOptions = <TData = Awaited<ReturnType<typeof listAlertmanagerRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertmanagerRoutes>>, TError, TData>>, fetch?: RequestInit}
+export const getListAlertmanagerRoutesQueryOptions = <TData = Awaited<ReturnType<typeof listAlertmanagerRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertmanagerRoutes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListAlertmanagerRoutesQueryKey(integrationId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAlertmanagerRoutes>>> = ({ signal }) => listAlertmanagerRoutes(integrationId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAlertmanagerRoutes>>> = ({ signal }) => listAlertmanagerRoutes(integrationId, { signal, ...requestOptions });
 
 
 
@@ -1290,7 +869,7 @@ export function useListAlertmanagerRoutes<TData = Awaited<ReturnType<typeof list
           TError,
           Awaited<ReturnType<typeof listAlertmanagerRoutes>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListAlertmanagerRoutes<TData = Awaited<ReturnType<typeof listAlertmanagerRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -1300,11 +879,11 @@ export function useListAlertmanagerRoutes<TData = Awaited<ReturnType<typeof list
           TError,
           Awaited<ReturnType<typeof listAlertmanagerRoutes>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListAlertmanagerRoutes<TData = Awaited<ReturnType<typeof listAlertmanagerRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertmanagerRoutes>>, TError, TData>>, fetch?: RequestInit}
+ integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertmanagerRoutes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1312,7 +891,7 @@ export function useListAlertmanagerRoutes<TData = Awaited<ReturnType<typeof list
  */
 
 export function useListAlertmanagerRoutes<TData = Awaited<ReturnType<typeof listAlertmanagerRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertmanagerRoutes>>, TError, TData>>, fetch?: RequestInit}
+ integrationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertmanagerRoutes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1327,45 +906,6 @@ export function useListAlertmanagerRoutes<TData = Awaited<ReturnType<typeof list
 
 
 
-
-export type listIntegrationAlertsResponse200 = {
-  data: IntegrationAlertList
-  status: 200
-}
-
-export type listIntegrationAlertsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listIntegrationAlertsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listIntegrationAlertsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listIntegrationAlertsResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type listIntegrationAlertsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listIntegrationAlertsResponseSuccess = (listIntegrationAlertsResponse200) & {
-  headers: Headers;
-};
-export type listIntegrationAlertsResponseError = (listIntegrationAlertsResponse400 | listIntegrationAlertsResponse401 | listIntegrationAlertsResponse403 | listIntegrationAlertsResponse404 | listIntegrationAlertsResponse429) & {
-  headers: Headers;
-};
-
-export type listIntegrationAlertsResponse = (listIntegrationAlertsResponseSuccess | listIntegrationAlertsResponseError)
 
 export const getListIntegrationAlertsUrl = (integrationId: string,
     params?: ListIntegrationAlertsParams,) => {
@@ -1396,23 +936,16 @@ export const getListIntegrationAlertsUrl = (integrationId: string,
  * @summary List the Alerts view of an Integration
  */
 export const listIntegrationAlerts = async (integrationId: string,
-    params?: ListIntegrationAlertsParams, options?: RequestInit): Promise<listIntegrationAlertsResponse> => {
+    params?: ListIntegrationAlertsParams, options?: Parameters<typeof apiFetch>[1]): Promise<IntegrationAlertList> => {
 
-  const res = await fetch(getListIntegrationAlertsUrl(integrationId,params),
+  return apiFetch<IntegrationAlertList>(getListIntegrationAlertsUrl(integrationId,params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listIntegrationAlertsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listIntegrationAlertsResponse
-}
+);}
 
 
 
@@ -1427,16 +960,16 @@ export const getListIntegrationAlertsQueryKey = (integrationId: string,
 
 
 export const getListIntegrationAlertsQueryOptions = <TData = Awaited<ReturnType<typeof listIntegrationAlerts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(integrationId: string,
-    params?: ListIntegrationAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrationAlerts>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListIntegrationAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrationAlerts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListIntegrationAlertsQueryKey(integrationId,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listIntegrationAlerts>>> = ({ signal }) => listIntegrationAlerts(integrationId,params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listIntegrationAlerts>>> = ({ signal }) => listIntegrationAlerts(integrationId,params, { signal, ...requestOptions });
 
 
 
@@ -1457,7 +990,7 @@ export function useListIntegrationAlerts<TData = Awaited<ReturnType<typeof listI
           TError,
           Awaited<ReturnType<typeof listIntegrationAlerts>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListIntegrationAlerts<TData = Awaited<ReturnType<typeof listIntegrationAlerts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -1468,12 +1001,12 @@ export function useListIntegrationAlerts<TData = Awaited<ReturnType<typeof listI
           TError,
           Awaited<ReturnType<typeof listIntegrationAlerts>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListIntegrationAlerts<TData = Awaited<ReturnType<typeof listIntegrationAlerts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
  integrationId: string,
-    params?: ListIntegrationAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrationAlerts>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListIntegrationAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrationAlerts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1482,7 +1015,7 @@ export function useListIntegrationAlerts<TData = Awaited<ReturnType<typeof listI
 
 export function useListIntegrationAlerts<TData = Awaited<ReturnType<typeof listIntegrationAlerts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
  integrationId: string,
-    params?: ListIntegrationAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrationAlerts>>, TError, TData>>, fetch?: RequestInit}
+    params?: ListIntegrationAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listIntegrationAlerts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1497,40 +1030,6 @@ export function useListIntegrationAlerts<TData = Awaited<ReturnType<typeof listI
 
 
 
-
-export type listStoredSnapshotsResponse200 = {
-  data: StoredSnapshotList
-  status: 200
-}
-
-export type listStoredSnapshotsResponse400 = {
-  data: BadRequestResponse
-  status: 400
-}
-
-export type listStoredSnapshotsResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type listStoredSnapshotsResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type listStoredSnapshotsResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type listStoredSnapshotsResponseSuccess = (listStoredSnapshotsResponse200) & {
-  headers: Headers;
-};
-export type listStoredSnapshotsResponseError = (listStoredSnapshotsResponse400 | listStoredSnapshotsResponse401 | listStoredSnapshotsResponse403 | listStoredSnapshotsResponse429) & {
-  headers: Headers;
-};
-
-export type listStoredSnapshotsResponse = (listStoredSnapshotsResponseSuccess | listStoredSnapshotsResponseError)
 
 export const getListStoredSnapshotsUrl = (params: ListStoredSnapshotsParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -1559,23 +1058,16 @@ export const getListStoredSnapshotsUrl = (params: ListStoredSnapshotsParams,) =>
  * Kept for `retention.stored_snapshots`. Replay is the CLI command `muster ingest replay`.
  * @summary List Stored Snapshots
  */
-export const listStoredSnapshots = async (params: ListStoredSnapshotsParams, options?: RequestInit): Promise<listStoredSnapshotsResponse> => {
+export const listStoredSnapshots = async (params: ListStoredSnapshotsParams, options?: Parameters<typeof apiFetch>[1]): Promise<StoredSnapshotList> => {
 
-  const res = await fetch(getListStoredSnapshotsUrl(params),
+  return apiFetch<StoredSnapshotList>(getListStoredSnapshotsUrl(params),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: listStoredSnapshotsResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as listStoredSnapshotsResponse
-}
+);}
 
 
 
@@ -1588,16 +1080,16 @@ export const getListStoredSnapshotsQueryKey = (params?: ListStoredSnapshotsParam
     }
 
 
-export const getListStoredSnapshotsQueryOptions = <TData = Awaited<ReturnType<typeof listStoredSnapshots>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params: ListStoredSnapshotsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStoredSnapshots>>, TError, TData>>, fetch?: RequestInit}
+export const getListStoredSnapshotsQueryOptions = <TData = Awaited<ReturnType<typeof listStoredSnapshots>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params: ListStoredSnapshotsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStoredSnapshots>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getListStoredSnapshotsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listStoredSnapshots>>> = ({ signal }) => listStoredSnapshots(params, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listStoredSnapshots>>> = ({ signal }) => listStoredSnapshots(params, { signal, ...requestOptions });
 
 
 
@@ -1617,7 +1109,7 @@ export function useListStoredSnapshots<TData = Awaited<ReturnType<typeof listSto
           TError,
           Awaited<ReturnType<typeof listStoredSnapshots>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListStoredSnapshots<TData = Awaited<ReturnType<typeof listStoredSnapshots>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
@@ -1627,11 +1119,11 @@ export function useListStoredSnapshots<TData = Awaited<ReturnType<typeof listSto
           TError,
           Awaited<ReturnType<typeof listStoredSnapshots>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListStoredSnapshots<TData = Awaited<ReturnType<typeof listStoredSnapshots>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params: ListStoredSnapshotsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStoredSnapshots>>, TError, TData>>, fetch?: RequestInit}
+ params: ListStoredSnapshotsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStoredSnapshots>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1639,7 +1131,7 @@ export function useListStoredSnapshots<TData = Awaited<ReturnType<typeof listSto
  */
 
 export function useListStoredSnapshots<TData = Awaited<ReturnType<typeof listStoredSnapshots>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
- params: ListStoredSnapshotsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStoredSnapshots>>, TError, TData>>, fetch?: RequestInit}
+ params: ListStoredSnapshotsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listStoredSnapshots>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
@@ -1655,40 +1147,6 @@ export function useListStoredSnapshots<TData = Awaited<ReturnType<typeof listSto
 
 
 
-export type getStoredSnapshotResponse200 = {
-  data: StoredSnapshot
-  status: 200
-}
-
-export type getStoredSnapshotResponse401 = {
-  data: UnauthorizedResponse
-  status: 401
-}
-
-export type getStoredSnapshotResponse403 = {
-  data: ForbiddenResponse
-  status: 403
-}
-
-export type getStoredSnapshotResponse404 = {
-  data: NotFoundResponse
-  status: 404
-}
-
-export type getStoredSnapshotResponse429 = {
-  data: TooManyRequestsResponse
-  status: 429
-}
-
-export type getStoredSnapshotResponseSuccess = (getStoredSnapshotResponse200) & {
-  headers: Headers;
-};
-export type getStoredSnapshotResponseError = (getStoredSnapshotResponse401 | getStoredSnapshotResponse403 | getStoredSnapshotResponse404 | getStoredSnapshotResponse429) & {
-  headers: Headers;
-};
-
-export type getStoredSnapshotResponse = (getStoredSnapshotResponseSuccess | getStoredSnapshotResponseError)
-
 export const getGetStoredSnapshotUrl = (storedSnapshotId: string,) => {
 
 
@@ -1700,23 +1158,16 @@ export const getGetStoredSnapshotUrl = (storedSnapshotId: string,) => {
 /**
  * @summary Read a Stored Snapshot as received
  */
-export const getStoredSnapshot = async (storedSnapshotId: string, options?: RequestInit): Promise<getStoredSnapshotResponse> => {
+export const getStoredSnapshot = async (storedSnapshotId: string, options?: Parameters<typeof apiFetch>[1]): Promise<StoredSnapshot> => {
 
-  const res = await fetch(getGetStoredSnapshotUrl(storedSnapshotId),
+  return apiFetch<StoredSnapshot>(getGetStoredSnapshotUrl(storedSnapshotId),
   {
     ...options,
     method: 'GET'
 
 
   }
-)
-
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getStoredSnapshotResponse['data'] = body ? JSON.parse(body) : {}
-  return { data, status: res.status, headers: res.headers } as getStoredSnapshotResponse
-}
+);}
 
 
 
@@ -1729,16 +1180,16 @@ export const getGetStoredSnapshotQueryKey = (storedSnapshotId: string,) => {
     }
 
 
-export const getGetStoredSnapshotQueryOptions = <TData = Awaited<ReturnType<typeof getStoredSnapshot>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(storedSnapshotId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStoredSnapshot>>, TError, TData>>, fetch?: RequestInit}
+export const getGetStoredSnapshotQueryOptions = <TData = Awaited<ReturnType<typeof getStoredSnapshot>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(storedSnapshotId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStoredSnapshot>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
-const {query: queryOptions, fetch: fetchOptions} = options ?? {};
+const {query: queryOptions, request: requestOptions} = options ?? {};
 
   const queryKey =  queryOptions?.queryKey ?? getGetStoredSnapshotQueryKey(storedSnapshotId);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getStoredSnapshot>>> = ({ signal }) => getStoredSnapshot(storedSnapshotId, { signal, ...fetchOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getStoredSnapshot>>> = ({ signal }) => getStoredSnapshot(storedSnapshotId, { signal, ...requestOptions });
 
 
 
@@ -1758,7 +1209,7 @@ export function useGetStoredSnapshot<TData = Awaited<ReturnType<typeof getStored
           TError,
           Awaited<ReturnType<typeof getStoredSnapshot>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetStoredSnapshot<TData = Awaited<ReturnType<typeof getStoredSnapshot>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
@@ -1768,11 +1219,11 @@ export function useGetStoredSnapshot<TData = Awaited<ReturnType<typeof getStored
           TError,
           Awaited<ReturnType<typeof getStoredSnapshot>>
         > , 'initialData'
-      >, fetch?: RequestInit}
+      >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useGetStoredSnapshot<TData = Awaited<ReturnType<typeof getStoredSnapshot>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- storedSnapshotId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStoredSnapshot>>, TError, TData>>, fetch?: RequestInit}
+ storedSnapshotId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStoredSnapshot>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1780,7 +1231,7 @@ export function useGetStoredSnapshot<TData = Awaited<ReturnType<typeof getStored
  */
 
 export function useGetStoredSnapshot<TData = Awaited<ReturnType<typeof getStoredSnapshot>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
- storedSnapshotId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStoredSnapshot>>, TError, TData>>, fetch?: RequestInit}
+ storedSnapshotId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getStoredSnapshot>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 

@@ -1,0 +1,192 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "continue": "Continue",
+    "loading": "Loading…",
+    "save": "Save",
+    "saved": "Saved."
+  },
+  "errors": {
+    "generic": "Something went wrong. Try again.",
+    "goHome": "Go to the home page",
+    "notFound": "There is no page at this address.",
+    "notFoundTitle": "Page not found",
+    "reload": "The page is out of date. Reload it and try again.",
+    "tooManyAttempts_one": "Too many attempts. Try again in {{count}} second.",
+    "tooManyAttempts_other": "Too many attempts. Try again in {{count}} seconds.",
+    "tryAgain": "Try again",
+    "unexpected": "The page could not be shown. Try again; if it keeps failing, reload the page.",
+    "unexpectedTitle": "Something went wrong",
+    "wrongCredentials": "Wrong login, password or code."
+  },
+  "fieldErrors": {
+    "invalid": "This value is not valid.",
+    "invalidFormat": "This value has the wrong format.",
+    "mismatch": "The passwords do not match.",
+    "required": "Fill in this field.",
+    "tooLong": "This value is too long.",
+    "tooShort": "This value is too short."
+  },
+  "home": {
+    "placeholder": "Alert Groups will appear here.",
+    "title": "Welcome, {{name}}"
+  },
+  "nav": {
+    "home": "Home",
+    "label": "Main",
+    "profile": "Profile"
+  },
+  "notices": {
+    "noReplicaLeading": "No replica is leading: Telegram polling, Heartbeat and Stale checks are paused.",
+    "recoveringAfterDowntime": "Muster is recovering after downtime. Data may be incomplete until {{time}}.",
+    "recoveringAfterDowntimeNoEnd": "Muster is recovering after downtime. Data may be incomplete for a while."
+  },
+  "passwordSetup": {
+    "done": "Your password is set. Sign in with your login and the new password.",
+    "hint": "Choose the password you will sign in with.",
+    "linkExpired": "This link has expired. Ask your administrator for a new one.",
+    "linkInvalid": "This link is not valid. Ask your administrator for a new one.",
+    "linkUsed": "This link was already used. Ask your administrator for a new one.",
+    "minLength_one": "At least {{count}} character.",
+    "minLength_other": "At least {{count}} characters.",
+    "password": "New password",
+    "repeat": "Repeat the password",
+    "submit": "Set password",
+    "title": "Set your password"
+  },
+  "profile": {
+    "details": {
+      "login": "Login: {{login}}",
+      "name": "Name",
+      "title": "Details"
+    },
+    "link": {
+      "errors": {
+        "identityLinkedElsewhere": "This identity already belongs to another Muster account, so it was not linked.",
+        "idpError": "The identity provider could not be reached or refused the request. Try again later.",
+        "invalidRequest": "Linking did not complete. Start it again from this page.",
+        "noAccess": "Your groups at the identity provider give no access to Muster, so the identity was not linked. Contact your administrator.",
+        "oidcDisabled": "OIDC sign-in is turned off, so the identity was not linked.",
+        "unknown": "Linking failed. Try again."
+      },
+      "start": "Link OIDC",
+      "warning": "After linking you will sign in only through OIDC; your password will be removed."
+    },
+    "method": {
+      "local": "Password",
+      "localLong": "You sign in with your login and password.",
+      "oidc": "OIDC",
+      "oidcLong": "You sign in through OIDC.",
+      "title": "Sign-in method"
+    },
+    "password": {
+      "changed": "Your password is changed. Your other sessions were signed out.",
+      "current": "Current password",
+      "hint": "Changing the password signs out your other sessions.",
+      "new": "New password",
+      "repeat": "Repeat the new password",
+      "submit": "Change password",
+      "title": "Password",
+      "wrong": "The current password is wrong."
+    },
+    "preferences": {
+      "browserLanguage": "Browser language",
+      "browserTimeZone": "Browser time zone ({{zone}})",
+      "hint": "Changes apply at once.",
+      "language": "Language",
+      "timeZone": "Time zone",
+      "title": "Language and time zone"
+    },
+    "sessions": {
+      "confirm": "This ends every session of your account, this one included. You will have to sign in again.",
+      "count_one": "{{count}} active session.",
+      "count_other": "{{count}} active sessions.",
+      "current": "This session",
+      "signOutEverywhere": "Sign out everywhere",
+      "times": "Signed in {{created}}, last active {{used}}",
+      "title": "Sessions"
+    },
+    "title": "Profile"
+  },
+  "secondFactor": {
+    "cancel": "Sign out",
+    "code": "Code",
+    "codeHint": "Enter the code from your authenticator app.",
+    "recoveryCode": "Recovery code",
+    "recoveryHint": "Enter one of your recovery codes. Each code works once.",
+    "submit": "Continue",
+    "title": "Two-factor authentication",
+    "useCode": "Use the authenticator app instead",
+    "useRecoveryCode": "Use a recovery code instead"
+  },
+  "shell": {
+    "skipToContent": "Skip to content"
+  },
+  "signIn": {
+    "errors": {
+      "accountDisabled": "Your account is disabled. Contact your administrator.",
+      "idpError": "The identity provider could not be reached or refused the request. Try again later.",
+      "invalidRequest": "The sign-in did not complete. Try again.",
+      "loginTaken": "An account with this login already exists. Sign in with it and link OIDC in your profile.",
+      "noAccess": "You have no access to Muster. Contact your administrator.",
+      "oidcDisabled": "OIDC sign-in is turned off. Sign in with your login and password.",
+      "unknown": "Sign-in failed. Try again."
+    },
+    "login": "Login",
+    "or": "or",
+    "password": "Password",
+    "sessionEnded": "Your session ended. Sign in again.",
+    "submit": "Sign in",
+    "title": "Sign in to Muster",
+    "withProvider": "Sign in with {{provider}}"
+  },
+  "totp": {
+    "alreadyEnrolled": "TOTP is already set up for your account.",
+    "enrol": {
+      "code": "Code from the app",
+      "confirm": "Confirm",
+      "qrLabel": "QR code for your authenticator app",
+      "scan": "Scan the QR code with your authenticator app, or enter the secret by hand. Then enter the code the app shows.",
+      "secret": "Secret",
+      "start": "Set up TOTP"
+    },
+    "enrolmentPage": {
+      "required": "Your organization requires two-factor authentication. Set it up to continue.",
+      "title": "Set up two-factor authentication"
+    },
+    "recoveryCodes": {
+      "copied": "Copied",
+      "copy": "Copy codes",
+      "hint_one": "Keep this code somewhere safe. It signs you in once if you lose your authenticator app, and it is shown only now.",
+      "hint_other": "Keep these {{count}} codes somewhere safe. Each signs you in once if you lose your authenticator app, and they are shown only now.",
+      "title": "Save these recovery codes"
+    },
+    "regenerate": {
+      "hint": "New recovery codes replace the unused ones. Enter a code from your authenticator app.",
+      "start": "Regenerate recovery codes",
+      "submit": "Regenerate"
+    },
+    "remove": {
+      "code": "Code from the app",
+      "hint": "Confirm that it is you to remove TOTP.",
+      "password": "Current password",
+      "proofKind": "Confirm with",
+      "recoveryCode": "Recovery code",
+      "start": "Remove TOTP",
+      "submit": "Remove TOTP",
+      "wrongProof": "Wrong password or code."
+    },
+    "status": {
+      "off": "TOTP is off.",
+      "on_one": "TOTP has been on since {{date}}. {{count}} recovery code left.",
+      "on_other": "TOTP has been on since {{date}}. {{count}} recovery codes left."
+    },
+    "title": "Two-factor authentication (TOTP)",
+    "wrongCode": "Wrong code. Check the time on your device and try again."
+  },
+  "userMenu": {
+    "label": "User menu: {{name}}",
+    "signOut": "Sign out"
+  }
+}
