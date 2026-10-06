@@ -51,6 +51,8 @@ type Work struct {
 	PruneAuth []PruneTable
 	// PruneUsers are the short-lived tables of internal/users: password setup links.
 	PruneUsers []PruneTable
+	// PruneOIDC are the short-lived tables of internal/oidc: the OIDC redirects in flight.
+	PruneOIDC []PruneTable
 }
 
 // PruneTable is one short-lived table of short-lived pruning.
@@ -63,7 +65,7 @@ type PruneTable struct {
 }
 
 func (w Work) shortLived() []PruneTable {
-	return slices.Concat(w.PruneAuth, w.PruneUsers)
+	return slices.Concat(w.PruneAuth, w.PruneUsers, w.PruneOIDC)
 }
 
 // pruneShortLived runs every short-lived table in every Organization at the same now, deleting in batches until a

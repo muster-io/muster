@@ -359,29 +359,41 @@ func (s *Service) failSignIn(ctx context.Context, req SignInRequest, user dbgen.
 	return ErrInvalidCredentials
 }
 
-func (s *Service) openSession(ctx context.Context, req SignInRequest, account, address string,
-	user dbgen.GetSignInUserRow, state SessionState) (Session, error) {
+// newSession makes a session of user with a fresh token, starting now on the business clock, and the parameters
+// that store it; lifetime bounds its total life.
+func (s *Service) newSession(user Principal, state SessionState, method string, lifetime time.Duration,
+	addr netip.Addr, userAgent string) (Session, dbgen.CreateSessionParams, error) {
 	token := make([]byte, tokenBytes)
 	if _, err := rand.Read(token); err != nil {
-		return Session{}, fmt.Errorf("make a session token: %w", err)
+		return Session{}, dbgen.CreateSessionParams{}, fmt.Errorf("make a session token: %w", err)
 	}
 	now := s.clock.Now().UTC()
 	sess := Session{
-		PublicID: publicid.New(publicid.Session), State: state, Method: MethodLocal, CreatedAt: now,
-		LastUsedAt: now, IdleExpiresAt: now.Add(SessionIdleTimeout), ExpiresAt: now.Add(SessionLifetime),
-		User: Principal{ID: user.ID, PublicID: user.PublicID, Name: user.Name, Role: user.Role}, token: token,
+		PublicID: publicid.New(publicid.Session), State: state, Method: method, CreatedAt: now, LastUsedAt: now,
+		IdleExpiresAt: now.Add(SessionIdleTimeout), ExpiresAt: now.Add(lifetime), User: user, token: token,
 	}
 	hash := sha256.Sum256(token)
 	p := dbgen.CreateSessionParams{
 		OrgID: s.orgID, PublicID: sess.PublicID, UserID: user.ID, TokenHash: hash[:], State: string(sess.State),
-		Method: sess.Method, UserAgent: optText(truncate(req.UserAgent, maxUserAgent)), CreatedAt: now,
+		Method: sess.Method, UserAgent: optText(truncate(userAgent, maxUserAgent)), CreatedAt: now,
 		IdleExpiresAt: sess.IdleExpiresAt, ExpiresAt: sess.ExpiresAt,
 	}
-	if req.Address.IsValid() {
-		addr := req.Address
-		p.Address = &addr
+	if addr.IsValid() {
+		a := addr
+		p.Address = &a
 	}
-	err := s.store.InTx(ctx, func(q Queries) error {
+	return sess, p, nil
+}
+
+func (s *Service) openSession(ctx context.Context, req SignInRequest, account, address string,
+	user dbgen.GetSignInUserRow, state SessionState) (Session, error) {
+	sess, p, err := s.newSession(Principal{ID: user.ID, PublicID: user.PublicID, Name: user.Name, Role: user.Role},
+		state, MethodLocal, SessionLifetime, req.Address, req.UserAgent)
+	if err != nil {
+		return Session{}, err
+	}
+	now := sess.CreatedAt
+	err = s.store.InTx(ctx, func(q Queries) error {
 		if state == StateActive {
 			if err := q.ResetSignInThrottles(ctx, dbgen.ResetSignInThrottlesParams{
 				OrgID: s.orgID, Account: account, Address: address,
@@ -402,6 +414,56 @@ func (s *Service) openSession(ctx context.Context, req SignInRequest, account, a
 			Action:   audit.ActionSignedIn,
 			Resource: audit.Resource{Type: audit.ResourceSession, PublicID: sess.PublicID, Name: user.Name},
 			Details:  map[string]any{"method": MethodLocal, "state": string(state)}, SourceAddress: req.Address,
+		})
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	return sess, nil
+}
+
+// OIDCSignIn is a session to open for a user whom an OIDC sign-in identified; internal/oidc checked the identity and
+// decided the state.
+type OIDCSignIn struct {
+	User  Principal
+	State SessionState
+	// IDPMFA records that the identity provider asserted multi-factor authentication (amr).
+	IDPMFA bool
+	// Lifetime bounds the session's total life: auth.session_lifetime, or auth.oidc_fallback_session_lifetime for a
+	// user without an offline token. Zero is auth.session_lifetime.
+	Lifetime  time.Duration
+	Address   netip.Addr
+	UserAgent string
+}
+
+// OpenOIDCSession opens a session with the method oidc after an OIDC sign-in and records the sign-in as
+// session.signed_in with the method oidc (C-03.FR-25).
+func (s *Service) OpenOIDCSession(ctx context.Context, in OIDCSignIn) (Session, error) {
+	lifetime := SessionLifetime
+	if in.Lifetime > 0 && in.Lifetime < lifetime {
+		lifetime = in.Lifetime
+	}
+	sess, p, err := s.newSession(in.User, in.State, MethodOIDC, lifetime, in.Address, in.UserAgent)
+	if err != nil {
+		return Session{}, err
+	}
+	p.IdpMfa = in.IDPMFA
+	err = s.store.InTx(ctx, func(q Queries) error {
+		id, err := q.CreateSession(ctx, p)
+		if err != nil {
+			return fmt.Errorf("create the session: %w", err)
+		}
+		sess.ID = id
+		if err := q.MarkSignedIn(ctx, dbgen.MarkSignedInParams{OrgID: s.orgID, ID: in.User.ID,
+			Now: sess.CreatedAt}); err != nil {
+			return fmt.Errorf("record the sign-in: %w", err)
+		}
+		return s.audit.Record(ctx, q, audit.Entry{
+			OrgID: s.orgID, Actor: audit.User(in.User.ID, in.User.PublicID), Transport: audit.TransportUI,
+			Action:        audit.ActionSignedIn,
+			Resource:      audit.Resource{Type: audit.ResourceSession, PublicID: sess.PublicID, Name: in.User.Name},
+			Details:       map[string]any{"method": MethodOIDC, "state": string(in.State), "idp_mfa": in.IDPMFA},
+			SourceAddress: in.Address,
 		})
 	})
 	if err != nil {

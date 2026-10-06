@@ -67,3 +67,10 @@ sql:
       go:
         <<: *go
         out: internal/totp/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/oidc/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/oidc/dbgen

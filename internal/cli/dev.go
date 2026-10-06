@@ -19,9 +19,11 @@ const devUsage = `Usage: muster dev [--replica]
 Development mode. Every MUSTER_* variable with a development default takes it unless the variable is set; a set
 variable replaces its default.
 
-  muster dev             start the fake Alertmanager, Mattermost and Telegram servers
-                         on 127.0.0.1:19093, 127.0.0.1:18065 and 127.0.0.1:18081, then Muster against the
-                         development database (make dev-db), migrated on start
+  muster dev             start the fake Alertmanager, Mattermost, Telegram and OIDC servers
+                         on 127.0.0.1:19093, 127.0.0.1:18065, 127.0.0.1:18081 and 127.0.0.1:18090 and the
+                         fake HTTP and SOCKS5 proxies on 127.0.0.1:18091 and 127.0.0.1:18092, then Muster
+                         against the development database (make dev-db), migrated on start, with the demo
+                         OIDC configuration "Dev IdP"
   muster dev --replica   run an additional replica on :9080, :9081 and :9082, without fake servers
   muster dev <command>   run another command with the development defaults, such as muster dev migrate
 `

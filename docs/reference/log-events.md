@@ -31,6 +31,7 @@ the event.
 | `live_updates_listen_restored` | INFO | — | C-03 | A replica listens for live-update hints again after live_updates_listen_failed; it sent every connected browser the hints of everything, so that they read it again. |
 | `migrations_applied` | INFO | from, to | C-02 | Migrations were applied under the migration lock, from one schema version to another. |
 | `migrations_current` | INFO | version | C-02 | No migration was applied: the schema already has the newest version this binary knows. |
+| `oidc_sign_in_failed` | WARN | reason, error | C-03 | An OIDC sign-in ended at the sign-in page with idp_error: the identity provider reported an error, could not be reached through the back channel or its proxy, or answered with an ID token that did not verify. The reason names the step; the error is masked and carries no token or secret. |
 | `organization_created` | INFO | organization | C-02 | The first start created the Organization with the defaults of its settings and its outbound address policy. |
 | `outbound_blocked` | WARN | client, rule, scheme, host | C-02 | The outbound address policy refused a request, which fails without retry; rule names the rule and the address or proxy it refused. Correct the configured address, or change the policy and its allowed networks. |
 | `outbound_unverified_address` | INFO | client, scheme, host | C-02 | A request went through the client's proxy to a host name that Muster cannot resolve itself, so only the name was checked against the allowed and denied lists, not its addresses. |

@@ -30,7 +30,7 @@ export const getOidcSettingsResponseTwoWarningsItemUserIdRegExp = new RegExp('^[
 
 export const GetOidcSettingsResponse = zod.object({
   "enabled": zod.boolean(),
-  "display_name": zod.string().optional().describe('Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL.'),
+  "display_name": zod.string().optional().describe('Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL; a read leaves it out while the default applies, and an empty value returns to the default.'),
   "issuer_url": zod.url(),
   "client_id": zod.string(),
   "client_secret_expires_on": zod.iso.date().nullish().describe('Optional expiry date of the client secret; the OIDC settings warn within `oidc.secret_expiry_lead`.'),
@@ -86,7 +86,7 @@ export const UpdateOidcSettingsHeader = zod.object({
 
 export const UpdateOidcSettingsBody = zod.object({
   "enabled": zod.boolean(),
-  "display_name": zod.string().optional().describe('Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL.'),
+  "display_name": zod.string().optional().describe('Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL; a read leaves it out while the default applies, and an empty value returns to the default.'),
   "issuer_url": zod.url(),
   "client_id": zod.string(),
   "client_secret_expires_on": zod.iso.date().nullish().describe('Optional expiry date of the client secret; the OIDC settings warn within `oidc.secret_expiry_lead`.'),
@@ -116,7 +116,7 @@ export const updateOidcSettingsResponseTwoWarningsItemUserIdRegExp = new RegExp(
 
 export const UpdateOidcSettingsResponse = zod.object({
   "enabled": zod.boolean(),
-  "display_name": zod.string().optional().describe('Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL.'),
+  "display_name": zod.string().optional().describe('Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL; a read leaves it out while the default applies, and an empty value returns to the default.'),
   "issuer_url": zod.url(),
   "client_id": zod.string(),
   "client_secret_expires_on": zod.iso.date().nullish().describe('Optional expiry date of the client secret; the OIDC settings warn within `oidc.secret_expiry_lead`.'),

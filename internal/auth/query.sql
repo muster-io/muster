@@ -38,11 +38,11 @@ WHERE org_id = @org_id AND id = @id AND oidc_subject IS NULL;
 
 -- name: CreateSession :one
 INSERT INTO sessions (
-    org_id, public_id, user_id, token_hash, state, method, address, user_agent, created_at, last_used_at,
+    org_id, public_id, user_id, token_hash, state, method, idp_mfa, address, user_agent, created_at, last_used_at,
     idle_expires_at, expires_at
 )
 VALUES (
-    @org_id, @public_id, @user_id, @token_hash, @state, @method, sqlc.narg('address'), sqlc.narg('user_agent'),
+    @org_id, @public_id, @user_id, @token_hash, @state, @method, @idp_mfa, sqlc.narg('address'), sqlc.narg('user_agent'),
     @created_at, @created_at, @idle_expires_at, @expires_at
 )
 RETURNING id;

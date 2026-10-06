@@ -20,9 +20,7 @@
 
 export type StartOidcSignInParams = {
 /**
- * Path to open after sign-in: a relative path that starts with a single `/` (never `//` or a scheme). Anything else is ignored.
- * @maxLength 2000
- * @pattern ^/([^/\\].*)?$
+ * Path to open after sign-in: a relative path that starts with a single `/` (never `//`, `/\` or a scheme), at most 2000 characters. Anything else is ignored, not refused, so the flow is no open redirect.
  */
 return_to?: string;
 };

@@ -58,12 +58,12 @@ func (q *Queries) CompleteSecondFactor(ctx context.Context, arg CompleteSecondFa
 
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (
-    org_id, public_id, user_id, token_hash, state, method, address, user_agent, created_at, last_used_at,
+    org_id, public_id, user_id, token_hash, state, method, idp_mfa, address, user_agent, created_at, last_used_at,
     idle_expires_at, expires_at
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8,
-    $9, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9,
+    $10, $10, $11, $12
 )
 RETURNING id
 `
@@ -75,6 +75,7 @@ type CreateSessionParams struct {
 	TokenHash     []byte
 	State         string
 	Method        string
+	IdpMfa        bool
 	Address       *netip.Addr
 	UserAgent     pgtype.Text
 	CreatedAt     time.Time
@@ -90,6 +91,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (i
 		arg.TokenHash,
 		arg.State,
 		arg.Method,
+		arg.IdpMfa,
 		arg.Address,
 		arg.UserAgent,
 		arg.CreatedAt,

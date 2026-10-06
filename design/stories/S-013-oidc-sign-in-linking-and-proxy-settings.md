@@ -33,6 +33,7 @@ files_touched:
   - internal/devmode/devmode.go
   - internal/devmode/devmode_test.go
   - internal/cli/dev.go
+  - internal/cli/dev_test.go
   - internal/runtime/runtime.go
   - internal/runtime/runtime_test.go
   - internal/leader/tasks.go
@@ -95,7 +96,8 @@ issue: 13
 - **Settings** (C-03.FR-5, FR-6, `oidc_settings`): `enabled`, `display_name` (default: the host of the issuer URL),
   `issuer_url`, `client_id`, `client_secret` (write-only), `client_secret_expires_on`, `scopes`, `groups_claim`,
   `group_mappings`, `unmatched_role` (`oidc.unmatched_role`), `sync_role` (`oidc.sync_role`), `skip_totp_with_idp_mfa`
-  (`oidc.skip_totp_with_idp_mfa`) and `proxy`; updates need `If-Match`. Before an Admin saves them, a read returns the
+  (`oidc.skip_totp_with_idp_mfa`) and `proxy`; updates need `If-Match`. A read returns `display_name` only when an
+  Admin set one, so that a read sent back unchanged keeps the default. Before an Admin saves them, a read returns the
   defaults with OIDC off and the ETag `"0"`, which the first update names. `warnings`: `nobody_can_sign_in` (empty
   mapping and no Role for unmatched users), `groups_claim_missing` (the last check found discovery's `claims_supported`
   without the claim, or a sign-in token without it; a sign-in token that carries it clears the warning),
@@ -122,14 +124,16 @@ issue: 13
   starting with a single `/`; the parameter carries no `pattern` in the spec, so anything else is ignored rather than
   refused) and purpose `sign_in`, valid for `oidc.auth_request_ttl`; it sets the cookie `muster_oidc_state` (HttpOnly,
   Secure, SameSite=Lax, path `/api/v1/`) to the state, which binds the callback to the browser that started it, and
-  redirects with the configured scopes plus `openid` and `offline_access` (`409 oidc_not_enabled` when OIDC is off).
+  redirects with the configured scopes plus `openid` and `offline_access` (`409 oidc_not_enabled` when OIDC is off;
+  `429` while 10 000 requests of the Organization are in flight, since a start needs no credentials and writes a row).
   The story adds `oidc_auth_requests` to the `short_lived_pruning` Leader task (a `PruneOIDC` field of `leader.Work`
   and the table in `metrics.ShortLivedTables`): a request is deleted once its `expires_at` is more than 1 h past; a
   link request also goes with its web session, by the cascade from `sessions`.
   `completeOidcSignIn` takes the request once (a used, expired or unknown state, or one that does not match the cookie,
   is `invalid_request`), exchanges the code (interactive class; `client_secret_basic`, or `client_secret_post` when
   discovery offers only that), verifies the ID token (signature, issuer, audience and `azp`, nonce, and `exp`, `nbf`
-  and `iat` against the real clock of S-006 with 60 s of leeway) and maps the groups claim to a Role (the highest wins,
+  and `iat` against the real clock of S-006 with 60 s of leeway; a token without the nonce of its request never
+  verifies) and maps the groups claim to a Role (the highest wins,
   C-03.FR-5). The groups claim is read from the ID token, and from the userinfo endpoint when the ID token lacks it
   (D247). Outcomes, always a `302`: success to `return_to` or `/` with the session cookie; failures to
   `/sign-in?error=` `no_access` (Audit `session.oidc_refused` with the groups of the claim;

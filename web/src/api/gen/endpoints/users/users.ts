@@ -573,7 +573,7 @@ export const getUpdateUserUrl = (userId: string,) => {
 }
 
 /**
- * Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) while `oidc.sync_role` locks the Role, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+ * Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
  * @summary Update a user
  */
 export const updateUser = async (userId: string,

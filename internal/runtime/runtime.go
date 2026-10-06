@@ -26,12 +26,15 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/leader"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/oidc"
+	oidcdb "github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/server"
@@ -80,6 +83,7 @@ type database interface {
 	AuthStore() auth.Store
 	TOTPStore() totp.Store
 	SettingsStore() organization.SettingsStore
+	OIDCStore() oidc.Store
 	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
 	SessionListenConn(ctx context.Context) (db.ListenConn, error)
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
@@ -89,6 +93,7 @@ type database interface {
 	ReplicaPruner() keyring.Pruner
 	AuthPruner() auth.PruneQueries
 	UsersPruner() users.PruneQueries
+	OIDCPruner() oidc.PruneQueries
 	// Clock reads the database clock, for the clock skew check.
 	Clock() rowQuerier
 }
@@ -116,6 +121,8 @@ func (d pgDatabase) SettingsStore() organization.SettingsStore {
 	return organization.NewSettingsStore(d.Pool)
 }
 
+func (d pgDatabase) OIDCStore() oidc.Store { return oidc.NewStore(d.Pool) }
+
 func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
 	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
 }
@@ -139,6 +146,8 @@ func (d pgDatabase) ReplicaPruner() keyring.Pruner { return kdb.New(d.Pool) }
 func (d pgDatabase) AuthPruner() auth.PruneQueries { return authdb.New(d.Pool) }
 
 func (d pgDatabase) UsersPruner() users.PruneQueries { return usersdb.New(d.Pool) }
+
+func (d pgDatabase) OIDCPruner() oidc.PruneQueries { return oidcdb.New(d.Pool) }
 
 func (d pgDatabase) Clock() rowQuerier { return d.Pool }
 
@@ -461,6 +470,19 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		return leader.Notices(ctx, leaderStore, now)
 	}, p.clocks.Business, p.hub, p.log)
 	p.listener = db.NewListener(p.db.SessionListenConn, p.log)
+	signIn := oidc.NewService(oidc.Config{
+		OrgID: orgID, Store: p.db.OIDCStore(), Keyring: p.keyring, Audit: w, Clocks: p.clocks, Log: p.log,
+		Sessions: sessions, PublicURL: p.cfg.PublicURL,
+		Network: oidc.Network{
+			Policy: organization.NewOutboundPolicies(p.db.OrganizationStore(), orgID, p.clocks.Real),
+			Log:    p.log, Real: p.clocks.Real,
+		},
+	})
+	if p.opts.Development {
+		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
+			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)
+		}
+	}
 	return api.New(api.Config{
 		Sessions:       sessions,
 		Users:          users.NewService(orgID, p.db.UsersStore(), w, p.clocks.Business),
@@ -470,6 +492,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Organization:   organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business),
 		Notices:        p.notices,
 		Live:           p.hub,
+		OIDC:           signIn,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -497,6 +520,9 @@ func (p *process) newKeeper() *leader.Keeper {
 		},
 		PruneUsers: []leader.PruneTable{
 			{Name: "password_setups", Delete: users.NewPruner(p.db.UsersPruner()).PasswordSetups},
+		},
+		PruneOIDC: []leader.PruneTable{
+			{Name: "oidc_auth_requests", Delete: oidc.NewPruner(p.db.OIDCPruner()).AuthRequests},
 		},
 	}))
 }

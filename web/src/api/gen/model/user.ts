@@ -33,7 +33,7 @@ export interface User {
   /** @nullable */
   email?: string | null;
   role: RoleName;
-  /** True while `oidc.sync_role` lets the identity provider decide the Role. */
+  /** True for an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, so the identity provider decides the Role. */
   role_locked?: boolean;
   source: UserSource;
   /** True while Muster holds an offline token from the identity provider for this OIDC account, so it is re-checked in the background and its Personal access tokens have no inactivity limit. The token itself is never returned. */

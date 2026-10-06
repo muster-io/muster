@@ -8498,7 +8498,8 @@ components:
           type: boolean
         display_name:
           type: string
-          description: Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL.
+          description: Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL;
+            a read leaves it out while the default applies, and an empty value returns to the default.
         issuer_url:
           type: string
           format: uri

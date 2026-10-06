@@ -113,6 +113,7 @@ type Config struct {
 	Organization Organization
 	Notices      Notices
 	Live         Live
+	OIDC         OIDC
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -132,6 +133,7 @@ type Server struct {
 	organization   Organization
 	notices        Notices
 	live           Live
+	oidc           OIDC
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -153,6 +155,8 @@ var implemented = map[string]bool{
 	"GetMyTotp": true, "BeginTotpEnrolment": true, "ConfirmTotpEnrolment": true, "RemoveTotp": true,
 	"RegenerateTotpRecoveryCodes": true, "SubmitSessionTotp": true, "ResetUserTotp": true, "GetOrganization": true,
 	"UpdateOrganization": true, "ListSystemNotices": true, "StreamLiveUpdates": true,
+	"GetOidcSettings": true, "UpdateOidcSettings": true, "CheckOidcSettings": true, "StartOidcSignIn": true,
+	"CompleteOidcSignIn": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -179,11 +183,11 @@ func New(cfg Config) (*Server, error) {
 	}
 	s := &Server{
 		sessions: cfg.Sessions, users: cfg.Users, admin: cfg.Admin, auditLog: cfg.AuditLog, totp: cfg.TOTP,
-		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
+		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, oidc: cfg.OIDC, trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}
 	mux := http.NewServeMux()
-	strict := gen.NewStrictHandlerWithOptions(s, []gen.StrictMiddlewareFunc{notImplemented},
+	strict := gen.NewStrictHandlerWithOptions(s, []gen.StrictMiddlewareFunc{notImplemented, withOIDCState},
 		gen.StrictHTTPServerOptions{
 			RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, _ error) {
 				writeProblem(w, r, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,

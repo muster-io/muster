@@ -3,16 +3,19 @@
 
 // Package fakeproxy is a fake HTTP proxy (CONNECT tunnels and requests in absolute form, optionally over TLS) and a
 // fake SOCKS5 proxy (CONNECT, optionally with username and password authentication), for the tests of the outbound
-// package. Both record every target they connect to, and resolve the names in their Hosts first, so that a test can
-// name a target only the proxy can resolve.
+// package and for `muster dev`. Both record every target they connect to, and resolve the names in their Hosts first,
+// so that a test can name a target only the proxy can resolve. Both also answer GET /_fake/requests on their own port
+// with the connections they made, so that a live check can see what went through them.
 package fakeproxy
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -46,9 +49,12 @@ type Options struct {
 // Connection is a connection the proxy made: the target as the client asked for it, and the local address of the
 // proxy's connection to it, which is the remote address the target sees.
 type Connection struct {
-	Target    string
-	LocalAddr string
+	Target    string `json:"target"`
+	LocalAddr string `json:"local_addr"`
 }
+
+// controlPath lists the connections a proxy made; DELETE forgets them.
+const controlPath = "/_fake/requests"
 
 // Server is a running fake proxy.
 type Server struct {
@@ -156,11 +162,17 @@ func (s *Server) serve() {
 		s.track(c)
 		conns.Go(func() {
 			defer s.untrack(c)
+			r := bufio.NewReader(c)
 			if s.kind == SOCKS5 {
-				s.serveSOCKS5(c)
+				// A SOCKS5 greeting starts with the version byte; anything else is a request for the control endpoint.
+				if b, err := r.Peek(1); err == nil && b[0] != socksVersion {
+					s.serveHTTP(c, r)
+					return
+				}
+				s.serveSOCKS5(c, r)
 				return
 			}
-			s.serveHTTP(c)
+			s.serveHTTP(c, r)
 		})
 	}
 }
@@ -194,10 +206,16 @@ func (s *Server) dial(target string) (net.Conn, error) {
 	return conn, nil
 }
 
-func (s *Server) serveHTTP(c net.Conn) {
-	r := bufio.NewReader(c)
+func (s *Server) serveHTTP(c net.Conn, r *bufio.Reader) {
 	req, err := http.ReadRequest(r)
 	if err != nil {
+		return
+	}
+	if req.URL.Host == "" && req.Method != http.MethodConnect {
+		s.serveControl(c, req)
+		return
+	}
+	if s.kind != HTTP {
 		return
 	}
 	if s.opts.Username != "" || s.opts.Password != "" {
@@ -266,8 +284,33 @@ const (
 	repCmdUnknown  = 0x07
 )
 
-func (s *Server) serveSOCKS5(c net.Conn) {
-	r := bufio.NewReader(c)
+// serveControl answers a request in origin form to the proxy itself: GET /_fake/requests lists the connections it
+// made and DELETE forgets them. Like the control endpoints of the fake servers, it refuses requests a browser makes.
+func (s *Server) serveControl(c net.Conn, req *http.Request) {
+	status, body := http.StatusNotFound, []byte(`{"error":"not found"}`)
+	switch {
+	case req.Header.Get("Origin") != "":
+		status, body = http.StatusForbidden, []byte(`{"error":"the control endpoint refuses requests with an Origin header"}`)
+	case req.URL.Path == controlPath && req.Method == http.MethodGet:
+		conns := s.Connections()
+		if conns == nil {
+			conns = []Connection{}
+		}
+		status = http.StatusOK
+		body, _ = json.Marshal(conns) // a slice of strings always encodes
+	case req.URL.Path == controlPath && req.Method == http.MethodDelete:
+		s.mu.Lock()
+		s.conns = nil
+		s.mu.Unlock()
+		status, body = http.StatusNoContent, nil
+	}
+	resp := &http.Response{StatusCode: status, ProtoMajor: 1, ProtoMinor: 1, Close: true,
+		Header: http.Header{"Content-Type": {"application/json"}}, ContentLength: int64(len(body)),
+		Body: io.NopCloser(bytes.NewReader(body))}
+	_ = resp.Write(c)
+}
+
+func (s *Server) serveSOCKS5(c net.Conn, r *bufio.Reader) {
 	if !s.socksAuth(c, r) {
 		return
 	}
