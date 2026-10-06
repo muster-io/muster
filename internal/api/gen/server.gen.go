@@ -3441,7 +3441,7 @@ type IntegrationTokenCreate struct {
 
 // IntegrationTokenCreated defines model for IntegrationTokenCreated.
 type IntegrationTokenCreated struct {
-	// AlertmanagerSnippet Alertmanager receiver and route (YAML) with `send_resolved: true`, `max_alerts: 0`, `http_config.authorization` and the token. The route is a child route with `continue: true`, to be placed first, so that it runs beside the existing receiver. Shown once.
+	// AlertmanagerSnippet Alertmanager receiver and route (YAML) with `send_resolved: true`, `max_alerts: 0`, `http_config.authorization` and the token. The route is a child route with `continue: true`, to be placed first, followed by a commented catch-all child route for the default receiver, to be kept last, so that the default receiver keeps getting alerts. Shown once.
 	AlertmanagerSnippet string `json:"alertmanager_snippet"`
 
 	// HeartbeatSnippet Always-firing rule, route and receiver for the Heartbeat; null while the Heartbeat is off. Shown once.

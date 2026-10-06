@@ -1,7 +1,7 @@
 # Verified facts
 
 - Status: Living document
-- Date: 2026-10-04
+- Date: 2026-10-07
 
 External behaviour that Muster's design relies on and that was checked against the real system rather than taken from
 its documentation: how Telegram, Mattermost and Alertmanager actually behave. Each fact has a stable id `F-NNN`, never
@@ -345,6 +345,20 @@ in the next repeat. A shorter stop kept `startsAt`; a first evaluation after `en
 `startsAt` came before the old `endsAt` and Alertmanager merged the alerts, keeping the old `startsAt`; a 10-minute stop
 gave a resolve and `first notification`. — _2026-10-04 · live test · vmalert v1.153.0, Alertmanager v0.34.1_ · Used in
 C-06.FR-11.
+
+### Routing
+
+**F-059. A first child route without matchers silences the top-level receiver.** Alertmanager sends an alert to the
+receiver of the top-level route only when no child route matches it; `continue: true` on a matching child route only
+lets the next siblings be tried. A first child route without matchers matches every alert, so an alert that no later
+child route matches goes to that route's receiver alone. With the Muster route of the snippet first, `amtool config
+routes test` returned only `muster` for a plain alert and the stand's default webhook got nothing; a last child route
+`- receiver: <default receiver>` without matchers made it return both, and the default webhook got the alerts again.
+This matches the [routing documentation](https://prometheus.io/docs/alerting/latest/configuration/#route) of
+Alertmanager: an alert enters the tree at the top-level route, which matches every alert, and traverses the child
+nodes; when no child matches, the alert is handled by the current node's configuration. — _2026-10-06/07 · live check
+on a test stand with `amtool config routes test` and a webhook default receiver; `amtool` v0.34.1 against the rendered
+snippet with and without the catch-all; Alertmanager routing documentation_ · Used in C-05.FR-5.
 
 ## Pending
 

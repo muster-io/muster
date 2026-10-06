@@ -23,7 +23,7 @@ export interface IntegrationTokenCreated {
   token: IntegrationToken;
   /** The token, starting with `mstr_int_`. Shown once. */
   value: string;
-  /** Alertmanager receiver and route (YAML) with `send_resolved: true`, `max_alerts: 0`, `http_config.authorization` and the token. The route is a child route with `continue: true`, to be placed first, so that it runs beside the existing receiver. Shown once. */
+  /** Alertmanager receiver and route (YAML) with `send_resolved: true`, `max_alerts: 0`, `http_config.authorization` and the token. The route is a child route with `continue: true`, to be placed first, followed by a commented catch-all child route for the default receiver, to be kept last, so that the default receiver keeps getting alerts. Shown once. */
   alertmanager_snippet: string;
   /**
      * Always-firing rule, route and receiver for the Heartbeat; null while the Heartbeat is off. Shown once.
