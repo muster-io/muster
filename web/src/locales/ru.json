@@ -271,7 +271,7 @@
   "roles": {
     "admin": "Администратор",
     "none": "Нет",
-    "responder": "Дежурный",
+    "responder": "Исполнитель",
     "viewer": "Наблюдатель"
   },
   "secondFactor": {
