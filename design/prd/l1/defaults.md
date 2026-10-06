@@ -66,7 +66,7 @@ table in the same pull request.
 | `oidc.secret_expiry_lead` | 14 days before the entered expiry date | built in | C-03, C-19 | decided |
 | `oidc.auth_request_ttl` | 10 min for an OIDC redirect (sign-in or link) to come back to the callback | built in | C-03 | decided |
 | `token.expiry` | none (the UI warns) | token | C-04 | decided |
-| `api.rate_limit` | 20 requests per second per token, bursts of 100, counted on each replica | built in | C-04 | P-09 |
+| `api.rate_limit` | 20 requests per second per token, bursts of 100, counted on each replica; web sessions and ingestion are not limited | built in | C-04 | decided |
 | `api.page_size` | 50, maximum 500 | request | C-09 | decided |
 
 ## Integrations and processing

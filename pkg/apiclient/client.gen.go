@@ -8669,7 +8669,7 @@ type ClientInterface interface {
 	//
 	// Server-sent events (`text/event-stream`). OpenAPI 3.1 cannot type event streams, so the events are described by `HintEvent`.
 	//
-	// Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page.
+	// Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page. The stream follows a web session; a token gets `403` (`session_required`).
 	//
 	// Corresponds with GET /live-updates (the `StreamLiveUpdates` operationId).
 	StreamLiveUpdates(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -9217,12 +9217,16 @@ type ClientInterface interface {
 
 	// CreateServiceAccountWithBody Create a Service account
 	//
+	// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
+	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /service-accounts (the `CreateServiceAccount` operationId).
 	CreateServiceAccountWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateServiceAccount Create a Service account
+	//
+	// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -9243,12 +9247,16 @@ type ClientInterface interface {
 
 	// UpdateServiceAccountWithBody Update a Service account
 	//
+	// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
+	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with PUT /service-accounts/{service_account_id} (the `UpdateServiceAccount` operationId).
 	UpdateServiceAccountWithBody(ctx context.Context, serviceAccountId ServiceAccountId, params *UpdateServiceAccountParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// UpdateServiceAccount Update a Service account
+	//
+	// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -9276,6 +9284,8 @@ type ClientInterface interface {
 
 	// CreateServiceAccountTokenWithBody Create a Service account token
 	//
+	// Shows the token once. Web session only: a token can never mint another token.
+	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /service-accounts/{service_account_id}/tokens (the `CreateServiceAccountToken` operationId).
@@ -9283,12 +9293,16 @@ type ClientInterface interface {
 
 	// CreateServiceAccountToken Create a Service account token
 	//
+	// Shows the token once. Web session only: a token can never mint another token.
+	//
 	// Takes a body of the `application/json` content type.
 	//
 	// Corresponds with POST /service-accounts/{service_account_id}/tokens (the `CreateServiceAccountToken` operationId).
 	CreateServiceAccountToken(ctx context.Context, serviceAccountId ServiceAccountId, body CreateServiceAccountTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RevokeServiceAccountToken Revoke a Service account token
+	//
+	// Revokes the token at once. Web session only: a token can never revoke a token.
 	//
 	// Corresponds with DELETE /service-accounts/{service_account_id}/tokens/{token_id} (the `RevokeServiceAccountToken` operationId).
 	RevokeServiceAccountToken(ctx context.Context, serviceAccountId ServiceAccountId, tokenId TokenId, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -9422,7 +9436,7 @@ type ClientInterface interface {
 
 	// CreateUserWithBody Create a local user
 	//
-	// Returns a single-use password setup link; Muster sends no email.
+	// Returns a single-use password setup link; Muster sends no email. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -9431,7 +9445,7 @@ type ClientInterface interface {
 
 	// CreateUser Create a local user
 	//
-	// Returns a single-use password setup link; Muster sends no email.
+	// Returns a single-use password setup link; Muster sends no email. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -9452,7 +9466,7 @@ type ClientInterface interface {
 
 	// UpdateUserWithBody Update a user
 	//
-	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -9461,7 +9475,7 @@ type ClientInterface interface {
 
 	// UpdateUser Update a user
 	//
-	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -11000,7 +11014,7 @@ func (c *Client) UpdateLinkRule(ctx context.Context, linkRuleId LinkRuleId, para
 //
 // Server-sent events (`text/event-stream`). OpenAPI 3.1 cannot type event streams, so the events are described by `HintEvent`.
 //
-// Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page.
+// Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page. The stream follows a web session; a token gets `403` (`session_required`).
 //
 // Corresponds with GET /live-updates (the `StreamLiveUpdates` operationId).
 func (c *Client) StreamLiveUpdates(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -12248,6 +12262,8 @@ func (c *Client) ListServiceAccounts(ctx context.Context, params *ListServiceAcc
 
 // CreateServiceAccountWithBody Create a Service account
 //
+// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
+//
 // Takes any type of body and a specified content type.
 //
 // Corresponds with POST /service-accounts (the `CreateServiceAccount` operationId).
@@ -12264,6 +12280,8 @@ func (c *Client) CreateServiceAccountWithBody(ctx context.Context, contentType s
 }
 
 // CreateServiceAccount Create a Service account
+//
+// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 //
 // Takes a body of the `application/json` content type.
 //
@@ -12314,6 +12332,8 @@ func (c *Client) GetServiceAccount(ctx context.Context, serviceAccountId Service
 
 // UpdateServiceAccountWithBody Update a Service account
 //
+// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
+//
 // Takes any type of body and a specified content type.
 //
 // Corresponds with PUT /service-accounts/{service_account_id} (the `UpdateServiceAccount` operationId).
@@ -12330,6 +12350,8 @@ func (c *Client) UpdateServiceAccountWithBody(ctx context.Context, serviceAccoun
 }
 
 // UpdateServiceAccount Update a Service account
+//
+// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 //
 // Takes a body of the `application/json` content type.
 //
@@ -12397,6 +12419,8 @@ func (c *Client) ListServiceAccountTokens(ctx context.Context, serviceAccountId 
 
 // CreateServiceAccountTokenWithBody Create a Service account token
 //
+// Shows the token once. Web session only: a token can never mint another token.
+//
 // Takes any type of body and a specified content type.
 //
 // Corresponds with POST /service-accounts/{service_account_id}/tokens (the `CreateServiceAccountToken` operationId).
@@ -12414,6 +12438,8 @@ func (c *Client) CreateServiceAccountTokenWithBody(ctx context.Context, serviceA
 
 // CreateServiceAccountToken Create a Service account token
 //
+// Shows the token once. Web session only: a token can never mint another token.
+//
 // Takes a body of the `application/json` content type.
 //
 // Corresponds with POST /service-accounts/{service_account_id}/tokens (the `CreateServiceAccountToken` operationId).
@@ -12430,6 +12456,8 @@ func (c *Client) CreateServiceAccountToken(ctx context.Context, serviceAccountId
 }
 
 // RevokeServiceAccountToken Revoke a Service account token
+//
+// Revokes the token at once. Web session only: a token can never revoke a token.
 //
 // Corresponds with DELETE /service-accounts/{service_account_id}/tokens/{token_id} (the `RevokeServiceAccountToken` operationId).
 func (c *Client) RevokeServiceAccountToken(ctx context.Context, serviceAccountId ServiceAccountId, tokenId TokenId, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -12743,7 +12771,7 @@ func (c *Client) ListUsers(ctx context.Context, params *ListUsersParams, reqEdit
 
 // CreateUserWithBody Create a local user
 //
-// Returns a single-use password setup link; Muster sends no email.
+// Returns a single-use password setup link; Muster sends no email. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 //
 // Takes any type of body and a specified content type.
 //
@@ -12762,7 +12790,7 @@ func (c *Client) CreateUserWithBody(ctx context.Context, contentType string, bod
 
 // CreateUser Create a local user
 //
-// Returns a single-use password setup link; Muster sends no email.
+// Returns a single-use password setup link; Muster sends no email. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 //
 // Takes a body of the `application/json` content type.
 //
@@ -12813,7 +12841,7 @@ func (c *Client) GetUser(ctx context.Context, userId UserId, reqEditors ...Reque
 
 // UpdateUserWithBody Update a user
 //
-// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 //
 // Takes any type of body and a specified content type.
 //
@@ -12832,7 +12860,7 @@ func (c *Client) UpdateUserWithBody(ctx context.Context, userId UserId, params *
 
 // UpdateUser Update a user
 //
-// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 //
 // Takes a body of the `application/json` content type.
 //
@@ -20862,7 +20890,7 @@ type ClientWithResponsesInterface interface {
 	//
 	// Server-sent events (`text/event-stream`). OpenAPI 3.1 cannot type event streams, so the events are described by `HintEvent`.
 	//
-	// Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page.
+	// Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page. The stream follows a web session; a token gets `403` (`session_required`).
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -21474,12 +21502,16 @@ type ClientWithResponsesInterface interface {
 
 	// CreateServiceAccountWithBodyWithResponse Create a Service account
 	//
+	// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
+	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /service-accounts (the `CreateServiceAccount` operationId).
 	CreateServiceAccountWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateServiceAccountResponse, error)
 
 	// CreateServiceAccountWithResponse Create a Service account
+	//
+	// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21504,12 +21536,16 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateServiceAccountWithBodyWithResponse Update a Service account
 	//
+	// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
+	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /service-accounts/{service_account_id} (the `UpdateServiceAccount` operationId).
 	UpdateServiceAccountWithBodyWithResponse(ctx context.Context, serviceAccountId ServiceAccountId, params *UpdateServiceAccountParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateServiceAccountResponse, error)
 
 	// UpdateServiceAccountWithResponse Update a Service account
+	//
+	// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21543,6 +21579,8 @@ type ClientWithResponsesInterface interface {
 
 	// CreateServiceAccountTokenWithBodyWithResponse Create a Service account token
 	//
+	// Shows the token once. Web session only: a token can never mint another token.
+	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /service-accounts/{service_account_id}/tokens (the `CreateServiceAccountToken` operationId).
@@ -21550,12 +21588,16 @@ type ClientWithResponsesInterface interface {
 
 	// CreateServiceAccountTokenWithResponse Create a Service account token
 	//
+	// Shows the token once. Web session only: a token can never mint another token.
+	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /service-accounts/{service_account_id}/tokens (the `CreateServiceAccountToken` operationId).
 	CreateServiceAccountTokenWithResponse(ctx context.Context, serviceAccountId ServiceAccountId, body CreateServiceAccountTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateServiceAccountTokenResponse, error)
 
 	// RevokeServiceAccountTokenWithResponse Revoke a Service account token
+	//
+	// Revokes the token at once. Web session only: a token can never revoke a token.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -21713,7 +21755,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateUserWithBodyWithResponse Create a local user
 	//
-	// Returns a single-use password setup link; Muster sends no email.
+	// Returns a single-use password setup link; Muster sends no email. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21722,7 +21764,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateUserWithResponse Create a local user
 	//
-	// Returns a single-use password setup link; Muster sends no email.
+	// Returns a single-use password setup link; Muster sends no email. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21747,7 +21789,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateUserWithBodyWithResponse Update a user
 	//
-	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21756,7 +21798,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateUserWithResponse Update a user
 	//
-	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+	// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -35167,7 +35209,7 @@ func (c *ClientWithResponses) UpdateLinkRuleWithResponse(ctx context.Context, li
 //
 // Server-sent events (`text/event-stream`). OpenAPI 3.1 cannot type event streams, so the events are described by `HintEvent`.
 //
-// Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page.
+// Each event has the name `hint`, an `id` line and a JSON `data` line `{type, id}`. A hint carries no data: the client re-reads through the API, so authorization stays in one place. The stream starts with `retry: 3000` (the reconnect delay in milliseconds) and a comment line (`: keepalive`) follows periodically. After a reconnect the client invalidates everything; `Last-Event-ID` is not replayed. When the session expires or is ended, the server closes the stream; the browser's reconnect then gets `401`, which makes `EventSource` stop for good, and the SPA goes to the sign-in page. The stream follows a web session; a token gets `403` (`session_required`).
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -36199,6 +36241,8 @@ func (c *ClientWithResponses) ListServiceAccountsWithResponse(ctx context.Contex
 
 // CreateServiceAccountWithBodyWithResponse Create a Service account
 //
+// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
+//
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /service-accounts (the `CreateServiceAccount` operationId).
@@ -36211,6 +36255,8 @@ func (c *ClientWithResponses) CreateServiceAccountWithBodyWithResponse(ctx conte
 }
 
 // CreateServiceAccountWithResponse Create a Service account
+//
+// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36253,6 +36299,8 @@ func (c *ClientWithResponses) GetServiceAccountWithResponse(ctx context.Context,
 
 // UpdateServiceAccountWithBodyWithResponse Update a Service account
 //
+// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
+//
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /service-accounts/{service_account_id} (the `UpdateServiceAccount` operationId).
@@ -36265,6 +36313,8 @@ func (c *ClientWithResponses) UpdateServiceAccountWithBodyWithResponse(ctx conte
 }
 
 // UpdateServiceAccountWithResponse Update a Service account
+//
+// A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36322,6 +36372,8 @@ func (c *ClientWithResponses) ListServiceAccountTokensWithResponse(ctx context.C
 
 // CreateServiceAccountTokenWithBodyWithResponse Create a Service account token
 //
+// Shows the token once. Web session only: a token can never mint another token.
+//
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /service-accounts/{service_account_id}/tokens (the `CreateServiceAccountToken` operationId).
@@ -36335,6 +36387,8 @@ func (c *ClientWithResponses) CreateServiceAccountTokenWithBodyWithResponse(ctx 
 
 // CreateServiceAccountTokenWithResponse Create a Service account token
 //
+// Shows the token once. Web session only: a token can never mint another token.
+//
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /service-accounts/{service_account_id}/tokens (the `CreateServiceAccountToken` operationId).
@@ -36347,6 +36401,8 @@ func (c *ClientWithResponses) CreateServiceAccountTokenWithResponse(ctx context.
 }
 
 // RevokeServiceAccountTokenWithResponse Revoke a Service account token
+//
+// Revokes the token at once. Web session only: a token can never revoke a token.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -36612,7 +36668,7 @@ func (c *ClientWithResponses) ListUsersWithResponse(ctx context.Context, params 
 
 // CreateUserWithBodyWithResponse Create a local user
 //
-// Returns a single-use password setup link; Muster sends no email.
+// Returns a single-use password setup link; Muster sends no email. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36627,7 +36683,7 @@ func (c *ClientWithResponses) CreateUserWithBodyWithResponse(ctx context.Context
 
 // CreateUserWithResponse Create a local user
 //
-// Returns a single-use password setup link; Muster sends no email.
+// Returns a single-use password setup link; Muster sends no email. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36670,7 +36726,7 @@ func (c *ClientWithResponses) GetUserWithResponse(ctx context.Context, userId Us
 
 // UpdateUserWithBodyWithResponse Update a user
 //
-// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36685,7 +36741,7 @@ func (c *ClientWithResponses) UpdateUserWithBodyWithResponse(ctx context.Context
 
 // UpdateUserWithResponse Update a user
 //
-// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role.
+// Changes name, email and Role. A Role change ends the user's sessions. Refused with `409` (`role_locked`) for a Role change of an account that signs in through OIDC while OIDC and `oidc.sync_role` are both on, and with `409` (`last_admin`) when it would give the last active Admin a lower Role. A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

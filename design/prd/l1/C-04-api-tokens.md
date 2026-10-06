@@ -36,13 +36,16 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   optional (`token.expiry`); the UI warns on tokens without one. Each token shows when and from which address it was
   last used — the client address of C-02.FR-1 (`MUSTER_TRUSTED_PROXIES`) — and can be revoked.
 - **C-04.FR-4** API requests authenticate with `Authorization: Bearer <token>`. Integration tokens are not accepted by
-  the API, and API tokens are not accepted by ingestion.
+  the API, and API tokens are not accepted by ingestion. A Personal access token keeps working while its owner's next
+  web session would have to enrol TOTP first (C-03.FR-10), since a token can only be created from a full web session.
 - **C-04.FR-5** The API is rate-limited per token by `api.rate_limit`; excess requests get `429` with `Retry-After`.
   Ingestion is not rate-limited.
 - **C-04.FR-6** Issuing and revoking tokens is recorded in the Audit log; every action made with a token records its
   name, shown as "{user} via token {name}" or as the Service account and token.
 - **C-04.FR-7** A token cannot mint or revoke tokens: Personal access tokens are issued and revoked from the web session
   only (C-03.FR-27). The Permissions chosen for a new token must be a subset of what its creator holds at that moment.
+  A token may only assign a Role whose Permissions it holds itself: creating or updating a User or a Service account
+  with any other Role gets `422` with `permission_not_held` at `/role`. The web session is not limited by this rule.
 - **C-04.FR-8** A Personal access token of an account that signs in through OIDC follows the IdP (C-03.FR-30). After the
   IdP refuses the owner at a background re-check, the token gets `401` with the code `oidc_recheck_required` and the
   text "Sign in through OIDC to make your tokens work again." until the owner's next successful OIDC sign-in. While

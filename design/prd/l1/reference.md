@@ -136,7 +136,8 @@ operations that change them need the web session, C-03.FR-27), the profile's sho
 account through (only the id, the name and the messenger of each, C-18.FR-10), the basic read of the `organization`
 resource (the outgoing heartbeat URL masked), system notices and live updates. A bulk command needs the Permission of
 the command it runs. A Personal access token can only narrow its owner's Permissions; a Service account has its Role's
-Permissions but cannot become an Owner (C-04.FR-2).
+Permissions but cannot become an Owner (C-04.FR-2). A token may only assign a Role whose Permissions it holds itself,
+when it creates or updates a User or a Service account (`422` `permission_not_held` at `/role`, C-04.FR-7).
 
 **Secret masking.** Secret values are write-only for everyone, Admins included (C-03.FR-21): bot tokens, the OIDC
 client secret, proxy passwords, outgoing webhook Secrets and Signing secrets, the outgoing heartbeat URL and master

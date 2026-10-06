@@ -179,7 +179,7 @@ issue: 20
   | Clock | Consumers |
   |---|---|
   | Business: moved by the development clock | domain timestamps (`received_at`, `fired_at`, Timeline and Audit log entries, `created_at`, `updated_at`); timers and every due time (`timers.deadline` for Snoozes, notices and Reminders, `oidc_checks.deadline`, the delivery worker's `next_attempt_at` and its limiter buckets); windows (duplicate, Reopen, Grace period, Thread batching, Storm, copy wait); retention and partition maintenance; sessions and the expiry of tokens and links; the Leader's alive mark, downtime and the recovery window |
-  | Real: never moved | TOTP steps (S-012); ID-token `exp` and `iat` (S-013); outgoing webhook signatures and `webhook-timestamp` (S-044); row leases (`lease_until` of the claim helper, S-062) and the Leader lease (S-008); the clock skew check (S-008); replica key records and their liveness (S-007); HTTP timeouts and other waits on an external system |
+  | Real: never moved | TOTP steps (S-012); ID-token `exp` and `iat` (S-013); outgoing webhook signatures and `webhook-timestamp` (S-044); row leases (`lease_until` of the claim helper, S-062) and the Leader lease (S-008); the clock skew check (S-008); replica key records and their liveness (S-007); HTTP timeouts and other waits on an external system; the token buckets of the API rate limiter (S-016), which count requests per second of real time, so an advance never refills them |
 - **Fake Alertmanager** (C-01.FR-13): a group model on top of the receivers of S-018:
   - `PUT /_fake/groups/{group}` `{"receiver", "route", "labels"}` defines an Alertmanager group and answers its
     `group_key` (`<route>:{<labels>}`, rendered as Alertmanager does);

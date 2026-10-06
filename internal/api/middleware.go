@@ -180,6 +180,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 	if !op.public {
 		id, p := s.authenticate(rec, r, op)
+		if p == nil {
+			p = credentialsAllowed(id, op)
+		}
 		if p != nil && op.id == operationCompleteOidcLink {
 			// The identity provider sends the browser back here: every outcome is a redirect to the profile, and a
 			// link without a usable web session is refused like one from another session.
@@ -208,11 +211,18 @@ func (s *Server) route(r *http.Request) *operation {
 	return s.operations[route.Operation]
 }
 
-// authenticate finds the identity of a request to an operation that needs one: the web session of the cookie, with
-// its CSRF token on a mutating request. Bearer tokens arrive with C-04; until then they are refused.
+// authenticate finds the identity of a request to an operation that needs one: a bearer token (C-04.FR-4), which needs
+// no CSRF token, or else the web session of the cookie, with its CSRF token on a mutating request.
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, op *operation) (*auth.Identity, *Problem) {
-	if strings.HasPrefix(strings.ToLower(r.Header.Get("Authorization")), "bearer ") {
-		return nil, errUnauthenticated
+	if scheme, value, _ := strings.Cut(r.Header.Get("Authorization"), " "); strings.EqualFold(scheme, "bearer") {
+		if s.tokens == nil {
+			return nil, errUnauthenticated
+		}
+		id, err := s.tokens.Authenticate(r.Context(), strings.TrimSpace(value), clientAddress(r.Context()))
+		if err != nil {
+			return nil, s.problemFor(r.Context(), op.id, err)
+		}
+		return id, nil
 	}
 	cookie, err := r.Cookie(auth.CookieName)
 	if err != nil || cookie.Value == "" {
@@ -239,8 +249,20 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, op *operat
 	return &auth.Identity{Session: sess, Permissions: s.sessions.Permissions(sess), Transport: audit.TransportUI}, nil
 }
 
-// permit checks the Permission of the operation's x-permission and, for an operation on the caller's own account,
-// that the caller uses the web session; it runs after request validation.
+// credentialsAllowed refuses a token where the operation needs the web session — the operations that change the
+// caller's own account, tokens included (C-03.FR-27, C-04.FR-7) — and a Service account under /me, which it does not
+// have. It runs before request validation, so that a token learns this whatever its request carries.
+func credentialsAllowed(id *auth.Identity, op *operation) *Problem {
+	if op.sessionOnly && id.Token != nil {
+		return errSessionRequired
+	}
+	if id.IsServiceAccount() && (op.path == "/me" || strings.HasPrefix(op.path, "/me/")) {
+		return errServiceAccountDenied
+	}
+	return nil
+}
+
+// permit checks the Permission of the operation's x-permission; it runs after request validation.
 func (s *Server) permit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		op := infoFrom(r.Context()).operation
@@ -251,10 +273,6 @@ func (s *Server) permit(next http.Handler) http.Handler {
 		id, ok := auth.IdentityFrom(r.Context())
 		if !ok {
 			writeProblem(w, r, errUnauthenticated)
-			return
-		}
-		if op.sessionOnly && id.Transport != audit.TransportUI {
-			writeProblem(w, r, errSessionRequired)
 			return
 		}
 		if !allowed(id, op.permissions) {

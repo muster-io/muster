@@ -20,6 +20,7 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/oidc"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
 )
@@ -65,6 +66,8 @@ const (
 	codeOIDCAlreadyLinked     = "oidc_already_linked"
 	codeOIDCNotLinked         = "oidc_not_linked"
 	codeRoleLocked            = "role_locked"
+	codeServiceAccountDenied  = "service_account_not_allowed"
+	codeOIDCRecheckRequired   = "oidc_recheck_required"
 
 	fieldRequired      = "required"
 	fieldInvalidFormat = "invalid_format"
@@ -142,6 +145,8 @@ var (
 		"This operation accepts the web session only.")
 	errTooLarge = problem(http.StatusRequestEntityTooLarge, typePayloadTooLarge, "",
 		"The request body is larger than 1 MiB.")
+	errServiceAccountDenied = problem(http.StatusForbidden, typeForbidden, codeServiceAccountDenied,
+		"A Service account has no profile; this operation needs a User.")
 	errOIDCNotEnabled = problem(http.StatusConflict, typeConflict, codeOIDCNotEnabled, "OIDC sign-in is switched off.")
 	errInternal       = problem(http.StatusInternalServerError, typeInternal, "", "The request failed; try again later.")
 )
@@ -185,6 +190,15 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		p.RetryAfter = t.Seconds()
 		return p
 	}
+	if t, ok := errors.AsType[*tokens.RateLimitedError](err); ok {
+		p := problem(http.StatusTooManyRequests, typeRateLimited, "",
+			"The token sent too many requests; wait before the next one.")
+		p.RetryAfter = t.Seconds()
+		return p
+	}
+	if f, ok := errors.AsType[*tokens.FieldError](err); ok {
+		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
 	if f, ok := errors.AsType[*oidc.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
@@ -209,6 +223,19 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 			"The identity provider no longer accepts your account; sign in again.")
 	case errors.Is(err, auth.ErrUnauthenticated):
 		return errUnauthenticated
+	case errors.Is(err, tokens.ErrInvalidToken):
+		return problem(http.StatusUnauthorized, typeUnauthenticated, codeInvalidCredentials,
+			"The token is missing, wrong, revoked or expired.")
+	case errors.Is(err, tokens.ErrOIDCRecheckRequired):
+		return problem(http.StatusUnauthorized, typeUnauthenticated, codeOIDCRecheckRequired,
+			"Sign in through OIDC to make your tokens work again.")
+	case errors.Is(err, tokens.ErrNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Service account or token.")
+	case errors.Is(err, tokens.ErrNameTaken):
+		return problem(http.StatusConflict, typeConflict, codeNameTaken,
+			"Another Service account has this name; names are compared case-insensitively.")
+	case errors.Is(err, tokens.ErrVersionMismatch):
+		return errPreconditionFailed
 	case errors.Is(err, auth.ErrPasswordTooShort):
 		return fieldProblem(http.StatusUnprocessableEntity, "/new_password", fieldTooShort,
 			"The password is shorter than "+strconv.Itoa(auth.PasswordMinLength)+" characters.")

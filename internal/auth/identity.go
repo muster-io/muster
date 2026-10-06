@@ -13,18 +13,59 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 )
 
-// Identity is who makes a request: for now a user signed in with a web session (S-016 adds tokens). It is derived
-// once per request by the API middleware and travels in the request context.
+// Identity is who makes a request: a user signed in with a web session, a user through a Personal access token, or
+// a Service account through one of its tokens (C-04). It is derived once per request by the API middleware and travels
+// in the request context.
 type Identity struct {
+	// Session is the web session; for a Personal access token only its User is set, to the token's owner, and for a
+	// Service account token it is empty.
 	Session     Session
 	Permissions []Permission
-	// Transport is ui for the web session.
+	// Transport is ui for the web session and api for a token.
 	Transport audit.Transport
+	// Token is the token of the request; nil for the web session.
+	Token *Token
 }
 
-// Actor is the identity as the Audit log records it.
+// Token is the Personal access token or Service account token a request authenticated with.
+type Token struct {
+	ID       int64
+	PublicID string
+	Name     string
+	// ServiceAccount is the account of a Service account token; nil for a Personal access token.
+	ServiceAccount *Principal
+}
+
+// IsServiceAccount reports whether the identity is a Service account, which has no profile and no Account links.
+func (id *Identity) IsServiceAccount() bool {
+	return id.Token != nil && id.Token.ServiceAccount != nil
+}
+
+// Actor is the identity as the Audit log records it, with the token it used.
 func (id *Identity) Actor() audit.Actor {
-	return audit.User(id.Session.User.ID, id.Session.User.PublicID)
+	if id.Token == nil {
+		return audit.User(id.Session.User.ID, id.Session.User.PublicID)
+	}
+	if sa := id.Token.ServiceAccount; sa != nil {
+		return audit.ServiceAccount(sa.ID, sa.PublicID).Via(id.Token.ID, id.Token.Name)
+	}
+	return audit.User(id.Session.User.ID, id.Session.User.PublicID).Via(id.Token.ID, id.Token.Name)
+}
+
+// MayAssign reports whether the identity may give someone the Role role, and the first Permission of the Role it
+// lacks when it may not: a token may only assign a Role whose Permissions it holds itself, so that a narrowed token
+// never creates or changes a User or a Service account with more than the token (C-04.FR-7). The web session is not
+// limited by this rule; the Permission of the operation decides.
+func (id *Identity) MayAssign(roles Roles, role string) (Permission, bool) {
+	if id.Token == nil {
+		return "", true
+	}
+	for _, p := range roles.Permissions(role) {
+		if !id.Can(p) {
+			return p, false
+		}
+	}
+	return "", true
 }
 
 // Can reports whether the identity holds p.

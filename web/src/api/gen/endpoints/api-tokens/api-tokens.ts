@@ -459,6 +459,7 @@ export const getCreateServiceAccountUrl = () => {
 }
 
 /**
+ * A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
  * @summary Create a Service account
  */
 export const createServiceAccount = async (serviceAccountInput: ServiceAccountInput, options?: Parameters<typeof apiFetch>[1]): Promise<ServiceAccount> => {
@@ -646,6 +647,7 @@ export const getUpdateServiceAccountUrl = (serviceAccountId: string,) => {
 }
 
 /**
+ * A token may only assign a Role whose Permissions it holds itself (`422` `permission_not_held` at `/role`).
  * @summary Update a Service account
  */
 export const updateServiceAccount = async (serviceAccountId: string,
@@ -1056,6 +1058,7 @@ export const getCreateServiceAccountTokenUrl = (serviceAccountId: string,) => {
 }
 
 /**
+ * Shows the token once. Web session only: a token can never mint another token.
  * @summary Create a Service account token
  */
 export const createServiceAccountToken = async (serviceAccountId: string,
@@ -1145,6 +1148,7 @@ export const useCreateServiceAccountToken = <TError = BadRequestResponse | Unaut
 }
 
 /**
+ * Revokes the token at once. Web session only: a token can never revoke a token.
  * @summary Revoke a Service account token
  */
 export const revokeServiceAccountToken = async (serviceAccountId: string,

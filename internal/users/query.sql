@@ -146,6 +146,12 @@ UPDATE sessions
 SET ended_at = @now::timestamptz, end_reason = @end_reason
 WHERE org_id = @org_id AND user_id = @user_id AND ended_at IS NULL;
 
+-- RevokeTokensOfUser revokes the Personal access tokens of a deleted user with the reason owner_deleted (C-04.FR-1).
+-- name: RevokeTokensOfUser :execrows
+UPDATE api_tokens
+SET revoked_at = @now::timestamptz, revoked_reason = 'owner_deleted'
+WHERE org_id = @org_id AND kind = 'personal' AND user_id = @user_id AND revoked_at IS NULL;
+
 -- name: InsertPasswordSetup :exec
 INSERT INTO password_setups (org_id, user_id, token_hash, created_by_user_id, created_at, expires_at)
 VALUES (@org_id, @user_id, @token_hash, sqlc.narg('created_by_user_id'), @created_at, @expires_at);

@@ -38,6 +38,7 @@ import (
 	odb "github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
 	tdb "github.com/muster-io/muster/internal/totp/dbgen"
 	"github.com/muster-io/muster/internal/users"
@@ -223,6 +224,8 @@ func (f *fakeDB) OrganizationStore() organization.Store { return &f.org }
 func (f *fakeDB) UsersStore() users.Store { return fakeUsersStore{} }
 
 func (f *fakeDB) AuthStore() auth.Store { return fakeAuthStore{} }
+
+func (f *fakeDB) TokensStore() tokens.Store { return nil }
 
 // fakeUsersStore has an Admin, so the bootstrap step creates nothing.
 type fakeUsersStore struct{ users.Store }
@@ -995,6 +998,10 @@ func (s *fakeAdminStore) ResetUserPassword(context.Context, udb.ResetUserPasswor
 
 func (s *fakeAdminStore) EndSessionsOfUser(context.Context, udb.EndSessionsOfUserParams) (int64, error) {
 	return 1, nil
+}
+
+func (s *fakeAdminStore) RevokeTokensOfUser(context.Context, udb.RevokeTokensOfUserParams) (int64, error) {
+	return 0, nil
 }
 
 func (s *fakeAdminStore) SupersedePasswordSetups(context.Context, udb.SupersedePasswordSetupsParams) (int64, error) {

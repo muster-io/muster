@@ -38,6 +38,7 @@ import (
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
 	usersdb "github.com/muster-io/muster/internal/users/dbgen"
@@ -84,6 +85,7 @@ type database interface {
 	TOTPStore() totp.Store
 	SettingsStore() organization.SettingsStore
 	OIDCStore() oidc.Store
+	TokensStore() tokens.Store
 	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
 	SessionListenConn(ctx context.Context) (db.ListenConn, error)
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
@@ -124,6 +126,8 @@ func (d pgDatabase) SettingsStore() organization.SettingsStore {
 }
 
 func (d pgDatabase) OIDCStore() oidc.Store { return oidc.NewStore(d.Pool) }
+
+func (d pgDatabase) TokensStore() tokens.Store { return tokens.NewStore(d.Pool) }
 
 func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
 	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
@@ -492,15 +496,17 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		}
 	}
 	return api.New(api.Config{
-		Sessions:       sessions,
-		Users:          users.NewService(orgID, p.db.UsersStore(), w, p.clocks.Business),
-		Admin:          users.NewAdmin(orgID, p.db.AdminStore(), w, p.clocks.Business, p.cfg.PublicURL),
-		AuditLog:       audit.NewReader(orgID, p.db.AuditReader()),
-		TOTP:           factors,
-		Organization:   organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business),
-		Notices:        p.notices,
-		Live:           p.hub,
-		OIDC:           signIn,
+		Sessions:     sessions,
+		Users:        users.NewService(orgID, p.db.UsersStore(), w, p.clocks.Business),
+		Admin:        users.NewAdmin(orgID, p.db.AdminStore(), w, p.clocks.Business, p.cfg.PublicURL),
+		AuditLog:     audit.NewReader(orgID, p.db.AuditReader()),
+		TOTP:         factors,
+		Organization: organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business),
+		Notices:      p.notices,
+		Live:         p.hub,
+		OIDC:         signIn,
+		Tokens: tokens.New(orgID, p.db.TokensStore(), w, p.clocks.Business, roles,
+			tokens.NewLimiter(p.clocks.Real)),
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
