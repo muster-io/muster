@@ -19,8 +19,10 @@
       "hint": "Значение метки видно, если оно одинаково у всех алертов группы.",
       "labelColumns": "Столбцы с метками",
       "lastChange": "Последнее изменение",
+      "owner": "Владелец",
       "remove": "Убрать столбец {{label}}",
       "reopened": "Переоткрыта",
+      "snoozeEnd": "Отложена до",
       "status": "Статус",
       "title": "Название"
     },
@@ -53,8 +55,14 @@
       "clear": "Сбросить фильтры",
       "done": "Показать группы алертов",
       "integration": "Интеграции",
+      "mine": "Мои",
       "neverReopened": "Не переоткрывались",
+      "nobody": "Ничьи",
       "notUrgent": "Несрочные",
+      "owner": "Владелец",
+      "ownerNoMatch": "Таких пользователей нет.",
+      "ownerSearch": "Найти пользователя",
+      "ownerUnknown": "Пользователь",
       "reason": "Причина",
       "remove": "Убрать {{value}}",
       "reopened": "Переоткрытие",
@@ -62,9 +70,11 @@
       "resolvedBy": "Кто закрыл",
       "route": "Маршруты",
       "severity": "Важность",
+      "snoozedNoEnd": "Отложены без срока",
       "title": "Фильтры",
       "urgent": "Срочность",
-      "urgentOnly": "Только срочные"
+      "urgentOnly": "Только срочные",
+      "userWithLogin": "{{name}} ({{login}})"
     },
     "labels": {
       "annotations": "Общие аннотации",
@@ -81,6 +91,7 @@
     "newCountLabel_few": "{{count}} новые группы алертов, показать",
     "newCountLabel_many": "{{count}} новых групп алертов, показать",
     "newCountLabel_other": "{{count}} новых групп алертов, показать",
+    "noEnd": "Без срока",
     "notices": {
       "days_one": "{{count}} день",
       "days_few": "{{count}} дня",
@@ -94,6 +105,7 @@
       "stillFiring_many": "⚠ В Alertmanager ещё горят {{count}} алертов",
       "stillFiring_other": "⚠ В Alertmanager ещё горят {{count}} алерта"
     },
+    "owner": "Владелец: {{name}}",
     "page": {
       "back": "Группы алертов"
     },
@@ -120,12 +132,16 @@
       "byUnknown": "Закрыта человеком"
     },
     "rowLabel": "{{title}}, #{{number}}, {{status}}, {{duration}}",
+    "rowLabelOwner": "{{label}}, владелец: {{name}}",
     "rowLabelUrgent": "{{title}}, #{{number}}, {{status}}, срочная, {{duration}}",
     "search": {
       "label": "Поиск",
       "placeholder": "#123 или текст",
       "region": "Поиск и сортировка"
     },
+    "snoozedBy": "Отложил(а): {{name}}",
+    "snoozedNoEnd": "Отложена без срока",
+    "snoozedUntil": "Отложена до {{until}}",
     "sort": {
       "label": "Сортировка",
       "lastChangeAsc": "Последнее изменение, сначала старые",
@@ -310,6 +326,98 @@
       "ui": "Веб-интерфейс"
     },
     "yes": "да"
+  },
+  "commands": {
+    "bulk": {
+      "actions": "Команды для выбранных групп алертов",
+      "clear": "Очистить",
+      "item": "{{subject}}: {{outcome}}",
+      "outcomes": {
+        "done": "выполнено",
+        "failed": "ошибка",
+        "notFound": "не найдена",
+        "refused": "отказано",
+        "skipped": "пропущена",
+        "skippedOwned": "пропущена: владелец {{name}}",
+        "unchanged": "без изменений"
+      },
+      "region": "Выбранные группы алертов",
+      "resolveTitle_one": "Закрыть {{count}} группу алертов",
+      "resolveTitle_few": "Закрыть {{count}} группы алертов",
+      "resolveTitle_many": "Закрыть {{count}} групп алертов",
+      "resolveTitle_other": "Закрыть {{count}} группы алертов",
+      "resultSummary_one": "Выполнено для {{done}} из {{count}} группы алертов.",
+      "resultSummary_few": "Выполнено для {{done}} из {{count}} групп алертов.",
+      "resultSummary_many": "Выполнено для {{done}} из {{count}} групп алертов.",
+      "resultSummary_other": "Выполнено для {{done}} из {{count}} группы алертов.",
+      "resultTitle": "Результат: {{command}}",
+      "select": "Выбрать",
+      "selectAll": "Выбрать все показанные",
+      "selectColumn": "Выбор",
+      "selected_one": "Выбрана {{count}}",
+      "selected_few": "Выбраны {{count}}",
+      "selected_many": "Выбрано {{count}}",
+      "selected_other": "Выбрано {{count}}",
+      "selectNone": "Снять выбор",
+      "selectOne": "Выбрать #{{number}}",
+      "snoozeTitle_one": "Отложить {{count}} группу алертов",
+      "snoozeTitle_few": "Отложить {{count}} группы алертов",
+      "snoozeTitle_many": "Отложить {{count}} групп алертов",
+      "snoozeTitle_other": "Отложить {{count}} группы алертов",
+      "stop": "Отменить выбор",
+      "tooMany": "Выберите не больше {{max}} групп алертов."
+    },
+    "buttons": {
+      "acknowledge": "Подтвердить",
+      "resolve": "Закрыть",
+      "snooze": "Отложить",
+      "takeOver": "Перехватить у владельца {{name}}",
+      "unacknowledge": "Снять подтверждение",
+      "unresolve": "Открыть снова",
+      "unsnooze": "Отменить откладывание"
+    },
+    "column": "Команды",
+    "label": "Команды",
+    "menu": "Команды для #{{number}}",
+    "newerExists": "Есть более новая группа алертов: #{{number}}",
+    "refusals": {
+      "allAlertsResolved": "Все алерты этой группы уже закрылись.",
+      "alreadyResolved": "Эта группа алертов уже закрыта.",
+      "forbidden": "У вас нет прав на это действие.",
+      "newerExists": "Есть более новая открытая группа алертов #{{number}}.",
+      "newerExistsLinked": "Есть более новая открытая группа алертов <groupLink>#{{number}}</groupLink>.",
+      "newerExistsUnknown": "Есть более новая открытая группа алертов.",
+      "notAcknowledged": "Эта группа алертов не подтверждена.",
+      "notResolved": "Эта группа алертов не закрыта.",
+      "notSnoozed": "Эта группа алертов не отложена.",
+      "ownerMustBeUser": "Сервисный аккаунт не может быть владельцем.",
+      "resolvedAutomatically": "Muster закрыл эту группу алертов автоматически; она откроется сама, когда алерт вернётся.",
+      "routeDeleted": "Маршрут этой группы алертов удалён; алерты, которые ещё горят, начнут новую группу в маршруте по умолчанию."
+    },
+    "resolve": {
+      "description": "Заметка, если вы её добавите, сохранится вместе с закрытием.",
+      "note": "Добавить заметку (необязательно)",
+      "title": "Закрыть #{{number}}"
+    },
+    "snooze": {
+      "date": "Дата",
+      "description": "Когда откладывание закончится, группа алертов снова будет гореть, без владельца.",
+      "for": "На сколько",
+      "incomplete": "Укажите дату и время.",
+      "noEnd": "Без срока",
+      "noEndWarning": "Эта группа алертов останется отложенной, пока кто-нибудь не снимет откладывание.",
+      "noEndWarningBulk": "Эти группы алертов останутся отложенными, пока кто-нибудь не снимет откладывание.",
+      "past": "Конец откладывания должен быть в будущем.",
+      "time": "Время",
+      "timeZone": "Часовой пояс: {{zone}}",
+      "title": "Отложить #{{number}}",
+      "understood": "Я понимаю",
+      "until": "До даты"
+    },
+    "unresolve": {
+      "question": "Вернуть эту группу алертов в состояние «горит» без владельца?",
+      "title": "Открыть #{{number}} снова"
+    }
   },
   "common": {
     "cancel": "Отмена",
@@ -543,6 +651,13 @@
     "serviceAccounts": "Сервисные аккаунты",
     "statistics": "Статистика",
     "users": "Пользователи"
+  },
+  "notes": {
+    "add": "Добавить заметку",
+    "counter": "{{length}}/{{max}}",
+    "label": "Заметка",
+    "title": "Добавить заметку",
+    "tooLong": "В заметке не больше {{max}} символов."
   },
   "notices": {
     "noReplicaLeading": "Нет ведущей реплики: опрос Telegram, проверки Heartbeat и Stale приостановлены.",
@@ -827,6 +942,21 @@
       "onCallLine": "Для алертов, на которые кто-то должен отреагировать: тайм-аут подтверждения и напоминания включены.",
       "title": "Выберите профиль"
     },
+    "snooze": {
+      "add": "Добавить",
+      "days": "дни",
+      "duplicate": "Этот срок уже есть в списке.",
+      "duration": "Срок",
+      "hint": "Быстрые варианты в окне «Отложить» и в мессенджерах.",
+      "hours": "часы",
+      "invalid": "Введите целое число: 1 или больше.",
+      "list": "Предлагаемые сроки",
+      "minutes": "минуты",
+      "none": "Сроков нет: только конец, который выберет пользователь.",
+      "remove": "Убрать {{duration}}",
+      "title": "Сроки откладывания",
+      "unit": "Единица"
+    },
     "suggestions": {
       "accept": "Создать маршрут",
       "dismiss": "Скрыть",
@@ -997,6 +1127,7 @@
       "route": "По маршрутам"
     },
     "columns": {
+      "acknowledged": "Подтверждено",
       "alertGroups": "Группы алертов",
       "integration": "Интеграция",
       "median": "Медиана",

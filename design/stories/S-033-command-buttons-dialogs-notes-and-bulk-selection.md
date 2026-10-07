@@ -14,17 +14,19 @@ files_touched:
   - web/src/components/resolve-dialog.tsx
   - web/src/components/note-box.tsx
   - web/src/components/bulk-actions-bar.tsx
+  - web/src/components/bulk-actions-bar.test.tsx
   - web/src/components/bulk-result-dialog.tsx
   - web/src/components/owner-filter.tsx
   - web/src/components/alert-group-table.tsx
   - web/src/components/alert-group-filters.tsx
   - web/src/components/alert-group-header.tsx
-  - web/src/components/timeline.tsx
   - web/src/components/route-policy-snooze.tsx
   - web/src/components/route-form.tsx
+  - web/src/components/statistics-table.tsx
   - web/src/routes/alert-groups.index.tsx
   - web/src/routes/alert-groups.$alertGroupId.tsx
   - web/src/lib/alert-group-search.ts
+  - web/src/lib/api.ts
   - web/src/lib/commands.ts
   - web/src/locales/en.json
   - web/src/locales/ru.json
@@ -68,7 +70,7 @@ issue: 33
 ## Contracts
 
 - **API used**: `acknowledgeAlertGroup`, `unacknowledgeAlertGroup`, `resolveAlertGroup`, `unresolveAlertGroup`,
-  `snoozeAlertGroup`, `unsnoozeAlertGroup`, `listAlertGroupNotes`, `createAlertGroupNote`, `runBulkCommand`,
+  `snoozeAlertGroup`, `unsnoozeAlertGroup`, `createAlertGroupNote`, `runBulkCommand`,
   `listUserDirectory`, `getRoute`, `updateRoute`, `listAlertGroups` (`owner`, `snoozed_no_end`),
   `getAlertGroupStatistics`.
 - **Buttons** (C-10.FR-1, FR-4, FR-16): built from `allowed_commands` only: "Acknowledge" — "Take over from {Owner}"
@@ -103,6 +105,8 @@ issue: 33
   {name}"; a deactivated user is shown as "{name} (deactivated)".
 - **Route editor** (C-10.FR-6): "Snooze durations" — a list of durations with add and remove, sent as
   `policy.snooze_durations_seconds`.
+- **Statistics** (C-10.AC-14): the table gains the column "Acknowledged" — `time_to_acknowledge.count`, the Alert
+  Groups the time to acknowledge measures — so that "10 min over 2 Alert Groups" reads on the page.
 - **Phone width** (C-09.FR-24): the commands form a bar right under the header; dialogs open as full-screen sheets; the
   Note box and the bulk bar fit 360 pixels.
 

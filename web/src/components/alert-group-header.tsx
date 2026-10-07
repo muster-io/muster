@@ -3,8 +3,9 @@
 
 // The header of the Alert Group page (C-09.FR-14, FR-10): status, #N, title and summary, Severity level, Urgent, the
 // Route and the Integrations linked, start and duration, "🔁 Reopened ×N" and, once resolved, who resolved it or the
-// system's reason. Status and urgency are words, never only a colour. The title and summary come from alert labels and
-// annotations, so they show as text only. The list shares the status and the Urgent mark.
+// system's reason; the Owner, the end of a Snooze ("No end" too) and who set it (C-10.FR-13), a deleted user named
+// "(deactivated)". Status and urgency are words, never only a colour. The title and summary come from alert labels
+// and annotations, so they show as text only. The list shares the status and the Urgent mark.
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
@@ -12,7 +13,14 @@ import { ArrowLeftIcon, SirenIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { AlertGroup, AlertGroupStatus, EntityRef, ResolvedBy } from "../api/gen/model";
+import type {
+  ActorRef,
+  AlertGroup,
+  AlertGroupStatus,
+  EntityRef,
+  ResolvedBy,
+} from "../api/gen/model";
+import { useTimeFormat } from "../lib/time";
 import { useCan } from "./app-shell";
 import { reasonLabel, severityLabel } from "./integration-alerts";
 import { DateTime, Duration } from "./relative-time";
@@ -134,6 +142,41 @@ function Fact({ term, children, testId }: { term: string; children: ReactNode; t
   );
 }
 
+function actorName(t: TFunction, actor: Pick<ActorRef, "name" | "deactivated">): string {
+  return actor.deactivated ? t("alertGroups.deactivated", { name: actor.name }) : actor.name;
+}
+
+/** The Owner and the Snooze of an Alert Group: "Owner: Alice", "Snoozed until …" or "Snoozed with no end", "Snoozed by …". */
+function Ownership({ group }: { group: AlertGroup }) {
+  const { t } = useTranslation();
+  const { dateTime } = useTimeFormat();
+  const snoozed = group.status === "snoozed";
+  if (group.owner === undefined && !snoozed) {
+    return null;
+  }
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+      {group.owner !== undefined && (
+        <p className="font-medium wrap-anywhere" data-testid="alert-group-owner">
+          {t("alertGroups.owner", { name: actorName(t, group.owner) })}
+        </p>
+      )}
+      {snoozed && (
+        <p className="wrap-anywhere" data-testid="alert-group-snooze">
+          {group.snooze_until
+            ? t("alertGroups.snoozedUntil", { until: dateTime(group.snooze_until) })
+            : t("alertGroups.snoozedNoEnd")}
+        </p>
+      )}
+      {snoozed && group.snoozed_by !== undefined && (
+        <p className="text-muted-foreground wrap-anywhere" data-testid="alert-group-snoozed-by">
+          {t("alertGroups.snoozedBy", { name: actorName(t, group.snoozed_by) })}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function AlertGroupHeader({ group }: { group: AlertGroup }) {
   const { t } = useTranslation();
   const canRoutes = useCan("routes:read");
@@ -179,6 +222,7 @@ export function AlertGroupHeader({ group }: { group: AlertGroup }) {
             {resolutionText(t, group.resolution)}
           </p>
         )}
+        <Ownership group={group} />
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
         <Fact term={t("alertGroups.fields.severity")} testId="fact-severity">

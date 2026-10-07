@@ -2,7 +2,8 @@
 // Copyright The Muster Authors
 
 // The Route editor (C-08.FR-1, FR-2, FR-4, FR-5): the name, the description, the Matchers (none for the Default
-// route), the urgent mark, the Group key with its preview and the Lifecycle section (C-09.FR-4, FR-5, FR-9). The other
+// route), the urgent mark, the Group key with its preview, the Lifecycle section (C-09.FR-4, FR-5, FR-9) and the
+// Snooze durations (C-10.FR-6). The other
 // fields of a Route — its Destinations and the policy fields of later capabilities — are not shown yet: they travel
 // unchanged from the profile of a new Route, or from the stored Route, with every save. Without routes:write the
 // editor only shows the Route.
@@ -37,6 +38,12 @@ import {
   lifecycleValues,
   withLifecycle,
 } from "./route-policy-lifecycle";
+import {
+  RoutePolicySnooze,
+  RoutePolicySnoozeReadOnly,
+  SNOOZE_POINTER,
+  sortedDurations,
+} from "./route-policy-snooze";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -61,6 +68,7 @@ const formSchema = z
       }),
     ),
     group_key: z.array(z.string()),
+    snooze_durations: z.array(z.number().int().min(1)),
     ...lifecycleSchema,
   })
   .superRefine((v, ctx) => {
@@ -80,6 +88,7 @@ function formValues(base: RouteInput): FormValues {
     urgent: base.urgent,
     matchers: matcherRows(base.matchers),
     group_key: [...base.group_key],
+    snooze_durations: sortedDurations(base.policy.snooze_durations_seconds),
     ...lifecycleValues(base.policy),
   };
 }
@@ -102,7 +111,7 @@ function inputOf(base: RouteInput, v: FormValues, draft: string, isDefault: bool
     matchers: isDefault ? [] : matchersOf(v.matchers),
     group_key: withDraft(v.group_key, draft),
     destination_ids: [...base.destination_ids],
-    policy: withLifecycle(base.policy, v),
+    policy: { ...withLifecycle(base.policy, v), snooze_durations_seconds: v.snooze_durations },
   };
 }
 
@@ -183,6 +192,7 @@ export function RouteForm({
     () => new Map(),
   );
   const [serverGroupKeyError, setServerGroupKeyError] = useState<string>();
+  const [snoozeError, setSnoozeError] = useState<string>();
   const [unmatched, setUnmatched] = useState<string[]>([]);
   // A label name typed in the Group key field: Save and Preview take it as if it had been added.
   const [keyDraft, setKeyDraft] = useState("");
@@ -219,6 +229,7 @@ export function RouteForm({
     mutationFn: ({ input }: { input: RouteInput; sent: MatcherRow[] }) => save(input),
     onMutate: () => {
       setUnmatched([]);
+      setSnoozeError(undefined);
       setServerMatcherErrors(new Map());
       setServerGroupKeyError(undefined);
     },
@@ -244,6 +255,8 @@ export function RouteForm({
           );
         } else if (item.pointer === "/description") {
           form.setError("description", { type: item.code, message: item.code });
+        } else if (item.pointer.startsWith(SNOOZE_POINTER)) {
+          setSnoozeError(item.code);
         } else if (
           !item.pointer.startsWith("/matchers/") &&
           !item.pointer.startsWith("/group_key")
@@ -330,6 +343,7 @@ export function RouteForm({
           />
         </div>
         <RoutePolicyLifecycleReadOnly policy={base.policy} />
+        <RoutePolicySnoozeReadOnly durations={base.policy.snooze_durations_seconds} />
         <div>
           <Button type="button" variant="outline" onClick={onCancel}>
             {t("routes.form.back")}
@@ -478,6 +492,21 @@ export function RouteForm({
           grace_period_minutes: errors.grace_period_minutes?.message,
           urgent_rise_removes_ack: errors.urgent_rise_removes_ack?.message,
         }}
+      />
+      <Controller
+        control={form.control}
+        name="snooze_durations"
+        render={({ field }) => (
+          <RoutePolicySnooze
+            id={`${ID}-snooze`}
+            value={field.value}
+            onChange={(next) => {
+              setSnoozeError(undefined);
+              field.onChange(next);
+            }}
+            error={snoozeError}
+          />
+        )}
       />
       {showStale && (
         <Alert variant="destructive">

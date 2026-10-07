@@ -9,7 +9,7 @@ import { queryOptions, useQuery } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import type { FieldValues, Path, UseFormSetError } from "react-hook-form";
 
-import type { Problem, ProblemError, Session } from "../api/gen/model";
+import type { AlertGroupRef, Problem, ProblemError, Session } from "../api/gen/model";
 
 /** An answer that is not 2xx, with its RFC 9457 Problem. Clients branch on status, code and errors[].code only. */
 export class ApiError extends Error implements Problem {
@@ -19,6 +19,7 @@ export class ApiError extends Error implements Problem {
   readonly code?: string;
   readonly errors?: ProblemError[];
   readonly retry_after_seconds?: number;
+  readonly related_alert_group?: AlertGroupRef;
 
   constructor(status: number, problem: Partial<Problem>, retryAfter: number | undefined) {
     super(problem.title ?? `HTTP ${status}`);
@@ -29,6 +30,7 @@ export class ApiError extends Error implements Problem {
     this.code = problem.code;
     this.errors = problem.errors;
     this.retry_after_seconds = problem.retry_after_seconds ?? retryAfter;
+    this.related_alert_group = problem.related_alert_group;
   }
 }
 
@@ -159,6 +161,7 @@ function problemOf(body: unknown): Partial<Problem> {
           isRecord(e) && typeof e.pointer === "string" && typeof e.code === "string",
       )
     : undefined;
+  const related = body.related_alert_group;
   return {
     type: text("type"),
     title: text("title"),
@@ -166,6 +169,10 @@ function problemOf(body: unknown): Partial<Problem> {
     errors,
     retry_after_seconds:
       typeof body.retry_after_seconds === "number" ? body.retry_after_seconds : undefined,
+    related_alert_group:
+      isRecord(related) && typeof related.id === "string" && typeof related.number === "number"
+        ? { id: related.id, number: related.number }
+        : undefined,
   };
 }
 

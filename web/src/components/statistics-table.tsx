@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The table of the statistics page (C-09.FR-15): a row per Route or Integration with its number of Alert Groups and
-// the median and 95th percentile of time to acknowledge and time to resolve, "—" where there is nothing to measure.
+// The table of the statistics page (C-09.FR-15, C-10.AC-14): a row per Route or Integration with its number of Alert
+// Groups, how many of them were acknowledged (the ones the time to acknowledge measures), and the median and 95th
+// percentile of time to acknowledge and time to resolve, "—" where there is nothing to measure.
 // The name opens the item's days below its row. The duration cells name both of their headers, so a screen reader
 // reads "Time to resolve, Median" and not only "Median".
 
@@ -73,6 +74,9 @@ export function StatisticsTable({ groupBy, items, empty, busy = false }: Statist
             </th>
             <th id={`${id}-count`} scope="col" rowSpan={2} className={cn(head, "text-right")}>
               {t("statistics.columns.alertGroups")}
+            </th>
+            <th id={`${id}-acked`} scope="col" rowSpan={2} className={cn(head, "text-right")}>
+              {t("statistics.columns.acknowledged")}
             </th>
             {MEASURES.map((m) => (
               <th
@@ -146,6 +150,13 @@ export function StatisticsTable({ groupBy, items, empty, busy = false }: Statist
                   >
                     {item.alert_group_count}
                   </td>
+                  <td
+                    headers={`${rowHeader} ${id}-acked`}
+                    className="px-3 py-2 text-right tabular-nums"
+                    data-testid="statistics-ack-count"
+                  >
+                    {item.time_to_acknowledge.count}
+                  </td>
                   {MEASURES.map((m) => {
                     const stats = measureOf(item, m);
                     return (
@@ -169,7 +180,7 @@ export function StatisticsTable({ groupBy, items, empty, busy = false }: Statist
                   })}
                 </tr>
                 <tr id={panel} hidden={!expanded} className="bg-muted/20">
-                  <td colSpan={6} headers={rowHeader} className="px-3 py-3">
+                  <td colSpan={7} headers={rowHeader} className="px-3 py-3">
                     {expanded && <StatisticsChart name={item.subject.name} days={item.per_day} />}
                   </td>
                 </tr>

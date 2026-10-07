@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The rows of the Alert Group list (C-09.FR-13, FR-24). On a desktop a table: status, #N, title, Severity level,
-// Urgent, Route, Integrations, firing and total Alerts, start, duration, last change, Reopen count and the label columns
-// the user picked. On a phone compact rows — status, #N, title, Urgent mark and duration — each a link to the page, so
-// that nothing scrolls sideways. Titles, summaries and label values come from alerts: text only.
+// The rows of the Alert Group list (C-09.FR-13, FR-24; C-10.FR-13, FR-14, FR-16). On a desktop a table: status, #N,
+// title, Severity level, Urgent, Route, Integrations, firing and total Alerts, Owner, Snooze end, start, duration, last
+// change, Reopen count, the label columns the user picked and the "…" menu of Commands. On a phone compact rows —
+// status, #N, title, Urgent mark, duration and Owner, a link to the page, with the menu beside it — so that nothing
+// scrolls sideways. While the user selects, each row has a checkbox. Titles, summaries and label values come from
+// alerts: text only.
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
-import { useMemo, useSyncExternalStore } from "react";
+import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AlertGroup } from "../api/gen/model";
 import { problemText } from "../lib/api";
+import { useTimeFormat } from "../lib/time";
 import { EntityLink, StatusBadge, UrgentMark, statusLabel } from "./alert-group-header";
 import { useCan } from "./app-shell";
+import { CommandMenu, personName } from "./command-buttons";
 import { type CursorList, type DataColumn, DataTable } from "./data-table";
 import { severityLabel } from "./integration-alerts";
 import { DateTime, Duration, elapsedSeconds, formatElapsed, useNow } from "./relative-time";
@@ -35,6 +39,58 @@ export function useWideLayout(): boolean {
 }
 
 const NONE = <span className="text-muted-foreground">—</span>;
+
+/** The selection of the list for a bulk command: whether rows show checkboxes, and which are ticked. */
+export interface Selection {
+  selecting: boolean;
+  selected: ReadonlySet<string>;
+  toggle: (id: string) => void;
+}
+
+export const SelectionContext = createContext<Selection>({
+  selecting: false,
+  selected: new Set(),
+  toggle: () => {},
+});
+
+function SelectBox({ row }: { row: AlertGroup }) {
+  const { t } = useTranslation();
+  const { selected, toggle } = useContext(SelectionContext);
+  return (
+    <input
+      type="checkbox"
+      className="size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      aria-label={t("commands.bulk.selectOne", { number: row.number })}
+      checked={selected.has(row.id)}
+      onChange={() => toggle(row.id)}
+      data-testid="select-row"
+    />
+  );
+}
+
+function OwnerCell({ row }: { row: AlertGroup }) {
+  const { t } = useTranslation();
+  return row.owner === undefined ? (
+    NONE
+  ) : (
+    <span className="wrap-anywhere" data-testid="owner">
+      {personName(t, row.owner)}
+    </span>
+  );
+}
+
+function SnoozeEndCell({ row }: { row: AlertGroup }) {
+  const { t } = useTranslation();
+  const { dateTime } = useTimeFormat();
+  if (row.status !== "snoozed") {
+    return NONE;
+  }
+  return (
+    <span className="whitespace-nowrap" data-testid="snooze-end">
+      {row.snooze_until ? dateTime(row.snooze_until) : t("alertGroups.noEnd")}
+    </span>
+  );
+}
 
 function NumberCell({ row }: { row: AlertGroup }) {
   return (
@@ -80,11 +136,21 @@ function alertCounts(t: TFunction, row: AlertGroup): string {
   });
 }
 
-/** The desktop columns, with one per picked label. */
-function useColumns(labelColumns: readonly string[]): DataColumn<AlertGroup>[] {
+/** The desktop columns, with one per picked label, a checkbox while selecting and the menu of Commands. */
+function useColumns(labelColumns: readonly string[], selecting: boolean): DataColumn<AlertGroup>[] {
   const { t } = useTranslation();
   return useMemo(
     (): DataColumn<AlertGroup>[] => [
+      ...(selecting
+        ? [
+            {
+              id: "select",
+              header: t("commands.bulk.selectColumn"),
+              className: "w-8",
+              Cell: SelectBox,
+            },
+          ]
+        : []),
       {
         id: "status",
         header: t("alertGroups.columns.status"),
@@ -127,6 +193,8 @@ function useColumns(labelColumns: readonly string[]): DataColumn<AlertGroup>[] {
         className: "whitespace-nowrap",
         text: (row) => alertCounts(t, row),
       },
+      { id: "owner", header: t("alertGroups.columns.owner"), Cell: OwnerCell },
+      { id: "snooze_end", header: t("alertGroups.columns.snoozeEnd"), Cell: SnoozeEndCell },
       {
         id: "started",
         header: t("alertGroups.fields.started"),
@@ -167,8 +235,13 @@ function useColumns(labelColumns: readonly string[]): DataColumn<AlertGroup>[] {
           );
         },
       })),
+      {
+        id: "commands",
+        header: t("commands.column"),
+        Cell: ({ row }) => <CommandMenu group={row} />,
+      },
     ],
-    [t, labelColumns],
+    [t, labelColumns, selecting],
   );
 }
 
@@ -176,19 +249,31 @@ function useColumns(labelColumns: readonly string[]): DataColumn<AlertGroup>[] {
 function CompactRow({ row }: { row: AlertGroup }) {
   const { t } = useTranslation();
   const at = useNow();
-  const label = t(row.urgent ? "alertGroups.rowLabelUrgent" : "alertGroups.rowLabel", {
+  const { selecting } = useContext(SelectionContext);
+  const owner = row.owner === undefined ? undefined : personName(t, row.owner);
+  const base = t(row.urgent ? "alertGroups.rowLabelUrgent" : "alertGroups.rowLabel", {
     title: row.title,
     number: row.number,
     status: statusLabel(t, row.status),
     duration: formatElapsed(t, elapsedSeconds(row.started_at, row.resolved_at, at)),
   });
+  const label =
+    owner === undefined ? base : t("alertGroups.rowLabelOwner", { label: base, name: owner });
   return (
-    <li className="border-t first:border-t-0" data-testid="alert-group-row">
+    <li
+      className="flex min-w-0 items-start border-t first:border-t-0"
+      data-testid="alert-group-row"
+    >
+      {selecting && (
+        <div className="flex shrink-0 items-center self-stretch pl-3">
+          <SelectBox row={row} />
+        </div>
+      )}
       <Link
         to="/alert-groups/$alertGroupId"
         params={{ alertGroupId: row.id }}
         aria-label={label}
-        className="flex min-w-0 flex-col gap-1 px-3 py-2.5 outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        className="flex min-w-0 flex-1 flex-col gap-1 px-3 py-2.5 outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <StatusBadge status={row.status} />
@@ -203,7 +288,15 @@ function CompactRow({ row }: { row: AlertGroup }) {
         <span className="text-sm font-medium wrap-anywhere" data-testid="alert-group-title">
           {row.title}
         </span>
+        {owner !== undefined && (
+          <span className="text-xs text-muted-foreground wrap-anywhere" data-testid="owner">
+            {t("alertGroups.owner", { name: owner })}
+          </span>
+        )}
       </Link>
+      <div className="shrink-0 py-2 pr-2">
+        <CommandMenu group={row} />
+      </div>
     </li>
   );
 }
@@ -218,7 +311,8 @@ export interface AlertGroupTableProps {
 
 export function AlertGroupTable({ list, labelColumns, empty, wide }: AlertGroupTableProps) {
   const { t } = useTranslation();
-  const columns = useColumns(labelColumns);
+  const { selecting } = useContext(SelectionContext);
+  const columns = useColumns(labelColumns, selecting);
   if (wide) {
     return (
       <DataTable

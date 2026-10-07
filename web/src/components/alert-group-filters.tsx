@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The filters of the Alert Group list (C-09.FR-13): Route and Integration (several of each), Severity level, Urgent,
-// resolved by a person or by the system with its reason, Reopened, and label Matchers; on a desktop also the label
+// The filters of the Alert Group list (C-09.FR-13, C-10.FR-13): Route and Integration (several of each), Severity
+// level, Urgent, resolved by a person or by the system with its reason, Reopened, the Owner, "Snoozed with no end",
+// and label Matchers; on a desktop also the label
 // columns. All combine, and all live in the URL. The pickers are native selects (D250); a picker that takes several
 // values adds each chosen one as a chip that removes it again.
 
@@ -30,6 +31,7 @@ import { useCan } from "./app-shell";
 import { reasonLabel, severityLabel } from "./integration-alerts";
 import { LabelColumnsPicker } from "./label-columns-picker";
 import { LabelMatchersInput } from "./label-matchers-input";
+import { OwnerFilter } from "./owner-filter";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
@@ -277,6 +279,19 @@ export function AlertGroupFilters({
         value={flag(search.reopened)}
         onChange={(next) => onChange({ reopened: fromFlag(next) })}
       />
+      <OwnerFilter value={search.owner} onChange={(owner) => onChange({ owner })} />
+      <div className="flex items-start gap-2">
+        <input
+          id={`${id}-no-end`}
+          type="checkbox"
+          className="mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          checked={search.snoozed_no_end === true}
+          onChange={(e) => onChange({ snoozed_no_end: e.target.checked ? true : undefined })}
+        />
+        <Label htmlFor={`${id}-no-end`} className="leading-snug">
+          {t("alertGroups.filters.snoozedNoEnd")}
+        </Label>
+      </div>
       <LabelMatchersInput
         id={`${id}-matchers`}
         value={search.label ?? []}
