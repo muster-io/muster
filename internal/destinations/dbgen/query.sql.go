@@ -12,6 +12,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteDestinationRoutes = `-- name: DeleteDestinationRoutes :exec
+DELETE FROM route_destinations
+WHERE org_id = $1 AND destination_id = $2
+`
+
+type DeleteDestinationRoutesParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+// DeleteDestinationRoutes removes a deleted Destination from every Route.
+func (q *Queries) DeleteDestinationRoutes(ctx context.Context, arg DeleteDestinationRoutesParams) error {
+	_, err := q.db.Exec(ctx, deleteDestinationRoutes, arg.OrgID, arg.DestinationID)
+	return err
+}
+
 const getDestination = `-- name: GetDestination :one
 SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d.mattermost_team_id,
        d.mattermost_channel_id, d.mattermost_team_name, d.mattermost_channel_name, d.telegram_channel_id,
@@ -365,4 +381,54 @@ func (q *Queries) ListRouteDestinationRefs(ctx context.Context, arg ListRouteDes
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockDestination = `-- name: LockDestination :one
+SELECT id, public_id, name, version
+FROM destinations
+WHERE org_id = $1 AND public_id = $2 AND deleted_at IS NULL
+FOR NO KEY UPDATE
+`
+
+type LockDestinationParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+type LockDestinationRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Version  int64
+}
+
+// LockDestination locks a Destination that is not deleted for a change and reads what its Audit log entry names.
+func (q *Queries) LockDestination(ctx context.Context, arg LockDestinationParams) (LockDestinationRow, error) {
+	row := q.db.QueryRow(ctx, lockDestination, arg.OrgID, arg.PublicID)
+	var i LockDestinationRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.Version,
+	)
+	return i, err
+}
+
+const markDestinationDeleted = `-- name: MarkDestinationDeleted :exec
+UPDATE destinations
+SET deleted_at = $1, updated_at = $1, version = version + 1
+WHERE org_id = $2 AND id = $3
+`
+
+type MarkDestinationDeletedParams struct {
+	Now   pgtype.Timestamptz
+	OrgID int64
+	ID    int64
+}
+
+// MarkDestinationDeleted soft-deletes a Destination: it leaves every list and reads as missing, the row stays.
+func (q *Queries) MarkDestinationDeleted(ctx context.Context, arg MarkDestinationDeletedParams) error {
+	_, err := q.db.Exec(ctx, markDestinationDeleted, arg.Now, arg.OrgID, arg.ID)
+	return err
 }

@@ -436,6 +436,15 @@ func (f *fakeDB) DeliveryStore() *delivery.Store { return delivery.NewStore(noDB
 // DestinationsStore has no Destinations.
 func (f *fakeDB) DestinationsStore() destinations.Store { return fakeDestinationsStore{} }
 
+// DestinationsWriter has no database: every change fails.
+func (f *fakeDB) DestinationsWriter() destinations.Writer { return noDestinationsWriter{} }
+
+type noDestinationsWriter struct{}
+
+func (noDestinationsWriter) InTx(context.Context, func(destinations.TxQueries) error) error {
+	return errNoDB
+}
+
 var errNoDB = errors.New("no database in this test")
 
 // noDB is a database that answers every statement with errNoDB.

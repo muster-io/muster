@@ -3,8 +3,8 @@
 
 // Package destinations holds the Destinations (C-11.FR-18): Mattermost channels and Telegram channels reached through
 // a Connection, and outgoing webhooks. This package reads every type with its health and Routes and exports
-// muster_destination_info; the type capabilities add creating and editing them (C-13 to C-15) and S-035 their health
-// changes. Secrets are read only as their status.
+// muster_destination_info, and deletes them (C-11.FR-14); the type capabilities add creating and editing them (C-13 to
+// C-15). Secrets are read only as their status.
 package destinations
 
 import (
@@ -138,10 +138,11 @@ type Store interface {
 // NewStore is the Store over the main pool.
 func NewStore(pool *pgxpool.Pool) Store { return dbgen.New(pool) }
 
-// Service reads the Destinations of an Organization.
+// Service reads the Destinations of an Organization and deletes them.
 type Service struct {
-	orgID int64
-	store Store
+	orgID  int64
+	store  Store
+	writer WriterConfig
 
 	mu   sync.Mutex
 	info map[string]string

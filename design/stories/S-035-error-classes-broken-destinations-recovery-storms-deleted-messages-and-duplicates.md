@@ -7,40 +7,51 @@ layer: L1
 depends_on: [S-034]
 covers: [C-11.FR-6, C-11.FR-8, C-11.FR-9, C-11.FR-10, C-11.FR-11, C-11.FR-12, C-11.FR-13, C-11.FR-14, C-11.FR-16, C-11.FR-17, C-11.FR-18, C-11.FR-19, C-11.FR-20, C-11.FR-21, C-11.AC-3, C-11.AC-4, C-11.AC-5, C-11.AC-6, C-11.AC-7, C-11.AC-8, C-11.AC-9, C-11.AC-10, C-11.AC-11, C-11.AC-12, C-11.AC-13, C-09.FR-19, C-08.FR-1]
 files_touched:
-  - internal/delivery/outcomes.go
-  - internal/delivery/broken.go
-  - internal/delivery/recovery.go
-  - internal/delivery/storm.go
-  - internal/delivery/publication.go
-  - internal/delivery/membership.go
-  - internal/delivery/worker.go
-  - internal/delivery/enqueue.go
-  - internal/delivery/query.sql
-  - internal/delivery/deliverytest/recorder.go
-  - internal/delivery/outcomes_test.go
-  - internal/delivery/broken_test.go
-  - internal/delivery/storm_test.go
-  - internal/delivery/publication_test.go
-  - internal/delivery/membership_test.go
-  - internal/delivery/live_test.go
-  - internal/destinations/destinations.go
-  - internal/destinations/delete.go
-  - internal/destinations/query.sql
-  - internal/destinations/delete_test.go
-  - internal/routing/routes.go
-  - internal/routing/query.sql
-  - internal/routing/routes_test.go
-  - internal/groups/move.go
-  - internal/timers/worker.go
-  - internal/internalalerts/registry.go
   - internal/api/destinations.go
   - internal/api/routes.go
-  - internal/api/routes_test.go
   - internal/api/server.go
+  - internal/api/destinations_test.go
+  - internal/api/routes_test.go
+  - internal/db/checks.go
+  - internal/delivery/broken.go
+  - internal/delivery/delivery.go
+  - internal/delivery/deliverytest/recorder.go
+  - internal/delivery/enqueue.go
+  - internal/delivery/events.go
+  - internal/delivery/membership.go
+  - internal/delivery/outcomes.go
+  - internal/delivery/publication.go
+  - internal/delivery/query.sql
+  - internal/delivery/recovery.go
+  - internal/delivery/storm.go
+  - internal/delivery/threads.go
+  - internal/delivery/worker.go
+  - internal/delivery/broken_test.go
+  - internal/delivery/enqueue_test.go
+  - internal/delivery/export_test.go
+  - internal/delivery/live_test.go
+  - internal/delivery/membership_test.go
+  - internal/delivery/outcomes_test.go
+  - internal/delivery/publication_test.go
+  - internal/delivery/storm_test.go
+  - internal/delivery/threads_test.go
+  - internal/delivery/worker_test.go
+  - internal/destinations/delete.go
+  - internal/destinations/destinations.go
+  - internal/destinations/query.sql
+  - internal/destinations/delete_test.go
+  - internal/groups/dispatcher.go
+  - internal/groups/dispatcher_test.go
+  - internal/internalalerts/registry.go
+  - internal/internalalerts/internalalerts_test.go
   - internal/leader/tasks.go
-  - internal/metrics/catalogue.go
   - internal/logging/events.go
+  - internal/metrics/catalogue.go
+  - internal/routing/query.sql
+  - internal/routing/routes.go
+  - internal/routing/routes_test.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
 acceptance:
   - "[C-11.FR-6, C-11.FR-17, C-11.AC-3] With 30 new Alert Groups within a minute on a Route with `route.storm_threshold` 20, the first 20 get Root messages; the 21st starts a Storm, so each Destination of the Route gets one Storm summary, Loud with `new_alert_group`, and of the last 10 only the Urgent ones are published, first; after `delivery.storm_calm_period` below the threshold the summary gets its final state in one Quiet edit, the last 10 still open are published as Quiet new messages within the limits, and the resolved ones are never published; `muster_storm_active{route}` and `Route.storm_active` show the Storm while it lasts."
   - "[C-11.FR-13, C-11.AC-4] A `gone` outcome for an open Alert Group's Root message republishes it once, Quietly, with \"The previous message was deleted at HH:MM\" and a new Thread; a `gone` for that republished message marks the pair `deleted_in_messenger` and nothing more is sent; for a resolved Alert Group only the mark is recorded."
@@ -261,7 +272,7 @@ curl -s -o /dev/null -w '%{http_code}\n' "${H[@]}" -X DELETE $API/destinations/D
 curl -s -b jar $API/routes | jq -c '[.items[] | {name, storm_active}]'      # [{"name":"Default","storm_active":false}]
 grep -A3 'MusterDestinationBroken' docs/reference/internal-alerts.md | head -4
 # | `MusterDestinationBroken` | critical | a Destination is Broken | `destination`, `destination_name` |
-curl -s localhost:8082/metrics | grep -c '^# TYPE muster_storm_active gauge'  # 1
+curl -s localhost:8082/metrics | grep -c '^muster_storm_active{'             # 1 (the Default route; no TYPE lines are exposed)
 ```
 
 ## Open questions
@@ -271,6 +282,15 @@ None.
 ## Notes
 
 - Suggested commit: `feat(delivery): add error classes, broken destinations and recovery, storms and republication`.
+- `groups.Rendering` gains `After`, the dispatcher's after-commit queue, so that `storm_started` is logged only once the
+  change that started the Storm committed.
+- An Enqueue and a change of a Route's Destinations (an edit of `destination_ids`, or the deletion of a Destination)
+  serialize on a transaction advisory lock of the Route (`db.RouteMembershipLockClass`), shared and exclusive, not on
+  the Route's row: the move to the Default route holds that row and then the Alert Groups, which a Command holds
+  before its Enqueue.
+- A call in flight never revives a row that ended meanwhile; a Publication that created a message on such a row keeps
+  it: a Storm summary is retired with it, an Alert Group whose Destination was deleted or left its Route gets the final
+  edit of it, any other row is kept current (`RecordDelivered`).
 - The Storm rule counts `created` events, not Alerts; a Reopen is not a new Alert Group and does not count.
 - `live_test.go` is the evidence for C-11.AC-3 to AC-13; S-061 shows the same behaviour against a messenger fake.
 

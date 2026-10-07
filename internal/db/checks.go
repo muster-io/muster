@@ -37,6 +37,11 @@ const (
 	sessionCheckLockKey int64 = 0x6d75_7374_6572_0002
 )
 
+// RouteMembershipLockClass is the first key of the transaction advisory locks of the Destinations of a Route, whose
+// second key is hashint8 of the Route's id: a change of its Destinations takes it exclusively (routing), an Enqueue on
+// the Route shared (delivery). The two-key advisory locks do not overlap the one-key locks above.
+const RouteMembershipLockClass int32 = 0x6d75_0002
+
 // querier is what the checks need of the main pool or of a connection.
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)

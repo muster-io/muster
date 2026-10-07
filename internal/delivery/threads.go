@@ -116,46 +116,42 @@ func (w *Worker) renderer() Renderer {
 	return w.Renderer
 }
 
-// sendReply sends a prepared Thread reply outside any transaction and records its outcome.
+// sendReply sends a prepared Thread reply outside any transaction and records its outcome by its rule (outcomes.go);
+// a markup the messenger rejects is sent again without markup in the same attempt.
 func (w *Worker) sendReply(ctx context.Context, org int64, a replyAttempt) error {
-	root := Root{MessageID: a.row.MessageID.String, ThreadAnchorID: a.row.ThreadAnchorID.String,
-		ChainLastID: a.row.ThreadChainLastID.String}
 	start := w.Lease.Clocks.Real.Now()
-	var out Outcome
-	if adapter := w.Adapters[a.destination.Type]; adapter != nil {
-		out = adapter.Reply(ctx, a.call, root, a.message)
-	} else {
-		out = Outcome{Kind: OutcomeUnknown, Error: outbound.Untrusted("no adapter for the destination type " +
-			a.destination.Type)}
+	c := a.call
+	out := w.sendReplyCall(ctx, a, c)
+	var rejected *Outcome
+	if out.Kind == OutcomeMarkupRejected {
+		first := out
+		rejected = &first
+		w.attempted(ctx, a.destination, a.row.Number, kindReply, out, a.row.Attempts+1,
+			w.Lease.Clocks.Real.Now().Sub(start))
+		c.Plain = true
+		out = plain(func() Outcome { return w.sendReplyCall(ctx, a, c) })
 	}
 	took := w.Lease.Clocks.Real.Now().Sub(start)
+	var logs after
 	err := w.Store.inTx(ctx, func(q queries) error {
-		now := w.Lease.Clocks.Business.Now().UTC()
-		id := a.row.ID
-		switch out.Kind {
-		case OutcomeOK:
-			if err := q.RecordReplySent(ctx, dbgen.RecordReplySentParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
-				MessageID: nonEmpty(out.MessageID), Now: now}); err != nil {
-				return fmt.Errorf("record the sent thread reply: %w", err)
-			}
-			return nil
-		case OutcomeRetryAfter:
-			until := now.Add(out.RetryAfter)
-			if err := q.RecordReplyRetry(ctx, dbgen.RecordReplyRetryParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
-				At: until.Add(TokenMargin), ErrorClass: nonEmpty(errorClass(out.Kind)),
-				Error: nonEmpty(string(out.Error))}); err != nil {
-				return fmt.Errorf("record the retry after of the thread reply: %w", err)
-			}
-			return holdBucket(ctx, q, org, a.destination, out, until)
-		default:
-			if err := q.RecordReplyRetry(ctx, dbgen.RecordReplyRetryParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
-				At: now.Add(TransientFirstStep), ErrorClass: nonEmpty(errorClass(out.Kind)),
-				Error: nonEmpty(string(out.Error))}); err != nil {
-				return fmt.Errorf("record the failed thread reply: %w", err)
-			}
-			return nil
-		}
+		logs = nil
+		return w.recordReply(ctx, q, org, a, out, rejected, &logs)
 	})
 	w.attempted(ctx, a.destination, a.row.Number, kindReply, out, a.row.Attempts+1, took)
+	if err == nil {
+		logs.run(ctx, w.Log)
+	}
 	return err
+}
+
+// sendReplyCall is one adapter call of a prepared Thread reply; a type no adapter serves is an unknown response.
+func (w *Worker) sendReplyCall(ctx context.Context, a replyAttempt, c Call) Outcome {
+	root := Root{MessageID: a.row.MessageID.String, ThreadAnchorID: a.row.ThreadAnchorID.String,
+		ChainLastID: a.row.ThreadChainLastID.String}
+	adapter := w.Adapters[a.destination.Type]
+	if adapter == nil {
+		return Outcome{Kind: OutcomeUnknown, Error: outbound.Untrusted("no adapter for the destination type " +
+			a.destination.Type)}
+	}
+	return adapter.Reply(ctx, c, root, a.message)
 }

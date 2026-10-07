@@ -28,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
+	destinationsdb "github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/heartbeat"
@@ -45,6 +46,7 @@ import (
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/routing"
+	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/internal/timers"
 	timersdb "github.com/muster-io/muster/internal/timers/dbgen"
@@ -113,9 +115,11 @@ type database interface {
 	// GroupsStore serves the Alert Group lifecycle; TimersStore the timer worker.
 	GroupsStore() groups.Store
 	TimersStore() timers.Store
-	// DeliveryStore serves delivery and its worker; DestinationsStore the reads of Destinations.
+	// DeliveryStore serves delivery and its worker; DestinationsStore the reads of Destinations and DestinationsWriter
+	// their changes.
 	DeliveryStore() *delivery.Store
 	DestinationsStore() destinations.Store
+	DestinationsWriter() destinations.Writer
 	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
 	SessionListenConn(ctx context.Context) (db.ListenConn, error)
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
@@ -180,6 +184,8 @@ func (d pgDatabase) TimersStore() timers.Store { return timers.NewStore(d.Pool) 
 func (d pgDatabase) DeliveryStore() *delivery.Store { return delivery.NewStore(d.Pool, d.Pool) }
 
 func (d pgDatabase) DestinationsStore() destinations.Store { return destinations.NewStore(d.Pool) }
+
+func (d pgDatabase) DestinationsWriter() destinations.Writer { return destinations.NewWriter(d.Pool) }
 
 func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
 	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
@@ -679,9 +685,21 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		}})
 	// The dispatcher's re-render step sets the Desired state of each Root message (ADR-0005).
 	p.delivery = delivery.New(delivery.Config{OrgID: orgID, Store: p.db.DeliveryStore(), Business: p.clocks.Business,
-		Log: p.log})
+		Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String()})
 	p.groups.SetRerender(p.delivery.Enqueue)
+	// Destinations added to or removed from a Route, or deleted, publish there or get their final edit (C-11.FR-14).
+	p.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, routeID int64, added, removed []int64) error {
+		return p.delivery.RouteDestinationsChanged(ctx, tx, routeID, added, removed)
+	})
 	p.destinations = destinations.New(orgID, p.db.DestinationsStore())
+	p.destinations.SetWriter(destinations.WriterConfig{Writer: p.db.DestinationsWriter(), Audit: w,
+		Business: p.clocks.Business,
+		Routes: func(ctx context.Context, tx destinationsdb.DBTX, id int64) error {
+			return p.routes.DestinationDeleted(ctx, tx, id)
+		},
+		Retire: func(ctx context.Context, tx destinationsdb.DBTX, id int64) error {
+			return p.delivery.RetireDestination(ctx, tx, id)
+		}})
 	if p.opts.Development {
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
 			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)
@@ -778,12 +796,13 @@ func (p *process) newKeeper() *leader.Keeper {
 	}))
 }
 
-// deliveryQueue is the Leader task delivery_queue for the Organization orgID: this process serves one.
+// deliveryQueue is the Leader task delivery_queue for the Organization orgID, which this process serves:
+// muster_delivery_queue, muster_destination_broken and muster_storm_active.
 func (p *process) deliveryQueue(ctx context.Context, orgID int64) error {
 	if orgID != p.orgID {
 		return nil
 	}
-	return p.delivery.ExportQueue(ctx)
+	return errors.Join(p.delivery.ExportQueue(ctx), p.delivery.ExportBroken(ctx), p.delivery.ExportStorms(ctx))
 }
 
 // threadReplyRetention is the Leader task thread_reply_retention for the Organization orgID.
@@ -914,8 +933,8 @@ func (p *process) loadDevClock(ctx context.Context) {
 // configureWorker completes the processing worker of this replica (C-06.FR-1) over the Organization, with leases held
 // by this replica's id, once both are known and before anything serves or runs that could wake it. Its Sink routes
 // the newly firing Alerts, then groups them, in each Snapshot's transaction; the timer worker fires the timers of
-// the Alert Groups; the delivery worker delivers to the Destinations through the adapters of their types, which the
-// type capabilities register here (S-039 onward).
+// the Alert Groups and the calm checks of Storms; the delivery worker delivers to the Destinations through the adapters
+// of their types, which the type capabilities register here (S-039 onward).
 func (p *process) configureWorker() {
 	sink := ingest.Chain(p.router, p.groups)
 	processor := ingest.NewProcessor(ingest.ProcessorConfig{OrgID: p.orgID, Store: p.db.ProcessStore(),
@@ -935,7 +954,16 @@ func (p *process) configureWorker() {
 	p.deliverer.Lease = db.Lease{Owner: p.replica.ID(), Duration: delivery.Lease, Clocks: p.clocks}
 	p.deliverer.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
 	p.deliverer.Adapters = delivery.Adapters{}
+	p.deliverer.RunbookBase = p.cfg.RunbookBaseURL.String()
+	p.deliverer.PublicURL = p.cfg.PublicURL.String()
 	p.timers.Handlers = map[string]timers.Handler{
+		delivery.TimerStormCalmCheck: func(ctx context.Context, tx timersdb.DBTX, org int64, t timers.Timer) (
+			func(context.Context), error) {
+			if org != p.orgID || t.StormID == nil {
+				return nil, nil
+			}
+			return p.delivery.CheckStormCalm(ctx, tx, *t.StormID)
+		},
 		groups.TimerReopenWindowEnd: groupTimer(p.orgID, func(ctx context.Context, tx timersdb.DBTX, id int64) (
 			func(context.Context), error) {
 			return nil, p.groups.EndReopenWindow(ctx, tx, id)

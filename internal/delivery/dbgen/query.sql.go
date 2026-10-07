@@ -12,6 +12,194 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const abandonConnectionDeliveries = `-- name: AbandonConnectionDeliveries :many
+UPDATE deliveries d
+SET state = 'not_delivered', desired_retire = false, last_error_class = 'unknown', last_error = $1::text,
+    lease_owner = NULL, lease_until = NULL, updated_at = $2
+FROM (SELECT x.id, x.desired_retire, ds.public_id
+      FROM deliveries x
+      JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
+      WHERE x.org_id = $3 AND x.state = 'pending' AND ds.connection_id = $4
+        AND ds.deleted_at IS NOT NULL
+      FOR UPDATE OF x) AS old
+WHERE d.org_id = $3 AND d.id = old.id
+RETURNING d.id, d.destination_id, d.alert_group_id, d.storm_id, old.public_id AS destination_public_id,
+          old.desired_retire AS final_edit, (d.message_id IS NULL)::boolean AS unpublished,
+          coalesce((SELECT g.public_id
+                    FROM alert_groups g
+                    WHERE g.org_id = d.org_id AND g.id = d.alert_group_id), '')::text AS alert_group_public_id
+`
+
+type AbandonConnectionDeliveriesParams struct {
+	Error        string
+	Now          time.Time
+	OrgID        int64
+	ConnectionID pgtype.Int8
+}
+
+type AbandonConnectionDeliveriesRow struct {
+	ID                  int64
+	DestinationID       int64
+	AlertGroupID        pgtype.Int8
+	StormID             pgtype.Int8
+	DestinationPublicID string
+	FinalEdit           bool
+	Unpublished         bool
+	AlertGroupPublicID  string
+}
+
+// AbandonConnectionDeliveries ends the deliveries still pending in the deleted Destinations of a deleted Connection as
+// Not delivered with @error (C-11.FR-14), with what the delivery_not_delivered line names: the public_ids of the
+// Destination and of the Alert Group, empty for a Storm summary, whether the call it ends was the final edit, and
+// whether it was a Publication.
+func (q *Queries) AbandonConnectionDeliveries(ctx context.Context, arg AbandonConnectionDeliveriesParams) ([]AbandonConnectionDeliveriesRow, error) {
+	rows, err := q.db.Query(ctx, abandonConnectionDeliveries,
+		arg.Error,
+		arg.Now,
+		arg.OrgID,
+		arg.ConnectionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AbandonConnectionDeliveriesRow{}
+	for rows.Next() {
+		var i AbandonConnectionDeliveriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DestinationID,
+			&i.AlertGroupID,
+			&i.StormID,
+			&i.DestinationPublicID,
+			&i.FinalEdit,
+			&i.Unpublished,
+			&i.AlertGroupPublicID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const breakDestination = `-- name: BreakDestination :one
+UPDATE destinations
+SET health = 'broken', broken_since = $1::timestamptz, broken_cause = $2::text, broken_reason = $3::text,
+    next_probe_at = $4::timestamptz
+WHERE org_id = $5 AND id = $6 AND health = 'healthy'
+RETURNING public_id, name
+`
+
+type BreakDestinationParams struct {
+	Now       time.Time
+	Cause     string
+	Reason    string
+	NextProbe time.Time
+	OrgID     int64
+	ID        int64
+}
+
+type BreakDestinationRow struct {
+	PublicID string
+	Name     string
+}
+
+// BreakDestination makes a healthy Destination Broken (C-11.FR-9, FR-18), probed first at @next_probe. No row when it
+// is Broken already.
+func (q *Queries) BreakDestination(ctx context.Context, arg BreakDestinationParams) (BreakDestinationRow, error) {
+	row := q.db.QueryRow(ctx, breakDestination,
+		arg.Now,
+		arg.Cause,
+		arg.Reason,
+		arg.NextProbe,
+		arg.OrgID,
+		arg.ID,
+	)
+	var i BreakDestinationRow
+	err := row.Scan(&i.PublicID, &i.Name)
+	return i, err
+}
+
+const claimBrokenProbes = `-- name: ClaimBrokenProbes :many
+UPDATE destinations ds
+SET next_probe_at = $1::timestamptz
+FROM (SELECT x.id
+      FROM destinations x
+      WHERE x.org_id = $2 AND x.health = 'broken'
+        AND (x.deleted_at IS NULL
+             OR EXISTS (SELECT 1
+                        FROM deliveries p
+                        WHERE p.org_id = x.org_id AND p.destination_id = x.id AND p.state = 'pending'))
+        AND (x.next_probe_at <= $3::timestamptz
+             OR (x.next_probe_at = 'infinity'
+                 AND EXISTS (SELECT 1
+                             FROM deliveries w
+                             WHERE w.org_id = x.org_id AND w.destination_id = x.id AND w.state = 'pending'
+                               AND w.held_by_storm_id IS NULL AND w.next_attempt_at <= $3::timestamptz
+                               AND (w.lease_until IS NULL OR w.lease_until <= $4::timestamptz))))
+      ORDER BY x.next_probe_at, x.id
+      LIMIT $5
+      FOR UPDATE OF x SKIP LOCKED) AS due
+WHERE ds.org_id = $2 AND ds.id = due.id
+RETURNING ds.id, ds.public_id, ds.name, ds.type, ds.connection_id
+`
+
+type ClaimBrokenProbesParams struct {
+	NextProbe time.Time
+	OrgID     int64
+	Due       time.Time
+	Now       time.Time
+	Lim       int32
+}
+
+type ClaimBrokenProbesRow struct {
+	ID           int64
+	PublicID     string
+	Name         string
+	Type         string
+	ConnectionID pgtype.Int8
+}
+
+// ClaimBrokenProbes claims the Broken Destinations whose probe is due (C-11.FR-9, schema.md §5): next_probe_at has
+// passed, or it is marked 'infinity' and one of its deliveries came due. Moving next_probe_at to @next_probe is the
+// lease; another claimer skips the rows this one locked. A deleted Destination is probed only while a final edit of
+// it waits.
+func (q *Queries) ClaimBrokenProbes(ctx context.Context, arg ClaimBrokenProbesParams) ([]ClaimBrokenProbesRow, error) {
+	rows, err := q.db.Query(ctx, claimBrokenProbes,
+		arg.NextProbe,
+		arg.OrgID,
+		arg.Due,
+		arg.Now,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClaimBrokenProbesRow{}
+	for rows.Next() {
+		var i ClaimBrokenProbesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.ConnectionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimDueDeliveries = `-- name: ClaimDueDeliveries :many
 UPDATE deliveries d
 SET lease_owner = $1::text, lease_until = $2::timestamptz
@@ -20,6 +208,7 @@ FROM (SELECT x.id
       JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
       WHERE x.org_id = $3 AND x.state = 'pending' AND x.next_attempt_at <= $4::timestamptz
         AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND ds.health = 'healthy'
+        AND x.held_by_storm_id IS NULL AND (ds.deleted_at IS NULL OR x.desired_retire)
       ORDER BY x.urgent DESC, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
       LIMIT $6
       FOR UPDATE OF x SKIP LOCKED) AS due
@@ -45,7 +234,8 @@ type ClaimDueDeliveriesRow struct {
 
 // ClaimDueDeliveries leases the due pending deliveries of healthy Destinations whose lease is free or ran out, Urgent
 // first, then the earliest, then the one delivered longest ago, so that deliveries waiting for the same token take
-// turns; another claimer skips the rows this one locked.
+// turns; another claimer skips the rows this one locked. A delivery a Storm holds waits for its Storm, and one of a
+// deleted Destination is claimed only for its final edit.
 func (q *Queries) ClaimDueDeliveries(ctx context.Context, arg ClaimDueDeliveriesParams) ([]ClaimDueDeliveriesRow, error) {
 	rows, err := q.db.Query(ctx, claimDueDeliveries,
 		arg.Owner,
@@ -203,7 +393,8 @@ const countDeliveryQueues = `-- name: CountDeliveryQueues :many
 SELECT ds.public_id,
        ((SELECT count(*)
         FROM deliveries d
-        WHERE d.org_id = ds.org_id AND d.destination_id = ds.id AND d.state = 'pending')::bigint
+        WHERE d.org_id = ds.org_id AND d.destination_id = ds.id AND d.state = 'pending'
+          AND d.held_by_storm_id IS NULL)::bigint
        + (SELECT count(*)
           FROM thread_replies r
           WHERE r.org_id = ds.org_id AND r.destination_id = ds.id AND r.state IN ('collecting', 'pending')
@@ -222,8 +413,8 @@ type CountDeliveryQueuesRow struct {
 	Queued   int64
 }
 
-// CountDeliveryQueues counts, per Destination that is not deleted, its pending deliveries and its Thread replies due
-// at @now, for muster_delivery_queue.
+// CountDeliveryQueues counts, per Destination that is not deleted, its pending deliveries that no Storm holds and its
+// Thread replies due at @now, for muster_delivery_queue.
 func (q *Queries) CountDeliveryQueues(ctx context.Context, arg CountDeliveryQueuesParams) ([]CountDeliveryQueuesRow, error) {
 	rows, err := q.db.Query(ctx, countDeliveryQueues, arg.Now, arg.OrgID)
 	if err != nil {
@@ -242,6 +433,49 @@ func (q *Queries) CountDeliveryQueues(ctx context.Context, arg CountDeliveryQueu
 		return nil, err
 	}
 	return items, nil
+}
+
+const countHeldOpen = `-- name: CountHeldOpen :one
+SELECT count(DISTINCT d.alert_group_id)::bigint
+FROM deliveries d
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+WHERE d.org_id = $1 AND d.held_by_storm_id = $2::bigint AND d.state = 'pending'
+  AND g.status <> 'resolved'
+`
+
+type CountHeldOpenParams struct {
+	OrgID   int64
+	StormID int64
+}
+
+// CountHeldOpen counts the open Alert Groups a Storm holds, which its end publishes.
+func (q *Queries) CountHeldOpen(ctx context.Context, arg CountHeldOpenParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countHeldOpen, arg.OrgID, arg.StormID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countRecentGroups = `-- name: CountRecentGroups :one
+
+SELECT count(*)::bigint
+FROM alert_groups
+WHERE org_id = $1 AND route_id = $2 AND created_at > $3::timestamptz
+`
+
+type CountRecentGroupsParams struct {
+	OrgID   int64
+	RouteID int64
+	Since   time.Time
+}
+
+// Storms (C-11.FR-6; storms, timers kind storm_calm_check, deliveries.storm_id and held_by_storm_id).
+// CountRecentGroups counts the Alert Groups of a Route created after @since, the Storm count of the last minute.
+func (q *Queries) CountRecentGroups(ctx context.Context, arg CountRecentGroupsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentGroups, arg.OrgID, arg.RouteID, arg.Since)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const deleteExpiredReplies = `-- name: DeleteExpiredReplies :execrows
@@ -269,6 +503,100 @@ func (q *Queries) DeleteExpiredReplies(ctx context.Context, arg DeleteExpiredRep
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const dropDeliveryReplies = `-- name: DropDeliveryReplies :exec
+UPDATE thread_replies
+SET state = 'dropped', lease_owner = NULL, lease_until = NULL
+WHERE org_id = $1 AND delivery_id = ANY($2::bigint[]) AND state IN ('collecting', 'pending')
+`
+
+type DropDeliveryRepliesParams struct {
+	OrgID       int64
+	DeliveryIds []int64
+}
+
+// DropDeliveryReplies drops the Thread replies still to be sent of deliveries that get their final edit.
+func (q *Queries) DropDeliveryReplies(ctx context.Context, arg DropDeliveryRepliesParams) error {
+	_, err := q.db.Exec(ctx, dropDeliveryReplies, arg.OrgID, arg.DeliveryIds)
+	return err
+}
+
+const dropDestinationReplies = `-- name: DropDestinationReplies :exec
+UPDATE thread_replies
+SET state = 'dropped', lease_owner = NULL, lease_until = NULL
+WHERE org_id = $1 AND destination_id = $2 AND state IN ('collecting', 'pending')
+`
+
+type DropDestinationRepliesParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+// DropDestinationReplies drops the Thread replies still to be sent of a deleted Destination.
+func (q *Queries) DropDestinationReplies(ctx context.Context, arg DropDestinationRepliesParams) error {
+	_, err := q.db.Exec(ctx, dropDestinationReplies, arg.OrgID, arg.DestinationID)
+	return err
+}
+
+const dropDueReplies = `-- name: DropDueReplies :exec
+UPDATE thread_replies
+SET state = 'dropped', lease_owner = NULL, lease_until = NULL
+WHERE org_id = $1 AND destination_id = $2 AND state IN ('collecting', 'pending')
+  AND next_attempt_at <= $3::timestamptz
+`
+
+type DropDueRepliesParams struct {
+	OrgID         int64
+	DestinationID int64
+	Now           time.Time
+}
+
+// DropDueReplies drops the Thread replies of a recovered Destination that came due while it was Broken (C-11.FR-19).
+func (q *Queries) DropDueReplies(ctx context.Context, arg DropDueRepliesParams) error {
+	_, err := q.db.Exec(ctx, dropDueReplies, arg.OrgID, arg.DestinationID, arg.Now)
+	return err
+}
+
+const dropPendingReplies = `-- name: DropPendingReplies :exec
+UPDATE thread_replies
+SET state = 'dropped', lease_owner = NULL, lease_until = NULL
+WHERE org_id = $1 AND delivery_id = $2 AND state IN ('collecting', 'pending')
+`
+
+type DropPendingRepliesParams struct {
+	OrgID      int64
+	DeliveryID int64
+}
+
+// DropPendingReplies drops the Thread replies of a delivery that are still to be sent.
+func (q *Queries) DropPendingReplies(ctx context.Context, arg DropPendingRepliesParams) error {
+	_, err := q.db.Exec(ctx, dropPendingReplies, arg.OrgID, arg.DeliveryID)
+	return err
+}
+
+const endStorm = `-- name: EndStorm :exec
+UPDATE storms
+SET ended_at = $1::timestamptz, calm_since = coalesce(calm_since, $2::timestamptz)
+WHERE org_id = $3 AND id = $4 AND ended_at IS NULL
+`
+
+type EndStormParams struct {
+	Now       time.Time
+	CalmSince pgtype.Timestamptz
+	OrgID     int64
+	ID        int64
+}
+
+// EndStorm ends a Storm.
+func (q *Queries) EndStorm(ctx context.Context, arg EndStormParams) error {
+	_, err := q.db.Exec(ctx, endStorm,
+		arg.Now,
+		arg.CalmSince,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
 }
 
 const ensureBuckets = `-- name: EnsureBuckets :exec
@@ -303,19 +631,20 @@ func (q *Queries) EnsureBuckets(ctx context.Context, arg EnsureBucketsParams) er
 }
 
 const ensureDelivery = `-- name: EnsureDelivery :one
-INSERT INTO deliveries (org_id, destination_id, alert_group_id, state, urgent, publication_loud, next_attempt_at,
-                        created_at, updated_at)
-VALUES ($1, $2, $3, 'pending', $4, $5::boolean, $6,
-        $6, $6)
+INSERT INTO deliveries (org_id, destination_id, alert_group_id, held_by_storm_id, state, urgent, publication_loud,
+                        next_attempt_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4::bigint, 'pending', $5,
+        $6::boolean, $7, $7, $7)
 ON CONFLICT (alert_group_id, destination_id) WHERE alert_group_id IS NOT NULL
 DO UPDATE SET updated_at = deliveries.updated_at
-RETURNING id, desired_version, desired_hash, thread_batch_until, (xmax = 0)::boolean AS inserted
+RETURNING id, desired_version, desired_hash, thread_batch_until, state, held_by_storm_id, (xmax = 0)::boolean AS inserted
 `
 
 type EnsureDeliveryParams struct {
 	OrgID           int64
 	DestinationID   int64
 	AlertGroupID    pgtype.Int8
+	HeldByStormID   pgtype.Int8
 	Urgent          bool
 	PublicationLoud pgtype.Bool
 	Now             time.Time
@@ -326,16 +655,20 @@ type EnsureDeliveryRow struct {
 	DesiredVersion   int64
 	DesiredHash      []byte
 	ThreadBatchUntil pgtype.Timestamptz
+	State            string
+	HeldByStormID    pgtype.Int8
 	Inserted         bool
 }
 
-// EnsureDelivery creates the delivery of an Alert Group and a Destination when it is missing, and locks it either way;
-// inserted tells a new one.
+// EnsureDelivery creates the delivery of an Alert Group and a Destination when it is missing, held by the Storm
+// @held_by_storm_id when one stands for it, and locks it either way; inserted tells a new one, state whether it ended
+// and held_by_storm_id whether a Storm holds it.
 func (q *Queries) EnsureDelivery(ctx context.Context, arg EnsureDeliveryParams) (EnsureDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, ensureDelivery,
 		arg.OrgID,
 		arg.DestinationID,
 		arg.AlertGroupID,
+		arg.HeldByStormID,
 		arg.Urgent,
 		arg.PublicationLoud,
 		arg.Now,
@@ -346,8 +679,100 @@ func (q *Queries) EnsureDelivery(ctx context.Context, arg EnsureDeliveryParams) 
 		&i.DesiredVersion,
 		&i.DesiredHash,
 		&i.ThreadBatchUntil,
+		&i.State,
+		&i.HeldByStormID,
 		&i.Inserted,
 	)
+	return i, err
+}
+
+const ensureStormSummary = `-- name: EnsureStormSummary :one
+INSERT INTO deliveries (org_id, destination_id, storm_id, state, urgent, publication_loud, next_attempt_at, created_at,
+                        updated_at)
+VALUES ($1, $2, $3, 'pending', false, true, $4, $4, $4)
+ON CONFLICT (storm_id, destination_id) WHERE storm_id IS NOT NULL
+DO UPDATE SET updated_at = deliveries.updated_at
+RETURNING id, desired_hash
+`
+
+type EnsureStormSummaryParams struct {
+	OrgID         int64
+	DestinationID int64
+	StormID       pgtype.Int8
+	Now           time.Time
+}
+
+type EnsureStormSummaryRow struct {
+	ID          int64
+	DesiredHash []byte
+}
+
+// EnsureStormSummary creates the Storm summary of a Storm in a Destination when it is missing, Loud at its first
+// Publication, and locks it either way.
+func (q *Queries) EnsureStormSummary(ctx context.Context, arg EnsureStormSummaryParams) (EnsureStormSummaryRow, error) {
+	row := q.db.QueryRow(ctx, ensureStormSummary,
+		arg.OrgID,
+		arg.DestinationID,
+		arg.StormID,
+		arg.Now,
+	)
+	var i EnsureStormSummaryRow
+	err := row.Scan(&i.ID, &i.DesiredHash)
+	return i, err
+}
+
+const getActiveStorm = `-- name: GetActiveStorm :one
+SELECT id, started_at, alert_group_count, urgent_count
+FROM storms
+WHERE org_id = $1 AND route_id = $2 AND ended_at IS NULL
+`
+
+type GetActiveStormParams struct {
+	OrgID   int64
+	RouteID int64
+}
+
+type GetActiveStormRow struct {
+	ID              int64
+	StartedAt       time.Time
+	AlertGroupCount int64
+	UrgentCount     int64
+}
+
+// GetActiveStorm reads the active Storm of a Route. No row when there is none.
+func (q *Queries) GetActiveStorm(ctx context.Context, arg GetActiveStormParams) (GetActiveStormRow, error) {
+	row := q.db.QueryRow(ctx, getActiveStorm, arg.OrgID, arg.RouteID)
+	var i GetActiveStormRow
+	err := row.Scan(
+		&i.ID,
+		&i.StartedAt,
+		&i.AlertGroupCount,
+		&i.UrgentCount,
+	)
+	return i, err
+}
+
+const getDestinationState = `-- name: GetDestinationState :one
+SELECT public_id, health
+FROM destinations
+WHERE org_id = $1 AND id = $2
+`
+
+type GetDestinationStateParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type GetDestinationStateRow struct {
+	PublicID string
+	Health   string
+}
+
+// GetDestinationState reads the public_id and health of a Destination, deleted or not.
+func (q *Queries) GetDestinationState(ctx context.Context, arg GetDestinationStateParams) (GetDestinationStateRow, error) {
+	row := q.db.QueryRow(ctx, getDestinationState, arg.OrgID, arg.ID)
+	var i GetDestinationStateRow
+	err := row.Scan(&i.PublicID, &i.Health)
 	return i, err
 }
 
@@ -370,15 +795,40 @@ func (q *Queries) GetGroupForDeliveries(ctx context.Context, arg GetGroupForDeli
 	return id, err
 }
 
+const getLatestRepublishedAt = `-- name: GetLatestRepublishedAt :one
+SELECT coalesce(max(occurred_at), '0001-01-01 00:00:00+00')::timestamptz AS at
+FROM delivery_events
+WHERE org_id = $1 AND alert_group_id = $2::bigint AND destination_id = $3
+  AND kind = 'republished'
+`
+
+type GetLatestRepublishedAtParams struct {
+	OrgID         int64
+	AlertGroupID  int64
+	DestinationID int64
+}
+
+// GetLatestRepublishedAt is when the Root message of an Alert Group in a Destination was last found deleted, the time
+// the note of its republication shows; the zero time when it never was.
+func (q *Queries) GetLatestRepublishedAt(ctx context.Context, arg GetLatestRepublishedAtParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getLatestRepublishedAt, arg.OrgID, arg.AlertGroupID, arg.DestinationID)
+	var at time.Time
+	err := row.Scan(&at)
+	return at, err
+}
+
 const getLeasedDelivery = `-- name: GetLeasedDelivery :one
-SELECT d.id, d.alert_group_id::bigint AS alert_group_id, d.desired_version, d.desired_payload, d.desired_hash,
-       d.desired_received_at, d.publication_loud,
-       d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
+SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id, d.desired_version,
+       d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
+       d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
        ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       ds.type AS destination_type, ds.connection_id, g.public_id AS alert_group_public_id, g.number
+       ds.type AS destination_type, ds.connection_id, ds.health AS destination_health,
+       coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
+       coalesce(g.status, '')::text AS group_status, coalesce(g.created_at, d.created_at)::timestamptz AS group_created_at,
+       g.resolved_at AS group_resolved_at
 FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
-JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+LEFT JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
 WHERE d.org_id = $1 AND d.id = $2 AND d.lease_owner = $3::text AND d.lease_until > $4::timestamptz
 FOR UPDATE OF d
 `
@@ -391,30 +841,39 @@ type GetLeasedDeliveryParams struct {
 }
 
 type GetLeasedDeliveryRow struct {
-	ID                   int64
-	AlertGroupID         int64
-	DesiredVersion       int64
-	DesiredPayload       []byte
-	DesiredHash          []byte
-	DesiredReceivedAt    pgtype.Timestamptz
-	PublicationLoud      pgtype.Bool
-	ActualHash           []byte
-	MessageID            pgtype.Text
-	MessageUrl           pgtype.Text
-	PublicationStartedAt pgtype.Timestamptz
-	Attempts             int64
-	DestinationID        int64
-	DestinationPublicID  string
-	DestinationName      string
-	DestinationType      string
-	ConnectionID         pgtype.Int8
-	AlertGroupPublicID   string
-	Number               int64
+	ID                     int64
+	AlertGroupID           int64
+	StormID                pgtype.Int8
+	DesiredVersion         int64
+	DesiredPayload         []byte
+	DesiredHash            []byte
+	DesiredReceivedAt      pgtype.Timestamptz
+	DesiredRetire          bool
+	PublicationLoud        pgtype.Bool
+	LateNote               bool
+	RepublishedAfterDelete bool
+	ActualHash             []byte
+	MessageID              pgtype.Text
+	MessageUrl             pgtype.Text
+	PublicationStartedAt   pgtype.Timestamptz
+	Attempts               int64
+	DestinationID          int64
+	DestinationPublicID    string
+	DestinationName        string
+	DestinationType        string
+	ConnectionID           pgtype.Int8
+	DestinationHealth      string
+	AlertGroupPublicID     string
+	Number                 int64
+	GroupStatus            string
+	GroupCreatedAt         time.Time
+	GroupResolvedAt        pgtype.Timestamptz
 }
 
 // GetLeasedDelivery reads, and locks, a delivery whose lease this replica still holds at the real time now: its latest
-// Desired state, its actual message, its Destination and its Alert Group. No row when the lease ran out or went to
-// another replica.
+// Desired state, whether its next call is the final edit, its actual message, its notes, its Destination with its
+// health and its Alert Group, or its Storm for a Storm summary, whose Alert Group fields are empty. No row when the
+// lease ran out or went to another replica.
 func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryParams) (GetLeasedDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, getLeasedDelivery,
 		arg.OrgID,
@@ -426,11 +885,15 @@ func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryPa
 	err := row.Scan(
 		&i.ID,
 		&i.AlertGroupID,
+		&i.StormID,
 		&i.DesiredVersion,
 		&i.DesiredPayload,
 		&i.DesiredHash,
 		&i.DesiredReceivedAt,
+		&i.DesiredRetire,
 		&i.PublicationLoud,
+		&i.LateNote,
+		&i.RepublishedAfterDelete,
 		&i.ActualHash,
 		&i.MessageID,
 		&i.MessageUrl,
@@ -441,15 +904,19 @@ func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryPa
 		&i.DestinationName,
 		&i.DestinationType,
 		&i.ConnectionID,
+		&i.DestinationHealth,
 		&i.AlertGroupPublicID,
 		&i.Number,
+		&i.GroupStatus,
+		&i.GroupCreatedAt,
+		&i.GroupResolvedAt,
 	)
 	return i, err
 }
 
 const getLeasedReply = `-- name: GetLeasedReply :one
-SELECT r.id, r.delivery_id, r.event, r.event_seqs, r.loudness, r.mentions, r.fingerprints, r.attempts,
-       d.message_id, d.thread_anchor_id, d.thread_chain_last_id,
+SELECT r.id, r.delivery_id, r.alert_group_id, r.event, r.event_seqs, r.loudness, r.mentions, r.fingerprints,
+       r.attempts, d.message_id, d.thread_anchor_id, d.thread_chain_last_id, d.republished_after_delete,
        ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id,
        g.public_id AS alert_group_public_id, g.number, g.title, g.status, g.urgent,
@@ -471,28 +938,30 @@ type GetLeasedReplyParams struct {
 }
 
 type GetLeasedReplyRow struct {
-	ID                  int64
-	DeliveryID          int64
-	Event               string
-	EventSeqs           []int64
-	Loudness            string
-	Mentions            []string
-	Fingerprints        []string
-	Attempts            int64
-	MessageID           pgtype.Text
-	ThreadAnchorID      pgtype.Text
-	ThreadChainLastID   pgtype.Text
-	DestinationID       int64
-	DestinationPublicID string
-	DestinationName     string
-	DestinationType     string
-	ConnectionID        pgtype.Int8
-	AlertGroupPublicID  string
-	Number              int64
-	Title               string
-	Status              string
-	Urgent              bool
-	Language            string
+	ID                     int64
+	DeliveryID             int64
+	AlertGroupID           int64
+	Event                  string
+	EventSeqs              []int64
+	Loudness               string
+	Mentions               []string
+	Fingerprints           []string
+	Attempts               int64
+	MessageID              pgtype.Text
+	ThreadAnchorID         pgtype.Text
+	ThreadChainLastID      pgtype.Text
+	RepublishedAfterDelete bool
+	DestinationID          int64
+	DestinationPublicID    string
+	DestinationName        string
+	DestinationType        string
+	ConnectionID           pgtype.Int8
+	AlertGroupPublicID     string
+	Number                 int64
+	Title                  string
+	Status                 string
+	Urgent                 bool
+	Language               string
 }
 
 // GetLeasedReply reads, and locks, a Thread reply whose lease this replica still holds at the real time now, with its
@@ -508,6 +977,7 @@ func (q *Queries) GetLeasedReply(ctx context.Context, arg GetLeasedReplyParams) 
 	err := row.Scan(
 		&i.ID,
 		&i.DeliveryID,
+		&i.AlertGroupID,
 		&i.Event,
 		&i.EventSeqs,
 		&i.Loudness,
@@ -517,6 +987,7 @@ func (q *Queries) GetLeasedReply(ctx context.Context, arg GetLeasedReplyParams) 
 		&i.MessageID,
 		&i.ThreadAnchorID,
 		&i.ThreadChainLastID,
+		&i.RepublishedAfterDelete,
 		&i.DestinationID,
 		&i.DestinationPublicID,
 		&i.DestinationName,
@@ -547,7 +1018,7 @@ func (q *Queries) GetRetentionDetailsDays(ctx context.Context, orgID int64) (int
 }
 
 const getRouteDelivery = `-- name: GetRouteDelivery :one
-SELECT language, thread_batching_window_seconds
+SELECT public_id, name, language, thread_batching_window_seconds, storm_threshold
 FROM routes
 WHERE org_id = $1 AND id = $2
 `
@@ -558,16 +1029,55 @@ type GetRouteDeliveryParams struct {
 }
 
 type GetRouteDeliveryRow struct {
+	PublicID                    string
+	Name                        string
 	Language                    string
 	ThreadBatchingWindowSeconds int64
+	StormThreshold              int64
 }
 
-// GetRouteDelivery reads what delivery needs of a Route, deleted or not: its language and its Thread batching window.
+// GetRouteDelivery reads what delivery needs of a Route, deleted or not: its public_id and name, its language, its
+// Thread batching window and its Storm threshold.
 func (q *Queries) GetRouteDelivery(ctx context.Context, arg GetRouteDeliveryParams) (GetRouteDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, getRouteDelivery, arg.OrgID, arg.ID)
 	var i GetRouteDeliveryRow
-	err := row.Scan(&i.Language, &i.ThreadBatchingWindowSeconds)
+	err := row.Scan(
+		&i.PublicID,
+		&i.Name,
+		&i.Language,
+		&i.ThreadBatchingWindowSeconds,
+		&i.StormThreshold,
+	)
 	return i, err
+}
+
+const getStormRankTime = `-- name: GetStormRankTime :one
+SELECT x.created_at
+FROM (SELECT g.created_at, row_number() OVER (ORDER BY g.created_at DESC, g.id DESC) AS n
+      FROM alert_groups g
+      WHERE g.org_id = $1 AND g.route_id = $2 AND g.created_at > $3::timestamptz) AS x
+WHERE x.n = $4::bigint
+`
+
+type GetStormRankTimeParams struct {
+	OrgID   int64
+	RouteID int64
+	Floor   time.Time
+	Rank    int64
+}
+
+// GetStormRankTime is when the @rank-th most recent Alert Group of a Route created after @floor was created: one more
+// than the Storm threshold, so that the count of the last minute fell to the threshold one minute after it.
+func (q *Queries) GetStormRankTime(ctx context.Context, arg GetStormRankTimeParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getStormRankTime,
+		arg.OrgID,
+		arg.RouteID,
+		arg.Floor,
+		arg.Rank,
+	)
+	var created_at time.Time
+	err := row.Scan(&created_at)
+	return created_at, err
 }
 
 const holdBucket = `-- name: HoldBucket :exec
@@ -596,10 +1106,11 @@ func (q *Queries) HoldBucket(ctx context.Context, arg HoldBucketParams) error {
 }
 
 const insertDeliveryEvent = `-- name: InsertDeliveryEvent :exec
-INSERT INTO delivery_events (org_id, public_id, occurred_at, destination_id, alert_group_id, kind, loudness, mentions,
-                             error_class, error, detail)
-VALUES ($1, $2, $3, $4, $5::bigint, $6, $7,
-        $8::text[], $9::text, $10::text, $11::jsonb)
+INSERT INTO delivery_events (org_id, public_id, occurred_at, destination_id, alert_group_id, storm_id, kind, loudness,
+                             mentions, error_class, error, detail)
+VALUES ($1, $2, $3, $4, $5::bigint,
+        $6::bigint, $7, $8, $9::text[], $10::text,
+        $11::text, $12::jsonb)
 `
 
 type InsertDeliveryEventParams struct {
@@ -608,6 +1119,7 @@ type InsertDeliveryEventParams struct {
 	OccurredAt    time.Time
 	DestinationID int64
 	AlertGroupID  pgtype.Int8
+	StormID       pgtype.Int8
 	Kind          string
 	Loudness      string
 	Mentions      []string
@@ -624,6 +1136,7 @@ func (q *Queries) InsertDeliveryEvent(ctx context.Context, arg InsertDeliveryEve
 		arg.OccurredAt,
 		arg.DestinationID,
 		arg.AlertGroupID,
+		arg.StormID,
 		arg.Kind,
 		arg.Loudness,
 		arg.Mentions,
@@ -638,7 +1151,7 @@ const insertThreadReply = `-- name: InsertThreadReply :exec
 INSERT INTO thread_replies (org_id, delivery_id, alert_group_id, destination_id, event, event_seqs, loudness,
                             mentions, fingerprints, state, next_attempt_at, created_at)
 VALUES ($1, $2, $3, $4, $5, $6::bigint[], $7,
-        $8::text[], $9::text[], 'pending', $10, $11)
+        $8::text[], $9::text[], $10::text, $11, $12)
 `
 
 type InsertThreadReplyParams struct {
@@ -651,11 +1164,12 @@ type InsertThreadReplyParams struct {
 	Loudness      string
 	Mentions      []string
 	Fingerprints  []string
+	State         string
 	Due           time.Time
 	Now           time.Time
 }
 
-// InsertThreadReply queues a Thread reply, due at @due.
+// InsertThreadReply queues a Thread reply, due at @due: pending, or dropped while its Destination is Broken.
 func (q *Queries) InsertThreadReply(ctx context.Context, arg InsertThreadReplyParams) error {
 	_, err := q.db.Exec(ctx, insertThreadReply,
 		arg.OrgID,
@@ -667,10 +1181,170 @@ func (q *Queries) InsertThreadReply(ctx context.Context, arg InsertThreadReplyPa
 		arg.Loudness,
 		arg.Mentions,
 		arg.Fingerprints,
+		arg.State,
 		arg.Due,
 		arg.Now,
 	)
 	return err
+}
+
+const joinStorm = `-- name: JoinStorm :one
+UPDATE storms
+SET alert_group_count = alert_group_count + 1,
+    urgent_count      = urgent_count + CASE WHEN $1::boolean THEN 1 ELSE 0 END
+WHERE org_id = $2 AND route_id = $3 AND ended_at IS NULL
+RETURNING id, started_at, alert_group_count, urgent_count
+`
+
+type JoinStormParams struct {
+	Urgent  bool
+	OrgID   int64
+	RouteID int64
+}
+
+type JoinStormRow struct {
+	ID              int64
+	StartedAt       time.Time
+	AlertGroupCount int64
+	UrgentCount     int64
+}
+
+// JoinStorm adds a new Alert Group to the active Storm of a Route, counting it Urgent when it is. No row when the Route
+// has no active Storm.
+func (q *Queries) JoinStorm(ctx context.Context, arg JoinStormParams) (JoinStormRow, error) {
+	row := q.db.QueryRow(ctx, joinStorm, arg.Urgent, arg.OrgID, arg.RouteID)
+	var i JoinStormRow
+	err := row.Scan(
+		&i.ID,
+		&i.StartedAt,
+		&i.AlertGroupCount,
+		&i.UrgentCount,
+	)
+	return i, err
+}
+
+const leaseOldestWaiting = `-- name: LeaseOldestWaiting :one
+WITH oldest AS (
+    SELECT x.id, (x.lease_until IS NULL OR x.lease_until <= $1::timestamptz) AS free
+    FROM deliveries x
+    WHERE x.org_id = $2 AND x.destination_id = $3 AND x.state = 'pending'
+      AND x.held_by_storm_id IS NULL
+    ORDER BY x.next_attempt_at, x.id
+    LIMIT 1
+    FOR UPDATE OF x
+), leased AS (
+    UPDATE deliveries d
+    SET lease_owner      = $4::text,
+        lease_until      = $5::timestamptz,
+        publication_loud = CASE
+                               WHEN d.message_id IS NULL AND d.alert_group_id IS NOT NULL
+                                   THEN coalesce((SELECT g.status = 'firing'
+                                                  FROM alert_groups g
+                                                  WHERE g.org_id = d.org_id AND g.id = d.alert_group_id), false)
+                               ELSE d.publication_loud
+                           END,
+        late_note        = CASE WHEN d.message_id IS NULL THEN false ELSE d.late_note END
+    FROM oldest o
+    WHERE d.org_id = $2 AND d.id = o.id AND o.free
+    RETURNING d.id
+)
+SELECT o.id, o.free::boolean AS free
+FROM oldest o
+`
+
+type LeaseOldestWaitingParams struct {
+	Now           time.Time
+	OrgID         int64
+	DestinationID int64
+	Owner         string
+	LeaseUntil    time.Time
+}
+
+type LeaseOldestWaitingRow struct {
+	ID   int64
+	Free bool
+}
+
+// LeaseOldestWaiting is the probe's delivery: the oldest pending delivery of a Destination that no Storm holds, leased
+// to this replica when its lease is free. No row when nothing waits; free is false when it is leased elsewhere. A
+// first Publication of an Alert Group it leases follows the recovery rule: Loud only when the Alert Group is firing at
+// that moment, and without the late note (C-11.FR-19).
+func (q *Queries) LeaseOldestWaiting(ctx context.Context, arg LeaseOldestWaitingParams) (LeaseOldestWaitingRow, error) {
+	row := q.db.QueryRow(ctx, leaseOldestWaiting,
+		arg.Now,
+		arg.OrgID,
+		arg.DestinationID,
+		arg.Owner,
+		arg.LeaseUntil,
+	)
+	var i LeaseOldestWaitingRow
+	err := row.Scan(&i.ID, &i.Free)
+	return i, err
+}
+
+const listDeletedDestinationsOfConnection = `-- name: ListDeletedDestinationsOfConnection :many
+SELECT id
+FROM destinations
+WHERE org_id = $1 AND connection_id = $2 AND deleted_at IS NOT NULL
+ORDER BY id
+`
+
+type ListDeletedDestinationsOfConnectionParams struct {
+	OrgID        int64
+	ConnectionID pgtype.Int8
+}
+
+// ListDeletedDestinationsOfConnection lists the deleted Destinations of a Connection.
+func (q *Queries) ListDeletedDestinationsOfConnection(ctx context.Context, arg ListDeletedDestinationsOfConnectionParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listDeletedDestinationsOfConnection, arg.OrgID, arg.ConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDestinationHealth = `-- name: ListDestinationHealth :many
+SELECT public_id, health
+FROM destinations
+WHERE org_id = $1 AND deleted_at IS NULL
+`
+
+type ListDestinationHealthRow struct {
+	PublicID string
+	Health   string
+}
+
+// ListDestinationHealth lists the health of each Destination that is not deleted, for muster_destination_broken.
+func (q *Queries) ListDestinationHealth(ctx context.Context, orgID int64) ([]ListDestinationHealthRow, error) {
+	rows, err := q.db.Query(ctx, listDestinationHealth, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDestinationHealthRow{}
+	for rows.Next() {
+		var i ListDestinationHealthRow
+		if err := rows.Scan(&i.PublicID, &i.Health); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listGroupDeliveries = `-- name: ListGroupDeliveries :many
@@ -737,10 +1411,78 @@ func (q *Queries) ListGroupDeliveries(ctx context.Context, arg ListGroupDeliveri
 	return items, nil
 }
 
+const listOpenGroupsOfRoute = `-- name: ListOpenGroupsOfRoute :many
+
+SELECT g.id, g.public_id, g.number, g.title, g.status, g.urgent,
+       coalesce(NOT g.urgent AND $1::bigint IS NOT NULL
+                AND (g.created_at >= $2::timestamptz
+                     OR EXISTS (SELECT 1
+                                FROM deliveries h
+                                WHERE h.org_id = g.org_id AND h.alert_group_id = g.id
+                                  AND h.held_by_storm_id = $1::bigint)), false)::boolean AS held
+FROM alert_groups g
+WHERE g.org_id = $3 AND g.route_id = $4 AND g.status <> 'resolved'
+ORDER BY g.id
+`
+
+type ListOpenGroupsOfRouteParams struct {
+	StormID      pgtype.Int8
+	StormStarted pgtype.Timestamptz
+	OrgID        int64
+	RouteID      int64
+}
+
+type ListOpenGroupsOfRouteRow struct {
+	ID       int64
+	PublicID string
+	Number   int64
+	Title    string
+	Status   string
+	Urgent   bool
+	Held     bool
+}
+
+// Destinations joining and leaving Routes, and deleted Destinations (C-11.FR-14, C-09.FR-19, C-11.FR-20).
+// ListOpenGroupsOfRoute lists the open Alert Groups of a Route, as delivery renders them, in id order, with whether the
+// active Storm @storm_id of the Route, started at @storm_started, holds it: not Urgent, and created since the Storm
+// started or held by it in another Destination. held is false when there is no Storm.
+func (q *Queries) ListOpenGroupsOfRoute(ctx context.Context, arg ListOpenGroupsOfRouteParams) ([]ListOpenGroupsOfRouteRow, error) {
+	rows, err := q.db.Query(ctx, listOpenGroupsOfRoute,
+		arg.StormID,
+		arg.StormStarted,
+		arg.OrgID,
+		arg.RouteID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOpenGroupsOfRouteRow{}
+	for rows.Next() {
+		var i ListOpenGroupsOfRouteRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Number,
+			&i.Title,
+			&i.Status,
+			&i.Urgent,
+			&i.Held,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRouteDestinations = `-- name: ListRouteDestinations :many
 
 
-SELECT d.id, d.public_id, d.name, d.type, d.connection_id
+SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health
 FROM route_destinations rd
 JOIN destinations d ON d.org_id = rd.org_id AND d.id = rd.destination_id
 WHERE rd.org_id = $1 AND rd.route_id = $2 AND d.deleted_at IS NULL
@@ -758,6 +1500,7 @@ type ListRouteDestinationsRow struct {
 	Name         string
 	Type         string
 	ConnectionID pgtype.Int8
+	Health       string
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -766,7 +1509,8 @@ type ListRouteDestinationsRow struct {
 // reconciliation by the delivery worker, Thread replies, the shared limiter buckets and the delivery events. Only this
 // package writes deliveries, thread_replies, rate_limit_buckets and delivery_events. Due times are business times and
 // leases real times; both come from Go.
-// ListRouteDestinations lists the Destinations of a Route that are not deleted, in id order, for Enqueue.
+// ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health, in id order, for
+// Enqueue.
 func (q *Queries) ListRouteDestinations(ctx context.Context, arg ListRouteDestinationsParams) ([]ListRouteDestinationsRow, error) {
 	rows, err := q.db.Query(ctx, listRouteDestinations, arg.OrgID, arg.RouteID)
 	if err != nil {
@@ -782,6 +1526,7 @@ func (q *Queries) ListRouteDestinations(ctx context.Context, arg ListRouteDestin
 			&i.Name,
 			&i.Type,
 			&i.ConnectionID,
+			&i.Health,
 		); err != nil {
 			return nil, err
 		}
@@ -791,6 +1536,144 @@ func (q *Queries) ListRouteDestinations(ctx context.Context, arg ListRouteDestin
 		return nil, err
 	}
 	return items, nil
+}
+
+const listStormActivity = `-- name: ListStormActivity :many
+SELECT r.public_id,
+       EXISTS (SELECT 1
+               FROM storms s
+               WHERE s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL)::boolean AS active
+FROM routes r
+WHERE r.org_id = $1 AND r.deleted_at IS NULL
+`
+
+type ListStormActivityRow struct {
+	PublicID string
+	Active   bool
+}
+
+// ListStormActivity lists the Routes that are not deleted with whether a Storm is active, for muster_storm_active.
+func (q *Queries) ListStormActivity(ctx context.Context, orgID int64) ([]ListStormActivityRow, error) {
+	rows, err := q.db.Query(ctx, listStormActivity, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStormActivityRow{}
+	for rows.Next() {
+		var i ListStormActivityRow
+		if err := rows.Scan(&i.PublicID, &i.Active); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStormSummaries = `-- name: ListStormSummaries :many
+SELECT id, desired_hash
+FROM deliveries
+WHERE org_id = $1 AND storm_id = $2::bigint
+ORDER BY id
+`
+
+type ListStormSummariesParams struct {
+	OrgID   int64
+	StormID int64
+}
+
+type ListStormSummariesRow struct {
+	ID          int64
+	DesiredHash []byte
+}
+
+// ListStormSummaries lists the Storm summaries of a Storm, in every Destination it reached.
+func (q *Queries) ListStormSummaries(ctx context.Context, arg ListStormSummariesParams) ([]ListStormSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listStormSummaries, arg.OrgID, arg.StormID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStormSummariesRow{}
+	for rows.Next() {
+		var i ListStormSummariesRow
+		if err := rows.Scan(&i.ID, &i.DesiredHash); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockStorm = `-- name: LockStorm :one
+SELECT s.id, s.route_id, s.started_at, s.calm_since, s.alert_group_count, s.urgent_count, r.public_id AS route_public_id,
+       r.name AS route_name, r.storm_threshold
+FROM storms s
+JOIN routes r ON r.org_id = s.org_id AND r.id = s.route_id
+WHERE s.org_id = $1 AND s.id = $2 AND s.ended_at IS NULL
+FOR UPDATE OF s
+`
+
+type LockStormParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type LockStormRow struct {
+	ID              int64
+	RouteID         int64
+	StartedAt       time.Time
+	CalmSince       pgtype.Timestamptz
+	AlertGroupCount int64
+	UrgentCount     int64
+	RoutePublicID   string
+	RouteName       string
+	StormThreshold  int64
+}
+
+// LockStorm reads, and locks, a Storm that has not ended, with the public_id, name and Storm threshold of its Route.
+func (q *Queries) LockStorm(ctx context.Context, arg LockStormParams) (LockStormRow, error) {
+	row := q.db.QueryRow(ctx, lockStorm, arg.OrgID, arg.ID)
+	var i LockStormRow
+	err := row.Scan(
+		&i.ID,
+		&i.RouteID,
+		&i.StartedAt,
+		&i.CalmSince,
+		&i.AlertGroupCount,
+		&i.UrgentCount,
+		&i.RoutePublicID,
+		&i.RouteName,
+		&i.StormThreshold,
+	)
+	return i, err
+}
+
+const markDeletedInMessenger = `-- name: MarkDeletedInMessenger :execrows
+UPDATE deliveries
+SET state = 'deleted_in_messenger', lease_owner = NULL, lease_until = NULL, updated_at = $1
+WHERE org_id = $2 AND id = $3 AND state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
+`
+
+type MarkDeletedInMessengerParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+}
+
+// MarkDeletedInMessenger leaves a delivery whose Root message was deleted in the messenger alone for good.
+func (q *Queries) MarkDeletedInMessenger(ctx context.Context, arg MarkDeletedInMessengerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markDeletedInMessenger, arg.Now, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const markDelivered = `-- name: MarkDelivered :exec
@@ -819,12 +1702,102 @@ func (q *Queries) MarkDelivered(ctx context.Context, arg MarkDeliveredParams) er
 	return err
 }
 
+const markDestinationHealthy = `-- name: MarkDestinationHealthy :one
+UPDATE destinations d
+SET health = 'healthy', broken_since = NULL, broken_cause = NULL, broken_reason = NULL, next_probe_at = NULL
+FROM (SELECT x.id, x.broken_since
+      FROM destinations x
+      WHERE x.org_id = $1 AND x.id = $2 AND x.health = 'broken'
+      FOR UPDATE OF x) AS old
+WHERE d.org_id = $1 AND d.id = old.id
+RETURNING d.public_id, d.name, old.broken_since::timestamptz AS was_broken_since,
+          (d.deleted_at IS NOT NULL)::boolean AS deleted
+`
+
+type MarkDestinationHealthyParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type MarkDestinationHealthyRow struct {
+	PublicID       string
+	Name           string
+	WasBrokenSince time.Time
+	Deleted        bool
+}
+
+// MarkDestinationHealthy ends the Broken state of a Destination and tells whether it is deleted. No row when it is
+// healthy already.
+func (q *Queries) MarkDestinationHealthy(ctx context.Context, arg MarkDestinationHealthyParams) (MarkDestinationHealthyRow, error) {
+	row := q.db.QueryRow(ctx, markDestinationHealthy, arg.OrgID, arg.ID)
+	var i MarkDestinationHealthyRow
+	err := row.Scan(
+		&i.PublicID,
+		&i.Name,
+		&i.WasBrokenSince,
+		&i.Deleted,
+	)
+	return i, err
+}
+
+const markPossibleDuplicate = `-- name: MarkPossibleDuplicate :exec
+UPDATE deliveries
+SET possible_duplicate = true, updated_at = $1
+WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text
+`
+
+type MarkPossibleDuplicateParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+	Owner string
+}
+
+// MarkPossibleDuplicate records that a Publication starts again after an earlier start that was never recorded as
+// taken (C-11.FR-12).
+func (q *Queries) MarkPossibleDuplicate(ctx context.Context, arg MarkPossibleDuplicateParams) error {
+	_, err := q.db.Exec(ctx, markPossibleDuplicate,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	return err
+}
+
+const markProbeOnNextDelivery = `-- name: MarkProbeOnNextDelivery :exec
+UPDATE destinations
+SET next_probe_at = 'infinity'
+WHERE org_id = $1 AND id = $2 AND health = 'broken'
+`
+
+type MarkProbeOnNextDeliveryParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// MarkProbeOnNextDelivery marks a Broken Destination whose type has no Destination check: its next delivery that
+// comes due is the probe and is attempted at once.
+func (q *Queries) MarkProbeOnNextDelivery(ctx context.Context, arg MarkProbeOnNextDeliveryParams) error {
+	_, err := q.db.Exec(ctx, markProbeOnNextDelivery, arg.OrgID, arg.ID)
+	return err
+}
+
 const nextDeliveryWork = `-- name: NextDeliveryWork :one
 WITH due AS (
     SELECT x.next_attempt_at AS at, x.lease_until
     FROM deliveries x
     JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
-    WHERE x.org_id = $2 AND x.state = 'pending' AND ds.health = 'healthy'
+    WHERE x.org_id = $2 AND x.state = 'pending' AND (ds.health = 'healthy' OR ds.next_probe_at = 'infinity')
+      AND x.held_by_storm_id IS NULL AND (ds.deleted_at IS NULL OR x.desired_retire)
+    UNION ALL
+    SELECT b.next_probe_at, NULL::timestamptz
+    FROM destinations b
+    WHERE b.org_id = $2 AND b.health = 'broken' AND b.next_probe_at <> 'infinity'
+      AND (b.deleted_at IS NULL
+           OR EXISTS (SELECT 1
+                      FROM deliveries w
+                      WHERE w.org_id = b.org_id AND w.destination_id = b.id AND w.state = 'pending'))
     UNION ALL
     SELECT y.next_attempt_at, y.lease_until
     FROM thread_replies y
@@ -854,8 +1827,10 @@ type NextDeliveryWorkRow struct {
 	LeaseEnd time.Time
 }
 
-// NextDeliveryWork is when the next delivery or Thread reply can be claimed: the earliest due time of free work on the
-// business clock, and the earliest end of a lease still held on the real clock; each the zero time when there is none.
+// NextDeliveryWork is when the next delivery, Thread reply or Broken probe can be claimed: the earliest due time of
+// free work on the business clock, and the earliest end of a lease still held on the real clock; each the zero time
+// when there is none. A Broken Destination marked for its next due delivery wakes the worker when that one is due;
+// deliveries a Storm holds, and those of a deleted Destination other than its final edits, are not work.
 func (q *Queries) NextDeliveryWork(ctx context.Context, arg NextDeliveryWorkParams) (NextDeliveryWorkRow, error) {
 	row := q.db.QueryRow(ctx, nextDeliveryWork, arg.Now, arg.OrgID)
 	var i NextDeliveryWorkRow
@@ -873,16 +1848,42 @@ func (q *Queries) NotifyDelivery(ctx context.Context, channel string) error {
 	return err
 }
 
-const recordDelivered = `-- name: RecordDelivered :one
+const quietStormSummaries = `-- name: QuietStormSummaries :exec
 UPDATE deliveries
+SET publication_loud = false, updated_at = $1
+WHERE org_id = $2 AND storm_id = $3::bigint AND message_id IS NULL
+`
+
+type QuietStormSummariesParams struct {
+	Now     time.Time
+	OrgID   int64
+	StormID int64
+}
+
+// QuietStormSummaries makes the Storm summaries of a Storm that were never published Quiet: a summary first published
+// after its Storm ended announces nothing new.
+func (q *Queries) QuietStormSummaries(ctx context.Context, arg QuietStormSummariesParams) error {
+	_, err := q.db.Exec(ctx, quietStormSummaries, arg.Now, arg.OrgID, arg.StormID)
+	return err
+}
+
+const recordDelivered = `-- name: RecordDelivered :one
+UPDATE deliveries d
 SET actual_version      = $1::bigint,
     actual_hash         = $2,
-    message_id          = coalesce($3::text, message_id),
-    message_url         = coalesce($4::text, message_url),
-    published_at        = CASE WHEN $5::boolean THEN coalesce(published_at, $6::timestamptz) ELSE published_at END,
-    publications        = publications + CASE WHEN $5::boolean THEN 1 ELSE 0 END,
+    message_id          = coalesce($3::text, d.message_id),
+    message_url         = coalesce($4::text, d.message_url),
+    published_at        = CASE WHEN $5::boolean THEN coalesce(d.published_at, $6::timestamptz) ELSE d.published_at END,
+    publications        = d.publications + CASE WHEN $5::boolean THEN 1 ELSE 0 END,
     last_delivered_at   = $6::timestamptz,
-    state               = CASE WHEN desired_version = $1::bigint THEN 'delivered' ELSE 'pending' END,
+    state               = CASE
+                              WHEN f.ended AND NOT f.raced THEN d.state
+                              WHEN f.raced AND d.storm_id IS NOT NULL THEN 'retired'
+                              WHEN f.raced AND f.left_destination THEN 'pending'
+                              WHEN d.desired_version = $1::bigint AND NOT d.desired_retire THEN 'delivered'
+                              ELSE 'pending'
+                          END,
+    desired_retire      = d.desired_retire OR (f.raced AND d.storm_id IS NULL AND f.left_destination),
     desired_received_at = NULL,
     next_attempt_at     = $6::timestamptz,
     attempts            = 0,
@@ -892,8 +1893,22 @@ SET actual_version      = $1::bigint,
     lease_owner         = NULL,
     lease_until         = NULL,
     updated_at          = $6::timestamptz
-WHERE org_id = $7 AND id = $8 AND lease_owner = $9::text
-RETURNING state
+FROM (SELECT x.id,
+             x.state IN ('withheld', 'retired', 'deleted_in_messenger') AS ended,
+             (x.state IN ('withheld', 'retired', 'deleted_in_messenger') AND x.message_id IS NULL
+              AND $3::text IS NOT NULL) AS raced,
+             (EXISTS (SELECT 1
+                      FROM destinations ds
+                      WHERE ds.org_id = x.org_id AND ds.id = x.destination_id AND ds.deleted_at IS NOT NULL)
+              OR NOT EXISTS (SELECT 1
+                             FROM alert_groups g
+                             JOIN route_destinations rd ON rd.org_id = g.org_id AND rd.route_id = g.route_id
+                             WHERE g.org_id = x.org_id AND g.id = x.alert_group_id
+                               AND rd.destination_id = x.destination_id)) AS left_destination
+      FROM deliveries x
+      WHERE x.org_id = $7 AND x.id = $9) AS f
+WHERE d.org_id = $7 AND d.id = f.id AND d.lease_owner = $8::text
+RETURNING d.state
 `
 
 type RecordDeliveredParams struct {
@@ -904,13 +1919,19 @@ type RecordDeliveredParams struct {
 	Published  bool
 	Now        time.Time
 	OrgID      int64
-	ID         int64
 	Owner      string
+	ID         int64
 }
 
 // RecordDelivered records a successful call that brought the actual message to @version: the delivery is delivered
-// unless the Desired state grew meanwhile, in which case it stays pending and the next call carries the newest one.
+// unless the Desired state grew meanwhile, or its Destination left the Route while the call was made, in which cases it
+// stays pending and the next call carries the newest state or the final edit.
 // The delivered version clears the receipt time, so a later call never observes a Snapshot already delivered.
+// A row that ended while the call was in flight — withheld, retired or deleted in the messenger — stays so, with the
+// actual message recorded, unless the call was a Publication that created a message on a row that had none (raced):
+// a Storm summary is then retired with it; an Alert Group whose Destination was deleted or left its Route meanwhile
+// gets the final edit of that message (pending, desired_retire); any other row follows the rule above, so that the
+// message that now exists is kept current.
 func (q *Queries) RecordDelivered(ctx context.Context, arg RecordDeliveredParams) (string, error) {
 	row := q.db.QueryRow(ctx, recordDelivered,
 		arg.Version,
@@ -920,40 +1941,97 @@ func (q *Queries) RecordDelivered(ctx context.Context, arg RecordDeliveredParams
 		arg.Published,
 		arg.Now,
 		arg.OrgID,
-		arg.ID,
 		arg.Owner,
+		arg.ID,
 	)
 	var state string
 	err := row.Scan(&state)
 	return state, err
 }
 
-const recordDeliveryRetry = `-- name: RecordDeliveryRetry :exec
+const recordDeliveryRetry = `-- name: RecordDeliveryRetry :one
 UPDATE deliveries
-SET next_attempt_at  = $1,
-    last_error_class = $2::text,
-    last_error       = $3::text,
-    lease_owner      = NULL,
-    lease_until      = NULL,
-    updated_at       = $4
-WHERE org_id = $5 AND id = $6 AND lease_owner = $7::text
+SET next_attempt_at        = $1,
+    attempts               = attempts + CASE WHEN $2::boolean THEN 1 ELSE 0 END,
+    first_failed_at        = CASE WHEN $2::boolean THEN coalesce(first_failed_at, $3) ELSE first_failed_at END,
+    publication_started_at = CASE WHEN message_id IS NULL THEN NULL ELSE publication_started_at END,
+    last_error_class       = $4::text,
+    last_error             = $5::text,
+    lease_owner            = NULL,
+    lease_until            = NULL,
+    updated_at             = $3
+WHERE org_id = $6 AND id = $7 AND lease_owner = $8::text
+RETURNING attempts, first_failed_at
 `
 
 type RecordDeliveryRetryParams struct {
 	At         time.Time
+	Counted    bool
+	Now        time.Time
 	ErrorClass pgtype.Text
 	Error      pgtype.Text
+	OrgID      int64
+	ID         int64
+	Owner      string
+}
+
+type RecordDeliveryRetryRow struct {
+	Attempts      int64
+	FirstFailedAt pgtype.Timestamptz
+}
+
+// RecordDeliveryRetry records an outcome that is retried at @at: a RetryAfter or a Fatal error, which leave the
+// budget untouched, or a Transient error, which is @counted: attempts grows and the time budget starts. The messenger
+// did not take a Publication, so its start is cleared. No row when the lease went to another replica.
+func (q *Queries) RecordDeliveryRetry(ctx context.Context, arg RecordDeliveryRetryParams) (RecordDeliveryRetryRow, error) {
+	row := q.db.QueryRow(ctx, recordDeliveryRetry,
+		arg.At,
+		arg.Counted,
+		arg.Now,
+		arg.ErrorClass,
+		arg.Error,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	var i RecordDeliveryRetryRow
+	err := row.Scan(&i.Attempts, &i.FirstFailedAt)
+	return i, err
+}
+
+const recordNotDelivered = `-- name: RecordNotDelivered :one
+UPDATE deliveries
+SET state                  = CASE
+                                 WHEN state IN ('withheld', 'retired', 'deleted_in_messenger') THEN state
+                                 ELSE 'not_delivered'
+                             END,
+    desired_retire         = false,
+    attempts               = 0,
+    first_failed_at        = NULL,
+    publication_started_at = CASE WHEN message_id IS NULL THEN NULL ELSE publication_started_at END,
+    last_error_class       = $1::text,
+    last_error             = $2::text,
+    lease_owner            = NULL,
+    lease_until            = NULL,
+    updated_at             = $3
+WHERE org_id = $4 AND id = $5 AND lease_owner = $6::text
+RETURNING id
+`
+
+type RecordNotDeliveredParams struct {
+	ErrorClass string
+	Error      string
 	Now        time.Time
 	OrgID      int64
 	ID         int64
 	Owner      string
 }
 
-// RecordDeliveryRetry records an outcome that is retried at @at: a RetryAfter, which leaves attempts untouched, or an
-// outcome that S-035 gives its own rule.
-func (q *Queries) RecordDeliveryRetry(ctx context.Context, arg RecordDeliveryRetryParams) error {
-	_, err := q.db.Exec(ctx, recordDeliveryRetry,
-		arg.At,
+// RecordNotDelivered ends a delivery as Not delivered with the error class and the masked error (C-11.FR-10); a later
+// change of its Desired state makes it pending again. A final edit that was due ends with it, and a row that ended
+// while the call was in flight stays so. No row when the lease went to another replica.
+func (q *Queries) RecordNotDelivered(ctx context.Context, arg RecordNotDeliveredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, recordNotDelivered,
 		arg.ErrorClass,
 		arg.Error,
 		arg.Now,
@@ -961,21 +2039,59 @@ func (q *Queries) RecordDeliveryRetry(ctx context.Context, arg RecordDeliveryRet
 		arg.ID,
 		arg.Owner,
 	)
-	return err
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
-const recordReplyRetry = `-- name: RecordReplyRetry :exec
+const recordReplyNotDelivered = `-- name: RecordReplyNotDelivered :one
+UPDATE thread_replies
+SET state = 'not_delivered', last_error_class = $1::text, last_error = $2::text, lease_owner = NULL,
+    lease_until = NULL
+WHERE org_id = $3 AND id = $4 AND lease_owner = $5::text
+RETURNING id
+`
+
+type RecordReplyNotDeliveredParams struct {
+	ErrorClass string
+	Error      string
+	OrgID      int64
+	ID         int64
+	Owner      string
+}
+
+// RecordReplyNotDelivered ends a Thread reply as Not delivered with the error class and the masked error. No row when
+// the lease went to another replica.
+func (q *Queries) RecordReplyNotDelivered(ctx context.Context, arg RecordReplyNotDeliveredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, recordReplyNotDelivered,
+		arg.ErrorClass,
+		arg.Error,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const recordReplyRetry = `-- name: RecordReplyRetry :one
 UPDATE thread_replies
 SET next_attempt_at  = $1,
-    last_error_class = $2::text,
-    last_error       = $3::text,
+    attempts         = attempts + CASE WHEN $2::boolean THEN 1 ELSE 0 END,
+    first_failed_at  = CASE WHEN $2::boolean THEN coalesce(first_failed_at, $3::timestamptz) ELSE first_failed_at END,
+    last_error_class = $4::text,
+    last_error       = $5::text,
     lease_owner      = NULL,
     lease_until      = NULL
-WHERE org_id = $4 AND id = $5 AND lease_owner = $6::text
+WHERE org_id = $6 AND id = $7 AND lease_owner = $8::text
+RETURNING attempts, first_failed_at
 `
 
 type RecordReplyRetryParams struct {
 	At         time.Time
+	Counted    bool
+	Now        time.Time
 	ErrorClass pgtype.Text
 	Error      pgtype.Text
 	OrgID      int64
@@ -983,17 +2099,27 @@ type RecordReplyRetryParams struct {
 	Owner      string
 }
 
-// RecordReplyRetry records an outcome of a Thread reply that is retried at @at.
-func (q *Queries) RecordReplyRetry(ctx context.Context, arg RecordReplyRetryParams) error {
-	_, err := q.db.Exec(ctx, recordReplyRetry,
+type RecordReplyRetryRow struct {
+	Attempts      int64
+	FirstFailedAt pgtype.Timestamptz
+}
+
+// RecordReplyRetry records an outcome of a Thread reply that is retried at @at; a Transient error is @counted against
+// the budget. No row when the lease went to another replica.
+func (q *Queries) RecordReplyRetry(ctx context.Context, arg RecordReplyRetryParams) (RecordReplyRetryRow, error) {
+	row := q.db.QueryRow(ctx, recordReplyRetry,
 		arg.At,
+		arg.Counted,
+		arg.Now,
 		arg.ErrorClass,
 		arg.Error,
 		arg.OrgID,
 		arg.ID,
 		arg.Owner,
 	)
-	return err
+	var i RecordReplyRetryRow
+	err := row.Scan(&i.Attempts, &i.FirstFailedAt)
+	return i, err
 }
 
 const recordReplySent = `-- name: RecordReplySent :exec
@@ -1019,6 +2145,172 @@ func (q *Queries) RecordReplySent(ctx context.Context, arg RecordReplySentParams
 		arg.OrgID,
 		arg.ID,
 		arg.Owner,
+	)
+	return err
+}
+
+const recordRetired = `-- name: RecordRetired :one
+UPDATE deliveries
+SET state = CASE WHEN state IN ('withheld', 'deleted_in_messenger') THEN state ELSE 'retired' END, desired_retire = false, attempts = 0, first_failed_at = NULL, last_error_class = NULL,
+    last_error = NULL, last_delivered_at = $1::timestamptz, lease_owner = NULL, lease_until = NULL,
+    updated_at = $1::timestamptz
+WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text
+RETURNING id
+`
+
+type RecordRetiredParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+	Owner string
+}
+
+// RecordRetired records the final edit of a delivery, or a Root message found deleted at it: the row is retired,
+// keeps the link to its last message and receives nothing more; one withheld or deleted in the messenger while the
+// call was in flight stays so. No row when the lease went to another replica.
+func (q *Queries) RecordRetired(ctx context.Context, arg RecordRetiredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, recordRetired,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const recoverPublished = `-- name: RecoverPublished :exec
+UPDATE deliveries
+SET next_attempt_at = $1, updated_at = $1
+WHERE org_id = $2 AND destination_id = $3 AND state = 'pending' AND message_id IS NOT NULL
+  AND held_by_storm_id IS NULL
+`
+
+type RecoverPublishedParams struct {
+	Now           time.Time
+	OrgID         int64
+	DestinationID int64
+}
+
+// RecoverPublished makes the published Root messages of a recovered Destination due now: one edit to the current
+// state each (C-11.FR-19).
+func (q *Queries) RecoverPublished(ctx context.Context, arg RecoverPublishedParams) error {
+	_, err := q.db.Exec(ctx, recoverPublished, arg.Now, arg.OrgID, arg.DestinationID)
+	return err
+}
+
+const recoverUnpublished = `-- name: RecoverUnpublished :exec
+UPDATE deliveries d
+SET publication_loud = (g.status = 'firing'), late_note = false, next_attempt_at = $1, updated_at = $1
+FROM alert_groups g
+WHERE d.org_id = $2 AND d.destination_id = $3 AND d.state = 'pending' AND d.message_id IS NULL
+  AND d.held_by_storm_id IS NULL AND g.org_id = $2 AND g.id = d.alert_group_id AND g.status <> 'resolved'
+`
+
+type RecoverUnpublishedParams struct {
+	Now           time.Time
+	OrgID         int64
+	DestinationID int64
+}
+
+// RecoverUnpublished makes the open Alert Groups never published on a recovered Destination due now: Loud when it is
+// firing at that moment, Quiet otherwise (C-11.FR-19).
+func (q *Queries) RecoverUnpublished(ctx context.Context, arg RecoverUnpublishedParams) error {
+	_, err := q.db.Exec(ctx, recoverUnpublished, arg.Now, arg.OrgID, arg.DestinationID)
+	return err
+}
+
+const rejoinDelivery = `-- name: RejoinDelivery :execrows
+UPDATE deliveries
+SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE message_id END,
+    message_url              = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE message_url END,
+    actual_version           = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE actual_version END,
+    actual_hash              = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE actual_hash END,
+    thread_state             = CASE WHEN state IN ('retired', 'withheld') THEN 'none' ELSE thread_state END,
+    thread_anchor_id         = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE thread_anchor_id END,
+    thread_chain_last_id     = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE thread_chain_last_id END,
+    publication_started_at   = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE publication_started_at END,
+    publication_loud         = CASE WHEN state IN ('retired', 'withheld') THEN $1::boolean ELSE publication_loud END,
+    republished_after_delete = CASE WHEN state IN ('retired', 'withheld') THEN false ELSE republished_after_delete END,
+    late_note                = false,
+    desired_retire           = false,
+    held_by_storm_id         = CASE WHEN state IN ('retired', 'withheld') THEN $2::bigint END,
+    state                    = 'pending',
+    next_attempt_at          = $3,
+    updated_at               = $3
+WHERE org_id = $4 AND alert_group_id = $5::bigint AND destination_id = $6
+  AND (state IN ('retired', 'withheld') OR desired_retire)
+`
+
+type RejoinDeliveryParams struct {
+	Loud          bool
+	HeldByStormID pgtype.Int8
+	Now           time.Time
+	OrgID         int64
+	AlertGroupID  int64
+	DestinationID int64
+}
+
+// RejoinDelivery makes the delivery of an open Alert Group in a Destination that joins its Route current again: one
+// that left (retired) or was never published there (withheld) is published afresh, Quiet as @loud, held by the active
+// Storm @held_by_storm_id when one holds the Alert Group; one whose final edit still waits keeps its Root message and
+// is edited to the current state instead.
+func (q *Queries) RejoinDelivery(ctx context.Context, arg RejoinDeliveryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rejoinDelivery,
+		arg.Loud,
+		arg.HeldByStormID,
+		arg.Now,
+		arg.OrgID,
+		arg.AlertGroupID,
+		arg.DestinationID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const releaseHeld = `-- name: ReleaseHeld :exec
+UPDATE deliveries
+SET held_by_storm_id = NULL, next_attempt_at = $1, updated_at = $1
+WHERE org_id = $2 AND id = $3 AND held_by_storm_id IS NOT NULL
+`
+
+type ReleaseHeldParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+}
+
+// ReleaseHeld lets an Alert Group a Storm holds be published at once: it became Urgent.
+func (q *Queries) ReleaseHeld(ctx context.Context, arg ReleaseHeldParams) error {
+	_, err := q.db.Exec(ctx, releaseHeld, arg.Now, arg.OrgID, arg.ID)
+	return err
+}
+
+const releaseHeldOpen = `-- name: ReleaseHeldOpen :exec
+UPDATE deliveries d
+SET held_by_storm_id = NULL, publication_loud = $1::boolean, next_attempt_at = $2, updated_at = $2
+FROM alert_groups g
+WHERE d.org_id = $3 AND d.held_by_storm_id = $4::bigint AND g.org_id = $3
+  AND g.id = d.alert_group_id AND g.status <> 'resolved'
+`
+
+type ReleaseHeldOpenParams struct {
+	Loud    bool
+	Now     time.Time
+	OrgID   int64
+	StormID int64
+}
+
+// ReleaseHeldOpen publishes the open Alert Groups a Storm held, Loud as @loud, within the limiters (C-11.FR-6).
+func (q *Queries) ReleaseHeldOpen(ctx context.Context, arg ReleaseHeldOpenParams) error {
+	_, err := q.db.Exec(ctx, releaseHeldOpen,
+		arg.Loud,
+		arg.Now,
+		arg.OrgID,
+		arg.StormID,
 	)
 	return err
 }
@@ -1122,6 +2414,235 @@ func (q *Queries) RescheduleReply(ctx context.Context, arg RescheduleReplyParams
 	return err
 }
 
+const resetDestinationBudgets = `-- name: ResetDestinationBudgets :exec
+WITH replies AS (
+    UPDATE thread_replies r
+    SET attempts = 0, first_failed_at = NULL
+    WHERE r.org_id = $1 AND r.destination_id = $2 AND r.state IN ('collecting', 'pending')
+    RETURNING r.id
+)
+UPDATE deliveries d
+SET attempts = 0, first_failed_at = NULL
+WHERE d.org_id = $1 AND d.destination_id = $2 AND d.state = 'pending'
+`
+
+type ResetDestinationBudgetsParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+// ResetDestinationBudgets gives the pending deliveries and Thread replies of a recovered Destination a fresh Transient
+// budget. It runs in the recovery, while no other replica works the Destination's rows: the claims skip a Broken
+// Destination, so no transaction of another replica holds them and waits for the Destination's row in return.
+func (q *Queries) ResetDestinationBudgets(ctx context.Context, arg ResetDestinationBudgetsParams) error {
+	_, err := q.db.Exec(ctx, resetDestinationBudgets, arg.OrgID, arg.DestinationID)
+	return err
+}
+
+const resetForRepublish = `-- name: ResetForRepublish :execrows
+UPDATE deliveries
+SET message_id               = NULL,
+    message_url              = NULL,
+    actual_version           = NULL,
+    actual_hash              = NULL,
+    publication_started_at   = NULL,
+    thread_state             = 'none',
+    thread_anchor_id         = NULL,
+    thread_chain_last_id     = NULL,
+    republished_after_delete = true,
+    publication_loud         = false,
+    late_note                = false,
+    state                    = 'pending',
+    attempts                 = 0,
+    first_failed_at          = NULL,
+    last_error_class         = NULL,
+    last_error               = NULL,
+    next_attempt_at          = $1,
+    lease_owner              = NULL,
+    lease_until              = NULL,
+    updated_at               = $1
+WHERE org_id = $2 AND id = $3 AND NOT republished_after_delete
+  AND state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
+`
+
+type ResetForRepublishParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+}
+
+// ResetForRepublish makes a delivery whose Root message was deleted in the messenger publish again, Quietly and once
+// (C-11.FR-13): the actual message and its Thread are forgotten, and its pending Thread replies wait for the new Root
+// message. A delivery republished once already, or ended, is left alone.
+func (q *Queries) ResetForRepublish(ctx context.Context, arg ResetForRepublishParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resetForRepublish, arg.Now, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retireDestinationDeliveries = `-- name: RetireDestinationDeliveries :many
+UPDATE deliveries d
+SET state            = CASE WHEN d.message_id IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
+    desired_retire   = NOT (d.message_id IS NULL AND d.publication_started_at IS NULL),
+    held_by_storm_id = NULL,
+    next_attempt_at  = $1,
+    updated_at       = $1
+FROM alert_groups g
+WHERE d.org_id = $2 AND d.destination_id = $3 AND g.org_id = $2 AND g.id = d.alert_group_id
+  AND g.status <> 'resolved' AND d.state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
+RETURNING d.id
+`
+
+type RetireDestinationDeliveriesParams struct {
+	Now           time.Time
+	OrgID         int64
+	DestinationID int64
+}
+
+// RetireDestinationDeliveries gives the deliveries of the open Alert Groups in a deleted Destination their final edit.
+func (q *Queries) RetireDestinationDeliveries(ctx context.Context, arg RetireDestinationDeliveriesParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, retireDestinationDeliveries, arg.Now, arg.OrgID, arg.DestinationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const retireGroupDeliveries = `-- name: RetireGroupDeliveries :many
+UPDATE deliveries
+SET state            = CASE WHEN message_id IS NULL AND publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
+    desired_retire   = NOT (message_id IS NULL AND publication_started_at IS NULL),
+    held_by_storm_id = NULL,
+    next_attempt_at  = $1,
+    updated_at       = $1
+WHERE org_id = $2 AND alert_group_id = $3::bigint AND destination_id <> ALL($4::bigint[])
+  AND state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
+RETURNING id
+`
+
+type RetireGroupDeliveriesParams struct {
+	Now          time.Time
+	OrgID        int64
+	AlertGroupID int64
+	Keep         []int64
+}
+
+// RetireGroupDeliveries gives the deliveries of an Alert Group in the Destinations other than @keep their final edit:
+// it moved to a Route they are not Destinations of (C-09.FR-19).
+func (q *Queries) RetireGroupDeliveries(ctx context.Context, arg RetireGroupDeliveriesParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, retireGroupDeliveries,
+		arg.Now,
+		arg.OrgID,
+		arg.AlertGroupID,
+		arg.Keep,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const retireRouteDeliveries = `-- name: RetireRouteDeliveries :many
+UPDATE deliveries d
+SET state            = CASE WHEN d.message_id IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
+    desired_retire   = NOT (d.message_id IS NULL AND d.publication_started_at IS NULL),
+    held_by_storm_id = NULL,
+    next_attempt_at  = $1,
+    updated_at       = $1
+FROM alert_groups g
+WHERE d.org_id = $2 AND d.destination_id = $3 AND g.org_id = $2 AND g.id = d.alert_group_id
+  AND g.route_id = $4 AND g.status <> 'resolved'
+  AND d.state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
+RETURNING d.id
+`
+
+type RetireRouteDeliveriesParams struct {
+	Now           time.Time
+	OrgID         int64
+	DestinationID int64
+	RouteID       int64
+}
+
+// RetireRouteDeliveries gives the deliveries of the open Alert Groups of a Route in a Destination that left it their
+// final edit (C-11.FR-14): a published Root message is edited once more, and one never published there is withheld.
+func (q *Queries) RetireRouteDeliveries(ctx context.Context, arg RetireRouteDeliveriesParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, retireRouteDeliveries,
+		arg.Now,
+		arg.OrgID,
+		arg.DestinationID,
+		arg.RouteID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const retireStormSummary = `-- name: RetireStormSummary :exec
+UPDATE deliveries d
+SET state = CASE WHEN d.message_id IS NULL THEN 'withheld' ELSE 'retired' END, updated_at = $1
+FROM storms s
+WHERE d.org_id = $2 AND d.destination_id = $3 AND d.storm_id = s.id AND s.org_id = $2
+  AND s.route_id = $4 AND s.ended_at IS NULL AND d.state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
+`
+
+type RetireStormSummaryParams struct {
+	Now           time.Time
+	OrgID         int64
+	DestinationID int64
+	RouteID       int64
+}
+
+// RetireStormSummary ends the Storm summary of the active Storm of a Route in a Destination that left it: retired when
+// published there, withheld otherwise; it receives nothing more.
+func (q *Queries) RetireStormSummary(ctx context.Context, arg RetireStormSummaryParams) error {
+	_, err := q.db.Exec(ctx, retireStormSummary,
+		arg.Now,
+		arg.OrgID,
+		arg.DestinationID,
+		arg.RouteID,
+	)
+	return err
+}
+
 const setDeliveryUrgent = `-- name: SetDeliveryUrgent :exec
 UPDATE deliveries
 SET urgent = $1, updated_at = $2
@@ -1146,18 +2667,29 @@ func (q *Queries) SetDeliveryUrgent(ctx context.Context, arg SetDeliveryUrgentPa
 	return err
 }
 
-const setDesired = `-- name: SetDesired :exec
+const setDesired = `-- name: SetDesired :one
 UPDATE deliveries
 SET desired_version     = desired_version + 1,
     desired_text        = $1::text,
     desired_payload     = $2,
     desired_hash        = $3,
     desired_received_at = coalesce(desired_received_at, $4::timestamptz),
-    state               = 'pending',
-    urgent              = $5,
-    next_attempt_at     = $6,
-    updated_at          = $6
-WHERE org_id = $7 AND id = $8
+    state               = CASE
+                              WHEN state IN ('deleted_in_messenger', 'retired') THEN state
+                              WHEN state = 'withheld' AND NOT $5::boolean THEN state
+                              ELSE 'pending'
+                          END,
+    publication_loud    = CASE
+                              WHEN (state = 'withheld' OR (late_note AND message_id IS NULL)) AND $5::boolean
+                                  THEN $6::boolean
+                              ELSE publication_loud
+                          END,
+    late_note           = CASE WHEN $5::boolean THEN false ELSE late_note END,
+    urgent              = $7,
+    next_attempt_at     = $8,
+    updated_at          = $8
+WHERE org_id = $9 AND id = $10
+RETURNING state
 `
 
 type SetDesiredParams struct {
@@ -1165,6 +2697,8 @@ type SetDesiredParams struct {
 	DesiredPayload []byte
 	DesiredHash    []byte
 	ReceivedAt     pgtype.Timestamptz
+	Open           bool
+	Firing         bool
 	Urgent         bool
 	Now            time.Time
 	OrgID          int64
@@ -1172,17 +2706,69 @@ type SetDesiredParams struct {
 }
 
 // SetDesired stores a new Desired state: the next version, its text, payload and hash, the receipt time of the oldest
-// Snapshot it carries that is not delivered yet, and makes the delivery due now.
-func (q *Queries) SetDesired(ctx context.Context, arg SetDesiredParams) error {
-	_, err := q.db.Exec(ctx, setDesired,
+// Snapshot it carries that is not delivered yet, and makes the delivery due now, and returns the state it leaves. A
+// delivery deleted in the messenger or retired stays so; a withheld one stays so unless its Alert Group is open again
+// (@open), when it is published after all, Loud when it is @firing (C-11.FR-19); a Not delivered one starts a new
+// delivery (C-11.FR-10). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
+// before it was made loses the note and takes the loudness of the recovery rule, Loud when @firing (C-11.FR-11).
+func (q *Queries) SetDesired(ctx context.Context, arg SetDesiredParams) (string, error) {
+	row := q.db.QueryRow(ctx, setDesired,
 		arg.DesiredText,
 		arg.DesiredPayload,
 		arg.DesiredHash,
 		arg.ReceivedAt,
+		arg.Open,
+		arg.Firing,
 		arg.Urgent,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,
+	)
+	var state string
+	err := row.Scan(&state)
+	return state, err
+}
+
+const setStormCalmSince = `-- name: SetStormCalmSince :exec
+UPDATE storms
+SET calm_since = $1::timestamptz
+WHERE org_id = $2 AND id = $3
+`
+
+type SetStormCalmSinceParams struct {
+	CalmSince pgtype.Timestamptz
+	OrgID     int64
+	ID        int64
+}
+
+// SetStormCalmSince records since when the count of a Storm stayed at or below the threshold, null while it does not.
+func (q *Queries) SetStormCalmSince(ctx context.Context, arg SetStormCalmSinceParams) error {
+	_, err := q.db.Exec(ctx, setStormCalmSince, arg.CalmSince, arg.OrgID, arg.ID)
+	return err
+}
+
+const setStormTimer = `-- name: SetStormTimer :exec
+INSERT INTO timers (org_id, storm_id, kind, deadline, created_at, updated_at)
+VALUES ($1, $2::bigint, 'storm_calm_check', $3, $4, $4)
+ON CONFLICT (storm_id, kind) WHERE storm_id IS NOT NULL
+DO UPDATE SET deadline = excluded.deadline, lease_owner = NULL, lease_until = NULL, attempts = 0,
+              updated_at = excluded.updated_at
+`
+
+type SetStormTimerParams struct {
+	OrgID    int64
+	StormID  int64
+	Deadline time.Time
+	Now      time.Time
+}
+
+// SetStormTimer sets the deadline of the calm check of a Storm, free of any lease.
+func (q *Queries) SetStormTimer(ctx context.Context, arg SetStormTimerParams) error {
+	_, err := q.db.Exec(ctx, setStormTimer,
+		arg.OrgID,
+		arg.StormID,
+		arg.Deadline,
+		arg.Now,
 	)
 	return err
 }
@@ -1211,6 +2797,84 @@ func (q *Queries) SetThreadBatchUntil(ctx context.Context, arg SetThreadBatchUnt
 	return err
 }
 
+const settleDestinationLeftovers = `-- name: SettleDestinationLeftovers :exec
+UPDATE deliveries d
+SET state            = CASE WHEN d.message_id IS NULL THEN 'withheld' ELSE 'retired' END,
+    desired_retire   = false,
+    held_by_storm_id = NULL,
+    updated_at       = $1
+WHERE d.org_id = $2 AND d.destination_id = $3 AND NOT d.desired_retire
+  AND (d.state = 'pending' OR (d.storm_id IS NOT NULL AND d.state NOT IN ('withheld', 'deleted_in_messenger', 'retired')))
+  AND NOT EXISTS (SELECT 1
+                  FROM alert_groups g
+                  WHERE g.org_id = d.org_id AND g.id = d.alert_group_id AND g.status <> 'resolved')
+`
+
+type SettleDestinationLeftoversParams struct {
+	Now           time.Time
+	OrgID         int64
+	DestinationID int64
+}
+
+// SettleDestinationLeftovers ends the other deliveries of a deleted Destination without a call: the pending ones of
+// resolved Alert Groups, and its Storm summaries, which the end of their Storm would otherwise edit again; retired when
+// published there, withheld otherwise.
+func (q *Queries) SettleDestinationLeftovers(ctx context.Context, arg SettleDestinationLeftoversParams) error {
+	_, err := q.db.Exec(ctx, settleDestinationLeftovers, arg.Now, arg.OrgID, arg.DestinationID)
+	return err
+}
+
+const settleResolvedPublication = `-- name: SettleResolvedPublication :exec
+UPDATE deliveries d
+SET state            = CASE WHEN ds.health = 'broken' THEN 'withheld' ELSE d.state END,
+    late_note        = d.late_note
+                       OR coalesce(ds.health = 'healthy' AND d.last_error_class IN ('retry_after', 'transient'), false),
+    publication_loud = CASE
+                           WHEN ds.health = 'healthy' AND d.last_error_class IN ('retry_after', 'transient') THEN false
+                           ELSE d.publication_loud
+                       END,
+    updated_at       = $1
+FROM destinations ds
+WHERE d.org_id = $2 AND d.id = $3 AND ds.org_id = $2 AND ds.id = d.destination_id
+  AND d.state = 'pending' AND d.message_id IS NULL AND d.held_by_storm_id IS NULL AND d.storm_id IS NULL
+`
+
+type SettleResolvedPublicationParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+}
+
+// SettleResolvedPublication decides the first Publication of a resolved Alert Group that is still pending (C-11.FR-11,
+// FR-19): withheld while its Destination is Broken, so that nothing waits for it; Quiet with the late note when it
+// waited for a RetryAfter or Transient retries; unchanged otherwise, also when no error was ever recorded
+// (last_error_class is null, which coalesce turns into false rather than a null late_note). Storm summaries and held
+// deliveries are not touched. A lease stays: the record of a call in flight, such as a probe's, then follows the rule
+// of RecordDelivered for a row that ended meanwhile.
+func (q *Queries) SettleResolvedPublication(ctx context.Context, arg SettleResolvedPublicationParams) error {
+	_, err := q.db.Exec(ctx, settleResolvedPublication, arg.Now, arg.OrgID, arg.ID)
+	return err
+}
+
+const shareRouteMembership = `-- name: ShareRouteMembership :exec
+SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))
+`
+
+type ShareRouteMembershipParams struct {
+	LockClass int32
+	RouteID   int64
+}
+
+// ShareRouteMembership takes, until the transaction ends, the shared membership lock of a Route, which a change of its
+// Destinations takes exclusively (routing's LockRouteMembership, class db.RouteMembershipLockClass): an Enqueue and a
+// change of the Route's Destinations serialize, so that neither misses a delivery the other creates or retires. An
+// advisory lock, not a lock of the Route's row: the move of open Alert Groups to the Default route holds that row and
+// then locks the Alert Groups, which a Command holds before its Enqueue.
+func (q *Queries) ShareRouteMembership(ctx context.Context, arg ShareRouteMembershipParams) error {
+	_, err := q.db.Exec(ctx, shareRouteMembership, arg.LockClass, arg.RouteID)
+	return err
+}
+
 const startPublication = `-- name: StartPublication :exec
 UPDATE deliveries
 SET publication_started_at = $1::timestamptz, updated_at = $1::timestamptz
@@ -1233,6 +2897,46 @@ func (q *Queries) StartPublication(ctx context.Context, arg StartPublicationPara
 		arg.Owner,
 	)
 	return err
+}
+
+const startStorm = `-- name: StartStorm :one
+INSERT INTO storms (org_id, route_id, started_at, alert_group_count, urgent_count)
+VALUES ($1, $2, $3, 1, CASE WHEN $4::boolean THEN 1 ELSE 0 END)
+ON CONFLICT (route_id) WHERE ended_at IS NULL DO NOTHING
+RETURNING id, started_at, alert_group_count, urgent_count
+`
+
+type StartStormParams struct {
+	OrgID   int64
+	RouteID int64
+	Now     time.Time
+	Urgent  bool
+}
+
+type StartStormRow struct {
+	ID              int64
+	StartedAt       time.Time
+	AlertGroupCount int64
+	UrgentCount     int64
+}
+
+// StartStorm starts the Storm of a Route with the Alert Group that started it. No row when another transaction started
+// one first.
+func (q *Queries) StartStorm(ctx context.Context, arg StartStormParams) (StartStormRow, error) {
+	row := q.db.QueryRow(ctx, startStorm,
+		arg.OrgID,
+		arg.RouteID,
+		arg.Now,
+		arg.Urgent,
+	)
+	var i StartStormRow
+	err := row.Scan(
+		&i.ID,
+		&i.StartedAt,
+		&i.AlertGroupCount,
+		&i.UrgentCount,
+	)
+	return i, err
 }
 
 const takeTokens = `-- name: TakeTokens :one
@@ -1301,4 +3005,135 @@ func (q *Queries) TakeTokens(ctx context.Context, arg TakeTokensParams) (TakeTok
 	var i TakeTokensRow
 	err := row.Scan(&i.Taken, &i.Due)
 	return i, err
+}
+
+const updateBrokenReason = `-- name: UpdateBrokenReason :exec
+UPDATE destinations
+SET broken_reason = $1::text, broken_cause = coalesce($2::text, broken_cause)
+WHERE org_id = $3 AND id = $4 AND health = 'broken'
+`
+
+type UpdateBrokenReasonParams struct {
+	Reason string
+	Cause  pgtype.Text
+	OrgID  int64
+	ID     int64
+}
+
+// UpdateBrokenReason keeps a Broken Destination Broken with the error of its last failure as the reason, and its cause
+// when one is given.
+func (q *Queries) UpdateBrokenReason(ctx context.Context, arg UpdateBrokenReasonParams) error {
+	_, err := q.db.Exec(ctx, updateBrokenReason,
+		arg.Reason,
+		arg.Cause,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
+const wipeDestinationSecrets = `-- name: WipeDestinationSecrets :exec
+WITH gone AS (
+    SELECT x.id
+    FROM destinations x
+    WHERE x.org_id = $1 AND x.id = $2 AND x.deleted_at IS NOT NULL
+      AND NOT EXISTS (SELECT 1
+                      FROM deliveries p
+                      WHERE p.org_id = x.org_id AND p.destination_id = x.id AND p.state = 'pending')
+), secrets AS (
+    DELETE FROM destination_secrets s
+    USING gone
+    WHERE s.org_id = $1 AND s.destination_id = gone.id
+    RETURNING s.destination_id
+)
+UPDATE destinations d
+SET signing_secret_ciphertext          = NULL,
+    signing_secret_key_id              = NULL,
+    signing_secret_updated_at          = NULL,
+    previous_signing_secret_ciphertext = NULL,
+    previous_signing_secret_key_id     = NULL,
+    previous_signing_secret_since      = NULL,
+    proxy_password_ciphertext          = NULL,
+    proxy_password_key_id              = NULL,
+    proxy_password_updated_at          = NULL
+FROM gone
+WHERE d.org_id = $1 AND d.id = gone.id
+`
+
+type WipeDestinationSecretsParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// WipeDestinationSecrets wipes the secrets of a deleted Destination once none of its deliveries is pending: the
+// Signing secrets, the proxy password and its named Secrets (C-11.FR-14); the delete of the named Secrets runs whether
+// or not the update reads it. It changes nothing otherwise, and nothing the second time.
+func (q *Queries) WipeDestinationSecrets(ctx context.Context, arg WipeDestinationSecretsParams) error {
+	_, err := q.db.Exec(ctx, wipeDestinationSecrets, arg.OrgID, arg.ID)
+	return err
+}
+
+const withholdHeldResolved = `-- name: WithholdHeldResolved :exec
+UPDATE deliveries d
+SET held_by_storm_id = NULL, state = 'withheld', updated_at = $1
+FROM alert_groups g
+WHERE d.org_id = $2 AND d.held_by_storm_id = $3::bigint AND d.state = 'pending' AND g.org_id = $2
+  AND g.id = d.alert_group_id AND g.status = 'resolved'
+`
+
+type WithholdHeldResolvedParams struct {
+	Now     time.Time
+	OrgID   int64
+	StormID int64
+}
+
+// WithholdHeldResolved withholds the Alert Groups a Storm held that resolved meanwhile: never published.
+func (q *Queries) WithholdHeldResolved(ctx context.Context, arg WithholdHeldResolvedParams) error {
+	_, err := q.db.Exec(ctx, withholdHeldResolved, arg.Now, arg.OrgID, arg.StormID)
+	return err
+}
+
+const withholdLeased = `-- name: WithholdLeased :exec
+UPDATE deliveries
+SET state = 'withheld', desired_retire = false, lease_owner = NULL, lease_until = NULL, updated_at = $1
+WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text
+`
+
+type WithholdLeasedParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+	Owner string
+}
+
+// WithholdLeased withholds a leased delivery whose Destination left before it was ever published there.
+func (q *Queries) WithholdLeased(ctx context.Context, arg WithholdLeasedParams) error {
+	_, err := q.db.Exec(ctx, withholdLeased,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	return err
+}
+
+const withholdResolvedUnpublished = `-- name: WithholdResolvedUnpublished :exec
+UPDATE deliveries d
+SET state = 'withheld', lease_owner = NULL, lease_until = NULL, updated_at = $1
+FROM alert_groups g
+WHERE d.org_id = $2 AND d.destination_id = $3 AND d.state = 'pending' AND d.message_id IS NULL
+  AND d.held_by_storm_id IS NULL AND g.org_id = $2 AND g.id = d.alert_group_id AND g.status = 'resolved'
+`
+
+type WithholdResolvedUnpublishedParams struct {
+	Now           time.Time
+	OrgID         int64
+	DestinationID int64
+}
+
+// WithholdResolvedUnpublished withholds, on a recovered Destination, the deliveries never published there whose Alert
+// Group resolved meanwhile (C-11.FR-19).
+func (q *Queries) WithholdResolvedUnpublished(ctx context.Context, arg WithholdResolvedUnpublishedParams) error {
+	_, err := q.db.Exec(ctx, withholdResolvedUnpublished, arg.Now, arg.OrgID, arg.DestinationID)
+	return err
 }

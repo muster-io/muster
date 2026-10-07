@@ -30,3 +30,6 @@ func (w *Worker) WakeChannel() <-chan struct{} {
 
 // Defaults are the wait and the batch a Worker uses.
 func (w *Worker) Defaults() (time.Duration, int32) { return w.maxWait(), w.batch() }
+
+// Backoff is the wait after the n-th Transient attempt.
+func (w *Worker) Backoff(n int64) time.Duration { return w.backoff(n) }

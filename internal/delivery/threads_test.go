@@ -176,9 +176,9 @@ func TestRepliesInOrder(t *testing.T) {
 	}
 }
 
-// TestReplyOutcomes: a RetryAfter holds the Destination's bucket and leaves the reply pending until then; any other
-// outcome waits the first step of delivery.transient_backoff; a reply without tokens waits for them; a missing adapter
-// is unknown; failed queries are logged.
+// TestReplyOutcomes: a RetryAfter holds the Destination's bucket and leaves the reply pending until then; a lost Thread
+// waits the first step of delivery.transient_backoff; a reply without tokens waits for them; a missing adapter is
+// unknown, so Not delivered; failed queries are logged. The other rules are in outcomes_test.go.
 func TestReplyOutcomes(t *testing.T) {
 	e := published(t)
 	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: 2,

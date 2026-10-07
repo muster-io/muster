@@ -21,6 +21,7 @@ import (
 )
 
 const (
+	destinationsWriter = "mstr_pat_destinations_write"
 	destinationsReader = "mstr_pat_destinations_read"
 	mattermostID       = "DSAAAAAAAAAAA1"
 	telegramID         = "DSAAAAAAAAAAA2"
@@ -33,12 +34,32 @@ const noMentions = `{"new_alert_group":{"everyone":"none","user_ids":[],"groups"
 	`"snooze_ended":{"everyone":"none","user_ids":[],"groups":[]},` +
 	`"rise_to_urgent":{"everyone":"here","user_ids":[],"groups":["sre"]}}`
 
-// fakeDestinations stands for internal/destinations: the Destinations in id order, filtered as the query filters.
+// fakeDestinations stands for internal/destinations: the Destinations in id order, filtered as the query filters,
+// and the deletions with who asked and the version they named.
 type fakeDestinations struct {
-	list    []destinations.Destination
-	refs    map[int64][]destinations.Ref
-	filters []destinations.ListFilter
-	err     error
+	list     []destinations.Destination
+	refs     map[int64][]destinations.Ref
+	filters  []destinations.ListFilter
+	deleted  []string
+	versions []*int64
+	by       []destinations.Requester
+	err      error
+}
+
+func (f *fakeDestinations) Delete(_ context.Context, r destinations.Requester, id string, version *int64) error {
+	i := slices.IndexFunc(f.list, func(d destinations.Destination) bool { return d.PublicID == id })
+	if i < 0 {
+		return destinations.ErrNotFound
+	}
+	if version != nil && *version != f.list[i].Version {
+		return destinations.ErrVersionMismatch
+	}
+	if f.err != nil {
+		return f.err
+	}
+	f.deleted, f.versions, f.by = append(f.deleted, id), append(f.versions, version), append(f.by, r)
+	f.list = slices.Delete(f.list, i, i+1)
+	return nil
 }
 
 func (f *fakeDestinations) List(_ context.Context, lf destinations.ListFilter) (destinations.Page, error) {
@@ -96,6 +117,9 @@ func newDestinationsAPI(t *testing.T) (*testAPI, *fakeDestinations, *fakeDeliver
 	ft.idents[destinationsReader] = &auth.Identity{Session: ft.idents[fullToken].Session,
 		Permissions: []auth.Permission{"destinations:read", "routes:read", "alert-groups:read"},
 		Transport:   audit.TransportAPI, Token: &auth.Token{ID: 51, Name: "destinations"}}
+	ft.idents[destinationsWriter] = &auth.Identity{Session: ft.idents[fullToken].Session,
+		Permissions: []auth.Permission{"destinations:read", "destinations:write"},
+		Transport:   audit.TransportAPI, Token: &auth.Token{ID: 52, Name: "destinations-write"}}
 	since := t0.Add(-time.Hour)
 	fd := &fakeDestinations{list: []destinations.Destination{
 		{ID: 1, PublicID: mattermostID, Type: "mattermost", Name: "ops", Connection: ptr("CNAAAAAAAAAAA1"),
@@ -303,5 +327,50 @@ func TestLimitedProblem(t *testing.T) {
 		body["type"] != problemBase+"interactive-budget-exhausted" || body["title"] != "Messenger is busy" ||
 		body["retry_after_seconds"] != float64(7) {
 		t.Errorf("limited = %d %v %s", w.Code, w.Header(), w.Body)
+	}
+}
+
+// TestDeleteDestinationAPI is deleteDestination (C-11.FR-14) at the API with destinations:write: 204 with or without
+// If-Match, 412 when it is stale, 404 for an unknown or deleted Destination, 403 without the Permission, and the
+// deleted Destination no longer read or listed.
+func TestDeleteDestinationAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	path := "/api/v1/destinations/"
+	if a := x.as(t, destinationsReader, http.MethodDelete, path+webhookID, ""); a.status != http.StatusForbidden {
+		t.Errorf("delete by a reader = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, destinationsWriter, http.MethodDelete, path+webhookID, "", "If-Match", `"4"`); a.status !=
+		http.StatusPreconditionFailed {
+		t.Errorf("stale = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, destinationsWriter, http.MethodDelete, path+webhookID, "", "If-Match", `"5"`); a.status !=
+		http.StatusNoContent || !slices.Equal(fd.deleted, []string{webhookID}) || *fd.versions[0] != 5 ||
+		fd.by[0].Actor.TokenName != "destinations-write" || fd.by[0].Transport != audit.TransportAPI {
+		t.Errorf("delete = %d %s, %+v", a.status, a.body, fd.by)
+	}
+	if a := x.as(t, destinationsWriter, http.MethodDelete, path+telegramID, ""); a.status != http.StatusNoContent ||
+		fd.versions[1] != nil {
+		t.Errorf("delete without If-Match = %d %s", a.status, a.body)
+	}
+	for _, id := range []string{webhookID, "DSZZZZZZZZZZZZ"} {
+		if a := x.as(t, destinationsWriter, http.MethodDelete, path+id, ""); a.status != http.StatusNotFound {
+			t.Errorf("delete %s again = %d %s", id, a.status, a.body)
+		}
+	}
+	if a := x.as(t, destinationsReader, http.MethodGet, path+webhookID, ""); a.status != http.StatusNotFound {
+		t.Errorf("read a deleted destination = %d", a.status)
+	}
+	a := x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations", "")
+	if a.status != http.StatusOK || strings.Contains(string(a.body), webhookID) {
+		t.Errorf("list = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, destinationsWriter, http.MethodDelete, path+mattermostID, "", "If-Match", "garbage"); a.status !=
+		http.StatusPreconditionFailed && a.status != http.StatusBadRequest {
+		t.Errorf("malformed If-Match = %d", a.status)
+	}
+	fd.err = errors.New("boom")
+	if a := x.as(t, destinationsWriter, http.MethodDelete, path+mattermostID, ""); a.status !=
+		http.StatusInternalServerError {
+		t.Errorf("failure = %d", a.status)
 	}
 }

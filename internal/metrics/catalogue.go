@@ -398,6 +398,25 @@ var DeliveryQueue = newGauge(Definition{
 	LeaderOnly: true,
 })
 
+// DestinationBroken is 1 while a Destination is Broken and 0 while it is healthy, exported by the Leader (C-11.FR-9).
+var DestinationBroken = newGauge(Definition{
+	Name: "muster_destination_broken",
+	Help: "1 while the Destination is Broken, 0 while it is healthy, per Destination that is not deleted; set by the " +
+		"Leader.",
+	Labels:     []Label{entity("destination")},
+	Capability: "C-11",
+	LeaderOnly: true,
+})
+
+// StormActive is 1 while a Route has an active Storm and 0 otherwise, exported by the Leader (C-11.FR-6).
+var StormActive = newGauge(Definition{
+	Name:       "muster_storm_active",
+	Help:       "1 while the Route has an active Storm, 0 otherwise, per Route that is not deleted; set by the Leader.",
+	Labels:     []Label{entity("route")},
+	Capability: "C-11",
+	LeaderOnly: true,
+})
+
 // DestinationInfo is 1 for every Destination that is not deleted; its labels carry the Destination's name.
 var DestinationInfo = newGauge(Definition{
 	Name: "muster_destination_info",

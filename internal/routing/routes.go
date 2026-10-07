@@ -12,9 +12,11 @@
 package routing
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -144,23 +146,37 @@ type Reminders struct {
 	CapSeconds           int64 `json:"cap_seconds"`
 }
 
-// Route is a Route as the API reads it; Position is its zero-based place in evaluation order.
+// Route is a Route as the API reads it; Position is its zero-based place in evaluation order, DestinationIDs the
+// public_ids of its Destinations that are not deleted, in order, and Storm its active Storm, nil when there is none.
 type Route struct {
-	ID          int64
-	PublicID    string
-	Name        string
-	Description string
-	Position    int
-	IsDefault   bool
-	Urgent      bool
-	Matchers    []Matcher
-	GroupKey    []string
-	Policy      Policy
-	CreatedAt   time.Time
-	Version     int64
+	ID             int64
+	PublicID       string
+	Name           string
+	Description    string
+	Position       int
+	IsDefault      bool
+	Urgent         bool
+	Matchers       []Matcher
+	GroupKey       []string
+	Policy         Policy
+	DestinationIDs []string
+	Storm          *Storm
+	CreatedAt      time.Time
+	Version        int64
 	// OpenAlertGroupCount is the number of its open Alert Groups, which block its deletion (C-09.FR-19).
 	OpenAlertGroupCount int64
 }
+
+// Storm is the active Storm of a Route (C-11.FR-6): when it started and the new Alert Groups it counted, those of its
+// Storm summary.
+type Storm struct {
+	Since           time.Time
+	AlertGroupCount int64
+}
+
+// Membership is the hook that delivery runs, in the transaction tx of a Route's change, when Destinations were added
+// to or removed from the Route routeID, by internal id (C-11.FR-14).
+type Membership func(ctx context.Context, tx dbgen.DBTX, routeID int64, added, removed []int64) error
 
 // OpenAlertGroupsError is the refusal to delete a Route that still has open Alert Groups (C-09.FR-19); Count says
 // how many.
@@ -222,14 +238,26 @@ type Queries interface {
 	DismissRouteSuggestion(ctx context.Context, arg dbgen.DismissRouteSuggestionParams) error
 	CountOpenAlertGroups(ctx context.Context, arg dbgen.CountOpenAlertGroupsParams) (int64, error)
 	ListOpenAlertGroupCounts(ctx context.Context, orgID int64) ([]dbgen.ListOpenAlertGroupCountsRow, error)
+	ResolveDestinations(ctx context.Context, arg dbgen.ResolveDestinationsParams) ([]dbgen.ResolveDestinationsRow,
+		error)
+	ListRouteDestinationIDs(ctx context.Context, arg dbgen.ListRouteDestinationIDsParams) (
+		[]dbgen.ListRouteDestinationIDsRow, error)
+	InsertRouteDestinations(ctx context.Context, arg dbgen.InsertRouteDestinationsParams) error
+	DeleteRouteDestinations(ctx context.Context, arg dbgen.DeleteRouteDestinationsParams) error
+	LockRouteMembership(ctx context.Context, arg dbgen.LockRouteMembershipParams) error
+	BumpRoutesOfDestination(ctx context.Context, arg dbgen.BumpRoutesOfDestinationParams) (
+		[]dbgen.BumpRoutesOfDestinationRow, error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
+	// DB is the pool or the transaction the queries run on, which the membership hook writes through.
+	DB() dbgen.DBTX
 }
 
-// Store runs the queries alone or in one transaction.
+// Store runs the queries alone, in one transaction, or in a caller's transaction tx (On).
 type Store interface {
 	Queries
 	InTx(ctx context.Context, f func(Queries) error) error
+	On(tx dbgen.DBTX) Queries
 }
 
 // NewStore is the Store over the main pool.
@@ -240,7 +268,7 @@ func NewStore(pool *pgxpool.Pool) Store {
 type pgQueries struct {
 	*dbgen.Queries
 	audit.Store
-	exec db.Execer
+	exec dbgen.DBTX
 }
 
 func newQueries(d dbgen.DBTX) pgQueries {
@@ -251,10 +279,14 @@ func (q pgQueries) Notify(ctx context.Context, h db.Hint) error {
 	return db.NotifyHint(ctx, q.exec, h)
 }
 
+func (q pgQueries) DB() dbgen.DBTX { return q.exec }
+
 type pgStore struct {
 	pgQueries
 	pool *pgxpool.Pool
 }
+
+func (pgStore) On(tx dbgen.DBTX) Queries { return newQueries(tx) }
 
 func (s pgStore) InTx(ctx context.Context, f func(Queries) error) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -290,6 +322,9 @@ type Service struct {
 	snapshots Snapshots
 	log       *logging.Logger
 
+	// membership is the hook of delivery for Destinations added to or removed from a Route; nil changes nothing.
+	membership Membership
+
 	// info holds the muster_route_info series this replica exports, by public_id to name.
 	infoMu sync.Mutex
 	info   map[string]string
@@ -306,6 +341,38 @@ func New(cfg Config) *Service {
 	return &Service{orgID: cfg.OrgID, store: cfg.Store, audit: cfg.Audit, clock: cfg.Business, real: cfg.Real,
 		router: router, snapshots: cfg.Snapshots, log: cfg.Log, info: map[string]string{},
 		infoChanged: make(chan struct{}, 1)}
+}
+
+// DestinationDeleted is the hook of the Destinations (C-11.FR-14), in the transaction tx that deletes the Destination
+// destinationID, before it leaves its Routes: each Route that is not deleted and has it gets a new version — the
+// Destination leaves its destination_ids — and its hint, and its membership lock is taken, so that no Enqueue on it
+// runs until tx ends. The Routes are locked in id order before their membership locks; a transaction that renders
+// Alert Groups of several Routes at once and holds the membership lock of one of them may still deadlock with it,
+// which PostgreSQL detects and ends.
+func (s *Service) DestinationDeleted(ctx context.Context, tx dbgen.DBTX, destinationID int64) error {
+	q := s.store.On(tx)
+	routes, err := q.BumpRoutesOfDestination(ctx, dbgen.BumpRoutesOfDestinationParams{OrgID: s.orgID,
+		DestinationID: destinationID, Now: s.clock.Now().UTC()})
+	if err != nil {
+		return fmt.Errorf("change the routes of destination %d: %w", destinationID, err)
+	}
+	slices.SortFunc(routes, func(a, b dbgen.BumpRoutesOfDestinationRow) int { return cmp.Compare(a.ID, b.ID) })
+	for _, r := range routes {
+		if err := q.LockRouteMembership(ctx, dbgen.LockRouteMembershipParams{
+			LockClass: db.RouteMembershipLockClass, RouteID: r.ID}); err != nil {
+			return fmt.Errorf("lock the destinations of route %s: %w", r.PublicID, err)
+		}
+		if err := q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: r.PublicID}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetMembership fills the hook of delivery for Destinations added to or removed from a Route, before any Route
+// changes.
+func (s *Service) SetMembership(m Membership) {
+	s.membership = m
 }
 
 // List lists the Routes that are not deleted in evaluation order with the version of the list. The version is read
@@ -334,9 +401,13 @@ func (s *Service) list(ctx context.Context, q Queries) (List, error) {
 			TemplateAckTimeoutNotice: r.TemplateAckTimeoutNotice, AckTimeoutEnabled: r.AckTimeoutEnabled,
 			AckTimeoutFirstIntervalSeconds: r.AckTimeoutFirstIntervalSeconds, RemindersEnabled: r.RemindersEnabled,
 			RemindersFirstIntervalSeconds: r.RemindersFirstIntervalSeconds, RemindersCapSeconds: r.RemindersCapSeconds,
-			AutoUnacknowledge: r.AutoUnacknowledge, CreatedAt: r.CreatedAt, Version: r.Version, Place: int64(i)})
+			AutoUnacknowledge: r.AutoUnacknowledge, CreatedAt: r.CreatedAt, Version: r.Version, Place: int64(i),
+			StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount})
 	}
 	if err := s.withMatchers(ctx, q, out.Routes); err != nil {
+		return List{}, err
+	}
+	if err := s.withDestinations(ctx, q, out.Routes); err != nil {
 		return List{}, err
 	}
 	if err := s.withCounts(ctx, q, out.Routes); err != nil {
@@ -364,6 +435,9 @@ func (s *Service) get(ctx context.Context, q Queries, publicID string) (Route, e
 	}
 	list := []Route{routeOf(r)}
 	if err := s.withMatchers(ctx, q, list); err != nil {
+		return Route{}, err
+	}
+	if err := s.withDestinations(ctx, q, list); err != nil {
 		return Route{}, err
 	}
 	if err := s.withCounts(ctx, q, list); err != nil {
@@ -404,6 +478,122 @@ func (s *Service) withMatchers(ctx context.Context, q Queries, list []Route) err
 		if i, ok := index[m.RouteID]; ok {
 			list[i].Matchers = append(list[i].Matchers, Matcher{Label: m.Label, Op: m.Op, Value: m.Value})
 		}
+	}
+	return nil
+}
+
+// withDestinations sets the public_ids of the Destinations of each Route that are not deleted, in order.
+func (s *Service) withDestinations(ctx context.Context, q Queries, list []Route) error {
+	ids := make([]int64, len(list))
+	index := make(map[int64]int, len(list))
+	for i, r := range list {
+		ids[i], index[r.ID] = r.ID, i
+		list[i].DestinationIDs = []string{}
+	}
+	rows, err := q.ListRouteDestinationIDs(ctx, dbgen.ListRouteDestinationIDsParams{OrgID: s.orgID, RouteIds: ids})
+	if err != nil {
+		return fmt.Errorf("list the destinations of the routes: %w", err)
+	}
+	for _, d := range rows {
+		if i, ok := index[d.RouteID]; ok {
+			list[i].DestinationIDs = append(list[i].DestinationIDs, d.PublicID)
+		}
+	}
+	return nil
+}
+
+// destinationSet is the Destinations of a Route as an edit gives them: their internal ids by public_id.
+type destinationSet map[string]int64
+
+// publicIDs are the public_ids of the set, in order.
+func (d destinationSet) publicIDs() []string {
+	return slices.Sorted(maps.Keys(d))
+}
+
+// resolveDestinations reads the Destinations ids name, each once (C-08.FR-1): an id that names no Destination, or a
+// deleted one, is an unknown_id FieldError at its pointer.
+func (s *Service) resolveDestinations(ctx context.Context, q Queries, ids []string) (destinationSet, error) {
+	out := destinationSet{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	canonical := make([]string, len(ids))
+	for i, raw := range ids {
+		id, err := publicid.Parse(publicid.Destination, raw)
+		if err != nil {
+			return nil, unknownDestination(i)
+		}
+		canonical[i] = id
+	}
+	rows, err := q.ResolveDestinations(ctx, dbgen.ResolveDestinationsParams{OrgID: s.orgID, PublicIds: canonical})
+	if err != nil {
+		return nil, fmt.Errorf("read the destinations of the route: %w", err)
+	}
+	found := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		found[r.PublicID] = r.ID
+	}
+	for i, id := range canonical {
+		internal, ok := found[id]
+		if !ok {
+			return nil, unknownDestination(i)
+		}
+		out[id] = internal
+	}
+	return out, nil
+}
+
+// unknownDestination is the refusal of the i-th Destination of a Route.
+func unknownDestination(i int) error {
+	return &FieldError{Pointer: "/destination_ids/" + strconv.Itoa(i), Code: CodeUnknownID,
+		Detail: "No such Destination."}
+}
+
+// writeDestinations makes want the Destinations of the Route routeID in route_destinations — those kept keep when
+// they were added — and runs the membership hook with those added and removed. It takes the Route's membership lock
+// first, after the Route's row, so that an Enqueue on the Route waits for the change or the change for it.
+func (s *Service) writeDestinations(ctx context.Context, q Queries, routeID int64, want destinationSet) error {
+	if err := q.LockRouteMembership(ctx, dbgen.LockRouteMembershipParams{LockClass: db.RouteMembershipLockClass,
+		RouteID: routeID}); err != nil {
+		return fmt.Errorf("lock the destinations of the route: %w", err)
+	}
+	rows, err := q.ListRouteDestinationIDs(ctx, dbgen.ListRouteDestinationIDsParams{OrgID: s.orgID,
+		RouteIds: []int64{routeID}})
+	if err != nil {
+		return fmt.Errorf("list the destinations of the route: %w", err)
+	}
+	current := make(map[int64]bool, len(rows))
+	var removed []int64
+	for _, r := range rows {
+		current[r.DestinationID] = true
+		if _, ok := want[r.PublicID]; !ok {
+			removed = append(removed, r.DestinationID)
+		}
+	}
+	var added []int64
+	for _, id := range want {
+		if !current[id] {
+			added = append(added, id)
+		}
+	}
+	slices.Sort(added)
+	if len(removed) > 0 {
+		if err := q.DeleteRouteDestinations(ctx, dbgen.DeleteRouteDestinationsParams{OrgID: s.orgID,
+			RouteID: routeID, DestinationIds: removed}); err != nil {
+			return fmt.Errorf("remove destinations from the route: %w", err)
+		}
+	}
+	if len(added) > 0 {
+		if err := q.InsertRouteDestinations(ctx, dbgen.InsertRouteDestinationsParams{OrgID: s.orgID,
+			RouteID: routeID, DestinationIds: added, Now: s.clock.Now().UTC()}); err != nil {
+			return fmt.Errorf("add destinations to the route: %w", err)
+		}
+	}
+	if s.membership == nil || len(added)+len(removed) == 0 {
+		return nil
+	}
+	if err := s.membership(ctx, q.DB(), routeID, added, removed); err != nil {
+		return fmt.Errorf("deliver to the changed destinations of the route: %w", err)
 	}
 	return nil
 }
@@ -452,6 +642,10 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 				return err
 			}
 		}
+		dests, err := s.resolveDestinations(ctx, q, in.DestinationIDs)
+		if err != nil {
+			return err
+		}
 		description := ""
 		if in.Description != nil {
 			description = *in.Description
@@ -474,6 +668,9 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 			return fmt.Errorf("create the route: %w", nameTaken(err))
 		}
 		if err := s.writeMatchers(ctx, q, routeID, in.Matchers); err != nil {
+			return err
+		}
+		if err := s.writeDestinations(ctx, q, routeID, dests); err != nil {
 			return err
 		}
 		if created, err = s.get(ctx, q, id); err != nil {
@@ -527,9 +724,14 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			return &FieldError{Pointer: "/matchers", Code: CodeUnsupported,
 				Detail: "The Default route takes every Alert no other Route took; it has no Matchers."}
 		}
+		dests, err := s.resolveDestinations(ctx, q, in.DestinationIDs)
+		if err != nil {
+			return err
+		}
 		next := before
 		next.Name, next.Matchers, next.Urgent, next.GroupKey, next.Policy = in.Name, in.Matchers, in.Urgent,
 			in.GroupKey, in.Policy
+		next.DestinationIDs = dests.publicIDs()
 		if in.Description != nil {
 			next.Description = *in.Description
 		}
@@ -559,6 +761,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 				return fmt.Errorf("replace the matchers of the route %s: %w", before.PublicID, err)
 			}
 			if err := s.writeMatchers(ctx, q, before.ID, next.Matchers); err != nil {
+				return err
+			}
+		}
+		if !slices.Equal(before.DestinationIDs, next.DestinationIDs) {
+			if err := s.writeDestinations(ctx, q, before.ID, dests); err != nil {
 				return err
 			}
 		}
@@ -752,7 +959,7 @@ func EnsureDefault(ctx context.Context, q Queries, orgID int64, now time.Time) e
 }
 
 // check refuses an Input that is not valid: the fields the database checks are refused here first, with the pointer
-// of the field.
+// of the field. The Destinations are checked in the transaction that writes them.
 func check(in Input) error {
 	if strings.TrimSpace(in.Name) == "" {
 		return &FieldError{Pointer: "/name", Code: CodeInvalidFormat, Detail: "The name is empty."}
@@ -768,10 +975,6 @@ func check(in Input) error {
 	}
 	if err := checkGroupKey("/group_key", in.GroupKey); err != nil {
 		return err
-	}
-	if len(in.DestinationIDs) > 0 {
-		// No Destination type exists yet (C-13 to C-15), so every id names no Destination.
-		return &FieldError{Pointer: "/destination_ids/0", Code: CodeUnknownID, Detail: "No such Destination."}
 	}
 	return checkPolicy(in.Policy)
 }
@@ -884,12 +1087,13 @@ func resourceOf(r Route) audit.Resource {
 
 // view is a Route as its Audit log diff shows it.
 type view struct {
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Matchers    []Matcher `json:"matchers"`
-	Urgent      bool      `json:"urgent"`
-	GroupKey    []string  `json:"group_key"`
-	Policy      Policy    `json:"policy"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description"`
+	Matchers       []Matcher `json:"matchers"`
+	Urgent         bool      `json:"urgent"`
+	GroupKey       []string  `json:"group_key"`
+	DestinationIDs []string  `json:"destination_ids"`
+	Policy         Policy    `json:"policy"`
 }
 
 func viewOf(r Route) view {
@@ -900,15 +1104,24 @@ func viewOf(r Route) view {
 	if key == nil {
 		key = []string{}
 	}
+	dests := r.DestinationIDs
+	if dests == nil {
+		dests = []string{}
+	}
 	p := r.Policy
 	if p.SnoozeDurationsSeconds == nil {
 		p.SnoozeDurationsSeconds = []int64{}
 	}
-	return view{Name: r.Name, Description: r.Description, Matchers: ms, Urgent: r.Urgent, GroupKey: key, Policy: p}
+	return view{Name: r.Name, Description: r.Description, Matchers: ms, Urgent: r.Urgent, GroupKey: key,
+		DestinationIDs: dests, Policy: p}
 }
 
 func routeOf(r dbgen.GetRouteRow) Route {
-	return Route{
+	var st *Storm
+	if r.StormSince.Valid {
+		st = &Storm{Since: r.StormSince.Time.UTC(), AlertGroupCount: r.StormAlertGroupCount.Int64}
+	}
+	return Route{Storm: st,
 		ID: r.ID, PublicID: r.PublicID, Name: r.Name, Description: r.Description, Position: int(r.Place),
 		IsDefault: r.IsDefault, Urgent: r.Urgent, GroupKey: r.GroupKey, CreatedAt: r.CreatedAt.UTC(),
 		Version: r.Version,

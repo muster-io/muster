@@ -24,6 +24,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
@@ -34,13 +35,21 @@ import (
 // or a Thread reply is queued.
 const Channel = "muster_delivery"
 
-// The built-in settings of delivery (defaults.md): delivery.interactive_budget, delivery.thread_alerts_listed and the
-// first step of delivery.transient_backoff, which every outcome but ok and RetryAfter waits until S-035 gives each its
-// rule.
+// The built-in settings of delivery (defaults.md): delivery.interactive_budget, delivery.thread_alerts_listed,
+// delivery.transient_backoff from its first step up to its longest wait, the attempt and time budgets of
+// delivery.transient_budget, delivery.broken_probe_interval, delivery.storm_calm_period, the minute over which the new
+// Alert Groups of a Route are counted against route.storm_threshold, and the wait of a lost Thread until S-042 gives
+// it its rule.
 const (
-	InteractiveBudget  = 5 * time.Second
-	ThreadAlertsListed = 10
-	TransientFirstStep = 2 * time.Second
+	InteractiveBudget       = 5 * time.Second
+	ThreadAlertsListed      = 10
+	TransientFirstStep      = 2 * time.Second
+	TransientBackoffMax     = 5 * time.Minute
+	TransientBudgetAttempts = 10
+	TransientBudgetTime     = 30 * time.Minute
+	BrokenProbeInterval     = 5 * time.Minute
+	StormCalmPeriod         = 5 * time.Minute
+	StormWindow             = time.Minute
 )
 
 // The defaults of the worker: the lease of a claimed row, renewed before its call, which it outlasts; the rows one
@@ -79,8 +88,7 @@ type Destination struct {
 // OutcomeKind classifies what an adapter call ended with (C-11.FR-8).
 type OutcomeKind string
 
-// The outcomes of an adapter call. This story handles OutcomeOK and OutcomeRetryAfter; every other outcome leaves the
-// delivery pending until TransientFirstStep, until S-035 gives each its rule.
+// The outcomes of an adapter call; outcomes.go gives each its rule (C-11.FR-8).
 const (
 	// OutcomeOK is a message the messenger accepted; "not modified" is ok too.
 	OutcomeOK         OutcomeKind = "ok"
@@ -122,12 +130,14 @@ type Outcome struct {
 
 // Call is one adapter call: its client class (ADR-0015) — delivery for the worker, interactive for the interactive
 // path — its Destination, and for a new message its loudness and symbolic Mentions, which the adapter resolves from
-// S-037 on. An edit is always Quiet and mentions nobody.
+// S-037 on. An edit is always Quiet and mentions nobody. Plain asks for the same text without markup, after the
+// messenger rejected the markup (C-11.FR-8).
 type Call struct {
 	Class       outbound.Class
 	Destination Destination
 	Loudness    groups.Loudness
 	Mentions    []groups.Mention
+	Plain       bool
 }
 
 // Root is the Root message a Thread reply goes under: its message id and, in Telegram, the automatic copy in the
@@ -185,8 +195,9 @@ type queries interface {
 	ListRouteDestinations(ctx context.Context, arg dbgen.ListRouteDestinationsParams) (
 		[]dbgen.ListRouteDestinationsRow, error)
 	GetRouteDelivery(ctx context.Context, arg dbgen.GetRouteDeliveryParams) (dbgen.GetRouteDeliveryRow, error)
+	ShareRouteMembership(ctx context.Context, arg dbgen.ShareRouteMembershipParams) error
 	EnsureDelivery(ctx context.Context, arg dbgen.EnsureDeliveryParams) (dbgen.EnsureDeliveryRow, error)
-	SetDesired(ctx context.Context, arg dbgen.SetDesiredParams) error
+	SetDesired(ctx context.Context, arg dbgen.SetDesiredParams) (string, error)
 	SetDeliveryUrgent(ctx context.Context, arg dbgen.SetDeliveryUrgentParams) error
 	SetThreadBatchUntil(ctx context.Context, arg dbgen.SetThreadBatchUntilParams) error
 	InsertThreadReply(ctx context.Context, arg dbgen.InsertThreadReplyParams) error
@@ -199,7 +210,7 @@ type queries interface {
 	RescheduleDelivery(ctx context.Context, arg dbgen.RescheduleDeliveryParams) error
 	StartPublication(ctx context.Context, arg dbgen.StartPublicationParams) error
 	RecordDelivered(ctx context.Context, arg dbgen.RecordDeliveredParams) (string, error)
-	RecordDeliveryRetry(ctx context.Context, arg dbgen.RecordDeliveryRetryParams) error
+	RecordDeliveryRetry(ctx context.Context, arg dbgen.RecordDeliveryRetryParams) (dbgen.RecordDeliveryRetryRow, error)
 	EnsureBuckets(ctx context.Context, arg dbgen.EnsureBucketsParams) error
 	TakeTokens(ctx context.Context, arg dbgen.TakeTokensParams) (dbgen.TakeTokensRow, error)
 	HoldBucket(ctx context.Context, arg dbgen.HoldBucketParams) error
@@ -208,7 +219,7 @@ type queries interface {
 	RenewReplyLease(ctx context.Context, arg dbgen.RenewReplyLeaseParams) error
 	RescheduleReply(ctx context.Context, arg dbgen.RescheduleReplyParams) error
 	RecordReplySent(ctx context.Context, arg dbgen.RecordReplySentParams) error
-	RecordReplyRetry(ctx context.Context, arg dbgen.RecordReplyRetryParams) error
+	RecordReplyRetry(ctx context.Context, arg dbgen.RecordReplyRetryParams) (dbgen.RecordReplyRetryRow, error)
 	NextDeliveryWork(ctx context.Context, arg dbgen.NextDeliveryWorkParams) (dbgen.NextDeliveryWorkRow, error)
 	InsertDeliveryEvent(ctx context.Context, arg dbgen.InsertDeliveryEventParams) error
 	GetGroupForDeliveries(ctx context.Context, arg dbgen.GetGroupForDeliveriesParams) (int64, error)
@@ -217,6 +228,13 @@ type queries interface {
 		error)
 	GetRetentionDetailsDays(ctx context.Context, orgID int64) (int64, error)
 	DeleteExpiredReplies(ctx context.Context, arg dbgen.DeleteExpiredRepliesParams) (int64, error)
+	outcomeQueries
+	brokenQueries
+	stormQueries
+	membershipQueries
+	// Internal alerts and live-update hints are written in the transaction of the change they announce.
+	internalalerts.Store
+	Notify(ctx context.Context, h db.Hint) error
 }
 
 // Store runs the queries of the package over the main pool, alone or in short transactions, and over the
@@ -229,7 +247,20 @@ type Store struct {
 
 // NewStore is the Store that begins its transactions with b and runs its other queries on d: the main pool for both.
 func NewStore(b db.Beginner, d dbgen.DBTX) *Store {
-	return &Store{begin: b, db: d, queries: func(d dbgen.DBTX) queries { return dbgen.New(d) }}
+	return &Store{begin: b, db: d, queries: func(d dbgen.DBTX) queries {
+		return pgQueries{Queries: dbgen.New(d), Store: internalalerts.NewStore(d), exec: d}
+	}}
+}
+
+// pgQueries are the queries of the package and of the Internal alerts over one pool or transaction.
+type pgQueries struct {
+	*dbgen.Queries
+	internalalerts.Store
+	exec db.Execer
+}
+
+func (q pgQueries) Notify(ctx context.Context, h db.Hint) error {
+	return db.NotifyHint(ctx, q.exec, h)
 }
 
 // q are the queries over the pool.
@@ -248,16 +279,20 @@ type Config struct {
 	Business clock.Clock
 	Renderer Renderer
 	Log      *logging.Logger
+	// RunbookBase is MUSTER_RUNBOOK_BASE_URL, the base of the runbook_url of MusterDestinationBroken.
+	RunbookBase string
 }
 
 // Service is the delivery of an Organization: Enqueue for the dispatcher, the delivery state of Alert Groups, the
-// delivery events and the Leader tasks of delivery.
+// delivery events, the end of a Broken state, the calm check of Storms, the hooks of Routes and Destinations that
+// change their Destinations, and the Leader tasks of delivery.
 type Service struct {
 	orgID    int64
 	store    *Store
 	clock    clock.Clock
 	renderer Renderer
 	log      *logging.Logger
+	internal *internalalerts.Raiser
 }
 
 // New returns the Service of the Organization in cfg; a nil Renderer is the minimal renderer.
@@ -266,11 +301,16 @@ func New(cfg Config) *Service {
 	if r == nil {
 		r = MinimalRenderer{}
 	}
-	return &Service{orgID: cfg.OrgID, store: cfg.Store, clock: cfg.Business, renderer: r, log: cfg.Log}
+	return &Service{orgID: cfg.OrgID, store: cfg.Store, clock: cfg.Business, renderer: r, log: cfg.Log,
+		internal: internalalerts.NewRaiser(cfg.OrgID, cfg.RunbookBase)}
 }
 
 // ErrNotFound is an Alert Group that does not exist in the Organization.
 var ErrNotFound = errors.New("no such alert group")
+
+// StateWaitingForBroken is the delivery state the API shows for a pending delivery whose Destination is Broken; it is
+// derived, never stored (schema.md §4.11).
+const StateWaitingForBroken = "waiting_for_broken_destination"
 
 // State is the delivery state of an Alert Group in one Destination (C-11.FR-16).
 type State struct {
@@ -321,6 +361,9 @@ func (s *Service) States(ctx context.Context, publicID string) ([]State, error) 
 		if r.State == "not_delivered" {
 			st.Error = textOf(r.LastError)
 		}
+		if r.State == "pending" && r.Health == healthBroken {
+			st.State = StateWaitingForBroken
+		}
 		out = append(out, st)
 	}
 	return out, nil
@@ -353,6 +396,41 @@ func (s *Service) ExportQueue(ctx context.Context) error {
 		if !seen[id] {
 			metrics.DeliveryQueue.Delete(id)
 			delete(queueSeries, id)
+		}
+	}
+	return nil
+}
+
+// brokenSeries are the Destinations whose muster_destination_broken series this replica exports.
+var (
+	brokenMu     sync.Mutex
+	brokenSeries = map[string]bool{}
+)
+
+// ExportBroken sets muster_destination_broken to 1 for each Broken Destination of the Organization that is not deleted
+// and 0 for the healthy ones, as a Leader task; the series of a Destination that is gone is removed. Running it twice
+// sets the same values.
+func (s *Service) ExportBroken(ctx context.Context) error {
+	rows, err := s.store.q().ListDestinationHealth(ctx, s.orgID)
+	if err != nil {
+		return fmt.Errorf("read the health of the destinations: %w", err)
+	}
+	brokenMu.Lock()
+	defer brokenMu.Unlock()
+	seen := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		seen[r.PublicID] = true
+		brokenSeries[r.PublicID] = true
+		v := 0.0
+		if r.Health == healthBroken {
+			v = 1
+		}
+		metrics.DestinationBroken.With(r.PublicID).Set(v)
+	}
+	for id := range brokenSeries {
+		if !seen[id] {
+			metrics.DestinationBroken.Delete(id)
+			delete(brokenSeries, id)
 		}
 	}
 	return nil

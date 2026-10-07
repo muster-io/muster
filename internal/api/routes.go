@@ -307,8 +307,8 @@ func routeListOf(list routing.List) gen.RouteList {
 	return out
 }
 
-// routeOf is the API form of a Route without its Destinations, which routeView adds. The Storm state, the template error state and the count of open
-// Alert Groups arrive with their capabilities.
+// routeOf is the API form of a Route without its Destinations, which routeView adds, with its active Storm. The
+// template error state arrives with its capability.
 func routeOf(rt routing.Route) gen.Route {
 	tag, description := etag(rt.Version), rt.Description
 	key := rt.GroupKey
@@ -319,7 +319,11 @@ func routeOf(rt routing.Route) gen.Route {
 		Id: rt.PublicID, Name: rt.Name, Description: &description, Position: rt.Position, IsDefault: rt.IsDefault,
 		Urgent: rt.Urgent, GroupKey: key, Matchers: make([]gen.Matcher, 0, len(rt.Matchers)),
 		DestinationIds: []gen.PublicId{}, Destinations: []gen.DestinationRef{}, Policy: routePolicyOf(rt.Policy),
-		StormActive: false, OpenAlertGroupCount: int(rt.OpenAlertGroupCount), CreatedAt: rt.CreatedAt.UTC(), Etag: &tag,
+		StormActive: rt.Storm != nil, OpenAlertGroupCount: int(rt.OpenAlertGroupCount), CreatedAt: rt.CreatedAt.UTC(),
+		Etag: &tag,
+	}
+	if rt.Storm != nil {
+		out.Storm = &gen.RouteStorm{Since: rt.Storm.Since.UTC(), AlertGroupCount: int(rt.Storm.AlertGroupCount)}
 	}
 	for _, m := range rt.Matchers {
 		out.Matchers = append(out.Matchers, gen.Matcher{Label: m.Label, Op: gen.MatcherOp(m.Op), Value: m.Value})

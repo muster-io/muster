@@ -40,6 +40,8 @@ type Call struct {
 	Message   delivery.Message
 	Loudness  groups.Loudness
 	Mentions  []groups.Mention
+	// Plain is a call without markup, after the messenger rejected the markup.
+	Plain bool
 	// Answered is the outcome the recorder answered with.
 	Answered delivery.Outcome
 }
@@ -167,19 +169,19 @@ func (r *Recorder) answer(ctx context.Context, c Call) delivery.Outcome {
 // Publish records a new Root message.
 func (r *Recorder) Publish(ctx context.Context, c delivery.Call, m delivery.Message) delivery.Outcome {
 	return r.answer(ctx, Call{Method: MethodPublish, Class: c.Class, Destination: c.Destination, Message: m,
-		Loudness: c.Loudness, Mentions: c.Mentions})
+		Loudness: c.Loudness, Mentions: c.Mentions, Plain: c.Plain})
 }
 
 // Update records an edit of the message messageID.
 func (r *Recorder) Update(ctx context.Context, c delivery.Call, messageID string, m delivery.Message) delivery.Outcome {
 	return r.answer(ctx, Call{Method: MethodUpdate, Class: c.Class, Destination: c.Destination, MessageID: messageID,
-		Message: m, Loudness: c.Loudness, Mentions: c.Mentions})
+		Message: m, Loudness: c.Loudness, Mentions: c.Mentions, Plain: c.Plain})
 }
 
 // Reply records a Thread reply under root.
 func (r *Recorder) Reply(ctx context.Context, c delivery.Call, root delivery.Root, m delivery.Message) delivery.Outcome {
 	return r.answer(ctx, Call{Method: MethodReply, Class: c.Class, Destination: c.Destination,
-		MessageID: root.MessageID, Root: root, Message: m, Loudness: c.Loudness, Mentions: c.Mentions})
+		MessageID: root.MessageID, Root: root, Message: m, Loudness: c.Loudness, Mentions: c.Mentions, Plain: c.Plain})
 }
 
 // Check records a Destination check.

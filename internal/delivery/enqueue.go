@@ -7,12 +7,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 )
@@ -59,7 +59,8 @@ type Row struct {
 
 // Table is the closed table of the lifecycle events of C-09.FR-22, C-10.FR-15 and C-17.FR-11 that delivery turns into
 // messages (C-11.FR-20), keyed by event and variant: an event whose rows differ by actor or reason has a row per
-// variant. moved_to_default_route is S-035's: until then delivery leaves the Alert Group where it was.
+// variant. moved_to_default_route changes the Destinations of the Alert Group (C-09.FR-19): the final edit in those it
+// leaves, a Quiet Publication in those it joins, an update in those of both.
 var Table = []Row{
 	{groups.EventCreated, groups.VariantAny, FormPublication, groups.Loud, []groups.Mention{groups.MentionNewAlertGroup},
 		false},
@@ -82,6 +83,7 @@ var Table = []Row{
 	{groups.EventSnoozeEnded, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionSnoozeEnded},
 		false},
 	{groups.EventResolved, VariantSystem, FormReplyAndUpdate, groups.Quiet, nil, false},
+	{groups.EventMovedToDefaultRoute, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventUnacknowledged, groups.VariantOwnerReleased, FormReplyAndUpdate, groups.Loud, nil, false},
 	{groups.EventAcknowledged, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventTakeover, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionPreviousOwner},
@@ -98,6 +100,63 @@ var Table = []Row{
 	{EventReminderAnswered, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{EventAutoUnacknowledged, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionOwner}, false},
 	{EventNoticesMissed, groups.VariantAny, FormReply, groups.Loud, nil, true},
+}
+
+// EventRow is a row of the Loud/Quiet table of delivery events (reference.md, Loud and Quiet): what delivery
+// itself sends to one Destination, apart from the lifecycle events — a new message, an edit, or nothing — with its
+// loudness and symbolic Mentions. LoudWhenFiring is the row that is Loud only for an Alert Group firing at that moment.
+type EventRow struct {
+	Name           string
+	Form           Form
+	Loudness       groups.Loudness
+	Mentions       []groups.Mention
+	LoudWhenFiring bool
+}
+
+// The names of the rows of DeliveryEvents.
+const (
+	DeliveryAddedDestination   = "publication_into_added_destination"
+	DeliveryStormSummary       = "storm_summary_first_publication"
+	DeliveryStormUpdate        = "storm_summary_update"
+	DeliveryAfterStorm         = "gradual_publication_after_storm"
+	DeliveryLate               = "delivered_late"
+	DeliveryAfterRecovery      = "publication_after_recovery"
+	DeliveryUpdateRecovery     = "update_after_recovery"
+	DeliveryRepliesWhileBroken = "thread_replies_while_broken"
+	DeliveryResolvedBroken     = "resolved_while_broken"
+	DeliveryRepublication      = "republication_after_deletion"
+	DeliveryFinalEdit          = "final_edit"
+)
+
+// DeliveryEvents is the closed Loud/Quiet table of delivery events (C-11.FR-20, reference.md): every message delivery
+// sends of its own, or decides not to send, reads its loudness and Mentions here.
+var DeliveryEvents = []EventRow{
+	{DeliveryAddedDestination, FormPublication, groups.Quiet, nil, false},
+	{DeliveryStormSummary, FormPublication, groups.Loud, []groups.Mention{groups.MentionNewAlertGroup}, false},
+	{DeliveryStormUpdate, FormUpdate, groups.Quiet, nil, false},
+	{DeliveryAfterStorm, FormPublication, groups.Quiet, nil, false},
+	{DeliveryLate, FormPublication, groups.Quiet, nil, false},
+	{DeliveryAfterRecovery, FormPublication, groups.Loud, []groups.Mention{groups.MentionNewAlertGroup}, true},
+	{DeliveryUpdateRecovery, FormUpdate, groups.Quiet, nil, false},
+	{DeliveryRepliesWhileBroken, FormNothing, groups.Quiet, nil, false},
+	{DeliveryResolvedBroken, FormNothing, groups.Quiet, nil, false},
+	{DeliveryRepublication, FormPublication, groups.Quiet, nil, false},
+	{DeliveryFinalEdit, FormUpdate, groups.Quiet, nil, false},
+}
+
+// deliveryEvent is the row name of DeliveryEvents; a name outside the table is a programming error.
+func deliveryEvent(name string) EventRow {
+	for _, r := range DeliveryEvents {
+		if r.Name == name {
+			return r
+		}
+	}
+	panic("delivery: no row " + name + " in the table of delivery events")
+}
+
+// loud says whether the row is Loud for an Alert Group that is firing or not.
+func (r EventRow) loud(firing bool) bool {
+	return r.Loudness == groups.Loud && (!r.LoudWhenFiring || firing)
 }
 
 // rowOf is the row of a recorded event made by actor; false for an event outside the table.
@@ -136,28 +195,34 @@ func (r Row) mentionsOf(e groups.Recorded) []string {
 // Enqueue is the re-render step of the dispatcher (C-11.FR-1, FR-20; groups.Rerender), in the dispatcher's
 // transaction tx. For each Destination of the Alert Group's Route that is not deleted it creates the delivery when it is
 // missing, renders the Root message and, when what it shows changed, stores it as the next Desired state, due now; the
-// lifecycle events whose form is a Thread reply queue one, new Alerts within the Thread batching window. A delivery
-// created by `created` is a Loud Publication. It wakes the delivery workers once tx commits.
+// lifecycle events whose form is a Thread reply queue one, new Alerts within the Thread batching window, or drop it
+// while the Destination is Broken, a Storm holds the delivery or it ended. A delivery created by `created` is a Loud
+// Publication unless a Storm of the Route holds it (C-11.FR-6); the first Publication of an Alert Group that resolves
+// is settled by the rules of late Publications and Broken Destinations; an Alert Group moved to the Default route gets
+// the final edit in the Destinations it leaves and a Quiet Publication in those it joins (C-09.FR-19). It wakes the
+// delivery workers once tx commits.
+//
+// It first takes the Route's membership lock shared (ShareRouteMembership), which a change of the Route's Destinations
+// and the deletion of one of them take exclusively, so that an Enqueue and such a change serialize: neither misses a
+// delivery the other creates or retires. The lock order cannot deadlock: grouping holds the Route's row FOR SHARE and
+// takes this lock after it, and a change of the Destinations takes the row before this lock, so it waits for grouping
+// before it takes the lock; a Command or a timer holds only its Alert Group, which a change of the Destinations never
+// locks; the move to the Default route holds the Route's row and then the Alert Groups, but never this lock, which an
+// Enqueue takes without the row. While it waits nobody waits for a delivery row it holds: an Enqueue locks the
+// deliveries of its Route only after the lock, and a change of the Destinations locks those of its Route only after it.
 func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Rendering) error {
-	if slices.ContainsFunc(r.Events, func(e groups.Recorded) bool { return e.Event == groups.EventMovedToDefaultRoute }) {
-		return nil
-	}
 	q := s.store.queries(tx)
 	g := r.Group
-	dests, err := q.ListRouteDestinations(ctx, dbgen.ListRouteDestinationsParams{OrgID: s.orgID, RouteID: g.RouteID})
-	if err != nil {
-		return fmt.Errorf("list the destinations of alert group #%d: %w", g.Number, err)
+	if err := q.ShareRouteMembership(ctx, dbgen.ShareRouteMembershipParams{LockClass: db.RouteMembershipLockClass,
+		RouteID: g.RouteID}); err != nil {
+		return fmt.Errorf("lock the destinations of the route of alert group #%d: %w", g.Number, err)
 	}
-	if len(dests) == 0 {
-		return nil
+	later := r.After
+	if later == nil {
+		later = func(f func(ctx context.Context)) { f(ctx) }
 	}
-	route, err := q.GetRouteDelivery(ctx, dbgen.GetRouteDeliveryParams{OrgID: s.orgID, ID: g.RouteID})
-	if err != nil {
-		return fmt.Errorf("read the route of alert group #%d: %w", g.Number, err)
-	}
-	now := s.clock.Now().UTC()
 	var replies []reply
-	created := false
+	created, moved := false, false
 	for _, e := range r.Events {
 		row, ok := rowOf(e, r.Actor)
 		if !ok {
@@ -165,16 +230,62 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 				e.Event, e.Variant)
 		}
 		created = created || row.Form == FormPublication
+		moved = moved || e.Event == groups.EventMovedToDefaultRoute
 		if row.Form.replies() {
 			replies = append(replies, reply{event: e, row: row})
 		}
 	}
-	window := time.Duration(route.ThreadBatchingWindowSeconds) * time.Second
-	for _, d := range dests {
-		dst := Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name, Type: d.Type, Connection: int8Of(d.ConnectionID)}
-		if err := s.enqueue(ctx, q, r, dst, route.Language, created, replies, now, window); err != nil {
+	dests, err := q.ListRouteDestinations(ctx, dbgen.ListRouteDestinationsParams{OrgID: s.orgID, RouteID: g.RouteID})
+	if err != nil {
+		return fmt.Errorf("list the destinations of alert group #%d: %w", g.Number, err)
+	}
+	now := s.clock.Now().UTC()
+	left := 0
+	if moved {
+		if left, err = s.leave(ctx, q, g, dests, now); err != nil {
 			return err
 		}
+	}
+	if len(dests) == 0 && !created {
+		return s.wake(ctx, q, left > 0)
+	}
+	route, err := q.GetRouteDelivery(ctx, dbgen.GetRouteDeliveryParams{OrgID: s.orgID, ID: g.RouteID})
+	if err != nil {
+		return fmt.Errorf("read the route of alert group #%d: %w", g.Number, err)
+	}
+	var st *storm
+	if created {
+		if st, err = s.joinStorm(ctx, q, g, route, now, later); err != nil {
+			return err
+		}
+	}
+	if len(dests) == 0 {
+		return s.wake(ctx, q, left > 0)
+	}
+	window := time.Duration(route.ThreadBatchingWindowSeconds) * time.Second
+	how := enqueueing{language: route.Language, created: created, moved: moved, replies: replies, now: now,
+		window: window}
+	if st != nil && !g.Urgent {
+		how.heldBy = &st.id
+	}
+	for _, d := range dests {
+		dst := Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name, Type: d.Type, Connection: int8Of(d.ConnectionID)}
+		if err := s.enqueue(ctx, q, r, dst, d.Health == healthBroken, how); err != nil {
+			return err
+		}
+	}
+	if st != nil {
+		if err := s.renderSummaries(ctx, q, st, route.Name, dests, now); err != nil {
+			return err
+		}
+	}
+	return s.wake(ctx, q, true)
+}
+
+// wake wakes the delivery workers once the transaction commits, when changed.
+func (s *Service) wake(ctx context.Context, q queries, changed bool) error {
+	if !changed {
+		return nil
 	}
 	if err := q.NotifyDelivery(ctx, Channel); err != nil {
 		return fmt.Errorf("wake the delivery workers: %w", err)
@@ -188,27 +299,64 @@ type reply struct {
 	row   Row
 }
 
-// enqueue sets the Desired state of the Alert Group in one Destination and queues its Thread replies.
-func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d Destination, language string,
-	created bool, replies []reply, now time.Time, window time.Duration) error {
-	g := r.Group
+// enqueueing is how a rendering reaches each Destination: the language of the Route, whether the Alert Group was
+// created or moved, the Storm that holds a new one, its Thread replies, the time and the Thread batching window.
+type enqueueing struct {
+	language       string
+	created, moved bool
+	heldBy         *int64
+	replies        []reply
+	now            time.Time
+	window         time.Duration
+}
+
+// enqueue sets the Desired state of the Alert Group in one Destination and queues its Thread replies; while the
+// Destination is Broken, while a Storm holds the delivery, or once the delivery ended, they are created dropped
+// (C-11.FR-6, FR-13, FR-19). An Urgent Alert Group that a Storm holds is released at once.
+func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d Destination, broken bool,
+	how enqueueing) error {
+	g, now := r.Group, how.now
 	p := dbgen.EnsureDeliveryParams{OrgID: s.orgID, DestinationID: d.ID,
-		AlertGroupID: pgtype.Int8{Int64: g.ID, Valid: true}, Urgent: g.Urgent, Now: now}
-	if created {
+		AlertGroupID: pgtype.Int8{Int64: g.ID, Valid: true}, HeldByStormID: nullInt(how.heldBy), Urgent: g.Urgent,
+		Now: now}
+	switch {
+	case how.created:
 		p.PublicationLoud = pgtype.Bool{Bool: true, Valid: true}
+	case how.moved:
+		p.PublicationLoud = pgtype.Bool{Bool: deliveryEvent(DeliveryAddedDestination).loud(false), Valid: true}
 	}
 	row, err := q.EnsureDelivery(ctx, p)
 	if err != nil {
 		return fmt.Errorf("create the delivery of alert group #%d to %s: %w", g.Number, d.PublicID, err)
 	}
-	msg := encode(s.renderer.Render(viewOf(g), d, language))
+	state := row.State
+	if how.moved && !row.Inserted {
+		n, err := q.RejoinDelivery(ctx, dbgen.RejoinDeliveryParams{OrgID: s.orgID, AlertGroupID: g.ID,
+			DestinationID: d.ID, Loud: deliveryEvent(DeliveryAddedDestination).loud(false), Now: now})
+		if err != nil {
+			return fmt.Errorf("publish alert group #%d in %s again: %w", g.Number, d.PublicID, err)
+		}
+		if n > 0 {
+			state = statePending
+		}
+	}
+	held := row.HeldByStormID.Valid
+	if held && g.Urgent {
+		if err := q.ReleaseHeld(ctx, dbgen.ReleaseHeldParams{OrgID: s.orgID, ID: row.ID, Now: now}); err != nil {
+			return fmt.Errorf("release the urgent alert group #%d from its storm: %w", g.Number, err)
+		}
+		held = false
+	}
+	msg := encode(s.renderer.Render(viewOf(g), d, how.language))
 	if !bytes.Equal(row.DesiredHash, msg.hash) {
 		var received pgtype.Timestamptz
 		if r.ReceivedAt != nil {
 			received = pgtype.Timestamptz{Time: r.ReceivedAt.UTC(), Valid: true}
 		}
-		if err := q.SetDesired(ctx, dbgen.SetDesiredParams{OrgID: s.orgID, ID: row.ID, DesiredText: msg.text,
-			DesiredPayload: msg.payload, DesiredHash: msg.hash, ReceivedAt: received, Urgent: g.Urgent,
+		if state, err = q.SetDesired(ctx, dbgen.SetDesiredParams{OrgID: s.orgID, ID: row.ID, DesiredText: msg.text,
+			DesiredPayload: msg.payload, DesiredHash: msg.hash, ReceivedAt: received,
+			Open:   g.Status != groups.StatusResolved,
+			Firing: deliveryEvent(DeliveryAfterRecovery).loud(g.Status == groups.StatusFiring), Urgent: g.Urgent,
 			Now: now}); err != nil {
 			return fmt.Errorf("set the desired state of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 		}
@@ -216,15 +364,57 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 		Urgent: g.Urgent, Now: now}); err != nil {
 		return fmt.Errorf("set the urgency of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 	}
+	if g.Status == groups.StatusResolved {
+		if err := s.settleResolved(ctx, q, row.ID, now); err != nil {
+			return fmt.Errorf("settle the publication of alert group #%d in %s: %w", g.Number, d.PublicID, err)
+		}
+	}
+	if broken || held || ended(state) {
+		for _, rp := range how.replies {
+			if err := q.InsertThreadReply(ctx, s.replyParams(row.ID, g.ID, d, rp, replyDropped, now)); err != nil {
+				return fmt.Errorf("drop the %s reply of alert group #%d in %s: %w", rp.event.Event, g.Number,
+					d.PublicID, err)
+			}
+		}
+		return nil
+	}
 	until := timeOf(row.ThreadBatchUntil)
-	for _, rp := range replies {
+	for _, rp := range how.replies {
 		var err error
-		if until, err = s.queueReply(ctx, q, row.ID, g.ID, d, rp, until, now, window); err != nil {
+		if until, err = s.queueReply(ctx, q, row.ID, g.ID, d, rp, until, now, how.window); err != nil {
 			return fmt.Errorf("queue the %s reply of alert group #%d in %s: %w", rp.event.Event, g.Number, d.PublicID,
 				err)
 		}
 	}
 	return nil
+}
+
+// ended reports whether a delivery is in a state that a change of the Desired state does not revive: withheld,
+// deleted in the messenger or retired.
+func ended(state string) bool {
+	return state == "withheld" || state == "deleted_in_messenger" || state == "retired"
+}
+
+// statePending is a delivery with work to do.
+const statePending = "pending"
+
+// The states a Thread reply is queued in.
+const (
+	replyPending = "pending"
+	replyDropped = "dropped"
+)
+
+// replyParams queue the Thread reply of one lifecycle event in a state, due now.
+func (s *Service) replyParams(deliveryID, groupID int64, d Destination, rp reply, state string,
+	now time.Time) dbgen.InsertThreadReplyParams {
+	fingerprints := rp.event.Fingerprints
+	if fingerprints == nil {
+		fingerprints = []string{}
+	}
+	return dbgen.InsertThreadReplyParams{OrgID: s.orgID, DeliveryID: deliveryID, AlertGroupID: groupID,
+		DestinationID: d.ID, Event: string(rp.event.Event), EventSeqs: []int64{rp.event.Seq},
+		Loudness: string(rp.row.Loudness), Mentions: rp.row.mentionsOf(rp.event), Fingerprints: fingerprints,
+		State: state, Due: now, Now: now}
 }
 
 // queueReply queues the Thread reply of one lifecycle event and returns the end of the Thread batching window
@@ -235,29 +425,20 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 func (s *Service) queueReply(ctx context.Context, q queries, deliveryID, groupID int64, d Destination, rp reply,
 	until *time.Time, now time.Time, window time.Duration) (*time.Time, error) {
 	e := rp.event
-	fingerprints := e.Fingerprints
-	if fingerprints == nil {
-		fingerprints = []string{}
-	}
-	mentions := rp.row.mentionsOf(e)
+	p := s.replyParams(deliveryID, groupID, d, rp, replyPending, now)
 	if e.Event != groups.EventAlertsAdded {
-		return until, q.InsertThreadReply(ctx, dbgen.InsertThreadReplyParams{OrgID: s.orgID, DeliveryID: deliveryID,
-			AlertGroupID: groupID, DestinationID: d.ID, Event: string(e.Event), EventSeqs: []int64{e.Seq},
-			Loudness: string(rp.row.Loudness), Mentions: mentions, Fingerprints: fingerprints, Due: now, Now: now})
+		return until, q.InsertThreadReply(ctx, p)
 	}
 	if until == nil || !until.After(now) {
 		end := now.Add(window)
-		if err := q.InsertThreadReply(ctx, dbgen.InsertThreadReplyParams{OrgID: s.orgID, DeliveryID: deliveryID,
-			AlertGroupID: groupID, DestinationID: d.ID, Event: string(e.Event), EventSeqs: []int64{e.Seq},
-			Loudness: string(rp.row.Loudness), Mentions: mentions, Fingerprints: fingerprints, Due: now,
-			Now: now}); err != nil {
+		if err := q.InsertThreadReply(ctx, p); err != nil {
 			return nil, err
 		}
 		return &end, s.setBatchUntil(ctx, q, deliveryID, end, now)
 	}
 	inserted, err := q.CollectAlerts(ctx, dbgen.CollectAlertsParams{OrgID: s.orgID, DeliveryID: deliveryID,
-		AlertGroupID: groupID, DestinationID: d.ID, EventSeqs: []int64{e.Seq}, Loudness: string(rp.row.Loudness),
-		Mentions: mentions, Fingerprints: fingerprints, Due: *until, Now: now})
+		AlertGroupID: groupID, DestinationID: d.ID, EventSeqs: p.EventSeqs, Loudness: p.Loudness,
+		Mentions: p.Mentions, Fingerprints: p.Fingerprints, Due: *until, Now: now})
 	if err != nil || !inserted {
 		return until, err
 	}

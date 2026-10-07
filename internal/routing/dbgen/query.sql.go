@@ -34,6 +34,54 @@ func (q *Queries) BumpRouteOrder(ctx context.Context, arg BumpRouteOrderParams) 
 	return route_order_version, err
 }
 
+const bumpRoutesOfDestination = `-- name: BumpRoutesOfDestination :many
+UPDATE routes r
+SET version = r.version + 1, updated_at = $1
+FROM (SELECT x.id
+      FROM routes x
+      WHERE x.org_id = $2 AND x.deleted_at IS NULL
+        AND x.id IN (SELECT rd.route_id
+                     FROM route_destinations rd
+                     WHERE rd.org_id = $2 AND rd.destination_id = $3)
+      ORDER BY x.id
+      FOR NO KEY UPDATE OF x) AS locked
+WHERE r.org_id = $2 AND r.id = locked.id
+RETURNING r.id, r.public_id
+`
+
+type BumpRoutesOfDestinationParams struct {
+	Now           time.Time
+	OrgID         int64
+	DestinationID int64
+}
+
+type BumpRoutesOfDestinationRow struct {
+	ID       int64
+	PublicID string
+}
+
+// BumpRoutesOfDestination gives each Route that is not deleted of a Destination about to leave them a new version,
+// locking them in id order, and returns them in that order.
+func (q *Queries) BumpRoutesOfDestination(ctx context.Context, arg BumpRoutesOfDestinationParams) ([]BumpRoutesOfDestinationRow, error) {
+	rows, err := q.db.Query(ctx, bumpRoutesOfDestination, arg.Now, arg.OrgID, arg.DestinationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BumpRoutesOfDestinationRow{}
+	for rows.Next() {
+		var i BumpRoutesOfDestinationRow
+		if err := rows.Scan(&i.ID, &i.PublicID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countOpenAlertGroups = `-- name: CountOpenAlertGroups :one
 SELECT count(*)::bigint
 FROM alert_groups
@@ -69,6 +117,23 @@ type DeleteRouteParams struct {
 // DeleteRoute soft-deletes a Route: it leaves every list and the evaluation order at once.
 func (q *Queries) DeleteRoute(ctx context.Context, arg DeleteRouteParams) error {
 	_, err := q.db.Exec(ctx, deleteRoute, arg.Now, arg.OrgID, arg.ID)
+	return err
+}
+
+const deleteRouteDestinations = `-- name: DeleteRouteDestinations :exec
+DELETE FROM route_destinations
+WHERE org_id = $1 AND route_id = $2 AND destination_id = ANY($3::bigint[])
+`
+
+type DeleteRouteDestinationsParams struct {
+	OrgID          int64
+	RouteID        int64
+	DestinationIds []int64
+}
+
+// DeleteRouteDestinations removes Destinations from a Route.
+func (q *Queries) DeleteRouteDestinations(ctx context.Context, arg DeleteRouteDestinationsParams) error {
+	_, err := q.db.Exec(ctx, deleteRouteDestinations, arg.OrgID, arg.RouteID, arg.DestinationIds)
 	return err
 }
 
@@ -193,8 +258,10 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urg
        (SELECT count(*)
         FROM routes o
         WHERE o.org_id = $1 AND o.deleted_at IS NULL
-          AND (o.is_default, o.position, o.id) < (r.is_default, r.position, r.id))::bigint AS place
+          AND (o.is_default, o.position, o.id) < (r.is_default, r.position, r.id))::bigint AS place,
+       s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count
 FROM routes r
+LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
 WHERE r.org_id = $1 AND r.public_id = $2 AND r.deleted_at IS NULL
 `
 
@@ -231,9 +298,11 @@ type GetRouteRow struct {
 	CreatedAt                      time.Time
 	Version                        int64
 	Place                          int64
+	StormSince                     pgtype.Timestamptz
+	StormAlertGroupCount           pgtype.Int8
 }
 
-// GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based.
+// GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, and its active Storm.
 func (q *Queries) GetRoute(ctx context.Context, arg GetRouteParams) (GetRouteRow, error) {
 	row := q.db.QueryRow(ctx, getRoute, arg.OrgID, arg.PublicID)
 	var i GetRouteRow
@@ -265,6 +334,8 @@ func (q *Queries) GetRoute(ctx context.Context, arg GetRouteParams) (GetRouteRow
 		&i.CreatedAt,
 		&i.Version,
 		&i.Place,
+		&i.StormSince,
+		&i.StormAlertGroupCount,
 	)
 	return i, err
 }
@@ -393,6 +464,29 @@ func (q *Queries) InsertRoute(ctx context.Context, arg InsertRouteParams) (int64
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertRouteDestinations = `-- name: InsertRouteDestinations :exec
+INSERT INTO route_destinations (route_id, destination_id, org_id, added_at)
+SELECT $1, unnest($2::bigint[]), $3, $4
+`
+
+type InsertRouteDestinationsParams struct {
+	RouteID        int64
+	DestinationIds []int64
+	OrgID          int64
+	Now            time.Time
+}
+
+// InsertRouteDestinations adds Destinations to a Route, added now.
+func (q *Queries) InsertRouteDestinations(ctx context.Context, arg InsertRouteDestinationsParams) error {
+	_, err := q.db.Exec(ctx, insertRouteDestinations,
+		arg.RouteID,
+		arg.DestinationIds,
+		arg.OrgID,
+		arg.Now,
+	)
+	return err
 }
 
 const insertRouteMatcher = `-- name: InsertRouteMatcher :exec
@@ -531,6 +625,46 @@ func (q *Queries) ListOpenAlertGroupCounts(ctx context.Context, orgID int64) ([]
 	return items, nil
 }
 
+const listRouteDestinationIDs = `-- name: ListRouteDestinationIDs :many
+SELECT rd.route_id, rd.destination_id, d.public_id
+FROM route_destinations rd
+JOIN destinations d ON d.org_id = rd.org_id AND d.id = rd.destination_id
+WHERE rd.org_id = $1 AND rd.route_id = ANY($2::bigint[]) AND d.deleted_at IS NULL
+ORDER BY rd.route_id, d.public_id
+`
+
+type ListRouteDestinationIDsParams struct {
+	OrgID    int64
+	RouteIds []int64
+}
+
+type ListRouteDestinationIDsRow struct {
+	RouteID       int64
+	DestinationID int64
+	PublicID      string
+}
+
+// ListRouteDestinationIDs lists the Destinations that are not deleted of the Routes, by public_id.
+func (q *Queries) ListRouteDestinationIDs(ctx context.Context, arg ListRouteDestinationIDsParams) ([]ListRouteDestinationIDsRow, error) {
+	rows, err := q.db.Query(ctx, listRouteDestinationIDs, arg.OrgID, arg.RouteIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRouteDestinationIDsRow{}
+	for rows.Next() {
+		var i ListRouteDestinationIDsRow
+		if err := rows.Scan(&i.RouteID, &i.DestinationID, &i.PublicID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRouteInfo = `-- name: ListRouteInfo :many
 SELECT public_id, name
 FROM routes
@@ -642,14 +776,16 @@ func (q *Queries) ListRouteSuggestionDismissals(ctx context.Context, arg ListRou
 
 const listRoutes = `-- name: ListRoutes :many
 
-SELECT id, public_id, name, description, position, is_default, urgent, group_key, reopen_window_seconds,
-       grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
-       storm_threshold, language, template_root_message, template_line, template_ack_timeout_notice,
-       ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
-       reminders_cap_seconds, auto_unacknowledge, created_at, version
-FROM routes
-WHERE org_id = $1 AND deleted_at IS NULL
-ORDER BY is_default, position, id
+SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urgent, r.group_key,
+       r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
+       r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
+       r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
+       r.reminders_enabled, r.reminders_first_interval_seconds, r.reminders_cap_seconds, r.auto_unacknowledge,
+       r.created_at, r.version, s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count
+FROM routes r
+LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
+WHERE r.org_id = $1 AND r.deleted_at IS NULL
+ORDER BY r.is_default, r.position, r.id
 `
 
 type ListRoutesRow struct {
@@ -679,11 +815,14 @@ type ListRoutesRow struct {
 	AutoUnacknowledge              bool
 	CreatedAt                      time.Time
 	Version                        int64
+	StormSince                     pgtype.Timestamptz
+	StormAlertGroupCount           pgtype.Int8
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
-// ListRoutes lists the Routes that are not deleted in evaluation order, the Default route last.
+// ListRoutes lists the Routes that are not deleted in evaluation order, the Default route last, with their active
+// Storm.
 func (q *Queries) ListRoutes(ctx context.Context, orgID int64) ([]ListRoutesRow, error) {
 	rows, err := q.db.Query(ctx, listRoutes, orgID)
 	if err != nil {
@@ -720,6 +859,8 @@ func (q *Queries) ListRoutes(ctx context.Context, orgID int64) ([]ListRoutesRow,
 			&i.AutoUnacknowledge,
 			&i.CreatedAt,
 			&i.Version,
+			&i.StormSince,
+			&i.StormAlertGroupCount,
 		); err != nil {
 			return nil, err
 		}
@@ -750,6 +891,61 @@ func (q *Queries) LockRoute(ctx context.Context, arg LockRouteParams) (int64, er
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const lockRouteMembership = `-- name: LockRouteMembership :exec
+SELECT pg_advisory_xact_lock($1::int, hashint8($2::bigint))
+`
+
+type LockRouteMembershipParams struct {
+	LockClass int32
+	RouteID   int64
+}
+
+// LockRouteMembership takes, until the transaction ends, the membership lock of a Route exclusively before its
+// Destinations change: delivery's Enqueue takes it shared (ShareRouteMembership, class db.RouteMembershipLockClass),
+// so that a change of the Destinations and an Enqueue on the Route serialize.
+func (q *Queries) LockRouteMembership(ctx context.Context, arg LockRouteMembershipParams) error {
+	_, err := q.db.Exec(ctx, lockRouteMembership, arg.LockClass, arg.RouteID)
+	return err
+}
+
+const resolveDestinations = `-- name: ResolveDestinations :many
+SELECT id, public_id
+FROM destinations
+WHERE org_id = $1 AND public_id = ANY($2::text[]) AND deleted_at IS NULL
+`
+
+type ResolveDestinationsParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type ResolveDestinationsRow struct {
+	ID       int64
+	PublicID string
+}
+
+// ResolveDestinations reads the Destinations that are not deleted among the public_ids, for the Destinations of a
+// Route.
+func (q *Queries) ResolveDestinations(ctx context.Context, arg ResolveDestinationsParams) ([]ResolveDestinationsRow, error) {
+	rows, err := q.db.Query(ctx, resolveDestinations, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveDestinationsRow{}
+	for rows.Next() {
+		var i ResolveDestinationsRow
+		if err := rows.Scan(&i.ID, &i.PublicID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const restampAlertRoutes = `-- name: RestampAlertRoutes :exec

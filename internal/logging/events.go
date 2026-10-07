@@ -401,17 +401,67 @@ var AlertGroupsPurged = newEvent("alert_groups_purged", LevelInfo, "C-09",
 
 // DeliveryAttempt is logged for every call of the delivery worker to a Destination (C-11.FR-17).
 var DeliveryAttempt = newEvent("delivery_attempt", LevelInfo, "C-11",
-	"The delivery worker called a Destination: destination is its public_id, group the #N of the Alert Group, kind "+
-		"what it sent (publication, update or thread_reply), outcome delivered or the error class of the answer, "+
-		"attempt the number of this attempt, duration_ms how long the call took and retry_after_ms the wait a "+
-		"RetryAfter asked for, 0 otherwise.",
+	"The delivery worker called a Destination: destination is its public_id, group the #N of the Alert Group, empty "+
+		"for a Storm summary, kind what it sent (publication, update, thread_reply, storm_summary for any call of a "+
+		"Storm summary, or final_edit for the last edit of a Root message in a Destination it left), outcome "+
+		"delivered or the error class of the answer, attempt the number of this attempt, duration_ms how long the "+
+		"call took and retry_after_ms the wait a RetryAfter asked for, 0 otherwise.",
 	"destination", "group", "kind", "outcome", "attempt", "duration_ms", "retry_after_ms")
 
-// DeliveryWorkFailed is logged when the delivery worker could not attempt a delivery or a Thread reply.
+// DeliveryWorkFailed is logged when the delivery worker could not attempt a delivery or a Thread reply, or probe a
+// Broken Destination.
 var DeliveryWorkFailed = newEvent("delivery_work_failed", LevelWarn, "C-11",
-	"The delivery worker could not attempt a delivery or a Thread reply (work is delivery or thread_reply) because "+
-		"of error, such as a lost database connection. Any replica attempts it again once its lease runs out.",
+	"The delivery worker could not attempt a delivery or a Thread reply, or probe a Broken Destination (work is "+
+		"delivery, thread_reply or probe), because of error, such as a lost database connection. Any replica "+
+		"attempts it again once its lease runs out, or at the next probe.",
 	"work", "error")
+
+// DestinationBroken is logged when a Destination becomes Broken (C-11.FR-9).
+var DestinationBroken = newEvent("destination_broken", LevelWarn, "C-11",
+	"A Destination became Broken: destination is its public_id, cause fatal after a Fatal error or unavailable after "+
+		"the Transient budget ran out, and reason the masked error the messenger answered. Its deliveries wait, "+
+		"MusterDestinationBroken fires and a probe runs every delivery.broken_probe_interval.",
+	"destination", "cause", "reason")
+
+// DestinationRecovered is logged when a Broken Destination becomes healthy again (C-11.FR-9, FR-19).
+var DestinationRecovered = newEvent("destination_recovered", LevelInfo, "C-11",
+	"A Broken Destination is healthy again after a successful probe or Destination check: destination is its "+
+		"public_id and broken_for_s how long it was Broken, in seconds. Its deliveries resume with the current state.",
+	"destination", "broken_for_s")
+
+// DeliveryPossibleDuplicate is logged when a Publication starts again after an earlier start that was never recorded
+// (C-11.FR-12).
+var DeliveryPossibleDuplicate = newEvent("delivery_possible_duplicate", LevelWarn, "C-11",
+	"A Publication started again after an earlier start whose outcome was never recorded, such as after a crash: "+
+		"destination is the public_id of the Destination and group the public_id of the Alert Group. The messenger "+
+		"may show the Root message twice.",
+	"destination", "group")
+
+// DeliveryNotDelivered is logged when a delivery or a Thread reply ends as Not delivered (C-11.FR-10).
+var DeliveryNotDelivered = newEvent("delivery_not_delivered", LevelWarn, "C-11",
+	"A delivery ended as Not delivered after an answer the adapter could not classify, because no adapter serves "+
+		"the Destination type, or because the Connection of its deleted Destination was deleted: destination is the "+
+		"public_id of the Destination, group the public_id of the Alert Group, empty for a Storm summary, kind what "+
+		"was sent (publication, update, thread_reply, storm_summary or final_edit) and error_class unknown. The next "+
+		"change of the Alert Group starts a new delivery.",
+	"destination", "group", "kind", "error_class")
+
+// StormStarted is logged when a Route's new Alert Groups start a Storm (C-11.FR-6).
+var StormStarted = newEvent("storm_started", LevelInfo, "C-11",
+	"The new Alert Groups of a Route exceeded route.storm_threshold within a minute and started a Storm: route is the "+
+		"public_id of the Route, and alert_groups and urgent are the Storm's own counts at its start, as storm_ended "+
+		"has them at its end: the new Alert Groups it counted, 1 (the one that started it), and how many of them were "+
+		"Urgent, 1 or 0. Each Destination of the Route gets a Storm summary and only Urgent Alert Groups are posted "+
+		"one by one until it calms down. Logged once the change that started it committed.",
+	"route", "alert_groups", "urgent")
+
+// StormEnded is logged when a Storm ends after delivery.storm_calm_period below the threshold (C-11.FR-6).
+var StormEnded = newEvent("storm_ended", LevelInfo, "C-11",
+	"A Storm ended after its Route stayed at or below route.storm_threshold for delivery.storm_calm_period: route is the "+
+		"public_id of the Route, and alert_groups and urgent are the Storm's own counts at its end, as storm_started "+
+		"has them at its start: the new Alert Groups it counted and how many of them were Urgent. The Storm summary "+
+		"shows its final state and the Alert Groups still open are posted Quietly.",
+	"route", "alert_groups", "urgent")
 
 // IngestReplayed is logged when muster ingest replay set Stored Snapshots back to pending.
 var IngestReplayed = newEvent("ingest_replayed", LevelInfo, "C-06",

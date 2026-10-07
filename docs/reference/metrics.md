@@ -32,6 +32,7 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_delivery_attempts_total` | counter | destination, kind, outcome | C-11 | no | Calls of the delivery worker to a Destination, one per attempt, by Destination, what it sent and its outcome. |
 | `muster_delivery_latency_seconds` | histogram | destination | C-11 | no | Time from the receipt of the Snapshot behind a change of a Root message to the messenger API call that delivered it, by Destination; changes made by Commands or timers are not observed. The service-level indicator of NFR-2. Buckets (le): 0.25, 0.5, 1, 2, 3, 5, 10, 30, 60, 300, 900. |
 | `muster_delivery_queue` | gauge | destination | C-11 | yes | Pending deliveries and Thread replies that are due, per Destination that is not deleted, counted by the Leader. |
+| `muster_destination_broken` | gauge | destination | C-11 | yes | 1 while the Destination is Broken, 0 while it is healthy, per Destination that is not deleted; set by the Leader. |
 | `muster_destination_info` | gauge | destination, name | C-11 | no | Always 1, one series per Destination that is not deleted; the labels carry its public_id and name. |
 | `muster_heartbeat_lost` | gauge | integration | C-07 | yes | 1 while the Integration is Heartbeat lost, 0 while its Heartbeat is on and not lost; set by the Leader's Heartbeat check. |
 | `muster_ingest_backlog` | gauge | — | C-06 | yes | Stored Snapshots waiting for processing in every Organization, counted by the Leader. |
@@ -47,6 +48,7 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_oidc_checks_total` | counter | outcome | C-03 | no | Background re-checks of OIDC users at the identity provider, by outcome. |
 | `muster_route_info` | gauge | route, name | C-08 | no | Always 1, one series per Route that is not deleted, the Default route included; the labels carry its public_id and name. |
 | `muster_short_lived_rows_pruned_total` | counter | table | C-02 | no | Short-lived rows that could no longer be used and that the Leader deleted, by table. |
+| `muster_storm_active` | gauge | route | C-11 | yes | 1 while the Route has an active Storm, 0 otherwise, per Route that is not deleted; set by the Leader. |
 
 ## Label values
 
@@ -82,6 +84,7 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_delivery_attempts_total` | `outcome` | `delivered`, `markup_rejected`, `retry_after`, `transient`, `fatal`, `unknown`, `template_error` — delivered, or the error class of the answer |
 | `muster_delivery_latency_seconds` | `destination` | entity: the public_id of the destination |
 | `muster_delivery_queue` | `destination` | entity: the public_id of the destination |
+| `muster_destination_broken` | `destination` | entity: the public_id of the destination |
 | `muster_destination_info` | `destination` | entity: the public_id of the destination |
 | `muster_destination_info` | `name` | info: the name of the Destination |
 | `muster_heartbeat_lost` | `integration` | entity: the public_id of the integration |
@@ -98,3 +101,4 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_route_info` | `route` | entity: the public_id of the route |
 | `muster_route_info` | `name` | info: the name of the Route |
 | `muster_short_lived_rows_pruned_total` | `table` | `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests` — the short-lived table the rows were deleted from |
+| `muster_storm_active` | `route` | entity: the public_id of the route |

@@ -21,11 +21,10 @@ import (
 var person = groups.Actor{Kind: audit.ActorUser, Transport: audit.TransportUI}
 
 // TestTableMatchesLifecycleEvents: the table of delivery has a row for every row of the lifecycle event tables of
-// C-09.FR-22 and C-10.FR-15 but moved_to_default_route (S-035), with the same loudness and Mentions, resolved split by
-// who resolved; the six rows of C-17.FR-11 complete the 31; a Loud event is always a new message and an edit is
-// always Quiet (C-11.FR-7).
+// C-09.FR-22 and C-10.FR-15, with the same loudness and Mentions, resolved split by who resolved; the six rows of
+// C-17.FR-11 complete the 32; a Loud event is always a new message and an edit is always Quiet (C-11.FR-7).
 func TestTableMatchesLifecycleEvents(t *testing.T) {
-	if len(delivery.Table) != 31 {
+	if len(delivery.Table) != 32 {
 		t.Errorf("%d rows", len(delivery.Table))
 	}
 	seen := map[string]bool{}
@@ -44,9 +43,6 @@ func TestTableMatchesLifecycleEvents(t *testing.T) {
 		}
 	}
 	for _, g := range groups.Table {
-		if g.Event == groups.EventMovedToDefaultRoute {
-			continue
-		}
 		variants := []groups.Variant{g.Variant}
 		if g.Event == groups.EventResolved {
 			variants = []groups.Variant{delivery.VariantSystem, groups.VariantCommand}
@@ -141,9 +137,9 @@ func TestLifecycleRows(t *testing.T) {
 }
 
 // TestEnqueue covers the edges of the re-render step: an Alert Group whose Route has no Destination that is not
-// deleted delivers nothing; a moved Alert Group is S-035's; an event outside the table is an error; the receipt time
+// deleted delivers nothing; an event outside the table is an error; the receipt time
 // of the oldest undelivered Snapshot is kept; a delivery whose message did not change follows the urgency of its Alert
-// Group without a new version.
+// Group without a new version; the Route's membership lock is taken shared before its Destinations are read.
 func TestEnqueue(t *testing.T) {
 	e := newEnv(t)
 	e.db.routeDests[routeID] = nil
@@ -153,11 +149,6 @@ func TestEnqueue(t *testing.T) {
 	}
 	e.db.routeDests[routeID] = []int64{destMM, destWH}
 	e.db.dests[destWH].deleted = true
-	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: 1,
-		Event: groups.EventMovedToDefaultRoute})
-	if e.db.calls["ListRouteDestinations"] != 1 {
-		t.Error("a move rendered")
-	}
 	err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusFiring, "a"),
 		Actor: groups.System, Events: []groups.Recorded{{Event: "exploded"}}})
 	if err == nil || !strings.Contains(err.Error(), "no row in the delivery table") {
@@ -179,8 +170,16 @@ func TestEnqueue(t *testing.T) {
 	if d.version != 3 || d.urgent {
 		t.Errorf("urgency %+v", d)
 	}
-	for _, q := range []string{"ListRouteDestinations", "GetRouteDelivery", "EnsureDelivery", "SetDesired",
-		"SetDeliveryUrgent", "NotifyDelivery", "InsertThreadReply"} {
+	// The membership lock of the Route is taken shared before its Destinations are read.
+	e.db.membershipLocks = nil
+	e.db.before["ListRouteDestinations"] = func() {
+		if !slices.Equal(e.db.membershipLocks, []int64{routeID}) {
+			t.Errorf("the destinations were read under the locks %v", e.db.membershipLocks)
+		}
+	}
+	e.enqueue(t, e.group(groups.StatusFiring, "2"), groups.System)
+	for _, q := range []string{"ShareRouteMembership", "ListRouteDestinations", "GetRouteDelivery", "EnsureDelivery",
+		"SetDesired", "SetDeliveryUrgent", "NotifyDelivery", "InsertThreadReply"} {
 		e.db.fail[q] = errBoom
 		title := "2"
 		if q == "SetDesired" {

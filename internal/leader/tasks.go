@@ -27,7 +27,8 @@ const BacklogInterval = 15 * time.Second
 // AlertGroupGaugeInterval is how often the Leader counts the open Alert Groups for muster_alert_groups.
 const AlertGroupGaugeInterval = 15 * time.Second
 
-// DeliveryQueueInterval is how often the Leader counts the pending deliveries for muster_delivery_queue.
+// DeliveryQueueInterval is how often the Leader counts the pending deliveries for muster_delivery_queue, reads the
+// health of the Destinations for muster_destination_broken and the Storms of the Routes for muster_storm_active.
 const DeliveryQueueInterval = 15 * time.Second
 
 // HeartbeatCheckInterval is how often the Leader runs the Heartbeat check, and StaleScanInterval the Stale scan.
@@ -125,7 +126,8 @@ type Work struct {
 	// Organization orgID past their retention periods at now (C-09.FR-16) and returns how many of each it deleted.
 	AlertGroupRetention func(ctx context.Context, orgID int64, now time.Time) (details, summaries int64, err error)
 	// DeliveryQueue sets muster_delivery_queue from the pending deliveries and due Thread replies of the Organization
-	// orgID (C-11.FR-17).
+	// orgID, muster_destination_broken from the health of its Destinations and muster_storm_active from the Storms of
+	// its Routes (C-11.FR-6, FR-9, FR-17).
 	DeliveryQueue func(ctx context.Context, orgID int64) error
 	// ThreadReplyRetention deletes, in batches, the Thread replies of the Organization orgID that are sent, dropped or
 	// not delivered and older than retention.alert_details at now, and returns how many it deleted.
