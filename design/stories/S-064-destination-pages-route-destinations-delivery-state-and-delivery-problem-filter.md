@@ -48,7 +48,7 @@ acceptance:
   - "[C-13.FR-9] Without `destinations:write` the Destination pages are read-only: no \"Create destination\", \"Save\" or \"Delete\", and \"Check\" needs `destinations:test`."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 138
 ---
 
 # S-064. Destination pages, the Route's Destinations and delivery sections, delivery state and the Delivery problem filter (FE)

@@ -47,7 +47,7 @@ acceptance:
   - "[C-03.FR-13, C-03.AC-27, C-09.FR-22] Disabling a user who owns acknowledged Alert Groups makes each one firing without an Owner, in the transaction of `disableUser`, with an `unacknowledged` Timeline entry by the system — `reason` `owner_disabled`, `previous_owner` that user, `loud`, no Mentions — and no Audit log entry of its own beside `user.disabled`; enabling the user again changes nothing; deleting a user does the same with `owner_deleted`; an Alert Group the user owned that the system resolved reopens into firing."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 137
 ---
 
 # S-063. Notes, Snooze ends, the user directory, Owner filters and the release of disabled and deleted Owners (BE)
