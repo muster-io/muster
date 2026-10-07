@@ -59,7 +59,7 @@ acceptance:
   - "[C-17.FR-6] A press on a Reminder button whose key is not in the Keyring is answered privately with \"This button has expired; use the buttons on the Alert Group's message\" and changes nothing."
   - "[C-17.AC-8] An Unclaimed Alert Group stops being Unclaimed — `unclaimed: false` and the mark gone from the Root message — when it is acknowledged, snoozed or resolved; after Unacknowledge it is not Unclaimed again until the third notice of the new ack timeout."
   - "[C-17.FR-7, C-02.FR-12] Overdue notices of one Alert Group, such as after downtime, collapse into one Loud Thread reply and one `notices_missed` entry with `missed_count`."
-  - "[C-17.FR-8, C-03.FR-13, C-03.AC-27] Disabling the Owner of an acknowledged Alert Group whose Reminders run releases it (S-032): its `reminder` timer is deleted, so no Reminder and no auto-unacknowledge follow; the ack timeout starts over at the release, so notice 1 comes F later and the third notice makes it Unclaimed again; the Thread in the fake Mattermost gets the Loud reply \"The owner was disabled — this Alert Group has no owner now.\"; enabling the User again brings back neither the acknowledgement nor the Reminders. Deleting the Owner does the same with \"The owner was deleted — this Alert Group has no owner now.\""
+  - "[C-17.FR-8, C-03.FR-13, C-03.AC-27] Disabling the Owner of an acknowledged Alert Group whose Reminders run releases it (S-063): its `reminder` timer is deleted, so no Reminder and no auto-unacknowledge follow; the ack timeout starts over at the release, so notice 1 comes F later and the third notice makes it Unclaimed again; the Thread in the fake Mattermost gets the Loud reply \"The owner was disabled — this Alert Group has no owner now.\"; enabling the User again brings back neither the acknowledgement nor the Reminders. Deleting the Owner does the same with \"The owner was deleted — this Alert Group has no owner now.\""
   - "[C-17.FR-9] `getAlertGroup` returns `next_notice` with the kind and time of the next ack timeout notice or Reminder."
   - "[C-17.FR-11, C-17.AC-9, C-09.FR-11, C-11.FR-20] Every row of the lifecycle event table of C-17.FR-11 records exactly one Timeline entry with the row's `event`, kind, `loudness` and `mentions`, and reaches messengers as the row's last column says (a table-driven test)."
   - "[C-15.AC-11] With an events-mode outgoing webhook Destination on the Route, the running timers produce exactly one events-mode request per timer row — `ack_timeout`, `unclaimed`, `reminder`, `auto_unacknowledged`, `notices_missed`, and `reminder_answered` from \"Still on it\" — with the row's name as `event` and its loudness as `notify` (`test/e2e/timers_test.go`)."
@@ -80,7 +80,7 @@ issue: 49
 - Auto-unacknowledge with the answer rule, including Reminders that reached no Destination.
 - "Still on it" through the API and through the Reminder buttons in Mattermost and Telegram; expired Reminder buttons.
 - Collapsed overdue notices; `next_notice`; the `unclaimed` filter and field; the lifecycle events of C-17.FR-11.
-- The C-09.FR-8 part left by S-032: the ack timeout starts over when a Snooze ends.
+- The C-09.FR-8 part left by S-063: the ack timeout starts over when a Snooze ends.
 
 **OUT**
 
@@ -118,7 +118,7 @@ issue: 49
     `ack_timeout_notices_sent` and `unclaimed`, and writes the `ack_timeout` timer for notice 1.
   - *Start over*: every transition into firing of an Alert Group that has `first_published_at` — Reopen into firing,
     Unacknowledge, Unsnooze, Unresolve, a Snooze ending, a rise to Urgent that removes the acknowledgement or ends a
-    Snooze, auto-unacknowledge, the release of a disabled or deleted Owner (S-032, through the same transition) — does
+    Snooze, auto-unacknowledge, the release of a disabled or deleted Owner (S-063, through the same transition) — does
     the same with the transition's time (`transitions.go`, `snooze.go`, `commands.go`).
   - *Stop*: Acknowledge (Takeover included), Snooze and Resolve, by a person or the system, delete the `ack_timeout`
     timer and clear `unclaimed`.
@@ -131,7 +131,7 @@ issue: 49
   time + B; Unacknowledge, Snooze, Resolve, auto-unacknowledge and the release of a disabled or deleted Owner delete it. A Reopen into acknowledged continues the
   sequence: the counters are kept and the next Reminder is due one interval of the next step after the Reopen. The
   timer records `reminder` (Loud, Mentions `[owner]`, kind `timers`, `notice_number` = k), sets `last_reminder_at`
-  and reschedules itself. Disabling or deleting the Owner releases the Alert Group (S-032) and so deletes the timer:
+  and reschedules itself. Disabling or deleting the Owner releases the Alert Group (S-063) and so deletes the timer:
   no Reminder and no auto-unacknowledge follow, and the release's Loud Thread reply carries the text of S-036;
   enabling the User again writes no timer, and the next Acknowledge starts the Reminders over. A `reminder` timer that
   comes due on an Alert Group that is no longer acknowledged, or whose Route's Reminders are off, is deleted with
@@ -145,8 +145,9 @@ issue: 49
   `auto_unacknowledged` (Loud, Mentions `[owner]` — the Owner who loses it, C-09.FR-22 — kind `status`, `reason` "No
   answer to the last two Reminders", `previous_owner_user_id`), and the ack timeout starts over. Without a Destination,
   or when every Destination is Broken, Reminders never reach anyone and auto-unacknowledge never happens.
-- **"Still on it"** (C-17.FR-10, C-04.FR-2; `answerReminder` and the Reminder button): a command of the dispatcher.
-  Permission `alert-groups:acknowledge`; refused as `409 command-refused` with `owner_must_be_user` for a Service
+- **"Still on it"** (C-17.FR-10, C-04.FR-2; `answerReminder` and the Reminder button): a command of the dispatcher,
+  marked `x-permission-check: dispatcher` like the Commands of S-032, so the dispatcher checks the Permission
+  `alert-groups:acknowledge`; refused as `409 command-refused` with `owner_must_be_user` for a Service
   account (checked first), `not_owner` when the caller is not the Owner, and `no_reminder_pending` unless
   `reminders_sent` > 0 and `owner_answered_at` is before `last_reminder_at`. Done: `reminder_answered` (Quiet, kind
   `timers`), `owner_answered_at`, the Audit log entry `alert_group.reminder_answered`, `CommandResult` with `done`,
@@ -383,17 +384,17 @@ None.
 | C-17.AC-8 | partial | the Root message and the API; the UI is S-050 |
 | C-17.AC-9 | full | |
 | C-09.FR-1 | partial | the Unclaimed flag |
-| C-09.FR-8 | full | together with S-032: the ack timeout starts over when a Snooze ends |
+| C-09.FR-8 | full | together with S-063: the ack timeout starts over when a Snooze ends |
 | C-09.FR-11 | partial | the timer entries |
 | C-09.FR-13 | partial | the `unclaimed` filter in the API; the list page is S-050 |
 | C-10.FR-4 | partial | Reminders start over for the new Owner |
 | C-10.FR-16 | partial | `still_on_it`; the button is S-050 |
 | C-04.FR-2 | full | together with S-016 and S-032: "Still on it" refused for Service accounts |
-| C-03.FR-13 | partial | the ack timeout and Reminders after the release of a disabled or deleted Owner; the release is S-032 |
+| C-03.FR-13 | partial | the ack timeout and Reminders after the release of a disabled or deleted Owner; the release is S-063 |
 | C-02.FR-12 | partial | collapsed overdue notices and Reminders |
 | C-11.FR-20 | partial | the C-17 rows are produced |
 | C-12.FR-4 | partial | the ack timeout notice template rendered at runtime |
 | C-13.FR-4 | partial | presses on Thread replies and their answers in the Thread |
 | C-14.FR-4 | partial | presses on Thread replies in the discussion group |
 | C-15.AC-11 | partial | the timer rows, produced by the running timers; every row in the table-driven test of S-044 |
-| C-03.AC-27 | partial | the Loud Thread reply in the fake Mattermost and the ack timeout starting over; the release and its Timeline entry are S-032 |
+| C-03.AC-27 | partial | the Loud Thread reply in the fake Mattermost and the ack timeout starting over; the release and its Timeline entry are S-063 |

@@ -17,11 +17,14 @@ files_touched:
   - web/src/components/route-delete-dialog.tsx
   - web/src/components/integration-delete-dialog.tsx
   - web/src/components/integration-alerts.tsx
+  - web/src/components/app-shell.tsx
+  - web/src/components/app-shell.test.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - NOTICE
   - web/e2e/statistics.spec.ts
   - web/e2e/route-delete.spec.ts
+  - web/e2e/integration-page.spec.ts
 acceptance:
   - "[C-09.FR-15, C-09.AC-17] The statistics page shows, per Route or per Integration and for a chosen period, the number of Alert Groups and the median and 95th percentile of time to acknowledge and time to resolve, as totals and per day; for a Route whose three Alert Groups resolved 10, 20 and 30 minutes after they started it shows 3 and a median time to resolve of 20 min, and the same Alert Groups under their Integration."
   - "[C-09.FR-19] Deleting a Route with open Alert Groups shows \"This route has N open Alert Groups. Move them to the Default route to delete it.\"; \"Move and delete\" moves them and deletes the Route, and each moved Alert Group's Timeline shows the move."
@@ -53,12 +56,17 @@ issue: 31
 
 - **API used**: `getAlertGroupStatistics`, `listRoutes`, `listIntegrations`, `getRoute`, `updateRoute`, `deleteRoute`,
   `moveOpenAlertGroups`, `getIntegration`, `deleteIntegration`, `listIntegrationAlerts`.
-- **Statistics** (C-09.FR-15; route `/statistics`, navigation entry "Statistics" with `alert-groups:read`): "By route"
+- **Statistics** (C-09.FR-15; route `/statistics`, navigation entry "Statistics" with `alert-groups:read`, added to
+  the entries of `app-shell.tsx` after "Alert Groups"): "By route"
   or "By integration"; the items to show (all by default); the period ("Last 7 days" by default, "Last 30 days", "Last
   90 days", "Custom"); the request passes the profile's time zone, so days split where the user's days do. A table per
   item: "Alert Groups", "Time to acknowledge" and "Time to resolve" with the median and the 95th percentile as durations
   ("—" without data); expanding an item shows its days as a bar chart of the count with the medians beside it. The chart
-  library is under the shipped licence list and listed in NOTICE. The period and the choice are kept in the URL.
+  library is under the shipped licence list and listed in NOTICE, and works under the Content Security Policy of the
+  app listener, `style-src 'self'` (`internal/server/spa.go`): it injects no `<style>` element and sets no `style`
+  attribute from markup — a library that needs either is not used; bars drawn as SVG or with Tailwind classes are
+  fine. `statistics.spec.ts` collects violations with `watchCsp` (`web/e2e/support.ts`) and expects none. The period
+  and the choice are kept in the URL.
 - **Lifecycle section** (C-09.FR-4, FR-5, FR-9): in `route-form.tsx`, "Reopen window" and "Grace period" in minutes
   (`policy.reopen_window_seconds`, `policy.grace_period_seconds`) with the hints "An alert with the same key firing
   this soon after Muster resolved the Alert Group reopens it." and "After a person resolves an Alert Group, alerts that
@@ -70,12 +78,13 @@ issue: 31
 - **Integration delete dialog** (C-09.FR-21): adds "N open Alert Groups will be resolved." from
   `open_alert_group_count`, or nothing at zero.
 - **Alerts view column** (C-06.FR-19): "Alert Group" with `alert_group.number` as `#N`, linked to
-  `/alert-groups/$alertGroupId`.
+  `/alert-groups/$alertGroupId`. `web/e2e/integration-page.spec.ts` reads the cells of that table by position
+  (`getByRole("cell").nth(…)`); the new column shifts them, so the spec reads them by column name instead.
 
 ## Steps
 
-1. Write the statistics page with its table and chart. Check: the component test formats durations and empty values;
-   Playwright reads the numbers of Verification.
+1. Write the statistics page with its table and chart, and its navigation entry. Check: the component test formats
+   durations and empty values; Playwright reads the numbers of Verification with no CSP violation.
 2. Add the Lifecycle section. Check: Playwright saves new values and reads them back.
 3. Extend both delete dialogs and the Alerts view. Check: Playwright moves and deletes a Route and reads the counts.
 
@@ -85,7 +94,8 @@ Run `make dev`, sign in as `admin@example.org` / `muster-dev-password`; create t
 resolved after 10, 20 and 30 minutes from a terminal as in S-029, and the open Alert Groups of the Route "db" of S-028.
 Then in Playwright:
 
-1. Statistics → "By route" → the row "st" shows "3", "Time to resolve" median "20 min" → expand → one day with 3.
+1. Statistics → "By route" → the row "st" shows "3", "Time to resolve" median "20 min" → expand → one day with 3;
+   `watchCsp` recorded no violation.
 2. "By integration" → the row of the Integration shows the same three among its Alert Groups.
 3. Routes → open "st" → "Lifecycle" shows "Reopen window 15" and "Grace period 15" minutes and the switch on → set the
    Reopen window to 30 → "Save" → reload → 30.

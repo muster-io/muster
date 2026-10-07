@@ -29,10 +29,10 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-07 Heartbeat | Observation | 12 | S-023, S-024 | yes | 12 of 12 |
 | C-08 Routing | Observation | 22 | S-025, S-026, S-027 | yes | 22 of 22 |
 | C-09 Alert Group lifecycle | Observation | 49 | S-028, S-029, S-030, S-031 | yes | 49 of 49 |
-| C-10 Commands | Observation | 35 | S-032, S-033 | yes | 35 of 35 |
+| C-10 Commands | Observation | 35 | S-032, S-063, S-033 | yes | 35 of 35 |
 | C-11 Delivery engine | Shadow | 35 | S-034, S-035 | yes | 35 of 35 |
 | C-12 Messages | Shadow | 19 | S-036, S-037, S-038 | yes | 19 of 19 |
-| C-13 Mattermost | Shadow | 28 | S-039, S-061, S-040 | yes | 28 of 28 |
+| C-13 Mattermost | Shadow | 28 | S-039, S-061, S-040, S-064 | yes | 28 of 28 |
 | C-14 Telegram | Shadow | 35 | S-041, S-042, S-043 | yes | 35 of 35 |
 | C-15 Outgoing webhook | Shadow | 25 | S-044, S-045, S-046 | yes | 25 of 25 |
 | C-16 Destination test | Shadow | 14 | S-047, S-048 | yes | 14 of 14 |
@@ -130,7 +130,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-03.FR-10 | S-012 (part), S-013 (part), S-014 | complete |  |
 | C-03.FR-11 | S-011 (part), S-012 (part), S-062 (part), S-015 | complete |  |
 | C-03.FR-12 | S-010 (part), S-014 (part), S-017 (part), S-052 (part) | complete | Personal access tokens join with S-017, Account links with S-052 |
-| C-03.FR-13 | S-011 (part), S-015 (part), S-016 (part), S-032 (part), S-049 (part), S-051 (part) | complete | the effects on Account links come with S-051; the release of the acknowledgements of disabled and deleted users with S-032 and S-049 |
+| C-03.FR-13 | S-011 (part), S-015 (part), S-016 (part), S-063 (part), S-049 (part), S-051 (part) | complete | the effects on Account links come with S-051; the release of the acknowledgements of disabled and deleted users with S-063 and S-049 |
 | C-03.FR-14 | S-010 (part), S-011 (part), S-012 (part), S-013 (part), S-062 (part), S-051 (part) | complete | each later capability adds its entry types; Account links with S-051 |
 | C-03.FR-15 | S-011 (part), S-015 | complete |  |
 | C-03.FR-16 | S-010 | complete |  |
@@ -175,7 +175,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-03.AC-24 | S-062 (part), S-016 | complete | the Personal access token part needs C-04 and is verified by S-016 |
 | C-03.AC-25 | S-011 | complete |  |
 | C-03.AC-26 | S-013 (part), S-062 (part), S-015 | complete |  |
-| C-03.AC-27 | S-032 (part), S-049 (part) | complete | needs Owners (S-032) and a messenger with the ack timeout (S-049), both later than the user administration of S-011 |
+| C-03.AC-27 | S-063 (part), S-049 (part) | complete | needs Owners (S-032, released by S-063) and a messenger with the ack timeout (S-049), both later than the user administration of S-011 |
 
 ## C-04
 
@@ -196,7 +196,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-04.AC-3 | S-016 | complete |  |
 | C-04.AC-4 | S-016 | complete |  |
 | C-04.AC-5 | S-016 | complete |  |
-| C-04.AC-6 | S-032 | complete | verified by S-032: Acknowledge, Resolve, Snooze and Notes are the commands of C-10 |
+| C-04.AC-6 | S-032 (part), S-063 (part) | complete | verified by S-032 and S-063: Acknowledge, Resolve and Snooze are the commands of S-032, Notes come with S-063 |
 | C-04.AC-7 | S-016 | complete |  |
 | C-04.AC-8 | S-016 | complete |  |
 | C-04.AC-9 | S-016 | complete |  |
@@ -294,7 +294,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-08.FR-1 | S-025 (part), S-027 (part), S-031 (part), S-033 (part), S-034 (part), S-036 (part), S-038 (part), S-040 (part), S-050 (part) | complete | later policy sections and the Destinations picker come with their capabilities (S-031, S-033, S-038, S-040, S-050) |
+| C-08.FR-1 | S-025 (part), S-027 (part), S-031 (part), S-033 (part), S-034 (part), S-035 (part), S-036 (part), S-038 (part), S-064 (part), S-050 (part) | complete | later policy sections and the Destinations picker come with their capabilities (S-031, S-033, S-038, S-064, S-050); S-035 writes the Destinations of a Route |
 | C-08.FR-2 | S-025 (part), S-027 | complete |  |
 | C-08.FR-3 | S-025 (part), S-027 | complete |  |
 | C-08.FR-4 | S-025 (part), S-028 | complete | grouping by the key needs Alert Groups (C-09, S-028) |
@@ -304,7 +304,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-08.FR-8 | S-025 (part), S-028 | complete | open Alert Groups need C-09 (S-028) |
 | C-08.FR-9 | S-025 (part), S-028 | complete | Routes with open Alert Groups need C-09 (S-028, S-031) |
 | C-08.FR-10 | S-025 | complete |  |
-| C-08.FR-11 | S-026 (part), S-027, S-061 (part), S-040 (part) | complete | the `internal_alerts` suggestion is C-13.FR-11 (S-061, S-040) |
+| C-08.FR-11 | S-026 (part), S-027, S-061 (part), S-064 (part) | complete | the `internal_alerts` suggestion is C-13.FR-11 (S-061, S-064) |
 | C-08.FR-12 | S-025 | complete |  |
 | C-08.FR-13 | S-025 (part), S-027 | complete |  |
 | C-08.AC-1 | S-025 | complete |  |
@@ -331,22 +331,22 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-09.FR-5 | S-028 (part), S-031 (part), S-032 | complete | the Grace period follows a person's Resolve (C-10, S-032) |
 | C-09.FR-6 | S-028 (part), S-032 | complete | the acknowledged and snoozed cases need Acknowledge and Snooze (C-10, S-032) |
 | C-09.FR-7 | S-028 (part), S-030 | complete |  |
-| C-09.FR-8 | S-032 (part), S-049 | complete | the Snooze is C-10 (S-032); the ack timeout starting over is C-17 (S-049) |
+| C-09.FR-8 | S-063 (part), S-049 | complete | the Snooze is C-10 (S-032, its end S-063); the ack timeout starting over is C-17 (S-049) |
 | C-09.FR-9 | S-028 (part), S-031 (part), S-032 | complete | the Loud cases need Acknowledge and Snooze (C-10, S-032) |
 | C-09.FR-10 | S-028 (part), S-030 (part), S-036 (part) | complete | from C-11 on also in messages |
-| C-09.FR-11 | S-028 (part), S-030 (part), S-032 (part), S-034 (part), S-049 (part) | complete | each later capability adds its entry types (S-032, S-034, S-049) |
-| C-09.FR-12 | S-028 (part), S-032 | complete | Snooze ends come with Snooze (C-10, S-032) |
+| C-09.FR-11 | S-028 (part), S-030 (part), S-032 (part), S-063 (part), S-034 (part), S-049 (part) | complete | each later capability adds its entry types (S-032, S-063, S-034, S-049) |
+| C-09.FR-12 | S-028 (part), S-063 | complete | Snooze ends come with S-063 |
 | C-09.FR-18 | S-028 | complete |  |
 | C-09.FR-19 | S-028 (part), S-031, S-035 (part) | complete |  |
-| C-09.FR-22 | S-028 (part), S-032 (part) | complete |  |
-| C-09.FR-13 | S-029 (part), S-030, S-032 (part), S-033, S-061 (part), S-040 (part), S-049 (part), S-050 (part) | complete | later filters come with S-040 and S-050 |
+| C-09.FR-22 | S-028 (part), S-063 (part) | complete |  |
+| C-09.FR-13 | S-029 (part), S-030, S-063 (part), S-033, S-061 (part), S-064 (part), S-049 (part), S-050 (part) | complete | later filters come with S-063, S-064 and S-050 |
 | C-09.FR-17 | S-030 | complete |  |
 | C-09.FR-24 | S-030 (part), S-033 | complete |  |
 | C-09.FR-25 | S-012 (part), S-029 (part), S-030 | complete | S-012 brought the stream forward with the notice and Organization hints |
-| C-09.FR-14 | S-028 (part), S-030, S-033, S-034 (part), S-037 (part), S-038 (part), S-040 (part), S-050 (part) | complete | later sections come with S-038, S-040 and S-050 |
+| C-09.FR-14 | S-028 (part), S-030, S-033, S-034 (part), S-037 (part), S-038 (part), S-064 (part), S-050 (part) | complete | later sections come with S-038, S-064 and S-050 |
 | C-09.FR-20 | S-029 (part), S-030 | complete |  |
 | C-09.FR-15 | S-029 (part), S-031 | complete |  |
-| C-09.FR-16 | S-029 (part), S-030 (part), S-032 | complete | Notes are C-10 (S-032) |
+| C-09.FR-16 | S-029 (part), S-030 (part), S-063 | complete | Notes are C-10 (S-063) |
 | C-09.FR-21 | S-029 (part), S-031 | complete |  |
 | C-09.AC-1 | S-028 | complete |  |
 | C-09.AC-2 | S-028 | complete |  |
@@ -375,25 +375,25 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-10
 
-[Commands](../prd/l1/C-10-commands.md) · Observation · stories: S-032, S-033
+[Commands](../prd/l1/C-10-commands.md) · Observation · stories: S-032, S-063, S-033
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-10.FR-1 | S-032, S-033 | complete |  |
+| C-10.FR-1 | S-032 (part), S-063 (part), S-033 | complete |  |
 | C-10.FR-2 | S-032 (part), S-033 | complete |  |
 | C-10.FR-3 | S-032, S-061 (part), S-042 (part) | complete | the messenger Transports are passed in by S-061 and S-042 |
 | C-10.FR-4 | S-032 (part), S-033, S-049 (part) | complete | Reminders starting over for the new Owner are C-17 (S-049) |
 | C-10.FR-5 | S-032 | complete |  |
-| C-10.FR-6 | S-032 (part), S-033, S-061 (part), S-042 (part) | complete | the messenger durations come with S-061 and S-042 |
+| C-10.FR-6 | S-032 (part), S-063 (part), S-033, S-061 (part), S-042 (part) | complete | the messenger durations come with S-061 and S-042 |
 | C-10.FR-7 | S-032 (part), S-033 | complete |  |
-| C-10.FR-8 | S-032 (part), S-033 | complete |  |
+| C-10.FR-8 | S-063 (part), S-033 | complete |  |
 | C-10.FR-10 | S-032 | complete |  |
 | C-10.FR-11 | S-032 (part), S-061 (part), S-042 (part), S-051 | complete | the messenger adapters are S-061 and S-042; refusals of presses without an Account link are verified with real links by S-051 |
-| C-10.FR-12 | S-032 | complete |  |
-| C-10.FR-13 | S-032 (part), S-033 | complete |  |
+| C-10.FR-12 | S-032 (part), S-063 (part) | complete |  |
+| C-10.FR-13 | S-063 (part), S-033 | complete |  |
 | C-10.FR-14 | S-032 (part), S-033 | complete |  |
-| C-10.FR-15 | S-032 | complete |  |
-| C-10.FR-16 | S-032 (part), S-033, S-049 (part), S-050 (part) | complete | `still_on_it` is C-17 (S-049, S-050) |
+| C-10.FR-15 | S-032 (part), S-063 (part) | complete |  |
+| C-10.FR-16 | S-032 (part), S-063 (part), S-033, S-049 (part), S-050 (part) | complete | `still_on_it` is C-17 (S-049, S-050) |
 | C-10.AC-1 | S-032 | complete |  |
 | C-10.AC-2 | S-032 | complete |  |
 | C-10.AC-3 | S-032 | complete |  |
@@ -403,17 +403,17 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-10.AC-7 | S-032 | complete |  |
 | C-10.AC-8 | S-032 | complete |  |
 | C-10.AC-9 | S-032 | complete |  |
-| C-10.AC-10 | S-032 | complete |  |
+| C-10.AC-10 | S-063 | complete |  |
 | C-10.AC-11 | S-032 | complete |  |
 | C-10.AC-12 | S-032 | complete |  |
 | C-10.AC-13 | S-032 | complete |  |
 | C-10.AC-14 | S-032 (part), S-033 | complete |  |
 | C-10.AC-15 | S-032 | complete |  |
-| C-10.AC-16 | S-032 | complete |  |
+| C-10.AC-16 | S-032 (part), S-063 (part) | complete |  |
 | C-10.AC-17 | S-032 | complete |  |
-| C-10.AC-18 | S-032 | complete |  |
-| C-10.AC-19 | S-032 | complete |  |
-| C-10.AC-20 | S-032 | complete |  |
+| C-10.AC-18 | S-032 (part), S-063 (part) | complete |  |
+| C-10.AC-19 | S-063 | complete |  |
+| C-10.AC-20 | S-063 | complete |  |
 
 ## C-11
 
@@ -429,14 +429,14 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-11.FR-6 | S-035 (part), S-044 (part), S-045 (part) | complete |  |
 | C-11.FR-7 | S-034 (part), S-061 (part), S-042 (part) | complete |  |
 | C-11.FR-8 | S-034 (part), S-035 (part), S-061 (part), S-042 (part), S-044 (part) | complete |  |
-| C-11.FR-9 | S-035 (part), S-061 (part), S-040 (part), S-042 (part), S-044 (part), S-047 (part) | complete |  |
-| C-11.FR-10 | S-035, S-040 (part) | complete |  |
+| C-11.FR-9 | S-035 (part), S-061 (part), S-064 (part), S-042 (part), S-044 (part), S-047 (part) | complete |  |
+| C-11.FR-10 | S-035, S-064 (part) | complete |  |
 | C-11.FR-11 | S-035 | complete |  |
 | C-11.FR-12 | S-035 | complete |  |
 | C-11.FR-13 | S-035 | complete |  |
 | C-11.FR-14 | S-035 (part), S-039 (part), S-044 (part), S-045 (part) | complete |  |
 | C-11.FR-15 | S-034 | complete |  |
-| C-11.FR-16 | S-034 (part), S-035 (part), S-040 (part), S-042 (part) | complete |  |
+| C-11.FR-16 | S-034 (part), S-035 (part), S-064 (part), S-042 (part) | complete |  |
 | C-11.FR-17 | S-034 (part), S-035 (part) | complete |  |
 | C-11.FR-18 | S-034 (part), S-035 (part), S-039 (part), S-042 (part), S-044 (part) | complete |  |
 | C-11.FR-19 | S-035 (part), S-044 (part) | complete |  |
@@ -468,9 +468,9 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-12.FR-3 | S-036 (part), S-038 (part) | complete |  |
 | C-12.FR-4 | S-036 (part), S-037 (part), S-045 (part), S-049 (part) | complete | the ack timeout notice is rendered from S-049 on |
 | C-12.FR-5 | S-036 (part), S-038 (part) | complete |  |
-| C-12.FR-6 | S-036 (part), S-037 (part) | complete |  |
+| C-12.FR-6 | S-036 (part), S-037 (part), S-038 (part) | complete |  |
 | C-12.FR-7 | S-036 (part), S-037 (part), S-061 (part), S-042 (part) | complete |  |
-| C-12.FR-8 | S-037 (part), S-039 (part), S-061 (part), S-040 (part), S-042 (part), S-044 (part), S-045 (part) | complete |  |
+| C-12.FR-8 | S-037 (part), S-039 (part), S-061 (part), S-064 (part), S-042 (part), S-044 (part), S-045 (part) | complete |  |
 | C-12.FR-9 | S-037 (part), S-038 (part) | complete |  |
 | C-12.FR-10 | S-036 | complete |  |
 | C-12.FR-11 | S-036 (part), S-061 (part), S-042 (part) | complete |  |
@@ -485,33 +485,33 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-13
 
-[Mattermost](../prd/l1/C-13-mattermost.md) · Shadow · stories: S-039, S-061, S-040
+[Mattermost](../prd/l1/C-13-mattermost.md) · Shadow · stories: S-039, S-061, S-040, S-064
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-13.FR-1 | S-039 (part), S-040 (part) | complete |  |
-| C-13.FR-2 | S-039 (part), S-040 (part) | complete |  |
+| C-13.FR-2 | S-039 (part), S-040 (part), S-064 (part) | complete |  |
 | C-13.FR-3 | S-039 (part), S-061 (part) | complete |  |
 | C-13.FR-4 | S-061 (part), S-049 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminders of S-049 |
 | C-13.FR-5 | S-061 | complete |  |
 | C-13.FR-6 | S-039 | complete |  |
 | C-13.FR-7 | S-061 | complete |  |
 | C-13.FR-8 | S-061 | complete |  |
-| C-13.FR-9 | S-040 | complete |  |
-| C-13.FR-10 | S-039 (part), S-061 (part), S-040 (part) | complete |  |
-| C-13.FR-11 | S-061 (part), S-040 (part) | complete |  |
-| C-13.FR-12 | S-061 (part), S-040 (part) | complete |  |
+| C-13.FR-9 | S-064 | complete |  |
+| C-13.FR-10 | S-039 (part), S-061 (part), S-064 (part) | complete |  |
+| C-13.FR-11 | S-061 (part), S-064 (part) | complete |  |
+| C-13.FR-12 | S-061 (part), S-064 (part) | complete |  |
 | C-13.FR-13 | S-039 (part), S-040 (part), S-047 (part), S-048 (part) | complete |  |
 | C-13.AC-1 | S-061 | complete |  |
 | C-13.AC-2 | S-061 | complete |  |
-| C-13.AC-3 | S-061 (part), S-040 (part) | complete |  |
+| C-13.AC-3 | S-061 (part), S-064 (part) | complete |  |
 | C-13.AC-4 | S-061 | complete |  |
 | C-13.AC-5 | S-061 | complete |  |
 | C-13.AC-6 | S-061 | complete |  |
 | C-13.AC-7 | S-039 | complete |  |
-| C-13.AC-8 | S-061 (part), S-040 (part) | complete |  |
-| C-13.AC-9 | S-061 (part), S-040 (part) | complete |  |
-| C-13.AC-10 | S-061 (part), S-040 (part) | complete |  |
+| C-13.AC-8 | S-061 (part), S-064 (part) | complete |  |
+| C-13.AC-9 | S-061 (part), S-064 (part) | complete |  |
+| C-13.AC-10 | S-061 (part), S-064 (part) | complete |  |
 | C-13.AC-11 | S-061 | complete |  |
 | C-13.AC-12 | S-061 | complete |  |
 | C-13.AC-13 | S-061 | complete |  |
@@ -626,7 +626,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-17.FR-5 | S-049 | complete |  |
 | C-17.FR-6 | S-049, S-055 (part) | complete | S-055's end-to-end test repeats the expiry after a real key rotation |
 | C-17.FR-7 | S-049 | complete |  |
-| C-17.FR-8 | S-049 | complete | the release itself is S-032 (C-03.FR-13) |
+| C-17.FR-8 | S-049 | complete | the release itself is S-063 (C-03.FR-13) |
 | C-17.FR-9 | S-049 (part), S-050 (part) | complete |  |
 | C-17.FR-10 | S-049 (part), S-050 (part), S-051 (part) | complete | presses from links made through the profile with S-051 |
 | C-17.FR-11 | S-049 | complete |  |

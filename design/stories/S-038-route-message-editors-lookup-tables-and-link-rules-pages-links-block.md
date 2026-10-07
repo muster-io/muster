@@ -5,7 +5,7 @@ capability: C-12
 kind: fe
 layer: L1
 depends_on: [S-027, S-030, S-033, S-037]
-covers: [C-12.FR-2, C-12.FR-3, C-12.FR-5, C-12.FR-9, C-12.AC-2, C-12.AC-6, C-09.FR-14, C-08.FR-1]
+covers: [C-12.FR-2, C-12.FR-3, C-12.FR-5, C-12.FR-6, C-12.FR-9, C-12.AC-2, C-12.AC-6, C-09.FR-14, C-08.FR-1]
 files_touched:
   - web/package.json
   - web/src/components/route-policy-message.tsx
@@ -14,11 +14,19 @@ files_touched:
   - web/src/components/template-preview.tsx
   - web/src/components/sample-picker.tsx
   - web/src/components/route-form.tsx
-  - web/src/routes/admin.organization.lookup-tables.tsx
+  - web/src/components/template-error-banner.tsx
+  - web/src/components/route-list.tsx
+  - web/src/components/timeline.tsx
+  - web/src/components/timeline.test.tsx
+  - web/src/components/app-shell.tsx
+  - web/src/components/app-shell.test.tsx
+  - web/src/components/audit-diff.tsx
+  - web/src/components/audit-diff.test.tsx
+  - web/src/routes/admin.organization.lookup-tables.index.tsx
   - web/src/routes/admin.organization.lookup-tables.$lookupTableId.tsx
   - web/src/components/lookup-table-editor.tsx
   - web/src/components/lookup-table-editor.test.tsx
-  - web/src/routes/admin.organization.link-rules.tsx
+  - web/src/routes/admin.organization.link-rules.index.tsx
   - web/src/routes/admin.organization.link-rules.$linkRuleId.tsx
   - web/src/components/link-rule-form.tsx
   - web/src/components/alert-group-links.tsx
@@ -37,6 +45,8 @@ acceptance:
   - "[C-12.FR-9, C-12.AC-6] Organization → Link rules lists the rules, the built-in \"Explore\" marked \"Built-in\" without \"Delete\"; the form takes the name, Matchers with the Matcher builder, the scope (Alert Group, or each value of a label) and the URL template, whose preview against a Stored Snapshot shows the rendered link, for example `https://grafana.example.org/d/latency?var-ns=api`."
   - "[C-12.FR-9, C-09.FR-14] The Alert Group page shows a Links block — Link rules, \"Runbook\", \"Dashboard\" and \"Source\" — each opening in a new tab; at 360 CSS pixels it fits without horizontal scrolling."
   - "[C-12.FR-9] Without `link-rules:write` or `lookup-tables:write` the pages are read-only: no create, edit or delete."
+  - "[C-12.FR-6] A Route whose template keeps failing shows \"Template error since HH:MM: {error}. Messages use the fallback template.\" in the Route editor and a mark in the Routes list, from `Route.template_error`; the Alert Group's Timeline shows the `fallback_template_used` entry as \"Fallback template used: {template} failed — {error}\"."
+  - "[C-12.FR-9] The Audit log names the changed fields of Lookup tables and Link rules, and the navigation lists \"Lookup tables\" and \"Link rules\" under Organization."
 verify: "make ci e2e"
 operator_attention: false
 issue: 38
@@ -54,7 +64,7 @@ issue: 38
 
 **OUT**
 
-- The Destinations section of the Route editor and the Mention settings of a Destination (S-040); the Destination
+- The Destinations section of the Route editor and the Mention settings of a Destination (S-064); the Destination
   preview (S-048); the ack timeout and Reminder fields (S-050).
 
 ## Contracts
@@ -68,10 +78,12 @@ issue: 38
   `previewTemplate` with an empty `template` in the Route's language. The ack timeout notice is stored now and used
   from S-050 on.
 - **Template editor** (`template-editor.tsx`): a code editor component under the shipped licence list (listed in NOTICE)
-  with Go-template highlighting; it marks `errors[]` of `previewTemplate` and of a `422` at their `line` and `column`
+  with Go-template highlighting, which works under the Content Security Policy of the app listener, `style-src 'self'`
+  (`internal/server/spa.go`): it injects no `<style>` element and sets no `style` attribute from markup, or it is not
+  used; `route-message.spec.ts` collects violations with `watchCsp` (`web/e2e/support.ts`) and expects none; it marks `errors[]` of `previewTemplate` and of a `422` at their `line` and `column`
   with the error text (`unknown_function` → "Unknown function: {name}", `template_syntax` → the `detail`).
 - **Preview** (`template-preview.tsx`, `sample-picker.tsx`): debounced `previewTemplate` with the editor's kind,
-  `route_id`, `language` and the chosen sample — "Recent snapshots of this route" (default), one Stored Snapshot by its
+  `route_id`, `language` and the chosen sample, picked in a native `<select>` (D250) — "Recent snapshots of this route" (default), one Stored Snapshot by its
   time (with `stored-snapshots:read`), or one Alert Group by `#N` — and the "Mattermost" / "Telegram" switch as
   `format` (`markdown`, `html`); a Mattermost result is shown as rendered Markdown inside a frame and a Telegram result
   as its HTML text, untrusted text never interpreted as HTML; "Shortened to fit" appears when `truncated`.
@@ -79,7 +91,7 @@ issue: 38
 
   | Route | Permission | Content |
   |---|---|---|
-  | `/admin/organization/lookup-tables` | `lookup-tables:read` | list: name, description, columns, rows; "Create table" with `:write` |
+  | `/admin/organization/lookup-tables` (`admin.organization.lookup-tables.index.tsx`) | `lookup-tables:read` | list: name, description, columns, rows; "Create table" with `:write` |
   | `/admin/organization/lookup-tables/$lookupTableId` | `lookup-tables:read` | name, description, columns, the grid of rows; save with `If-Match` |
 
   A `422 column_mismatch` marks the row; `409 in_use` shows "This table is used by a Link rule and cannot be deleted.";
@@ -88,11 +100,24 @@ issue: 38
 
   | Route | Permission | Content |
   |---|---|---|
-  | `/admin/organization/link-rules` | `link-rules:read` | list: name, scope, Matchers, "Built-in" badge; "Create rule" with `:write` |
+  | `/admin/organization/link-rules` (`admin.organization.link-rules.index.tsx`) | `link-rules:read` | list: name, scope, Matchers, "Built-in" badge; "Create rule" with `:write` |
   | `/admin/organization/link-rules/$linkRuleId` | `link-rules:read` | the form; "Delete" except for the built-in rule |
 
   The form reuses the Matcher builder of S-027; the scope is "Alert Group" or "Each value of label" with a label field;
   the URL template editor previews the link through `previewTemplate` (kind `link_rule`).
+- **List routes as `index` files**: the list pages are `….index.tsx`, so that TanStack Router makes the detail routes
+  `$lookupTableId` and `$linkRuleId` siblings of the list, not children rendered inside a list layout without an
+  `<Outlet>`.
+- **Navigation and the Audit log** (`app-shell.tsx`, `audit-diff.tsx` and their tests): the entries "Lookup tables"
+  (`lookup-tables:read`) and "Link rules" (`link-rules:read`) join the Organization entries of the shell;
+  `audit-diff.tsx` names the fields of the resource types `lookup_table` (name, description, columns, rows) and
+  `link_rule` (name, Matchers, scope, URL template), as it does for `route`.
+- **Template errors** (C-12.FR-6; `template-error-banner.tsx`, `route-form.tsx`, `route-list.tsx`, `timeline.tsx`):
+  while `Route.template_error` is set, the Route editor shows the banner of
+  [reference.md](../prd/l1/reference.md#banners-warnings-and-notices) for a Route, "Template error since HH:MM:
+  {error}." with "Messages use the fallback template.", the time in the user's time zone and the error as untrusted
+  text, and the Routes list marks the Route; the Timeline of S-030 gains the text of the `system` entry
+  `fallback_template_used` (S-036): "Fallback template used: {template} failed — {error}".
 - **Links block** (`alert-group-links.tsx`): `AlertGroup.links` as a list of named links with `rel="noopener
   noreferrer"` and `target="_blank"`, under the header on the Alert Group page; hidden when empty.
 
@@ -128,6 +153,15 @@ Run `make dev`, sign in as `admin@example.org` / `muster-dev-password`; from a t
    `https://grafana.example.org/d/latency?var-ns=api` in a new tab; at 360 × 740 pixels
    `document.documentElement.scrollWidth` equals the viewport width.
 8. As a Viewer → Link rules and Lookup tables show no "Create", "Save" or "Delete".
+9. No Destination type exists yet to make a template fail at delivery, so from a terminal set the error state of the
+   Route "pods" directly: `psql "$MUSTER_DATABASE_URL" -c "UPDATE routes SET template_error_since = now(),
+   template_error = 'map has no entry for key \"pod\"', template_error_template = 'line' WHERE name = 'pods'"` → Routes
+   marks "pods" → open it → "Template error since HH:MM: map has no entry for key \"pod\". Messages use the fallback
+   template."
+10. Audit log → the entries of step 4 and step 5 name "Rows" and "URL template"; the navigation shows "Lookup tables"
+    and "Link rules" under Organization.
+
+The Timeline text of `fallback_template_used` is checked by `timeline.test.tsx`; the entry itself comes from S-036.
 
 `make e2e` runs these steps as `web/e2e/route-message.spec.ts`, `link-rules.spec.ts` and `alert-group-links.spec.ts`.
 
@@ -147,6 +181,7 @@ None.
 | C-12.FR-2 | partial | the line template editor; with S-036 complete |
 | C-12.FR-3 | partial | the language field; with S-036 complete |
 | C-12.FR-5 | partial | the editor preview; with S-036 complete |
+| C-12.FR-6 | partial | the template error banner on the Route and the Timeline text; with S-036 and S-037 complete |
 | C-12.FR-9 | partial | the pages and the links block; with S-037 complete |
 | C-12.AC-2 | partial | the error position in the editor; with S-036 complete |
 | C-12.AC-6 | partial | the page preview; with S-037 complete |

@@ -4,7 +4,7 @@ title: Route policy fields, Unclaimed filter and badge, next notice and "Still o
 capability: C-17
 kind: fe
 layer: L1
-depends_on: [S-033, S-038, S-040, S-049]
+depends_on: [S-033, S-038, S-064, S-049]
 covers: [C-17.FR-2, C-17.FR-3, C-17.FR-9, C-17.FR-10, C-17.AC-6, C-17.AC-8, C-09.FR-13, C-09.FR-14, C-10.FR-16, C-08.FR-1]
 files_touched:
   - web/src/components/route-policy-timers.tsx

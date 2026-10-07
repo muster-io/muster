@@ -232,11 +232,11 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Phase | Capabilities | Stories | Count |
 |---|---|---|---|
 | Foundation | C-01 – C-04 | S-001 – S-017, S-062 | 18 |
-| Observation | C-05 – C-10 | S-018 – S-033 | 16 |
-| Shadow | C-11 – C-16 | S-034 – S-048, S-061 | 16 |
+| Observation | C-05 – C-10 | S-018 – S-033, S-063 | 17 |
+| Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 | 17 |
 | Actions | C-17, C-18 | S-049 – S-052 | 4 |
 | Operations | C-19 – C-21 | S-053 – S-060 | 8 |
-| **L1** | 21 | | **62** |
+| **L1** | 21 | | **64** |
 
 ### Foundation
 
@@ -279,27 +279,29 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-029](S-029-alert-group-list-search-statistics-and-live-hints.md) | C-09 | Alert Group list, search, counts, related Alert Groups, statistics, retention and live hints (BE) | be | S-028 |
 | [S-030](S-030-alert-group-list-and-page-at-phone-width.md) | C-09 | Alert Group list and Alert Group page at phone width (FE) | fe | S-017, S-029 |
 | [S-031](S-031-statistics-page-route-lifecycle-settings-and-dialogs.md) | C-09 | Statistics page, Route lifecycle settings and the delete dialog additions (FE) | fe | S-019, S-027, S-030 |
-| [S-032](S-032-commands-notes-snooze-timers-and-bulk-commands.md) | C-10 | Commands, Takeover, Notes, Snooze timers, refusals and bulk commands (BE) | be | S-016, S-029 |
-| [S-033](S-033-command-buttons-dialogs-notes-and-bulk-selection.md) | C-10 | Command buttons, dialogs, Note box, bulk selection, Owner filters and Snooze durations (FE) | fe | S-031, S-032 |
+| [S-032](S-032-commands-notes-snooze-timers-and-bulk-commands.md) | C-10 | Commands, Takeover, refusals, allowed commands and bulk commands (BE) | be | S-016, S-029 |
+| [S-063](S-063-notes-snooze-ends-user-directory-owner-filters-and-owner-release.md) | C-10 | Notes, Snooze ends, the user directory, Owner filters and the release of disabled and deleted Owners (BE) | be | S-032 |
+| [S-033](S-033-command-buttons-dialogs-notes-and-bulk-selection.md) | C-10 | Command buttons, dialogs, Note box, bulk selection, Owner filters and Snooze durations (FE) | fe | S-031, S-063 |
 
 ### Shadow
 
 | ID | Capability | Title | Kind | Depends on |
 |---|---|---|---|---|
-| [S-034](S-034-delivery-reconciliation-limiters-interactive-path-and-threads.md) | C-11 | Delivery reconciliation, limiters, interactive path and Threads (BE) | be | S-032 |
+| [S-034](S-034-delivery-reconciliation-limiters-interactive-path-and-threads.md) | C-11 | Delivery reconciliation, limiters, interactive path and Threads (BE) | be | S-063 |
 | [S-035](S-035-error-classes-broken-destinations-recovery-storms-deleted-messages-and-duplicates.md) | C-11 | Error classes, Broken Destinations and recovery, Storms, deleted messages and duplicates (BE) | be | S-034 |
 | [S-036](S-036-default-message-built-in-texts-template-sandbox-previews-and-fallback.md) | C-12 | Default message, built-in texts, template sandbox, previews and the Fallback template (BE) | be | S-035 |
 | [S-037](S-037-lookup-tables-link-rules-and-mention-settings.md) | C-12 | Lookup tables, Link rules and Mention settings (BE) | be | S-036 |
 | [S-038](S-038-route-message-editors-lookup-tables-and-link-rules-pages-links-block.md) | C-12 | Route message editors, Lookup tables and Link rules pages, links block (FE) | fe | S-027, S-030, S-033, S-037 |
 | [S-039](S-039-mattermost-connections-destinations-check-and-fake-server.md) | C-13 | Mattermost Connections and Destinations, the Destination check and the fake Mattermost server (BE) | be | S-037 |
 | [S-061](S-061-mattermost-adapter-posts-threads-buttons-callbacks-and-delivery-problem-filter.md) | C-13 | Mattermost adapter: posts, Threads, buttons, callbacks, the Delivery problem filter and the Internal alerts suggestion (BE) | be | S-039 |
-| [S-040](S-040-mattermost-connection-pages-shared-destination-pages-delivery-state-and-delivery-problem-filter.md) | C-13 | Mattermost Connection pages, shared Destination pages, delivery state and Delivery problem filter (FE) | fe | S-033, S-038, S-061 |
+| [S-040](S-040-mattermost-connection-pages-shared-destination-pages-delivery-state-and-delivery-problem-filter.md) | C-13 | Mattermost Connection pages with the check, the callback address and its hint (FE) | fe | S-038, S-061 |
+| [S-064](S-064-destination-pages-route-destinations-delivery-state-and-delivery-problem-filter.md) | C-13 | Destination pages, the Route's Destinations and delivery sections, delivery state and the Delivery problem filter (FE) | fe | S-040 |
 | [S-041](S-041-telegram-connection-bot-api-base-url-dry-probe-long-polling-and-webhook-modes.md) | C-14 | Telegram Connection: Bot API base URL, dry probe, long polling and webhook modes (BE) | be | S-061 |
 | [S-042](S-042-telegram-adapter-channel-posts-comment-threads-buttons-callbacks-and-check.md) | C-14 | Telegram adapter: channel posts, comment Threads, buttons, callbacks and Destination check (BE) | be | S-041 |
-| [S-043](S-043-telegram-connection-pages-step-by-step-check-and-destination-form.md) | C-14 | Telegram Connection pages with the step-by-step check and the Telegram Destination form (FE) | fe | S-040, S-042 |
+| [S-043](S-043-telegram-connection-pages-step-by-step-check-and-destination-form.md) | C-14 | Telegram Connection pages with the step-by-step check and the Telegram Destination form (FE) | fe | S-064, S-042 |
 | [S-044](S-044-outgoing-webhook-events-mode-signing-secret-secrets-and-error-mapping.md) | C-15 | Outgoing webhook events mode, Signing secret, Secrets and error mapping (BE) | be | S-039 |
 | [S-045](S-045-outgoing-webhook-template-mode-extraction-threads-storm-summaries-and-mentions.md) | C-15 | Outgoing webhook template mode: extraction, threads, Storm summaries and Mentions as data (BE) | be | S-044 |
-| [S-046](S-046-outgoing-webhook-destination-form-request-builders-secrets-and-signing-secret.md) | C-15 | Outgoing webhook Destination form, request builders, Secrets and Signing secret actions (FE) | fe | S-040, S-043, S-045 |
+| [S-046](S-046-outgoing-webhook-destination-form-request-builders-secrets-and-signing-secret.md) | C-15 | Outgoing webhook Destination form, request builders, Secrets and Signing secret actions (FE) | fe | S-064, S-043, S-045 |
 | [S-047](S-047-destination-test-and-preview-for-every-destination-type.md) | C-16 | Destination test and preview for every Destination type (BE) | be | S-042, S-045 |
 | [S-048](S-048-test-and-preview-panels-on-the-destination-page.md) | C-16 | Test and Preview panels on the Destination page (FE) | fe | S-043, S-046, S-047 |
 
@@ -308,7 +310,7 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | ID | Capability | Title | Kind | Depends on |
 |---|---|---|---|---|
 | [S-049](S-049-ack-timeouts-unclaimed-reminders-auto-unacknowledge-and-still-on-it.md) | C-17 | Ack timeouts, Unclaimed, Reminders, auto-unacknowledge and "Still on it" (BE) | be | S-042, S-047 |
-| [S-050](S-050-route-timer-fields-unclaimed-filter-and-badge-next-notice-and-still-on-it.md) | C-17 | Route policy fields, Unclaimed filter and badge, next notice and "Still on it" (FE) | fe | S-033, S-038, S-040, S-049 |
+| [S-050](S-050-route-timer-fields-unclaimed-filter-and-badge-next-notice-and-still-on-it.md) | C-17 | Route policy fields, Unclaimed filter and badge, next notice and "Still on it" (FE) | fe | S-033, S-038, S-064, S-049 |
 | [S-051](S-051-account-links-telegram-deep-links-mattermost-codes-press-attribution-and-audit-log.md) | C-18 | Account links: Telegram deep links, Mattermost codes, press attribution and Audit log (BE) | be | S-049 |
 | [S-052](S-052-messenger-accounts-in-the-profile-and-account-links-on-the-user-page.md) | C-18 | Messenger accounts in the profile and Account links on the user page (FE) | fe | S-015, S-051 |
 
@@ -332,7 +334,14 @@ Destination check and the fake server, S-061 takes the adapter and everything th
 Shadow phase, before S-040. S-062 was split from S-013 before its implementation, because S-013 touched about 50
 files: S-013 keeps the OIDC settings, the proxy settings object and sign-in, S-062 takes linking, conversion to local,
 the offline token and the background re-checks with the shared claim helper; it follows S-013 in the Foundation phase,
-before S-014.
+before S-014. S-063 and S-064 were split from S-032 and S-040 by the plan review of the next phase, before their
+implementation, because with the wiring files the review added each touched about 40 files. S-032 keeps the Commands,
+their refusals, `allowed_commands` and bulk commands, and S-063 takes Notes, the Snooze end timer, the user directory,
+the Owner filters and the release of disabled and deleted Owners; it follows S-032 in the Observation phase, before
+S-033, and the delivery engine (S-034) follows it. S-040 keeps the Connection pages, and S-064 takes the Destination
+pages, the Route editor's Destinations and delivery sections, the delivery state and the "Delivery problem" filter; it
+follows S-040 in the Shadow phase, and the Telegram and outgoing webhook pages and the timer fields (S-043, S-046,
+S-050) follow it. Both keep their file names.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

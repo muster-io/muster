@@ -4,7 +4,7 @@ title: Outgoing webhook Destination form, request builders, Secrets and Signing 
 capability: C-15
 kind: fe
 layer: L1
-depends_on: [S-040, S-043, S-045]
+depends_on: [S-064, S-043, S-045]
 covers: [C-15.FR-1, C-15.FR-3, C-15.FR-5, C-15.FR-10, C-15.FR-12]
 files_touched:
   - web/src/components/webhook-destination-fields.tsx
@@ -42,13 +42,13 @@ issue: 46
 
 **IN**
 
-- The outgoing webhook variant of the Destination form of S-040: mode tabs, the events URL and headers, the four request
+- The outgoing webhook variant of the Destination form of S-064: mode tabs, the events URL and headers, the four request
   builders with extraction rules, the proxy, Mentions and limiter.
 - The Secrets section, the Signing secret section and its dialogs, the literal-credential warning, the delete dialog.
 
 **OUT**
 
-- Test and Preview (S-048); the shared Destination pages (S-040).
+- Test and Preview (S-048); the shared Destination pages (S-064).
 
 ## Contracts
 
@@ -60,7 +60,7 @@ issue: 46
   `request-builder.tsx` instances ("Create" and "Update" required, "Open thread" and "Reply in thread" optional with an
   "Add" switch), each with method, URL, headers, body (the template editor of S-038) and, for "Create" and "Open
   thread", `extraction-rules.tsx` (name, JSONPath, help "Read as `{{ .Response.<name> }}`"); "Both" shows both parts.
-  The proxy form of S-015 and the Mention section and limiter of S-040 follow. `422` errors appear at their pointers
+  The proxy form of S-015 and the Mention section and limiter of S-064 follow. `422` errors appear at their pointers
   (`/events/url`, `/template/update/url` …) with `line` and `column`.
 - **Literal credentials**: `warnings` of kind `literal_credential` mark the field named by `field` with "Store
   credentials as Secrets: this value is shown to everyone who can read Destinations."
