@@ -269,9 +269,12 @@ WHERE org_id = @org_id AND route_id = @route_id AND status <> 'resolved' AND mov
 ORDER BY id;
 
 -- GetGroup reads an Alert Group by public_id with its Route, the #N of the Alert Group it fires again after, the
--- label of its latest Replacement and the Alerts still firing in it.
+-- label of its latest Replacement, the Alerts still firing in it and retention.alert_details. Urgency is derived from
+-- the Route and organization.critical_is_urgent as they are now (C-08.FR-6), so that marking a Route urgent or
+-- changing the setting shows on open Alert Groups at once without changing them.
 -- name: GetGroup :one
-SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level, g.urgent, g.group_key_values,
+SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
+       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.group_key_values,
        g.common_labels, g.common_annotations, g.integration_ids, g.reopen_count, g.firing_alert_count,
        g.resolved_alert_count, g.resolved_at, g.resolved_by_kind, g.resolved_by_user_id,
        g.resolved_by_service_account_id, g.resolve_reason, g.resolve_reason_text, g.created_at, g.last_changed_at,
@@ -286,16 +289,20 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
                  LIMIT 1), '')::text AS replaced_label,
        (SELECT count(*)
         FROM alert_group_alerts m
-        WHERE m.org_id = g.org_id AND m.alert_group_id = g.id AND m.state = 'firing')::bigint AS still_firing
+        WHERE m.org_id = g.org_id AND m.alert_group_id = g.id AND m.state = 'firing')::bigint AS still_firing,
+       o.retention_alert_details_days
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
 WHERE g.org_id = @org_id AND g.public_id = @public_id;
 
--- GetGroupID reads the id of an Alert Group by public_id.
+-- GetGroupID reads the id of an Alert Group by public_id, with when it was resolved and retention.alert_details, which
+-- decide whether its details are removed.
 -- name: GetGroupID :one
-SELECT id
-FROM alert_groups
-WHERE org_id = @org_id AND public_id = @public_id;
+SELECT g.id, g.resolved_at, o.retention_alert_details_days
+FROM alert_groups g
+JOIN organizations o ON o.id = g.org_id
+WHERE g.org_id = @org_id AND g.public_id = @public_id;
 
 -- ListIntegrationRefs names Integrations, deleted ones included.
 -- name: ListIntegrationRefs :many
@@ -416,3 +423,311 @@ GROUP BY r.public_id, g.status;
 SELECT public_id
 FROM routes
 WHERE org_id = @org_id AND deleted_at IS NULL;
+
+-- The Alert Group list (C-09.FR-13) reads the summary rows in one of four orders. Every query runs with the plan of its
+-- parameters (Store.CustomPlans), so that the filters left unset fold away and the planner picks the index of the
+-- filters that are set: the partial open index for the default tab, the started or changed index for a range, the
+-- trigram indexes for text, the jsonb_path_ops index for = label Matchers, the unique (org_id, number) for #N. The time
+-- range selects lifetimes that overlap it — created_at < to AND (resolved_at IS NULL OR resolved_at >= from), written
+-- with the status that the CHECK ties to resolved_at, so that the open index and alert_groups_resolved_idx serve it —
+-- and is ignored for a number. Label Matchers other than = with a value are matched in Go on common_labels, after
+-- these conditions; urgency is derived as in GetGroup.
+
+-- ListGroupsStartedDesc reads a batch of the Alert Group list, newest start first, after the cursor when given.
+-- name: ListGroupsStartedDesc :many
+SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
+       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
+       g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
+       g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+FROM alert_groups g
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
+WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
+  AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
+  AND (sqlc.narg('number')::bigint IS NOT NULL
+       OR (g.created_at < @range_to::timestamptz
+           AND (g.status <> 'resolved' OR (g.status = 'resolved' AND g.resolved_at >= @range_from::timestamptz))))
+  AND (cardinality(@route_ids::bigint[]) = 0 OR g.route_id = ANY(@route_ids::bigint[]))
+  AND (cardinality(@integration_ids::bigint[]) = 0 OR g.integration_ids && @integration_ids::bigint[])
+  AND (cardinality(@severities::text[]) = 0 OR g.severity_level = ANY(@severities::text[]))
+  AND (sqlc.narg('urgent')::boolean IS NULL
+       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = sqlc.narg('urgent')::boolean)
+  AND (sqlc.narg('resolved_by')::text IS NULL OR g.resolved_by_kind = sqlc.narg('resolved_by')::text)
+  AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
+  AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+  AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
+  AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
+       OR g.summary ILIKE sqlc.narg('pattern')::text)
+  AND (sqlc.narg('after_at')::timestamptz IS NULL
+       OR (g.created_at, g.id) < (sqlc.narg('after_at')::timestamptz, sqlc.narg('after_id')::bigint))
+ORDER BY g.created_at DESC, g.id DESC
+LIMIT @lim;
+
+-- ListGroupsStartedAsc reads a batch of the Alert Group list, oldest start first, after the cursor when given.
+-- name: ListGroupsStartedAsc :many
+SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
+       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
+       g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
+       g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+FROM alert_groups g
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
+WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
+  AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
+  AND (sqlc.narg('number')::bigint IS NOT NULL
+       OR (g.created_at < @range_to::timestamptz
+           AND (g.status <> 'resolved' OR (g.status = 'resolved' AND g.resolved_at >= @range_from::timestamptz))))
+  AND (cardinality(@route_ids::bigint[]) = 0 OR g.route_id = ANY(@route_ids::bigint[]))
+  AND (cardinality(@integration_ids::bigint[]) = 0 OR g.integration_ids && @integration_ids::bigint[])
+  AND (cardinality(@severities::text[]) = 0 OR g.severity_level = ANY(@severities::text[]))
+  AND (sqlc.narg('urgent')::boolean IS NULL
+       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = sqlc.narg('urgent')::boolean)
+  AND (sqlc.narg('resolved_by')::text IS NULL OR g.resolved_by_kind = sqlc.narg('resolved_by')::text)
+  AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
+  AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+  AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
+  AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
+       OR g.summary ILIKE sqlc.narg('pattern')::text)
+  AND (sqlc.narg('after_at')::timestamptz IS NULL
+       OR (g.created_at, g.id) > (sqlc.narg('after_at')::timestamptz, sqlc.narg('after_id')::bigint))
+ORDER BY g.created_at, g.id
+LIMIT @lim;
+
+-- ListGroupsChangedDesc reads a batch of the Alert Group list, latest change first, after the cursor when given.
+-- name: ListGroupsChangedDesc :many
+SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
+       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
+       g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
+       g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+FROM alert_groups g
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
+WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
+  AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
+  AND (sqlc.narg('number')::bigint IS NOT NULL
+       OR (g.created_at < @range_to::timestamptz
+           AND (g.status <> 'resolved' OR (g.status = 'resolved' AND g.resolved_at >= @range_from::timestamptz))))
+  AND (cardinality(@route_ids::bigint[]) = 0 OR g.route_id = ANY(@route_ids::bigint[]))
+  AND (cardinality(@integration_ids::bigint[]) = 0 OR g.integration_ids && @integration_ids::bigint[])
+  AND (cardinality(@severities::text[]) = 0 OR g.severity_level = ANY(@severities::text[]))
+  AND (sqlc.narg('urgent')::boolean IS NULL
+       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = sqlc.narg('urgent')::boolean)
+  AND (sqlc.narg('resolved_by')::text IS NULL OR g.resolved_by_kind = sqlc.narg('resolved_by')::text)
+  AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
+  AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+  AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
+  AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
+       OR g.summary ILIKE sqlc.narg('pattern')::text)
+  AND (sqlc.narg('after_at')::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) < (sqlc.narg('after_at')::timestamptz, sqlc.narg('after_id')::bigint))
+ORDER BY g.last_changed_at DESC, g.id DESC
+LIMIT @lim;
+
+-- ListGroupsChangedAsc reads a batch of the Alert Group list, earliest change first, after the cursor when given.
+-- name: ListGroupsChangedAsc :many
+SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
+       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
+       g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
+       g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+FROM alert_groups g
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
+WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
+  AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
+  AND (sqlc.narg('number')::bigint IS NOT NULL
+       OR (g.created_at < @range_to::timestamptz
+           AND (g.status <> 'resolved' OR (g.status = 'resolved' AND g.resolved_at >= @range_from::timestamptz))))
+  AND (cardinality(@route_ids::bigint[]) = 0 OR g.route_id = ANY(@route_ids::bigint[]))
+  AND (cardinality(@integration_ids::bigint[]) = 0 OR g.integration_ids && @integration_ids::bigint[])
+  AND (cardinality(@severities::text[]) = 0 OR g.severity_level = ANY(@severities::text[]))
+  AND (sqlc.narg('urgent')::boolean IS NULL
+       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = sqlc.narg('urgent')::boolean)
+  AND (sqlc.narg('resolved_by')::text IS NULL OR g.resolved_by_kind = sqlc.narg('resolved_by')::text)
+  AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
+  AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+  AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
+  AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
+       OR g.summary ILIKE sqlc.narg('pattern')::text)
+  AND (sqlc.narg('after_at')::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) > (sqlc.narg('after_at')::timestamptz, sqlc.narg('after_id')::bigint))
+ORDER BY g.last_changed_at, g.id
+LIMIT @lim;
+
+-- CountGroups counts the Alert Groups of the list's filters per status, without the status and the cursor; with
+-- @with_labels it groups them by common_labels too, for the Matchers that Go applies.
+-- name: CountGroups :many
+SELECT g.status, (CASE WHEN @with_labels::boolean THEN g.common_labels END)::jsonb AS common_labels,
+       count(*)::bigint AS count
+FROM alert_groups g
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
+WHERE g.org_id = @org_id
+  AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
+  AND (sqlc.narg('number')::bigint IS NOT NULL
+       OR (g.created_at < @range_to::timestamptz
+           AND (g.status <> 'resolved' OR (g.status = 'resolved' AND g.resolved_at >= @range_from::timestamptz))))
+  AND (cardinality(@route_ids::bigint[]) = 0 OR g.route_id = ANY(@route_ids::bigint[]))
+  AND (cardinality(@integration_ids::bigint[]) = 0 OR g.integration_ids && @integration_ids::bigint[])
+  AND (cardinality(@severities::text[]) = 0 OR g.severity_level = ANY(@severities::text[]))
+  AND (sqlc.narg('urgent')::boolean IS NULL
+       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = sqlc.narg('urgent')::boolean)
+  AND (sqlc.narg('resolved_by')::text IS NULL OR g.resolved_by_kind = sqlc.narg('resolved_by')::text)
+  AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
+  AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+  AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
+  AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
+       OR g.summary ILIKE sqlc.narg('pattern')::text)
+GROUP BY g.status, (CASE WHEN @with_labels::boolean THEN g.common_labels END);
+
+-- GetListSettings reads what the list and the reads of one Alert Group need of the Organization: retention.alert_details
+-- and organization.time_zone.
+-- name: GetListSettings :one
+SELECT retention_alert_details_days, time_zone
+FROM organizations
+WHERE id = @org_id;
+
+-- ListRoutesByPublicID names Routes, deleted ones included, by public_id: the Route filter of the list and of the
+-- statistics.
+-- name: ListRoutesByPublicID :many
+SELECT id, public_id, name
+FROM routes
+WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]);
+
+-- ListIntegrationsByPublicID names Integrations, deleted ones included, by public_id.
+-- name: ListIntegrationsByPublicID :many
+SELECT id, public_id, name
+FROM integrations
+WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]);
+
+-- GetGroupKey reads the Route and the Group key of an Alert Group, for its related Alert Groups.
+-- name: GetGroupKey :one
+SELECT id, route_id, group_key_sha256
+FROM alert_groups
+WHERE org_id = @org_id AND public_id = @public_id;
+
+-- ListRelatedGroups lists the other Alert Groups of a Route with the same Group key values, newest first, after the
+-- cursor when given (C-09.FR-20; alert_groups_related_idx).
+-- name: ListRelatedGroups :many
+SELECT g.id, g.public_id, g.number, g.status, g.created_at, g.resolved_at, g.resolved_by_kind, g.resolved_by_user_id,
+       g.resolved_by_service_account_id, g.resolve_reason, g.resolve_reason_text
+FROM alert_groups g
+WHERE g.org_id = @org_id AND g.route_id = @route_id AND g.group_key_sha256 = @group_key_sha256 AND g.id <> @id
+  AND (sqlc.narg('after_at')::timestamptz IS NULL
+       OR (g.created_at, g.id) < (sqlc.narg('after_at')::timestamptz, sqlc.narg('after_id')::bigint))
+ORDER BY g.created_at DESC, g.id DESC
+LIMIT @lim;
+
+-- The statistics (C-09.FR-15) aggregate the summary rows that started in [@range_from, @range_to): per subject, and
+-- per subject and day of start in the time zone @time_zone. Time to resolve counts the resolved ones, time to
+-- acknowledge those acknowledged at least once; both are seconds, their median and 95th percentile interpolated, and 0
+-- when their count is 0.
+
+-- RouteStatistics aggregates the Alert Groups per Route, only the Routes @route_ids when set.
+-- name: RouteStatistics :many
+SELECT s.subject_id, s.day, (GROUPING(s.day) = 1)::boolean AS total, count(*)::bigint AS alert_group_count,
+       count(s.resolve)::bigint AS resolve_count,
+       coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.resolve), 0)::float8 AS resolve_median,
+       coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.resolve), 0)::float8 AS resolve_p95,
+       count(s.ack)::bigint AS ack_count,
+       coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.ack), 0)::float8 AS ack_median,
+       coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.ack), 0)::float8 AS ack_p95
+FROM (SELECT g.route_id AS subject_id, (g.created_at AT TIME ZONE @time_zone::text)::date AS day,
+             extract(epoch FROM g.resolved_at - g.created_at)::float8 AS resolve,
+             extract(epoch FROM g.first_acknowledged_at - g.created_at)::float8 AS ack
+      FROM alert_groups g
+      WHERE g.org_id = @org_id AND g.created_at >= @range_from::timestamptz AND g.created_at < @range_to::timestamptz
+        AND (cardinality(@route_ids::bigint[]) = 0 OR g.route_id = ANY(@route_ids::bigint[]))) AS s
+GROUP BY GROUPING SETS ((s.subject_id), (s.subject_id, s.day))
+ORDER BY s.subject_id, s.day NULLS FIRST;
+
+-- IntegrationStatistics aggregates the Alert Groups per Integration — one with Alerts from several counts for each —
+-- only the Integrations @integration_ids when set.
+-- name: IntegrationStatistics :many
+SELECT s.subject_id, s.day, (GROUPING(s.day) = 1)::boolean AS total, count(*)::bigint AS alert_group_count,
+       count(s.resolve)::bigint AS resolve_count,
+       coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.resolve), 0)::float8 AS resolve_median,
+       coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.resolve), 0)::float8 AS resolve_p95,
+       count(s.ack)::bigint AS ack_count,
+       coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.ack), 0)::float8 AS ack_median,
+       coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.ack), 0)::float8 AS ack_p95
+FROM (SELECT i.integration_id::bigint AS subject_id, (g.created_at AT TIME ZONE @time_zone::text)::date AS day,
+             extract(epoch FROM g.resolved_at - g.created_at)::float8 AS resolve,
+             extract(epoch FROM g.first_acknowledged_at - g.created_at)::float8 AS ack
+      FROM alert_groups g
+      CROSS JOIN LATERAL unnest(g.integration_ids) AS i(integration_id)
+      WHERE g.org_id = @org_id AND g.created_at >= @range_from::timestamptz AND g.created_at < @range_to::timestamptz
+        AND (cardinality(@integration_ids::bigint[]) = 0 OR i.integration_id = ANY(@integration_ids::bigint[]))) AS s
+GROUP BY GROUPING SETS ((s.subject_id), (s.subject_id, s.day))
+ORDER BY s.subject_id, s.day NULLS FIRST;
+
+-- ListStatisticsRoutes lists the subjects of the statistics per Route: those that are not deleted and @with_ids (the
+-- deleted ones with Alert Groups in the period), or only @only_ids when set.
+-- name: ListStatisticsRoutes :many
+SELECT id, public_id, name
+FROM routes
+WHERE org_id = @org_id
+  AND (CASE WHEN cardinality(@only_ids::bigint[]) > 0 THEN id = ANY(@only_ids::bigint[])
+            ELSE deleted_at IS NULL OR id = ANY(@with_ids::bigint[]) END)
+ORDER BY name, id;
+
+-- ListStatisticsIntegrations lists the subjects of the statistics per Integration, as ListStatisticsRoutes does.
+-- name: ListStatisticsIntegrations :many
+SELECT id, public_id, name
+FROM integrations
+WHERE org_id = @org_id
+  AND (CASE WHEN cardinality(@only_ids::bigint[]) > 0 THEN id = ANY(@only_ids::bigint[])
+            ELSE deleted_at IS NULL OR id = ANY(@with_ids::bigint[]) END)
+ORDER BY name, id;
+
+-- CountOpenGroupsByIntegration counts the open Alert Groups with an Alert from each of the Integrations
+-- (C-09.FR-21): those that deleting it would resolve.
+-- name: CountOpenGroupsByIntegration :many
+SELECT i.public_id, count(*)::bigint AS count
+FROM alert_groups g
+CROSS JOIN LATERAL unnest(g.integration_ids) AS u(integration_id)
+JOIN integrations i ON i.org_id = g.org_id AND i.id = u.integration_id
+WHERE g.org_id = @org_id AND g.status <> 'resolved' AND i.public_id = ANY(@public_ids::text[])
+GROUP BY i.public_id;
+
+-- Retention (C-09.FR-16; design/db/schema.md §6) deletes in batches on the Leader, the rows that already qualify only,
+-- so that running it twice deletes nothing more. Details go first: the Alerts inside Alert Groups that ended
+-- retention.alert_details ago; then the summary rows resolved retention.alert_group_summaries ago, with their Notes,
+-- timers, deliveries and queue rows by cascade.
+
+-- GetRetentionPeriods reads retention.alert_details and retention.alert_group_summaries, in days.
+-- name: GetRetentionPeriods :one
+SELECT retention_alert_details_days, retention_alert_group_summaries_days
+FROM organizations
+WHERE id = @org_id;
+
+-- DeleteExpiredMemberships deletes at most @batch_size Alerts inside Alert Groups that ended before @cutoff; rows
+-- another transaction holds wait for the next run.
+-- name: DeleteExpiredMemberships :execrows
+DELETE FROM alert_group_alerts m
+WHERE m.org_id = @org_id AND m.id IN (
+    SELECT e.id
+    FROM alert_group_alerts e
+    WHERE e.org_id = @org_id AND e.state <> 'firing' AND e.ended_at < @cutoff::timestamptz
+    ORDER BY e.ended_at
+    LIMIT @batch_size
+    FOR UPDATE SKIP LOCKED);
+
+-- DeleteExpiredGroups deletes at most @batch_size summary rows resolved before @cutoff. A summary row that an Alert
+-- inside another Alert Group still names as where it moved waits for the details of that one to go first; a later
+-- Alert Group that fires again after it keeps its row, without the reference (ON DELETE SET NULL).
+-- name: DeleteExpiredGroups :execrows
+DELETE FROM alert_groups g
+WHERE g.org_id = @org_id AND g.id IN (
+    SELECT e.id
+    FROM alert_groups e
+    WHERE e.org_id = @org_id AND e.status = 'resolved' AND e.resolved_at < @cutoff::timestamptz
+      AND NOT EXISTS (SELECT 1
+                      FROM alert_group_alerts m
+                      WHERE m.org_id = @org_id AND m.moved_to_alert_group_id = e.id)
+    ORDER BY e.resolved_at
+    LIMIT @batch_size
+    FOR UPDATE SKIP LOCKED);

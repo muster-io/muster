@@ -6060,7 +6060,7 @@ type ListAlertGroupsParams struct {
 	// To End of the time range (RFC 3339, UTC).
 	To *To `form:"to,omitempty" json:"to,omitempty"`
 
-	// Number The Alert Group with exactly this `#N`. The default time range does not apply: a number is found whatever its age (while its summary row is kept).
+	// Number The Alert Group with exactly this `#N`. Neither the default time range nor the default status applies: a number is found whatever its age and status (while its summary row is kept); the other filters still apply.
 	Number *AgNumber `form:"number,omitempty" json:"number,omitempty"`
 
 	// Q Search by text in the title or `summary`, case-insensitive and matching parts of words. A `#N` typed here is the same as `number`.
@@ -21887,6 +21887,8 @@ type GetAlertGroupCountsResponse struct {
 	ApplicationproblemJSON401 *Unauthorized
 	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
 	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
 	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
 	ApplicationproblemJSON429 *TooManyRequests
 	// Headers429 the parsed response headers for an HTTP 429 response
@@ -21911,6 +21913,11 @@ func (r GetAlertGroupCountsResponse) GetApplicationproblemJSON401() *Unauthorize
 // GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
 func (r GetAlertGroupCountsResponse) GetApplicationproblemJSON403() *Forbidden {
 	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r GetAlertGroupCountsResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
 }
 
 // GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
@@ -22053,6 +22060,8 @@ type ListAlertGroupsResponse struct {
 	ApplicationproblemJSON401 *Unauthorized
 	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
 	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
 	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
 	ApplicationproblemJSON429 *TooManyRequests
 	// Headers429 the parsed response headers for an HTTP 429 response
@@ -22077,6 +22086,11 @@ func (r ListAlertGroupsResponse) GetApplicationproblemJSON401() *Unauthorized {
 // GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
 func (r ListAlertGroupsResponse) GetApplicationproblemJSON403() *Forbidden {
 	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r ListAlertGroupsResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
 }
 
 // GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
@@ -36910,6 +36924,13 @@ func ParseGetAlertGroupCountsResponse(rsp *http.Response) (*GetAlertGroupCountsR
 		}
 		response.ApplicationproblemJSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
 		var dest TooManyRequests
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -37057,6 +37078,13 @@ func ParseListAlertGroupsResponse(rsp *http.Response) (*ListAlertGroupsResponse,
 			return nil, err
 		}
 		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
 		var dest TooManyRequests

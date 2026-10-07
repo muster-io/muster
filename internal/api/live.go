@@ -21,7 +21,8 @@ func (s *Server) StreamLiveUpdates(ctx context.Context, _ gen.StreamLiveUpdatesR
 	if err != nil {
 		return nil, err
 	}
-	sub, err := s.live.Subscribe(live.Subscriber{SessionID: id.Session.ID, Admin: id.Can(permissionSystemStatus)})
+	sub, err := s.live.Subscribe(live.Subscriber{SessionID: id.Session.ID, Admin: id.Can(permissionSystemStatus),
+		AlertGroups: id.Can(permissionAlertGroupsRead)})
 	if err != nil {
 		return nil, err
 	}

@@ -17,11 +17,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
@@ -98,7 +100,11 @@ type Queries interface {
 	LockRouteForMove(ctx context.Context, arg dbgen.LockRouteForMoveParams) (dbgen.LockRouteForMoveRow, error)
 	GetDefaultRouteID(ctx context.Context, orgID int64) (int64, error)
 	ListOpenGroupsOfRoute(ctx context.Context, arg dbgen.ListOpenGroupsOfRouteParams) ([]int64, error)
+	// Notify sends a live-update hint once the transaction commits.
+	Notify(ctx context.Context, h db.Hint) error
 	readQueries
+	listQueries
+	retentionQueries
 	audit.Store
 }
 
@@ -106,30 +112,60 @@ type Queries interface {
 type Store interface {
 	Queries
 	InTx(ctx context.Context, f func(Queries) error) error
+	// CustomPlans are the queries over a connection that plans each statement with its parameters, for the list,
+	// whose optional filters a generic plan of a prepared statement could not use the indexes of.
+	CustomPlans() Queries
 }
 
 // NewStore is the Store over the main pool.
 func NewStore(pool *pgxpool.Pool) Store {
-	return pgStore{Queries: newQueries(pool), pool: pool}
+	return pgStore{Queries: newQueries(pool), pool: pool, custom: newQueries(customPlans{db: pool})}
 }
 
 type pgQueries struct {
 	*dbgen.Queries
 	audit.Store
+	exec db.Execer
 }
 
 // newQueries are the queries over a pool or a transaction.
 func newQueries(d dbgen.DBTX) Queries {
-	return pgQueries{Queries: dbgen.New(d), Store: audit.NewStore(d)}
+	return pgQueries{Queries: dbgen.New(d), Store: audit.NewStore(d), exec: d}
+}
+
+func (q pgQueries) Notify(ctx context.Context, h db.Hint) error {
+	return db.NotifyHint(ctx, q.exec, h)
 }
 
 type pgStore struct {
 	Queries
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	custom Queries
 }
 
 func (s pgStore) InTx(ctx context.Context, f func(Queries) error) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return f(newQueries(tx)) })
+}
+
+func (s pgStore) CustomPlans() Queries { return s.custom }
+
+// customPlans runs the statements of a pool as unnamed statements, which PostgreSQL plans with the parameters they
+// are bound to, instead of the cached prepared statements whose generic plan ignores them: pgx takes a QueryExecMode
+// as the first argument.
+type customPlans struct {
+	db dbgen.DBTX
+}
+
+func (c customPlans) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return c.db.Exec(ctx, sql, append([]any{pgx.QueryExecModeDescribeExec}, args...)...)
+}
+
+func (c customPlans) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return c.db.Query(ctx, sql, append([]any{pgx.QueryExecModeDescribeExec}, args...)...)
+}
+
+func (c customPlans) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return c.db.QueryRow(ctx, sql, append([]any{pgx.QueryExecModeDescribeExec}, args...)...)
 }
 
 // Actor is who changes an Alert Group and through which Transport. System transitions are made by Muster itself
@@ -312,8 +348,9 @@ func (c committed) run(ctx context.Context) {
 }
 
 // dispatcher is the one way an Alert Group changes (ADR-0004, ADR-0016): permission → precondition → transition →
-// Audit log → Timeline → re-render, inside the caller's transaction, on a row the caller locked FOR UPDATE. System
-// transitions need no Permission and write no Audit log entry; S-032 adds both steps for Commands.
+// Audit log → Timeline → re-render, inside the caller's transaction, on a row the caller locked FOR UPDATE, and the
+// live-update hints of the change once the transaction commits. System transitions need no Permission and write no
+// Audit log entry; S-032 adds both steps for Commands.
 type dispatcher struct {
 	orgID int64
 	clock clock.Clock
@@ -353,6 +390,9 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 		if err := d.rerender(ctx, q, g); err != nil {
 			return err
 		}
+	}
+	if err := d.hint(ctx, q, g, from); err != nil {
+		return err
 	}
 	if from != g.Status {
 		if err := d.statusChanged(ctx, q, g, from, c.reason, actor, after); err != nil {

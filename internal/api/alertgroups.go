@@ -6,26 +6,266 @@ package api
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
+	openapi_types "github.com/oapi-codegen/runtime/types"
+
 	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/matchers"
+	"github.com/muster-io/muster/internal/organization"
 )
 
-// AlertGroups is what the API needs of internal/groups: one Alert Group, its Alerts and its Timeline, and the move
-// of a Route's open Alert Groups to the Default route.
+// AlertGroups is what the API needs of internal/groups: the list with its counts, one Alert Group, its Alerts, its
+// Timeline and its related Alert Groups, the statistics, the open count of Integrations, and the move of a Route's
+// open Alert Groups to the Default route.
 type AlertGroups interface {
+	List(ctx context.Context, r groups.ListRequest) (groups.ListPage, error)
+	Counts(ctx context.Context, f groups.Filter) (groups.Counts, error)
 	Get(ctx context.Context, publicID string) (groups.View, error)
 	Alerts(ctx context.Context, publicID string, f groups.AlertFilter) (groups.AlertPage, error)
 	Timeline(ctx context.Context, publicID string, f groups.TimelineFilter) (groups.TimelinePage, error)
+	Related(ctx context.Context, publicID string, after *groups.ListPosition, limit int) (groups.RelatedPage, error)
+	Statistics(ctx context.Context, r groups.StatisticsRequest) (groups.Statistics, error)
+	OpenCounts(ctx context.Context, integrations []string) (map[string]int64, error)
 	MoveOpenAlertGroups(ctx context.Context, r groups.Requester, routeID string) (int, error)
 }
 
+// permissionAlertGroupsRead reads Alert Groups; the live-update hints about them go only to those who hold it.
+const permissionAlertGroupsRead auth.Permission = "alert-groups:read"
+
 // The cursors of the Alert Group lists.
 const (
+	alertGroupsCursor        = "alert-groups"
 	alertGroupAlertsCursor   = "alert-group-alerts"
 	alertGroupTimelineCursor = "alert-group-timeline"
+	relatedAlertGroupsCursor = "related-alert-groups"
 )
+
+// alertGroupKey is the position of an Alert Group in its cursor: the time it is sorted by and its id.
+type alertGroupKey struct {
+	At time.Time `json:"t"`
+	ID int64     `json:"i"`
+}
+
+// filterParams are the filter parameters that listAlertGroups and getAlertGroupCounts share.
+type filterParams struct {
+	route, integration    *[]string
+	severity              *[]gen.SeverityLevel
+	urgent, reopened      *bool
+	resolvedBy            *gen.ResolverKind
+	resolveReason         *gen.ResolveReason
+	label                 *[]string
+	owner                 *string
+	snoozedNoEnd, problem *bool
+	unclaimed             *bool
+	from, to              *time.Time
+	q                     *string
+}
+
+// filterOf is the groups.Filter of the parameters. The filters Owner, "snoozed with no end", "Delivery problem" and
+// Unclaimed belong to later stories and answer 422 unsupported until then.
+func filterOf(p filterParams) (groups.Filter, error) {
+	for _, u := range []struct {
+		name string
+		set  bool
+	}{{"owner", p.owner != nil}, {"snoozed_no_end", p.snoozedNoEnd != nil},
+		{"delivery_problem", p.problem != nil}, {"unclaimed", p.unclaimed != nil}} {
+		if u.set {
+			return groups.Filter{}, fieldProblem(http.StatusUnprocessableEntity, "/query/"+u.name, fieldUnsupported,
+				"This filter is not available yet.")
+		}
+	}
+	f := groups.Filter{Urgent: p.urgent, Reopened: p.reopened, From: p.from, To: p.to}
+	if p.route != nil {
+		f.Routes = *p.route
+	}
+	if p.integration != nil {
+		f.Integrations = *p.integration
+	}
+	if p.severity != nil {
+		for _, l := range *p.severity {
+			f.Severities = append(f.Severities, organization.SeverityLevel(l))
+		}
+	}
+	if p.resolvedBy != nil {
+		by := string(*p.resolvedBy)
+		f.ResolvedBy = &by
+	}
+	if p.resolveReason != nil {
+		reason := string(*p.resolveReason)
+		f.ResolveReason = &reason
+	}
+	if p.label != nil {
+		for i, raw := range *p.label {
+			m, err := matchers.Parse(raw)
+			if err != nil {
+				return groups.Filter{}, matcherProblem(i, err)
+			}
+			f.Matchers = append(f.Matchers, m)
+		}
+	}
+	if p.q != nil {
+		f.Query = *p.q
+	}
+	return f, nil
+}
+
+// ListAlertGroups is listAlertGroups: a page of the Alert Group list with its filters, range, search and order.
+func (s *Server) ListAlertGroups(ctx context.Context, req gen.ListAlertGroupsRequestObject) (
+	gen.ListAlertGroupsResponseObject, error) {
+	p := req.Params
+	f, err := filterOf(filterParams{route: p.Route, integration: p.Integration, severity: p.Severity,
+		urgent: p.Urgent, reopened: p.Reopened, resolvedBy: p.ResolvedBy, resolveReason: p.ResolveReason,
+		label: p.Label, owner: p.Owner, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
+		unclaimed: p.Unclaimed, from: p.From, to: p.To, q: p.Q})
+	if err != nil {
+		return nil, err
+	}
+	r := groups.ListRequest{Filter: f, Sort: groups.SortStartedDesc, Limit: pageSize(p.Limit)}
+	if p.Status != nil {
+		for _, st := range *p.Status {
+			r.Statuses = append(r.Statuses, groups.Status(st))
+		}
+	}
+	if p.Number != nil {
+		n := int64(*p.Number)
+		r.Number = &n
+	}
+	if p.Sort != nil {
+		r.Sort = groups.Sort(*p.Sort)
+	}
+	if p.LabelColumns != nil {
+		r.LabelColumns = *p.LabelColumns
+	}
+	list := alertGroupsCursor + ":" + string(r.Sort)
+	var key alertGroupKey
+	if ok, err := decodeCursor(p.Cursor, list, &key); err != nil {
+		return nil, err
+	} else if ok {
+		r.After = &groups.ListPosition{At: key.At, ID: key.ID}
+	}
+	page, err := s.alertGroups.List(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.AlertGroupList{Items: make([]gen.AlertGroup, 0, len(page.Groups))}
+	for _, v := range page.Groups {
+		out.Items = append(out.Items, alertGroupOf(v))
+	}
+	if page.Next != nil {
+		out.NextCursor.Set(encodeCursor(list, alertGroupKey{At: page.Next.At, ID: page.Next.ID}))
+	} else {
+		out.NextCursor.SetNull()
+	}
+	return gen.ListAlertGroups200JSONResponse(out), nil
+}
+
+// GetAlertGroupCounts is getAlertGroupCounts: the Alert Groups of the list's filters per status tab.
+func (s *Server) GetAlertGroupCounts(ctx context.Context, req gen.GetAlertGroupCountsRequestObject) (
+	gen.GetAlertGroupCountsResponseObject, error) {
+	p := req.Params
+	f, err := filterOf(filterParams{route: p.Route, integration: p.Integration, severity: p.Severity,
+		urgent: p.Urgent, reopened: p.Reopened, resolvedBy: p.ResolvedBy, resolveReason: p.ResolveReason,
+		label: p.Label, owner: p.Owner, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
+		unclaimed: p.Unclaimed, from: p.From, to: p.To, q: p.Q})
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.alertGroups.Counts(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetAlertGroupCounts200JSONResponse{Firing: int(c.Firing), Acknowledged: int(c.Acknowledged),
+		Snoozed: int(c.Snoozed), Resolved: int(c.Resolved), All: int(c.All)}, nil
+}
+
+// ListRelatedAlertGroups is listRelatedAlertGroups: the other Alert Groups of the same Route and Group key values,
+// newest first.
+func (s *Server) ListRelatedAlertGroups(ctx context.Context, req gen.ListRelatedAlertGroupsRequestObject) (
+	gen.ListRelatedAlertGroupsResponseObject, error) {
+	p := req.Params
+	var after *groups.ListPosition
+	var key alertGroupKey
+	if ok, err := decodeCursor(p.Cursor, relatedAlertGroupsCursor, &key); err != nil {
+		return nil, err
+	} else if ok {
+		after = &groups.ListPosition{At: key.At, ID: key.ID}
+	}
+	page, err := s.alertGroups.Related(ctx, req.AlertGroupId, after, pageSize(p.Limit))
+	if err != nil {
+		return nil, err
+	}
+	out := gen.RelatedAlertGroupList{Items: make([]gen.RelatedAlertGroup, 0, len(page.Groups))}
+	for _, g := range page.Groups {
+		item := gen.RelatedAlertGroup{Id: g.PublicID, Number: int(g.Number), Status: gen.AlertGroupStatus(g.Status),
+			StartedAt: g.StartedAt, Resolution: resolvedByOf(g.Resolution)}
+		if g.Duration != nil {
+			item.DurationSeconds.Set(int(g.Duration.Seconds()))
+		} else {
+			item.DurationSeconds.SetNull()
+		}
+		out.Items = append(out.Items, item)
+	}
+	if page.Next != nil {
+		out.NextCursor.Set(encodeCursor(relatedAlertGroupsCursor, alertGroupKey{At: page.Next.At, ID: page.Next.ID}))
+	} else {
+		out.NextCursor.SetNull()
+	}
+	return gen.ListRelatedAlertGroups200JSONResponse(out), nil
+}
+
+// GetAlertGroupStatistics is getAlertGroupStatistics: per Route or per Integration, totals and days.
+func (s *Server) GetAlertGroupStatistics(ctx context.Context, req gen.GetAlertGroupStatisticsRequestObject) (
+	gen.GetAlertGroupStatisticsResponseObject, error) {
+	p := req.Params
+	r := groups.StatisticsRequest{GroupBy: string(p.GroupBy), From: p.From, To: p.To}
+	if p.Route != nil {
+		r.Routes = *p.Route
+	}
+	if p.Integration != nil {
+		r.Integrations = *p.Integration
+	}
+	if p.TimeZone != nil {
+		r.TimeZone = *p.TimeZone
+	}
+	st, err := s.alertGroups.Statistics(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.AlertGroupStatistics{GroupBy: gen.AlertGroupStatisticsGroupBy(st.GroupBy), From: st.From, To: st.To,
+		Items: make([]gen.AlertGroupStatisticsItem, 0, len(st.Items))}
+	for _, it := range st.Items {
+		item := gen.AlertGroupStatisticsItem{Subject: gen.EntityRef{Id: it.Subject.PublicID, Name: it.Subject.Name},
+			AlertGroupCount: int(it.AlertGroupCount), TimeToAcknowledge: durationStatsOf(it.TimeToAcknowledge),
+			TimeToResolve: durationStatsOf(it.TimeToResolve), PerDay: make([]gen.StatisticsDay, 0, len(it.PerDay))}
+		for _, d := range it.PerDay {
+			item.PerDay = append(item.PerDay, gen.StatisticsDay{Date: openapi_types.Date{Time: d.Date},
+				AlertGroupCount: int(d.AlertGroupCount), TimeToAcknowledge: durationStatsOf(d.TimeToAcknowledge),
+				TimeToResolve: durationStatsOf(d.TimeToResolve)})
+		}
+		out.Items = append(out.Items, item)
+	}
+	return gen.GetAlertGroupStatistics200JSONResponse(out), nil
+}
+
+// durationStatsOf is the API form of durations: median and 95th percentile are null without any.
+func durationStatsOf(d groups.DurationStats) gen.DurationStats {
+	out := gen.DurationStats{Count: int(d.Count)}
+	if d.Median != nil {
+		out.MedianSeconds.Set(int(*d.Median))
+	} else {
+		out.MedianSeconds.SetNull()
+	}
+	if d.P95 != nil {
+		out.P95Seconds.Set(int(*d.P95))
+	} else {
+		out.P95Seconds.SetNull()
+	}
+	return out
+}
 
 // GetAlertGroup is getAlertGroup: the Alert Group with its resolution, labels and notices.
 func (s *Server) GetAlertGroup(ctx context.Context, req gen.GetAlertGroupRequestObject) (
@@ -37,8 +277,9 @@ func (s *Server) GetAlertGroup(ctx context.Context, req gen.GetAlertGroupRequest
 	return gen.GetAlertGroup200JSONResponse(alertGroupOf(v)), nil
 }
 
-// alertGroupOf is the API form of an Alert Group. The Owner, the Snooze and the allowed Commands arrive with the
-// Commands, the links, Unclaimed and the delivery problem with their capabilities.
+// alertGroupOf is the API form of an Alert Group, of its page or of a list item; a list item leaves out the labels
+// and the notices. The Owner, the Snooze and the allowed Commands arrive with the Commands, the links, Unclaimed and
+// the delivery problem with their capabilities.
 func alertGroupOf(v groups.View) gen.AlertGroup {
 	out := gen.AlertGroup{
 		Id: v.PublicID, Number: int(v.Number), Title: v.Title, Summary: nullableString(v.Summary),
@@ -47,26 +288,20 @@ func alertGroupOf(v groups.View) gen.AlertGroup {
 		StartedAt: v.StartedAt, LastChangedAt: v.LastChangedAt, ResolvedAt: nullableTime(v.ResolvedAt),
 		ReopenCount: int(v.ReopenCount), FiringAlertCount: int(v.FiringCount),
 		ResolvedAlertCount: int(v.ResolvedCount), AllowedCommands: []gen.CommandName{},
-		Links: &[]gen.AlertGroupLink{},
+		Links: &[]gen.AlertGroupLink{}, DetailsRemoved: &v.DetailsRemoved, Resolution: resolvedByOf(v.Resolution),
 	}
 	for _, i := range v.Integrations {
 		out.Integrations = append(out.Integrations, gen.EntityRef{Id: i.PublicID, Name: i.Name})
 	}
+	if v.LabelValues != nil {
+		values := labelsOf(v.LabelValues)
+		out.LabelValues = &values
+	}
+	if v.Notices == nil {
+		return out
+	}
 	labels, common, annotations := labelsOf(v.GroupLabels), labelsOf(v.CommonLabels), labelsOf(v.CommonAnnotations)
 	out.GroupLabels, out.CommonLabels, out.CommonAnnotations = &labels, &common, &annotations
-	if r := v.Resolution; r != nil {
-		res := gen.ResolvedBy{By: gen.ResolverKind(r.By), Reason: nullableString(r.Reason)}
-		if r.ReasonCode != nil {
-			res.ReasonCode.Set(gen.NullableResolveReason(*r.ReasonCode))
-		} else {
-			res.ReasonCode.SetNull()
-		}
-		if r.Actor != nil {
-			a := actorRefOf(*r.Actor)
-			res.Actor = &a
-		}
-		out.Resolution = &res
-	}
 	notices := make([]gen.AlertGroupNotice, 0, len(v.Notices))
 	for _, n := range v.Notices {
 		g := gen.AlertGroupNotice{Kind: gen.AlertGroupNoticeKind(n.Kind)}
@@ -79,10 +314,31 @@ func alertGroupOf(v groups.View) gen.AlertGroup {
 		if n.ResolvedNumber != nil {
 			g.ResolvedNumber.Set(int(*n.ResolvedNumber))
 		}
+		if n.RetentionDays != nil {
+			g.RetentionDays.Set(int(*n.RetentionDays))
+		}
 		notices = append(notices, g)
 	}
 	out.Notices = &notices
 	return out
+}
+
+// resolvedByOf is the API form of who resolved an Alert Group, nil while it is open.
+func resolvedByOf(r *groups.Resolution) *gen.ResolvedBy {
+	if r == nil {
+		return nil
+	}
+	res := gen.ResolvedBy{By: gen.ResolverKind(r.By), Reason: nullableString(r.Reason)}
+	if r.ReasonCode != nil {
+		res.ReasonCode.Set(gen.NullableResolveReason(*r.ReasonCode))
+	} else {
+		res.ReasonCode.SetNull()
+	}
+	if r.Actor != nil {
+		a := actorRefOf(*r.Actor)
+		res.Actor = &a
+	}
+	return &res
 }
 
 // actorRefOf is the API form of a User or a Service account.

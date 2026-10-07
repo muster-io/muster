@@ -48,7 +48,7 @@ export const ListAlertGroupsQueryParams = zod.object({
   "unclaimed": zod.boolean().optional().describe('Only Unclaimed Alert Groups.'),
   "from": zod.iso.datetime({"offset":true}).optional().describe('Start of the time range (RFC 3339, UTC).'),
   "to": zod.iso.datetime({"offset":true}).optional().describe('End of the time range (RFC 3339, UTC).'),
-  "number": zod.int().min(1).optional().describe('The Alert Group with exactly this `#N`. The default time range does not apply: a number is found whatever its age (while its summary row is kept).'),
+  "number": zod.int().min(1).optional().describe('The Alert Group with exactly this `#N`. Neither the default time range nor the default status applies: a number is found whatever its age and status (while its summary row is kept); the other filters still apply.'),
   "q": zod.string().optional().describe('Search by text in the title or `summary`, case-insensitive and matching parts of words. A `#N` typed here is the same as `number`.'),
   "sort": zod.enum(['started_at', '-started_at', 'last_changed_at', '-last_changed_at']).default(listAlertGroupsQuerySortDefault).describe('Sort field; a leading `-` sorts descending.'),
   "label_columns": zod.array(zod.string()).optional().describe('Label names whose shared value is returned in `label_values` of each Alert Group.')

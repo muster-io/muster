@@ -20,17 +20,28 @@ files_touched:
   - internal/groups/list_test.go
   - internal/groups/statistics_test.go
   - internal/groups/retention_test.go
+  - internal/groups/dispatcher_test.go
+  - internal/groups/list_integration_test.go
   - internal/api/alertgroups.go
   - internal/api/alertgroups_test.go
   - internal/api/integrations.go
+  - internal/api/integrations_test.go
+  - internal/api/live.go
+  - internal/api/live_test.go
+  - internal/api/problem.go
   - internal/api/server.go
   - internal/api/server_test.go
   - internal/live/hub.go
+  - internal/live/live_test.go
   - internal/leader/tasks.go
+  - internal/leader/leader_test.go
   - internal/logging/events.go
   - internal/runtime/runtime.go
   - internal/db/migrations/0003_alert_groups_firing_again_after_on_delete.up.sql
   - internal/db/migrations/0003_alert_groups_firing_again_after_on_delete.down.sql
+  - internal/db/db_test.go
+  - internal/db/migrate_test.go
+  - api/openapi.yaml
   - design/db/schema.md
   - test/e2e/alert_group_list_test.go
 acceptance:
@@ -74,25 +85,41 @@ issue: 29
   `Integration.open_alert_group_count`. Schemas: `AlertGroupList`, `AlertGroupCounts`, `RelatedAlertGroup(List)`,
   `AlertGroupStatistics`, `AlertGroupStatisticsItem`, `StatisticsDay`, `DurationStats`, `HintEvent`; parameters
   `AgStatus`, `AgRoute`, `AgIntegration`, `AgSeverity`, `AgUrgent`, `AgResolvedBy`, `AgResolveReason`, `AgReopened`,
-  `LabelMatchers`, `From`, `To`, `AgNumber`, `AgQuery`, `AgSort`, `AgLabelColumns`.
+  `LabelMatchers`, `From`, `To`, `AgNumber`, `AgQuery`, `AgSort`, `AgLabelColumns`. `listAlertGroups` and
+  `getAlertGroupCounts` declare `422` (the unsupported filters, an unknown Route or Integration, a range that does not
+  start before it ends); `AgNumber` says that the default status does not apply either.
 - **List** (C-09.FR-13; `alert_groups` and its indexes): status defaults to firing, acknowledged and snoozed. The time
-  range defaults to the last `alert_group.list_range` and selects lifetimes that overlap it (`created_at < to AND
-  (resolved_at IS NULL OR resolved_at >= from)`). Filters: `route` and `integration` (`public_id`s; `integration_ids`
-  overlap), `severity`, `urgent`, `resolved_by` (`user` or `system`), `resolve_reason` (with `resolved_by=system`),
-  `reopened` (Reopen count above zero), `label` (Matchers of `internal/matchers` applied to `common_labels`: `=` by
-  `jsonb` containment, the others row by row after the other conditions; a label the Alerts do not share counts as
-  absent). `number` and a `q` of the form `#N` select that Alert Group and ignore the time range; any other `q` searches
-  the title and `summary` case-insensitively inside words (trigram `ILIKE`). `sort` by `started_at` or
-  `last_changed_at`, either direction, cursor on `(value, id)`, `limit` per `api.page_size`. `label_columns` returns,
-  for each item, the value of each named label in `common_labels` (`label_values`). `owner`, `snoozed_no_end`,
-  `delivery_problem` and `unclaimed` answer `422` with `unsupported` at `/query/<name>` until S-063, S-061 and S-049.
-- **Counts** (`getAlertGroupCounts`): the same filters without `status` and `number`, counted per status and in total.
+  range defaults to the last `alert_group.list_range`, ending at the end of now (an Alert Group started at this very
+  time is in), and selects lifetimes that overlap it (`created_at < to AND (resolved_at IS NULL OR resolved_at >=
+  from)`, written in SQL with the `status` that the `CHECK` ties to `resolved_at`, so that the open index and
+  `alert_groups_resolved_idx` serve it). Filters: `route` and `integration` (`public_id`s, deleted ones included; an
+  unknown one is `422 unknown_id`; `integration_ids` overlap), `severity`, `urgent`, `resolved_by` (`user` or
+  `system`), `resolve_reason` (with `resolved_by=system`), `reopened` (Reopen count above zero, or zero for `false`),
+  `label` (Matchers of `internal/matchers` applied to `common_labels`: `=` with a value by `jsonb` containment, the
+  others row by row in Go after the other conditions, batch by batch; a label the Alerts do not share counts as absent;
+  a Matcher that does not parse is `400` as on the Alerts view). `number` and a `q` of the form `#N` select that Alert
+  Group and ignore the time range and the default status (an explicit `status` and the other filters still apply); any
+  other `q` searches the title and `summary` case-insensitively inside words (trigram `ILIKE`, its wildcards escaped).
+  `sort` by `started_at` or `last_changed_at`, either direction, cursor on `(value, id)`, `limit` per `api.page_size`.
+  `label_columns` returns, for each item, the value of each named label in `common_labels` (`label_values`). `owner`,
+  `snoozed_no_end`, `delivery_problem` and `unclaimed` answer `422` with `unsupported` at `/query/<name>` until S-063,
+  S-061 and S-049. The list and count queries run as unnamed statements (`Store.CustomPlans`), planned with their
+  parameters, so that the filters left unset fold away and the indexes of the filters that are set are used.
+- **Urgency** (C-08.FR-6; the D269 decision carried over from S-028): reads derive `urgent` from the Alert Group's
+  Route and `organization.critical_is_urgent` as they are now (`route.urgent OR (severity_level = 'critical' AND
+  critical_is_urgent)`), in `getAlertGroup`, the list items and the `urgent` filter, so that marking a Route urgent or
+  changing the setting shows on open Alert Groups at once without changing their status (C-09.AC-8, C-20.AC-3). The
+  stored `alert_groups.urgent` keeps the urgency judged at the last rise, which the transitions of S-028 compare.
+- **Counts** (`getAlertGroupCounts`): the same filters without `status` and `number`, counted per status and in total;
+  a `q` of the form `#N` counts that Alert Group whatever the range, as the list finds it. With Matchers that Go
+  applies, the database counts per status and set of common labels and Go adds up the matching ones.
 - **Related** (C-09.FR-20): Alert Groups of the same Route with the same `group_key_sha256`, the Alert Group itself
   excluded, newest first by cursor: number, status, start, `duration_seconds` (to the resolution; null while open) and
   `resolution`.
 - **Statistics** (C-09.FR-15): `group_by` `route` or `integration` (required); `route` or `integration` ids narrow the
-  matching kind (the other kind answers `422 unsupported`); `from` and `to` default to the last
-  `alert_group.list_range`; `time_zone` (IANA, default `organization.time_zone`, otherwise `422 invalid_format`). From
+  matching kind (the other kind answers `422 unsupported`, an unknown id `422 unknown_id`); `from` and `to` default to
+  the last `alert_group.list_range`; `time_zone` (IANA, default `organization.time_zone`, otherwise
+  `422 invalid_format`). Items are ordered by name; `per_day` lists the days with Alert Groups. From
   the summary rows that started in the period: per item — every Route or Integration that is not deleted, and deleted
   ones with Alert Groups in the period — `alert_group_count`, time to resolve (resolved ones, `resolved_at −
   created_at`) and time to acknowledge (`first_acknowledged_at − created_at`, only Alert Groups that were acknowledged)
@@ -100,8 +127,9 @@ issue: 29
   Alerts from several Integrations counts for each.
 - **Retention** (C-09.FR-16; ADR-0006, `design/db/schema.md` §6): an hourly Leader task deletes, in batches of at most
   5,000 rows, `alert_group_alerts` rows that ended more than `retention.alert_details` ago and `alert_groups` resolved
-  more than `retention.alert_group_summaries` ago (their Notes, timers and delivery rows go by cascade); Timeline months
-  are dropped by S-008. The task runs per Organization: it iterates over the Organizations (one in L1), reads that
+  more than `retention.alert_group_summaries` ago (their Notes, timers and delivery rows go by cascade), the details
+  first; a summary row that an Alert of another Alert Group still names as where it moved
+  (`alert_group_alerts.moved_to_alert_group_id`) waits for that row to go; Timeline months are dropped by S-008. The task runs per Organization: it iterates over the Organizations (one in L1), reads that
   Organization's periods and passes `org_id` to every query (lint 1). Reads hide what is past its period: an Alert Group
   resolved more than `retention.alert_details` ago has `details_removed: true` and the notice `details_removed` with
   `retention_days`, `listAlertGroupAlerts` returns nothing and the Timeline returns only Notes. List, search, counts and
@@ -118,7 +146,8 @@ issue: 29
 - **Live hints** (C-09.FR-25, ADR-0009; `internal/groups/dispatcher.go`, `hints.go`): the dispatcher sends, in the
   transaction of each change, `NOTIFY` for the hint
   `alert-group` with the `public_id`; a new Alert Group and a Reopen also send `alert-groups` with `null`. The hub of
-  S-012 gains both types.
+  S-012 gains both types, sends them only to streams whose identity holds `alert-groups:read` (`internal/api/live.go`
+  marks the subscriber), and adds `alert-groups` to the hints it sends when its LISTEN is restored.
 - **Integration count** (C-09.FR-21): `open_alert_group_count` on every Integration read — the open Alert Groups whose
   `integration_ids` contain it.
 - **Log event**: `alert_groups_purged` (INFO: `details`, `summaries`).
@@ -190,7 +219,8 @@ NOTIFY s1 '{"reason":"first notification"}'
 for n in 1 2 3; do ADV 600; PUTA s1 x$n "{\"labels\":{\"team\":\"st\",\"n\":\"$n\"},\"status\":\"resolved\"}"; NOTIFY s1 '{"reason":"some alerts resolved"}'; done
 curl -s "${A[@]}" "$API/alert-group-statistics?group_by=route&route=$RS&time_zone=Europe/Berlin" \
   | jq -c '.items[0] | {n: .alert_group_count, med: .time_to_resolve.median_seconds, days: [.per_day[].alert_group_count]}'
-# {"n":3,"med":1200,"days":[3]}
+# {"n":3,"med":1200,"days":[3]}   (a few seconds more live: the business clock also follows real time, and ADV and
+# NOTIFY each wait a second)
 curl -s "${A[@]}" "$API/alert-group-statistics?group_by=integration&integration=$INT" | jq '.items[0].alert_group_count'   # 5
 
 # C-09.AC-16: the earlier Alert Group with the same key
@@ -224,7 +254,7 @@ curl -s -c jar -H 'Content-Type: application/json' -d '{"login":"admin@example.o
 CSRF=$(curl -s -b jar $API/sessions/current | jq -r .csrf_token); H=(-b jar -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json')
 curl -sN -b jar $API/live-updates > /tmp/sse2 & S2=$!
 sleep 1; head -1 /tmp/sse2                                                                        # retry: 3000
-curl -s -o /dev/null "${H[@]}" -X DELETE $API/sessions/current; sleep 1
+curl -s -o /dev/null "${H[@]}" -X DELETE $API/sessions/current; sleep 6   # the Hub checks sessions every 5 s
 kill -0 $S2 2>/dev/null || echo closed                                                            # closed
 curl -s -o /dev/null -w '%{http_code}\n' -b jar $API/live-updates                                  # 401
 ```

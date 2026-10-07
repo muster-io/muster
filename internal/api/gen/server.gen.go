@@ -6058,7 +6058,7 @@ type ListAlertGroupsParams struct {
 	// To End of the time range (RFC 3339, UTC).
 	To *To `form:"to,omitempty" json:"to,omitempty"`
 
-	// Number The Alert Group with exactly this `#N`. The default time range does not apply: a number is found whatever its age (while its summary row is kept).
+	// Number The Alert Group with exactly this `#N`. Neither the default time range nor the default status applies: a number is found whatever its age and status (while its summary row is kept); the other filters still apply.
 	Number *AgNumber `form:"number,omitempty" json:"number,omitempty"`
 
 	// Q Search by text in the title or `summary`, case-insensitive and matching parts of words. A `#N` typed here is the same as `number`.
@@ -14051,6 +14051,22 @@ func (response GetAlertGroupCounts403ApplicationProblemPlusJSONResponse) VisitGe
 	return err
 }
 
+type GetAlertGroupCounts422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response GetAlertGroupCounts422ApplicationProblemPlusJSONResponse) VisitGetAlertGroupCountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetAlertGroupCounts429ApplicationProblemPlusJSONResponse struct {
 	TooManyRequestsApplicationProblemPlusJSONResponse
 }
@@ -14257,6 +14273,22 @@ func (response ListAlertGroups403ApplicationProblemPlusJSONResponse) VisitListAl
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAlertGroups422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response ListAlertGroups422ApplicationProblemPlusJSONResponse) VisitListAlertGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }

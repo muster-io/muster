@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -33,6 +34,11 @@ type fakeAlertGroups struct {
 	alerts    []groups.AlertFilter
 	timelines []groups.TimelineFilter
 	moved     []groups.Requester
+	lists     []groups.ListRequest
+	counts    []groups.Filter
+	related   []*groups.ListPosition
+	stats     []groups.StatisticsRequest
+	open      map[string]int64
 	err       error
 }
 
@@ -116,6 +122,65 @@ func (f *fakeAlertGroups) Timeline(_ context.Context, id string, fl groups.Timel
 		page.Next = &groups.TimelinePosition{At: t0, Source: 1, ID: 3}
 	}
 	return page, f.err
+}
+
+func (f *fakeAlertGroups) List(_ context.Context, r groups.ListRequest) (groups.ListPage, error) {
+	f.lists = append(f.lists, r)
+	item := f.view
+	item.Notices, item.GroupLabels, item.CommonLabels, item.CommonAnnotations = nil, nil, nil, nil
+	item.LabelValues = map[string]string{"namespace": "payments"}
+	page := groups.ListPage{Groups: []groups.View{item}}
+	if r.After == nil {
+		page.Next = &groups.ListPosition{At: t0, ID: 7}
+	}
+	return page, f.err
+}
+
+func (f *fakeAlertGroups) Counts(_ context.Context, fl groups.Filter) (groups.Counts, error) {
+	f.counts = append(f.counts, fl)
+	return groups.Counts{Firing: 1, Acknowledged: 2, Snoozed: 3, Resolved: 4, All: 10}, f.err
+}
+
+func (f *fakeAlertGroups) Related(_ context.Context, id string, after *groups.ListPosition, limit int) (
+	groups.RelatedPage, error) {
+	f.related = append(f.related, after)
+	if id != groupID {
+		return groups.RelatedPage{}, groups.ErrNotFound
+	}
+	hour := time.Hour
+	page := groups.RelatedPage{Groups: []groups.Related{
+		{PublicID: "AGBBBBBBBBBBBB", Number: 411, Status: groups.StatusResolved, StartedAt: t0.Add(-2 * time.Hour),
+			Duration: &hour, Resolution: &groups.Resolution{By: "system", ReasonCode: ptr("resolved")}},
+		{PublicID: "AGCCCCCCCCCCCC", Number: 413, Status: groups.StatusFiring, StartedAt: t0},
+	}}
+	if after == nil && limit == 2 {
+		page.Next = &groups.ListPosition{At: t0, ID: 3}
+	}
+	return page, f.err
+}
+
+func (f *fakeAlertGroups) Statistics(_ context.Context, r groups.StatisticsRequest) (groups.Statistics, error) {
+	f.stats = append(f.stats, r)
+	if r.TimeZone == "Mars/Olympus" {
+		return groups.Statistics{}, &groups.FieldError{Pointer: "/query/time_zone", Code: groups.CodeInvalid,
+			Detail: "x"}
+	}
+	median := int64(1200)
+	return groups.Statistics{GroupBy: r.GroupBy, From: t0.Add(-7 * 24 * time.Hour), To: t0,
+		Items: []groups.StatisticsItem{{Subject: groups.Ref{PublicID: routeID, Name: "payments"}, AlertGroupCount: 3,
+			TimeToResolve: groups.DurationStats{Count: 3, Median: &median, P95: &median},
+			PerDay: []groups.StatisticsDay{{Date: time.Date(2026, 10, 7, 0, 0, 0, 0, time.UTC), AlertGroupCount: 3,
+				TimeToResolve: groups.DurationStats{Count: 3, Median: &median, P95: &median}}}}}}, f.err
+}
+
+func (f *fakeAlertGroups) OpenCounts(_ context.Context, ids []string) (map[string]int64, error) {
+	out := map[string]int64{}
+	for _, id := range ids {
+		if n, ok := f.open[id]; ok {
+			out[id] = n
+		}
+	}
+	return out, f.err
 }
 
 func (f *fakeAlertGroups) MoveOpenAlertGroups(_ context.Context, r groups.Requester, id string) (int, error) {
@@ -347,5 +412,168 @@ func TestMoveAndDeleteRouteAPI(t *testing.T) {
 			http.StatusInternalServerError {
 			t.Errorf("a failed %s = %d", path, a.status)
 		}
+	}
+}
+
+// TestListAlertGroupsAPI is listAlertGroups (C-09.FR-13): every filter reaches internal/groups, the items carry
+// label_values and details_removed without the labels of the page, the cursor keeps the sort, and the filters of
+// later stories answer 422 unsupported.
+func TestListAlertGroupsAPI(t *testing.T) {
+	x, fg, _ := newAlertGroupsAPI(t)
+	q := url.Values{"status": {"firing", "resolved"}, "route": {routeID}, "integration": {"NTAAAAAAAAAAAA"},
+		"severity": {"critical"}, "urgent": {"true"}, "resolved_by": {"system"}, "resolve_reason": {"gone"},
+		"reopened": {"false"}, "label": {`namespace="payments"`, `pod=~"api-.*"`}, "from": {"2026-10-01T00:00:00Z"},
+		"to": {"2026-10-08T00:00:00Z"}, "number": {"412"}, "q": {"postgres"}, "sort": {"last_changed_at"},
+		"label_columns": {"namespace"}, "limit": {"5"}}
+	a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?"+q.Encode(), "")
+	var list gen.AlertGroupList
+	decodeInto(t, a, &list)
+	if a.status != http.StatusOK || len(list.Items) != 1 || list.NextCursor.IsNull() ||
+		(*list.Items[0].LabelValues)["namespace"] != "payments" || list.Items[0].GroupLabels != nil ||
+		list.Items[0].Notices != nil || list.Items[0].DetailsRemoved == nil || *list.Items[0].DetailsRemoved {
+		t.Fatalf("list = %d %s", a.status, a.body)
+	}
+	r := fg.lists[0]
+	if !slices.Equal(r.Statuses, []groups.Status{groups.StatusFiring, groups.StatusResolved}) ||
+		!slices.Equal(r.Routes, []string{routeID}) || !slices.Equal(r.Integrations, []string{"NTAAAAAAAAAAAA"}) ||
+		len(r.Severities) != 1 || !*r.Urgent || *r.ResolvedBy != "system" || *r.ResolveReason != "gone" ||
+		*r.Reopened || len(r.Matchers) != 2 || r.Matchers[1].String() != `pod=~"api-.*"` || !r.From.Equal(time.Date(2026, 10, 1, 0,
+		0, 0, 0, time.UTC)) || *r.Number != 412 || r.Query != "postgres" || r.Sort != groups.SortChanged ||
+		!slices.Equal(r.LabelColumns, []string{"namespace"}) || r.Limit != 5 || r.After != nil {
+		t.Errorf("request %+v", r)
+	}
+	cursor := list.NextCursor.MustGet()
+	a = x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?sort=last_changed_at&cursor="+cursor, "")
+	if r := fg.lists[1]; a.status != http.StatusOK || r.After == nil || r.After.ID != 7 || !r.After.At.Equal(t0) ||
+		r.Sort != groups.SortChanged || r.Statuses != nil {
+		t.Errorf("next page %d %+v", a.status, r)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?cursor="+cursor, ""); a.status !=
+		http.StatusBadRequest {
+		t.Errorf("a cursor of another sort = %d", a.status)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups", ""); a.status != http.StatusOK ||
+		fg.lists[2].Sort != groups.SortStartedDesc || fg.lists[2].Limit != 50 {
+		t.Errorf("defaults = %d %+v", a.status, fg.lists[2])
+	}
+	for _, name := range []string{"owner=me", "snoozed_no_end=true", "delivery_problem=true", "unclaimed=true"} {
+		a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?"+name, "")
+		var p gen.Problem
+		decodeInto(t, a, &p)
+		key, _, _ := strings.Cut(name, "=")
+		if a.status != http.StatusUnprocessableEntity || p.Errors == nil || (*p.Errors)[0].Code != "unsupported" ||
+			(*p.Errors)[0].Pointer != "/query/"+key {
+			t.Errorf("%s = %d %s", name, a.status, a.body)
+		}
+		if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-counts?"+name, ""); a.status !=
+			http.StatusUnprocessableEntity {
+			t.Errorf("counts %s = %d", name, a.status)
+		}
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?label=pod%3D~%22%28%22", ""); a.status !=
+		http.StatusBadRequest || a.json(t)["errors"].([]any)[0].(map[string]any)["code"] != "invalid_regex" {
+		t.Errorf("a bad matcher = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-counts?label=pod", ""); a.status !=
+		http.StatusBadRequest {
+		t.Errorf("counts with a bad matcher = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, groupsNone, http.MethodGet, "/api/v1/alert-groups", ""); a.status != http.StatusForbidden {
+		t.Errorf("without the permission = %d", a.status)
+	}
+	fg.err = &groups.FieldError{Pointer: "/query/route", Code: groups.CodeUnknownID, Detail: "No such route."}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?route=RTZZZZZZZZZZZZ", ""); a.status !=
+		http.StatusUnprocessableEntity || a.json(t)["errors"].([]any)[0].(map[string]any)["code"] != "unknown_id" {
+		t.Errorf("an unknown route = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-counts", ""); a.status !=
+		http.StatusUnprocessableEntity {
+		t.Errorf("counts failing = %d %s", a.status, a.body)
+	}
+}
+
+// TestAlertGroupCountsAPI is getAlertGroupCounts: the counts per status tab for the filters of the list.
+func TestAlertGroupCountsAPI(t *testing.T) {
+	x, fg, _ := newAlertGroupsAPI(t)
+	a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-counts?label=namespace%3D%22payments%22&q=%2312", "")
+	var c gen.AlertGroupCounts
+	decodeInto(t, a, &c)
+	if a.status != http.StatusOK || c != (gen.AlertGroupCounts{Firing: 1, Acknowledged: 2, Snoozed: 3, Resolved: 4,
+		All: 10}) || len(fg.counts[0].Matchers) != 1 || fg.counts[0].Query != "#12" {
+		t.Errorf("counts = %d %s %+v", a.status, a.body, fg.counts)
+	}
+}
+
+// TestListRelatedAlertGroupsAPI is listRelatedAlertGroups (C-09.FR-20): number, status, start, duration and who
+// resolved them, by cursor.
+func TestListRelatedAlertGroupsAPI(t *testing.T) {
+	x, fg, _ := newAlertGroupsAPI(t)
+	a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/"+groupID+"/related?limit=2", "")
+	var list gen.RelatedAlertGroupList
+	decodeInto(t, a, &list)
+	if a.status != http.StatusOK || len(list.Items) != 2 || list.Items[0].Number != 411 ||
+		list.Items[0].DurationSeconds.MustGet() != 3600 || list.Items[0].Resolution.By != gen.ResolverKindSystem ||
+		!list.Items[1].DurationSeconds.IsNull() || list.Items[1].Resolution != nil || list.NextCursor.IsNull() {
+		t.Fatalf("related = %d %s", a.status, a.body)
+	}
+	a = x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/"+groupID+"/related?cursor="+
+		list.NextCursor.MustGet(), "")
+	decodeInto(t, a, &list)
+	if a.status != http.StatusOK || fg.related[1] == nil || fg.related[1].ID != 3 || !list.NextCursor.IsNull() {
+		t.Errorf("next page %d %+v", a.status, fg.related)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/"+groupID+"/related?cursor=x", ""); a.status !=
+		http.StatusBadRequest {
+		t.Errorf("a bad cursor = %d", a.status)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/AGZZZZZZZZZZZZ/related", ""); a.status !=
+		http.StatusNotFound {
+		t.Errorf("unknown = %d", a.status)
+	}
+}
+
+// TestAlertGroupStatisticsAPI is getAlertGroupStatistics (C-09.FR-15): totals and days per subject, durations null
+// without any, and a field error as 422.
+func TestAlertGroupStatisticsAPI(t *testing.T) {
+	x, fg, _ := newAlertGroupsAPI(t)
+	a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-statistics?group_by=route&route="+routeID+
+		"&integration=NTAAAAAAAAAAAA&time_zone=Europe/Berlin&from=2026-10-01T00:00:00Z&to=2026-10-08T00:00:00Z", "")
+	var st gen.AlertGroupStatistics
+	decodeInto(t, a, &st)
+	if a.status != http.StatusOK || st.GroupBy != gen.AlertGroupStatisticsGroupByRoute || len(st.Items) != 1 ||
+		st.Items[0].AlertGroupCount != 3 || st.Items[0].TimeToResolve.MedianSeconds.MustGet() != 1200 ||
+		!st.Items[0].TimeToAcknowledge.MedianSeconds.IsNull() || st.Items[0].PerDay[0].Date.String() != "2026-10-07" {
+		t.Fatalf("statistics = %d %s", a.status, a.body)
+	}
+	if r := fg.stats[0]; r.GroupBy != "route" || r.TimeZone != "Europe/Berlin" || !slices.Equal(r.Routes,
+		[]string{routeID}) || len(r.Integrations) != 1 || r.From == nil || r.To == nil {
+		t.Errorf("request %+v", r)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-statistics?group_by=route&time_zone=Mars/Olympus",
+		""); a.status != http.StatusUnprocessableEntity {
+		t.Errorf("a bad zone = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-statistics", ""); a.status !=
+		http.StatusBadRequest {
+		t.Errorf("without group_by = %d", a.status)
+	}
+	fg.err = errBoom
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-statistics?group_by=integration", ""); a.status !=
+		http.StatusInternalServerError {
+		t.Errorf("a failure = %d", a.status)
+	}
+}
+
+// TestGetAlertGroupDetailsRemovedAPI: the notice details_removed carries the retention period.
+func TestGetAlertGroupDetailsRemovedAPI(t *testing.T) {
+	x, fg, _ := newAlertGroupsAPI(t)
+	days := int64(90)
+	fg.view.DetailsRemoved = true
+	fg.view.Notices = []groups.Notice{{Kind: groups.NoticeDetailsRemoved, RetentionDays: &days}}
+	var g gen.AlertGroup
+	decodeInto(t, x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/"+groupID, ""), &g)
+	if g.DetailsRemoved == nil || !*g.DetailsRemoved || len(*g.Notices) != 1 ||
+		(*g.Notices)[0].Kind != gen.DetailsRemoved || (*g.Notices)[0].RetentionDays.MustGet() != 90 {
+		t.Errorf("alert group %+v", g)
 	}
 }

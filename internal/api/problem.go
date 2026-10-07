@@ -224,6 +224,9 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	if f, ok := errors.AsType[*routing.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
+	if f, ok := errors.AsType[*groups.FieldError](err); ok {
+		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
 	if o, ok := errors.AsType[*routing.OpenAlertGroupsError](err); ok {
 		p := problem(http.StatusConflict, typeRouteHasOpenGroups, "",
 			"The Route still has open Alert Groups; move them to the Default route first.")

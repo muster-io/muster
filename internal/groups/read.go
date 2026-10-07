@@ -25,7 +25,7 @@ import (
 // readQueries are the queries of the reads and of muster_alert_groups.
 type readQueries interface {
 	GetGroup(ctx context.Context, arg dbgen.GetGroupParams) (dbgen.GetGroupRow, error)
-	GetGroupID(ctx context.Context, arg dbgen.GetGroupIDParams) (int64, error)
+	GetGroupID(ctx context.Context, arg dbgen.GetGroupIDParams) (dbgen.GetGroupIDRow, error)
 	ListIntegrationRefs(ctx context.Context, arg dbgen.ListIntegrationRefsParams) ([]dbgen.ListIntegrationRefsRow,
 		error)
 	ListUserRefs(ctx context.Context, arg dbgen.ListUserRefsParams) ([]dbgen.ListUserRefsRow, error)
@@ -47,6 +47,7 @@ const (
 	NoticeAlertsStillFiring             = "alerts_still_firing"
 	NoticeReplacement                   = "replacement"
 	NoticeFiringAgainAfterManualResolve = "firing_again_after_manual_resolve"
+	NoticeDetailsRemoved                = "details_removed"
 )
 
 // Ref names an entity by its public_id and name.
@@ -80,6 +81,7 @@ type Notice struct {
 	Count          *int64
 	Label          *string
 	ResolvedNumber *int64
+	RetentionDays  *int64
 }
 
 // View is an Alert Group as getAlertGroup reads it.
@@ -104,26 +106,40 @@ type View struct {
 	CommonLabels      map[string]string
 	CommonAnnotations map[string]string
 	Notices           []Notice
+	// DetailsRemoved is set once retention.alert_details passed since the resolution: the Alerts and the Timeline
+	// are gone, the summary and the Notes stay (C-09.FR-16).
+	DetailsRemoved bool
+	// LabelValues are the values of the labels the list asked for that the Alerts share.
+	LabelValues map[string]string
 }
 
-// groupID reads the id of the Alert Group publicID; an unknown or malformed one is ErrNotFound.
-func (s *Service) groupID(ctx context.Context, publicID string) (int64, error) {
+// detailsRemoved reports whether retention.alert_details, in days, passed at now since an Alert Group was resolved:
+// the reads hide its details from then on, whether or not the Leader deleted them yet (design/db/schema.md §6).
+func detailsRemoved(resolvedAt pgtype.Timestamptz, days int64, now time.Time) bool {
+	return resolvedAt.Valid && resolvedAt.Time.Before(now.Add(-time.Duration(days)*24*time.Hour))
+}
+
+// groupID reads the id of the Alert Group publicID and whether its details are removed; an unknown or malformed one
+// is ErrNotFound.
+func (s *Service) groupID(ctx context.Context, publicID string) (int64, bool, error) {
 	id, err := publicid.Parse(publicid.AlertGroup, publicID)
 	if err != nil {
-		return 0, ErrNotFound
+		return 0, false, ErrNotFound
 	}
-	gid, err := s.store.GetGroupID(ctx, dbgen.GetGroupIDParams{OrgID: s.orgID, PublicID: id})
+	r, err := s.store.GetGroupID(ctx, dbgen.GetGroupIDParams{OrgID: s.orgID, PublicID: id})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, ErrNotFound
+		return 0, false, ErrNotFound
 	}
 	if err != nil {
-		return 0, fmt.Errorf("read alert group %s: %w", id, err)
+		return 0, false, fmt.Errorf("read alert group %s: %w", id, err)
 	}
-	return gid, nil
+	return r.ID, detailsRemoved(r.ResolvedAt, r.RetentionAlertDetailsDays, s.clock.Now()), nil
 }
 
 // Get reads the Alert Group publicID (C-09.FR-1, FR-10, FR-14): its status, Route, Integrations, title and summary,
-// Severity level, counts, the resolution, its labels and the notices of its page.
+// Severity level, urgency as its Route and organization.critical_is_urgent give it now, counts, the resolution, its
+// labels and the notices of its page; once its details are removed, the notice details_removed with the period
+// (C-09.FR-16).
 func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
 	id, err := publicid.Parse(publicid.AlertGroup, publicID)
 	if err != nil {
@@ -180,6 +196,10 @@ func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
 	if r.FiringAgainAfterNumber > 0 {
 		v.Notices = append(v.Notices, Notice{Kind: NoticeFiringAgainAfterManualResolve,
 			ResolvedNumber: &r.FiringAgainAfterNumber})
+	}
+	if detailsRemoved(r.ResolvedAt, r.RetentionAlertDetailsDays, s.clock.Now()) {
+		v.DetailsRemoved = true
+		v.Notices = append(v.Notices, Notice{Kind: NoticeDetailsRemoved, RetentionDays: &r.RetentionAlertDetailsDays})
 	}
 	return v, nil
 }
@@ -269,11 +289,14 @@ type AlertPage struct {
 
 // Alerts lists the Alerts of the Alert Group publicID (C-09.FR-14, C-06.FR-19): firing first, then resolved with
 // their reason, each with its Integration, labels, the annotations as last seen in it, the Alertmanager groups that
-// listed it and its source link.
+// listed it and its source link; none once its details are removed (C-09.FR-16).
 func (s *Service) Alerts(ctx context.Context, publicID string, f AlertFilter) (AlertPage, error) {
-	gid, err := s.groupID(ctx, publicID)
+	gid, removed, err := s.groupID(ctx, publicID)
 	if err != nil {
 		return AlertPage{}, err
+	}
+	if removed {
+		return AlertPage{Alerts: []GroupAlert{}}, nil
 	}
 	p := dbgen.ListGroupAlertsParams{OrgID: s.orgID, AlertGroupID: gid, AllStates: f.State == "",
 		Firing: f.State == string(StatusFiring), AfterRank: -1, Lim: int32(f.Limit + 1)} //nolint:gosec // G115: limit is at most the page size
@@ -417,11 +440,18 @@ type TimelinePage struct {
 
 // Timeline reads the Timeline of the Alert Group publicID (C-09.FR-11, FR-14): its entries with the Notes and the
 // delivery events merged by time, newest first unless Ascending, filtered by kind, each with its actor and
-// Transport and, for a lifecycle event, its event, loudness and Mentions.
+// Transport and, for a lifecycle event, its event, loudness and Mentions. Once its details are removed only the Notes
+// remain (C-09.FR-16).
 func (s *Service) Timeline(ctx context.Context, publicID string, f TimelineFilter) (TimelinePage, error) {
-	gid, err := s.groupID(ctx, publicID)
+	gid, removed, err := s.groupID(ctx, publicID)
 	if err != nil {
 		return TimelinePage{}, err
+	}
+	if removed {
+		if len(f.Kinds) > 0 && !slices.Contains(f.Kinds, KindNotes) {
+			return TimelinePage{Entries: []TimelineEntry{}}, nil
+		}
+		f.Kinds = []Kind{KindNotes}
 	}
 	want := func(k Kind) bool { return len(f.Kinds) == 0 || slices.Contains(f.Kinds, k) }
 	var stored []string

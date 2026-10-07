@@ -417,11 +417,13 @@ func TestNotFoundAndNotImplemented(t *testing.T) {
 			t.Errorf("%s %s = %d %s", c.method, c.path, a.status, a.body)
 		}
 	}
-	a := x.call(t, http.MethodGet, "/api/v1/alert-groups", "", "Cookie", "admin-cookie")
+	// listAlertGroupDeliveries arrives with delivery, in a later phase.
+	deliveries := "/api/v1/alert-groups/AGAAAAAAAAAAAA/deliveries"
+	a := x.call(t, http.MethodGet, deliveries, "", "Cookie", "admin-cookie")
 	if a.status != http.StatusNotImplemented || a.json(t)["type"] != problemBase+"not-implemented" {
-		t.Errorf("GET /alert-groups = %d %s", a.status, a.body)
+		t.Errorf("GET %s = %d %s", deliveries, a.status, a.body)
 	}
-	a = x.call(t, http.MethodGet, "/api/v1/alert-groups", "")
+	a = x.call(t, http.MethodGet, deliveries, "")
 	if a.status != http.StatusUnauthorized {
 		t.Errorf("an unimplemented operation without credentials = %d", a.status)
 	}
