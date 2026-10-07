@@ -512,10 +512,12 @@ func TestRoutes(t *testing.T) {
 		{RoutePath: `{}/{team="web"}`, LearnedRepeatIntervalMs: pgtype.Int8{Int64: 300_000, Valid: true}},
 		{RoutePath: `{}/{kind="info"}`, LearnedRepeatIntervalMs: pgtype.Int8{Int64: 7_200_000, Valid: true}},
 		{RoutePath: `{}/{a="b"}`, LearnedRepeatIntervalMs: pgtype.Int8{Int64: 3_600_000, Valid: true}},
+		{RoutePath: `{}/{b="c"}`, LearnedRepeatIntervalMs: pgtype.Int8{Int64: 300_400, Valid: true}},
+		{RoutePath: `{}/{c="d"}`, LearnedRepeatIntervalMs: pgtype.Int8{Int64: 3_600_400, Valid: true}},
 	}}
 	v := NewAlertsView(1, q, clock.NewManual(t0))
 	routes, err := v.Routes(t.Context(), "NTAAAAAAAAAAAA")
-	if err != nil || len(routes) != 4 {
+	if err != nil || len(routes) != 6 {
 		t.Fatalf("routes %+v, %v", routes, err)
 	}
 	if r := routes[0]; r.LearnedRepeatInterval != nil || r.ResolveByAbsenceAfter != 25*time.Hour ||
@@ -532,6 +534,15 @@ func TestRoutes(t *testing.T) {
 	}
 	if r := routes[3]; r.LongIntervalWarning {
 		t.Errorf("exactly the threshold %+v", r)
+	}
+	// A measured gap is not whole seconds: the interval is rounded first and the time to resolve by absence is three
+	// times the rounded interval, never 901 s from rounding 3 × 300.4 s.
+	if r := routes[4]; *r.LearnedRepeatInterval != 300*time.Second || r.ResolveByAbsenceAfter != 900*time.Second {
+		t.Errorf("300.4 seconds %+v", r)
+	}
+	if r := routes[5]; *r.LearnedRepeatInterval != time.Hour || r.ResolveByAbsenceAfter != 3*time.Hour ||
+		r.LongIntervalWarning {
+		t.Errorf("an hour and 400 ms %+v", r)
 	}
 	q.builtin = true
 	if routes, err := v.Routes(t.Context(), "NTAAAAAAAAAAAA"); err != nil || len(routes) != 0 || routes == nil {
