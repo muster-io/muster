@@ -383,6 +383,14 @@ type fakeStore struct {
 	rows      []dbgen.ListStoredSnapshotsRow
 	snapshot  *dbgen.GetStoredSnapshotRow
 	fail      map[string]error
+	// For the reads of the Group key preview: the Static labels of the Integrations by id, the Stored Snapshots that
+	// failed by receipt time, the pages listed, the sizes of the batches of bodies read, and whether the bodies are
+	// gone.
+	static  map[int64]string
+	failed  map[time.Time]bool
+	pages   []dbgen.ListPreviewBodiesParams
+	batches []int
+	dropped bool
 }
 
 func newStore() *fakeStore {

@@ -98,6 +98,13 @@ func NewRaiser(orgID int64, runbookBase string) *Raiser {
 // same name.
 func (r *Raiser) Raise(ctx context.Context, q Store, now time.Time, d *Definition, e Entity,
 	extra map[string]string) error {
+	return r.raise(ctx, q, now, d, d.AlertLabels(e, extra), now)
+}
+
+// AlertLabels are the labels the Internal alert d carries about the entity e, with its extra labels: alertname,
+// severity, the entity's id and name, the Extra labels and, for one that carries the Static labels of its
+// Integration, those in extra; its own labels win over a Static label of the same name.
+func (d *Definition) AlertLabels(e Entity, extra map[string]string) map[string]string {
 	labels := map[string]string{"alertname": d.Name, "severity": d.Severity}
 	if d.Entity != "" {
 		labels[d.Entity], labels[d.NameLabel] = e.ID, e.Name
@@ -112,7 +119,7 @@ func (r *Raiser) Raise(ctx context.Context, q Store, now time.Time, d *Definitio
 			}
 		}
 	}
-	return r.raise(ctx, q, now, d, labels, now)
+	return labels
 }
 
 // raise writes the synthetic Stored Snapshot of a firing Internal alert with the labels, firing since startsAt.

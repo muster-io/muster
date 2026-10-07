@@ -9814,7 +9814,7 @@ components:
       properties:
         destination_ids:
           type: array
-          description: Destinations for the created Route; required for `internal-alerts`.
+          description: Destinations for the created Route; required for `internal_alerts`.
           items:
             $ref: '#/components/schemas/PublicId'
     GroupKeyPreviewRequest:

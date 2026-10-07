@@ -20,6 +20,6 @@
 import type { PublicId } from './publicId';
 
 export interface RouteSuggestionAcceptance {
-  /** Destinations for the created Route; required for `internal-alerts`. */
+  /** Destinations for the created Route; required for `internal_alerts`. */
   destination_ids?: PublicId[];
 }

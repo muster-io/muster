@@ -4630,7 +4630,7 @@ type RouteSuggestion struct {
 
 // RouteSuggestionAcceptance defines model for RouteSuggestionAcceptance.
 type RouteSuggestionAcceptance struct {
-	// DestinationIds Destinations for the created Route; required for `internal-alerts`.
+	// DestinationIds Destinations for the created Route; required for `internal_alerts`.
 	DestinationIds *[]PublicId `json:"destination_ids,omitempty"`
 }
 

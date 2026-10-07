@@ -112,7 +112,7 @@ Other lifecycle values:
 
 | Name | Default | Set on | Capability | Status |
 |---|---|---|---|---|
-| `routing.group_key_preview_period` | last 24 h (at most `retention.stored_snapshots`) | request | C-08 | P-12 |
+| `routing.group_key_preview_period` | last 24 h (at most `retention.stored_snapshots`) | request | C-08 | decided |
 | `routing.group_key_preview_examples` | the 5 largest Alert Groups for each key | built in | C-08 | decided |
 | `routing.group_key_preview_max_alerts` | 10,000 Alerts, the newest first (the active Alerts of NFR-1) | built in | C-08 | decided |
 | `alert_group.list_range` | last 7 days (lifetime overlapping the range) | request | C-09 | decided |

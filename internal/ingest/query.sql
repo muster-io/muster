@@ -63,6 +63,43 @@ JOIN integrations i ON i.org_id = @org_id AND i.id = s.integration_id
 WHERE s.org_id = @org_id AND s.public_id = @public_id AND s.received_at >= @not_before::timestamptz
 LIMIT 1;
 
+-- ListPreviewIntegrations lists the Integrations other than the built-in one, deleted ones included, with their
+-- current Static labels, for the Group key preview.
+-- name: ListPreviewIntegrations :many
+SELECT id, static_labels
+FROM integrations
+WHERE org_id = @org_id AND NOT builtin;
+
+-- ListPreviewBodies lists the distinct bodies of each Integration among the webhook Stored Snapshots received in
+-- [@received_from, @received_to) on the UTC day @body_day that did not fail, each with its newest receipt, newest
+-- first, then by Integration and hash, after the cursor (@after_at, @after_integration_id, @after_sha256) when it is
+-- given. One day is one partition, and its bodies are de-duplicated per day, so a page reads one partition; past the
+-- first page only the rows received at or before the cursor are grouped, so a body listed already may come again
+-- with an older receipt, which the reader skips.
+-- name: ListPreviewBodies :many
+SELECT s.integration_id, s.body_sha256, max(s.received_at)::timestamptz AS received_at,
+       max(s.size_bytes)::bigint AS size_bytes
+FROM stored_snapshots s
+WHERE s.org_id = @org_id AND s.source = 'webhook' AND s.state <> 'failed' AND s.body_day = @body_day
+  AND s.received_at >= @received_from::timestamptz AND s.received_at < @received_to::timestamptz
+  AND (sqlc.narg('after_at')::timestamptz IS NULL OR s.received_at <= sqlc.narg('after_at')::timestamptz)
+GROUP BY s.integration_id, s.body_sha256
+HAVING sqlc.narg('after_at')::timestamptz IS NULL
+    OR max(s.received_at) < sqlc.narg('after_at')::timestamptz
+    OR (max(s.received_at) = sqlc.narg('after_at')::timestamptz
+        AND (s.integration_id, s.body_sha256) > (sqlc.narg('after_integration_id')::bigint,
+                                                  sqlc.narg('after_sha256')::bytea))
+ORDER BY 3 DESC, s.integration_id, s.body_sha256
+LIMIT @page_size;
+
+-- ListPreviewSnapshotBodies reads the bodies of the pairs of hash and UTC day; the days also prune the partitions.
+-- name: ListPreviewSnapshotBodies :many
+SELECT b.body_sha256, b.body_day, b.body
+FROM snapshot_bodies b
+JOIN (SELECT unnest(@body_sha256s::bytea[]) AS body_sha256, unnest(@body_days::date[]) AS body_day) AS k
+    ON k.body_sha256 = b.body_sha256 AND k.body_day = b.body_day
+WHERE b.org_id = @org_id AND b.body_day = ANY(@body_days::date[]);
+
 -- ListPendingIntegrations finds the Integrations with pending Stored Snapshots received since @horizon; the partial
 -- index holds only pending rows.
 -- name: ListPendingIntegrations :many

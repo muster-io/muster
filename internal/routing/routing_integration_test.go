@@ -269,3 +269,155 @@ func TestIntegrationRouter(t *testing.T) {
 		}
 	})
 }
+
+// TestIntegrationPreviewAndSuggestions is C-08.FR-5 and FR-11 on PostgreSQL: the preview reads the webhook Stored
+// Snapshots of the period across day partitions and Integrations, each distinct body once, the failed and internal
+// ones left out, with the current Static labels; heartbeat_lost applies to an Integration with its Heartbeat on, and
+// accepting it puts the Route at the top of the list once, however many accept it at the same time.
+func TestIntegrationPreviewAndSuggestions(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		for _, day := range []string{"20261005", "20261006", "20261007"} {
+			d, _ := time.Parse("20060102", day)
+			next := d.AddDate(0, 0, 1)
+			for _, stmt := range []string{
+				`CREATE TABLE stored_snapshots_p` + day + ` PARTITION OF stored_snapshots FOR VALUES FROM ('` +
+					d.Format(time.RFC3339) + `') TO ('` + next.Format(time.RFC3339) + `')`,
+				`CREATE TABLE snapshot_bodies_p` + day + ` PARTITION OF snapshot_bodies FOR VALUES FROM ('` +
+					d.Format(time.DateOnly) + `') TO ('` + next.Format(time.DateOnly) + `')`,
+			} {
+				if _, err := e.d.Pool.Exec(ctx, stmt); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		integration := func(publicID, name, static string, heartbeat bool) int64 {
+			t.Helper()
+			state := "not_configured"
+			if heartbeat {
+				state = "waiting"
+			}
+			var id int64
+			if err := e.d.Pool.QueryRow(ctx, `INSERT INTO integrations (org_id, public_id, name, connection_mode,
+				static_labels, duplicate_window_seconds, heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state,
+				created_at, updated_at) VALUES ($1, $2, $3, 'webhook_only', $4, 45, $5, 300, $6, $7, $7) RETURNING id`,
+				e.orgID, publicID, name, static, heartbeat, state, t0).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}
+		pv := integration("NTAAAAAAAAAAAA", "pv", `{"env":"prod"}`, false)
+		other := integration("NTBBBBBBBBBBBB", "other", `{}`, false)
+		c := clock.NewManual(t0)
+		snapshots := ingest.New(e.orgID, ingest.NewStore(e.d.Pool), c)
+		body := func(alerts ...string) []byte {
+			var wire []string
+			for _, a := range alerts {
+				name, cluster, _ := strings.Cut(a, ":")
+				labels := `"alertname":"Disk","node":"` + name + `"`
+				if cluster != "" {
+					labels += `,"cluster":"` + cluster + `"`
+				}
+				wire = append(wire, `{"status":"firing","labels":{`+labels+`},"startsAt":"2026-10-06T00:00:00Z"}`)
+			}
+			return []byte(`{"groupKey":"{}:{}","status":"firing","alerts":[` + strings.Join(wire, ",") + `]}`)
+		}
+		store := func(at time.Time, integrationID int64, b []byte) {
+			t.Helper()
+			c.Set(at)
+			if _, err := snapshots.Store(ctx, ingest.Received{IntegrationID: integrationID, Body: b}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		repeat := body("a1:a", "m1")
+		store(t0.Add(-60*time.Hour), pv, body("old:a"))      // before the period
+		store(t0.Add(-30*time.Hour), pv, repeat)             // yesterday's copy
+		store(t0.Add(-20*time.Hour), pv, body("a2:a", "m2")) // yesterday
+		store(t0.Add(-2*time.Hour), pv, repeat)              // today's copy of the same body
+		store(t0.Add(-time.Hour), other, repeat)             // the same body of another Integration
+		store(t0.Add(-50*time.Minute), pv, body("f1:f"))     // failed
+		store(t0.Add(-40*time.Minute), pv, body("i1:i"))     // internal
+		if _, err := e.d.Pool.Exec(ctx, `UPDATE stored_snapshots SET state = 'failed', processed_at = received_at,
+			processing_error = 'x' WHERE received_at = $1`, t0.Add(-50*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.d.Pool.Exec(ctx, `UPDATE stored_snapshots SET source = 'internal' WHERE received_at = $1`,
+			t0.Add(-40*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		c.Set(t0)
+		var log bytes.Buffer
+		logger := logging.New(&log, logging.LevelInfo)
+		store2 := routing.NewStore(e.d.Pool)
+		svc := routing.New(routing.Config{OrgID: e.orgID, Store: store2, Audit: audit.NewWriter(logger, c),
+			Business: c, Real: c, Snapshots: snapshots, Log: logger})
+		p, err := svc.Preview(ctx, routing.PreviewRequest{Matchers: []routing.Matcher{{Label: "alertname", Op: "=",
+			Value: "Disk"}}, ProposedGroupKey: []string{"cluster", "env"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, ex := range p.Proposed.Examples {
+			got = append(got, fmt.Sprintf("%s/%s=%d", ex.GroupKeyValues["cluster"], ex.GroupKeyValues["env"],
+				ex.AlertCount))
+		}
+		if p.Truncated || p.Current != nil || strings.Join(got, " ") != "/prod=2 a/prod=2 /=1 a/=1" ||
+			!strings.Contains(log.String(), `"snapshots_read":3`) {
+			t.Errorf("preview %+v %v\n%s", p, got, log.String())
+		}
+
+		// heartbeat_lost, accepted at the top of the list.
+		if list, err := svc.Suggestions(ctx, nil); err != nil || len(list) != 0 {
+			t.Fatalf("without a heartbeat %+v, %v", list, err)
+		}
+		integration("NTCCCCCCCCCCCC", "hb", `{"team":"x"}`, true)
+		if _, err := svc.Create(ctx, by, input("other", routing.Matcher{Label: "team", Op: "=", Value: "y"})); err != nil {
+			t.Fatal(err)
+		}
+		if list, err := svc.Suggestions(ctx, nil); err != nil || len(list) != 1 {
+			t.Fatalf("with a heartbeat %+v, %v", list, err)
+		}
+		// Two acceptances at once: the lock of the list lets one create the Route, and the other finds it obsolete.
+		type result struct {
+			rt  routing.Route
+			err error
+		}
+		results := make(chan result, 2)
+		for range 2 {
+			go func() {
+				rt, err := svc.AcceptSuggestion(ctx, by, routing.SuggestionHeartbeatLost, nil)
+				results <- result{rt, err}
+			}()
+		}
+		var rt routing.Route
+		obsolete := 0
+		for range 2 {
+			r := <-results
+			switch {
+			case r.err == nil:
+				rt = r.rt
+			case errors.Is(r.err, routing.ErrSuggestionObsolete):
+				obsolete++
+			default:
+				t.Fatal(r.err)
+			}
+		}
+		if rt.PublicID == "" || obsolete != 1 {
+			t.Fatalf("concurrent acceptances: %+v, %d obsolete", rt, obsolete)
+		}
+		list, err := svc.List(ctx)
+		if err != nil || names(list) != "Muster: Heartbeat lost,other,Default" || rt.Position != 0 {
+			t.Errorf("after accepting %s %+v %v", names(list), rt, err)
+		}
+		if _, err := svc.AcceptSuggestion(ctx, by, routing.SuggestionHeartbeatLost, nil); !errors.Is(err,
+			routing.ErrSuggestionObsolete) {
+			t.Errorf("accepted twice: %v", err)
+		}
+		var details string
+		if err := e.d.Pool.QueryRow(ctx, `SELECT details::text FROM audit_log WHERE resource_public_id = $1`,
+			rt.PublicID).Scan(&details); err != nil || details != `{"suggestion": "heartbeat_lost"}` {
+			t.Errorf("audit details %s, %v", details, err)
+		}
+	})
+}

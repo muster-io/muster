@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -346,6 +347,87 @@ func TestIntegrationNotify(t *testing.T) {
 		n, err := conn.WaitForNotification(wctx)
 		if err != nil || n.Channel != ingest.SnapshotChannel || !strings.Contains(n.Payload, `"integration_id":`) {
 			t.Errorf("notification %+v, %v", n, err)
+		}
+	})
+}
+
+// TestIntegrationFiringPages is the read of the Group key preview on PostgreSQL with pages of two bodies: every
+// distinct body of an Integration once, newest first and, at the same receipt time, by Integration and hash, across
+// pages and days, the same as with one page; a stop leaves the rest unread.
+func TestIntegrationFiringPages(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		a, err := e.ints.Create(ctx, by, input("a"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := e.ints.Create(ctx, by, input("b"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		idOf := func(publicID string) int64 {
+			return e.count(t, `SELECT id FROM integrations WHERE public_id = $1`, publicID)
+		}
+		ia, ib := idOf(a.PublicID), idOf(b.PublicID)
+		bodyOf := func(name string) []byte {
+			return []byte(`{"groupKey":"{}:{}","status":"firing","alerts":[{"status":"firing","labels":{"n":"` + name +
+				`"},"startsAt":"2026-10-06T00:00:00Z"}]}`)
+		}
+		store := func(at time.Time, integration int64, name string) {
+			t.Helper()
+			e.clock.Set(at)
+			if _, err := e.snapshots.Store(ctx, ingest.Received{IntegrationID: integration, Body: bodyOf(name)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		yesterday, today := t0.Add(-20*time.Hour), t0.Add(-time.Hour)
+		store(yesterday, ia, "y1")
+		store(yesterday, ib, "y1")
+		store(yesterday.Add(time.Minute), ia, "y2")
+		store(today, ia, "t1")
+		store(today, ib, "t1")
+		store(today, ia, "t2")
+		store(today, ib, "t3")
+		store(today.Add(time.Minute), ia, "y1") // a newer copy of a body of yesterday, on another day
+		store(today.Add(2*time.Minute), ia, "t4")
+		store(today.Add(3*time.Minute), ia, "t4") // a repeat
+		e.clock.Set(t0)
+		read := func() []string {
+			t.Helper()
+			var out []string
+			if _, err := e.snapshots.Firing(ctx, t0.Add(-24*time.Hour), func(alerts []ingest.FiringAlert) bool {
+				for _, f := range alerts {
+					who := "a"
+					if f.IntegrationID == ib {
+						who = "b"
+					}
+					out = append(out, who+":"+f.Labels["n"])
+				}
+				return true
+			}); err != nil {
+				t.Fatal(err)
+			}
+			return out
+		}
+		whole := read()
+		ingest.SetFiringPage(t, 2)
+		paged := read()
+		// t1 and t2 of a, then t1 and t3 of b, received at the same time, are ordered by Integration and hash; y1 of a
+		// is read once, at its newest copy.
+		if len(whole) != 8 || !slices.Equal(whole, paged) || whole[0] != "a:t4" || whole[1] != "a:y1" ||
+			!strings.HasPrefix(whole[2], "a:") || !strings.HasPrefix(whole[3], "a:") ||
+			!strings.HasPrefix(whole[4], "b:") || !strings.HasPrefix(whole[5], "b:") || whole[6] != "a:y2" ||
+			whole[7] != "b:y1" {
+			t.Errorf("one page %v\npages of two %v", whole, paged)
+		}
+		n := 0
+		got, err := e.snapshots.Firing(ctx, t0.Add(-24*time.Hour), func([]ingest.FiringAlert) bool {
+			n++
+			return n < 2
+		})
+		if err != nil || !got.Unread || got.Bodies != 2 {
+			t.Errorf("stop at the second body = %+v, %v", got, err)
 		}
 	})
 }

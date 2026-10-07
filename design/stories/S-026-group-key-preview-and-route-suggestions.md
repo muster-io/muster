@@ -11,13 +11,26 @@ files_touched:
   - internal/routing/preview_test.go
   - internal/routing/suggestions.go
   - internal/routing/suggestions_test.go
+  - internal/routing/routes.go
+  - internal/routing/routes_test.go
+  - internal/routing/routing_integration_test.go
   - internal/routing/query.sql
   - internal/ingest/snapshots.go
+  - internal/ingest/snapshots_test.go
+  - internal/ingest/store.go
+  - internal/ingest/handler_test.go
+  - internal/ingest/export_test.go
+  - internal/ingest/ingest_integration_test.go
   - internal/ingest/query.sql
+  - internal/internalalerts/raise.go
   - internal/api/routes.go
   - internal/api/routes_test.go
+  - internal/api/server.go
+  - internal/api/problem.go
+  - internal/runtime/runtime.go
   - internal/logging/events.go
   - test/e2e/routing_preview_test.go
+  - api/openapi.yaml
   - design/prd/l1/defaults.md
   - design/prd/L1.md
 acceptance:
@@ -59,8 +72,8 @@ issue: 26
   in them — each with its labels from the newest Snapshot listing it — and that the Route takes in the current
   evaluation order: a saved Route at its position with its own Matchers, or with the given `matchers` when both are
   sent; `matchers` alone stand for a new Route just before the Default route, where `createRoute` puts it. It stops
-  after `routing.group_key_preview_max_alerts` fingerprints; `truncated` is `true` when Snapshots of the period were
-  then left unread, otherwise `false`. Each side groups those fingerprints by its Group key, a missing label counting as an empty value:
+  after `routing.group_key_preview_max_alerts` fingerprints; `truncated` is `true` when Snapshots of the period, or
+  Alerts the Route takes, were then left unread, otherwise `false`. Each side groups those fingerprints by its Group key, a missing label counting as an empty value:
   `alert_group_count` is the number of distinct key values and `examples` the `routing.group_key_preview_examples`
   largest groups with their `group_key_values` and `alert_count`. `current` uses the saved Route's Group key and is
   absent without `route_id`; `proposed` uses `proposed_group_key`. The count is of distinct key values: Reopen windows
@@ -74,7 +87,8 @@ issue: 26
   - `listRouteSuggestions` (`routes:read`) returns the suggestions that apply and that the calling user has not
     dismissed. `acceptRouteSuggestion` (`routes:write`) creates the suggested Route — with `destination_ids` from the
     body where given — at the top of the evaluation order (bumping the list ETag), writes `route.created` with the
-    suggestion id and sends the `route` hint; a suggestion that no longer applies answers `409 suggestion_obsolete`.
+    suggestion id and sends the `route` hint; a suggestion that no longer applies answers `409 suggestion_obsolete`,
+    and another Route with its name, which does not take the alert, answers `409 name_taken` as on `createRoute`.
     `dismissRouteSuggestion` (`routes:read`) records the dismissal for the calling User; a Service account gets `403
     service_account_not_allowed`; an obsolete suggestion answers `409 suggestion_obsolete`.
 - **Log event**: `group_key_previewed` (INFO: `route`, `period_seconds`, `snapshots_read`, `truncated`, `duration_ms`).
