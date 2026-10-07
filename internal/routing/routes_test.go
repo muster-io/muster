@@ -62,6 +62,10 @@ type fakeStore struct {
 	mapping       []byte
 	alerts        map[int64][]byte
 	routed        map[int64]dbgen.SetAlertRoutesParams
+
+	// The Integrations with a Heartbeat, and the Route suggestions each User dismissed.
+	heartbeats []dbgen.ListHeartbeatIntegrationsRow
+	dismissals map[int64][]string
 }
 
 func newStore() *fakeStore {
@@ -69,7 +73,7 @@ func newStore() *fakeStore {
 		calls: map[string]int{}, severityLabel: "severity",
 		mapping: []byte(`[{"value":"critical","level":"critical"},{"value":"warning","level":"warning"},` +
 			`{"value":"info","level":"info"},{"value":"none","level":"info"}]`),
-		alerts: map[int64][]byte{}, routed: map[int64]dbgen.SetAlertRoutesParams{}}
+		alerts: map[int64][]byte{}, routed: map[int64]dbgen.SetAlertRoutesParams{}, dismissals: map[int64][]string{}}
 }
 
 func (s *fakeStore) call(name string) error {
@@ -179,11 +183,19 @@ func (s *fakeStore) InsertRoute(_ context.Context, arg dbgen.InsertRouteParams) 
 	if s.nameTaken(arg.Name, 0) {
 		return 0, errUnique
 	}
-	position := int64(0)
+	var positions []int64
 	for _, r := range s.live() {
 		if !r.IsDefault {
-			position = max(position, r.Position+1)
+			positions = append(positions, r.Position)
 		}
+	}
+	position := int64(0)
+	switch {
+	case len(positions) == 0:
+	case arg.First:
+		position = slices.Min(positions) - 1
+	default:
+		position = slices.Max(positions) + 1
 	}
 	s.nextID++
 	s.rows = append(s.rows, &routeRow{ListRoutesRow: dbgen.ListRoutesRow{
@@ -359,8 +371,9 @@ func newService(t *testing.T) (*Service, *fakeStore, *clock.Manual) {
 	if err := EnsureDefault(t.Context(), store, orgID, t0); err != nil {
 		t.Fatal(err)
 	}
-	return New(Config{OrgID: orgID, Store: store, Audit: audit.NewWriter(logging.New(nilWriter{}, logging.LevelInfo), c),
-		Business: c}), store, c
+	logger := logging.New(nilWriter{}, logging.LevelInfo)
+	return New(Config{OrgID: orgID, Store: store, Audit: audit.NewWriter(logger, c), Business: c, Real: c,
+		Log: logger}), store, c
 }
 
 type nilWriter struct{}

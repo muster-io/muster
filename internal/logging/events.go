@@ -350,6 +350,14 @@ var HeartbeatLost = newEvent("heartbeat_lost", LevelWarn, "C-07",
 		"MusterHeartbeatLost is raised: integration is its public_id and last_signal_at the time of its last signal.",
 	"integration", "last_signal_at")
 
+// GroupKeyPreviewed is logged when a Group key preview was computed.
+var GroupKeyPreviewed = newEvent("group_key_previewed", LevelInfo, "C-08",
+	"A Group key preview read the Stored Snapshots of a period: route is the public_id of the saved Route it "+
+		"previewed, empty for a Route that is not saved yet, period_seconds the period, snapshots_read how many "+
+		"distinct bodies it read, truncated whether routing.group_key_preview_max_alerts stopped it with Stored "+
+		"Snapshots of the period, or Alerts the Route takes, left unread, and duration_ms how long it took.",
+	"route", "period_seconds", "snapshots_read", "truncated", "duration_ms")
+
 // IngestReplayed is logged when muster ingest replay set Stored Snapshots back to pending.
 var IngestReplayed = newEvent("ingest_replayed", LevelInfo, "C-06",
 	"muster ingest replay set the Stored Snapshots received within the period back to pending, for processing again: "+

@@ -158,7 +158,8 @@ type Alerts interface {
 	Routes(ctx context.Context, integration string) ([]ingest.AlertmanagerRoute, error)
 }
 
-// Routes is what the API needs of internal/routing: Routes and their order.
+// Routes is what the API needs of internal/routing: Routes and their order, the Group key preview and the Route
+// suggestions.
 type Routes interface {
 	List(ctx context.Context) (routing.List, error)
 	Get(ctx context.Context, publicID string) (routing.Route, error)
@@ -167,6 +168,11 @@ type Routes interface {
 		routing.Route, error)
 	Delete(ctx context.Context, r routing.Requester, publicID string, version *int64) error
 	Reorder(ctx context.Context, r routing.Requester, version *int64, ids []string) (routing.List, error)
+	Preview(ctx context.Context, req routing.PreviewRequest) (routing.Preview, error)
+	Suggestions(ctx context.Context, userID *int64) ([]routing.Suggestion, error)
+	AcceptSuggestion(ctx context.Context, r routing.Requester, id string, destinationIDs []string) (routing.Route,
+		error)
+	DismissSuggestion(ctx context.Context, userID int64, id string) error
 }
 
 // Config is what the API serves with.
@@ -242,7 +248,8 @@ var implemented = map[string]bool{
 	"RevokeIntegrationToken": true, "ListStoredSnapshots": true, "GetStoredSnapshot": true,
 	"ListIntegrationAlerts": true, "ListAlertmanagerRoutes": true,
 	"ListRoutes": true, "CreateRoute": true, "GetRoute": true, "UpdateRoute": true, "DeleteRoute": true,
-	"ReorderRoutes": true, "ListRouteProfiles": true,
+	"ReorderRoutes": true, "ListRouteProfiles": true, "PreviewGroupKey": true, "ListRouteSuggestions": true,
+	"AcceptRouteSuggestion": true, "DismissRouteSuggestion": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how

@@ -636,9 +636,9 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.signals = heartbeat.New(heartbeat.Config{OrgID: orgID, Store: p.db.HeartbeatStore(), Business: p.clocks.Business,
 		Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String()})
 	alerts := ingest.NewAlertsView(orgID, p.db.ProcessStore(), p.clocks.Business)
-	p.routes = routing.New(routing.Config{OrgID: orgID, Store: p.db.RoutingStore(), Audit: w,
-		Business: p.clocks.Business})
 	p.router = routing.NewRouter(orgID)
+	p.routes = routing.New(routing.Config{OrgID: orgID, Store: p.db.RoutingStore(), Audit: w,
+		Business: p.clocks.Business, Real: p.clocks.Real, Router: p.router, Snapshots: p.snapshots, Log: p.log})
 	if p.opts.Development {
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
 			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)

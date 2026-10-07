@@ -6,8 +6,9 @@
 // Matchers and is always last. Routes are evaluated `ORDER BY is_default, position, id` and the first one whose
 // Matchers all match takes a newly firing Alert (Router). Reordering replaces the positions under the list ETag,
 // organizations.route_order_version, which creating, deleting and reordering bump; deletion is soft. Every change is
-// recorded in the Audit log and announced with the live hint route; the package also exports muster_route_info and
-// serves the two Route profiles, On-call and Informational, from the built-in defaults.
+// recorded in the Audit log and announced with the live hint route; the package also exports muster_route_info,
+// serves the two Route profiles, On-call and Informational, from the built-in defaults, previews a Group key over the
+// Stored Snapshots of a period with the Router's evaluation order, and computes the Route suggestions on each read.
 package routing
 
 import (
@@ -30,6 +31,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/matchers"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
@@ -97,6 +99,7 @@ const (
 	CodeUnknownID        = "unknown_id"
 	CodeInvalidRegex     = "invalid_regex"
 	CodeRouteSetMismatch = "route_set_mismatch"
+	CodeOneOfRequired    = "one_of_required"
 )
 
 // Matcher is a Matcher of a Route as the API and the Audit log show it: a label, an operator and a value.
@@ -186,6 +189,7 @@ type Requester struct {
 
 // Queries are the queries of the package, with the insert of the Audit log and the live hint.
 type Queries interface {
+	evalQueries
 	ListRoutes(ctx context.Context, orgID int64) ([]dbgen.ListRoutesRow, error)
 	GetRoute(ctx context.Context, arg dbgen.GetRouteParams) (dbgen.GetRouteRow, error)
 	LockRoute(ctx context.Context, arg dbgen.LockRouteParams) (int64, error)
@@ -200,6 +204,10 @@ type Queries interface {
 	DeleteRoute(ctx context.Context, arg dbgen.DeleteRouteParams) error
 	SetRoutePositions(ctx context.Context, arg dbgen.SetRoutePositionsParams) error
 	ListRouteInfo(ctx context.Context, orgID int64) ([]dbgen.ListRouteInfoRow, error)
+	ListHeartbeatIntegrations(ctx context.Context, orgID int64) ([]dbgen.ListHeartbeatIntegrationsRow, error)
+	ListRouteSuggestionDismissals(ctx context.Context, arg dbgen.ListRouteSuggestionDismissalsParams) ([]string,
+		error)
+	DismissRouteSuggestion(ctx context.Context, arg dbgen.DismissRouteSuggestionParams) error
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 }
@@ -245,16 +253,28 @@ type Config struct {
 	OrgID int64
 	Store Store
 	Audit *audit.Writer
-	// Business is the business clock, which dates the rows.
+	// Business is the business clock, which dates the rows and the period of a Group key preview; Real measures how
+	// long a preview took.
 	Business clock.Clock
+	Real     clock.Clock
+	// Router is the Router of the Organization, whose evaluation order the Group key preview and the suggestions
+	// use; a new one when nil.
+	Router *Router
+	// Snapshots reads the Stored Snapshots for the Group key preview.
+	Snapshots Snapshots
+	Log       *logging.Logger
 }
 
 // Service holds the Routes of the Organization.
 type Service struct {
-	orgID int64
-	store Store
-	audit *audit.Writer
-	clock clock.Clock
+	orgID     int64
+	store     Store
+	audit     *audit.Writer
+	clock     clock.Clock
+	real      clock.Clock
+	router    *Router
+	snapshots Snapshots
+	log       *logging.Logger
 
 	// info holds the muster_route_info series this replica exports, by public_id to name.
 	infoMu sync.Mutex
@@ -265,8 +285,13 @@ type Service struct {
 
 // New returns the Service of the Organization in cfg.
 func New(cfg Config) *Service {
-	return &Service{orgID: cfg.OrgID, store: cfg.Store, audit: cfg.Audit, clock: cfg.Business,
-		info: map[string]string{}, infoChanged: make(chan struct{}, 1)}
+	router := cfg.Router
+	if router == nil {
+		router = NewRouter(cfg.OrgID)
+	}
+	return &Service{orgID: cfg.OrgID, store: cfg.Store, audit: cfg.Audit, clock: cfg.Business, real: cfg.Real,
+		router: router, snapshots: cfg.Snapshots, log: cfg.Log, info: map[string]string{},
+		infoChanged: make(chan struct{}, 1)}
 }
 
 // List lists the Routes that are not deleted in evaluation order with the version of the list. The version is read
@@ -364,6 +389,18 @@ func (s *Service) lock(ctx context.Context, q Queries, publicID string) (Route, 
 
 // Create creates a Route at the last position before the Default route; a name another Route has is ErrNameTaken.
 func (s *Service) Create(ctx context.Context, r Requester, in Input) (Route, error) {
+	return s.create(ctx, r, in, creation{})
+}
+
+// creation is how a Route is created: at the top of the list instead of before the Default route, after a
+// precondition checked under the lock of the list, and with details for its Audit log entry.
+type creation struct {
+	first        bool
+	precondition func(Queries) error
+	details      map[string]any
+}
+
+func (s *Service) create(ctx context.Context, r Requester, in Input, how creation) (Route, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if err := check(in); err != nil {
 		return Route{}, err
@@ -374,6 +411,11 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Route, err
 		if _, err := q.BumpRouteOrder(ctx, dbgen.BumpRouteOrderParams{OrgID: s.orgID}); err != nil {
 			return fmt.Errorf("bump the route order: %w", err)
 		}
+		if how.precondition != nil {
+			if err := how.precondition(q); err != nil {
+				return err
+			}
+		}
 		description := ""
 		if in.Description != nil {
 			description = *in.Description
@@ -381,7 +423,7 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Route, err
 		id := publicid.New(publicid.Route)
 		p := in.Policy
 		routeID, err := q.InsertRoute(ctx, dbgen.InsertRouteParams{
-			OrgID: s.orgID, PublicID: id, Name: in.Name, Description: description, Urgent: in.Urgent,
+			OrgID: s.orgID, PublicID: id, Name: in.Name, Description: description, First: how.first, Urgent: in.Urgent,
 			GroupKey: in.GroupKey, ReopenWindowSeconds: p.ReopenWindowSeconds, GracePeriodSeconds: p.GracePeriodSeconds,
 			UrgentRiseRemovesAck: p.UrgentRiseRemovesAck, SnoozeDurationsSeconds: p.SnoozeDurationsSeconds,
 			ThreadBatchingWindowSeconds: p.ThreadBatchingWindowSeconds, StormThreshold: p.StormThreshold,
@@ -403,7 +445,8 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Route, err
 		}
 		if err := s.audit.Record(ctx, q, audit.Entry{
 			OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport, Action: ActionCreated,
-			Resource: resourceOf(created), Diff: audit.Created(viewOf(created)), SourceAddress: r.Address,
+			Resource: resourceOf(created), Diff: audit.Created(viewOf(created)), Details: how.details,
+			SourceAddress: r.Address,
 		}); err != nil {
 			return err
 		}
@@ -677,9 +720,21 @@ func check(in Input) error {
 			return err
 		}
 	}
-	seen := make(map[string]bool, len(in.GroupKey))
-	for i, name := range in.GroupKey {
-		pointer := "/group_key/" + strconv.Itoa(i)
+	if err := checkGroupKey("/group_key", in.GroupKey); err != nil {
+		return err
+	}
+	if len(in.DestinationIDs) > 0 {
+		// No Destination type exists yet (C-13 to C-15), so every id names no Destination.
+		return &FieldError{Pointer: "/destination_ids/0", Code: CodeUnknownID, Detail: "No such Destination."}
+	}
+	return checkPolicy(in.Policy)
+}
+
+// checkGroupKey refuses a Group key, at the pointer base, with an empty or a repeated label name.
+func checkGroupKey(base string, key []string) error {
+	seen := make(map[string]bool, len(key))
+	for i, name := range key {
+		pointer := base + "/" + strconv.Itoa(i)
 		if name == "" {
 			return &FieldError{Pointer: pointer, Code: CodeInvalidFormat, Detail: "A label name is empty."}
 		}
@@ -688,11 +743,7 @@ func check(in Input) error {
 		}
 		seen[name] = true
 	}
-	if len(in.DestinationIDs) > 0 {
-		// No Destination type exists yet (C-13 to C-15), so every id names no Destination.
-		return &FieldError{Pointer: "/destination_ids/0", Code: CodeUnknownID, Detail: "No such Destination."}
-	}
-	return checkPolicy(in.Policy)
+	return nil
 }
 
 // checkMatcher refuses a Matcher at index i whose label is empty, whose operator is not one of Alertmanager's, or

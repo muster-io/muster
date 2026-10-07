@@ -139,6 +139,127 @@ func (s *Server) ListRouteProfiles(context.Context, gen.ListRouteProfilesRequest
 	return gen.ListRouteProfiles200JSONResponse(out), nil
 }
 
+// PreviewGroupKey is previewGroupKey: how the Stored Snapshots of the period group with the current and the proposed
+// Group key.
+func (s *Server) PreviewGroupKey(ctx context.Context, req gen.PreviewGroupKeyRequestObject) (
+	gen.PreviewGroupKeyResponseObject, error) {
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	in := routing.PreviewRequest{ProposedGroupKey: req.Body.ProposedGroupKey}
+	if req.Body.RouteId.IsSpecified() && !req.Body.RouteId.IsNull() {
+		in.RouteID = req.Body.RouteId.MustGet()
+	}
+	if req.Body.Matchers != nil {
+		in.Matchers = make([]routing.Matcher, 0, len(*req.Body.Matchers))
+		for _, m := range *req.Body.Matchers {
+			in.Matchers = append(in.Matchers, routing.Matcher{Label: m.Label, Op: string(m.Op), Value: m.Value})
+		}
+	}
+	if req.Body.PeriodSeconds != nil {
+		period := int64(*req.Body.PeriodSeconds)
+		in.PeriodSeconds = &period
+	}
+	p, err := s.routes.Preview(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.GroupKeyPreview{PeriodSeconds: int(p.PeriodSeconds), Truncated: p.Truncated,
+		Proposed: previewSideOf(p.Proposed)}
+	if p.Current != nil {
+		current := previewSideOf(*p.Current)
+		out.Current = &current
+	}
+	return gen.PreviewGroupKey200JSONResponse(out), nil
+}
+
+func previewSideOf(side routing.PreviewSide) gen.GroupKeyPreviewSide {
+	out := gen.GroupKeyPreviewSide{AlertGroupCount: side.AlertGroupCount,
+		Examples: make([]gen.GroupKeyPreviewExample, 0, len(side.Examples))}
+	for _, e := range side.Examples {
+		out.Examples = append(out.Examples, gen.GroupKeyPreviewExample{GroupKeyValues: e.GroupKeyValues,
+			AlertCount: e.AlertCount})
+	}
+	return out
+}
+
+// ListRouteSuggestions is listRouteSuggestions: the suggestions that apply and that the calling User has not
+// dismissed; a Service account has no dismissals.
+func (s *Server) ListRouteSuggestions(ctx context.Context, _ gen.ListRouteSuggestionsRequestObject) (
+	gen.ListRouteSuggestionsResponseObject, error) {
+	id, err := identity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var user *int64
+	if !id.IsServiceAccount() {
+		user = &id.Session.User.ID
+	}
+	list, err := s.routes.Suggestions(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.RouteSuggestionList{Items: make([]gen.RouteSuggestion, 0, len(list))}
+	for _, sg := range list {
+		out.Items = append(out.Items, gen.RouteSuggestion{Id: gen.RouteSuggestionId(sg.ID), Route: routeInputFor(sg.Route)})
+	}
+	return gen.ListRouteSuggestions200JSONResponse(out), nil
+}
+
+// AcceptRouteSuggestion is acceptRouteSuggestion: the suggested Route at the top of the list.
+func (s *Server) AcceptRouteSuggestion(ctx context.Context, req gen.AcceptRouteSuggestionRequestObject) (
+	gen.AcceptRouteSuggestionResponseObject, error) {
+	r, err := routeRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var destinations []string
+	if req.Body != nil && req.Body.DestinationIds != nil {
+		destinations = *req.Body.DestinationIds
+	}
+	rt, err := s.routes.AcceptSuggestion(ctx, r, string(req.SuggestionId), destinations)
+	if err != nil {
+		return nil, err
+	}
+	tag, location := etag(rt.Version), BasePath+"/routes/"+rt.PublicID
+	return gen.AcceptRouteSuggestion201JSONResponse{Body: routeOf(rt),
+		Headers: gen.AcceptRouteSuggestion201ResponseHeaders{ETag: &tag, Location: &location}}, nil
+}
+
+// DismissRouteSuggestion is dismissRouteSuggestion: remembered for the calling User, so a Service account is refused.
+func (s *Server) DismissRouteSuggestion(ctx context.Context, req gen.DismissRouteSuggestionRequestObject) (
+	gen.DismissRouteSuggestionResponseObject, error) {
+	id, err := identity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if id.IsServiceAccount() {
+		return nil, errServiceAccountDenied
+	}
+	if err := s.routes.DismissSuggestion(ctx, id.Session.User.ID, string(req.SuggestionId)); err != nil {
+		return nil, err
+	}
+	return gen.DismissRouteSuggestion204Response{}, nil
+}
+
+// routeInputFor is the API form of a Route to create.
+func routeInputFor(in routing.Input) gen.RouteInput {
+	description := ""
+	if in.Description != nil {
+		description = *in.Description
+	}
+	out := gen.RouteInput{Name: in.Name, Description: &description, Urgent: in.Urgent, GroupKey: in.GroupKey,
+		DestinationIds: in.DestinationIDs, Matchers: make([]gen.Matcher, 0, len(in.Matchers)),
+		Policy: routePolicyOf(in.Policy)}
+	if out.DestinationIds == nil {
+		out.DestinationIds = []gen.PublicId{}
+	}
+	for _, m := range in.Matchers {
+		out.Matchers = append(out.Matchers, gen.Matcher{Label: m.Label, Op: gen.MatcherOp(m.Op), Value: m.Value})
+	}
+	return out
+}
+
 func routeListOf(list routing.List) gen.RouteList {
 	out := gen.RouteList{Items: make([]gen.Route, 0, len(list.Routes))}
 	for _, rt := range list.Routes {

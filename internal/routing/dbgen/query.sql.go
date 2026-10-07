@@ -68,6 +68,30 @@ func (q *Queries) DeleteRouteMatchers(ctx context.Context, arg DeleteRouteMatche
 	return err
 }
 
+const dismissRouteSuggestion = `-- name: DismissRouteSuggestion :exec
+INSERT INTO route_suggestion_dismissals (user_id, suggestion, org_id, dismissed_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (user_id, suggestion) DO NOTHING
+`
+
+type DismissRouteSuggestionParams struct {
+	UserID      int64
+	Suggestion  string
+	OrgID       int64
+	DismissedAt time.Time
+}
+
+// DismissRouteSuggestion records that a User dismissed a Route suggestion; a second dismissal changes nothing.
+func (q *Queries) DismissRouteSuggestion(ctx context.Context, arg DismissRouteSuggestionParams) error {
+	_, err := q.db.Exec(ctx, dismissRouteSuggestion,
+		arg.UserID,
+		arg.Suggestion,
+		arg.OrgID,
+		arg.DismissedAt,
+	)
+	return err
+}
+
 const ensureDefaultRoute = `-- name: EnsureDefaultRoute :one
 INSERT INTO routes (
     org_id, public_id, name, description, position, is_default, urgent, group_key, reopen_window_seconds,
@@ -280,13 +304,14 @@ INSERT INTO routes (
     reminders_cap_seconds, auto_unacknowledge, created_at, updated_at
 )
 SELECT $1, $2, $3, $4,
-       coalesce((SELECT max(p.position) + 1 FROM routes p
+       coalesce((SELECT CASE WHEN $5::boolean THEN min(p.position) - 1 ELSE max(p.position) + 1 END
+                 FROM routes p
                  WHERE p.org_id = $1 AND NOT p.is_default AND p.deleted_at IS NULL), 0),
-       false, $5, $6::text[], $7, $8, $9,
-       $10::bigint[], $11, $12, $13,
-       $14, $15, $16,
-       $17, $18, $19,
-       $20, $21, $22, $23, $23
+       false, $6, $7::text[], $8, $9, $10,
+       $11::bigint[], $12, $13, $14,
+       $15, $16, $17,
+       $18, $19, $20,
+       $21, $22, $23, $24, $24
 RETURNING id
 `
 
@@ -295,6 +320,7 @@ type InsertRouteParams struct {
 	PublicID                       string
 	Name                           string
 	Description                    string
+	First                          bool
 	Urgent                         bool
 	GroupKey                       []string
 	ReopenWindowSeconds            int64
@@ -316,13 +342,14 @@ type InsertRouteParams struct {
 	Now                            time.Time
 }
 
-// InsertRoute creates a Route at the last position before the Default route.
+// InsertRoute creates a Route at the last position before the Default route, or with @first at the top of the list.
 func (q *Queries) InsertRoute(ctx context.Context, arg InsertRouteParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertRoute,
 		arg.OrgID,
 		arg.PublicID,
 		arg.Name,
 		arg.Description,
+		arg.First,
 		arg.Urgent,
 		arg.GroupKey,
 		arg.ReopenWindowSeconds,
@@ -412,6 +439,41 @@ func (q *Queries) ListAlertLabels(ctx context.Context, arg ListAlertLabelsParams
 	return items, nil
 }
 
+const listHeartbeatIntegrations = `-- name: ListHeartbeatIntegrations :many
+SELECT public_id, name, static_labels
+FROM integrations
+WHERE org_id = $1 AND deleted_at IS NULL AND heartbeat_enabled
+ORDER BY id
+`
+
+type ListHeartbeatIntegrationsRow struct {
+	PublicID     string
+	Name         string
+	StaticLabels []byte
+}
+
+// ListHeartbeatIntegrations lists the Integrations that are not deleted and have their Heartbeat on, with what
+// MusterHeartbeatLost carries of them: the public_id, the name and the Static labels.
+func (q *Queries) ListHeartbeatIntegrations(ctx context.Context, orgID int64) ([]ListHeartbeatIntegrationsRow, error) {
+	rows, err := q.db.Query(ctx, listHeartbeatIntegrations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListHeartbeatIntegrationsRow{}
+	for rows.Next() {
+		var i ListHeartbeatIntegrationsRow
+		if err := rows.Scan(&i.PublicID, &i.Name, &i.StaticLabels); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRouteInfo = `-- name: ListRouteInfo :many
 SELECT public_id, name
 FROM routes
@@ -482,6 +544,38 @@ func (q *Queries) ListRouteMatchers(ctx context.Context, arg ListRouteMatchersPa
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRouteSuggestionDismissals = `-- name: ListRouteSuggestionDismissals :many
+SELECT suggestion
+FROM route_suggestion_dismissals
+WHERE org_id = $1 AND user_id = $2
+`
+
+type ListRouteSuggestionDismissalsParams struct {
+	OrgID  int64
+	UserID int64
+}
+
+// ListRouteSuggestionDismissals lists the Route suggestions a User dismissed.
+func (q *Queries) ListRouteSuggestionDismissals(ctx context.Context, arg ListRouteSuggestionDismissalsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listRouteSuggestionDismissals, arg.OrgID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var suggestion string
+		if err := rows.Scan(&suggestion); err != nil {
+			return nil, err
+		}
+		items = append(items, suggestion)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

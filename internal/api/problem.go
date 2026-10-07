@@ -73,6 +73,7 @@ const (
 	codeServiceAccountDenied  = "service_account_not_allowed"
 	codeOIDCRecheckRequired   = "oidc_recheck_required"
 	codeBuiltinImmutable      = "builtin_immutable"
+	codeSuggestionObsolete    = "suggestion_obsolete"
 
 	fieldRequired      = "required"
 	fieldInvalidFormat = "invalid_format"
@@ -266,6 +267,12 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 			"The Default route is always last: it cannot be deleted or moved.")
 	case errors.Is(err, routing.ErrVersionMismatch):
 		return errPreconditionFailed
+	case errors.Is(err, routing.ErrSuggestionNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Route suggestion.")
+	case errors.Is(err, routing.ErrSuggestionObsolete):
+		return problem(http.StatusConflict, typeConflict, codeSuggestionObsolete,
+			"The Route suggestion no longer applies: a Route other than the Default route takes its alerts, or it "+
+				"needs a Destination.")
 	case errors.Is(err, ingest.ErrNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Stored Snapshot, or it is past retention.")
 	case errors.Is(err, auth.ErrPasswordTooShort):

@@ -776,6 +776,155 @@ func (q *Queries) ListPendingIntegrations(ctx context.Context, arg ListPendingIn
 	return items, nil
 }
 
+const listPreviewBodies = `-- name: ListPreviewBodies :many
+SELECT s.integration_id, s.body_sha256, max(s.received_at)::timestamptz AS received_at,
+       max(s.size_bytes)::bigint AS size_bytes
+FROM stored_snapshots s
+WHERE s.org_id = $1 AND s.source = 'webhook' AND s.state <> 'failed' AND s.body_day = $2
+  AND s.received_at >= $3::timestamptz AND s.received_at < $4::timestamptz
+  AND ($5::timestamptz IS NULL OR s.received_at <= $5::timestamptz)
+GROUP BY s.integration_id, s.body_sha256
+HAVING $5::timestamptz IS NULL
+    OR max(s.received_at) < $5::timestamptz
+    OR (max(s.received_at) = $5::timestamptz
+        AND (s.integration_id, s.body_sha256) > ($6::bigint,
+                                                  $7::bytea))
+ORDER BY 3 DESC, s.integration_id, s.body_sha256
+LIMIT $8
+`
+
+type ListPreviewBodiesParams struct {
+	OrgID              int64
+	BodyDay            pgtype.Date
+	ReceivedFrom       time.Time
+	ReceivedTo         time.Time
+	AfterAt            pgtype.Timestamptz
+	AfterIntegrationID pgtype.Int8
+	AfterSha256        []byte
+	PageSize           int32
+}
+
+type ListPreviewBodiesRow struct {
+	IntegrationID int64
+	BodySha256    []byte
+	ReceivedAt    time.Time
+	SizeBytes     int64
+}
+
+// ListPreviewBodies lists the distinct bodies of each Integration among the webhook Stored Snapshots received in
+// [@received_from, @received_to) on the UTC day @body_day that did not fail, each with its newest receipt, newest
+// first, then by Integration and hash, after the cursor (@after_at, @after_integration_id, @after_sha256) when it is
+// given. One day is one partition, and its bodies are de-duplicated per day, so a page reads one partition; past the
+// first page only the rows received at or before the cursor are grouped, so a body listed already may come again
+// with an older receipt, which the reader skips.
+func (q *Queries) ListPreviewBodies(ctx context.Context, arg ListPreviewBodiesParams) ([]ListPreviewBodiesRow, error) {
+	rows, err := q.db.Query(ctx, listPreviewBodies,
+		arg.OrgID,
+		arg.BodyDay,
+		arg.ReceivedFrom,
+		arg.ReceivedTo,
+		arg.AfterAt,
+		arg.AfterIntegrationID,
+		arg.AfterSha256,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPreviewBodiesRow{}
+	for rows.Next() {
+		var i ListPreviewBodiesRow
+		if err := rows.Scan(
+			&i.IntegrationID,
+			&i.BodySha256,
+			&i.ReceivedAt,
+			&i.SizeBytes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPreviewIntegrations = `-- name: ListPreviewIntegrations :many
+SELECT id, static_labels
+FROM integrations
+WHERE org_id = $1 AND NOT builtin
+`
+
+type ListPreviewIntegrationsRow struct {
+	ID           int64
+	StaticLabels []byte
+}
+
+// ListPreviewIntegrations lists the Integrations other than the built-in one, deleted ones included, with their
+// current Static labels, for the Group key preview.
+func (q *Queries) ListPreviewIntegrations(ctx context.Context, orgID int64) ([]ListPreviewIntegrationsRow, error) {
+	rows, err := q.db.Query(ctx, listPreviewIntegrations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPreviewIntegrationsRow{}
+	for rows.Next() {
+		var i ListPreviewIntegrationsRow
+		if err := rows.Scan(&i.ID, &i.StaticLabels); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPreviewSnapshotBodies = `-- name: ListPreviewSnapshotBodies :many
+SELECT b.body_sha256, b.body_day, b.body
+FROM snapshot_bodies b
+JOIN (SELECT unnest($1::bytea[]) AS body_sha256, unnest($2::date[]) AS body_day) AS k
+    ON k.body_sha256 = b.body_sha256 AND k.body_day = b.body_day
+WHERE b.org_id = $3 AND b.body_day = ANY($2::date[])
+`
+
+type ListPreviewSnapshotBodiesParams struct {
+	BodySha256s [][]byte
+	BodyDays    []pgtype.Date
+	OrgID       int64
+}
+
+type ListPreviewSnapshotBodiesRow struct {
+	BodySha256 []byte
+	BodyDay    pgtype.Date
+	Body       []byte
+}
+
+// ListPreviewSnapshotBodies reads the bodies of the pairs of hash and UTC day; the days also prune the partitions.
+func (q *Queries) ListPreviewSnapshotBodies(ctx context.Context, arg ListPreviewSnapshotBodiesParams) ([]ListPreviewSnapshotBodiesRow, error) {
+	rows, err := q.db.Query(ctx, listPreviewSnapshotBodies, arg.BodySha256s, arg.BodyDays, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPreviewSnapshotBodiesRow{}
+	for rows.Next() {
+		var i ListPreviewSnapshotBodiesRow
+		if err := rows.Scan(&i.BodySha256, &i.BodyDay, &i.Body); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSnapshotAlerts = `-- name: ListSnapshotAlerts :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.generator_url, a.static_label_conflicts, a.status,
        a.starts_at, a.ends_at, a.episode, a.fired_at, a.first_seen_at, a.last_seen_at, a.resolved_at,

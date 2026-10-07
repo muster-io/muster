@@ -53,6 +53,10 @@ type Queries interface {
 		dbgen.FindSnapshotIntegrationRow, error)
 	ListStoredSnapshots(ctx context.Context, arg dbgen.ListStoredSnapshotsParams) ([]dbgen.ListStoredSnapshotsRow, error)
 	GetStoredSnapshot(ctx context.Context, arg dbgen.GetStoredSnapshotParams) (dbgen.GetStoredSnapshotRow, error)
+	ListPreviewIntegrations(ctx context.Context, orgID int64) ([]dbgen.ListPreviewIntegrationsRow, error)
+	ListPreviewBodies(ctx context.Context, arg dbgen.ListPreviewBodiesParams) ([]dbgen.ListPreviewBodiesRow, error)
+	ListPreviewSnapshotBodies(ctx context.Context, arg dbgen.ListPreviewSnapshotBodiesParams) (
+		[]dbgen.ListPreviewSnapshotBodiesRow, error)
 }
 
 // Store runs the queries alone or in one transaction.

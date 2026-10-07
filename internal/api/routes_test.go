@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -30,6 +31,12 @@ type fakeRoutes struct {
 	reorders [][]string
 	by       []routing.Requester
 	err      error
+
+	previews     []routing.PreviewRequest
+	users        []*int64
+	accepted     [][]string
+	dismissed    []int64
+	suggestionOK bool
 }
 
 func newFakeRoutes() *fakeRoutes {
@@ -110,11 +117,64 @@ func (f *fakeRoutes) Reorder(_ context.Context, r routing.Requester, version *in
 	return out, f.err
 }
 
+func (f *fakeRoutes) Preview(_ context.Context, req routing.PreviewRequest) (routing.Preview, error) {
+	f.previews = append(f.previews, req)
+	switch {
+	case req.RouteID == "" && req.Matchers == nil:
+		return routing.Preview{}, &routing.FieldError{Code: routing.CodeOneOfRequired, Detail: "Give one."}
+	case req.RouteID == "RTZZZZZZZZZZZZ":
+		return routing.Preview{}, routing.ErrNotFound
+	}
+	side := routing.PreviewSide{AlertGroupCount: 2, Examples: []routing.PreviewExample{
+		{GroupKeyValues: map[string]string{"cluster": ""}, AlertCount: 2},
+		{GroupKeyValues: map[string]string{"cluster": "a"}, AlertCount: 2}}}
+	out := routing.Preview{PeriodSeconds: 86400, Proposed: side, Truncated: true}
+	if req.RouteID != "" {
+		out.Current = &routing.PreviewSide{AlertGroupCount: 1, Examples: []routing.PreviewExample{
+			{GroupKeyValues: map[string]string{}, AlertCount: 4}}}
+	}
+	return out, f.err
+}
+
+func (f *fakeRoutes) Suggestions(_ context.Context, user *int64) ([]routing.Suggestion, error) {
+	f.users = append(f.users, user)
+	if !f.suggestionOK {
+		return nil, f.err
+	}
+	return []routing.Suggestion{{ID: routing.SuggestionHeartbeatLost, Route: routing.Input{
+		Name: routing.HeartbeatLostRouteName, Urgent: true, GroupKey: []string{"alertname", "integration"},
+		Matchers: []routing.Matcher{{Label: "alertname", Op: "=", Value: "MusterHeartbeatLost"}},
+		Policy:   routing.Profiles()[0].Policy}}}, f.err
+}
+
+func (f *fakeRoutes) AcceptSuggestion(_ context.Context, r routing.Requester, id string, destinations []string) (
+	routing.Route, error) {
+	f.by, f.accepted = append(f.by, r), append(f.accepted, append([]string{id}, destinations...))
+	if !f.suggestionOK || id != routing.SuggestionHeartbeatLost {
+		return routing.Route{}, routing.ErrSuggestionObsolete
+	}
+	out := f.list.Routes[0]
+	out.Name, out.Version = routing.HeartbeatLostRouteName, 1
+	return out, f.err
+}
+
+func (f *fakeRoutes) DismissSuggestion(_ context.Context, user int64, id string) error {
+	f.dismissed = append(f.dismissed, user)
+	switch {
+	case id != routing.SuggestionHeartbeatLost:
+		return routing.ErrSuggestionObsolete
+	case !f.suggestionOK:
+		return routing.ErrSuggestionObsolete
+	}
+	return f.err
+}
+
 // The tokens of the Route tests: one with routes:read and routes:write, as an Admin holds them, and one with
 // routes:read alone, as every Role holds it.
 const (
-	routesWriter = "mstr_pat_routes_write"
-	routesReader = "mstr_pat_routes_read"
+	routesWriter  = "mstr_pat_routes_write"
+	routesReader  = "mstr_pat_routes_read"
+	routesService = "mstr_sat_routes"
 )
 
 func newRoutesAPI(t *testing.T) (*testAPI, *fakeRoutes) {
@@ -125,6 +185,9 @@ func newRoutesAPI(t *testing.T) (*testAPI, *fakeRoutes) {
 		"routes:write"}, Transport: audit.TransportAPI, Token: &auth.Token{ID: 31, Name: "routes"}}
 	ft.idents[routesReader] = &auth.Identity{Session: owner, Permissions: []auth.Permission{"routes:read"},
 		Transport: audit.TransportAPI, Token: &auth.Token{ID: 32, Name: "routes-read"}}
+	ft.idents[routesService] = &auth.Identity{Permissions: []auth.Permission{"routes:read", "routes:write"},
+		Transport: audit.TransportAPI, Token: &auth.Token{ID: 33, Name: "ci",
+			ServiceAccount: &auth.Principal{ID: 3, PublicID: saPublicID, Name: "terraform", Role: "admin"}}}
 	fr := newFakeRoutes()
 	x.srv.routes = fr
 	return x, fr
@@ -345,5 +408,138 @@ func TestIntegrationAlertRoute(t *testing.T) {
 	got = integrationAlertOf(ingest.ViewAlert{})
 	if got.Route != nil || got.SeverityLevel != nil || got.SeverityRaw.IsSpecified() {
 		t.Errorf("before routing %+v", got)
+	}
+}
+
+// TestPreviewGroupKeyAPI is C-08.FR-5, C-08.AC-2 and C-08.AC-12 at the API with routes:write: the request as the
+// domain reads it, the preview with current absent for an unsaved Route, the empty value of a missing label, and the
+// refusals as problems.
+func TestPreviewGroupKeyAPI(t *testing.T) {
+	x, fr := newRoutesAPI(t)
+	a := x.as(t, routesWriter, http.MethodPost, "/api/v1/group-key-previews",
+		`{"matchers":[{"label":"alertname","op":"=","value":"Disk"}],"proposed_group_key":["alertname","cluster"]}`)
+	if a.status != http.StatusOK || strings.Contains(string(a.body), `"current"`) ||
+		!strings.Contains(string(a.body), `"examples":[{"alert_count":2,"group_key_values":{"cluster":""}}`) ||
+		a.json(t)["truncated"] != true || a.json(t)["period_seconds"] != 86400.0 {
+		t.Errorf("unsaved = %d %s", a.status, a.body)
+	}
+	req := fr.previews[0]
+	if req.RouteID != "" || len(req.Matchers) != 1 || req.Matchers[0] != (routing.Matcher{Label: "alertname", Op: "=",
+		Value: "Disk"}) || !slices.Equal(req.ProposedGroupKey, []string{"alertname", "cluster"}) || req.PeriodSeconds != nil {
+		t.Errorf("request %+v", req)
+	}
+	a = x.as(t, routesWriter, http.MethodPost, "/api/v1/group-key-previews",
+		`{"route_id":"`+routeID+`","proposed_group_key":[],"period_seconds":3600,"matchers":[]}`)
+	var p gen.GroupKeyPreview
+	decodeInto(t, a, &p)
+	if a.status != http.StatusOK || p.Current == nil || p.Current.AlertGroupCount != 1 || p.Proposed.AlertGroupCount != 2 {
+		t.Errorf("saved = %d %s", a.status, a.body)
+	}
+	req = fr.previews[1]
+	if req.RouteID != routeID || req.Matchers == nil || len(req.Matchers) != 0 || *req.PeriodSeconds != 3600 {
+		t.Errorf("request %+v", req)
+	}
+	a = x.as(t, routesWriter, http.MethodPost, "/api/v1/group-key-previews",
+		`{"route_id":null,"proposed_group_key":["alertname"]}`)
+	errs, _ := a.json(t)["errors"].([]any)
+	first, _ := errs[0].(map[string]any)
+	if a.status != http.StatusUnprocessableEntity || first["code"] != "one_of_required" || fr.previews[2].RouteID != "" {
+		t.Errorf("neither = %d %s", a.status, a.body)
+	}
+	if a = x.as(t, routesWriter, http.MethodPost, "/api/v1/group-key-previews",
+		`{"route_id":"RTZZZZZZZZZZZZ","proposed_group_key":[]}`); a.status != http.StatusNotFound {
+		t.Errorf("unknown route = %d %s", a.status, a.body)
+	}
+	if a = x.as(t, routesWriter, http.MethodPost, "/api/v1/group-key-previews",
+		`{"route_id":"`+routeID+`","proposed_group_key":[],"period_seconds":0}`); a.status != http.StatusBadRequest {
+		t.Errorf("a period below the minimum = %d", a.status)
+	}
+	if a = x.as(t, routesReader, http.MethodPost, "/api/v1/group-key-previews",
+		`{"route_id":"`+routeID+`","proposed_group_key":[]}`); a.status != http.StatusForbidden {
+		t.Errorf("preview by a viewer = %d", a.status)
+	}
+}
+
+// TestRouteSuggestionsAPI is C-08.FR-11, C-08.AC-8 and C-08.AC-11 at the API: the list for routes:read with the
+// calling User's dismissals, acceptance for routes:write with the created Route, its ETag and Location, 409
+// suggestion_obsolete, and dismissal for routes:read, refused to a Service account.
+func TestRouteSuggestionsAPI(t *testing.T) {
+	x, fr := newRoutesAPI(t)
+	fr.suggestionOK = true
+	a := x.as(t, routesReader, http.MethodGet, "/api/v1/route-suggestions", "")
+	var list gen.RouteSuggestionList
+	decodeInto(t, a, &list)
+	if a.status != http.StatusOK || len(list.Items) != 1 || list.Items[0].Id != gen.RouteSuggestionIdHeartbeatLost ||
+		list.Items[0].Route.Name != "Muster: Heartbeat lost" || !list.Items[0].Route.Urgent ||
+		list.Items[0].Route.DestinationIds == nil || *list.Items[0].Route.Description != "" ||
+		list.Items[0].Route.Matchers[0].Value != "MusterHeartbeatLost" || fr.users[0] == nil {
+		t.Errorf("list = %d %s", a.status, a.body)
+	}
+	if a = x.as(t, routesService, http.MethodGet, "/api/v1/route-suggestions", ""); a.status != http.StatusOK ||
+		fr.users[1] != nil {
+		t.Errorf("list by a service account = %d %s", a.status, a.body)
+	}
+
+	path := "/api/v1/route-suggestions/heartbeat_lost/"
+	a = x.as(t, routesWriter, http.MethodPost, path+"accept", "")
+	if a.status != http.StatusCreated || a.header.Get("ETag") != `"1"` ||
+		a.header.Get("Location") != "/api/v1/routes/"+routeID || a.json(t)["name"] != "Muster: Heartbeat lost" ||
+		!slices.Equal(fr.accepted[0], []string{"heartbeat_lost"}) || fr.by[0].Actor.TokenName != "routes" {
+		t.Errorf("accept = %d %v %s", a.status, a.header, a.body)
+	}
+	if a = x.as(t, routesWriter, http.MethodPost, path+"accept", `{"destination_ids":["DSAAAAAAAAAAAA"]}`); a.status !=
+		http.StatusCreated || !slices.Equal(fr.accepted[1], []string{"heartbeat_lost", "DSAAAAAAAAAAAA"}) {
+		t.Errorf("accept with destinations = %d %v", a.status, fr.accepted)
+	}
+	a = x.as(t, routesWriter, http.MethodPost, "/api/v1/route-suggestions/internal_alerts/accept",
+		`{"destination_ids":[]}`)
+	if a.status != http.StatusConflict || a.code(t) != "suggestion_obsolete" {
+		t.Errorf("obsolete = %d %s", a.status, a.body)
+	}
+	if a = x.as(t, routesReader, http.MethodPost, path+"accept", ""); a.status != http.StatusForbidden {
+		t.Errorf("accept by a viewer = %d", a.status)
+	}
+	if a = x.as(t, routesWriter, http.MethodPost, "/api/v1/route-suggestions/other/accept", ""); a.status !=
+		http.StatusBadRequest {
+		t.Errorf("accept an id outside the enum = %d", a.status)
+	}
+
+	if a = x.as(t, routesReader, http.MethodPost, path+"dismiss", ""); a.status != http.StatusNoContent ||
+		len(fr.dismissed) != 1 {
+		t.Errorf("dismiss = %d %s", a.status, a.body)
+	}
+	a = x.as(t, routesService, http.MethodPost, path+"dismiss", "")
+	if a.status != http.StatusForbidden || a.code(t) != "service_account_not_allowed" || len(fr.dismissed) != 1 {
+		t.Errorf("dismiss by a service account = %d %s", a.status, a.body)
+	}
+	fr.suggestionOK = false
+	if a = x.as(t, routesReader, http.MethodPost, path+"dismiss", ""); a.status != http.StatusConflict ||
+		a.code(t) != "suggestion_obsolete" {
+		t.Errorf("dismiss obsolete = %d %s", a.status, a.body)
+	}
+	if a = x.as(t, routesWriter, http.MethodPost, path+"accept", ""); a.status != http.StatusConflict {
+		t.Errorf("accept obsolete = %d %s", a.status, a.body)
+	}
+	if a = x.call(t, http.MethodGet, "/api/v1/route-suggestions", "", bearer(readOnlyToken)...); a.status !=
+		http.StatusForbidden {
+		t.Errorf("list without routes:read = %d", a.status)
+	}
+	fr.err = errors.New("boom")
+	for _, tt := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/route-suggestions"},
+		{http.MethodPost, "/api/v1/group-key-previews"},
+	} {
+		if a = x.as(t, routesWriter, tt.method, tt.path, `{"matchers":[],"proposed_group_key":[]}`); a.status !=
+			http.StatusInternalServerError {
+			t.Errorf("%s %s with a failure = %d", tt.method, tt.path, a.status)
+		}
+	}
+}
+
+// TestSuggestionProblems maps the errors of the suggestions to their problems.
+func TestSuggestionProblems(t *testing.T) {
+	x, _ := newRoutesAPI(t)
+	if p := x.srv.problemFor(t.Context(), "", routing.ErrSuggestionNotFound); p.Status != http.StatusNotFound {
+		t.Errorf("not found = %+v", p)
 	}
 }

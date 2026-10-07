@@ -57,7 +57,7 @@ SELECT route_order_version
 FROM organizations
 WHERE id = @org_id;
 
--- InsertRoute creates a Route at the last position before the Default route.
+-- InsertRoute creates a Route at the last position before the Default route, or with @first at the top of the list.
 -- name: InsertRoute :one
 INSERT INTO routes (
     org_id, public_id, name, description, position, is_default, urgent, group_key, reopen_window_seconds,
@@ -67,7 +67,8 @@ INSERT INTO routes (
     reminders_cap_seconds, auto_unacknowledge, created_at, updated_at
 )
 SELECT @org_id, @public_id, @name, @description,
-       coalesce((SELECT max(p.position) + 1 FROM routes p
+       coalesce((SELECT CASE WHEN @first::boolean THEN min(p.position) - 1 ELSE max(p.position) + 1 END
+                 FROM routes p
                  WHERE p.org_id = @org_id AND NOT p.is_default AND p.deleted_at IS NULL), 0),
        false, @urgent, @group_key::text[], @reopen_window_seconds, @grace_period_seconds, @urgent_rise_removes_ack,
        @snooze_durations_seconds::bigint[], @thread_batching_window_seconds, @storm_threshold, @language,
@@ -165,3 +166,23 @@ SET route_id = nullif(r.route_id, 0), severity_level = r.severity_level, severit
 FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@route_ids::bigint[]) AS route_id,
              unnest(@severity_levels::text[]) AS severity_level, unnest(@severity_raws::text[]) AS severity_raw) AS r
 WHERE a.org_id = @org_id AND a.id = r.id;
+
+-- ListHeartbeatIntegrations lists the Integrations that are not deleted and have their Heartbeat on, with what
+-- MusterHeartbeatLost carries of them: the public_id, the name and the Static labels.
+-- name: ListHeartbeatIntegrations :many
+SELECT public_id, name, static_labels
+FROM integrations
+WHERE org_id = @org_id AND deleted_at IS NULL AND heartbeat_enabled
+ORDER BY id;
+
+-- ListRouteSuggestionDismissals lists the Route suggestions a User dismissed.
+-- name: ListRouteSuggestionDismissals :many
+SELECT suggestion
+FROM route_suggestion_dismissals
+WHERE org_id = @org_id AND user_id = @user_id;
+
+-- DismissRouteSuggestion records that a User dismissed a Route suggestion; a second dismissal changes nothing.
+-- name: DismissRouteSuggestion :exec
+INSERT INTO route_suggestion_dismissals (user_id, suggestion, org_id, dismissed_at)
+VALUES (@user_id, @suggestion, @org_id, @dismissed_at)
+ON CONFLICT (user_id, suggestion) DO NOTHING;
