@@ -545,6 +545,17 @@ type HeartbeatSender struct {
 type heartbeatSender struct {
 	HeartbeatSender
 	stop context.CancelFunc
+	// done is closed once the sender's ticks are no longer read; nil for a sender without an interval.
+	done chan struct{}
+}
+
+// halt stops the sender and waits until its ticks are no longer read, so that a stopped sender never takes another
+// tick: its loop could otherwise still pick a tick over the end of its context, which select chooses at random.
+func (s *heartbeatSender) halt() {
+	s.stop()
+	if s.done != nil {
+		<-s.done
+	}
 }
 
 // maxHeartbeatInterval bounds the interval of a Heartbeat sender.
@@ -580,15 +591,19 @@ func (f *Fake) StartHeartbeat(ctx context.Context, h HeartbeatSender) error {
 	}
 	ctx, stop := context.WithCancel(context.WithoutCancel(ctx))
 	s := &heartbeatSender{HeartbeatSender: h, stop: stop}
-	f.mu.Lock()
-	if old, ok := f.heartbeats[h.Name]; ok {
-		old.stop()
+	if h.IntervalSeconds > 0 {
+		s.done = make(chan struct{})
 	}
+	f.mu.Lock()
+	old := f.heartbeats[h.Name]
 	f.heartbeats[h.Name] = s
 	f.mu.Unlock()
+	if old != nil {
+		old.halt()
+	}
 	if h.IntervalSeconds > 0 {
 		ticks, stopTicks := f.heartbeatTicker()(time.Duration(h.IntervalSeconds) * time.Second)
-		go f.beat(ctx, s.HeartbeatSender, ticks, stopTicks)
+		go f.beat(ctx, s.HeartbeatSender, ticks, stopTicks, s.done)
 	}
 	return nil
 }
@@ -612,8 +627,9 @@ func (f *Fake) heartbeatTicker() func(time.Duration) (<-chan time.Time, func()) 
 	}
 }
 
-// beat signals at every tick until the sender stops; a failed signal is lost, as with Alertmanager.
-func (f *Fake) beat(ctx context.Context, h HeartbeatSender, ticks <-chan time.Time, stop func()) {
+// beat signals at every tick until the sender stops, then closes done; a failed signal is lost, as with Alertmanager.
+func (f *Fake) beat(ctx context.Context, h HeartbeatSender, ticks <-chan time.Time, stop func(), done chan struct{}) {
+	defer close(done)
 	defer stop()
 	for {
 		select {
@@ -636,14 +652,15 @@ func (f *Fake) SendHeartbeat(ctx context.Context, name string) (int, error) {
 	return f.signal(ctx, s.HeartbeatSender)
 }
 
-// StopHeartbeat stops the sender named name, as a cut network would, and reports whether it was started.
+// StopHeartbeat stops the sender named name, as a cut network would, and reports whether it was started; once it
+// returns, the sender takes no more ticks.
 func (f *Fake) StopHeartbeat(name string) bool {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	s, ok := f.heartbeats[name]
+	delete(f.heartbeats, name)
+	f.mu.Unlock()
 	if ok {
-		s.stop()
-		delete(f.heartbeats, name)
+		s.halt()
 	}
 	return ok
 }
@@ -651,10 +668,14 @@ func (f *Fake) StopHeartbeat(name string) bool {
 // StopHeartbeats stops every sender.
 func (f *Fake) StopHeartbeats() {
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	stopped := make([]*heartbeatSender, 0, len(f.heartbeats))
 	for name, s := range f.heartbeats {
-		s.stop()
+		stopped = append(stopped, s)
 		delete(f.heartbeats, name)
+	}
+	f.mu.Unlock()
+	for _, s := range stopped {
+		s.halt()
 	}
 }
 

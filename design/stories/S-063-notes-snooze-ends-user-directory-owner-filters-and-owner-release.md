@@ -46,6 +46,8 @@ files_touched:
   - internal/runtime/runtime_test.go
   - test/e2e/notes_test.go
   - test/e2e/alert_group_list_test.go
+  - internal/fakes/fakealertmanager/fakealertmanager.go
+  - internal/fakes/fakealertmanager/fakealertmanager_test.go
   - design/prd/l1/defaults.md
   - design/prd/L1.md
 acceptance:
