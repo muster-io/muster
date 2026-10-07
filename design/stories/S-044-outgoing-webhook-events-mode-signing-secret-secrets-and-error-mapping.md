@@ -21,8 +21,10 @@ files_touched:
   - internal/delivery/webhookevents.go
   - internal/delivery/enqueue.go
   - internal/delivery/broken.go
+  - internal/delivery/membership.go
   - internal/delivery/query.sql
   - internal/delivery/webhookevents_test.go
+  - internal/delivery/membership_test.go
   - internal/destinations/write.go
   - internal/destinations/delete.go
   - internal/destinations/write_test.go
@@ -287,6 +289,12 @@ None.
 
 - Suggested commit: `feat(webhooks): add the outgoing webhook events mode with signing and secrets`.
 - The body is rendered when the event is queued, so a retry hours later still carries the state the event described.
+- `deleteDestination` must keep the secrets of a Destination that was deleted while one of its calls holds a lease until
+  that call ends: a late Publication still in flight runs its final edit with them, and a signed webhook cannot be
+  signed without the Signing secret. Today `RetireDestination` in `internal/delivery/membership.go` wipes the secrets in
+  the deleting transaction once no delivery is pending, which is harmless for Mattermost and Telegram. The wipe is
+  deferred until no delivery of that Destination holds a lease, and the worker that ends the last such call performs
+  it.
 
 ## Coverage
 
