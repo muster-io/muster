@@ -3,8 +3,9 @@
 
 // Package fakealertmanager is the fake Alertmanager: it sends Alertmanager webhooks (version 4), or any body, to a URL
 // or to a registered receiver, once or at a steady rate, on request through its control endpoints or from Go. Its
-// group model keeps Alertmanager groups and their Alerts and sends the Snapshots Alertmanager would send for them, and
-// its scenarios replay the verified Alertmanager facts that processing relies on.
+// group model keeps Alertmanager groups and their Alerts and sends the Snapshots Alertmanager would send for them, its
+// Heartbeat senders signal Muster's Heartbeat endpoint at an interval, on request or not at all, and its scenarios
+// replay the verified Alertmanager facts that processing relies on.
 package fakealertmanager
 
 import (
@@ -75,6 +76,9 @@ type Fake struct {
 	seq       int
 	receivers map[string]Receiver
 	groups    map[string]*fakeGroup
+	// heartbeats are the running Heartbeat senders by name; ticker makes the ticks of their intervals.
+	heartbeats map[string]*heartbeatSender
+	ticker     func(time.Duration) (<-chan time.Time, func())
 	// clock is the time of the group model; nil is the system time.
 	clock func() time.Time
 }
@@ -84,8 +88,9 @@ func New() *Fake {
 	t.Proxy = nil
 	t.MaxIdleConnsPerHost = 100
 	f := &Fake{
-		receivers: map[string]Receiver{},
-		groups:    map[string]*fakeGroup{},
+		receivers:  map[string]Receiver{},
+		groups:     map[string]*fakeGroup{},
+		heartbeats: map[string]*heartbeatSender{},
 		client: &http.Client{
 			Transport: t,
 			Timeout:   sendTimeout,
@@ -102,6 +107,9 @@ func New() *Fake {
 	f.HandleControl("PUT /_fake/groups/{group}/alerts/{alert}", f.handlePutAlert)
 	f.HandleControl("DELETE /_fake/groups/{group}/alerts/{alert}", f.handleDeleteAlert)
 	f.HandleControl("POST /_fake/groups/{group}/notify", f.handleNotify)
+	f.HandleControl("POST /_fake/heartbeats", f.handleStartHeartbeat)
+	f.HandleControl("POST /_fake/heartbeats/{name}/send", f.handleSendHeartbeat)
+	f.HandleControl("DELETE /_fake/heartbeats/{name}", f.handleStopHeartbeat)
 	return f
 }
 
@@ -520,4 +528,204 @@ func checkURL(s string) error {
 		return errors.New("url must name localhost or a loopback address: development mode reaches nothing but loopback")
 	}
 	return nil
+}
+
+// HeartbeatSender is a Heartbeat sender of the fake: what Alertmanager's Heartbeat route does with an always-firing
+// alert. It signals URL, Muster's Heartbeat endpoint, with Token as a bearer token or, with TokenIn TokenInPath, in the
+// path, by Method (POST, the default, or GET), every IntervalSeconds, or only on request when that is 0.
+type HeartbeatSender struct {
+	Name            string `json:"name"`
+	URL             string `json:"url"`
+	Token           string `json:"token"`
+	TokenIn         string `json:"token_in"`
+	Method          string `json:"method"`
+	IntervalSeconds int    `json:"interval_seconds"`
+}
+
+type heartbeatSender struct {
+	HeartbeatSender
+	stop context.CancelFunc
+}
+
+// maxHeartbeatInterval bounds the interval of a Heartbeat sender.
+const maxHeartbeatInterval = 24 * 60 * 60
+
+// heartbeatBody is what a signal by POST carries: Alertmanager's webhook of the always-firing alert. Muster ignores it.
+const heartbeatBody = `{"version":"4","status":"firing","receiver":"muster-heartbeat",` +
+	`"groupLabels":{"alertname":"MusterHeartbeat"},"alerts":[{"status":"firing",` +
+	`"labels":{"alertname":"MusterHeartbeat"}}]}`
+
+// StartHeartbeat starts the Heartbeat sender h, or replaces the one of the same name; with an interval it signals
+// every interval from then on until it is stopped, whether ctx ends or not. Unlike the control endpoint, it takes any
+// URL.
+func (f *Fake) StartHeartbeat(ctx context.Context, h HeartbeatSender) error {
+	if h.Name == "" {
+		return errors.New("a heartbeat sender needs a name")
+	}
+	if h.TokenIn == "" {
+		h.TokenIn = TokenInHeader
+	}
+	if h.TokenIn != TokenInHeader && h.TokenIn != TokenInPath {
+		return errors.New(`token_in must be "header" or "path"`)
+	}
+	h.Method = strings.ToUpper(h.Method)
+	if h.Method == "" {
+		h.Method = http.MethodPost
+	}
+	if h.Method != http.MethodPost && h.Method != http.MethodGet {
+		return errors.New(`method must be "GET" or "POST"`)
+	}
+	if h.IntervalSeconds < 0 || h.IntervalSeconds > maxHeartbeatInterval {
+		return fmt.Errorf("interval_seconds must be between 0 and %d", maxHeartbeatInterval)
+	}
+	ctx, stop := context.WithCancel(context.WithoutCancel(ctx))
+	s := &heartbeatSender{HeartbeatSender: h, stop: stop}
+	f.mu.Lock()
+	if old, ok := f.heartbeats[h.Name]; ok {
+		old.stop()
+	}
+	f.heartbeats[h.Name] = s
+	f.mu.Unlock()
+	if h.IntervalSeconds > 0 {
+		ticks, stopTicks := f.heartbeatTicker()(time.Duration(h.IntervalSeconds) * time.Second)
+		go f.beat(ctx, s.HeartbeatSender, ticks, stopTicks)
+	}
+	return nil
+}
+
+// SetHeartbeatTicker replaces the ticks of the Heartbeat senders started afterwards, for tests.
+func (f *Fake) SetHeartbeatTicker(ticker func(time.Duration) (<-chan time.Time, func())) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ticker = ticker
+}
+
+func (f *Fake) heartbeatTicker() func(time.Duration) (<-chan time.Time, func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ticker != nil {
+		return f.ticker
+	}
+	return func(d time.Duration) (<-chan time.Time, func()) {
+		t := time.NewTicker(d)
+		return t.C, t.Stop
+	}
+}
+
+// beat signals at every tick until the sender stops; a failed signal is lost, as with Alertmanager.
+func (f *Fake) beat(ctx context.Context, h HeartbeatSender, ticks <-chan time.Time, stop func()) {
+	defer stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+			_, _ = f.signal(ctx, h)
+		}
+	}
+}
+
+// SendHeartbeat signals once now with the sender named name and returns the answer's status.
+func (f *Fake) SendHeartbeat(ctx context.Context, name string) (int, error) {
+	f.mu.Lock()
+	s, ok := f.heartbeats[name]
+	f.mu.Unlock()
+	if !ok {
+		return 0, fmt.Errorf("no heartbeat sender %q is started", name)
+	}
+	return f.signal(ctx, s.HeartbeatSender)
+}
+
+// StopHeartbeat stops the sender named name, as a cut network would, and reports whether it was started.
+func (f *Fake) StopHeartbeat(name string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s, ok := f.heartbeats[name]
+	if ok {
+		s.stop()
+		delete(f.heartbeats, name)
+	}
+	return ok
+}
+
+// StopHeartbeats stops every sender.
+func (f *Fake) StopHeartbeats() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for name, s := range f.heartbeats {
+		s.stop()
+		delete(f.heartbeats, name)
+	}
+}
+
+func (f *Fake) signal(ctx context.Context, h HeartbeatSender) (int, error) {
+	target := h.URL
+	if h.TokenIn == TokenInPath && h.Token != "" {
+		target = strings.TrimSuffix(target, "/") + "/" + url.PathEscape(h.Token)
+	}
+	var body io.Reader
+	if h.Method == http.MethodPost {
+		body = strings.NewReader(heartbeatBody)
+	}
+	req, err := http.NewRequestWithContext(ctx, h.Method, target, body)
+	if err != nil {
+		return 0, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("User-Agent", UserAgent)
+	if h.Token != "" && h.TokenIn != TokenInPath {
+		req.Header.Set("Authorization", "Bearer "+h.Token)
+	}
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	return resp.StatusCode, nil
+}
+
+func (f *Fake) handleStartHeartbeat(w http.ResponseWriter, r *http.Request) {
+	var in HeartbeatSender
+	if err := fakeserver.DecodeJSON(w, r, &in); err != nil {
+		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := checkURL(in.URL); err != nil {
+		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := f.StartHeartbeat(r.Context(), in); err != nil {
+		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (f *Fake) handleSendHeartbeat(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	f.mu.Lock()
+	_, ok := f.heartbeats[name]
+	f.mu.Unlock()
+	if !ok {
+		fakeserver.WriteError(w, http.StatusNotFound, fmt.Sprintf("no heartbeat sender %q is started", name))
+		return
+	}
+	status, err := f.SendHeartbeat(r.Context(), name)
+	if err != nil {
+		fakeserver.WriteError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	fakeserver.WriteJSON(w, http.StatusOK, map[string]int{"status": status})
+}
+
+func (f *Fake) handleStopHeartbeat(w http.ResponseWriter, r *http.Request) {
+	if !f.StopHeartbeat(r.PathValue("name")) {
+		fakeserver.WriteError(w, http.StatusNotFound, fmt.Sprintf("no heartbeat sender %q is started",
+			r.PathValue("name")))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

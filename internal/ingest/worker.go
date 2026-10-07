@@ -79,6 +79,12 @@ type ProcessQueries interface {
 		[]dbgen.ResolveIntegrationAlertsRow, error)
 	ClearTruncation(ctx context.Context, arg dbgen.ClearTruncationParams) (int64, error)
 	LockIntegrationName(ctx context.Context, arg dbgen.LockIntegrationNameParams) (string, error)
+	ListLiveIntegrations(ctx context.Context, orgID int64) ([]int64, error)
+	HasPendingSnapshots(ctx context.Context, arg dbgen.HasPendingSnapshotsParams) (bool, error)
+	ListStalePresences(ctx context.Context, arg dbgen.ListStalePresencesParams) ([]dbgen.ListStalePresencesRow, error)
+	MarkPresencesStale(ctx context.Context, arg dbgen.MarkPresencesStaleParams) error
+	ResolveStaleAlerts(ctx context.Context, arg dbgen.ResolveStaleAlertsParams) ([]dbgen.ResolveStaleAlertsRow, error)
+	ExpireTruncation(ctx context.Context, arg dbgen.ExpireTruncationParams) (int64, error)
 	viewQueries
 	routeQueries
 	retentionQueries
@@ -378,7 +384,7 @@ func snapshotOf(a *attempt, payload Payload, info dbgen.RenewIngestLeaseRow) (sn
 		return snapshotIn{}, processingError(fmt.Errorf("read the static labels: %w", err))
 	}
 	return snapshotIn{StoredSnapshotID: a.id, ReceivedAt: a.receivedAt, Payload: payload, StaticLabels: static,
-		DuplicateWindow: time.Duration(info.DuplicateWindowSeconds) * time.Second, ClockMs: info.LivenessClockMs,
+		DuplicateWindow: time.Duration(info.DuplicateWindowSeconds) * time.Second, ClockMs: clockAt(info, a.receivedAt),
 		Internal: a.internal, Integration: internalalerts.Entity{ID: info.PublicID, Name: info.Name},
 		Deleted: info.DeletedAt.Valid}, nil
 }

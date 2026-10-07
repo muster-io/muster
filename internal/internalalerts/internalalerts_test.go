@@ -89,9 +89,14 @@ func TestRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 1 || defs[0] != SnapshotTruncated || Lookup("MusterSnapshotTruncated") != SnapshotTruncated ||
+	if len(defs) != 2 || defs[0] != HeartbeatLost || defs[1] != SnapshotTruncated ||
+		Lookup("MusterSnapshotTruncated") != SnapshotTruncated || Lookup("MusterHeartbeatLost") != HeartbeatLost ||
 		Lookup("MusterUnknown") != nil {
 		t.Errorf("registry %v", defs)
+	}
+	if h := HeartbeatLost; h.Severity != SeverityCritical || !h.StaticLabels || h.Capability != "C-07" ||
+		!slices.Equal(h.Labels(), []string{"integration", "integration_name"}) {
+		t.Errorf("MusterHeartbeatLost = %+v", h)
 	}
 	d := SnapshotTruncated
 	if d.Severity != SeverityWarning || !slices.Equal(d.Labels(), []string{"integration", "integration_name"}) ||
@@ -122,13 +127,15 @@ func TestRegistryChecks(t *testing.T) {
 		{Name: "MusterQuiet", Severity: SeverityCritical},
 		text(&Definition{Name: "MusterGood", Severity: SeverityCritical, Entity: EntityDestination,
 			NameLabel: "destination_name", Extra: []string{"template"}}),
+		text(&Definition{Name: "MusterStatic", Severity: SeverityCritical, Entity: EntityRoute,
+			NameLabel: "route_name", StaticLabels: true}),
 	}
 	defs, err := Definitions()
 	for _, want := range []string{`"Bad": the name is not`, `"MusterTwice" is registered twice`,
 		`"MusterTwice": unknown severity "page"`, `"MusterNameless": a name label without an entity`,
 		`"MusterRoute": the name label of route is route_name`, `"MusterThing": unknown entity "thing"`,
 		`"MusterLabels": invalid label "severity"`, `"MusterLabels": a label is listed twice`,
-		`"MusterQuiet": condition, summary`} {
+		`"MusterQuiet": condition, summary`, `"MusterStatic": Static labels need the integration entity`} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("error %v lacks %q", err, want)
 		}
@@ -138,6 +145,28 @@ func TestRegistryChecks(t *testing.T) {
 	}
 	if len(defs) != len(registry) || defs[0].Name != "Bad" {
 		t.Errorf("sorted %v", defs)
+	}
+}
+
+// TestRaiseWithStaticLabels covers C-07.FR-4 on the raise: MusterHeartbeatLost carries the Integration's Static
+// labels, its own labels winning over a Static label of the same name, and its fingerprint is that of alertname and
+// the Integration's id alone.
+func TestRaiseWithStaticLabels(t *testing.T) {
+	q := newFake()
+	r := NewRaiser(1, "")
+	static := map[string]string{"env": "prod", "severity": "low", "integration": "other", "integration_name": "x",
+		"alertname": "Other"}
+	if err := r.Raise(t.Context(), q, t0, HeartbeatLost, Entity{ID: "NTAAAAAAAAAAAA", Name: "hb"},
+		static); err != nil {
+		t.Fatal(err)
+	}
+	a := q.read(t, 0).Alerts[0]
+	want := map[string]string{"alertname": "MusterHeartbeatLost", "severity": "critical",
+		"integration": "NTAAAAAAAAAAAA", "integration_name": "hb", "env": "prod"}
+	if !mapsEqual(a.Labels, want) || a.Fingerprint != Fingerprint(HeartbeatLost, map[string]string{
+		"integration": "NTAAAAAAAAAAAA"}) || a.Annotations["summary"] != "No Heartbeat from the Alertmanager of "+
+		"Integration hb" || a.Annotations["runbook_url"] != DefaultRunbookBase+"/operations/runbooks/MusterHeartbeatLost/" {
+		t.Errorf("alert %+v", a)
 	}
 }
 

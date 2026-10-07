@@ -208,6 +208,40 @@ func (q *Queries) EnsureIngestClaims(ctx context.Context, arg EnsureIngestClaims
 	return err
 }
 
+const expireTruncation = `-- name: ExpireTruncation :execrows
+UPDATE alertmanager_groups g
+SET truncated = false, truncated_since = NULL
+FROM alertmanager_routes r
+WHERE g.org_id = $1 AND g.integration_id = $2 AND g.truncated
+  AND r.org_id = $1 AND r.id = g.alertmanager_route_id
+  AND g.last_snapshot_clock_ms + coalesce(r.learned_repeat_interval_ms * $3::bigint, $4::bigint)
+      < $5::bigint
+`
+
+type ExpireTruncationParams struct {
+	OrgID         int64
+	IntegrationID int64
+	Factor        int64
+	UnlearnedMs   int64
+	ClockMs       int64
+}
+
+// ExpireTruncation ends the truncation of the groupKeys of an Integration whose last Snapshot is more than
+// stale_after of their Alertmanager route behind the liveness clock @clock_ms (C-06.FR-6), and returns how many ended.
+func (q *Queries) ExpireTruncation(ctx context.Context, arg ExpireTruncationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, expireTruncation,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.Factor,
+		arg.UnlearnedMs,
+		arg.ClockMs,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const findReplayIntegration = `-- name: FindReplayIntegration :one
 SELECT id, public_id, name
 FROM integrations
@@ -443,6 +477,29 @@ func (q *Queries) GetStoredSnapshot(ctx context.Context, arg GetStoredSnapshotPa
 	return i, err
 }
 
+const hasPendingSnapshots = `-- name: HasPendingSnapshots :one
+SELECT EXISTS (SELECT 1
+               FROM stored_snapshots
+               WHERE org_id = $1 AND integration_id = $2 AND state = 'pending'
+                 AND received_at >= $3::timestamptz)::boolean AS pending
+`
+
+type HasPendingSnapshotsParams struct {
+	OrgID         int64
+	IntegrationID int64
+	Horizon       time.Time
+}
+
+// HasPendingSnapshots reports whether an Integration has Stored Snapshots received since @horizon that wait for
+// processing; the Stale scan leaves such an Integration to the next run, so that it never resolves an Alert that a
+// Snapshot waiting in the queue still lists.
+func (q *Queries) HasPendingSnapshots(ctx context.Context, arg HasPendingSnapshotsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPendingSnapshots, arg.OrgID, arg.IntegrationID, arg.Horizon)
+	var pending bool
+	err := row.Scan(&pending)
+	return pending, err
+}
+
 const insertAlerts = `-- name: InsertAlerts :many
 INSERT INTO alerts (
     org_id, integration_id, fingerprint, labels, annotations, generator_url, static_label_conflicts, status,
@@ -654,6 +711,35 @@ func (q *Queries) ListAlertmanagerRoutes(ctx context.Context, arg ListAlertmanag
 	return items, nil
 }
 
+const listLiveIntegrations = `-- name: ListLiveIntegrations :many
+SELECT id
+FROM integrations
+WHERE org_id = $1 AND deleted_at IS NULL AND heartbeat_state = 'live' AND NOT builtin
+ORDER BY id
+`
+
+// ListLiveIntegrations lists the Integrations whose Heartbeat is live, for the Stale scan; the built-in one never has a
+// Heartbeat.
+func (q *Queries) ListLiveIntegrations(ctx context.Context, orgID int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listLiveIntegrations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingIntegrations = `-- name: ListPendingIntegrations :many
 SELECT DISTINCT integration_id
 FROM stored_snapshots
@@ -762,6 +848,61 @@ func (q *Queries) ListSnapshotAlerts(ctx context.Context, arg ListSnapshotAlerts
 			&i.ResolveReason,
 			&i.ResolveReasonText,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStalePresences = `-- name: ListStalePresences :many
+SELECT p.alert_id, p.alertmanager_group_id
+FROM alert_presences p
+JOIN alertmanager_groups g ON g.org_id = $1 AND g.id = p.alertmanager_group_id
+JOIN alertmanager_routes r ON r.org_id = $1 AND r.id = g.alertmanager_route_id
+WHERE p.org_id = $1 AND p.integration_id = $2 AND p.state IN ('listed', 'missed')
+  AND CASE WHEN g.truncated THEN greatest(p.last_seen_clock_ms, g.last_snapshot_clock_ms)
+           ELSE p.last_seen_clock_ms END
+      + coalesce(r.learned_repeat_interval_ms * $3::bigint, $4::bigint) < $5::bigint
+ORDER BY p.alert_id, p.alertmanager_group_id
+`
+
+type ListStalePresencesParams struct {
+	OrgID         int64
+	IntegrationID int64
+	Factor        int64
+	UnlearnedMs   int64
+	ClockMs       int64
+}
+
+type ListStalePresencesRow struct {
+	AlertID             int64
+	AlertmanagerGroupID int64
+}
+
+// ListStalePresences lists the active presences of an Integration that are Stale at the liveness clock @clock_ms: the
+// clock is more than stale_after of their Alertmanager route past their reference, which is the clock when they were
+// last listed or, while their groupKey is truncated, the clock at its last Snapshot. stale_after is @factor learned
+// repeat intervals, or @unlearned_ms before one is learned.
+func (q *Queries) ListStalePresences(ctx context.Context, arg ListStalePresencesParams) ([]ListStalePresencesRow, error) {
+	rows, err := q.db.Query(ctx, listStalePresences,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.Factor,
+		arg.UnlearnedMs,
+		arg.ClockMs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStalePresencesRow{}
+	for rows.Next() {
+		var i ListStalePresencesRow
+		if err := rows.Scan(&i.AlertID, &i.AlertmanagerGroupID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1273,6 +1414,26 @@ func (q *Queries) MarkPresencesMissed(ctx context.Context, arg MarkPresencesMiss
 	return err
 }
 
+const markPresencesStale = `-- name: MarkPresencesStale :exec
+UPDATE alert_presences p
+SET state = 'stale', missed_since = NULL
+WHERE p.org_id = $1 AND p.state IN ('listed', 'missed')
+  AND (p.alert_id, p.alertmanager_group_id) IN (SELECT unnest($2::bigint[]),
+                                                       unnest($3::bigint[]))
+`
+
+type MarkPresencesStaleParams struct {
+	OrgID                int64
+	AlertIds             []int64
+	AlertmanagerGroupIds []int64
+}
+
+// MarkPresencesStale makes active presences, given as parallel arrays of Alert and Alertmanager group ids, Stale.
+func (q *Queries) MarkPresencesStale(ctx context.Context, arg MarkPresencesStaleParams) error {
+	_, err := q.db.Exec(ctx, markPresencesStale, arg.OrgID, arg.AlertIds, arg.AlertmanagerGroupIds)
+	return err
+}
+
 const nextPendingSnapshot = `-- name: NextPendingSnapshot :one
 SELECT s.id, s.public_id, s.received_at, s.source, b.body
 FROM stored_snapshots s
@@ -1350,7 +1511,8 @@ SET lease_until = $1
 FROM integrations i
 WHERE c.org_id = $2 AND c.integration_id = $3 AND c.lease_owner = $4
   AND i.org_id = $2 AND i.id = c.integration_id
-RETURNING i.public_id, i.name, i.static_labels, i.duplicate_window_seconds, i.liveness_clock_ms, i.deleted_at
+RETURNING i.public_id, i.name, i.builtin, i.static_labels, i.duplicate_window_seconds, i.liveness_clock_ms,
+    i.heartbeat_state, i.heartbeat_last_signal_at, i.heartbeat_timeout_seconds, i.deleted_at
 `
 
 type RenewIngestLeaseParams struct {
@@ -1361,12 +1523,16 @@ type RenewIngestLeaseParams struct {
 }
 
 type RenewIngestLeaseRow struct {
-	PublicID               string
-	Name                   string
-	StaticLabels           []byte
-	DuplicateWindowSeconds int64
-	LivenessClockMs        int64
-	DeletedAt              pgtype.Timestamptz
+	PublicID                string
+	Name                    string
+	Builtin                 bool
+	StaticLabels            []byte
+	DuplicateWindowSeconds  int64
+	LivenessClockMs         int64
+	HeartbeatState          string
+	HeartbeatLastSignalAt   pgtype.Timestamptz
+	HeartbeatTimeoutSeconds int64
+	DeletedAt               pgtype.Timestamptz
 }
 
 // RenewIngestLease extends the lease this replica holds and locks the claim row until the Snapshot's transaction
@@ -1383,9 +1549,13 @@ func (q *Queries) RenewIngestLease(ctx context.Context, arg RenewIngestLeasePara
 	err := row.Scan(
 		&i.PublicID,
 		&i.Name,
+		&i.Builtin,
 		&i.StaticLabels,
 		&i.DuplicateWindowSeconds,
 		&i.LivenessClockMs,
+		&i.HeartbeatState,
+		&i.HeartbeatLastSignalAt,
+		&i.HeartbeatTimeoutSeconds,
 		&i.DeletedAt,
 	)
 	return i, err
@@ -1472,6 +1642,62 @@ func (q *Queries) ResolveIntegrationAlerts(ctx context.Context, arg ResolveInteg
 	items := []ResolveIntegrationAlertsRow{}
 	for rows.Next() {
 		var i ResolveIntegrationAlertsRow
+		if err := rows.Scan(&i.ID, &i.Fingerprint, &i.Episode); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveStaleAlerts = `-- name: ResolveStaleAlerts :many
+UPDATE alerts a
+SET status = 'resolved', resolved_at = $1::timestamptz, resolve_reason = 'stale',
+    resolve_reason_text = $2::text, updated_at = $3::timestamptz
+WHERE a.org_id = $4 AND a.integration_id = $5 AND a.id = ANY($6::bigint[])
+  AND a.status = 'firing'
+  AND NOT EXISTS (SELECT 1
+                  FROM alert_presences o
+                  WHERE o.org_id = $4 AND o.alert_id = a.id AND o.state IN ('listed', 'missed'))
+RETURNING a.id, a.fingerprint, a.episode
+`
+
+type ResolveStaleAlertsParams struct {
+	ResolvedAt    time.Time
+	ReasonText    string
+	UpdatedAt     time.Time
+	OrgID         int64
+	IntegrationID int64
+	AlertIds      []int64
+}
+
+type ResolveStaleAlertsRow struct {
+	ID          int64
+	Fingerprint string
+	Episode     int64
+}
+
+// ResolveStaleAlerts resolves, with the reason stale, the firing Alerts among @alert_ids that have no active presence
+// left (C-06.FR-7), and returns them.
+func (q *Queries) ResolveStaleAlerts(ctx context.Context, arg ResolveStaleAlertsParams) ([]ResolveStaleAlertsRow, error) {
+	rows, err := q.db.Query(ctx, resolveStaleAlerts,
+		arg.ResolvedAt,
+		arg.ReasonText,
+		arg.UpdatedAt,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.AlertIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveStaleAlertsRow{}
+	for rows.Next() {
+		var i ResolveStaleAlertsRow
 		if err := rows.Scan(&i.ID, &i.Fingerprint, &i.Episode); err != nil {
 			return nil, err
 		}

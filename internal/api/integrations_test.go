@@ -67,15 +67,16 @@ func (f *fakeIntegrations) Get(_ context.Context, id string) (integrations.Integ
 func (f *fakeIntegrations) Create(_ context.Context, r integrations.Requester, in integrations.Input) (
 	integrations.Integration, error) {
 	f.by, f.inputs = append(f.by, r), append(f.inputs, in)
-	if in.Heartbeat.Enabled {
-		return integrations.Integration{}, &integrations.FieldError{Pointer: "/heartbeat/enabled",
-			Code: integrations.CodeUnsupported, Detail: "The Heartbeat cannot be switched on yet."}
-	}
 	if in.Name == "taken" {
 		return integrations.Integration{}, integrations.ErrNameTaken
 	}
 	out := f.in
 	out.Name, out.StaticLabels = in.Name, in.StaticLabels
+	if in.Heartbeat.Enabled {
+		out.Heartbeat = integrations.Heartbeat{Enabled: true, TimeoutSeconds: *in.Heartbeat.TimeoutSeconds,
+			State: "waiting"}
+		out.Warnings = []integrations.Warning{{Kind: integrations.WarningHeartbeatWaiting}}
+	}
 	return out, f.err
 }
 
@@ -110,7 +111,8 @@ func (f *fakeIntegrations) CreateToken(_ context.Context, r integrations.Request
 	f.by, f.names = append(f.by, r), append(f.names, name)
 	t := integrations.Token{ID: 9, PublicID: "NKAAAAAAAAAAAA", Name: name, CreatedAt: t0}
 	return integrations.CreatedToken{Token: t, Value: "mstr_int_new",
-		Snippet: integrations.Snippet("prod-eu", f.IngestURL(), "mstr_int_new")}, f.err
+		Snippet: integrations.Snippet("prod-eu", f.IngestURL(), "mstr_int_new"), Integration: f.in.Name,
+		Heartbeat: f.in.Heartbeat.Enabled}, f.err
 }
 
 func (f *fakeIntegrations) RevokeToken(_ context.Context, r integrations.Requester, _, tokenID string) error {
@@ -177,12 +179,12 @@ func TestIntegrationsAPI(t *testing.T) {
 	}
 	a = x.mutate(t, adminCookie, http.MethodPost, "/api/v1/integrations",
 		strings.Replace(integrationBody, `"enabled":false}`, `"enabled":true,"timeout_seconds":60}`, 1))
-	var p struct {
-		Errors []struct{ Pointer, Code string } `json:"errors"`
-	}
-	decodeInto(t, a, &p)
-	if a.status != http.StatusUnprocessableEntity || len(p.Errors) != 1 || p.Errors[0].Pointer != "/heartbeat/enabled" ||
-		p.Errors[0].Code != "unsupported" || *fi.inputs[1].Heartbeat.TimeoutSeconds != 60 {
+	var on gen.Integration
+	decodeInto(t, a, &on)
+	if a.status != http.StatusCreated || !fi.inputs[1].Heartbeat.Enabled || *fi.inputs[1].Heartbeat.TimeoutSeconds != 60 ||
+		!on.Heartbeat.Enabled || on.Heartbeat.State != gen.Waiting || on.Heartbeat.TimeoutSeconds != 60 ||
+		len(on.Warnings) != 1 || on.Warnings[0].Kind != gen.IntegrationWarningKindHeartbeatWaiting ||
+		on.Warnings[0].Since.IsSpecified() {
 		t.Errorf("heartbeat on = %d %s", a.status, a.body)
 	}
 	a = x.mutate(t, adminCookie, http.MethodPost, "/api/v1/integrations",
@@ -296,6 +298,18 @@ func TestIntegrationTokensAPI(t *testing.T) {
 	if a = x.mutate(t, adminCookie, http.MethodPost, path, ""); a.status != http.StatusCreated || fi.names[1] != "" {
 		t.Errorf("create without a body = %d %s", a.status, a.body)
 	}
+	// C-07.FR-6: with the Heartbeat on, the Heartbeat snippet carries the token too.
+	fi.in.Heartbeat.Enabled = true
+	a = x.mutate(t, adminCookie, http.MethodPost, path, `{"name":"hb"}`)
+	m = a.json(t)
+	hb, _ := m["heartbeat_snippet"].(string)
+	if a.status != http.StatusCreated || !strings.Contains(hb, "expr: vector(1)") ||
+		!strings.Contains(hb, "repeat_interval: 1m") || !strings.Contains(hb, "- url: http://localhost:8081/api/v1/heartbeat\n") ||
+		!strings.Contains(hb, "credentials: mstr_int_new") ||
+		!strings.Contains(hb, "send_resolved: false") {
+		t.Errorf("heartbeat snippet = %d %s", a.status, a.body)
+	}
+	fi.in.Heartbeat.Enabled = false
 	used := t0
 	fi.tokens = []integrations.Token{{PublicID: "NKAAAAAAAAAAAA", Name: "rotation-1", CreatedAt: t0, LastUsedAt: &used},
 		{PublicID: "NKBBBBBBBBBBBB", CreatedAt: t0}}
@@ -530,12 +544,19 @@ func decodeInto(t *testing.T, a answer, v any) {
 func TestBuiltinAndWarningsAPI(t *testing.T) {
 	x, fi, _ := newIntegrationsAPI(t)
 	fi.in.Builtin = true
+	since := t0.Add(-time.Hour)
 	fi.in.Warnings = []integrations.Warning{{Kind: integrations.WarningSnapshotTruncated, TruncatedGroupCount: 1},
-		{Kind: integrations.WarningLongRepeatInterval, RoutePath: `{}/{kind="info"}`, RepeatIntervalSeconds: 7200}}
+		{Kind: integrations.WarningLongRepeatInterval, RoutePath: `{}/{kind="info"}`, RepeatIntervalSeconds: 7200},
+		{Kind: integrations.WarningHeartbeatLost, Since: &since}}
 	a := x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID, "", "Cookie", viewerCookie)
 	var got gen.Integration
 	decodeInto(t, a, &got)
-	if a.status != http.StatusOK || !got.Builtin || len(got.Warnings) != 2 ||
+	if a.status != http.StatusOK || len(got.Warnings) != 3 || got.Warnings[2].Kind != gen.IntegrationWarningKindHeartbeatLost ||
+		!got.Warnings[2].Since.MustGet().Equal(since) || got.Warnings[2].RoutePath.IsSpecified() ||
+		got.Warnings[0].Since.IsSpecified() {
+		t.Errorf("heartbeat warning = %d %s", a.status, a.body)
+	}
+	if a.status != http.StatusOK || !got.Builtin ||
 		got.Warnings[0].Kind != gen.IntegrationWarningKindSnapshotTruncated ||
 		got.Warnings[0].TruncatedGroupCount.MustGet() != 1 || got.Warnings[0].RoutePath.IsSpecified() ||
 		got.Warnings[1].RoutePath.MustGet() != `{}/{kind="info"}` || got.Warnings[1].RepeatIntervalSeconds.MustGet() != 7200 ||

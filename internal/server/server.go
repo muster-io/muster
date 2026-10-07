@@ -31,11 +31,27 @@ const (
 func IsIngestPath(p string) bool {
 	switch {
 	case p == "/api/v1/ingest", strings.HasPrefix(p, "/api/v1/ingest/"),
-		p == "/api/v1/heartbeat", strings.HasPrefix(p, "/api/v1/heartbeat/"),
-		strings.HasPrefix(p, "/api/v1/callbacks/"):
+		IsHeartbeatPath(p), strings.HasPrefix(p, "/api/v1/callbacks/"):
 		return true
 	}
 	return false
+}
+
+// IsHeartbeatPath reports whether p is the Heartbeat endpoint, with or without a token in the path.
+func IsHeartbeatPath(p string) bool {
+	return p == "/api/v1/heartbeat" || strings.HasPrefix(p, "/api/v1/heartbeat/")
+}
+
+// Ingest is the handler of the ingest listener: heartbeat serves the Heartbeat endpoint and ingest everything else,
+// ingestion and the messenger callbacks.
+func Ingest(ingest, heartbeat http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if IsHeartbeatPath(r.URL.Path) {
+			heartbeat.ServeHTTP(w, r)
+			return
+		}
+		ingest.ServeHTTP(w, r)
+	})
 }
 
 // Merge routes the ingest paths to ingest and every other path to app, for one port that serves both.

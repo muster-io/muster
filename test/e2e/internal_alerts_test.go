@@ -142,6 +142,13 @@ func TestInternalAlerts(t *testing.T) {
 		return page.Items
 	}
 
+	// The Internal alerts about lab: the demo Integration's MusterHeartbeatLost may come and go meanwhile, because the
+	// development clock jumps further than its Heartbeat timeout.
+	internal := func(query string) []alert {
+		t.Helper()
+		return alerts(builtin, query+"&label="+url.QueryEscape(`integration="`+id+`"`))
+	}
+
 	// C-06.AC-5: truncation raises MusterSnapshotTruncated, once.
 	put("/groups/g2", `{"receiver":"lab","route":"{}","labels":{"alertname":"PodDown"}}`)
 	for _, i := range "0123456789" {
@@ -149,7 +156,7 @@ func TestInternalAlerts(t *testing.T) {
 	}
 	notify("g2", `{"reason":"first notification"}`)
 	notify("g2", `{"reason":"repeat interval elapsed","max_alerts":2}`)
-	firing := alerts(builtin, "state=firing")
+	firing := internal("state=firing")
 	if len(firing) != 1 || firing[0].Labels["alertname"] != "MusterSnapshotTruncated" ||
 		firing[0].Labels["integration"] != id || firing[0].Labels["integration_name"] != "lab" ||
 		firing[0].Labels["severity"] != "warning" || len(firing[0].Labels) != 4 {
@@ -157,13 +164,20 @@ func TestInternalAlerts(t *testing.T) {
 	}
 	fingerprint := firing[0].Fingerprint
 	warnings := admin.json(http.MethodGet, "/api/v1/integrations/"+id, "", http.StatusOK)["warnings"].([]any)
-	if len(warnings) != 1 || warnings[0].(map[string]any)["kind"] != "snapshot_truncated" ||
-		warnings[0].(map[string]any)["truncated_group_count"] != 1.0 {
+	if len(warnings) != 2 || warnings[0].(map[string]any)["kind"] != "heartbeat_not_configured" ||
+		warnings[1].(map[string]any)["kind"] != "snapshot_truncated" ||
+		warnings[1].(map[string]any)["truncated_group_count"] != 1.0 {
 		t.Errorf("warnings %v", warnings)
 	}
 	snapshots := func() []any {
-		return admin.json(http.MethodGet, "/api/v1/stored-snapshots?integration="+builtin, "",
-			http.StatusOK)["items"].([]any)
+		var out []any
+		for _, s := range admin.json(http.MethodGet, "/api/v1/stored-snapshots?integration="+builtin, "",
+			http.StatusOK)["items"].([]any) {
+			if key, _ := s.(map[string]any)["group_key"].(string); strings.Contains(key, "MusterSnapshotTruncated") {
+				out = append(out, s)
+			}
+		}
+		return out
 	}
 	if s := snapshots(); len(s) != 1 || s[0].(map[string]any)["state"] != "processed" ||
 		s[0].(map[string]any)["group_key"] != `{}/{muster="internal"}:{alertname="MusterSnapshotTruncated"}` {
@@ -182,12 +196,12 @@ func TestInternalAlerts(t *testing.T) {
 		t.Fatalf("rename = %d %s", a.status, a.body)
 	}
 	idle()
-	firing = alerts(builtin, "state=firing")
+	firing = internal("state=firing")
 	if len(firing) != 1 || firing[0].Fingerprint != fingerprint || firing[0].Labels["integration_name"] != "lab-eu" {
 		t.Errorf("after the rename %+v", firing)
 	}
 	notify("g2", `{"reason":"repeat interval elapsed"}`)
-	if n := len(alerts(builtin, "state=firing")); n != 0 {
+	if n := len(internal("state=firing")); n != 0 {
 		t.Errorf("%d internal alerts fire after an untruncated snapshot", n)
 	}
 
@@ -294,7 +308,7 @@ func TestInternalAlerts(t *testing.T) {
 
 	// C-06.AC-7 and C-06.AC-10: the deletion resolves the open Alerts and the Internal alert.
 	notify("g2", `{"reason":"repeat interval elapsed","max_alerts":2}`)
-	if n := len(alerts(builtin, "state=firing")); n != 1 {
+	if n := len(internal("state=firing")); n != 1 {
 		t.Fatalf("%d internal alerts fire", n)
 	}
 	open := len(alerts(id, "state=firing&limit=500"))
@@ -322,7 +336,7 @@ func TestInternalAlerts(t *testing.T) {
 		}
 		return total-deleted0 == open
 	})
-	if n := len(alerts(builtin, "state=firing")); n != 0 {
+	if n := len(internal("state=firing")); n != 0 {
 		t.Errorf("%d internal alerts fire after the deletion", n)
 	}
 }

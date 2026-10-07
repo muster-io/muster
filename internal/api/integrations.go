@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/heartbeat"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/matchers"
@@ -148,7 +149,8 @@ func (s *Server) ListIntegrationTokens(ctx context.Context, req gen.ListIntegrat
 	return gen.ListIntegrationTokens200JSONResponse(out), nil
 }
 
-// CreateIntegrationToken is createIntegrationToken: the value and the Alertmanager snippet, shown this once.
+// CreateIntegrationToken is createIntegrationToken: the value and the Alertmanager snippet, and the Heartbeat snippet
+// while the Integration's Heartbeat is on, shown this once.
 func (s *Server) CreateIntegrationToken(ctx context.Context, req gen.CreateIntegrationTokenRequestObject) (
 	gen.CreateIntegrationTokenResponseObject, error) {
 	r, err := integrationRequester(ctx)
@@ -165,7 +167,11 @@ func (s *Server) CreateIntegrationToken(ctx context.Context, req gen.CreateInteg
 	}
 	out := gen.IntegrationTokenCreated{Token: integrationTokenOf(created.Token), Value: created.Value,
 		AlertmanagerSnippet: created.Snippet}
-	out.HeartbeatSnippet.SetNull()
+	if created.Heartbeat {
+		out.HeartbeatSnippet.Set(heartbeat.Snippet(created.Integration, s.integrations.HeartbeatURL(), created.Value))
+	} else {
+		out.HeartbeatSnippet.SetNull()
+	}
 	return gen.CreateIntegrationToken201JSONResponse(out), nil
 }
 
@@ -317,8 +323,8 @@ func integrationInputOf(in gen.IntegrationInput) integrations.Input {
 	return out
 }
 
-// integrationOf is the API form of an Integration, with the URLs of the ingest listener and its warnings. The
-// Heartbeat warnings arrive with the Heartbeat, and the count of open Alert Groups with them.
+// integrationOf is the API form of an Integration, with the URLs of the ingest listener and its warnings. The count
+// of open Alert Groups arrives with them.
 func (s *Server) integrationOf(in integrations.Integration) gen.Integration {
 	tag := etag(in.Version)
 	description, ingestURL, heartbeatURL := in.Description, s.integrations.IngestURL(), s.integrations.HeartbeatURL()
@@ -345,6 +351,10 @@ func (s *Server) integrationOf(in integrations.Integration) gen.Integration {
 		case integrations.WarningLongRepeatInterval:
 			item.RoutePath.Set(w.RoutePath)
 			item.RepeatIntervalSeconds.Set(int(w.RepeatIntervalSeconds))
+		case integrations.WarningHeartbeatLost:
+			if w.Since != nil {
+				item.Since.Set(w.Since.UTC())
+			}
 		}
 		out.Warnings = append(out.Warnings, item)
 	}

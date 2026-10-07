@@ -47,6 +47,7 @@ SELECT public_id
 FROM integrations
 WHERE org_id = @org_id AND name = @name AND deleted_at IS NULL;
 
+-- InsertIntegration creates an Integration; a Heartbeat that is on waits for its first signal.
 -- name: InsertIntegration :one
 INSERT INTO integrations (
     org_id, public_id, name, description, connection_mode, static_labels, duplicate_window_seconds,
@@ -54,15 +55,24 @@ INSERT INTO integrations (
 )
 VALUES (
     @org_id, @public_id, @name, @description, @connection_mode, @static_labels, @duplicate_window_seconds,
-    false, @heartbeat_timeout_seconds, 'not_configured', @now::timestamptz, @now::timestamptz
+    @heartbeat_enabled::boolean, @heartbeat_timeout_seconds,
+    CASE WHEN @heartbeat_enabled::boolean THEN 'waiting' ELSE 'not_configured' END, @now::timestamptz,
+    @now::timestamptz
 )
 RETURNING id;
 
--- UpdateIntegration replaces the configured fields; the runtime state (Heartbeat state, counters) is left alone.
+-- UpdateIntegration replaces the configured fields. The Heartbeat state follows its setting (C-07.FR-3): turned on
+-- from not_configured it waits for the first signal, turned off it is not_configured and no longer lost; otherwise the
+-- runtime state (Heartbeat state, liveness clock, counters) is left alone.
 -- name: UpdateIntegration :exec
 UPDATE integrations
 SET name = @name, description = @description, static_labels = @static_labels,
-    duplicate_window_seconds = @duplicate_window_seconds, heartbeat_timeout_seconds = @heartbeat_timeout_seconds,
+    duplicate_window_seconds = @duplicate_window_seconds, heartbeat_enabled = @heartbeat_enabled::boolean,
+    heartbeat_timeout_seconds = @heartbeat_timeout_seconds,
+    heartbeat_state = CASE WHEN NOT @heartbeat_enabled::boolean THEN 'not_configured'
+                           WHEN heartbeat_state = 'not_configured' THEN 'waiting'
+                           ELSE heartbeat_state END,
+    heartbeat_lost_since = CASE WHEN @heartbeat_enabled::boolean THEN heartbeat_lost_since END,
     updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 

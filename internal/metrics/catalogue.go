@@ -242,6 +242,17 @@ var IngestResolvedDropped = newCounter(Definition{
 	Capability: "C-06",
 })
 
+// HeartbeatLost is 1 while the Heartbeat of an Integration is lost and 0 while it is on and not lost, exported by the
+// Leader, whose Heartbeat check sets it (C-07.FR-8).
+var HeartbeatLost = newGauge(Definition{
+	Name: "muster_heartbeat_lost",
+	Help: "1 while the Integration is Heartbeat lost, 0 while its Heartbeat is on and not lost; set by the Leader's " +
+		"Heartbeat check.",
+	Labels:     []Label{entity("integration")},
+	Capability: "C-07",
+	LeaderOnly: true,
+})
+
 // IntegrationInfo is 1 for every Integration that is not deleted; its labels carry the Integration's name.
 var IntegrationInfo = newGauge(Definition{
 	Name: "muster_integration_info",

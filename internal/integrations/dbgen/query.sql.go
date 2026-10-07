@@ -267,7 +267,9 @@ INSERT INTO integrations (
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    false, $8, 'not_configured', $9::timestamptz, $9::timestamptz
+    $8::boolean, $9,
+    CASE WHEN $8::boolean THEN 'waiting' ELSE 'not_configured' END, $10::timestamptz,
+    $10::timestamptz
 )
 RETURNING id
 `
@@ -280,10 +282,12 @@ type InsertIntegrationParams struct {
 	ConnectionMode          string
 	StaticLabels            []byte
 	DuplicateWindowSeconds  int64
+	HeartbeatEnabled        bool
 	HeartbeatTimeoutSeconds int64
 	Now                     time.Time
 }
 
+// InsertIntegration creates an Integration; a Heartbeat that is on waits for its first signal.
 func (q *Queries) InsertIntegration(ctx context.Context, arg InsertIntegrationParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertIntegration,
 		arg.OrgID,
@@ -293,6 +297,7 @@ func (q *Queries) InsertIntegration(ctx context.Context, arg InsertIntegrationPa
 		arg.ConnectionMode,
 		arg.StaticLabels,
 		arg.DuplicateWindowSeconds,
+		arg.HeartbeatEnabled,
 		arg.HeartbeatTimeoutSeconds,
 		arg.Now,
 	)
@@ -665,9 +670,14 @@ func (q *Queries) TouchIntegrationToken(ctx context.Context, arg TouchIntegratio
 const updateIntegration = `-- name: UpdateIntegration :exec
 UPDATE integrations
 SET name = $1, description = $2, static_labels = $3,
-    duplicate_window_seconds = $4, heartbeat_timeout_seconds = $5,
-    updated_at = $6::timestamptz, version = version + 1
-WHERE org_id = $7 AND id = $8
+    duplicate_window_seconds = $4, heartbeat_enabled = $5::boolean,
+    heartbeat_timeout_seconds = $6,
+    heartbeat_state = CASE WHEN NOT $5::boolean THEN 'not_configured'
+                           WHEN heartbeat_state = 'not_configured' THEN 'waiting'
+                           ELSE heartbeat_state END,
+    heartbeat_lost_since = CASE WHEN $5::boolean THEN heartbeat_lost_since END,
+    updated_at = $7::timestamptz, version = version + 1
+WHERE org_id = $8 AND id = $9
 `
 
 type UpdateIntegrationParams struct {
@@ -675,19 +685,23 @@ type UpdateIntegrationParams struct {
 	Description             string
 	StaticLabels            []byte
 	DuplicateWindowSeconds  int64
+	HeartbeatEnabled        bool
 	HeartbeatTimeoutSeconds int64
 	Now                     time.Time
 	OrgID                   int64
 	ID                      int64
 }
 
-// UpdateIntegration replaces the configured fields; the runtime state (Heartbeat state, counters) is left alone.
+// UpdateIntegration replaces the configured fields. The Heartbeat state follows its setting (C-07.FR-3): turned on
+// from not_configured it waits for the first signal, turned off it is not_configured and no longer lost; otherwise the
+// runtime state (Heartbeat state, liveness clock, counters) is left alone.
 func (q *Queries) UpdateIntegration(ctx context.Context, arg UpdateIntegrationParams) error {
 	_, err := q.db.Exec(ctx, updateIntegration,
 		arg.Name,
 		arg.Description,
 		arg.StaticLabels,
 		arg.DuplicateWindowSeconds,
+		arg.HeartbeatEnabled,
 		arg.HeartbeatTimeoutSeconds,
 		arg.Now,
 		arg.OrgID,

@@ -180,8 +180,8 @@ func TestIntegrationSnapshotTruncated(t *testing.T) {
 			t.Errorf("internal snapshots after the raise = %d", n)
 		}
 		got, err := e.ints.Get(ctx, lab.PublicID)
-		if err != nil || len(got.Warnings) != 1 || got.Warnings[0].Kind != integrations.WarningSnapshotTruncated ||
-			got.Warnings[0].TruncatedGroupCount != 1 {
+		if err != nil || len(got.Warnings) != 2 || got.Warnings[0].Kind != integrations.WarningHeartbeatNotConfigured ||
+			got.Warnings[1].Kind != integrations.WarningSnapshotTruncated || got.Warnings[1].TruncatedGroupCount != 1 {
 			t.Errorf("warnings = %+v, %v", got.Warnings, err)
 		}
 
@@ -502,8 +502,9 @@ func TestIntegrationRoutesAndRetention(t *testing.T) {
 			t.Errorf("info route = %+v\n%s", c, c.RecommendedSnippet)
 		}
 		got, err := e.ints.Get(ctx, in.PublicID)
-		if err != nil || len(got.Warnings) != 1 || got.Warnings[0] != (integrations.Warning{
-			Kind: integrations.WarningLongRepeatInterval, RoutePath: `{}/{kind="info"}`, RepeatIntervalSeconds: 7200}) {
+		if err != nil || len(got.Warnings) != 2 || got.Warnings[0].Kind != integrations.WarningHeartbeatNotConfigured ||
+			got.Warnings[1] != (integrations.Warning{Kind: integrations.WarningLongRepeatInterval,
+				RoutePath: `{}/{kind="info"}`, RepeatIntervalSeconds: 7200}) {
 			t.Errorf("warnings = %+v, %v", got.Warnings, err)
 		}
 

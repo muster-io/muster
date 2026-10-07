@@ -296,7 +296,7 @@ func (k *Keeper) release(ctx context.Context) {
 	k.closeSession(ctx)
 }
 
-// runTask runs t at once, then at every interval, until ctx ends.
+// runTask runs t at once, then at every interval and whenever it is woken, until ctx ends.
 func (k *Keeper) runTask(ctx context.Context, t Task) {
 	ticks, stop := k.every(t.Every)
 	defer stop()
@@ -308,6 +308,7 @@ func (k *Keeper) runTask(ctx context.Context, t Task) {
 		case <-ctx.Done():
 			return
 		case <-ticks:
+		case <-t.Wake:
 		}
 	}
 }

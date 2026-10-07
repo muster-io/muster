@@ -28,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/heartbeat"
 	"github.com/muster-io/muster/internal/ingest"
 	ingestdb "github.com/muster-io/muster/internal/ingest/dbgen"
 	"github.com/muster-io/muster/internal/integrations"
@@ -327,6 +328,8 @@ func (f *fakeDB) TokensStore() tokens.Store { return nil }
 func (f *fakeDB) IntegrationsStore() integrations.Store { return &f.integ }
 
 func (f *fakeDB) IngestStore() ingest.Store { return nil }
+
+func (f *fakeDB) HeartbeatStore() heartbeat.Store { return nil }
 
 // ProcessStore has no pending Stored Snapshots.
 func (f *fakeDB) ProcessStore() ingest.ProcessStore { return fakeProcessStore{} }

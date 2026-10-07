@@ -48,11 +48,14 @@ type Token struct {
 }
 
 // CreatedToken is a token that was just issued, with its value and the Alertmanager snippet that carries it, which
-// are shown this once.
+// are shown this once. Integration is the name of its Integration, and Heartbeat whether that Integration's Heartbeat
+// is on, so that the Heartbeat snippet can carry the token too.
 type CreatedToken struct {
-	Token   Token
-	Value   string
-	Snippet string
+	Token       Token
+	Value       string
+	Snippet     string
+	Integration string
+	Heartbeat   bool
 }
 
 // Caller is who sends an ingestion request: the token and its Integration.
@@ -223,7 +226,8 @@ func (s *Service) CreateToken(ctx context.Context, r Requester, publicID, name s
 	if err != nil {
 		return CreatedToken{}, err
 	}
-	return CreatedToken{Token: t, Value: value, Snippet: Snippet(in.Name, s.IngestURL(), value)}, nil
+	return CreatedToken{Token: t, Value: value, Snippet: Snippet(in.Name, s.IngestURL(), value), Integration: in.Name,
+		Heartbeat: in.Heartbeat.Enabled}, nil
 }
 
 // RevokeToken revokes the token tokenID of the Integration publicID: it answers 401 from the next request. A token of
