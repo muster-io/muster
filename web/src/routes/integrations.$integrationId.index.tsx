@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// An Integration's page (C-05.FR-1, FR-2, FR-7, FR-8, C-06.FR-14, FR-18, FR-19): the details with the Connection mode
-// and its precision, the Static labels and the duplicate window; the last Snapshot and the number received; the
-// tokens; the warnings; the learned Alertmanager routes; the Alerts view for alerts:read; the Stored Snapshots for
-// stored-snapshots:read; Edit and Delete for integrations:write. The built-in Integration "Muster" shows only what it
+// An Integration's page (C-05.FR-1, FR-2, FR-7, FR-8, C-06.FR-14, FR-18, FR-19, C-07.FR-3, FR-5): the Heartbeat state
+// beside the name and its banner; the details with the Connection mode and its precision, the Static labels and the
+// duplicate window; the last Snapshot and the number received; the tokens; the warnings; the learned Alertmanager
+// routes; the Alerts view for alerts:read; the Stored Snapshots for stored-snapshots:read; Edit and Delete for
+// integrations:write. The built-in Integration "Muster" shows only what it
 // is, its Alerts view and its Stored Snapshots.
 
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -19,9 +20,10 @@ import { RequirePermission, useCan } from "../components/app-shell";
 import { IntegrationAlerts } from "../components/integration-alerts";
 import { type AlertSearch, alertSearchSchema } from "../components/integration-alerts-search";
 import { IntegrationDeleteDialog } from "../components/integration-delete-dialog";
+import { HeartbeatBadge } from "../components/heartbeat-badge";
 import { BuiltinBadge, ConnectionMode } from "../components/integration-form";
 import { IntegrationTokens } from "../components/integration-tokens";
-import { IntegrationWarnings } from "../components/integration-warnings";
+import { HeartbeatBanner, IntegrationWarnings } from "../components/integration-warnings";
 import { type SnapshotSearch, snapshotSearchSchema } from "../components/stored-snapshot-search";
 import { StoredSnapshots } from "../components/stored-snapshots";
 import { buttonVariants } from "../components/ui/button";
@@ -164,6 +166,9 @@ function IntegrationView({ integrationId }: { integrationId: string }) {
               {integration?.name ?? t("integrations.page.title")}
             </h1>
             {integration?.builtin === true && <BuiltinBadge />}
+            {integration?.builtin === false && (
+              <HeartbeatBadge state={integration.heartbeat.state} labelled />
+            )}
           </div>
           {integration !== undefined && writable && (
             <div className="flex flex-wrap gap-2">
@@ -184,6 +189,7 @@ function IntegrationView({ integrationId }: { integrationId: string }) {
             {t("integrations.builtin.explanation")}
           </p>
         )}
+        {integration?.builtin === false && <HeartbeatBanner warnings={integration.warnings} />}
       </div>
       {integration === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">

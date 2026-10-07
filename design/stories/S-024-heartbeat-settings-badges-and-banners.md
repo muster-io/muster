@@ -12,7 +12,7 @@ files_touched:
   - web/src/components/integration-warnings.tsx
   - web/src/components/integration-token-dialog.tsx
   - web/src/routes/integrations.index.tsx
-  - web/src/routes/integrations.$integrationId.tsx
+  - web/src/routes/integrations.$integrationId.index.tsx
   - web/src/components/heartbeat-badge.test.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json

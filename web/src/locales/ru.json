@@ -183,6 +183,39 @@
     "tooShort": "Слишком короткое значение.",
     "unsupported": "Эту настройку пока нельзя изменить."
   },
+  "heartbeat": {
+    "badgeLabel": "Heartbeat:",
+    "banner": {
+      "lost": "Связи с Alertmanager нет с {{time}}. Пока она не восстановится, ничего не закрывается как устаревшее.",
+      "lostNoTime": "Связи с Alertmanager нет. Пока она не восстановится, ничего не закрывается как устаревшее.",
+      "notConfigured": "Нет Heartbeat: Muster не заметит, если Alertmanager замолчит, и закрытие устаревших алертов отключено.",
+      "waiting": "Ждём первого сигнала Heartbeat. До его прихода устаревшие алерты не закрываются."
+    },
+    "errors": {
+      "timeout": "Введите число минут больше 0."
+    },
+    "form": {
+      "enabled": "Следить за сигналами Heartbeat",
+      "hint": "Alertmanager регулярно подаёт Muster сигнал, чтобы Muster заметил, если Alertmanager замолчит. Устаревшие алерты закрываются, только пока Heartbeat на связи.",
+      "minutesUnit": "мин.",
+      "timeout": "Тайм-аут",
+      "timeoutHint": "Если сигнала нет дольше этого времени, связь по Heartbeat считается потерянной.",
+      "url": "Адрес Heartbeat",
+      "urlAfterCreate": "Адрес Heartbeat появится после создания интеграции.",
+      "urlHint": "Передайте один из токенов этой интеграции в заголовке Authorization: Bearer или допишите его к адресу как /<token>."
+    },
+    "snippet": {
+      "off": "Чтобы получить конфигурацию Heartbeat, включите Heartbeat и создайте токен.",
+      "title": "Конфигурация Heartbeat"
+    },
+    "state": {
+      "live": "На связи",
+      "lost": "Нет связи",
+      "notConfigured": "Не настроен",
+      "waiting": "Ожидание"
+    },
+    "title": "Heartbeat"
+  },
   "home": {
     "placeholder": "Здесь появятся группы алертов.",
     "title": "Добро пожаловать, {{name}}"

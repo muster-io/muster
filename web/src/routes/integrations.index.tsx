@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Integrations (C-05.FR-1, C-06.FR-14, FR-18): the list with the name, the Connection mode and the time of the last
-// Snapshot, the built-in Integration "Muster" marked "Built-in", a mark on the Integrations with warnings, and "Create
-// integration" for integrations:write.
+// Integrations (C-05.FR-1, C-06.FR-14, FR-18, C-07.FR-3): the list with the name, the Connection mode, the Heartbeat
+// state and the time of the last Snapshot, the built-in Integration "Muster" marked "Built-in" and without a Heartbeat,
+// a mark on the Integrations with warnings, and "Create integration" for integrations:write.
 
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
@@ -16,6 +16,7 @@ import {
 import type { Integration } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
+import { HeartbeatBadge } from "../components/heartbeat-badge";
 import { BuiltinBadge, connectionModeLabel } from "../components/integration-form";
 import { WarningMark } from "../components/integration-warnings";
 import { buttonVariants } from "../components/ui/button";
@@ -44,6 +45,11 @@ function NameCell({ row }: { row: Integration }) {
   );
 }
 
+/** The Heartbeat state; the built-in Integration has none. */
+function HeartbeatCell({ row }: { row: Integration }) {
+  return row.builtin ? null : <HeartbeatBadge state={row.heartbeat.state} />;
+}
+
 function LastSnapshotCell({ row }: { row: Integration }) {
   const { t } = useTranslation();
   const { dateTime } = useTimeFormat();
@@ -64,8 +70,15 @@ function IntegrationsTable() {
       {
         id: "connection_mode",
         header: t("integrations.fields.connectionMode"),
-        className: "whitespace-nowrap",
+        // L1 has one Connection mode; on a phone the column gives its room to the Heartbeat state.
+        className: "hidden whitespace-nowrap sm:table-cell",
         text: (i) => connectionModeLabel(t, i.connection_mode),
+      },
+      {
+        id: "heartbeat",
+        header: t("heartbeat.title"),
+        className: "whitespace-nowrap",
+        Cell: HeartbeatCell,
       },
       {
         id: "last_snapshot",
