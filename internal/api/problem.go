@@ -16,6 +16,7 @@ import (
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/live"
@@ -39,6 +40,7 @@ const (
 	typeNotFound             = "not-found"
 	typeConflict             = "conflict"
 	typeDefaultRoute         = "default-route-immutable"
+	typeRouteHasOpenGroups   = "route-has-open-alert-groups"
 	typeGone                 = "gone"
 	typePreconditionFailed   = "precondition-failed"
 	typePreconditionRequired = "precondition-required"
@@ -96,6 +98,7 @@ var titles = map[string]string{
 	typeNotFound:             "Not found",
 	typeConflict:             "Conflict",
 	typeDefaultRoute:         "Default route immutable",
+	typeRouteHasOpenGroups:   "Route has open Alert Groups",
 	typeGone:                 "Gone",
 	typePreconditionFailed:   "Precondition failed",
 	typePreconditionRequired: "Precondition required",
@@ -113,6 +116,8 @@ type Problem struct {
 	Detail     string
 	Errors     []gen.ProblemError
 	RetryAfter int
+	// OpenAlertGroupCount is set on route-has-open-alert-groups.
+	OpenAlertGroupCount int64
 }
 
 func (p *Problem) Error() string {
@@ -176,6 +181,10 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 	}
 	instance := r.URL.Path
 	body.Instance = &instance
+	if p.Type == typeRouteHasOpenGroups {
+		count := int(p.OpenAlertGroupCount)
+		body.OpenAlertGroupCount = &count
+	}
 	if p.RetryAfter > 0 {
 		body.RetryAfterSeconds = &p.RetryAfter
 		w.Header().Set(retryAfterHeader, strconv.Itoa(p.RetryAfter))
@@ -214,6 +223,12 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	}
 	if f, ok := errors.AsType[*routing.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
+	if o, ok := errors.AsType[*routing.OpenAlertGroupsError](err); ok {
+		p := problem(http.StatusConflict, typeRouteHasOpenGroups, "",
+			"The Route still has open Alert Groups; move them to the Default route first.")
+		p.OpenAlertGroupCount = o.Count
+		return p
 	}
 	if f, ok := errors.AsType[*users.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
@@ -273,6 +288,13 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		return problem(http.StatusConflict, typeConflict, codeSuggestionObsolete,
 			"The Route suggestion no longer applies: a Route other than the Default route takes its alerts, or it "+
 				"needs a Destination.")
+	case errors.Is(err, groups.ErrNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Alert Group.")
+	case errors.Is(err, groups.ErrRouteNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Route.")
+	case errors.Is(err, groups.ErrDefaultRoute):
+		return problem(http.StatusConflict, typeDefaultRoute, "",
+			"The Default route keeps its Alert Groups: there is nothing to move.")
 	case errors.Is(err, ingest.ErrNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Stored Snapshot, or it is past retention.")
 	case errors.Is(err, auth.ErrPasswordTooShort):

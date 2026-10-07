@@ -393,6 +393,15 @@ JOIN alertmanager_groups g ON g.org_id = @org_id AND g.id = p.alertmanager_group
 WHERE p.org_id = @org_id AND p.alert_id = ANY(@alert_ids::bigint[]) AND p.last_seen_at >= a.fired_at
 ORDER BY p.alert_id, g.group_key;
 
+-- ListViewAlertGroups names, for each Alert, the Alert Group of its latest membership: the one it fires in, or the
+-- last one it fired in (read-only: only groups writes the Alert Group tables).
+-- name: ListViewAlertGroups :many
+SELECT DISTINCT ON (m.alert_id) m.alert_id, g.public_id, g.number
+FROM alert_group_alerts m
+JOIN alert_groups g ON g.org_id = m.org_id AND g.id = m.alert_group_id
+WHERE m.org_id = @org_id AND m.alert_id = ANY(@alert_ids::bigint[])
+ORDER BY m.alert_id, m.id DESC;
+
 -- CountTruncatedGroups counts the truncated groupKeys of an Integration (MusterSnapshotTruncated).
 -- name: CountTruncatedGroups :one
 SELECT count(*)

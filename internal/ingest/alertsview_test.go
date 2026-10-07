@@ -117,6 +117,18 @@ func (f *fakeView) ListViewAlertsByStartsAtAsc(_ context.Context, arg dbgen.List
 	return out, f.fail
 }
 
+// ListViewAlertGroups names an Alert Group for the Alerts with an even id.
+func (f *fakeView) ListViewAlertGroups(_ context.Context, arg dbgen.ListViewAlertGroupsParams) (
+	[]dbgen.ListViewAlertGroupsRow, error) {
+	var out []dbgen.ListViewAlertGroupsRow
+	for _, id := range arg.AlertIds {
+		if id%2 == 0 {
+			out = append(out, dbgen.ListViewAlertGroupsRow{AlertID: id, PublicID: "AGAAAAAAAAAAAA", Number: id})
+		}
+	}
+	return out, f.fail
+}
+
 func (f *fakeView) ListViewGroupKeys(_ context.Context, arg dbgen.ListViewGroupKeysParams) (
 	[]dbgen.ListViewGroupKeysRow, error) {
 	var out []dbgen.ListViewGroupKeysRow
@@ -195,7 +207,13 @@ func TestAlertsView(t *testing.T) {
 		*a3.SeverityRaw != "P5" {
 		t.Errorf("alert 3 = %+v", a3)
 	}
+	if a3.AlertGroup != nil {
+		t.Errorf("alert 3 in alert group %+v", a3.AlertGroup)
+	}
 	a2 := all[slices.IndexFunc(all, func(a ViewAlert) bool { return a.ID == 2 })]
+	if a2.AlertGroup == nil || *a2.AlertGroup != (AlertGroupRef{PublicID: "AGAAAAAAAAAAAA", Number: 2}) {
+		t.Errorf("alert 2 in alert group %+v", a2.AlertGroup)
+	}
 	if a2.State != StatusResolved || *a2.Reason != ResolveGone || *a2.ReasonText != GoneReasonText ||
 		a2.ResolvedAt == nil || a2.Warnings == nil || a2.Route != nil || a2.SeverityLevel != nil || a2.SeverityRaw != nil {
 		t.Errorf("alert 2 = %+v", a2)

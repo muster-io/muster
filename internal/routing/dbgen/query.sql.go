@@ -34,6 +34,26 @@ func (q *Queries) BumpRouteOrder(ctx context.Context, arg BumpRouteOrderParams) 
 	return route_order_version, err
 }
 
+const countOpenAlertGroups = `-- name: CountOpenAlertGroups :one
+SELECT count(*)::bigint
+FROM alert_groups
+WHERE org_id = $1 AND route_id = $2 AND status <> 'resolved' AND moved_from_route_id IS NULL
+`
+
+type CountOpenAlertGroupsParams struct {
+	OrgID   int64
+	RouteID int64
+}
+
+// CountOpenAlertGroups counts the open Alert Groups of a Route, read-only (only groups writes alert_groups); a
+// deletion counts them after LockRoute, so that a Snapshot grouping on the Route either committed before or waits.
+func (q *Queries) CountOpenAlertGroups(ctx context.Context, arg CountOpenAlertGroupsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOpenAlertGroups, arg.OrgID, arg.RouteID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const deleteRoute = `-- name: DeleteRoute :exec
 UPDATE routes
 SET deleted_at = $1, updated_at = $1, version = version + 1
@@ -474,6 +494,39 @@ func (q *Queries) ListHeartbeatIntegrations(ctx context.Context, orgID int64) ([
 	return items, nil
 }
 
+const listOpenAlertGroupCounts = `-- name: ListOpenAlertGroupCounts :many
+SELECT route_id, count(*)::bigint AS count
+FROM alert_groups
+WHERE org_id = $1 AND status <> 'resolved' AND moved_from_route_id IS NULL
+GROUP BY route_id
+`
+
+type ListOpenAlertGroupCountsRow struct {
+	RouteID int64
+	Count   int64
+}
+
+// ListOpenAlertGroupCounts counts the open Alert Groups of each Route that has any (Route.open_alert_group_count).
+func (q *Queries) ListOpenAlertGroupCounts(ctx context.Context, orgID int64) ([]ListOpenAlertGroupCountsRow, error) {
+	rows, err := q.db.Query(ctx, listOpenAlertGroupCounts, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOpenAlertGroupCountsRow{}
+	for rows.Next() {
+		var i ListOpenAlertGroupCountsRow
+		if err := rows.Scan(&i.RouteID, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRouteInfo = `-- name: ListRouteInfo :many
 SELECT public_id, name
 FROM routes
@@ -693,6 +746,25 @@ func (q *Queries) LockRoute(ctx context.Context, arg LockRouteParams) (int64, er
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const restampAlertRoutes = `-- name: RestampAlertRoutes :exec
+UPDATE alerts
+SET route_id = $1
+WHERE org_id = $2 AND id = ANY($3::bigint[])
+`
+
+type RestampAlertRoutesParams struct {
+	RouteID pgtype.Int8
+	OrgID   int64
+	Ids     []int64
+}
+
+// RestampAlertRoutes records another Route for the current firing of Alerts: the Default route, for Alerts whose Route
+// was deleted while their Snapshot waited for it.
+func (q *Queries) RestampAlertRoutes(ctx context.Context, arg RestampAlertRoutesParams) error {
+	_, err := q.db.Exec(ctx, restampAlertRoutes, arg.RouteID, arg.OrgID, arg.Ids)
+	return err
 }
 
 const setAlertRoutes = `-- name: SetAlertRoutes :exec

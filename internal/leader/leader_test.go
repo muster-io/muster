@@ -321,7 +321,7 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		names = append(names, task.Name)
 	}
 	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning",
-		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan"}
+		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
@@ -351,6 +351,36 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	// Without a retention the task does nothing.
 	if err := tasks[5].Run(t.Context()); err != nil {
 		t.Errorf("alert retention without a retention: %v", err)
+	}
+	// Without a counter of Alert Groups the task does nothing.
+	if tasks[8].Every != AlertGroupGaugeInterval || tasks[8].Run(t.Context()) != nil {
+		t.Errorf("alert group gauges without a counter")
+	}
+}
+
+// TestAlertGroupGauges: the Leader counts the open Alert Groups of every Organization and goes on past one that
+// fails.
+func TestAlertGroupGauges(t *testing.T) {
+	var counted []int64
+	failed := errors.New("locked")
+	work := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		AlertGroupGauges: func(_ context.Context, org int64) error {
+			counted = append(counted, org)
+			if org == 1 {
+				return failed
+			}
+			return nil
+		},
+	}
+	gauges := Tasks(work)()[8]
+	if err := gauges.Run(t.Context()); !errors.Is(err, failed) || !slices.Equal(counted, []int64{1, 2}) {
+		t.Errorf("counted %v, %v", counted, err)
+	}
+	orgsErr := errors.New("down")
+	work.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
+	if err := Tasks(work)()[8].Run(t.Context()); !errors.Is(err, orgsErr) {
+		t.Errorf("gauges = %v", err)
 	}
 }
 

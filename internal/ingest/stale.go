@@ -85,8 +85,9 @@ func (p *Processor) StaleScan(ctx context.Context) error {
 // logs what it resolved.
 func (p *Processor) scan(ctx context.Context, c Claimed, horizon time.Time) error {
 	var changes []AlertChange
+	var routed Routed
 	err := p.store.InTx(ctx, func(q ProcessQueries, tx dbgen.DBTX) error {
-		changes = nil
+		changes, routed = nil, Routed{}
 		info, err := p.renew(ctx, q, c.ID)
 		if err != nil {
 			return err
@@ -111,7 +112,7 @@ func (p *Processor) scan(ctx context.Context, c Claimed, horizon time.Time) erro
 			return err
 		}
 		if p.sink != nil && len(changes) > 0 {
-			if _, err := p.sink.AlertChanges(ctx, tx, changes); err != nil {
+			if routed, err = p.sink.AlertChanges(ctx, tx, changes); err != nil {
 				return fmt.Errorf("hand over the alert changes: %w", err)
 			}
 		}
@@ -127,6 +128,7 @@ func (p *Processor) scan(ctx context.Context, c Claimed, horizon time.Time) erro
 		metrics.AlertsResolved.With(c.PublicID, ResolveStale).Add(len(changes))
 		p.log.Log(ctx, logging.AlertsStale, logging.F("integration", c.PublicID), logging.F("count", len(changes)))
 	}
+	routed.committed(ctx)
 	return nil
 }
 

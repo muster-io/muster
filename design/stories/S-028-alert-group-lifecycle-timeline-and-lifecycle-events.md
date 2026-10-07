@@ -21,31 +21,41 @@ files_touched:
   - internal/groups/transitions_test.go
   - internal/groups/events_test.go
   - internal/groups/title_test.go
+  - internal/groups/groups_integration_test.go
   - internal/timers/worker.go
   - internal/timers/query.sql
   - internal/timers/worker_test.go
   - internal/ingest/changes.go
   - internal/ingest/alertsview.go
+  - internal/ingest/alertsview_test.go
+  - internal/ingest/query.sql
   - internal/ingest/worker.go
   - internal/ingest/worker_test.go
-  - internal/ingest/worker_integration_test.go
-  - internal/ingest/internal_integration_test.go
+  - internal/ingest/deletion.go
+  - internal/ingest/stale.go
   - internal/routing/routes.go
   - internal/routing/query.sql
   - internal/routing/routes_test.go
   - internal/api/alertgroups.go
   - internal/api/alertgroups_test.go
+  - internal/api/integrations.go
   - internal/api/routes.go
   - internal/api/server.go
   - internal/api/problem.go
   - internal/leader/alive.go
+  - internal/leader/alive_test.go
   - internal/leader/tasks.go
+  - internal/leader/leader_test.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
   - internal/devmode/devmode.go
+  - internal/devmode/devmode_test.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
+  - api/openapi.yaml
   - sqlc.yaml
   - test/e2e/lifecycle_test.go
+  - test/e2e/routing_test.go
 acceptance:
   - "[C-09.FR-3, C-09.AC-6, C-08.FR-4] Alerts with the same Group key values on one Route join one Alert Group, a missing label counting as an empty value; an Alert with another `cluster` starts a second one."
   - "[C-09.FR-1, C-09.FR-2] Each Alert Group gets the next `#N` of the Organization in the transaction that creates it — without gaps, also when that transaction rolls back — and an opaque `public_id`; `getAlertGroup` returns its status, Route, Integrations, title, `summary`, Severity level, Urgent flag, start, counts and Reopen count."
@@ -102,8 +112,9 @@ issue: 28
   `TimelineEntryList`, `TimelineActor`, `LifecycleEvent`, `Loudness`, `MentionName`, `TimelineKind`,
   `MovedAlertGroups`.
 - **Dispatcher** (ADR-0004, ADR-0016; `internal/groups`): every change of an Alert Group passes through one function
-  with the steps precondition → transition → Audit log → Timeline → re-render. It locks the Alert Group row (`SELECT …
-  FOR UPDATE`) and runs in the caller's transaction (processing's per Snapshot, a timer's, an API request's). System
+  with the steps precondition → transition → Audit log → Timeline → re-render. It runs on Alert Group rows its caller
+  locked (`SELECT … FOR UPDATE`), all of a transaction's rows in id order, and in the caller's transaction
+  (processing's per Snapshot, a timer's, an API request's). System
   transitions run as the actor `system` with the Transport `system`, need no Permission and write no Audit log entry;
   S-032 adds the Permission and Audit log steps of Commands. Re-render is a hook that delivery fills from S-034. Only
   `groups` writes `alert_groups`, `alert_group_alerts`, `timeline_entries` and `alert_group_counters` (lint 2).
@@ -112,8 +123,9 @@ issue: 28
   This story wires a Sink chain there: routing first (`routing.Router.AlertChanges`, which stamps `alerts.route_id`),
   then grouping (`groups`), both in the Snapshot's transaction, so an error of either rolls the Snapshot back.
   `ingest.Routed` gains the Alert Groups the Snapshot created or changed, as their `#N`, which `snapshot_processed`
-  logs as `alert_groups` (`worker.go`). The fakes of the Sink and the assertions on `Routed` in `worker_test.go`,
-  `worker_integration_test.go` and `internal_integration_test.go` change with the new field.
+  logs as `alert_groups` (`worker.go`), and `Committed`, which counts and logs what grouping did once the Snapshot's
+  transaction committed; `deletion.go` keeps the result of the Sink and the Stale scan (`stale.go`) runs `Committed`
+  after its commit. The recording Sink and the assertions on `Routed` in `worker_test.go` change with the new fields.
 - **Grouping** (C-09.FR-3, FR-4, FR-5, FR-6; ADR-0003): processing hands the Alert changes of a Snapshot, after
   routing, to `groups`. Before it creates or joins an Alert Group on Route R, grouping locks R with `SELECT … FROM
   routes WHERE org_id = … AND id = … AND deleted_at IS NULL FOR SHARE` (`internal/groups/query.sql`). The Router read
@@ -132,6 +144,9 @@ issue: 28
      `alert_group_counters` in the same transaction: `INSERT … ON CONFLICT (org_id) DO NOTHING` creates the
      Organization's row on first use — no start-up step creates it, since only `groups` writes the table (lint 2) —
      and `UPDATE … SET last_number = last_number + 1 … RETURNING` takes the number.
+  Locks are taken in one order: the Routes `FOR SHARE`, then the counter row `FOR UPDATE` whenever Alerts are grouped
+  (so creations and Reopens, which make an Alert Group open, never race for one key), then the Alert Groups in id
+  order; a target that a concurrent change resolved or moved after the lookup is looked up again.
   A person-resolved Alert Group of (R, V) inside its Grace period is never reopened: rule 3 starts a new one at once
   (FR-5). An Alert that lives in an open Alert Group (`alert_group_alerts` row `firing`) is neither routed nor grouped
   again (C-08.FR-8); its later changes apply there. Alerts of one Snapshot that start or join the same Alert Group are
@@ -151,12 +166,15 @@ issue: 28
   `alerts_added`; a Reopen of a system-resolved one inside its window; or a new Alert Group marked
   `firing_again_after_id`, `created`, Loud. A Continuation is never a new firing.
 - **Changes of members** (C-09.FR-7, FR-11; C-06.FR-11, FR-12): a Continuation updates the membership's `starts_at` and
-  records `alert_continued`; an annotation change records `annotations_changed`; both Quiet. A new Alert that differs
+  records `alert_continued`; an annotation change records `annotations_changed`; both Quiet, the annotation change
+  first when one Snapshot has both. A new Alert that differs
   from a firing Alert of the same Alert Group only in labels of `organization.instance_labels` records `alert_replaced`
   naming the differing label (`replaced_label`) instead of `alerts_added`.
 - **Severity and urgency** (C-08.FR-6, C-09.FR-9): an Alert Group's Severity level is the highest of its firing
-  Alerts; it is Urgent when its Route is urgent, or its level is critical and `organization.critical_is_urgent` is on. A
-  rise that leaves urgency unchanged records `severity_raised`; a rise that makes it Urgent records `urgency_raised`:
+  Alerts — lowered with the `alert_resolved` that resolves the highest, and taken from the new Alerts on a Reopen; it
+  is Urgent when its Route is urgent, or its level is critical and `organization.critical_is_urgent` is on, judged on
+  the Route and settings as they are at the rise. A rise that leaves urgency unchanged records `severity_raised`; a rise
+  that makes it Urgent records `urgency_raised`:
   Quiet when it removes nothing; when snoozed — unless `snoozed_while_urgent` — it ends the Snooze, and when
   acknowledged with `route.urgent_rise_removes_ack` on it removes the Owner, both Loud with `[owner, rise_to_urgent]`.
   Configuration edits never change a status.
@@ -168,8 +186,10 @@ issue: 28
   loudness and Mentions per variant — and every transition records exactly one entry with `event_seq` taken from
   `alert_groups.event_seq`; the `CHECK`s of `timeline_entries` back it. Mentions are symbolic.
 - **Timers** (C-09.FR-12; `timers`, `internal/timers`): a worker on every replica claims due rows with
-  `FOR UPDATE SKIP LOCKED` and a lease through the claim helper of S-062, waking at the earliest deadline and on
-  `NOTIFY`; overdue rows after downtime fire once. The worker, like the downtime step below, runs per Organization: it
+  `FOR UPDATE SKIP LOCKED` and a lease through the claim helper of S-062, waking at the earliest deadline of a free row
+  (business clock) or the end of the earliest held lease (real clock) and on `NOTIFY`; overdue rows after downtime
+  fire once. A worker claims only the kinds it has handlers for, and a failed timer fires again after its lease;
+  `timer_failed` logs the failure. The worker, like the downtime step below, runs per Organization: it
   iterates over the Organizations (one in L1) and passes `org_id` to every claim and query (lint 1). Kinds here: `reopen_window_end` (clears `reopen_deadline` and the
   `prior_*` columns, no entry) and `grace_period_end`. S-063, S-035 and S-049 register their kinds. The worker also
   wakes when the development clock moves: today a clock move wakes only the ingest worker (the single `changed`
@@ -178,7 +198,8 @@ issue: 28
   offset on every replica — and `runtime.go` registers the ingest worker and the timers worker; S-034 adds the
   delivery worker. A worker woken this way re-reads its earliest deadline on the business clock.
 - **Downtime** (C-09.FR-18, C-02.FR-12): when the Leader records a downtime (S-008), every open Alert Group gets a
-  `system` entry `muster_unavailable` with `period_from` and `period_to`.
+  `system` entry `muster_unavailable` with `period_from` and `period_to`, in the takeover's transaction
+  (`leader.Alive.OnDowntime`, `alive.go`).
 - **Route deletion and the move** (C-09.FR-19, C-08.FR-9): `Route.open_alert_group_count` counts its open Alert Groups;
   `deleteRoute` of a Route with any answers `409` `route-has-open-alert-groups` with `open_alert_group_count`.
   `routing.Service.Delete` counts them inside its transaction after `LockRoute` (a count query on `alert_groups` in
@@ -205,10 +226,14 @@ issue: 28
   `muster_alert_groups_resolved_total{route,by}`, `muster_alert_group_time_to_resolve_seconds{route}` (`le` buckets
   1 minute to 24 hours, observed at each resolution from the start).
 - **Log events**: `alert_group_status_changed` (INFO: `group` as `#N`, `route`, `from`, `to`, `reason`, `transport`),
-  `alert_continued` (INFO: `group`, `fingerprint`); `snapshot_processed` gains `alert_groups` (the `#N` touched).
+  `alert_continued` (INFO: `group`, `fingerprint`), `timer_failed` (WARN: `kind`, `error`); `snapshot_processed` gains
+  `alert_groups` (the `#N` touched). `muster_alert_groups` is the Leader task `alert_group_gauges` (`tasks.go`).
 - **Wiring** (`internal/api/server.go`, `sqlc.yaml`): the four operations join the implemented-operations map, and the
   API `Config` and `Server` gain the `groups` service; `sqlc.yaml` gains the entries for `internal/groups/query.sql`
-  and `internal/timers/query.sql`.
+  and `internal/timers/query.sql`. The Alerts view reads the Alert Group of each Alert with its own read-only query
+  (`internal/ingest/query.sql`), which `integrationAlertOf` maps (`internal/api/integrations.go`).
+- **Specification** (`api/openapi.yaml`): `TimelineStatusEntry` gains `fingerprints` and `label_conflicts`, which the
+  `created`, `reopened` and `resolved` entries carry (one entry per Snapshot lists its Alerts).
 
 ## Steps
 

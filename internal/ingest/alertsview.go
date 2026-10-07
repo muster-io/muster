@@ -45,6 +45,8 @@ type viewQueries interface {
 	ListViewAlertsByStartsAtAsc(ctx context.Context, arg dbgen.ListViewAlertsByStartsAtAscParams) (
 		[]dbgen.ListViewAlertsByStartsAtAscRow, error)
 	ListViewGroupKeys(ctx context.Context, arg dbgen.ListViewGroupKeysParams) ([]dbgen.ListViewGroupKeysRow, error)
+	ListViewAlertGroups(ctx context.Context, arg dbgen.ListViewAlertGroupsParams) ([]dbgen.ListViewAlertGroupsRow,
+		error)
 }
 
 // AlertPosition is the sort key of an Alert in the view: the sorted time and the id.
@@ -87,6 +89,14 @@ type ViewAlert struct {
 	Route         *RouteRef
 	SeverityLevel *string
 	SeverityRaw   *string
+	// AlertGroup is the Alert Group it fires in, or last fired in; nil before grouping (C-06.FR-19).
+	AlertGroup *AlertGroupRef
+}
+
+// AlertGroupRef names an Alert Group by its public_id and #N.
+type AlertGroupRef struct {
+	PublicID string
+	Number   int64
 }
 
 // RouteRef names a Route by its public_id and name.
@@ -304,7 +314,7 @@ func viewAlertOf(r viewRow) (ViewAlert, error) {
 	return a, nil
 }
 
-// withGroupKeys adds the groupKeys of each Alert of the page.
+// withGroupKeys adds the groupKeys and the Alert Group of each Alert of the page.
 func (v *AlertsView) withGroupKeys(ctx context.Context, page AlertPage) (AlertPage, error) {
 	if len(page.Alerts) == 0 {
 		return page, nil
@@ -321,6 +331,13 @@ func (v *AlertsView) withGroupKeys(ctx context.Context, page AlertPage) (AlertPa
 	for _, r := range rows {
 		a := &page.Alerts[index[r.AlertID]]
 		a.GroupKeys = append(a.GroupKeys, r.GroupKey)
+	}
+	groups, err := v.store.ListViewAlertGroups(ctx, dbgen.ListViewAlertGroupsParams{OrgID: v.orgID, AlertIds: ids})
+	if err != nil {
+		return AlertPage{}, fmt.Errorf("list the alert groups of the alerts: %w", err)
+	}
+	for _, r := range groups {
+		page.Alerts[index[r.AlertID]].AlertGroup = &AlertGroupRef{PublicID: r.PublicID, Number: r.Number}
 	}
 	return page, nil
 }

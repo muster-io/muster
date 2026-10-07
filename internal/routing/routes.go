@@ -158,6 +158,18 @@ type Route struct {
 	Policy      Policy
 	CreatedAt   time.Time
 	Version     int64
+	// OpenAlertGroupCount is the number of its open Alert Groups, which block its deletion (C-09.FR-19).
+	OpenAlertGroupCount int64
+}
+
+// OpenAlertGroupsError is the refusal to delete a Route that still has open Alert Groups (C-09.FR-19); Count says
+// how many.
+type OpenAlertGroupsError struct {
+	Count int64
+}
+
+func (e *OpenAlertGroupsError) Error() string {
+	return fmt.Sprintf("the route has %d open alert groups", e.Count)
 }
 
 // Input is what createRoute and updateRoute write. A nil Description keeps the stored value on an update and is empty
@@ -208,6 +220,8 @@ type Queries interface {
 	ListRouteSuggestionDismissals(ctx context.Context, arg dbgen.ListRouteSuggestionDismissalsParams) ([]string,
 		error)
 	DismissRouteSuggestion(ctx context.Context, arg dbgen.DismissRouteSuggestionParams) error
+	CountOpenAlertGroups(ctx context.Context, arg dbgen.CountOpenAlertGroupsParams) (int64, error)
+	ListOpenAlertGroupCounts(ctx context.Context, orgID int64) ([]dbgen.ListOpenAlertGroupCountsRow, error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 }
@@ -325,6 +339,9 @@ func (s *Service) list(ctx context.Context, q Queries) (List, error) {
 	if err := s.withMatchers(ctx, q, out.Routes); err != nil {
 		return List{}, err
 	}
+	if err := s.withCounts(ctx, q, out.Routes); err != nil {
+		return List{}, err
+	}
 	return out, nil
 }
 
@@ -349,7 +366,26 @@ func (s *Service) get(ctx context.Context, q Queries, publicID string) (Route, e
 	if err := s.withMatchers(ctx, q, list); err != nil {
 		return Route{}, err
 	}
+	if err := s.withCounts(ctx, q, list); err != nil {
+		return Route{}, err
+	}
 	return list[0], nil
+}
+
+// withCounts sets the number of open Alert Groups of each Route.
+func (s *Service) withCounts(ctx context.Context, q Queries, list []Route) error {
+	counts, err := q.ListOpenAlertGroupCounts(ctx, s.orgID)
+	if err != nil {
+		return fmt.Errorf("count the open alert groups of the routes: %w", err)
+	}
+	by := make(map[int64]int64, len(counts))
+	for _, c := range counts {
+		by[c.RouteID] = c.Count
+	}
+	for i := range list {
+		list[i].OpenAlertGroupCount = by[list[i].ID]
+	}
+	return nil
 }
 
 // withMatchers sets the Matchers of each Route.
@@ -565,6 +601,16 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		}
 		if version != nil && *version != before.Version {
 			return ErrVersionMismatch
+		}
+		// Counted after the lock: a Snapshot that groups on the Route holds it FOR SHARE, so its Alert Group is
+		// either committed and counted here, or the Snapshot waits and then finds the Route deleted.
+		open, err := q.CountOpenAlertGroups(ctx, dbgen.CountOpenAlertGroupsParams{OrgID: s.orgID,
+			RouteID: before.ID})
+		if err != nil {
+			return fmt.Errorf("count the open alert groups of the route %s: %w", before.PublicID, err)
+		}
+		if open > 0 {
+			return &OpenAlertGroupsError{Count: open}
 		}
 		now := s.clock.Now().UTC()
 		if err := q.DeleteRoute(ctx, dbgen.DeleteRouteParams{OrgID: s.orgID, ID: before.ID,
@@ -964,4 +1010,14 @@ func textOf(t pgtype.Text) *string {
 		return nil
 	}
 	return &t.String
+}
+
+// RestampAlerts records routeID as the Route of the current firing of the Alerts, in the Snapshot's transaction tx:
+// grouping puts Alerts whose Route was deleted while their Snapshot waited for it on the Default route.
+func RestampAlerts(ctx context.Context, tx dbgen.DBTX, orgID int64, alertIDs []int64, routeID int64) error {
+	if err := dbgen.New(tx).RestampAlertRoutes(ctx, dbgen.RestampAlertRoutesParams{OrgID: orgID, Ids: alertIDs,
+		RouteID: pgtype.Int8{Int64: routeID, Valid: true}}); err != nil {
+		return fmt.Errorf("record the route of the alerts: %w", err)
+	}
+	return nil
 }

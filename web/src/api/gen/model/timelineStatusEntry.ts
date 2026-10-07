@@ -39,4 +39,8 @@ export type TimelineStatusEntry = TimelineEntryBase & TimelineLifecycleFields & 
   previous_owner?: UserRef;
   /** @nullable */
   snooze_until?: string | null;
+  /** The Alerts that started the Alert Group (`created`), reopened it (`reopened`) or whose resolution resolved it (`resolved`): Alerts of one Snapshot are one entry. */
+  fingerprints?: string[];
+  /** Static labels the Alerts of `created` or `reopened` already carried. */
+  label_conflicts?: string[];
 });

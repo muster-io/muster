@@ -24,6 +24,9 @@ const MaintenanceInterval = time.Hour
 // BacklogInterval is how often the Leader counts the pending Stored Snapshots for muster_ingest_backlog.
 const BacklogInterval = 15 * time.Second
 
+// AlertGroupGaugeInterval is how often the Leader counts the open Alert Groups for muster_alert_groups.
+const AlertGroupGaugeInterval = 15 * time.Second
+
 // HeartbeatCheckInterval is how often the Leader runs the Heartbeat check, and StaleScanInterval the Stale scan.
 const (
 	HeartbeatCheckInterval = 10 * time.Second
@@ -113,6 +116,8 @@ type Work struct {
 	HeartbeatCheck func(ctx context.Context, orgs []int64) error
 	// StaleScan runs the Stale scan of the Organization orgID (C-06.FR-9, C-07.FR-5).
 	StaleScan func(ctx context.Context, orgID int64) error
+	// AlertGroupGauges sets muster_alert_groups from the open Alert Groups of the Organization orgID (C-09).
+	AlertGroupGauges func(ctx context.Context, orgID int64) error
 	// ClockMoved, in development mode, wakes the Heartbeat check and the Stale scan when the development clock moved;
 	// nil otherwise.
 	ClockMoved *Wakes
@@ -172,7 +177,7 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 
 // Tasks returns the closed list of Leader tasks (ADR-0007): partition maintenance and retention, the alive mark, the
 // pruning of replica records, the pruning of short-lived state, the ingestion backlog, the retention of the Alerts
-// view, the Heartbeat check and the Stale scan. Later capabilities add theirs here: Telegram polling, the outgoing
+// view, the Heartbeat check, the Stale scan and the count of open Alert Groups. Later capabilities add theirs here: Telegram polling, the outgoing
 // heartbeat and the OIDC client secret expiry check. The Keeper calls the result at every leadership, so each one
 // starts with a takeover; the Heartbeat check waits for it, so that it measures the timeouts from the end of a
 // downtime the takeover records (C-07.FR-4).
@@ -207,8 +212,25 @@ func Tasks(w Work) func() []Task {
 					return w.heartbeatCheck(ctx)
 				}},
 			{Name: "stale_scan", Every: StaleScanInterval, Wake: staleWake, Run: w.staleScan},
+			{Name: "alert_group_gauges", Every: AlertGroupGaugeInterval, Run: w.alertGroupGauges},
 		}
 	}
+}
+
+// alertGroupGauges counts the open Alert Groups of every Organization; counting twice sets the same values.
+func (w Work) alertGroupGauges(ctx context.Context) error {
+	if w.AlertGroupGauges == nil {
+		return nil
+	}
+	orgs, err := w.Organizations(ctx)
+	if err != nil {
+		return fmt.Errorf("list the organizations to count the alert groups of: %w", err)
+	}
+	var errs []error
+	for _, org := range orgs {
+		errs = append(errs, w.AlertGroupGauges(ctx, org))
+	}
+	return errors.Join(errs...)
 }
 
 // heartbeatCheck runs the Heartbeat check over every Organization.

@@ -524,16 +524,17 @@ func clockAnswer(t *testing.T, h http.Handler, method, body string) (int, map[st
 
 // TestClock is the development clock of C-01.FR-13: an advance runs partition maintenance as at the new time, adds
 // to the stored offset, notifies the replicas and moves the business clock of this replica; Load takes the stored
-// offset, as another replica does on the notification; the real clock never moves.
+// offset, as another replica does on the notification, and every wake function hears of each change; the real clock
+// never moves.
 func TestClock(t *testing.T) {
 	store := &clockDB{fail: map[string]error{}}
 	_, business := clock.System()
 	var maintained []time.Time
-	changes := 0
+	changes, timers := 0, 0
 	c := devmode.NewClock(store, business, func(_ context.Context, at time.Time) error {
 		maintained = append(maintained, at)
 		return nil
-	}, func() { changes++ })
+	}, func() { changes++ }, nil, func() { timers++ })
 	if err := c.Load(t.Context()); err != nil || business.Offset() != 0 || changes != 0 {
 		t.Fatalf("Load without a row = %v, offset %v", err, business.Offset())
 	}
@@ -561,8 +562,8 @@ func TestClock(t *testing.T) {
 	}
 	// Another replica advanced the clock: Load takes the stored offset.
 	*store.offset = 900
-	if err := c.Load(t.Context()); err != nil || c.OffsetSeconds() != 900 || changes != 2 {
-		t.Errorf("Load = %v, offset %d, changes %d", err, c.OffsetSeconds(), changes)
+	if err := c.Load(t.Context()); err != nil || c.OffsetSeconds() != 900 || changes != 2 || timers != 2 {
+		t.Errorf("Load = %v, offset %d, changes %d and %d", err, c.OffsetSeconds(), changes, timers)
 	}
 	if err := c.Load(t.Context()); err != nil || changes != 2 {
 		t.Errorf("an unchanged offset was announced: %d", changes)

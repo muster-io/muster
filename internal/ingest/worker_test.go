@@ -317,7 +317,9 @@ func TestProcessPending(t *testing.T) {
 	store := newFakeProcess()
 	c := clock.NewManual(t0.Add(2 * time.Second))
 	var log bytes.Buffer
-	sink := &recordingSink{routed: Routed{IDs: []int64{4}, PublicIDs: []string{"RTAAAAAAAAAAAA"}}}
+	committed := 0
+	sink := &recordingSink{routed: Routed{IDs: []int64{4}, PublicIDs: []string{"RTAAAAAAAAAAAA"},
+		AlertGroups: []int64{7}, Committed: func(context.Context) { committed++ }}}
 	p := newTestProcessor(store, c, &log, sink)
 	integration := "NTAAAAAAAAAAAA"
 	failed0 := metrics.IngestFailedSnapshots.With(integration).Get()
@@ -395,6 +397,13 @@ func TestProcessPending(t *testing.T) {
 			(len(routes) != 1 || routes[0] != "RTAAAAAAAAAAAA") {
 			t.Errorf("routes of %v", e)
 		}
+		if groups, _ := e["alert_groups"].([]any); e["event"] == "snapshot_processed" &&
+			(len(groups) != 1 || groups[0] != 7.0) {
+			t.Errorf("alert groups of %v", e)
+		}
+	}
+	if committed != 2 {
+		t.Errorf("committed %d times, want once per processed snapshot", committed)
 	}
 	if !slices.Equal(names, []string{"snapshot_processed", "snapshot_failed", "snapshot_processed"}) {
 		t.Errorf("events %v", names)
@@ -648,4 +657,47 @@ func (s *syncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
+}
+
+// sinkFunc is a Sink of a function.
+type sinkFunc func(changes []AlertChange) (Routed, error)
+
+func (f sinkFunc) AlertChanges(_ context.Context, _ dbgen.DBTX, changes []AlertChange) (Routed, error) {
+	return f(changes)
+}
+
+// TestChain: the Sink chain hands the changes to routing, then grouping, in the same transaction, merges the Routes
+// once each in order and the Alert Groups sorted, runs every Committed once, and stops at the first error.
+func TestChain(t *testing.T) {
+	var order, committed []string
+	routing := sinkFunc(func([]AlertChange) (Routed, error) {
+		order = append(order, "routing")
+		return Routed{IDs: []int64{4, 2}, PublicIDs: []string{"RT4", "RT2"},
+			Committed: func(context.Context) { committed = append(committed, "routing") }}, nil
+	})
+	grouping := sinkFunc(func([]AlertChange) (Routed, error) {
+		order = append(order, "grouping")
+		return Routed{IDs: []int64{1, 2}, PublicIDs: []string{"RT1", "RT2"}, AlertGroups: []int64{9, 3, 9},
+			Committed: func(context.Context) { committed = append(committed, "grouping") }}, nil
+	})
+	out, err := Chain(routing, grouping).AlertChanges(t.Context(), nil, []AlertChange{{Kind: ChangeFired}})
+	if err != nil || !slices.Equal(order, []string{"routing", "grouping"}) || !slices.Equal(out.IDs, []int64{4, 2, 1}) ||
+		!slices.Equal(out.PublicIDs, []string{"RT4", "RT2", "RT1"}) || !slices.Equal(out.AlertGroups, []int64{3, 9}) {
+		t.Fatalf("chain = %+v, %v, order %v", out, err, order)
+	}
+	out.committed(t.Context())
+	if !slices.Equal(committed, []string{"routing", "grouping"}) {
+		t.Errorf("committed %v", committed)
+	}
+	quiet := sinkFunc(func([]AlertChange) (Routed, error) { return Routed{}, nil })
+	if out, err := Chain(quiet, quiet).AlertChanges(t.Context(), nil, nil); err != nil || out.AlertGroups != nil ||
+		out.Committed != nil {
+		t.Errorf("nothing = %+v, %v", out, err)
+	}
+	out.committed(t.Context())
+	failing := sinkFunc(func([]AlertChange) (Routed, error) { return Routed{}, errors.New("boom") })
+	order = nil
+	if _, err := Chain(failing, grouping).AlertChanges(t.Context(), nil, nil); err == nil || len(order) != 0 {
+		t.Errorf("a failing sink = %v, then %v", err, order)
+	}
 }

@@ -44,6 +44,8 @@ type Queries interface {
 	MarkAlive(ctx context.Context, arg dbgen.MarkAliveParams) (int64, error)
 	ListOrganizationIDs(ctx context.Context) ([]int64, error)
 	LongestLearnedRepeatInterval(ctx context.Context, orgID int64) (int64, error)
+	// DBTX is the connection or the transaction the queries run on, for what other packages record with them.
+	DBTX() dbgen.DBTX
 }
 
 // Store runs the queries alone or in one transaction.
@@ -54,30 +56,49 @@ type Store interface {
 
 // NewStore is the Store over the main pool.
 func NewStore(pool *pgxpool.Pool) Store {
-	return pgStore{Queries: dbgen.New(pool), pool: pool}
+	return pgStore{pgQueries: pgQueries{Queries: dbgen.New(pool), db: pool}, pool: pool}
 }
 
-type pgStore struct {
+type pgQueries struct {
 	*dbgen.Queries
+	db dbgen.DBTX
+}
+
+func (q pgQueries) DBTX() dbgen.DBTX { return q.db }
+
+type pgStore struct {
+	pgQueries
 	pool *pgxpool.Pool
 }
 
 func (s pgStore) InTx(ctx context.Context, f func(Queries) error) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return f(dbgen.New(tx)) })
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return f(pgQueries{Queries: dbgen.New(tx), db: tx}) })
 }
+
+// DowntimeRecorder records a downtime in the Organization orgID inside the transaction tx in which the Leader
+// records it: the open Alert Groups get their "Muster was unavailable" entries (C-09.FR-18).
+type DowntimeRecorder func(ctx context.Context, tx dbgen.DBTX, orgID int64, d Downtime) error
 
 // Alive keeps the alive mark of the Leader in runtime_state, on the business clock, which downtime and the recovery
 // window follow too.
 type Alive struct {
-	store   Store
-	clocks  clock.Clocks
-	log     *logging.Logger
-	replica string
+	store      Store
+	clocks     clock.Clocks
+	log        *logging.Logger
+	replica    string
+	onDowntime DowntimeRecorder
 }
 
 // NewAlive returns the alive mark of the replica id.
 func NewAlive(s Store, clocks clock.Clocks, log *logging.Logger, replica string) *Alive {
 	return &Alive{store: s, clocks: clocks, log: log, replica: replica}
+}
+
+// OnDowntime has every downtime the Leader records also recorded by f, in the same transaction, in each
+// Organization.
+func (a *Alive) OnDowntime(f DowntimeRecorder) *Alive {
+	a.onDowntime = f
+	return a
 }
 
 // Mark refreshes the alive mark.
@@ -126,6 +147,9 @@ func (a *Alive) TakeOver(ctx context.Context) error {
 				RecordedAt: now}); err != nil {
 				return fmt.Errorf("record the downtime: %w", err)
 			}
+			if err := a.recordOnOrganizations(ctx, q, *d); err != nil {
+				return err
+			}
 			params.RecoveryUntil = pgtype.Timestamptz{Time: d.RecoveryUntil, Valid: true}
 		}
 		if err := q.TakeOver(ctx, params); err != nil {
@@ -141,6 +165,23 @@ func (a *Alive) TakeOver(ctx context.Context) error {
 		a.log.Log(ctx, logging.DowntimeRecorded, logging.F("started_at", recorded.Start.UTC()),
 			logging.F("ended_at", recorded.End.UTC()),
 			logging.F("duration_seconds", recorded.End.Sub(recorded.Start).Seconds()))
+	}
+	return nil
+}
+
+// recordOnOrganizations has the downtime recorded in every Organization by the DowntimeRecorder, if any.
+func (a *Alive) recordOnOrganizations(ctx context.Context, q Queries, d Downtime) error {
+	if a.onDowntime == nil {
+		return nil
+	}
+	orgs, err := q.ListOrganizationIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("list the organizations: %w", err)
+	}
+	for _, org := range orgs {
+		if err := a.onDowntime(ctx, q.DBTX(), org, d); err != nil {
+			return fmt.Errorf("record the downtime in organization %d: %w", org, err)
+		}
 	}
 	return nil
 }

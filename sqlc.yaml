@@ -123,3 +123,17 @@ sql:
       go:
         <<: *go
         out: internal/routing/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/groups/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/groups/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/timers/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/timers/dbgen

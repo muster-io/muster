@@ -186,3 +186,24 @@ WHERE org_id = @org_id AND user_id = @user_id;
 INSERT INTO route_suggestion_dismissals (user_id, suggestion, org_id, dismissed_at)
 VALUES (@user_id, @suggestion, @org_id, @dismissed_at)
 ON CONFLICT (user_id, suggestion) DO NOTHING;
+
+-- CountOpenAlertGroups counts the open Alert Groups of a Route, read-only (only groups writes alert_groups); a
+-- deletion counts them after LockRoute, so that a Snapshot grouping on the Route either committed before or waits.
+-- name: CountOpenAlertGroups :one
+SELECT count(*)::bigint
+FROM alert_groups
+WHERE org_id = @org_id AND route_id = @route_id AND status <> 'resolved' AND moved_from_route_id IS NULL;
+
+-- ListOpenAlertGroupCounts counts the open Alert Groups of each Route that has any (Route.open_alert_group_count).
+-- name: ListOpenAlertGroupCounts :many
+SELECT route_id, count(*)::bigint AS count
+FROM alert_groups
+WHERE org_id = @org_id AND status <> 'resolved' AND moved_from_route_id IS NULL
+GROUP BY route_id;
+
+-- RestampAlertRoutes records another Route for the current firing of Alerts: the Default route, for Alerts whose Route
+-- was deleted while their Snapshot waited for it.
+-- name: RestampAlertRoutes :exec
+UPDATE alerts
+SET route_id = @route_id
+WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
