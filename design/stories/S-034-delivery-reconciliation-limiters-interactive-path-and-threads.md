@@ -4,7 +4,7 @@ title: Delivery reconciliation, limiters, interactive path and Threads (BE)
 capability: C-11
 kind: be
 layer: L1
-depends_on: [S-032]
+depends_on: [S-063]
 covers: [C-11.FR-1, C-11.FR-2, C-11.FR-3, C-11.FR-4, C-11.FR-5, C-11.FR-7, C-11.FR-8, C-11.FR-15, C-11.FR-16, C-11.FR-17, C-11.FR-18, C-11.FR-20, C-11.FR-21, C-11.AC-1, C-11.AC-2, C-11.AC-10, C-11.AC-14, C-09.FR-11, C-09.FR-14, C-08.FR-1]
 files_touched:
   - internal/delivery/delivery.go
@@ -32,11 +32,14 @@ files_touched:
   - internal/api/destinations.go
   - internal/api/alertgroups.go
   - internal/api/destinations_test.go
-  - internal/archlint/callrules.go
+  - internal/api/server.go
+  - internal/api/problem.go
+  - internal/archlint/archlint.go
   - internal/leader/tasks.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
   - internal/runtime/runtime.go
+  - sqlc.yaml
 acceptance:
   - "[C-11.FR-1, C-11.AC-1] Ten Alerts in one Snapshot and an Acknowledge within 2 seconds produce, through the recording test adapter, one Publication and at most one edit; changes made while a call is pending collapse into the next call, which carries the latest Desired state."
   - "[C-11.FR-1] A delivery whose actual hash equals the desired hash makes no call, and a \"not modified\" outcome counts as delivered."
@@ -45,7 +48,7 @@ acceptance:
   - "[C-11.FR-2] A call on the interactive path takes the next free token ahead of waiting deliveries and never queues; when no token frees within `delivery.interactive_budget` it returns `limited` with the time to wait and sends nothing."
   - "[C-11.FR-4, C-11.FR-5] The first new Alerts of a firing Alert Group reach the Thread at once; new Alerts arriving within `route.thread_batching_window` form one reply when the window closes; after a quiet period longer than the window the next ones are immediate again; a reply about more than `delivery.thread_alerts_listed` new Alerts lists that many and \"…and K more — open in Muster\"."
   - "[C-11.FR-7, C-11.FR-20, C-11.AC-10] Every row of the lifecycle event tables of C-09.FR-22, C-10.FR-15 and C-17.FR-11 except `moved_to_default_route` — rows keyed by the event and its variant, so that `unacknowledged` by a Command and by the system releasing an Owner are two rows — produces a new message, an edit or nothing, Loud or Quiet and with the row's symbolic Mentions, as the row's last column says (a table-driven test; the rows of C-17 are set up directly); a Loud event is always a new message and an edit is always Quiet."
-  - "[C-11.FR-15] Delivery rows and Thread replies are claimed with `FOR UPDATE SKIP LOCKED` and a lease by any replica; a row whose lease ran out is claimed again; adapter calls are made outside any database transaction, in the delivery client class."
+  - "[C-11.FR-15] Delivery rows and Thread replies are claimed with `FOR UPDATE SKIP LOCKED` and a lease by any replica; a row whose lease ran out is claimed again; adapter calls are made outside any database transaction, in the delivery client class; in development mode a move of the development clock wakes the worker on every replica, so a delivery or a Thread batch due by the new time is attempted at once."
   - "[C-11.FR-16, C-11.FR-18] `listAlertGroupDeliveries` returns one item per Destination of the Alert Group with its state (`pending` or `delivered`) and `message_url`; `listDestinations` and `getDestination` return Destinations of every type with their health and Routes, filtered by `type`, `health` and `route`; `getRoute` carries its Destinations with their health; `muster_destination_info{destination,name}` is exported for each Destination."
   - "[C-11.FR-21, C-09.FR-11, C-09.FR-14] A Publication records one `publication` row in `delivery_events` and changes no Alert Group table; `getAlertGroupTimeline` merges the delivery events of the Alert Group with its entries by time as the kind `delivery`, and `kind=delivery` returns only them."
   - "[C-11.FR-17] `muster_delivery_attempts_total{destination,kind,outcome}`, `muster_delivery_latency_seconds{destination}` (from the receipt of the Snapshot behind a change to the adapter call) and the Leader gauge `muster_delivery_queue{destination}` are exported; every attempt writes one `delivery_attempt` line."
@@ -80,7 +83,7 @@ issue: 34
 - The real message: default layout, built-in texts, templates and buttons (S-036), links and Mention settings (S-037);
   until then a minimal renderer stands in (see Contracts).
 - The adapters, the Destination checks and every type-specific create and update (S-039, S-061, S-041, S-042, S-044, S-045);
-  the delivery state on the Alert Group page (S-040).
+  the delivery state on the Alert Group page (S-064).
 
 ## Contracts
 
@@ -103,7 +106,8 @@ issue: 34
   colour. This story ships a minimal renderer — status, `#N`, title and the names of the status's buttons from
   [reference.md](../prd/l1/reference.md#buttons-and-links-by-status), and for a reply the event and its fingerprints —
   which S-036 replaces with the real one.
-- **Adapter interface** (`delivery.go`, declared by its consumer, ADR-0016): `Publish` (a new Root message),
+- **Adapter interface** (`delivery.go`, declared by its consumer, ADR-0016): the interface is named `Adapter`, which is
+  the name lint 3 looks for (`delivery.Adapter`, below): `Publish` (a new Root message),
   `Update` (an edit of one message id), `Reply` (a Thread reply under a Root message), optional `Check` (the Destination
   check, S-035 onward) and `LengthLimit`. Each returns an outcome: `ok` (with message id and URL; "not modified" is
   `ok`), `retry_after` (the exact delay and its scope, `destination` or `connection`), `transient`, `fatal`, `unknown`,
@@ -111,8 +115,9 @@ issue: 34
   marked untrusted. Adapters register per Destination type; the registry is wired in `runtime.go`. This story handles
   `ok` and `retry_after`; any other outcome leaves the delivery `pending` with its next attempt after the first step of
   `delivery.transient_backoff`, until S-035 gives each its rule.
-- **Worker** (C-11.FR-1, FR-15; `design/db/schema.md` §5): every replica runs one, woken by `NOTIFY delivery` and by
-  the earliest `next_attempt_at`. It works per Organization — it iterates over the Organizations (one in L1) and
+- **Worker** (C-11.FR-1, FR-15; `design/db/schema.md` §5): every replica runs one, woken by `NOTIFY delivery`, by
+  the earliest `next_attempt_at` and, in development mode, by a move of the development clock: `runtime.go` adds the
+  worker's wake to the fan-out of `devmode.NewClock` that S-028 introduced, as the timers worker does. It works per Organization — it iterates over the Organizations (one in L1) and
   passes `org_id` to every claim and query (lint 1). It claims due `pending` rows of healthy Destinations, Urgent first, with
   `FOR UPDATE SKIP LOCKED` and a lease through the claim helper of S-062, then in a short transaction re-reads the
   latest Desired state: if `actual_hash = desired_hash` it marks the row `delivered` and calls nothing. Otherwise it
@@ -125,7 +130,7 @@ issue: 34
 - **Loudness** (C-11.FR-7, FR-20): the lifecycle event tables are a closed table in `enqueue.go` keyed by the event and
   its variant: an event whose rows differ by actor or reason has a row per variant. `unacknowledged` by a Command
   (C-10.FR-15) is a Quiet update of the Root message, while `unacknowledged` by the system with the reason
-  `owner_disabled` or `owner_deleted` (the release of an Owner, C-09.FR-22, S-032) is a Loud Thread reply with an update
+  `owner_disabled` or `owner_deleted` (the release of an Owner, C-09.FR-22, S-063) is a Loud Thread reply with an update
   of the Root message. Each row gives the messenger form — `publication`, `update`, `reply`, `reply_and_update` or
   `nothing` — with the row's loudness and symbolic Mentions; `delivery_events` and `thread_replies` carry them. A Loud
   event is always a new message (a Publication or a Thread reply); an edit is always Quiet. A first Publication is Loud
@@ -153,7 +158,8 @@ issue: 34
   from the same buckets, polling them during `delivery.interactive_budget`; since deliveries without a token wait for
   the margin, the interactive caller takes the next token first. It never queues and never writes `deliveries`. When the
   budget runs out it returns `limited` with the time until a token is due, which API handlers turn into `503`
-  `interactive-budget-exhausted` with `Retry-After` (the `Limited` response) and a Destination test into the error class
+  `interactive-budget-exhausted` with `Retry-After` (the `Limited` response; `internal/api/problem.go` gains the type
+  and maps the domain error, with `retry_after_seconds`) and a Destination test into the error class
   `limited` (S-047). Calls run in the **interactive** client class. The Broken probe never uses this path (S-035).
 - **Delivery events** (C-11.FR-21; `delivery_events`): `delivery.RecordEvent` writes one row per event with
   `destination_id`, `alert_group_id`, `kind`, `loudness`, `mentions`, `error_class`, masked `error` and `detail`; this
@@ -180,13 +186,19 @@ issue: 34
 - **Retention**: a Leader task deletes, in batches of at most 5,000 rows, `thread_replies` that are `sent`, `dropped` or
   `not_delivered` and older than `retention.alert_details` (`design/db/schema.md` §6), per Organization with its
   `org_id`.
-- **Architecture lint 3** (ADR-0016; `internal/archlint/callrules.go`): the adapter methods `Publish`, `Update` and
-  `Reply`, and every method an adapter offers to the interactive path, may be called only from `worker.go`,
-  `threads.go` and `interactive.go` of `internal/delivery`; the bad fixture calls `Publish` from `internal/api`.
+- **Architecture lint 3** (ADR-0016; `internal/archlint/archlint.go`): the rule and its fixtures exist since S-001;
+  its configuration is `DefaultConfig().Messenger` in `archlint.go` — package `internal/delivery`, interface `Adapter`,
+  methods `Publish`, `Update` and `Reply`, allowed in `worker.go`, `threads.go` and `interactive.go`. The real
+  interface must keep the name `delivery.Adapter` for the rule to find it, and every method an adapter offers to the
+  interactive path joins `Methods` there. `make lint-arch` passes over the real package and the fixtures in
+  `internal/archlint/testdata/rule3` keep failing as before.
 - **Recording test adapter** (`deliverytest`): records every call with its time, Destination, message and loudness;
   answers from a script per call (`ok`, `retry_after` with a delay and scope, `transient`, `fatal`, `unknown`,
   `markup_rejected`, `gone`, `thread_lost`, a delay, or a hook that runs after it accepted a call); offers a scripted
   `Check`. Every C-11 to C-16 test uses it through the adapter interface.
+- **Wiring** (`internal/api/server.go`, `sqlc.yaml`): the three operations join the implemented-operations map and
+  the API `Config` gains the Destinations reader and the delivery state; `sqlc.yaml` gains the entries for
+  `internal/delivery/query.sql` and `internal/destinations/query.sql`.
 - **Defaults**: `delivery.interactive_budget`, `delivery.thread_alerts_listed`,
   `route.thread_batching_window`, `delivery.transient_backoff` (first step only, until S-035).
 
@@ -201,7 +213,8 @@ issue: 34
 4. Write the worker with claims, leases, the collapse and the outcome records, and the Thread batching. Check:
    `worker_test.go` and `threads_test.go` with a manual clock.
 5. Write the delivery events, the Timeline merge, the Destination reads, the delivery state, the metrics, the log event,
-   the retention task and lint 3. Check: `make lint-arch` reports the bad fixture.
+   the retention task, the clock wake and the configuration of lint 3. Check: `make lint-arch` passes on the real
+   package, and `internal/archlint` tests still report the bad calls of the rule 3 fixtures.
 6. Write `live_test.go`. Check: Verification below.
 
 ## Verification
@@ -236,6 +249,8 @@ go test -tags integration -run TestLive -v ./internal/delivery/...
 #     no token within 5 s: limited, retry after 7 s; the recorder saw no call
 # === RUN   TestLive/thread_batching                    (C-11.FR-4, FR-5)
 #     t=0 s reply (1 Alert); t=10–50 s collected; t=60 s reply listing 10 of 12 Alerts and "…and 2 more — open in Muster"; t=200 s reply at once
+# === RUN   TestLive/clock_wake
+#     a Thread batch due in 60 s: an advance of the development clock by 60 s woke both workers and the reply went at once
 # === RUN   TestLive/lifecycle_rows                     (C-11.AC-10)
 #     31 rows of the lifecycle event tables, keyed by event and variant: each produced its row's form, loudness and Mentions
 # === RUN   TestLive/lease_expiry
@@ -281,7 +296,7 @@ None.
 | C-11.FR-7 | partial | the rule and the table; Quiet new messages per messenger are S-061 and S-042 |
 | C-11.FR-8 | partial | `RetryAfter`; the other classes are S-035 |
 | C-11.FR-15 | full | |
-| C-11.FR-16 | partial | `pending` and `delivered`; the other states are S-035 and S-042, the page S-040 |
+| C-11.FR-16 | partial | `pending` and `delivered`; the other states are S-035 and S-042, the page S-064 |
 | C-11.FR-17 | partial | attempts, latency, queue and info; Broken and Storm metrics are S-035 |
 | C-11.FR-18 | partial | reading Destinations with health and Routes; health changes are S-035, type fields come with each type |
 | C-11.FR-20 | partial | every row but `moved_to_default_route` (S-035); the C-17 rows are produced from S-049 on |
@@ -291,5 +306,5 @@ None.
 | C-11.AC-10 | partial | the lifecycle event rows; the delivery-event rows and `moved_to_default_route` are S-035 |
 | C-11.AC-14 | full | |
 | C-09.FR-11 | partial | delivery entries in the Timeline |
-| C-09.FR-14 | partial | delivery entries in the Timeline API; the page section is S-040 |
+| C-09.FR-14 | partial | delivery entries in the Timeline API; the page section is S-064 |
 | C-08.FR-1 | partial | the Route's Destinations with their health |

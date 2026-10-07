@@ -4,7 +4,7 @@ title: Telegram Connection pages with the step-by-step check and the Telegram De
 capability: C-14
 kind: fe
 layer: L1
-depends_on: [S-040, S-042]
+depends_on: [S-064, S-042]
 covers: [C-14.FR-1, C-14.FR-2, C-14.FR-10, C-14.FR-11, C-14.FR-14, C-14.AC-6, C-14.AC-7, C-14.AC-13, C-14.AC-16]
 files_touched:
   - web/src/components/telegram-connection-fields.tsx
@@ -48,7 +48,7 @@ issue: 43
 
 **OUT**
 
-- The shared pages, the Mention section and the health banners (S-040); Test and Preview (S-048); Account links in the
+- The shared Destination pages, the Mention section and the health banners (S-064); Test and Preview (S-048); Account links in the
   profile (S-052).
 
 ## Contracts
@@ -70,7 +70,7 @@ issue: 43
   (`@username` or chat id) only, with the help text "Enable comments on the channel and make the bot an admin of the
   channel and of its discussion group."; after saving, the page shows "Discussion group: {title} ({id})" and "Channel:
   {title}" read-only. `destination_check_failed` shows each failing check's text next to "Channel". The Mention section
-  of S-040 offers no "everyone" choice and no groups for Telegram.
+  of S-064 offers no "everyone" choice and no groups for Telegram.
 - **Check** (`destination-check.tsx`): the names of the Telegram checks — `channel_exists` "Channel exists",
   `discussion_group` "Discussion group", `bot_rights_channel` "Bot rights in the channel", `bot_rights_group` "Bot rights
   in the discussion group".

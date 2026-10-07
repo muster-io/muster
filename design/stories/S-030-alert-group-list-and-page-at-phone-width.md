@@ -23,6 +23,10 @@ files_touched:
   - web/src/components/timeline.tsx
   - web/src/components/related-alert-groups.tsx
   - web/src/components/relative-time.tsx
+  - web/src/components/app-shell.tsx
+  - web/src/components/app-shell.test.tsx
+  - web/src/components/integration-alerts.tsx
+  - web/src/components/integration-alerts.test.tsx
   - web/src/lib/alert-group-search.ts
   - web/src/lib/live.ts
   - web/src/components/alert-group-filters.test.tsx
@@ -32,11 +36,19 @@ files_touched:
   - web/e2e/alert-group-list.spec.ts
   - web/e2e/alert-group-page.spec.ts
   - web/e2e/phone-width.spec.ts
+  - web/e2e/support.ts
+  - web/e2e/sign-in.spec.ts
+  - web/e2e/oidc-settings.spec.ts
+  - web/e2e/integration-page.spec.ts
+  - web/e2e/route-preview.spec.ts
+  - web/e2e/routes.spec.ts
+  - web/e2e/heartbeat.spec.ts
 acceptance:
   - "[C-09.FR-13] The Alert Group list is the home page: tabs Open (the default: firing, acknowledged and snoozed), Firing, Acknowledged, Snoozed, Resolved and All, each with its count for the other filters; filters for Route, Integration, Severity level, Urgent, resolved by, Reopened and label Matchers; time range presets and a custom range (7 days by default); search by `#N` or text; sorting by start or last change; \"Load more\"."
   - "[C-09.FR-13, C-09.AC-15] Tab, filters, range, search, chosen label columns and sorting live in the URL: opening it in another browser shows the same view with the same columns."
   - "[C-09.FR-25, C-09.AC-13] With the list open on the Firing tab, a new Alert Group appears as \"1 new\" above the list within seconds, without a reload, and the Firing count grows by one; rows that change update in place, and the list never moves until \"1 new\" is clicked."
   - "[C-09.FR-14, C-09.FR-10] The Alert Group page shows the header (status, `#N`, title, Severity level, Urgent, linked Route, Integrations, start and duration, Reopen count, the system's resolution reason), the notices, the Alerts — firing first, resolved struck through with their reason, annotations expandable, filterable — the group labels, common labels and common annotations, and the Timeline."
+  - "[C-09.FR-24] The full text of a Gone or Stale reason is readable by touch: in the expandable details of the Alert, on the Alert Group page and in the Integration's Alerts view, not only in a `title` tooltip."
   - "[C-09.FR-11] The Timeline shows each entry with its time, actor and Transport, Loud or Quiet and whom it asked to mention, newest or oldest first, filtered by kind; `muster_unavailable` reads \"Muster was unavailable from {from} to {to}\"."
   - "[C-09.FR-7, C-09.AC-4] After a Replacement the page shows \"Alerts were replaced because `pod` changed. Consider removing Instance labels from the rule, for example `without(pod, instance)`.\""
   - "[C-09.FR-20, C-09.AC-16] The page lists the previous Alert Groups of the same Route and key with number, status, start, duration and who resolved them, each linked."
@@ -62,7 +74,7 @@ issue: 30
 **OUT**
 
 - Commands, the Note box, bulk selection and the Owner filters and columns (S-033); links (S-038); delivery state
-  (S-040); the next notice or Reminder and Unclaimed (S-050).
+  (S-064); the next notice or Reminder and Unclaimed (S-050).
 - The statistics page (S-031).
 
 ## Contracts
@@ -70,14 +82,18 @@ issue: 30
 - **API used**: `listAlertGroups`, `getAlertGroupCounts`, `getAlertGroup`, `listAlertGroupAlerts`,
   `getAlertGroupTimeline`, `listRelatedAlertGroups`, `listRoutes`, `listIntegrations`, `streamLiveUpdates`.
 - **Routes and navigation**: `/` redirects to `/alert-groups`, which replaces the placeholder of S-014; navigation
-  entry "Alert Groups", first, with `alert-groups:read`; `/alert-groups/$alertGroupId` is the page.
+  entry "Alert Groups", first, with `alert-groups:read`; `/alert-groups/$alertGroupId` is the page. The shell's
+  `home` entry (`/`, "Home", `app-shell.tsx`) becomes this entry, `app-shell.test.tsx` follows, and the `home.*` texts
+  of the placeholder go. Signing in now ends on `/alert-groups` after the redirect, so the assertions on `${APP}/` in
+  `web/e2e/sign-in.spec.ts` and `oidc-settings.spec.ts` expect `/alert-groups` instead.
 - **List** (C-09.FR-13):
   - tabs Open (default), Firing, Acknowledged, Snoozed, Resolved, All; counts from `getAlertGroupCounts` (Open is the
     sum of the first three);
   - filters — Route and Integration (multiple), Severity level, Urgent, resolved by (a person, or the system with a
     reason), Reopened, labels through the Matcher input of S-022 — in a side panel on a desktop and a sheet on a phone;
   - time range — "Last hour", "Last 24 hours", "Last 7 days" (default, `alert_group.list_range`), "Last 30 days",
-    "Custom"; search — a `#N` or text; sorting — start time or last change, either direction;
+    "Custom" — as a native `<select>`, and the custom range as native date and time inputs (D250); search — a `#N` or
+    text; sorting — start time or last change, either direction;
   - desktop columns — status, `#N`, title, Severity level, Urgent, Route, Integrations, firing and total Alerts, start
     and duration, last change, Reopen count, and the label columns picked by the user (`label_columns`, none by
     default), "Load more" by cursor;
@@ -93,6 +109,10 @@ issue: 30
   the Replacement text, the removed-details text, and "Firing again after a manual resolve of #N" linked; the Alerts
   with a Firing/Resolved filter; group labels, common labels, and the common annotations with `summary` and
   `description` shown first; the Timeline; previous Alert Groups (C-09.FR-20).
+- **Alert details for touch** (C-09.FR-24, D261a): each Alert's expandable details — on the Alert Group page and in the
+  Integration's Alerts view (`integration-alerts.tsx`, where the reason of a Gone or Stale Alert is today only a `title`
+  attribute) — show the full text of its resolve reason, so a phone user reads it without hovering; the short reason
+  stays in the row.
 - **Timeline** (C-09.FR-11): oldest or newest first, kind chips `status`, `alerts`, `notes`, `timers`, `delivery`,
   `system`; each entry shows the time, the actor ("Muster" for `system`) with the Transport, a text per event or system
   entry written in this story, a "Loud" mark and "Mentions: …" listing the symbolic Mentions, and its details
@@ -102,16 +122,22 @@ issue: 30
 - **Phone width** (C-09.FR-24, NFR-15): from 360 CSS pixels, the list renders compact rows — status, `#N`, title,
   Urgent mark, duration — and the page stacks the header, the Alerts and the Timeline; neither page scrolls
   horizontally (long label values wrap).
+- **End-to-end helpers** (`web/e2e/support.ts`): the helpers that drive the fake Alertmanager and the development clock
+  — `fam`, `notify` and `advance`, today copied into `integration-page.spec.ts`, `route-preview.spec.ts`,
+  `routes.spec.ts` and `heartbeat.spec.ts` — move into `support.ts` with one signature each, and those specs import
+  them; the new specs of this story use them too.
 
 ## Steps
 
-1. Write the search parameters, tabs, filters, time range and table. Check: the component test round-trips every filter
+1. Move the end-to-end helpers into `support.ts`. Check: `make e2e` passes the existing specs unchanged in behaviour.
+2. Write the search parameters, tabs, filters, time range and table. Check: the component test round-trips every filter
    through the URL.
-2. Add search, sorting, label columns and paging. Check: Playwright reproduces a view from its URL in a new context.
-3. Add live updates with "N new". Check: Playwright sees "1 new" after the fake Alertmanager sends a new Alert.
-4. Write the page with its sections and the Timeline. Check: the component test renders each event kind; Playwright
-   reads a Reopen and a Replacement.
-5. Make both pages work at 360 pixels. Check: `phone-width.spec.ts` asserts no horizontal scroll.
+3. Add search, sorting, label columns and paging. Check: Playwright reproduces a view from its URL in a new context.
+4. Add live updates with "N new". Check: Playwright sees "1 new" after the fake Alertmanager sends a new Alert.
+5. Write the page with its sections and the Timeline, the navigation entry and the redirect. Check: the component test
+   renders each event kind; Playwright reads a Reopen and a Replacement; the sign-in specs land on `/alert-groups`.
+6. Make both pages work at 360 pixels, with the reasons in the Alert details. Check: `phone-width.spec.ts` asserts no
+   horizontal scroll and opens the details of a Gone Alert by tapping.
 
 ## Verification
 
@@ -138,6 +164,8 @@ At 360 × 740 pixels:
 9. The list shows compact rows and a "Filters" button; `document.documentElement.scrollWidth` equals the viewport width.
 10. "Filters" → "Firing" tab → open the first row → the header is at the top, then the Alerts, then the Timeline; no
     horizontal scroll.
+11. Tap a resolved Alert whose reason is Gone → its details show the full reason "Alertmanager no longer reports this
+    alert — …" (the `alerts.reasonText.absent` text of S-022), without a hover.
 
 `make e2e` runs these steps as `web/e2e/alert-group-list.spec.ts`, `alert-group-page.spec.ts` and `phone-width.spec.ts`.
 
@@ -148,10 +176,11 @@ None.
 ## Notes
 
 - Suggested commit: `feat(web): add the alert group list and page, usable at phone width`.
+- `alert-group-filters.tsx` builds its pickers from native `<select>` elements (D250), as the time range does.
 - The default tab Open of C-09.FR-13 has no count of its own in `AlertGroupCounts`: it is the sum of the three open
   statuses.
 - Later stories add to these pages: commands, Notes, selection and Owner (S-033), links (S-038), delivery state and
-  "Delivery problem" (S-040), the next notice, Unclaimed and "Still on it" (S-050).
+  "Delivery problem" (S-064), the next notice, Unclaimed and "Still on it" (S-050).
 
 ## Coverage
 
@@ -160,9 +189,9 @@ None.
 | C-09.FR-7 | full | together with S-028 |
 | C-09.FR-10 | partial | the page; messages are C-11 and C-12 |
 | C-09.FR-11 | partial | the page; later entry types come with their capabilities |
-| C-09.FR-13 | full | together with S-029; the later filters come with S-033, S-040 and S-050 |
-| C-09.FR-14 | full | together with S-028; later sections come with S-033, S-038, S-040 and S-050 |
-| C-09.FR-16 | partial | the page notice; keeping Notes is S-032 |
+| C-09.FR-13 | full | together with S-029; the later filters come with S-033, S-064 and S-050 |
+| C-09.FR-14 | full | together with S-028; later sections come with S-033, S-038, S-064 and S-050 |
+| C-09.FR-16 | partial | the page notice; keeping Notes is S-063 |
 | C-09.FR-17 | full | |
 | C-09.FR-20 | full | together with S-029 |
 | C-09.FR-24 | partial | the list and the page; the commands at phone width are S-033 |

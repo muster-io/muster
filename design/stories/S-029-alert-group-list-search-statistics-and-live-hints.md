@@ -14,6 +14,7 @@ files_touched:
   - internal/groups/statistics.go
   - internal/groups/retention.go
   - internal/groups/hints.go
+  - internal/groups/dispatcher.go
   - internal/groups/read.go
   - internal/groups/query.sql
   - internal/groups/list_test.go
@@ -22,9 +23,15 @@ files_touched:
   - internal/api/alertgroups.go
   - internal/api/alertgroups_test.go
   - internal/api/integrations.go
+  - internal/api/server.go
+  - internal/api/server_test.go
   - internal/live/hub.go
   - internal/leader/tasks.go
   - internal/logging/events.go
+  - internal/runtime/runtime.go
+  - internal/db/migrations/0003_alert_groups_firing_again_after_on_delete.up.sql
+  - internal/db/migrations/0003_alert_groups_firing_again_after_on_delete.down.sql
+  - design/db/schema.md
   - test/e2e/alert_group_list_test.go
 acceptance:
   - "[C-09.FR-13, C-09.AC-5] `listAlertGroups` without a status returns open Alert Groups, and without a time range those whose lifetime overlaps the last `alert_group.list_range`, including an open Alert Group that started earlier; sorting by start or last change in either direction pages by cursor."
@@ -57,7 +64,7 @@ issue: 29
 **OUT**
 
 - The pages (S-030, S-031).
-- The filters Owner and "snoozed with no end" (S-032), "Delivery problem" (S-061) and Unclaimed (S-049); time to
+- The filters Owner and "snoozed with no end" (S-063), "Delivery problem" (S-061) and Unclaimed (S-049); time to
   acknowledge gets data from S-032.
 
 ## Contracts
@@ -78,7 +85,7 @@ issue: 29
   the title and `summary` case-insensitively inside words (trigram `ILIKE`). `sort` by `started_at` or
   `last_changed_at`, either direction, cursor on `(value, id)`, `limit` per `api.page_size`. `label_columns` returns,
   for each item, the value of each named label in `common_labels` (`label_values`). `owner`, `snoozed_no_end`,
-  `delivery_problem` and `unclaimed` answer `422` with `unsupported` at `/query/<name>` until S-032, S-061 and S-049.
+  `delivery_problem` and `unclaimed` answer `422` with `unsupported` at `/query/<name>` until S-063, S-061 and S-049.
 - **Counts** (`getAlertGroupCounts`): the same filters without `status` and `number`, counted per status and in total.
 - **Related** (C-09.FR-20): Alert Groups of the same Route with the same `group_key_sha256`, the Alert Group itself
   excluded, newest first by cursor: number, status, start, `duration_seconds` (to the resolution; null while open) and
@@ -98,13 +105,27 @@ issue: 29
   Organization's periods and passes `org_id` to every query (lint 1). Reads hide what is past its period: an Alert Group
   resolved more than `retention.alert_details` ago has `details_removed: true` and the notice `details_removed` with
   `retention_days`, `listAlertGroupAlerts` returns nothing and the Timeline returns only Notes. List, search, counts and
-  statistics use the summary rows.
-- **Live hints** (C-09.FR-25, ADR-0009): the dispatcher sends, in the transaction of each change, `NOTIFY` for the hint
+  statistics use the summary rows. Besides its hourly run, the task runs when the development clock moves: it listens
+  on the `leader.Wakes` that already wakes the Heartbeat check and the Stale scan (`internal/leader/tasks.go`), so an
+  advance past a retention period purges at once and C-09.AC-18 here and C-10.AC-20 (S-063) are checkable without
+  waiting for the next hour.
+- **Foreign key for summary retention** (`internal/db/migrations/0003_…`, `design/db/schema.md`): `alert_groups.
+  firing_again_after_id` references `alert_groups (id)` without `ON DELETE` (`0001_init.up.sql`), so deleting the
+  summary row of a person-resolved Alert Group whose Alerts started a later one would fail on the foreign key. A new
+  expand-only migration `0003` replaces the constraint with one `ON DELETE SET NULL` (the later Alert Group then loses
+  the notice `firing_again_after_manual_resolve`), its down migration restores the old one, and `schema.md` lists the
+  migration and says so in its retention section.
+- **Live hints** (C-09.FR-25, ADR-0009; `internal/groups/dispatcher.go`, `hints.go`): the dispatcher sends, in the
+  transaction of each change, `NOTIFY` for the hint
   `alert-group` with the `public_id`; a new Alert Group and a Reopen also send `alert-groups` with `null`. The hub of
   S-012 gains both types.
 - **Integration count** (C-09.FR-21): `open_alert_group_count` on every Integration read — the open Alert Groups whose
   `integration_ids` contain it.
 - **Log event**: `alert_groups_purged` (INFO: `details`, `summaries`).
+- **Wiring** (`internal/api/server.go`, `internal/runtime/runtime.go`): the four operations join the
+  implemented-operations map; the retention task and the groups reads are wired in the runtime.
+  `internal/api/server_test.go` uses `GET /alert-groups` as its example of an operation that answers `501`; it takes
+  another operation that no story of this phase implements.
 
 ## Steps
 
@@ -113,8 +134,9 @@ issue: 29
    in `design/db/schema.md` §4.9.
 2. Write related Alert Groups and statistics. Check: tests cover C-09.AC-17 with a manual clock, days in a time zone and
    an Alert Group of two Integrations.
-3. Write retention and the reads of removed details. Check: tests with a manual clock cover C-09.AC-18 and Notes
-   surviving the details.
+3. Write retention, migration `0003` and the reads of removed details. Check: tests with a manual clock cover
+   C-09.AC-18, Notes surviving the details and a summary row deleted while a later Alert Group points at it;
+   `make test-integration` applies `0003` up and down.
 4. Add the hints and the Integration count. Check: Verification below.
 
 ## Verification
@@ -130,7 +152,11 @@ ROUTE() { curl -s "${A[@]}" $API/routes -d "{\"name\":\"$1\",\"matchers\":[{\"la
   \"urgent\":false,\"group_key\":$2,\"destination_ids\":[],\"policy\":$P}" | jq -r .id; }
 PUTA() { curl -s -X PUT "$FAM/groups/$1/alerts/$2" -d "$3" > /dev/null; }
 RK=$(ROUTE k8s '["alertname","namespace"]'); RM=$(ROUTE mix '["alertname"]'); RS=$(ROUTE st '["alertname","n"]')
-curl -sN "${A[@]}" $API/live-updates > /tmp/sse & SSE=$!
+# the live-updates stream follows a web session (D252; a token gets 403 session_required): sign in with a cookie jar
+# and open the stream now, before the first clock jump, which would end the session and close the stream
+curl -s -c jar -H 'Content-Type: application/json' -d '{"login":"admin@example.org","password":"muster-dev-password"}' \
+  $API/sessions > /dev/null
+curl -sN -b jar $API/live-updates > /tmp/sse & SSE=$!
 
 # two Alert Groups: "pay" (both Alerts in payments, critical, Urgent) and "mix" (one in payments, one in billing)
 curl -s -X PUT $FAM/groups/c1 -d '{"receiver":"lst","route":"{}","labels":{"alertname":"KubePodCrashLooping"}}' > /dev/null
@@ -140,6 +166,8 @@ PUTA c1 m0 '{"labels":{"team":"mix","namespace":"payments","pod":"a"}}'
 PUTA c1 m1 '{"labels":{"team":"mix","namespace":"billing","pod":"b"}}'
 NOTIFY c1 '{"reason":"first notification"}'
 grep -c '"type":"alert-groups"' /tmp/sse                                                          # 1 or more   (C-09.AC-13)
+grep -c '"type":"alert-group"' /tmp/sse                                                           # 2 or more   (C-09.FR-25)
+kill $SSE                                                                                         # before the first clock jump
 
 # C-09.AC-15 and C-09.AC-25: common labels decide
 FROM=$(date -u -v-30d +%FT%TZ 2>/dev/null || date -u -d '-30 days' +%FT%TZ)
@@ -189,7 +217,6 @@ curl -s "${A[@]}" "$API/alert-groups/$PAY" | jq -c '{details_removed, n: [.notic
 curl -s "${A[@]}" "$API/alert-groups/$PAY/alerts" | jq '.items | length'                            # 0
 LIST "q=KubePodCrashLooping&status=resolved&from=$(date -u -v-200d +%FT%TZ 2>/dev/null || date -u -d '-200 days' +%FT%TZ)&to=2100-01-01T00:00:00Z" \
   | jq --arg i "$PAY" '[.items[].id] | index($i) != null'                                           # true
-kill $SSE
 
 # C-09.AC-24, with a new session of the Admin (the jumps above ended the old one)
 curl -s -c jar -H 'Content-Type: application/json' -d '{"login":"admin@example.org","password":"muster-dev-password"}' \
@@ -217,11 +244,11 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-09.FR-13 | partial | the API; the page is S-030, the later filters S-032, S-061, S-049 |
+| C-09.FR-13 | partial | the API; the page is S-030, the later filters S-063, S-061, S-049 |
 | C-09.FR-23 | full | together with S-028 |
 | C-09.FR-20 | partial | the API; the page is S-030 |
 | C-09.FR-15 | partial | the API; the page is S-031, time to acknowledge gets data from S-032 |
-| C-09.FR-16 | partial | retention and the reads; the page notice is S-030, Notes S-032 |
+| C-09.FR-16 | partial | retention and the reads; the page notice is S-030, Notes S-063 |
 | C-09.FR-21 | partial | the count; the dialog is S-031 |
 | C-09.FR-25 | partial | the Alert Group hints; the client is S-030 |
 | C-09.AC-5 | full | |

@@ -16,9 +16,8 @@ files_touched:
   - internal/mattermost/callback_test.go
   - internal/accountlinks/lookup.go
   - internal/accountlinks/query.sql
-  - internal/api/callbacks.go
-  - internal/api/callbacks_test.go
-  - internal/api/server.go
+  - internal/server/server.go
+  - internal/server/server_test.go
   - internal/api/alertgroups_test.go
   - internal/groups/filters.go
   - internal/groups/read.go
@@ -35,6 +34,7 @@ files_touched:
   - test/e2e/mattermost_test.go
   - test/load/main.go
   - .github/workflows/nightly.yml
+  - sqlc.yaml
 acceptance:
   - "[C-13.AC-13, C-13.FR-3, C-12.FR-1, C-12.FR-11] A new Alert Group creates one post whose `message` is the summary line — the status emoji, `#N` and the title — with one attachment coloured by status, whose title `#N` and the title links to the Alert Group page, whose text has the line of links under the Alerts starting with \"Open in Muster\" and ends with the footer line, whose `footer` is \"Muster v<version>\" with the logo URL as `footer_icon`, and whose buttons follow; every link is in the attachment, none is a button; the post of an Alert Group of 600 Alerts keeps its `message` and its attachment text within 16,383 characters, its Alert list ends with \"…and N more\" and the link to Muster stays."
   - "[C-13.AC-1] Acknowledge through the API edits that post in place to the acknowledged colour, footer and buttons; a new Alert creates a reply with the post as `root_id`, which raises its reply count."
@@ -43,7 +43,7 @@ acceptance:
   - "[C-13.AC-14, C-13.FR-4, C-11.FR-2] A press on a Root message is answered 200 with `{}`, never with `update` or `ephemeral_text`; when the press is refused, the person gets one ephemeral post through `POST /api/v4/posts/ephemeral` in the channel, without `root_id`."
   - "[C-13.AC-4, C-10.FR-11] A press from a Mattermost account without an Account link changes nothing and gets the ephemeral \"Your Mattermost account is not linked to Muster. Link it in your profile: {link}\"."
   - "[C-13.FR-4, C-10.FR-3, C-10.FR-6] A press from an account linked to a Responder (link rows set up directly; S-051 creates them) runs Acknowledge, Resolve or a Snooze for the pressed duration as that User with the Transport `mattermost`; the delivery worker, not the answer, edits the post."
-  - "[C-13.AC-2] A callback whose action id was changed is answered `{}`, changes nothing and gets the ephemeral \"This button could not be verified; nothing was changed.\"; a callback for a Connection that does not exist, and one whose body is not JSON, is answered `200` `{}` the same way — the body that does not decode is answered by the strict server's request-error handler, before any handler runs."
+  - "[C-13.AC-2] A callback whose action id was changed is answered `{}`, changes nothing and gets the ephemeral \"This button could not be verified; nothing was changed.\"; a callback for a Connection that does not exist, and one whose body is not JSON or does not match `MattermostActionRequest`, is answered `200` `{}` the same way by the callback handler on the ingest listener."
   - "[C-13.AC-11] A press whose signed action id belongs to one post but arrives with the `post_id` of another is refused and changes nothing."
   - "[C-13.AC-3, C-11.FR-9] A `403` on a post makes the Destination Broken, raises `MusterDestinationBroken` and shows the Broken health on the Destination and in its Routes' `destinations`."
   - "[C-13.AC-8, C-13.FR-10] With the bot removed from the channel, a new Alert Group meets a `403` and resolves while the Destination is Broken; after the bot is added back the next probe — the Destination check, as the adapter's `Check` — ends the Broken state and resolves `MusterDestinationBroken` with no new Alert Group, its requests counted under `client=\"delivery\"`; `checkDestination` does the same at once under `client=\"interactive\"`."
@@ -69,9 +69,9 @@ issue: 61
 
 - The Mattermost adapter of the delivery engine: the Root message layout, edits, Thread replies, Quiet and Loud posts,
   escaping, the response mapping, and the Destination check of S-039 as its `Check` for the Broken probe.
-- Button presses: the callback endpoint, signatures, the message binding, Account link lookup, dispatching Commands
-  with the Transport `mattermost`, the ephemeral answers through the interactive path, and the request-error handler
-  that keeps the callback's `200 {}` promise for a body that does not decode.
+- Button presses: the callback handler on the ingest listener, signatures, the message binding, Account link lookup,
+  dispatching Commands with the Transport `mattermost`, and the ephemeral answers through the interactive path; the
+  handler keeps the callback's `200 {}` promise for every body, one that does not decode included.
 - The "Delivery problem" filter, the `internal_alerts` Route suggestion, `muster doctor` checks, the documentation.
 - The full profile of the load test and its thresholds (NFR-1, NFR-2, P-44), now that delivery reaches a messenger.
 
@@ -79,13 +79,15 @@ issue: 61
 
 - Connections, Destinations, the Destination check on save and through the API, and the fake Mattermost server
   (S-039).
-- The pages (S-040); the Telegram type (S-041, S-042); outgoing webhooks (S-044, S-045).
+- The pages (S-040 for Connections, S-064 for Destinations and delivery state); the Telegram type (S-041, S-042);
+  outgoing webhooks (S-044, S-045).
 - The test message and the bot's own press (S-047); Reminders and their buttons on Thread replies (S-049); creating
   Account links, with which S-051 verifies the answers to Viewers and disabled Users.
 
 ## Contracts
 
-- **Operations implemented**: `mattermostAction` (ingest listener); `listAlertGroups` and `getAlertGroupCounts` accept
+- **Operations implemented**: `mattermostAction` (ingest listener, served by the callback handler below, not by the
+  API server); `listAlertGroups` and `getAlertGroupCounts` accept
   `delivery_problem` and `AlertGroup.delivery_problem` is filled (the `422 unsupported` of S-029 is removed, and its
   tests in `list_test.go` and `alertgroups_test.go` change with it); `listRouteSuggestions` and `acceptRouteSuggestion`
   handle `internal_alerts`. Schemas: `MattermostActionRequest`, `MattermostActionContext`, `MattermostActionAnswer`.
@@ -125,11 +127,20 @@ issue: 61
   `GET /api/v4/posts/{root id}` in the same client class: `404` makes the outcome `gone`; `200` keeps the `403` `fatal`,
   a real permission error; any other answer of the read is classified by the mapping above. The adapter never reads
   with `include_deleted=true`, which may need the system admin role (F-058).
-- **Button presses** (C-13.FR-4; `callback.go`, `mattermostAction`): the callback always answers `200` `{}`, also to a
-  body that is not JSON or does not match `MattermostActionRequest`. Request validation is off for the route, and the
-  strict server's request-error handler (`internal/api/server.go`), which answers a body that does not decode with a
-  `400` Problem everywhere else, answers `mattermostAction` with `200` `{}` instead, so the promise holds before the
-  handler runs. The handler looks up the Connection (unknown or deleted: nothing more), verifies the action id with
+- **Callback seam** (`internal/server/server.go`, `internal/runtime/runtime.go`): `/api/v1/callbacks/*` is already an
+  ingest path (`server.IsIngestPath`), but `server.Ingest` hands everything except the Heartbeat to the ingest handler,
+  which answers `404` for any path but ingestion (`internal/ingest/handler.go`), and the API server mounts only the
+  operations with `x-listener: app` (`internal/api/middleware.go`), so no strict-server handler or request-error
+  handler ever sees a callback. This story gives `server.Ingest` a third handler for the callbacks, a mux under
+  `/api/v1/callbacks/` that `runtime.go` builds: `POST /api/v1/callbacks/mattermost/{connection_id}` goes to the
+  Mattermost callback handler of `internal/mattermost/callback.go`, and S-041 and S-042 add the Telegram webhook to the
+  same mux. The merged single-port mode (`server.Merge`) needs no change, since it already routes ingest paths to
+  `server.Ingest`.
+- **Button presses** (C-13.FR-4; `callback.go`, `mattermostAction`): the callback handler owns the promise that the
+  callback always answers `200` `{}`: it reads the body up to `ingest.body_limit` and answers `200` `{}` to a body that
+  cannot be read, is not JSON or does not match `MattermostActionRequest`, to an unknown method on the path and to any
+  error of its own, logging the cause; nothing in front of it validates the request. The handler looks up the
+  Connection (unknown or deleted: nothing more), verifies the action id with
   `internal/buttons` and the key named by `context.key_id`, and checks that `post_id` is the `message_id` of the Alert
   Group's delivery to a Destination of this Connection and that `channel_id` is that Destination's channel; any failure
   is a refusal. It maps `user_id` through `accountlinks.Lookup("mattermost:<connection>", user_id)`; without a link it
@@ -149,8 +160,13 @@ issue: 61
   when one of its deliveries is `not_delivered`, `deleted_in_messenger`, waits for a Broken Destination, or has a Thread
   not attached (from S-042); `delivery_problem=true` filters the list and the counts.
 - **Internal alerts suggestion** (C-13.FR-11, C-08.FR-11; `internal/routing/suggestions.go`): `internal_alerts` applies
-  while a Destination exists and no Route other than the Default route takes `alertname=~"Muster.*"`; accepting it
-  creates the Route "Muster internal alerts" with that Matcher at the top of the list with the chosen `destination_ids`.
+  while a Destination exists and some Internal alert of the closed registry (`internal/internalalerts`), with the
+  labels it is raised with, would be taken by no Route other than the Default route in the current evaluation order —
+  the test `heartbeatLostApplies` already makes for `MusterHeartbeatLost`, run over every Internal alert. The Route
+  "Muster: Heartbeat lost" that the `heartbeat_lost` suggestion of S-026 creates matches only
+  `alertname="MusterHeartbeatLost"`, so it takes that one alert and leaves the suggestion standing for the others;
+  both suggestions can apply at once. Accepting `internal_alerts` creates the Route "Muster internal alerts" with the
+  Matcher `alertname=~"Muster.*"`, the chosen `destination_ids` and the place of the Open question below.
 - **`muster doctor`** (C-02.FR-14): one line per Mattermost Connection (`connection <name>: ok` or the failing step) and
   per Mattermost Destination (`destination <name>: ok` or the failing check), with the checks of S-039, read-only, in
   the background class.
@@ -176,15 +192,17 @@ issue: 61
   and after the run. `-destination=none` runs the profile without the Destination and without the delivery threshold.
   The `load-test` job of `nightly.yml` (S-004) passes it on the compose run, with the bootstrap Admin it writes into the
   compose example's `.env`, for the footprint of NFR-3, and fails on a breach.
+- **Wiring** (`sqlc.yaml`): the entry for `internal/accountlinks/query.sql`.
 - **Defaults**: `delivery.interactive_budget`.
 
 ## Steps
 
 1. Write the adapter: layout, escaping, edits, replies, Mentions and the response mapping, with `Check` from S-039.
    Check: `layout_test.go` and `adapter_test.go` against the in-process fake.
-2. Write the callback with signatures, the binding, the lookup, dispatch, ephemeral answers and the request-error
-   handler. Check: `callback_test.go` covers C-13.AC-2, AC-4, AC-11 and AC-14; `internal/api/callbacks_test.go` sends
-   a body that is not JSON and gets `200` `{}`.
+2. Write the callback handler with signatures, the binding, the lookup, dispatch and ephemeral answers, and mount it
+   in `server.Ingest`. Check: `callback_test.go` covers C-13.AC-2, AC-4, AC-11 and AC-14 and a body that is not JSON;
+   `internal/server/server_test.go` routes `/api/v1/callbacks/mattermost/…` to the callback handler on the ingest
+   listener and in the merged mode.
 3. Add the Delivery problem filter, the suggestion, the doctor lines, the documentation, the secret probe and the
    end-to-end test. Check: Verification below.
 4. Give the load test its full profile, its own sign-in and data, `-destination=none` and the thresholds, and pass the
@@ -263,7 +281,7 @@ NOTIFY d1 '{"reason":"new alerts added"}'; ADV 60; sleep 3
 REQ '[.[] | select(.path == "/api/v4/posts")] | .[-2:] | (.[1].at_ms - .[0].at_ms) / 1000 | . >= 1 and . < 2'   # true
 
 # C-13.AC-3, AC-8: the bot leaves the channel; a new Alert Group meets 403 and resolves while Broken
-curl -s -X DELETE $FMM/channels/ch-alerts/members/u-bot
+curl -s -X DELETE $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
 curl -s -X PUT $FAM/groups/d1/alerts/j1 -d '{"labels":{"team":"db","cluster":"b","pod":"j1"}}' > /dev/null
 NOTIFY d1 '{"reason":"new alerts added"}'; sleep 1
 curl -s -b jar $API/destinations/$D | jq -c '.health | {state, r: (.reason | test("403"))}'   # {"state":"broken","r":true}
@@ -272,17 +290,17 @@ curl -s -b jar "$API/integrations/$(curl -s -b jar $API/integrations | jq -r '.i
   | jq -r '.items[].labels.alertname'                                       # MusterDestinationBroken
 curl -s -X PUT $FAM/groups/d1/alerts/j1 -d '{"labels":{"team":"db","cluster":"b","pod":"j1"},"status":"resolved"}' > /dev/null
 NOTIFY d1 '{"reason":"some alerts resolved"}'
-curl -s -X PUT $FMM/channels/ch-alerts/members/u-bot
+curl -s -X PUT $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
 D0=$(curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="delivery",outcome="ok"}' | awk '{print $2}')
 ADV 300; sleep 2
 curl -s -b jar $API/destinations/$D | jq -r .health.state                   # healthy
 curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="delivery",outcome="ok"}' | awk -v d=$D0 '{print ($2 - d) >= 2}'   # 1
 # the same through "Check", at once, in the interactive class
-curl -s -X DELETE $FMM/channels/ch-alerts/members/u-bot
+curl -s -X DELETE $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
 curl -s -X PUT $FAM/groups/d1/alerts/i5 -d '{"labels":{"team":"db","cluster":"a","pod":"i5"}}' > /dev/null
 NOTIFY d1 '{"reason":"new alerts added"}'; sleep 1
 curl -s -b jar $API/destinations/$D | jq -r .health.state                   # broken
-curl -s -X PUT $FMM/channels/ch-alerts/members/u-bot
+curl -s -X PUT $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
 I0=$(curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="interactive",outcome="ok"}' | awk '{print $2}')
 curl -s "${H[@]}" -X POST $API/destinations/$D/checks | jq -c '{ok, h: .health.state}'   # {"ok":true,"h":"healthy"}
 curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="interactive",outcome="ok"}' | awk -v i=$I0 '{print ($2 - i) >= 2}'   # 1
@@ -344,7 +362,12 @@ shown (F-056); and that after the Root message is deleted in the client, the nex
 
 ## Open questions
 
-None.
+- **Where the "Muster internal alerts" Route goes when "Muster: Heartbeat lost" exists.** C-08.FR-11 creates an
+  accepted suggestion at the top of the list. Placed above "Muster: Heartbeat lost", the broader `Muster.*` Route
+  would take `MusterHeartbeatLost` first, and that alert would lose its urgent Route and its Group key by Integration.
+  Recommendation: when a Route other than the Default route already takes an Internal alert, insert the new Route
+  directly below the last such Route, otherwise at the top; this changes C-08.FR-11's "at the top of the list" for this
+  one case, so the maintainer decides it (and the PRD wording) before the suggestion is implemented.
 
 ## Notes
 
@@ -364,18 +387,18 @@ None.
 | C-13.FR-5 | full | |
 | C-13.FR-7 | full | |
 | C-13.FR-8 | full | |
-| C-13.FR-10 | partial | the probe through `Check` and `muster doctor`; on save and through the API S-039, the "Check" button S-040 |
-| C-13.FR-11 | partial | the suggestion in the API; the page is S-040 |
-| C-13.FR-12 | partial | the filter and the field; the list filter and mark are S-040 |
+| C-13.FR-10 | partial | the probe through `Check` and `muster doctor`; on save and through the API S-039, the "Check" button S-064 |
+| C-13.FR-11 | partial | the suggestion in the API; the page is S-064 |
+| C-13.FR-12 | partial | the filter and the field; the list filter and mark are S-064 |
 | C-13.AC-1 | full | |
 | C-13.AC-2 | full | |
-| C-13.AC-3 | partial | Broken, the Internal alert and the health in the API; the banners are S-040 |
+| C-13.AC-3 | partial | Broken, the Internal alert and the health in the API; the banners are S-064 |
 | C-13.AC-4 | full | |
 | C-13.AC-5 | full | |
 | C-13.AC-6 | full | |
-| C-13.AC-8 | partial | the probe and the API check; the "Check" button is S-040 |
-| C-13.AC-9 | partial | the API; the page is S-040 |
-| C-13.AC-10 | partial | the API; the list mark is S-040 |
+| C-13.AC-8 | partial | the probe and the API check; the "Check" button is S-064 |
+| C-13.AC-9 | partial | the API; the page is S-064 |
+| C-13.AC-10 | partial | the API; the list mark is S-064 |
 | C-13.AC-11 | full | |
 | C-13.AC-12 | full | |
 | C-13.AC-13 | full | |

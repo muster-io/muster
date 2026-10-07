@@ -28,7 +28,11 @@ files_touched:
   - internal/api/links.go
   - internal/api/links_test.go
   - internal/api/templates.go
+  - internal/api/server.go
+  - internal/api/problem.go
   - internal/runtime/bootstrap.go
+  - internal/runtime/runtime.go
+  - sqlc.yaml
   - internal/logging/events.go
   - test/e2e/links_test.go
 acceptance:
@@ -62,7 +66,7 @@ issue: 37
 - Storing Mention settings on a Destination, which arrives with each type's create and update (S-039, S-042, S-044),
   and rendering targets in each messenger's syntax (S-061, S-042); Mentions as data for outgoing webhooks (S-044,
   S-045).
-- Creating Account links (S-051); the pages (S-038, S-040).
+- Creating Account links (S-051); the pages (S-038, S-064).
 
 ## Contracts
 
@@ -124,6 +128,11 @@ issue: 37
   Alert's `generatorURL`.
 - **Log events**: `link_rule_failed` (WARN: `link_rule`, `route`, `group`, `error`) at most once per rule and Alert
   Group.
+- **Wiring** (`internal/api/server.go`, `internal/api/problem.go`, `internal/runtime/runtime.go`, `sqlc.yaml`): the ten
+  operations join the implemented-operations map and the API `Config` gains `links`; `problem.go` maps the new domain
+  errors (`in_use`, `builtin_immutable`, `column_mismatch`, the name conflicts); the runtime hands `links` and
+  `mentions` to the renderer; `sqlc.yaml` gains the entries for `internal/links/query.sql` and
+  `internal/mentions/query.sql`.
 
 ## Steps
 
@@ -211,7 +220,7 @@ None.
 | C-12.FR-4 | partial | Link rule URL templates and `lookup` |
 | C-12.FR-6 | partial | a failing Link rule is left out and counted |
 | C-12.FR-7 | partial | `http(s)`-only links |
-| C-12.FR-8 | partial | validation, resolution and `mention`; storing the settings is S-039 and S-042, the messenger syntax S-061 and S-042, the form S-040, data for webhooks S-044 and S-045 |
+| C-12.FR-8 | partial | validation, resolution and `mention`; storing the settings is S-039 and S-042, the messenger syntax S-061 and S-042, the form S-064, data for webhooks S-044 and S-045 |
 | C-12.FR-9 | partial | the API, the rules and the links; the pages and the links block are S-038 |
 | C-12.FR-12 | full | checked with real Account links in C-18.AC-7 (S-051) |
 | C-12.FR-13 | partial | `link_rule` rendering time and errors |

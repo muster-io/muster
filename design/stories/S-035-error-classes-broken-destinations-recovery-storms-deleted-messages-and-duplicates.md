@@ -5,7 +5,7 @@ capability: C-11
 kind: be
 layer: L1
 depends_on: [S-034]
-covers: [C-11.FR-6, C-11.FR-8, C-11.FR-9, C-11.FR-10, C-11.FR-11, C-11.FR-12, C-11.FR-13, C-11.FR-14, C-11.FR-16, C-11.FR-17, C-11.FR-18, C-11.FR-19, C-11.FR-20, C-11.FR-21, C-11.AC-3, C-11.AC-4, C-11.AC-5, C-11.AC-6, C-11.AC-7, C-11.AC-8, C-11.AC-9, C-11.AC-10, C-11.AC-11, C-11.AC-12, C-11.AC-13, C-09.FR-19]
+covers: [C-11.FR-6, C-11.FR-8, C-11.FR-9, C-11.FR-10, C-11.FR-11, C-11.FR-12, C-11.FR-13, C-11.FR-14, C-11.FR-16, C-11.FR-17, C-11.FR-18, C-11.FR-19, C-11.FR-20, C-11.FR-21, C-11.AC-3, C-11.AC-4, C-11.AC-5, C-11.AC-6, C-11.AC-7, C-11.AC-8, C-11.AC-9, C-11.AC-10, C-11.AC-11, C-11.AC-12, C-11.AC-13, C-09.FR-19, C-08.FR-1]
 files_touched:
   - internal/delivery/outcomes.go
   - internal/delivery/broken.go
@@ -28,14 +28,19 @@ files_touched:
   - internal/destinations/query.sql
   - internal/destinations/delete_test.go
   - internal/routing/routes.go
+  - internal/routing/query.sql
+  - internal/routing/routes_test.go
   - internal/groups/move.go
   - internal/timers/worker.go
   - internal/internalalerts/registry.go
   - internal/api/destinations.go
   - internal/api/routes.go
+  - internal/api/routes_test.go
+  - internal/api/server.go
   - internal/leader/tasks.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
+  - internal/runtime/runtime.go
 acceptance:
   - "[C-11.FR-6, C-11.FR-17, C-11.AC-3] With 30 new Alert Groups within a minute on a Route with `route.storm_threshold` 20, the first 20 get Root messages; the 21st starts a Storm, so each Destination of the Route gets one Storm summary, Loud with `new_alert_group`, and of the last 10 only the Urgent ones are published, first; after `delivery.storm_calm_period` below the threshold the summary gets its final state in one Quiet edit, the last 10 still open are published as Quiet new messages within the limits, and the resolved ones are never published; `muster_storm_active{route}` and `Route.storm_active` show the Storm while it lasts."
   - "[C-11.FR-13, C-11.AC-4] A `gone` outcome for an open Alert Group's Root message republishes it once, Quietly, with \"The previous message was deleted at HH:MM\" and a new Thread; a `gone` for that republished message marks the pair `deleted_in_messenger` and nothing more is sent; for a resolved Alert Group only the mark is recorded."
@@ -46,6 +51,7 @@ acceptance:
   - "[C-11.FR-11, C-11.AC-9, C-11.AC-12] An Alert Group resolved while its first Publication waited for a `RetryAfter`, or for `Transient` retries within the budget, is published Quietly with \"Delivered late: started HH:MM, resolved HH:MM while this Destination was unavailable.\" and a `delivered_late` delivery event; one covered by a Storm summary, or whose Destination became Broken first, is not."
   - "[C-11.FR-9, C-11.AC-11] With a Destination Broken and nothing waiting, the probe after `delivery.broken_probe_interval` runs the adapter's Destination check in the delivery client class: a failing check keeps the Destination Broken with that error as the reason; a passing one makes it healthy, resolves `MusterDestinationBroken` and records `destination_recovered`, with no Alert Group activity; with a delivery waiting, the probe attempts the oldest one instead."
   - "[C-11.FR-8] A `markup_rejected` outcome resends the same text without markup in the same attempt, counts `outcome=\"markup_rejected\"` and records a `markup_rejected` delivery event."
+  - "[C-08.FR-1, C-11.FR-14] An `updateRoute` that changes only `destination_ids` is saved with a new version and records `route.updated` with `/destination_ids` in its diff; an id that names no Destination, or a deleted one, answers 422 `unknown_id` at its pointer."
   - "[C-11.FR-14] Adding a Destination to a Route publishes the Route's open Alert Groups there Quietly; removing it from the Route, or deleting it, gives each of its open Root messages one final Quiet edit \"No longer updated here; current state in Muster: {link}\" and nothing after; `deleteDestination` answers 204, removes the Destination from every Route, wipes its secrets once the final edits are done and keeps the row, which `listDestinations` no longer lists."
   - "[C-09.FR-19, C-11.FR-14, C-11.FR-20, C-11.AC-10] An Alert Group moved to the Default route gets the final edit in the Destinations it leaves and a Quiet Publication in the Default route's Destinations; every row of the Loud/Quiet table of delivery events produces the new message, edit or nothing it names (a table-driven test)."
 verify: "make ci test-integration"
@@ -75,11 +81,13 @@ issue: 35
 - The Destination check of each type (S-039 and S-061, S-042) and the next-delivery probe of outgoing webhooks (S-044).
 - The Connection API that deletes Connections (S-039); the events mode of outgoing webhooks, which keeps every event
   through a Broken period and a deletion of its own (S-044).
-- Warnings on the Destination and Route pages (S-040).
+- Warnings on the Destination and Route pages (S-064).
 
 ## Contracts
 
-- **Operations implemented**: `deleteDestination`; `DestinationHealth` gains `since` and `reason`; `Route.storm_active`,
+- **Operations implemented**: `deleteDestination` (it joins the implemented-operations map of
+  `internal/api/server.go`, and the runtime wires the probe, the Storm calm timer and the secret wipe);
+  `createRoute` and `updateRoute` accept `destination_ids`; `DestinationHealth` gains `since` and `reason`; `Route.storm_active`,
   `Route.storm` (`since`, `alert_group_count` of the active Storm) and `DestinationRef.health` take their values;
   `DeliveryState` gains `waiting_for_broken_destination`, `not_delivered`, `deleted_in_messenger`, `withheld` and
   `retired`, and `AlertGroupDelivery` its `possible_duplicate` and `error`. `listAlertGroupDeliveries` shows a
@@ -146,6 +154,15 @@ issue: 35
   the new Root message), and `republished` is recorded; if it is already true, the delivery becomes
   `deleted_in_messenger` (event `deleted_in_messenger`) and is never claimed again. For a resolved Alert Group only the
   mark is recorded.
+- **Route edits of `destination_ids`** (C-08.FR-1, C-11.FR-14; `internal/routing/routes.go`, `query.sql`): today a
+  Route edit that changes only its Destinations is dropped — `Update` never copies `DestinationIDs` into the new state,
+  and the Audit log view (`view`, `viewOf`) has no `destination_ids`, so the diff is empty and nothing is written — and
+  `check()` refuses every Destination id because no Destination type existed. This story adds `DestinationIDs` to the
+  view (the diff shows `/destination_ids`), copies them in `Update`, replaces the refusal with a check that each id names
+  a Destination that is not deleted (`422 unknown_id` at `/destination_ids/<i>` otherwise), and writes
+  `route_destinations` in the Route's transaction — created, kept with its `added_at`, or removed — with new queries in
+  `internal/routing/query.sql`. The fake store of `routes_test.go` and the tests of `internal/api/routes_test.go` that
+  expect the refusal change with it.
 - **Destinations of a Route** (C-11.FR-14; `route_destinations.added_at`, `deliveries.desired_retire`): `createRoute`,
   `updateRoute` and the accepted suggestions that add a Destination enqueue Quiet Publications of the Route's open Alert
   Groups there; removing a Destination from a Route sets `desired_retire` on the deliveries of the Route's open Alert
@@ -191,8 +208,9 @@ issue: 35
 3. Write Storms with the calm timer. Check: `storm_test.go` covers C-11.AC-3 and a Storm that does not calm.
 4. Write late Publications, possible duplicates and the deleted Root message flow. Check: `publication_test.go` covers
    C-11.AC-4, AC-5, AC-9 and AC-12.
-5. Write Route membership, the move to the Default route and `deleteDestination`. Check: `membership_test.go` and
-   `delete_test.go`, including the wiped secrets.
+5. Write the Route edits of `destination_ids`, Route membership, the move to the Default route and
+   `deleteDestination`. Check: `routes_test.go` covers an edit that changes only `destination_ids` and its Audit log
+   diff; `membership_test.go` and `delete_test.go`, including the wiped secrets.
 6. Extend `live_test.go` and add the metrics and log events. Check: Verification below.
 
 ## Verification
@@ -262,8 +280,8 @@ None.
 |---|---|---|
 | C-11.FR-6 | partial | messengers through the adapter interface; the template mode of outgoing webhooks is S-045, the events mode's exemption S-044 |
 | C-11.FR-8 | partial | completes the classes with S-034; each adapter maps its responses (S-061, S-042, S-044) |
-| C-11.FR-9 | partial | Broken, probe and recovery; the checks of each type are S-061 and S-042, the webhook probe S-044, the warnings on pages S-040 |
-| C-11.FR-10 | full | the Alert Group page shows it from S-040 |
+| C-11.FR-9 | partial | Broken, probe and recovery; the checks of each type are S-061 and S-042, the webhook probe S-044, the warnings on pages S-064 |
+| C-11.FR-10 | full | the Alert Group page shows it from S-064 |
 | C-11.FR-11 | full | |
 | C-11.FR-12 | full | |
 | C-11.FR-13 | full | |
@@ -286,3 +304,4 @@ None.
 | C-11.AC-12 | full | |
 | C-11.AC-13 | full | |
 | C-09.FR-19 | partial | the delivery side of the move |
+| C-08.FR-1 | partial | the Route's Destinations written through the API; their section of the Route form is S-064 |

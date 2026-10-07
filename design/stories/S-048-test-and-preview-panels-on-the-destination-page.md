@@ -40,7 +40,7 @@ issue: 48
 
 **OUT**
 
-- Everything else on the Destination page (S-040, S-043, S-046).
+- Everything else on the Destination page (S-064, S-043, S-046).
 
 ## Contracts
 

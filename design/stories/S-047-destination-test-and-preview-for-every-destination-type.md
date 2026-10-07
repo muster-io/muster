@@ -161,13 +161,13 @@ UD=$(curl -s "${H[@]}" $API/destinations -d '{"type":"webhook","name":"down","mo
 time (TEST $UD | jq -r '.steps[0].error_class')                                 # transient   (real < 5.5 s)
 
 # C-16.AC-5: a successful test ends the Broken state; a failed one changes nothing
-curl -s -X DELETE $FMM/channels/ch-alerts/members/u-bot
+curl -s -X DELETE $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
 TEST $MD | jq -r '.steps[0].error_class'                                       # fatal
 curl -s -b jar $API/destinations/$MD | jq -r .health.state                     # healthy   (a failed test changes nothing)
 curl -s -X PUT $FAM/groups/d1/alerts/k1 -d '{"labels":{"team":"db","cluster":"k","pod":"k1"}}' > /dev/null
 NOTIFY d1 '{"reason":"new alerts added"}'; sleep 1                              # a new Alert Group of the Route "db"
 curl -s -b jar $API/destinations/$MD | jq -r .health.state                     # broken
-curl -s -X PUT $FMM/channels/ch-alerts/members/u-bot
+curl -s -X PUT $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
 TEST $MD | jq -r '.health.state'                                               # healthy
 curl -s -b jar "$API/integrations/$(curl -s -b jar $API/integrations | jq -r '.items[] | select(.builtin) | .id')/alerts?state=firing" \
   | jq '[.items[] | select(.labels.alertname == "MusterDestinationBroken")] | length'   # 0

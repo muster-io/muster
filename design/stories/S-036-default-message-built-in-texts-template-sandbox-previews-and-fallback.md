@@ -37,8 +37,12 @@ files_touched:
   - internal/api/templates_test.go
   - internal/api/routes.go
   - internal/api/routes_test.go
+  - internal/api/server.go
+  - api/openapi.yaml
   - internal/metrics/catalogue.go
   - internal/logging/events.go
+  - internal/runtime/runtime.go
+  - test/e2e/routing_test.go
   - go.mod
   - NOTICE
 acceptance:
@@ -47,6 +51,7 @@ acceptance:
   - "[C-12.FR-7, C-12.AC-1] A label value `@channel` is rendered with a zero-width space after `@`, a label value longer than `message.value_cap` is cut with \"…\", and alert data reach templates already escaped for the target markup."
   - "[C-12.FR-4, C-12.FR-5, C-12.AC-2] `previewTemplate` of a template calling `env` returns `valid: false` with `unknown_function` and its line and column; saving it on a Route answers 422 at `/policy/templates/root_message` with the same code and position; a template that renders against the Route's recent Stored Snapshots is saved and its preview shown."
   - "[C-12.FR-4] Templates use Alertmanager's function names (`toUpper`, `join`, `reReplaceAll`, `safeHtml` …) and the registered sprout functions only; `now` follows Muster's clock; `until`, `seq` and `repeat` are capped and output stops at `template.output_cap`."
+  - "[C-12.FR-2, C-08.FR-1] In `updateRoute`, a template key absent from `policy.templates` keeps the stored template and `null` resets it to the built-in one; `getRoute` returns `null` for a built-in template."
   - "[C-12.FR-2] A Route's `root_message` template replaces only the body — the heading, links, notices, footer and buttons stay Muster's; a Route's line template replaces the default line of each Alert; the rest of the message is unchanged."
   - "[C-12.FR-2, C-12.FR-5] `previewTemplate` with an empty `template` returns the built-in template's `source` for the kind in the requested language, and `format` `html` lays the output out as Telegram HTML with alert data escaped for HTML."
   - "[C-12.FR-6, C-12.AC-3] A Route template that passed its dry run and fails on the next Alert Group produces the Fallback template — every label and the buttons — for that message, increases `muster_template_errors_total{route,destination,template=\"root_message\"}`, sets the Route's `template_error`, records a `fallback_template_used` Timeline entry and raises `MusterTemplateError`; the next successful render clears the error and resolves the Internal alert."
@@ -83,8 +88,11 @@ issue: 36
 ## Contracts
 
 - **Operations implemented**: `previewTemplate` (`templates:preview`) for the kinds `root_message`, `line` and
-  `ack_timeout_notice`; `createRoute` and `updateRoute` accept `policy.templates` and `policy.language` (the
-  `unsupported` answer of S-025 is removed) and dry-run templates; `Route.template_error` is filled. Schemas:
+  `ack_timeout_notice`, added to the implemented-operations map of `internal/api/server.go` with the renderer and the
+  sandbox wired in `runtime.go`; `createRoute` and `updateRoute` accept `policy.templates` and `policy.language` (the
+  `unsupported` answer of S-025 is removed — the tests that assert it change with it: the table of
+  `internal/routing/routes_test.go` that expects `unsupported` for each template, and `test/e2e/routing_test.go`,
+  "the templates until S-036") and dry-run templates; `Route.template_error` is filled. Schemas:
   `TemplatePreviewRequest`, `TemplatePreviewResult`, `TemplateKind`, `TemplateErrorState`, `RouteTemplates`, `Language`,
   `ProblemError` (`line`, `column`).
 - **Sandbox** (C-12.FR-4, ADR-0012; `internal/templates`): Go `text/template` with sprout (MIT) and only these
@@ -117,6 +125,13 @@ issue: 36
   (C-12.FR-2); a `line` template replaces the default line of each Alert; an `ack_timeout_notice` template is stored
   and dry-run here and rendered from S-049. `null` uses the built-in template of the kind, which is itself a sandbox
   template per language, embedded in `default.go`, so that its source can be read.
+- **Absent and `null` templates** (`api/openapi.yaml` `RouteTemplates`, `internal/api/routes.go`,
+  `internal/routing/routes.go`): today `templateOf` in `internal/api/routes.go` maps an absent key and `null` alike to
+  nil, and `Update` writes NULL for nil, so an edit that leaves a template out silently resets it to the built-in. From
+  this story a key absent from `policy.templates` keeps the stored template, and an explicit `null` resets it to the
+  built-in one: the routing input carries each template as "keep", "built-in" or a text, `Update` writes only the
+  changed columns, `createRoute` treats absent as built-in, and the description of `RouteTemplates` in the spec says
+  so. A dry run and the error state of the Fallback template concern only a template that is set.
 - **Built-in texts** (C-12.FR-3, FR-10; `texts/en.json`, `texts/ru.json`, embedded): every text of the default Root
   message and the Thread replies — new Alerts with "…and K more — open in Muster", Replacement, Reopen, Takeover, Snooze
   ended, rise to Urgent, resolution by the system, the release of a disabled or deleted Owner ("The owner was disabled

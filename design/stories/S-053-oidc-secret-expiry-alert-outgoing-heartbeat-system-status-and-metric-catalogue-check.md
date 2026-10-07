@@ -189,7 +189,7 @@ grep -c '"event":"oidc_secret_expiring"' dev.log            # 1
 # C-19.AC-2, FR-10, AC-6: a Broken Destination reaches the admin Destination; System status shows it; a Responder gets 403
 OPS=$(MKD ops ch-alerts-prod | jq -r .destination.id)
 curl -s "${H[@]}" -X POST $API/route-suggestions/internal_alerts/accept -d "{\"destination_ids\":[\"$OPS\"]}" > /dev/null
-curl -s -X DELETE $FMM/channels/ch-alerts/members/u-bot
+curl -s -X DELETE $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
 G=$(FIRE s1 Broken t); sleep 2
 curl -s $FMM/posts | jq -r '[.[] | select(.channel_id == "ch-alerts-prod" and .root_id == "")] | last | .props.attachments[0].title'   # #… MusterDestinationBroken
 curl -s -b jar $API/system-status | jq -c '{b: [.broken_destinations[] | {n: .destination.name, r: (.reason | test("403"))}], l: [.replicas[] | select(.leader) | (.key_ids | length > 0)]}'

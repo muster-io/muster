@@ -26,15 +26,25 @@ files_touched:
   - internal/timers/worker_test.go
   - internal/ingest/changes.go
   - internal/ingest/alertsview.go
+  - internal/ingest/worker.go
+  - internal/ingest/worker_test.go
+  - internal/ingest/worker_integration_test.go
+  - internal/ingest/internal_integration_test.go
   - internal/routing/routes.go
+  - internal/routing/query.sql
+  - internal/routing/routes_test.go
   - internal/api/alertgroups.go
   - internal/api/alertgroups_test.go
   - internal/api/routes.go
+  - internal/api/server.go
+  - internal/api/problem.go
   - internal/leader/alive.go
   - internal/leader/tasks.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
+  - internal/devmode/devmode.go
   - internal/runtime/runtime.go
+  - sqlc.yaml
   - test/e2e/lifecycle_test.go
 acceptance:
   - "[C-09.FR-3, C-09.AC-6, C-08.FR-4] Alerts with the same Group key values on one Route join one Alert Group, a missing label counting as an empty value; an Alert with another `cluster` starts a second one."
@@ -48,13 +58,14 @@ acceptance:
   - "[C-09.FR-10, C-09.FR-3, C-06.FR-4] When its last Alert resolves the system resolves the Alert Group with that Alert's reason, shown in `resolution`; a `resolved` applies to the latest Alert Group in which the fingerprint fires."
   - "[C-08.FR-8, C-09.AC-7, C-09.AC-8] Changing a Route's Matchers leaves an already grouped fingerprint in its open Alert Group, and marking the Route urgent changes the status of none of its open Alert Groups."
   - "[C-09.FR-19, C-08.FR-9, C-09.AC-9] Deleting a Route with open Alert Groups answers 409 `route-has-open-alert-groups` with their count; `moveOpenAlertGroups` moves them to the Default route with a `moved_to_default_route` entry each, and the deletion then succeeds; a moved Alert Group takes no new Alert and stays open beside an Alert Group of the Default route with the same key values."
+  - "[C-09.FR-19, C-08.FR-9] A Route deletion racing a Snapshot whose Alert starts an Alert Group on that Route ends one of two ways and never leaves an open Alert Group on a deleted Route: the Snapshot locks the Route first and the deletion answers 409 `route-has-open-alert-groups`, or the deletion commits first and the Alert is grouped on the Default route (an integration test with two connections)."
   - "[C-09.FR-18, C-02.FR-12, C-09.AC-11] After Muster was stopped for 10 minutes and started again, every open Alert Group's Timeline shows a `muster_unavailable` entry with the period."
   - "[C-09.FR-3, C-05.FR-8, C-09.AC-14] Deleting an Integration resolves its open Alert Groups with the reason \"Integration {name} deleted\"."
   - "[C-09.FR-22, C-09.AC-21] Every row of the lifecycle event table of C-09.FR-22 that this capability can produce records exactly one Timeline entry with the row's `event`, kind, `loudness` and `mentions` (a table-driven test that also covers the rows reached only through Acknowledge and Snooze, set up directly)."
   - "[C-09.FR-14, C-09.FR-11, C-06.FR-19] `listAlertGroupAlerts` lists firing Alerts first, then resolved ones with their reason; `getAlertGroupTimeline` returns the entries newest first or oldest first, filtered by kind, each with its actor, Transport and, for a lifecycle event, `event`, `loudness` and `mentions`; the Alerts view names the Alert Group of each Alert."
   - "[C-09.FR-6] New Alerts joining a firing Alert Group record one `alerts_added` per Snapshot with `loudness` `loud` and `mentions` `[new_alerts]`; joining an acknowledged or snoozed one records it Quiet (rows set up directly here, verified with Acknowledge and Snooze in S-032)."
   - "[C-09.FR-5] Within the Grace period of a person-resolved Alert Group an Alert with the same key starts a new Alert Group at once, and Alerts still firing when it ends join that open Alert Group, or else start one marked as firing again after the manual resolve (rows set up directly here, verified with Resolve in S-032)."
-  - "[C-09.FR-12] Reopen window and Grace period ends are timer rows that any replica claims; after downtime each overdue one fires once."
+  - "[C-09.FR-12] Reopen window and Grace period ends are timer rows that any replica claims; after downtime each overdue one fires once; in development mode an advance of the development clock past a deadline fires it at once on every replica, without waiting for the worker's next wake."
 verify: "make ci test-integration e2e"
 operator_attention: false
 issue: 28
@@ -77,8 +88,8 @@ issue: 28
 **OUT**
 
 - The list, search, counts, related Alert Groups, statistics, retention and live hints (S-029); the pages (S-030).
-- Commands, Notes, Snooze ends and `allowed_commands` (S-032); the acknowledged and snoozed variants of Reopen, new
-  Alerts and the rise to Urgent are written here and verified with Acknowledge and Snooze in S-032.
+- Commands and `allowed_commands` (S-032); Notes and Snooze ends (S-063); the acknowledged and snoozed variants of
+  Reopen, new Alerts and the rise to Urgent are written here and verified with Acknowledge and Snooze in S-032.
 - Delivery, its re-render and its Timeline entries (S-034 on); ack timeouts, Reminders and Unclaimed (S-049).
 
 ## Contracts
@@ -87,7 +98,7 @@ issue: 28
   `deleteRoute` gains the refusal and `Route.open_alert_group_count` its value; `IntegrationAlert.alert_group` is
   filled. Schemas: `AlertGroup`, `AlertGroupStatus`, `ResolvedBy`, `ResolverKind`, `AlertGroupNotice`,
   `AlertGroupAlert(List)`, `TimelineEntry` with `TimelineStatusEntry`, `TimelineAlertsEntry`, `TimelineSystemEntry`
-  (and `TimelineNoteEntry`, `TimelineDeliveryEntry` merged from their tables, empty until S-032 and S-034),
+  (and `TimelineNoteEntry`, `TimelineDeliveryEntry` merged from their tables, empty until S-063 and S-034),
   `TimelineEntryList`, `TimelineActor`, `LifecycleEvent`, `Loudness`, `MentionName`, `TimelineKind`,
   `MovedAlertGroups`.
 - **Dispatcher** (ADR-0004, ADR-0016; `internal/groups`): every change of an Alert Group passes through one function
@@ -96,8 +107,21 @@ issue: 28
   transitions run as the actor `system` with the Transport `system`, need no Permission and write no Audit log entry;
   S-032 adds the Permission and Audit log steps of Commands. Re-render is a hook that delivery fills from S-034. Only
   `groups` writes `alert_groups`, `alert_group_alerts`, `timeline_entries` and `alert_group_counters` (lint 2).
+- **Ingest seam** (`internal/ingest/changes.go`, `worker.go`; `internal/runtime/runtime.go`): today the processing
+  worker's `ingest.Sink` is the bare Router (`runtime.go`, `configureWorker`, for the worker and the Stale scan alike).
+  This story wires a Sink chain there: routing first (`routing.Router.AlertChanges`, which stamps `alerts.route_id`),
+  then grouping (`groups`), both in the Snapshot's transaction, so an error of either rolls the Snapshot back.
+  `ingest.Routed` gains the Alert Groups the Snapshot created or changed, as their `#N`, which `snapshot_processed`
+  logs as `alert_groups` (`worker.go`). The fakes of the Sink and the assertions on `Routed` in `worker_test.go`,
+  `worker_integration_test.go` and `internal_integration_test.go` change with the new field.
 - **Grouping** (C-09.FR-3, FR-4, FR-5, FR-6; ADR-0003): processing hands the Alert changes of a Snapshot, after
-  routing, to `groups`. A `fired` Alert on Route R with key values V — R's Group key evaluated on its labels now, a
+  routing, to `groups`. Before it creates or joins an Alert Group on Route R, grouping locks R with `SELECT … FROM
+  routes WHERE org_id = … AND id = … AND deleted_at IS NULL FOR SHARE` (`internal/groups/query.sql`). The Router read
+  its routing stamp without a lock (`internal/routing/evaluate.go`), and inserting `alert_groups.route_id` only takes
+  a key-share lock, which never waits for `LockRoute`'s `FOR NO KEY UPDATE`; the share lock does, so a concurrent
+  `deleteRoute` either waits for the Snapshot's transaction and then sees its Alert Group, or commits first. When the
+  lock finds no row — R was deleted meanwhile — the Alert is grouped on the Default route, as if it had been routed
+  there, and its `alerts.route_id` stamp is set to the Default route in the same transaction through routing. A `fired` Alert on Route R with key values V — R's Group key evaluated on its labels now, a
   missing label as `""`, `group_key_sha256` over the labels and values — goes, in order:
   1. into the open Alert Group of (R, V) if there is one (`alert_groups_open_key`, which leaves out Alert Groups moved
      to the Default route);
@@ -147,11 +171,20 @@ issue: 28
   `FOR UPDATE SKIP LOCKED` and a lease through the claim helper of S-062, waking at the earliest deadline and on
   `NOTIFY`; overdue rows after downtime fire once. The worker, like the downtime step below, runs per Organization: it
   iterates over the Organizations (one in L1) and passes `org_id` to every claim and query (lint 1). Kinds here: `reopen_window_end` (clears `reopen_deadline` and the
-  `prior_*` columns, no entry) and `grace_period_end`. S-032, S-035 and S-049 register their kinds.
+  `prior_*` columns, no entry) and `grace_period_end`. S-063, S-035 and S-049 register their kinds. The worker also
+  wakes when the development clock moves: today a clock move wakes only the ingest worker (the single `changed`
+  callback of `devmode.NewClock`) and, through `leader.Wakes`, the Heartbeat check and the Stale scan. This story turns
+  the callback into a fan-out — `devmode.NewClock` takes any number of wake functions, called after each change of the
+  offset on every replica — and `runtime.go` registers the ingest worker and the timers worker; S-034 adds the
+  delivery worker. A worker woken this way re-reads its earliest deadline on the business clock.
 - **Downtime** (C-09.FR-18, C-02.FR-12): when the Leader records a downtime (S-008), every open Alert Group gets a
   `system` entry `muster_unavailable` with `period_from` and `period_to`.
 - **Route deletion and the move** (C-09.FR-19, C-08.FR-9): `Route.open_alert_group_count` counts its open Alert Groups;
   `deleteRoute` of a Route with any answers `409` `route-has-open-alert-groups` with `open_alert_group_count`.
+  `routing.Service.Delete` counts them inside its transaction after `LockRoute` (a count query on `alert_groups` in
+  `internal/routing/query.sql`, read-only, so lint 2 holds) and returns a domain error carrying the count, which
+  `internal/api/problem.go` maps to the problem type with `open_alert_group_count`; counting after the lock is what
+  makes the grouping lock above effective. The fake store of `internal/routing/routes_test.go` gains the count.
   `moveOpenAlertGroups` (`routes:write`) moves each of them to the Default route as a system transition
   `moved_to_default_route` (Quiet, kind `system`) and writes one Audit log entry `route.open_alert_groups_moved` with
   the count. A moved Alert Group keeps its Group key labels, values and `group_key_sha256` and gets
@@ -173,6 +206,9 @@ issue: 28
   1 minute to 24 hours, observed at each resolution from the start).
 - **Log events**: `alert_group_status_changed` (INFO: `group` as `#N`, `route`, `from`, `to`, `reason`, `transport`),
   `alert_continued` (INFO: `group`, `fingerprint`); `snapshot_processed` gains `alert_groups` (the `#N` touched).
+- **Wiring** (`internal/api/server.go`, `sqlc.yaml`): the four operations join the implemented-operations map, and the
+  API `Config` and `Server` gain the `groups` service; `sqlc.yaml` gains the entries for `internal/groups/query.sql`
+  and `internal/timers/query.sql`.
 
 ## Steps
 
@@ -182,10 +218,11 @@ issue: 28
    label, a rolled-back creation and the title switch.
 3. Write the system transitions: resolution, Reopen into each prior status, Replacement, Continuation, annotation
    changes, severity and urgency. Check: transition tests with a manual clock and rows set up directly.
-4. Write the timer worker, the Grace period end and the Reopen window end. Check: tests with two workers claim each row
-   once and fire overdue rows once.
-5. Write the downtime entries, the deletion effects, the Route refusal and the move. Check: tests cover C-09.AC-9,
-   AC-11 and AC-14.
+4. Write the timer worker, the Grace period end and the Reopen window end, and the wake fan-out of the development
+   clock. Check: tests with two workers claim each row once and fire overdue rows once; a clock advance wakes the
+   worker.
+5. Write the downtime entries, the deletion effects, the Route lock, the Route refusal and the move. Check: tests cover
+   C-09.AC-9, AC-11 and AC-14, and the integration test races a deletion against a Snapshot.
 6. Write the reads, the Alerts view field, the metrics and log events. Check: Verification below.
 
 ## Verification
@@ -315,11 +352,11 @@ None.
 | C-09.FR-7 | partial | the entry and the notice; the hint on the page is S-030 |
 | C-09.FR-9 | partial | the rules; the Loud cases are verified in S-032 (C-10.AC-12, C-10.AC-13) |
 | C-09.FR-10 | partial | the reason in the API and the Timeline; the page is S-030, messages are C-11 |
-| C-09.FR-11 | partial | the entries of this capability; Notes S-032, delivery S-034, timers S-049, the page S-030 |
-| C-09.FR-12 | partial | Reopen window and Grace period ends; Snooze ends are S-032 |
+| C-09.FR-11 | partial | the entries of this capability; Commands S-032, Notes S-063, delivery S-034, timers S-049, the page S-030 |
+| C-09.FR-12 | partial | Reopen window and Grace period ends; Snooze ends are S-063 |
 | C-09.FR-18 | full | |
 | C-09.FR-19 | partial | the API; the move dialog is S-031 |
-| C-09.FR-22 | partial | the mechanism and the rows of this capability; the `unacknowledged` row of a released Owner is S-032 |
+| C-09.FR-22 | partial | the mechanism and the rows of this capability; the `unacknowledged` row of a released Owner is S-063 |
 | C-09.FR-14 | partial | the reads; the page is S-030 |
 | C-09.AC-1 | full | |
 | C-09.AC-2 | full | |

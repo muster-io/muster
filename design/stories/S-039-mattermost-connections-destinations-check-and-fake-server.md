@@ -19,6 +19,8 @@ files_touched:
   - internal/api/connections.go
   - internal/api/destinations.go
   - internal/api/connections_test.go
+  - internal/api/server.go
+  - internal/api/problem.go
   - internal/fakes/fakemattermost/fakemattermost.go
   - internal/fakes/fakemattermost/posts.go
   - internal/fakes/fakemattermost/presses.go
@@ -27,6 +29,8 @@ files_touched:
   - internal/runtime/runtime.go
   - internal/logging/events.go
   - internal/archlint/secretleak.go
+  - sqlc.yaml
+  - test/e2e/smoke_test.go
 acceptance:
   - "[C-13.FR-1, C-13.FR-2] A Mattermost Connection is created with a name, the server URL, a write-only bot token, a proxy and its limiter (`connection.mattermost.limiter`); `checkConnection` on the interactive path returns the bot's name, and a revoked token fails the check."
   - "[C-13.FR-13] A Mattermost Connection returns the read-only `callback_url`, `MUSTER_INGEST_URL/api/v1/callbacks/mattermost/<public_id>`."
@@ -62,7 +66,8 @@ issue: 39
 - The adapter (posts, edits, Thread replies, Mentions, escaping, the response mapping and the Broken probe through
   `Check`), button presses and callbacks, the Delivery problem filter, the `internal_alerts` Route suggestion, the
   `muster doctor` checks, the documentation and the full load profile (S-061).
-- The pages (S-040); the Telegram type (S-041, S-042); outgoing webhooks (S-044, S-045).
+- The pages (S-040 for Connections, S-064 for Destinations); the Telegram type (S-041, S-042); outgoing webhooks
+  (S-044, S-045).
 - The test message and the bot's own press (S-047).
 
 ## Contracts
@@ -90,7 +95,8 @@ issue: 39
   S-061 adds posts, patches, the plain post read and ephemeral posts.
 - **Connection check** (C-13.FR-2; `checkConnection`): through `delivery.Interactive` on the Connection's limiter, in the
   interactive client class through the Connection's proxy: `GET /api/v4/users/me` with the bot token → step `token`
-  with `latency_ms` and `via` (`direct` or `proxy`); `bot_name` is the bot's username, stored with `bot_user_id`.
+  with `latency_ms` and `via` (`direct` or `proxy`); `bot_name` is the bot's username, stored in
+  the columns `bot_username` and `bot_user_id` of `connections` and returned as `MattermostConnection.bot_username`.
   `503` with `Retry-After` when no token is free in time.
 - **Channels** (`listConnectionChannels`): the bot's teams and, per team, the channels the bot belongs to
   (`GET /api/v4/users/me/teams`, `GET /api/v4/users/me/teams/{team_id}/channels`), filtered by `team_id` and `q`,
@@ -117,7 +123,8 @@ issue: 39
   story proves each one against the fake alone, and S-061 drives posts, notifications, presses and the rate limit
   through the adapter:
   - a team `dev` (`team-dev`) with the channels `alerts` (`ch-alerts`), `alerts-prod` (`ch-alerts-prod`) and `no-bot`
-    (`ch-nobot`); the bot `muster-bot` (`u-bot`) is a member of the first two; the users `alice` (`u-alice`) and `bob`
+    (`ch-nobot`); the bot `muster-dev-bot` (`musterdevbotuserfake000000`, the `BotUsername` and `BotUserID` the fake already has)
+    is a member of the first two; the users `alice` (`u-alice`) and `bob`
     (`u-bob`); any non-empty bot token works except those revoked through `/_fake/config` (`401`);
   - the REST calls of this story and of S-061; a post by the bot with `root_id` raises the root's reply count (F-027);
     a post to a channel without the bot answers `403`, to an unknown or archived channel `404` naming the channel; an
@@ -152,6 +159,12 @@ issue: 39
 
   `muster dev` sets the fake's `AllowedUntrustedInternalConnections` to `localhost 127.0.0.1` at start and adds a demo
   Connection "Dev Mattermost" to it, without Destinations.
+  The fake answers every call it does not know with `501`; `test/e2e/smoke_test.go` asserts that for
+  `POST /api/v4/posts`, which this story implements, so the smoke test takes a call the fake still does not serve.
+- **Wiring** (`internal/api/server.go`, `internal/api/problem.go`, `sqlc.yaml`): the operations join the
+  implemented-operations map and the API `Config` gains `connections` and the Destination write path; `problem.go`
+  maps the domain errors of Connections and Destinations (`name_taken`, `in_use`, `unknown_id`,
+  `destination_check_failed`); `sqlc.yaml` gains the entry for `internal/connections/query.sql`.
 - **Defaults**: `connection.mattermost.limiter`, `destination.mattermost.limiter`, `delivery.interactive_budget`.
 
 ## Steps
@@ -175,7 +188,7 @@ API=localhost:8080/api/v1; FMM=127.0.0.1:18065/_fake
 C=$(curl -s "${H[@]}" $API/connections -d '{"type":"mattermost","name":"mm","server_url":"http://127.0.0.1:18065",
   "bot_token":"mm-dev-token","proxy":{"enabled":false},"limiter":{"limit":5,"per_seconds":1}}' | jq -r .id)
 curl -s "${H[@]}" -X POST $API/connections/$C/checks | jq -c '{ok, bot_name, s: [.steps[] | {name, ok, via}]}'
-# {"ok":true,"bot_name":"muster-bot","s":[{"name":"token","ok":true,"via":"direct"}]}
+# {"ok":true,"bot_name":"muster-dev-bot","s":[{"name":"token","ok":true,"via":"direct"}]}
 curl -s "${H[@]}" "$API/connections/$C/channels?q=alerts" | jq -c '[.items[] | {id, name, team_name}]'
 # [{"id":"ch-alerts","name":"alerts","team_name":"dev"},{"id":"ch-alerts-prod","name":"alerts-prod","team_name":"dev"}]
 curl -s -b jar $API/connections/$C | jq -c '{t: .bot_token_status.set, cb: (.callback_url | test("/api/v1/callbacks/mattermost/CN[0-9A-Z]{12}$"))}'
@@ -197,10 +210,10 @@ curl -s -b jar $API/destinations/$D | jq -c '{team_name, channel_name, n: .menti
 # {"team_name":"dev","channel_name":"alerts","n":"channel","l":5}
 
 # C-13.FR-10: the check from the API, failing and passing
-curl -s -X DELETE $FMM/channels/ch-alerts/members/u-bot
+curl -s -X DELETE $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
 curl -s "${H[@]}" -X POST $API/destinations/$D/checks | jq -c '{ok, c: [.checks[] | {name, ok}], m: .checks[1].message}'
 # {"ok":false,"c":[{"name":"token","ok":true},{"name":"bot_in_channel","ok":false}],"m":"The bot is not a member of this channel."}
-curl -s -X PUT $FMM/channels/ch-alerts/members/u-bot
+curl -s -X PUT $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
 psql "$MUSTER_DATABASE_URL" -qc "UPDATE destinations SET health = 'broken', broken_since = now(), broken_cause = 'fatal',
   broken_reason = 'test', next_probe_at = now() + interval '1 hour' WHERE public_id = '$D'"
 curl -s "${H[@]}" -X POST $API/destinations/$D/checks | jq -c '{ok, h: .health.state}'   # {"ok":true,"h":"healthy"}
@@ -243,10 +256,10 @@ None.
 | ID | Covered | Note |
 |---|---|---|
 | C-13.FR-1 | partial | the API; the page is S-040 |
-| C-13.FR-2 | partial | the API; the page is S-040 |
+| C-13.FR-2 | partial | the API; the pages are S-040 and S-064 |
 | C-13.FR-3 | partial | the Destination's fields; the Root message layout is S-061 |
 | C-13.FR-6 | full | |
-| C-13.FR-10 | partial | on save and through the API; the probe and `muster doctor` are S-061, the "Check" button S-040 |
+| C-13.FR-10 | partial | on save and through the API; the probe and `muster doctor` are S-061, the "Check" button S-064 |
 | C-13.FR-13 | partial | the callback address in the API; the page is S-040, the test press S-047 |
 | C-13.AC-7 | full | |
 | C-11.FR-2 | partial | the first callers: the Connection check, the channel list and the Destination check |
