@@ -91,6 +91,21 @@ WHERE u.org_id = @org_id
 ORDER BY lower(u.name), u.id
 LIMIT @page_size;
 
+-- ListUserDirectory is a page of the user directory (C-10.FR-13): every user, deleted ones included, with only what
+-- pickers and filters show, in the order of the lowercased name, then id, after the cursor (after_name, after_id) when
+-- one is given; q matches the name and the login case-insensitively, never the email.
+-- name: ListUserDirectory :many
+SELECT u.id, u.public_id, u.login, u.name, u.status, lower(u.name)::text AS sort_name
+FROM users u
+WHERE u.org_id = @org_id
+  AND (sqlc.narg('q')::text IS NULL
+       OR strpos(lower(u.name), lower(sqlc.narg('q')::text)) > 0
+       OR strpos(lower(u.login), lower(sqlc.narg('q')::text)) > 0)
+  AND (sqlc.narg('after_name')::text IS NULL
+       OR (lower(u.name), u.id) > (sqlc.narg('after_name')::text, sqlc.narg('after_id')::bigint))
+ORDER BY lower(u.name), u.id
+LIMIT @page_size;
+
 -- LockActiveAdmins locks the rows of the active Admins, so that a change that could remove the last of them is
 -- decided by one transaction at a time; a row that stopped matching while waiting is left out. Every change that locks
 -- them does so before it locks its own user, so that two changes never wait for each other.

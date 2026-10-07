@@ -122,6 +122,7 @@ func TestBulkRequest(t *testing.T) {
 		want string
 	}{
 		{BulkRequest{Command: CommandUnresolve, IDs: ids}, "/command invalid_format"},
+		{BulkRequest{Command: CommandAddNote, IDs: ids}, "/command invalid_format"},
 		{BulkRequest{Command: "nonsense", IDs: ids}, "/command invalid_format"},
 		{BulkRequest{Command: CommandResolve}, "/alert_group_ids out_of_range"},
 		{BulkRequest{Command: CommandResolve, IDs: make([]string, BulkMax+1)}, "/alert_group_ids out_of_range"},
@@ -129,7 +130,7 @@ func TestBulkRequest(t *testing.T) {
 		{BulkRequest{Command: CommandSnooze, IDs: ids, Snooze: &SnoozeEnd{}}, "/snooze one_of_required"},
 		{BulkRequest{Command: CommandSnooze, IDs: ids, Snooze: &SnoozeEnd{Until: ptr(t0.Add(-time.Hour))}},
 			"/snooze/until out_of_range"},
-		{BulkRequest{Command: CommandResolve, IDs: ids, Note: ptr("fixed")}, "/note unsupported"},
+		{BulkRequest{Command: CommandResolve, IDs: ids, Note: ptr("")}, "/note required"},
 	} {
 		if _, err := h.svc.Bulk(t.Context(), alice, c.r); code(err) != c.want {
 			t.Errorf("%+v = %v, want %s", c.r, err, c.want)

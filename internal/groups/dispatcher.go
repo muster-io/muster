@@ -53,6 +53,7 @@ const (
 const (
 	TimerReopenWindowEnd = "reopen_window_end"
 	TimerGracePeriodEnd  = "grace_period_end"
+	TimerSnoozeEnd       = "snooze_end"
 )
 
 // TimersChannel is the LISTEN/NOTIFY channel that wakes the timer workers of every replica when a timer is set.
@@ -86,6 +87,7 @@ type Queries interface {
 	InsertGroup(ctx context.Context, arg dbgen.InsertGroupParams) (int64, error)
 	SaveGroup(ctx context.Context, arg dbgen.SaveGroupParams) error
 	IsActiveUser(ctx context.Context, arg dbgen.IsActiveUserParams) (bool, error)
+	LockActiveUser(ctx context.Context, arg dbgen.LockActiveUserParams) ([]int64, error)
 	InsertMemberships(ctx context.Context, arg dbgen.InsertMembershipsParams) error
 	ResolveMemberships(ctx context.Context, arg dbgen.ResolveMembershipsParams) error
 	MoveMemberships(ctx context.Context, arg dbgen.MoveMembershipsParams) error
@@ -93,6 +95,9 @@ type Queries interface {
 	ListGroupFiringAlerts(ctx context.Context, arg dbgen.ListGroupFiringAlertsParams) (
 		[]dbgen.ListGroupFiringAlertsRow, error)
 	InsertTimelineEntry(ctx context.Context, arg dbgen.InsertTimelineEntryParams) error
+	InsertNote(ctx context.Context, arg dbgen.InsertNoteParams) error
+	ListJoinedDuringSnooze(ctx context.Context, arg dbgen.ListJoinedDuringSnoozeParams) ([]string, error)
+	ListOwnedGroups(ctx context.Context, arg dbgen.ListOwnedGroupsParams) ([]int64, error)
 	ListOpenGroupIDs(ctx context.Context, orgID int64) ([]int64, error)
 	InsertDowntimeEntries(ctx context.Context, arg dbgen.InsertDowntimeEntriesParams) error
 	UpsertTimer(ctx context.Context, arg dbgen.UpsertTimerParams) error
@@ -322,6 +327,8 @@ type entry struct {
 	Conflicts     []string
 	PeriodFrom    *time.Time
 	PeriodTo      *time.Time
+	// Note is the Note of a note_added, written to notes instead of the Timeline entries.
+	Note *noteEntry
 }
 
 // change is what one transition does to a locked Alert Group: the entries it records and, for a status change, the
@@ -361,7 +368,8 @@ func (c committed) run(ctx context.Context) {
 // dispatcher is the one way an Alert Group changes (ADR-0004, ADR-0016): permission → precondition → transition →
 // Audit log → Timeline → re-render, inside the caller's transaction, on a row the caller locked FOR UPDATE, and the
 // live-update hints of the change once the transaction commits. System transitions need no Permission and write no
-// Audit log entry; a Command passes permit first and names its Audit log action in its change.
+// Audit log entry; a Command passes permit first and names its Audit log action in its change. Whatever path enters,
+// moves or leaves a Snooze with an end, the dispatcher keeps its snooze_end timer with it.
 type dispatcher struct {
 	orgID int64
 	clock clock.Clock
@@ -380,7 +388,7 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	if err := t.precondition(g); err != nil {
 		return err
 	}
-	from := g.Status
+	from, snoozeEnd := g.Status, snoozeDeadline(g)
 	var c change
 	now := d.clock.Now().UTC()
 	if err := t.apply(ctx, q, g, &c); err != nil {
@@ -388,6 +396,9 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	}
 	if len(c.entries) == 0 && !c.written {
 		return nil
+	}
+	if err := d.syncSnoozeTimer(ctx, q, g, snoozeEnd, now); err != nil {
+		return err
 	}
 	if c.action != "" {
 		if err := d.audit.Record(ctx, q, audit.Entry{OrgID: d.orgID, Actor: actor.Person, Transport: actor.Transport,
@@ -421,9 +432,16 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	return nil
 }
 
-// record writes the entries of one change to the Timeline, numbering the lifecycle events of g.
+// record writes the entries of one change to the Timeline, numbering the lifecycle events of g; a Note is written to
+// notes with the number of its note_added.
 func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Actor, at time.Time, es []entry) error {
 	for _, e := range es {
+		if e.Note != nil {
+			if err := d.recordNote(ctx, q, g, actor, at, e.Note); err != nil {
+				return err
+			}
+			continue
+		}
 		p := dbgen.InsertTimelineEntryParams{
 			OrgID: d.orgID, PublicID: publicid.New(publicid.TimelineEntry), AlertGroupID: g.ID, At: at,
 			Mentions: []string{}, ActorKind: string(actor.Kind), Transport: string(actor.Transport),
@@ -464,6 +482,31 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 				err)
 		}
 	}
+	return nil
+}
+
+// recordNote writes a Note with its author, the token used and the Transport as the note_added lifecycle event of g
+// (C-10.FR-8, FR-15) and sets the time it was added.
+func (d *dispatcher) recordNote(ctx context.Context, q Queries, g *Group, actor Actor, at time.Time, n *noteEntry) error {
+	g.EventSeq++
+	p := dbgen.InsertNoteParams{OrgID: d.orgID, PublicID: n.PublicID, AlertGroupID: g.ID, EventSeq: g.EventSeq,
+		Body: n.Body, ActorKind: string(actor.Person.Kind), Transport: string(actor.Transport), CreatedAt: at}
+	switch actor.Person.Kind {
+	case audit.ActorUser:
+		p.ActorUserID = pgtype.Int8{Int64: actor.Person.ID, Valid: true}
+	case audit.ActorServiceAccount:
+		p.ActorServiceAccountID = pgtype.Int8{Int64: actor.Person.ID, Valid: true}
+	case audit.ActorSystem, audit.ActorBootstrap, audit.ActorCLI:
+		return fmt.Errorf("add a note to alert group #%d: only a user or a service account writes notes", g.Number)
+	}
+	if actor.Person.TokenID != 0 {
+		p.ApiTokenID = pgtype.Int8{Int64: actor.Person.TokenID, Valid: true}
+		p.TokenName = nonEmpty(actor.Person.TokenName)
+	}
+	if err := q.InsertNote(ctx, p); err != nil {
+		return fmt.Errorf("add a note to alert group #%d: %w", g.Number, err)
+	}
+	n.CreatedAt = at
 	return nil
 }
 

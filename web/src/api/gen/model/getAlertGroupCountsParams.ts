@@ -67,11 +67,11 @@ reopened?: AgReopenedParameter;
  */
 label?: LabelMatchersParameter;
 /**
- * A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns.
+ * A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns, resolved ones included.
  */
 owner?: AgOwnerParameter;
 /**
- * Only Alert Groups snoozed with no end.
+ * True: only Alert Groups snoozed with no end. False: every Alert Group but those.
  */
 snoozed_no_end?: AgSnoozedNoEndParameter;
 /**

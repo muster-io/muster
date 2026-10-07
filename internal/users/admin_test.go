@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/netip"
 	"net/url"
 	"slices"
@@ -55,6 +56,18 @@ type adminStore struct {
 	// tokens are the usable Personal access tokens per user, revoked the ones revoked with owner_deleted.
 	tokens  map[int64]int64
 	revoked map[int64]int64
+	// inTx is set while InTx runs f.
+	inTx bool
+}
+
+// fakeTx is the transaction an adminStore hands out through Tx.
+type fakeTx struct{ dbgen.DBTX }
+
+func (s *adminStore) Tx() dbgen.DBTX {
+	if s.inTx {
+		return fakeTx{}
+	}
+	return nil
 }
 
 func (s *adminStore) InTx(_ context.Context, f func(AdminQueries) error) error {
@@ -68,6 +81,8 @@ func (s *adminStore) InTx(_ context.Context, f func(AdminQueries) error) error {
 		sessions[k] = v
 	}
 	audits := len(s.audit)
+	s.inTx = true
+	defer func() { s.inTx = false }()
 	if err := f(s); err != nil {
 		s.users, s.setups, s.sessions, s.audit = users, setups, sessions, s.audit[:audits]
 		return err
@@ -1073,5 +1088,148 @@ func TestDisableAndDeleteDropTheCheck(t *testing.T) {
 	}
 	if err := a.Delete(t.Context(), byAdmin, "SRC0000000000C", nil); err == nil {
 		t.Error("a delete whose re-check removal failed")
+	}
+}
+
+func (s *adminStore) ListUserDirectory(_ context.Context, arg dbgen.ListUserDirectoryParams) (
+	[]dbgen.ListUserDirectoryRow, error) {
+	if err := s.fail["ListUserDirectory"]; err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListUserDirectoryRow
+	for _, u := range s.users {
+		name := strings.ToLower(u.Name)
+		if arg.Q.Valid && !strings.Contains(name, strings.ToLower(arg.Q.String)) &&
+			!strings.Contains(strings.ToLower(u.Login), strings.ToLower(arg.Q.String)) ||
+			arg.AfterName.Valid && (name < arg.AfterName.String || name == arg.AfterName.String && u.ID <= arg.AfterID.Int64) {
+			continue
+		}
+		out = append(out, dbgen.ListUserDirectoryRow{ID: u.ID, PublicID: u.PublicID, Login: u.Login, Name: u.Name,
+			Status: u.Status, SortName: name})
+	}
+	slices.SortFunc(out, func(a, b dbgen.ListUserDirectoryRow) int {
+		if c := strings.Compare(a.SortName, b.SortName); c != 0 {
+			return c
+		}
+		return int(a.ID - b.ID)
+	})
+	return out[:min(len(out), int(arg.PageSize))], nil
+}
+
+// releaser records the releases the user administration asks for, inside its transaction or not, and fails when
+// told to.
+type releaser struct {
+	calls     []string
+	inTx      []bool
+	fail      error
+	committed int
+}
+
+func (r *releaser) ReleaseOwner(_ context.Context, tx dbgen.DBTX, userID int64, reason string) (
+	func(context.Context), error) {
+	_, ok := tx.(fakeTx)
+	r.calls = append(r.calls, fmt.Sprintf("%d %s", userID, reason))
+	r.inTx = append(r.inTx, ok)
+	if r.fail != nil {
+		return nil, r.fail
+	}
+	return func(context.Context) { r.committed++ }, nil
+}
+
+// TestOwnerRelease is C-03.FR-13 and C-03.AC-27 (D267): Disable and Delete call the OwnerReleaser inside their own
+// transaction, after the status change and before the Audit log entry, with owner_disabled and owner_deleted, and run
+// what it returns once committed; Enable calls nothing; a failing release rolls the disable or the delete back, with no
+// Audit log entry; an Admin without a releaser releases nothing.
+func TestOwnerRelease(t *testing.T) {
+	s := &adminStore{users: []dbgen.GetUserRow{adminRow(1, adminID, "admin"), adminRow(2, bobID, "bob")}}
+	s.users[1].Role = auth.RoleResponder
+	a, _ := newAdmin(t, s)
+	r := &releaser{}
+	a.SetOwnerReleaser(r)
+	if _, err := a.Disable(t.Context(), byAdmin, bobID); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.calls, []string{"2 owner_disabled"}) || !slices.Equal(r.inTx, []bool{true}) || r.committed != 1 {
+		t.Errorf("disable released %v in a transaction %v, committed %d", r.calls, r.inTx, r.committed)
+	}
+	if e, _ := lastAudit(t, s); e.Action != audit.ActionUserDisabled {
+		t.Errorf("entry %s", e.Action)
+	}
+	if _, err := a.Enable(t.Context(), byAdmin, bobID); err != nil || len(r.calls) != 1 {
+		t.Errorf("enable = %v, released %v", err, r.calls)
+	}
+	// A failing release rolls the disable back.
+	r.fail = errors.New("boom")
+	audits := len(s.audit)
+	if _, err := a.Disable(t.Context(), byAdmin, bobID); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("disable with a failing release = %v", err)
+	}
+	if s.user(2).Status != StatusActive || len(s.audit) != audits || r.committed != 1 {
+		t.Errorf("rolled back to %s with %d audit entries", s.user(2).Status, len(s.audit)-audits)
+	}
+	if err := a.Delete(t.Context(), byAdmin, bobID, nil); err == nil || s.user(2).Status != StatusActive ||
+		len(s.audit) != audits {
+		t.Errorf("delete with a failing release = %v, %s", err, s.user(2).Status)
+	}
+	r.fail = nil
+	if err := a.Delete(t.Context(), byAdmin, bobID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if r.calls[len(r.calls)-1] != "2 owner_deleted" || !r.inTx[len(r.inTx)-1] || r.committed != 2 {
+		t.Errorf("delete released %v, committed %d", r.calls, r.committed)
+	}
+	if e, _ := lastAudit(t, s); e.Action != audit.ActionUserDeleted {
+		t.Errorf("entry %s", e.Action)
+	}
+	// A release that has nothing to run once committed.
+	s.users = append(s.users, adminRow(3, "SRC0000000000C", "carol"))
+	s.users[2].Role = auth.RoleResponder
+	a.SetOwnerReleaser(nothing{})
+	if _, err := a.Disable(t.Context(), byAdmin, "SRC0000000000C"); err != nil {
+		t.Errorf("disable with nothing to release = %v", err)
+	}
+	// Without a releaser nothing is released.
+	b, _ := newAdmin(t, s)
+	if _, err := b.Enable(t.Context(), byAdmin, "SRC0000000000C"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Disable(t.Context(), byAdmin, "SRC0000000000C"); err != nil {
+		t.Errorf("disable without a releaser = %v", err)
+	}
+}
+
+// nothing is an OwnerReleaser with nothing to release.
+type nothing struct{}
+
+func (nothing) ReleaseOwner(context.Context, dbgen.DBTX, int64, string) (func(context.Context), error) {
+	return nil, nil
+}
+
+// TestDirectory is C-10.FR-13 and C-10.AC-19: the user directory lists every user by name with only the name and the
+// login — a deleted user as deactivated — filtered by q, by cursor; TestIntegrationUserDirectory shows on PostgreSQL
+// that q never matches the email.
+func TestDirectory(t *testing.T) {
+	s := &adminStore{users: []dbgen.GetUserRow{adminRow(1, adminID, "admin"), adminRow(2, bobID, "Bob"),
+		adminRow(3, "SRC0000000000C", "carol")}}
+	s.users[1].Status, s.users[1].Name, s.users[1].Login = StatusDeleted, DeletedPrefix+bobID, DeletedPrefix+bobID
+	s.users[2].Status = StatusDisabled
+	d := NewDirectory(orgID, s)
+	page, err := d.List(t.Context(), "", nil, 2)
+	if err != nil || len(page.Entries) != 2 || page.Next == nil || page.Entries[0].Name != "admin" ||
+		page.Entries[1].Name != "carol" || page.Entries[1].Deactivated {
+		t.Fatalf("first page = %v %+v", err, page)
+	}
+	page, err = d.List(t.Context(), "", page.Next, 2)
+	if err != nil || len(page.Entries) != 1 || page.Next != nil || !page.Entries[0].Deactivated ||
+		page.Entries[0].PublicID != bobID || page.Entries[0].Login != DeletedPrefix+bobID {
+		t.Fatalf("second page = %v %+v", err, page)
+	}
+	if page, err := d.List(t.Context(), "CAROL", nil, 10); err != nil || len(page.Entries) != 1 ||
+		page.Entries[0].Login != "carol@example.org" {
+		t.Errorf("q = %v %+v", err, page)
+	}
+	s.fail = map[string]error{"ListUserDirectory": errors.New("boom")}
+	if _, err := d.List(t.Context(), "", nil, 2); err == nil {
+		t.Error("a failing directory")
 	}
 }

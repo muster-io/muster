@@ -4,6 +4,7 @@
 package groups
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -25,7 +26,7 @@ import (
 // Command is a Command on an Alert Group (C-10.FR-1, CommandName).
 type Command string
 
-// The Commands of C-10.FR-1 but Add Note, which S-063 adds.
+// The Commands of C-10.FR-1.
 const (
 	CommandAcknowledge   Command = "acknowledge"
 	CommandUnacknowledge Command = "unacknowledge"
@@ -33,6 +34,7 @@ const (
 	CommandUnresolve     Command = "unresolve"
 	CommandSnooze        Command = "snooze"
 	CommandUnsnooze      Command = "unsnooze"
+	CommandAddNote       Command = "add_note"
 )
 
 // The Permissions of the Commands (reference.md, Permissions).
@@ -40,6 +42,7 @@ const (
 	PermissionAcknowledge auth.Permission = "alert-groups:acknowledge"
 	PermissionResolve     auth.Permission = "alert-groups:resolve"
 	PermissionSnooze      auth.Permission = "alert-groups:snooze"
+	PermissionNote        auth.Permission = "alert-groups:note"
 )
 
 // Permission is the Permission the Command needs.
@@ -49,6 +52,8 @@ func (c Command) Permission() auth.Permission {
 		return PermissionAcknowledge
 	case CommandResolve, CommandUnresolve:
 		return PermissionResolve
+	case CommandAddNote:
+		return PermissionNote
 	default:
 		return PermissionSnooze
 	}
@@ -57,7 +62,7 @@ func (c Command) Permission() auth.Permission {
 // ResourceAlertGroup is the resource type of the Audit log entries of Commands.
 const ResourceAlertGroup = "alert_group"
 
-// The Audit log actions of the Commands (C-10.FR-12); alert_group.note_added is S-063's.
+// The Audit log actions of the Commands (C-10.FR-12).
 const (
 	ActionAcknowledged   = "alert_group.acknowledged"
 	ActionTakenOver      = "alert_group.taken_over"
@@ -66,6 +71,7 @@ const (
 	ActionUnresolved     = "alert_group.unresolved"
 	ActionSnoozed        = "alert_group.snoozed"
 	ActionUnsnoozed      = "alert_group.unsnoozed"
+	ActionNoteAdded      = "alert_group.note_added"
 )
 
 // The refusal codes of command-refused (C-10.FR-2), forbidden for a missing Permission, and the codes of the other
@@ -218,7 +224,8 @@ func (s *Service) Unacknowledge(ctx context.Context, c Caller, publicID string) 
 }
 
 // Resolve is the Command Resolve: resolved by the caller, with the Grace period of the Alerts still firing
-// (C-09.FR-5). A Note in the same request is refused as unsupported until Notes exist (S-063).
+// (C-09.FR-5). A Note in the same request, which needs alert-groups:note too, records note_added after resolved in
+// the same transaction (C-10.FR-15).
 func (s *Service) Resolve(ctx context.Context, c Caller, publicID string, note *string) (Result, error) {
 	return s.command(ctx, c, CommandResolve, publicID, args{note: note})
 }
@@ -238,21 +245,25 @@ func (s *Service) Unsnooze(ctx context.Context, c Caller, publicID string) (Resu
 	return s.command(ctx, c, CommandUnsnooze, publicID, args{})
 }
 
-// args are the arguments of a Command: the end of a Snooze, a Note of Resolve, whether it is an item of a bulk command
-// — whose Acknowledge skips an Alert Group another user owns — and whether its Permission and arguments were checked
-// already, once for the whole bulk command.
+// args are the arguments of a Command: the end of a Snooze, the text of a Note — Add Note's, or the one of Resolve —
+// with where it is in the request (noteAt, /note by default) and, for Add Note, the Note to add, whether it is an item
+// of a bulk command — whose Acknowledge skips an Alert Group another user owns — and whether its Permission and
+// arguments were checked already, once for the whole bulk command.
 type args struct {
 	end     *SnoozeEnd
 	note    *string
+	noteAt  string
+	added   *noteEntry
 	bulk    bool
 	checked bool
 }
 
-// check checks the arguments of a Command after its Permission; prefix is where they are in the request.
+// check checks the arguments of a Command after its Permission; prefix is where the Snooze is in the request.
 func (a args) check(prefix string, now time.Time) error {
 	if a.note != nil {
-		return &FieldError{Pointer: "/note", Code: CodeUnsupported,
-			Detail: "Notes are not available yet; resolve without a note."}
+		if err := checkNote(cmp.Or(a.noteAt, "/note"), *a.note); err != nil {
+			return err
+		}
 	}
 	if a.end != nil {
 		return a.end.check(prefix, now)
@@ -284,6 +295,15 @@ func (s *Service) permit(ctx context.Context, c Caller, cmd Command, group strin
 	return &ForbiddenError{Permission: cmd.Permission()}
 }
 
+// permitNote is permit for the Note of a Resolve, which needs alert-groups:note as Add Note does.
+func (s *Service) permitNote(ctx context.Context, c Caller, cmd Command, a args, group string, n int) error {
+	if cmd != CommandResolve || a.note == nil || c.can(PermissionNote) {
+		return nil
+	}
+	s.refused(ctx, c, CommandAddNote, group, CodeForbidden, n)
+	return &ForbiddenError{Permission: PermissionNote}
+}
+
 // refused counts and logs a refusal.
 func (s *Service) refused(ctx context.Context, c Caller, cmd Command, group, code string, n int) {
 	metrics.Commands.With(string(cmd), string(c.Transport), "refused").Add(n)
@@ -299,6 +319,9 @@ func (s *Service) refused(ctx context.Context, c Caller, cmd Command, group, cod
 func (s *Service) run(ctx context.Context, c Caller, cmd Command, publicID string, a args) (Outcome, int64, error) {
 	if !a.checked {
 		if err := s.permit(ctx, c, cmd, publicID, 1); err != nil {
+			return "", 0, err
+		}
+		if err := s.permitNote(ctx, c, cmd, a, publicID, 1); err != nil {
 			return "", 0, err
 		}
 		if err := a.check("", s.clock.Now()); err != nil {
@@ -349,6 +372,11 @@ func (s *Service) transact(ctx context.Context, c Caller, cmd Command, publicID 
 		if err != nil {
 			return fmt.Errorf("read alert group %s: %w", id, err)
 		}
+		if cmd == CommandAcknowledge && c.user() != 0 {
+			if err := s.lockActive(ctx, q, c); err != nil {
+				return err
+			}
+		}
 		routeDeleted := false
 		if cmd == CommandUnresolve {
 			if routeDeleted, err = s.lockForUnresolve(ctx, q, row.ID); err != nil {
@@ -370,6 +398,15 @@ func (s *Service) transact(ctx context.Context, c Caller, cmd Command, publicID 
 		}
 		if err := s.d.dispatch(ctx, q, g, c.actor(), t, &after); err != nil {
 			return err
+		}
+		if cmd == CommandResolve && a.note != nil {
+			if err := s.d.dispatch(ctx, q, g, c.actor(), addNote{note: newNote(*a.note)}, &after); err != nil {
+				return err
+			}
+			transport := string(c.Transport)
+			after.add(func(context.Context) {
+				metrics.Commands.With(string(CommandAddNote), transport, string(OutcomeDone)).Inc()
+			})
 		}
 		if a, ok := t.(*acknowledge); ok {
 			if a.unchanged {
@@ -427,8 +464,28 @@ func (s *Service) transition(ctx context.Context, q Queries, c Caller, cmd Comma
 		return snooze{end: *a.end, user: user, account: account, urgent: urgent}, nil
 	case CommandUnsnooze:
 		return unsnooze{}, nil
+	case CommandAddNote:
+		note := a.added
+		if note == nil {
+			note = newNote(*a.note)
+		}
+		return addNote{note: note}, nil
 	}
 	return nil, fmt.Errorf("unknown command %q", cmd)
+}
+
+// lockActive locks the row of the User who acknowledges, FOR SHARE, before the Alert Group, as the release of a
+// disabled or deleted Owner holds it before the Alert Groups (C-03.FR-13): an Acknowledge never leaves a User that is
+// no longer active as the Owner. A User disabled or deleted meanwhile holds no Permission any more.
+func (s *Service) lockActive(ctx context.Context, q Queries, c Caller) error {
+	ids, err := q.LockActiveUser(ctx, dbgen.LockActiveUserParams{OrgID: s.orgID, ID: c.user()})
+	if err != nil {
+		return fmt.Errorf("lock the user: %w", err)
+	}
+	if len(ids) == 0 {
+		return &ForbiddenError{Permission: PermissionAcknowledge}
+	}
+	return nil
 }
 
 // lockForUnresolve takes the locks of grouping before Unresolve opens an Alert Group again, in its order: the Route

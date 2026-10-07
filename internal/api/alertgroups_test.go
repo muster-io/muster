@@ -39,7 +39,25 @@ type fakeAlertGroups struct {
 	related   []*groups.ListPosition
 	stats     []groups.StatisticsRequest
 	open      map[string]int64
+	notes     []*groups.NotePosition
 	err       error
+}
+
+func (f *fakeAlertGroups) Notes(_ context.Context, id string, after *groups.NotePosition, limit int) (groups.NotePage,
+	error) {
+	f.notes = append(f.notes, after)
+	if id != groupID {
+		return groups.NotePage{}, groups.ErrNotFound
+	}
+	page := groups.NotePage{Notes: []groups.NoteView{{PublicID: "NEAAAAAAAAAAAA", Body: "Rolled back.",
+		Author: &groups.ActorRef{Kind: "user", PublicID: "SRAAAAAAAAAAAA", Name: "gone", Login: "gone",
+			Deactivated: true}, Transport: "ui", CreatedAt: t0}, {PublicID: "NEAAAAAAAAAAAB", Body: "x",
+		Author:    &groups.ActorRef{Kind: "service_account", PublicID: "SAAAAAAAAAAAAA", Name: "robot"},
+		Transport: "api", CreatedAt: t0}}}
+	if after == nil && limit == 2 {
+		page.Next = &groups.NotePosition{At: t0, ID: 9}
+	}
+	return page, f.err
 }
 
 func newFakeAlertGroups() *fakeAlertGroups {
@@ -456,7 +474,7 @@ func TestListAlertGroupsAPI(t *testing.T) {
 		fg.lists[2].Sort != groups.SortStartedDesc || fg.lists[2].Limit != 50 {
 		t.Errorf("defaults = %d %+v", a.status, fg.lists[2])
 	}
-	for _, name := range []string{"owner=me", "snoozed_no_end=true", "delivery_problem=true", "unclaimed=true"} {
+	for _, name := range []string{"delivery_problem=true", "unclaimed=true"} {
 		a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?"+name, "")
 		var p gen.Problem
 		decodeInto(t, a, &p)
@@ -489,6 +507,99 @@ func TestListAlertGroupsAPI(t *testing.T) {
 	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-counts", ""); a.status !=
 		http.StatusUnprocessableEntity {
 		t.Errorf("counts failing = %d %s", a.status, a.body)
+	}
+}
+
+// TestOwnerFiltersAPI is C-10.FR-13 and C-10.AC-19 on the API: owner and snoozed_no_end reach the list and the counts
+// with the caller, whom owner=me names; a Service account's owner=me is the 422 unsupported that groups reports.
+func TestOwnerFiltersAPI(t *testing.T) {
+	x, fg, _ := newAlertGroupsAPI(t)
+	for _, path := range []string{"/api/v1/alert-groups", "/api/v1/alert-group-counts"} {
+		a := x.as(t, groupsReader, http.MethodGet, path+"?owner=me&snoozed_no_end=true", "")
+		if a.status != http.StatusOK {
+			t.Fatalf("%s = %d %s", path, a.status, a.body)
+		}
+	}
+	for _, f := range []groups.Filter{fg.lists[0].Filter, fg.counts[0]} {
+		if f.Owner != groups.OwnerMe || f.Me.Kind != audit.ActorUser || f.Me.ID == 0 || f.SnoozedNoEnd == nil ||
+			!*f.SnoozedNoEnd {
+			t.Errorf("filter %+v", f)
+		}
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?owner=none", ""); a.status != http.StatusOK ||
+		fg.lists[1].Owner != groups.OwnerNone {
+		t.Errorf("owner=none = %d %+v", a.status, fg.lists[1].Filter)
+	}
+	if a := x.as(t, serviceToken, http.MethodGet, "/api/v1/alert-group-counts?owner=SRAAAAAAAAAAAA", ""); a.status !=
+		http.StatusOK || fg.counts[1].Owner != "SRAAAAAAAAAAAA" || fg.counts[1].Me.Kind != audit.ActorServiceAccount {
+		t.Errorf("owner=<id> = %d %+v", a.status, fg.counts[1])
+	}
+	fg.err = &groups.FieldError{Pointer: "/query/owner", Code: groups.CodeUnsupported, Detail: "x"}
+	a := x.as(t, serviceToken, http.MethodGet, "/api/v1/alert-groups?owner=me", "")
+	if a.status != http.StatusUnprocessableEntity || a.json(t)["errors"].([]any)[0].(map[string]any)["code"] !=
+		"unsupported" {
+		t.Errorf("owner=me by a service account = %d %s", a.status, a.body)
+	}
+}
+
+// TestAlertGroupNotesAPI is listAlertGroupNotes and createAlertGroupNote (C-10.FR-8, C-04.AC-6, C-10.AC-18): the
+// Notes by cursor with their author, readable with alert-groups:read; a Note created through the dispatcher, which
+// checks alert-groups:note, so a reader is refused with 403; a Note longer than alert_group.note_max_length is
+// refused by the request validation with too_long.
+func TestAlertGroupNotesAPI(t *testing.T) {
+	x, fg, _ := newAlertGroupsAPI(t)
+	fc := &fakeCommands{}
+	x.srv.commands = fc
+	ft := x.srv.tokens.(*fakeTokens)
+	ft.idents["mstr_pat_note"] = &auth.Identity{Session: ft.idents[fullToken].Session,
+		Permissions: []auth.Permission{"alert-groups:read", "alert-groups:note"}, Transport: audit.TransportAPI,
+		Token: &auth.Token{ID: 43, Name: "note"}}
+	path := "/api/v1/alert-groups/" + groupID + "/notes"
+	a := x.as(t, groupsReader, http.MethodGet, path+"?limit=2", "")
+	var list gen.NoteList
+	decodeInto(t, a, &list)
+	if a.status != http.StatusOK || len(list.Items) != 2 || !list.Items[0].Author.Deactivated ||
+		list.Items[0].Author.Kind != gen.ActorRefKindUser || list.Items[1].Transport != gen.TransportApi ||
+		list.NextCursor.IsNull() {
+		t.Fatalf("notes = %d %s", a.status, a.body)
+	}
+	a = x.as(t, groupsReader, http.MethodGet, path+"?cursor="+list.NextCursor.MustGet(), "")
+	if a.status != http.StatusOK || fg.notes[1] == nil || fg.notes[1].ID != 9 || !fg.notes[1].At.Equal(t0) ||
+		a.json(t)["next_cursor"] != nil {
+		t.Errorf("second page = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, path+"?cursor=e30", ""); a.status != http.StatusBadRequest {
+		t.Errorf("a bad cursor = %d", a.status)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/AGZZZZZZZZZZZZ/notes", ""); a.status !=
+		http.StatusNotFound {
+		t.Errorf("an unknown alert group = %d", a.status)
+	}
+	if a := x.as(t, groupsNone, http.MethodGet, path, ""); a.status != http.StatusForbidden {
+		t.Errorf("notes without alert-groups:read = %d", a.status)
+	}
+
+	a = x.as(t, "mstr_pat_note", http.MethodPost, path, `{"body":"Restarted the disk daemon."}`)
+	var n gen.Note
+	decodeInto(t, a, &n)
+	if a.status != http.StatusCreated || n.Body != "Restarted the disk daemon." || n.Author.Name != "robot" ||
+		len(fc.notes) != 1 || fc.callers[0].Actor.TokenName != "note" || fc.calls[0] != "add_note "+groupID {
+		t.Errorf("create = %d %s, %v", a.status, a.body, fc.calls)
+	}
+	// The dispatcher checks the Permission: the middleware lets a reader through, the command layer refuses.
+	if a := x.as(t, groupsReader, http.MethodPost, path, `{"body":"x"}`); a.status != http.StatusForbidden ||
+		fc.calls[len(fc.calls)-1] != "add_note "+groupID {
+		t.Errorf("a reader's note = %d %s", a.status, a.body)
+	}
+	long := strings.Repeat("x", 4001)
+	if a := x.as(t, "mstr_pat_note", http.MethodPost, path, `{"body":"`+long+`"}`); a.status !=
+		http.StatusBadRequest || a.json(t)["errors"].([]any)[0].(map[string]any)["code"] != "too_long" {
+		t.Errorf("a note too long = %d %s", a.status, a.body)
+	}
+	fc.err = errBoom
+	if a := x.as(t, "mstr_pat_note", http.MethodPost, path, `{"body":"x"}`); a.status !=
+		http.StatusInternalServerError {
+		t.Errorf("a failing note = %d", a.status)
 	}
 }
 

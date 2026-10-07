@@ -3771,6 +3771,7 @@ paths:
       summary: Add a Note
       description: Adds a Note. Service accounts may add Notes; the author is shown as the Service account.
       x-permission: alert-groups:note
+      x-permission-check: dispatcher
       x-listener: app
       security:
       - sessionCookie: []
@@ -6816,13 +6817,13 @@ components:
       name: owner
       in: query
       description: A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups
-        nobody owns.
+        nobody owns, resolved ones included.
       schema:
         type: string
     AgSnoozedNoEnd:
       name: snoozed_no_end
       in: query
-      description: Only Alert Groups snoozed with no end.
+      description: 'True: only Alert Groups snoozed with no end. False: every Alert Group but those.'
       schema:
         type: boolean
     AgDeliveryProblem:

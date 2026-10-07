@@ -160,6 +160,14 @@ SELECT EXISTS (
     WHERE org_id = @org_id AND id = @id AND status = 'active'
 )::boolean AS active;
 
+-- LockActiveUser locks the row of a User who acknowledges, FOR SHARE, while they are active: a disable or a delete of
+-- that User, which releases their acknowledgements, waits for the acknowledgement or makes it refused.
+-- name: LockActiveUser :many
+SELECT id
+FROM users
+WHERE org_id = @org_id AND id = @id AND status = 'active'
+FOR SHARE;
+
 -- InsertMemberships adds Alerts to Alert Groups, firing.
 -- name: InsertMemberships :exec
 INSERT INTO alert_group_alerts (org_id, alert_group_id, alert_id, episode, state, joined_at, starts_at, annotations)
@@ -216,6 +224,48 @@ VALUES (
     sqlc.narg('replaced_label'), sqlc.narg('label_conflicts')::text[], sqlc.narg('period_from'),
     sqlc.narg('period_to'), sqlc.narg('detail')
 );
+
+-- InsertNote records a Note with the event_seq of its note_added lifecycle event (C-10.FR-8).
+-- name: InsertNote :exec
+INSERT INTO notes (
+    org_id, public_id, alert_group_id, event_seq, body, actor_kind, actor_user_id, actor_service_account_id,
+    api_token_id, token_name, transport, created_at
+)
+VALUES (
+    @org_id, @public_id, @alert_group_id, @event_seq, @body, @actor_kind, sqlc.narg('actor_user_id'),
+    sqlc.narg('actor_service_account_id'), sqlc.narg('api_token_id'), sqlc.narg('token_name'), @transport,
+    @created_at
+);
+
+-- ListJoinedDuringSnooze lists the fingerprints of the Alerts that joined an Alert Group during its current Snooze
+-- (C-09.FR-8): after the last Timeline entry that took it into snoozed from another status, and, when that entry is a
+-- Reopen into snoozed, the Alerts that reopened it.
+-- name: ListJoinedDuringSnooze :many
+WITH snoozed AS (
+    SELECT t.at, t.event
+    FROM timeline_entries t
+    WHERE t.org_id = @org_id AND t.alert_group_id = @alert_group_id AND t.to_status = 'snoozed'
+      AND t.from_status IS DISTINCT FROM 'snoozed'
+    ORDER BY t.at DESC, t.id DESC
+    LIMIT 1
+)
+SELECT DISTINCT a.fingerprint
+FROM alert_group_alerts m
+JOIN alerts a ON a.org_id = m.org_id AND a.id = m.alert_id
+JOIN snoozed s ON m.joined_at > s.at OR (s.event = 'reopened' AND m.joined_at = s.at)
+WHERE m.org_id = @org_id AND m.alert_group_id = @alert_group_id
+ORDER BY a.fingerprint;
+
+-- ListOwnedGroups lists the Alert Groups a User owns, for the release of a disabled or deleted Owner (C-03.FR-13):
+-- acknowledged by them, or resolved by the system inside a Reopen window that would reopen them acknowledged by
+-- them.
+-- name: ListOwnedGroups :many
+SELECT id
+FROM alert_groups
+WHERE org_id = @org_id
+  AND ((status = 'acknowledged' AND owner_user_id = @user_id::bigint)
+       OR (status = 'resolved' AND prior_status = 'acknowledged' AND prior_owner_user_id = @user_id::bigint))
+ORDER BY id;
 
 -- ListOpenGroupIDs lists the open Alert Groups of the Organization, for the downtime entries.
 -- name: ListOpenGroupIDs :many
@@ -449,7 +499,8 @@ WHERE org_id = @org_id AND deleted_at IS NULL;
 -- range selects lifetimes that overlap it — created_at < to AND (resolved_at IS NULL OR resolved_at >= from), written
 -- with the status that the CHECK ties to resolved_at, so that the open index and alert_groups_resolved_idx serve it —
 -- and is ignored for a number. Label Matchers other than = with a value are matched in Go on common_labels, after
--- these conditions; urgency and the newer open Alert Group are derived as in GetGroup.
+-- these conditions; urgency and the newer open Alert Group are derived as in GetGroup. The Owner filter, with
+-- @owner_set, selects the Alert Groups the User @owner_id owns, or nobody owns when it is null.
 
 -- ListGroupsStartedDesc reads a batch of the Alert Group list, newest start first, after the cursor when given.
 -- name: ListGroupsStartedDesc :many
@@ -483,6 +534,9 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('resolved_by')::text IS NULL OR g.resolved_by_kind = sqlc.narg('resolved_by')::text)
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+  AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -523,6 +577,9 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('resolved_by')::text IS NULL OR g.resolved_by_kind = sqlc.narg('resolved_by')::text)
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+  AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -563,6 +620,9 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('resolved_by')::text IS NULL OR g.resolved_by_kind = sqlc.narg('resolved_by')::text)
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+  AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -603,6 +663,9 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('resolved_by')::text IS NULL OR g.resolved_by_kind = sqlc.narg('resolved_by')::text)
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+  AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -632,6 +695,9 @@ WHERE g.org_id = @org_id
   AND (sqlc.narg('resolved_by')::text IS NULL OR g.resolved_by_kind = sqlc.narg('resolved_by')::text)
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+  AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -649,6 +715,12 @@ WHERE id = @org_id;
 -- name: ListRoutesByPublicID :many
 SELECT id, public_id, name
 FROM routes
+WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]);
+
+-- ListUsersByPublicID names Users, deleted ones included, by public_id: the Owner filter of the list.
+-- name: ListUsersByPublicID :many
+SELECT id, public_id, name
+FROM users
 WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]);
 
 -- ListIntegrationsByPublicID names Integrations, deleted ones included, by public_id.

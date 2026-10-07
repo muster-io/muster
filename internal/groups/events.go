@@ -25,13 +25,15 @@ const (
 	EventUnacknowledged      Event = "unacknowledged"
 )
 
-// The lifecycle events of the Commands (C-10.FR-15); note_added is recorded by its Note (S-063).
+// The lifecycle events of the Commands (C-10.FR-15); note_added is recorded by its Note in notes, not in
+// timeline_entries.
 const (
 	EventAcknowledged Event = "acknowledged"
 	EventTakeover     Event = "takeover"
 	EventUnresolved   Event = "unresolved"
 	EventSnoozed      Event = "snoozed"
 	EventUnsnoozed    Event = "unsnoozed"
+	EventNoteAdded    Event = "note_added"
 )
 
 // Kind is the Timeline kind of an entry.
@@ -77,7 +79,7 @@ const (
 type Variant string
 
 // The variants of the rows of C-09.FR-22 and C-10.FR-15; VariantAny is an event with a single row. unacknowledged
-// has two: by the Command Unacknowledge, and when its Owner is disabled or deleted (S-063).
+// has two: by the Command Unacknowledge, and when its Owner is disabled or deleted.
 const (
 	VariantAny           Variant = ""
 	VariantFiring        Variant = "firing"
@@ -126,6 +128,7 @@ var Table = []Row{
 	{EventUnresolved, VariantAny, KindStatus, Quiet, nil},
 	{EventSnoozed, VariantAny, KindStatus, Quiet, nil},
 	{EventUnsnoozed, VariantAny, KindStatus, Quiet, nil},
+	{EventNoteAdded, VariantAny, KindNotes, Quiet, nil},
 }
 
 // rowOf is the row of the event and variant; an event outside the table is a programming error.

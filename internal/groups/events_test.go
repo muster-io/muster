@@ -126,6 +126,27 @@ func TestLifecycleEventTable(t *testing.T) {
 			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
 				return h.reopen(t, func(g *dbgen.LockGroupsRow) { h.snooze(g, t0.Add(time.Hour), false) })
 			}},
+		{"snooze ended", want{EventSnoozeEnded, KindStatus, Loud, []string{"snooze_ended"}},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				g := h.join(t, func(g *dbgen.LockGroupsRow) { h.snooze(g, t0.Add(time.Hour), false) })
+				h.clock.Advance(time.Hour)
+				if _, err := h.svc.EndSnooze(t.Context(), nil, g.ID); err != nil {
+					t.Fatal(err)
+				}
+				return g
+			}},
+		{"unacknowledged, its owner released", want{EventUnacknowledged, KindStatus, Loud, nil},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+				h.changes(t, ingest.ChangeFired, a)
+				g := h.groupOf(t, a)
+				h.acknowledge(g)
+				h.clock.Advance(time.Minute)
+				if _, err := h.svc.ReleaseOwner(t.Context(), nil, owner, ReasonOwnerDisabled); err != nil {
+					t.Fatal(err)
+				}
+				return g
+			}},
 		{"resolved by the system", want{EventResolved, KindStatus, Quiet, nil},
 			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
 				a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
@@ -174,26 +195,9 @@ func TestLifecycleEventTable(t *testing.T) {
 			produced[c.want.event] = true
 		})
 	}
-	// The rows of other stories are in the closed list with the PRD's values: Snooze ends (S-063) and a released
-	// Owner (S-063).
-	for _, r := range []struct {
-		row  Row
-		want want
-	}{
-		{rowOf(EventSnoozeEnded, VariantAny), want{EventSnoozeEnded, KindStatus, Loud, []string{"snooze_ended"}}},
-		{rowOf(EventUnacknowledged, VariantOwnerReleased), want{EventUnacknowledged, KindStatus, Loud, nil}},
-	} {
-		var mentions []string
-		for _, m := range r.row.Mentions {
-			mentions = append(mentions, string(m))
-		}
-		if r.row.Kind != r.want.kind || r.row.Loudness != r.want.loudness || !slices.Equal(mentions, r.want.mentions) {
-			t.Errorf("row %+v, want %+v", r.row, r.want)
-		}
-		produced[r.row.Event] = true
-	}
-	// TestCommandEventTable covers the rows of the Commands (C-10.FR-15).
-	for _, e := range []Event{EventAcknowledged, EventTakeover, EventUnresolved, EventSnoozed, EventUnsnoozed} {
+	// TestCommandEventTable and TestNoteAddedEvent cover the rows of the Commands (C-10.FR-15).
+	for _, e := range []Event{EventAcknowledged, EventTakeover, EventUnresolved, EventSnoozed, EventUnsnoozed,
+		EventNoteAdded} {
 		produced[e] = true
 	}
 	for _, r := range Table {
@@ -204,7 +208,7 @@ func TestLifecycleEventTable(t *testing.T) {
 }
 
 // TestCommandEventTable is C-10.AC-16, C-10.FR-15 and C-09.FR-11: every row of the lifecycle event table of the
-// Commands but note_added (S-063) records exactly one Timeline entry with the row's event, kind, loudness and Mentions
+// Commands but note_added (TestNoteAddedEvent) records exactly one Timeline entry with the row's event, kind, loudness and Mentions
 // and the actor and Transport of the Command, and an Acknowledge by the current Owner records none. The expected
 // values are the PRD table's, written out here.
 func TestCommandEventTable(t *testing.T) {
@@ -288,6 +292,38 @@ func TestCommandEventTable(t *testing.T) {
 			EventTakeover, EventUnresolved, EventSnoozed, EventUnsnoozed}, r.Event)) && !produced[r.Event] {
 			t.Errorf("no case covers %s", r.Event)
 		}
+	}
+}
+
+// TestNoteAddedEvent is C-10.AC-16, C-10.FR-15 and C-09.FR-11: Add Note records exactly one note_added — kind notes,
+// Quiet, without Mentions — with the actor and Transport of the Command and the next number among the lifecycle
+// events, which the Timeline shows; a Note alone records nothing else.
+func TestNoteAddedEvent(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	g := h.firing(t, "x")
+	h.clock.Advance(time.Minute)
+	entries, notes := len(h.entriesOf(g)), len(h.db.noteRows)
+	n, err := h.svc.AddNote(t.Context(), bob, g.PublicID, "Looking.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.entriesOf(g)) != entries || len(h.db.noteRows) != notes+1 || h.noteRow(t, n.PublicID).EventSeq != g.EventSeq {
+		t.Errorf("%d entries, %d notes", len(h.entriesOf(g))-entries, len(h.db.noteRows)-notes)
+	}
+	row := rowOf(EventNoteAdded, VariantAny)
+	if row.Kind != KindNotes || row.Loudness != Quiet || len(row.Mentions) != 0 {
+		t.Errorf("row %+v", row)
+	}
+	tl, err := h.svc.Timeline(t.Context(), g.PublicID, TimelineFilter{Limit: 1})
+	if err != nil || len(tl.Entries) != 1 {
+		t.Fatalf("timeline = %v %+v", err, tl)
+	}
+	e := tl.Entries[0]
+	if e.Kind != KindNotes || e.Event != string(EventNoteAdded) || e.Loudness != Quiet || len(e.Mentions) != 0 ||
+		e.Actor.Kind != "user" || e.Actor.Ref == nil || e.Actor.Ref.Name != "Bob" || e.Actor.Transport != "ui" ||
+		e.Note == nil || e.Note.Body != "Looking." {
+		t.Errorf("entry %+v", e)
 	}
 }
 
@@ -446,7 +482,7 @@ func TestRowOf(t *testing.T) {
 			t.Errorf("recovered %v", r)
 		}
 	}()
-	rowOf("note_added", VariantAny)
+	rowOf("still_on_it", VariantAny)
 }
 
 // TestStatusVariant: alerts_added and reopened take the variant of the status.

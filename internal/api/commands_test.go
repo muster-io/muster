@@ -72,6 +72,15 @@ func (f *fakeCommands) Unsnooze(_ context.Context, c groups.Caller, id string) (
 	return f.record("unsnooze", c, id)
 }
 
+func (f *fakeCommands) AddNote(_ context.Context, c groups.Caller, id, body string) (groups.NoteView, error) {
+	f.notes = append(f.notes, body)
+	if _, err := f.record("add_note", c, id); err != nil {
+		return groups.NoteView{}, err
+	}
+	return groups.NoteView{PublicID: "NEAAAAAAAAAAAA", Body: body, Transport: string(c.Transport), CreatedAt: t0,
+		Author: &groups.ActorRef{Kind: "service_account", PublicID: "SAAAAAAAAAAAAA", Name: "robot"}}, nil
+}
+
 func (f *fakeCommands) Bulk(_ context.Context, c groups.Caller, r groups.BulkRequest) ([]groups.BulkItem, error) {
 	f.bulks, f.callers = append(f.bulks, r), append(f.callers, c)
 	return f.items, f.err
@@ -120,7 +129,7 @@ func TestCommandsAPI(t *testing.T) {
 		c.Actor.TokenName != "ci" {
 		t.Errorf("service account = %d %+v", a.status, c)
 	}
-	// The Snooze names its choice; a Note on Resolve waits for Notes.
+	// The Snooze names its choice; Resolve takes a Note.
 	if a := x.as(t, fullToken, http.MethodPost, "/api/v1/alert-groups/"+groupID+"/snooze", `{}`); a.status !=
 		http.StatusUnprocessableEntity || !strings.Contains(string(a.body), `"one_of_required"`) {
 		t.Errorf("snooze {} = %d %s", a.status, a.body)

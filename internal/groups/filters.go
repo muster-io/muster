@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/matchers"
 	"github.com/muster-io/muster/internal/organization"
@@ -64,7 +65,19 @@ type Filter struct {
 	Number *int64
 	// Query is searched in the title and summary, case-insensitively and inside words.
 	Query string
+	// Owner is a User's public_id, OwnerMe for the User Me, or OwnerNone for the Alert Groups nobody owns
+	// (C-10.FR-13); empty does not filter. Me is the caller, whose own Alert Groups OwnerMe selects.
+	Owner string
+	Me    audit.Actor
+	// SnoozedNoEnd selects the Alert Groups snoozed with no end when true, and the others when false.
+	SnoozedNoEnd *bool
 }
+
+// The values of Filter.Owner that name no User.
+const (
+	OwnerMe   = "me"
+	OwnerNone = "none"
+)
 
 // query is a Filter resolved to the parameters of the list queries.
 type query struct {
@@ -80,6 +93,9 @@ type query struct {
 	reopened     pgtype.Bool
 	contains     []byte
 	pattern      pgtype.Text
+	ownerSet     bool
+	owner        pgtype.Int8
+	snoozedNoEnd pgtype.Bool
 	// rowwise are the Matchers the database does not apply.
 	rowwise []matchers.Matcher
 }
@@ -133,6 +149,12 @@ func (s *Service) resolve(ctx context.Context, f Filter, now time.Time) (query, 
 	if f.Reopened != nil {
 		q.reopened = pgtype.Bool{Bool: *f.Reopened, Valid: true}
 	}
+	if q.ownerSet, q.owner, err = s.owner(ctx, f.Owner, f.Me); err != nil {
+		return q, err
+	}
+	if f.SnoozedNoEnd != nil {
+		q.snoozedNoEnd = pgtype.Bool{Bool: *f.SnoozedNoEnd, Valid: true}
+	}
 	contains := map[string]string{}
 	for _, m := range f.Matchers {
 		if _, taken := contains[m.Name]; m.Op == matchers.Equal && m.Value != "" && !taken {
@@ -148,6 +170,35 @@ func (s *Service) resolve(ctx context.Context, f Filter, now time.Time) (query, 
 		q.pattern = pgtype.Text{String: "%" + escapeLike(search) + "%", Valid: true}
 	}
 	return q, nil
+}
+
+// owner resolves the Owner filter: whether it is set, and the User it selects, none for OwnerNone. OwnerMe is the
+// calling User; a Service account, which never owns an Alert Group, is a FieldError, as is an unknown User.
+func (s *Service) owner(ctx context.Context, owner string, me audit.Actor) (bool, pgtype.Int8, error) {
+	switch owner {
+	case "":
+		return false, pgtype.Int8{}, nil
+	case OwnerNone:
+		return true, pgtype.Int8{}, nil
+	case OwnerMe:
+		if me.Kind != audit.ActorUser {
+			return false, pgtype.Int8{}, &FieldError{Pointer: "/query/owner", Code: CodeUnsupported,
+				Detail: "A Service account owns no Alert Groups; name a user instead of me."}
+		}
+		return true, pgtype.Int8{Int64: me.ID, Valid: true}, nil
+	}
+	refs, err := lookup(publicid.User, "user", []string{owner}, "/query/owner", func(ids []string) ([]idRef, error) {
+		rows, err := s.store.ListUsersByPublicID(ctx, dbgen.ListUsersByPublicIDParams{OrgID: s.orgID, PublicIds: ids})
+		out := make([]idRef, len(rows))
+		for i, r := range rows {
+			out[i] = idRef(r)
+		}
+		return out, err
+	})
+	if err != nil {
+		return false, pgtype.Int8{}, err
+	}
+	return true, pgtype.Int8{Int64: refs[0].ID, Valid: true}, nil
 }
 
 // orNone is ids, or an empty list for nil, which the queries read as no filter.

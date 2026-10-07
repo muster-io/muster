@@ -8,12 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/ingest"
 )
 
 // TestAllowed is C-10.FR-16, C-10.AC-18 and C-10.FR-7: allowed_commands by status for a Responder, the Owner, a
-// Viewer and a Service account, and Unresolve on a person-resolved Alert Group only while every precondition holds.
+// Viewer and a Service account, Unresolve on a person-resolved Alert Group only while every precondition holds, and
+// add_note in every status for every caller with alert-groups:note.
 func TestAllowed(t *testing.T) {
 	type cmds = []Command
 	viewer := carol
@@ -23,36 +25,40 @@ func TestAllowed(t *testing.T) {
 		c     Caller
 		want  cmds
 	}{
-		{"firing, responder", nil, alice, cmds{CommandAcknowledge, CommandResolve, CommandSnooze}},
-		{"firing, service account", nil, robot, cmds{CommandResolve, CommandSnooze}},
+		{"firing, responder", nil, alice, cmds{CommandAcknowledge, CommandResolve, CommandSnooze, CommandAddNote}},
+		{"firing, service account", nil, robot, cmds{CommandResolve, CommandSnooze, CommandAddNote}},
 		{"firing, viewer", nil, viewer, cmds{}},
 		{"acknowledged, owner", func(h *harness, g *dbgen.LockGroupsRow) { h.acknowledge(g) }, alice,
-			cmds{CommandUnacknowledge, CommandResolve, CommandSnooze}},
+			cmds{CommandUnacknowledge, CommandResolve, CommandSnooze, CommandAddNote}},
 		{"acknowledged, another user", func(h *harness, g *dbgen.LockGroupsRow) { h.acknowledge(g) }, bob,
-			cmds{CommandAcknowledge, CommandUnacknowledge, CommandResolve, CommandSnooze}},
+			cmds{CommandAcknowledge, CommandUnacknowledge, CommandResolve, CommandSnooze, CommandAddNote}},
 		{"acknowledged, service account", func(h *harness, g *dbgen.LockGroupsRow) { h.acknowledge(g) }, robot,
-			cmds{CommandUnacknowledge, CommandResolve, CommandSnooze}},
+			cmds{CommandUnacknowledge, CommandResolve, CommandSnooze, CommandAddNote}},
 		{"snoozed, responder", func(h *harness, g *dbgen.LockGroupsRow) { h.snooze(g, t0.Add(time.Hour), false) },
-			bob, cmds{CommandAcknowledge, CommandResolve, CommandSnooze, CommandUnsnooze}},
+			bob, cmds{CommandAcknowledge, CommandResolve, CommandSnooze, CommandUnsnooze, CommandAddNote}},
 		{"resolved by the system", func(_ *harness, g *dbgen.LockGroupsRow) {
 			g.Status, g.ResolvedAt, g.ResolvedByKind = "resolved", ts(t0), txt(ResolvedBySystem)
 			g.ResolveReason = txt("resolved")
-		}, alice, cmds{}},
+		}, alice, cmds{CommandAddNote}},
 		{"resolved by a person, alerts firing", func(h *harness, g *dbgen.LockGroupsRow) {
 			h.personResolve(g, time.Minute)
-		}, alice, cmds{CommandUnresolve}},
+		}, alice, cmds{CommandUnresolve, CommandAddNote}},
 		{"resolved by a person, viewer", func(h *harness, g *dbgen.LockGroupsRow) {
 			h.personResolve(g, time.Minute)
 		}, viewer, cmds{}},
 		{"resolved by a person, no alert firing", func(h *harness, g *dbgen.LockGroupsRow) {
 			h.personResolve(g, time.Minute)
 			h.resolve(t, h.db.members[0].alert)
-		}, alice, cmds{}},
+		}, alice, cmds{CommandAddNote}},
 		{"resolved by a person, a newer open one", func(h *harness, g *dbgen.LockGroupsRow) {
 			h.personResolve(g, time.Minute)
 			b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
 			h.changes(t, ingest.ChangeFired, b)
-		}, alice, cmds{}},
+		}, alice, cmds{CommandAddNote}},
+		{"resolved by a person, a Note only", func(h *harness, g *dbgen.LockGroupsRow) {
+			h.personResolve(g, time.Minute)
+		}, Caller{Actor: carol.Actor, Transport: carol.Transport, Permissions: []auth.Permission{PermissionNote}},
+			cmds{CommandAddNote}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

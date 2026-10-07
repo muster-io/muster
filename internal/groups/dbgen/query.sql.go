@@ -31,9 +31,12 @@ WHERE g.org_id = $2
   AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
-  AND ($13::jsonb IS NULL OR g.common_labels @> $13::jsonb)
-  AND ($14::text IS NULL OR g.title ILIKE $14::text
-       OR g.summary ILIKE $14::text)
+  AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
+  AND ($15::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
+  AND ($16::jsonb IS NULL OR g.common_labels @> $16::jsonb)
+  AND ($17::text IS NULL OR g.title ILIKE $17::text
+       OR g.summary ILIKE $17::text)
 GROUP BY g.status, (CASE WHEN $1::boolean THEN g.common_labels END)
 `
 
@@ -50,6 +53,9 @@ type CountGroupsParams struct {
 	ResolvedBy     pgtype.Text
 	ResolveReason  pgtype.Text
 	Reopened       pgtype.Bool
+	OwnerSet       bool
+	OwnerID        pgtype.Int8
+	SnoozedNoEnd   pgtype.Bool
 	Contains       []byte
 	Pattern        pgtype.Text
 }
@@ -76,6 +82,9 @@ func (q *Queries) CountGroups(ctx context.Context, arg CountGroupsParams) ([]Cou
 		arg.ResolvedBy,
 		arg.ResolveReason,
 		arg.Reopened,
+		arg.OwnerSet,
+		arg.OwnerID,
+		arg.SnoozedNoEnd,
 		arg.Contains,
 		arg.Pattern,
 	)
@@ -759,6 +768,52 @@ func (q *Queries) InsertMemberships(ctx context.Context, arg InsertMembershipsPa
 	return err
 }
 
+const insertNote = `-- name: InsertNote :exec
+INSERT INTO notes (
+    org_id, public_id, alert_group_id, event_seq, body, actor_kind, actor_user_id, actor_service_account_id,
+    api_token_id, token_name, transport, created_at
+)
+VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $11,
+    $12
+)
+`
+
+type InsertNoteParams struct {
+	OrgID                 int64
+	PublicID              string
+	AlertGroupID          int64
+	EventSeq              int64
+	Body                  string
+	ActorKind             string
+	ActorUserID           pgtype.Int8
+	ActorServiceAccountID pgtype.Int8
+	ApiTokenID            pgtype.Int8
+	TokenName             pgtype.Text
+	Transport             string
+	CreatedAt             time.Time
+}
+
+// InsertNote records a Note with the event_seq of its note_added lifecycle event (C-10.FR-8).
+func (q *Queries) InsertNote(ctx context.Context, arg InsertNoteParams) error {
+	_, err := q.db.Exec(ctx, insertNote,
+		arg.OrgID,
+		arg.PublicID,
+		arg.AlertGroupID,
+		arg.EventSeq,
+		arg.Body,
+		arg.ActorKind,
+		arg.ActorUserID,
+		arg.ActorServiceAccountID,
+		arg.ApiTokenID,
+		arg.TokenName,
+		arg.Transport,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const insertTimelineEntry = `-- name: InsertTimelineEntry :exec
 INSERT INTO timeline_entries (
     org_id, public_id, alert_group_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind,
@@ -1274,13 +1329,16 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
-  AND ($13::jsonb IS NULL OR g.common_labels @> $13::jsonb)
-  AND ($14::text IS NULL OR g.title ILIKE $14::text
-       OR g.summary ILIKE $14::text)
-  AND ($15::timestamptz IS NULL
-       OR (g.last_changed_at, g.id) > ($15::timestamptz, $16::bigint))
+  AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
+  AND ($15::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
+  AND ($16::jsonb IS NULL OR g.common_labels @> $16::jsonb)
+  AND ($17::text IS NULL OR g.title ILIKE $17::text
+       OR g.summary ILIKE $17::text)
+  AND ($18::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) > ($18::timestamptz, $19::bigint))
 ORDER BY g.last_changed_at, g.id
-LIMIT $17
+LIMIT $20
 `
 
 type ListGroupsChangedAscParams struct {
@@ -1296,6 +1354,9 @@ type ListGroupsChangedAscParams struct {
 	ResolvedBy     pgtype.Text
 	ResolveReason  pgtype.Text
 	Reopened       pgtype.Bool
+	OwnerSet       bool
+	OwnerID        pgtype.Int8
+	SnoozedNoEnd   pgtype.Bool
 	Contains       []byte
 	Pattern        pgtype.Text
 	AfterAt        pgtype.Timestamptz
@@ -1351,6 +1412,9 @@ func (q *Queries) ListGroupsChangedAsc(ctx context.Context, arg ListGroupsChange
 		arg.ResolvedBy,
 		arg.ResolveReason,
 		arg.Reopened,
+		arg.OwnerSet,
+		arg.OwnerID,
+		arg.SnoozedNoEnd,
 		arg.Contains,
 		arg.Pattern,
 		arg.AfterAt,
@@ -1437,13 +1501,16 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
-  AND ($13::jsonb IS NULL OR g.common_labels @> $13::jsonb)
-  AND ($14::text IS NULL OR g.title ILIKE $14::text
-       OR g.summary ILIKE $14::text)
-  AND ($15::timestamptz IS NULL
-       OR (g.last_changed_at, g.id) < ($15::timestamptz, $16::bigint))
+  AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
+  AND ($15::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
+  AND ($16::jsonb IS NULL OR g.common_labels @> $16::jsonb)
+  AND ($17::text IS NULL OR g.title ILIKE $17::text
+       OR g.summary ILIKE $17::text)
+  AND ($18::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) < ($18::timestamptz, $19::bigint))
 ORDER BY g.last_changed_at DESC, g.id DESC
-LIMIT $17
+LIMIT $20
 `
 
 type ListGroupsChangedDescParams struct {
@@ -1459,6 +1526,9 @@ type ListGroupsChangedDescParams struct {
 	ResolvedBy     pgtype.Text
 	ResolveReason  pgtype.Text
 	Reopened       pgtype.Bool
+	OwnerSet       bool
+	OwnerID        pgtype.Int8
+	SnoozedNoEnd   pgtype.Bool
 	Contains       []byte
 	Pattern        pgtype.Text
 	AfterAt        pgtype.Timestamptz
@@ -1514,6 +1584,9 @@ func (q *Queries) ListGroupsChangedDesc(ctx context.Context, arg ListGroupsChang
 		arg.ResolvedBy,
 		arg.ResolveReason,
 		arg.Reopened,
+		arg.OwnerSet,
+		arg.OwnerID,
+		arg.SnoozedNoEnd,
 		arg.Contains,
 		arg.Pattern,
 		arg.AfterAt,
@@ -1600,13 +1673,16 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
-  AND ($13::jsonb IS NULL OR g.common_labels @> $13::jsonb)
-  AND ($14::text IS NULL OR g.title ILIKE $14::text
-       OR g.summary ILIKE $14::text)
-  AND ($15::timestamptz IS NULL
-       OR (g.created_at, g.id) > ($15::timestamptz, $16::bigint))
+  AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
+  AND ($15::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
+  AND ($16::jsonb IS NULL OR g.common_labels @> $16::jsonb)
+  AND ($17::text IS NULL OR g.title ILIKE $17::text
+       OR g.summary ILIKE $17::text)
+  AND ($18::timestamptz IS NULL
+       OR (g.created_at, g.id) > ($18::timestamptz, $19::bigint))
 ORDER BY g.created_at, g.id
-LIMIT $17
+LIMIT $20
 `
 
 type ListGroupsStartedAscParams struct {
@@ -1622,6 +1698,9 @@ type ListGroupsStartedAscParams struct {
 	ResolvedBy     pgtype.Text
 	ResolveReason  pgtype.Text
 	Reopened       pgtype.Bool
+	OwnerSet       bool
+	OwnerID        pgtype.Int8
+	SnoozedNoEnd   pgtype.Bool
 	Contains       []byte
 	Pattern        pgtype.Text
 	AfterAt        pgtype.Timestamptz
@@ -1677,6 +1756,9 @@ func (q *Queries) ListGroupsStartedAsc(ctx context.Context, arg ListGroupsStarte
 		arg.ResolvedBy,
 		arg.ResolveReason,
 		arg.Reopened,
+		arg.OwnerSet,
+		arg.OwnerID,
+		arg.SnoozedNoEnd,
 		arg.Contains,
 		arg.Pattern,
 		arg.AfterAt,
@@ -1764,13 +1846,16 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
-  AND ($13::jsonb IS NULL OR g.common_labels @> $13::jsonb)
-  AND ($14::text IS NULL OR g.title ILIKE $14::text
-       OR g.summary ILIKE $14::text)
-  AND ($15::timestamptz IS NULL
-       OR (g.created_at, g.id) < ($15::timestamptz, $16::bigint))
+  AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
+  AND ($15::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
+  AND ($16::jsonb IS NULL OR g.common_labels @> $16::jsonb)
+  AND ($17::text IS NULL OR g.title ILIKE $17::text
+       OR g.summary ILIKE $17::text)
+  AND ($18::timestamptz IS NULL
+       OR (g.created_at, g.id) < ($18::timestamptz, $19::bigint))
 ORDER BY g.created_at DESC, g.id DESC
-LIMIT $17
+LIMIT $20
 `
 
 type ListGroupsStartedDescParams struct {
@@ -1786,6 +1871,9 @@ type ListGroupsStartedDescParams struct {
 	ResolvedBy     pgtype.Text
 	ResolveReason  pgtype.Text
 	Reopened       pgtype.Bool
+	OwnerSet       bool
+	OwnerID        pgtype.Int8
+	SnoozedNoEnd   pgtype.Bool
 	Contains       []byte
 	Pattern        pgtype.Text
 	AfterAt        pgtype.Timestamptz
@@ -1833,7 +1921,8 @@ type ListGroupsStartedDescRow struct {
 // range selects lifetimes that overlap it — created_at < to AND (resolved_at IS NULL OR resolved_at >= from), written
 // with the status that the CHECK ties to resolved_at, so that the open index and alert_groups_resolved_idx serve it —
 // and is ignored for a number. Label Matchers other than = with a value are matched in Go on common_labels, after
-// these conditions; urgency and the newer open Alert Group are derived as in GetGroup.
+// these conditions; urgency and the newer open Alert Group are derived as in GetGroup. The Owner filter, with
+// @owner_set, selects the Alert Groups the User @owner_id owns, or nobody owns when it is null.
 // ListGroupsStartedDesc reads a batch of the Alert Group list, newest start first, after the cursor when given.
 func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStartedDescParams) ([]ListGroupsStartedDescRow, error) {
 	rows, err := q.db.Query(ctx, listGroupsStartedDesc,
@@ -1849,6 +1938,9 @@ func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStart
 		arg.ResolvedBy,
 		arg.ResolveReason,
 		arg.Reopened,
+		arg.OwnerSet,
+		arg.OwnerID,
+		arg.SnoozedNoEnd,
 		arg.Contains,
 		arg.Pattern,
 		arg.AfterAt,
@@ -1981,6 +2073,51 @@ func (q *Queries) ListIntegrationsByPublicID(ctx context.Context, arg ListIntegr
 	return items, nil
 }
 
+const listJoinedDuringSnooze = `-- name: ListJoinedDuringSnooze :many
+WITH snoozed AS (
+    SELECT t.at, t.event
+    FROM timeline_entries t
+    WHERE t.org_id = $1 AND t.alert_group_id = $2 AND t.to_status = 'snoozed'
+      AND t.from_status IS DISTINCT FROM 'snoozed'
+    ORDER BY t.at DESC, t.id DESC
+    LIMIT 1
+)
+SELECT DISTINCT a.fingerprint
+FROM alert_group_alerts m
+JOIN alerts a ON a.org_id = m.org_id AND a.id = m.alert_id
+JOIN snoozed s ON m.joined_at > s.at OR (s.event = 'reopened' AND m.joined_at = s.at)
+WHERE m.org_id = $1 AND m.alert_group_id = $2
+ORDER BY a.fingerprint
+`
+
+type ListJoinedDuringSnoozeParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+// ListJoinedDuringSnooze lists the fingerprints of the Alerts that joined an Alert Group during its current Snooze
+// (C-09.FR-8): after the last Timeline entry that took it into snoozed from another status, and, when that entry is a
+// Reopen into snoozed, the Alerts that reopened it.
+func (q *Queries) ListJoinedDuringSnooze(ctx context.Context, arg ListJoinedDuringSnoozeParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listJoinedDuringSnooze, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var fingerprint string
+		if err := rows.Scan(&fingerprint); err != nil {
+			return nil, err
+		}
+		items = append(items, fingerprint)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenGroupIDs = `-- name: ListOpenGroupIDs :many
 SELECT id
 FROM alert_groups
@@ -2024,6 +2161,43 @@ type ListOpenGroupsOfRouteParams struct {
 // ListOpenGroupsOfRoute lists the open Alert Groups of a Route.
 func (q *Queries) ListOpenGroupsOfRoute(ctx context.Context, arg ListOpenGroupsOfRouteParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsOfRoute, arg.OrgID, arg.RouteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOwnedGroups = `-- name: ListOwnedGroups :many
+SELECT id
+FROM alert_groups
+WHERE org_id = $1
+  AND ((status = 'acknowledged' AND owner_user_id = $2::bigint)
+       OR (status = 'resolved' AND prior_status = 'acknowledged' AND prior_owner_user_id = $2::bigint))
+ORDER BY id
+`
+
+type ListOwnedGroupsParams struct {
+	OrgID  int64
+	UserID int64
+}
+
+// ListOwnedGroups lists the Alert Groups a User owns, for the release of a disabled or deleted Owner (C-03.FR-13):
+// acknowledged by them, or resolved by the system inside a Reopen window that would reopen them acknowledged by
+// them.
+func (q *Queries) ListOwnedGroups(ctx context.Context, arg ListOwnedGroupsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listOwnedGroups, arg.OrgID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -2735,6 +2909,78 @@ func (q *Queries) ListUserRefs(ctx context.Context, arg ListUserRefsParams) ([]L
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsersByPublicID = `-- name: ListUsersByPublicID :many
+SELECT id, public_id, name
+FROM users
+WHERE org_id = $1 AND public_id = ANY($2::text[])
+`
+
+type ListUsersByPublicIDParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type ListUsersByPublicIDRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+}
+
+// ListUsersByPublicID names Users, deleted ones included, by public_id: the Owner filter of the list.
+func (q *Queries) ListUsersByPublicID(ctx context.Context, arg ListUsersByPublicIDParams) ([]ListUsersByPublicIDRow, error) {
+	rows, err := q.db.Query(ctx, listUsersByPublicID, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersByPublicIDRow{}
+	for rows.Next() {
+		var i ListUsersByPublicIDRow
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockActiveUser = `-- name: LockActiveUser :many
+SELECT id
+FROM users
+WHERE org_id = $1 AND id = $2 AND status = 'active'
+FOR SHARE
+`
+
+type LockActiveUserParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// LockActiveUser locks the row of a User who acknowledges, FOR SHARE, while they are active: a disable or a delete of
+// that User, which releases their acknowledgements, waits for the acknowledgement or makes it refused.
+func (q *Queries) LockActiveUser(ctx context.Context, arg LockActiveUserParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, lockActiveUser, arg.OrgID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

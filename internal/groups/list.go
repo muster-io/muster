@@ -35,6 +35,8 @@ type listQueries interface {
 		[]dbgen.ListRoutesByPublicIDRow, error)
 	ListIntegrationsByPublicID(ctx context.Context, arg dbgen.ListIntegrationsByPublicIDParams) (
 		[]dbgen.ListIntegrationsByPublicIDRow, error)
+	ListUsersByPublicID(ctx context.Context, arg dbgen.ListUsersByPublicIDParams) ([]dbgen.ListUsersByPublicIDRow,
+		error)
 	GetGroupKey(ctx context.Context, arg dbgen.GetGroupKeyParams) (dbgen.GetGroupKeyRow, error)
 	ListRelatedGroups(ctx context.Context, arg dbgen.ListRelatedGroupsParams) ([]dbgen.ListRelatedGroupsRow, error)
 	RouteStatistics(ctx context.Context, arg dbgen.RouteStatisticsParams) ([]dbgen.RouteStatisticsRow, error)
@@ -176,7 +178,8 @@ func (s *Service) listBatch(ctx context.Context, q query, sort Sort, after *List
 	p := dbgen.ListGroupsStartedDescParams{OrgID: s.orgID, Statuses: q.statuses, Number: q.number, RangeTo: q.to,
 		RangeFrom: q.from, RouteIds: q.routes, IntegrationIds: q.integrations, Severities: q.severities,
 		Urgent: q.urgent, ResolvedBy: q.resolvedBy, ResolveReason: q.reason, Reopened: q.reopened,
-		Contains: q.contains, Pattern: q.pattern, Lim: int32(size)} //nolint:gosec // G115: size is at most maxBatch
+		Contains: q.contains, Pattern: q.pattern, OwnerSet: q.ownerSet, OwnerID: q.owner, SnoozedNoEnd: q.snoozedNoEnd,
+		Lim: int32(size)} //nolint:gosec // G115: size is at most maxBatch
 	if after != nil {
 		p.AfterAt = pgtype.Timestamptz{Time: after.At, Valid: true}
 		p.AfterID = pgtype.Int8{Int64: after.ID, Valid: true}

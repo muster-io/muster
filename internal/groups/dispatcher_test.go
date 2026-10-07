@@ -76,6 +76,8 @@ type fakeDB struct {
 	ints     map[int64]dbgen.ListIntegrationRefsRow
 	keys     map[int64][]string
 	notes    []dbgen.ListTimelineNotesRow
+	// noteRows are the notes rows InsertNote wrote, whose Alert Group ListTimelineNotes filters by.
+	noteRows map[int64]dbgen.InsertNoteParams
 	delivery []dbgen.ListTimelineDeliveryEventsRow
 	audit    []auditdb.InsertAuditEntryParams
 	nextID   int64
@@ -837,6 +839,9 @@ func (f *fakeDB) ListTimelineNotes(_ context.Context, arg dbgen.ListTimelineNote
 	}
 	var out []dbgen.ListTimelineNotesRow
 	for _, n := range f.notes {
+		if r, ok := f.noteRows[n.ID]; ok && r.AlertGroupID != arg.AlertGroupID {
+			continue
+		}
 		if after(n.CreatedAt, 1, n.ID, arg.At, arg.Source, arg.ID, arg.Descending) {
 			out = append(out, n)
 		}

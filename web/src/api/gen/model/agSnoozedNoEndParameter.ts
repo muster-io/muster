@@ -19,6 +19,6 @@
  */
 
 /**
- * Only Alert Groups snoozed with no end.
+ * True: only Alert Groups snoozed with no end. False: every Alert Group but those.
  */
 export type AgSnoozedNoEndParameter = boolean;
