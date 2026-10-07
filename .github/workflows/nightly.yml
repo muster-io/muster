@@ -56,8 +56,6 @@ jobs:
     name: e2e-two-replicas
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      PLAYWRIGHT_INSTALL_FLAGS: --with-deps
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,6 +71,9 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
+      - name: install Playwright dependencies
+        timeout-minutes: 9
+        run: ./scripts/ci/install-playwright-deps.sh
       - run: make e2e E2E_REPLICAS=2
 
   # The load test runs against muster dev with the fake servers, then against the compose example started with the
