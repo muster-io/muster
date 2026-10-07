@@ -353,3 +353,58 @@ var AlertGroupTimeToAck = newHistogram(Definition{
 	Buckets:    []float64{60, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400},
 	Capability: "C-10",
 })
+
+// DeliveryKinds are the kind values of muster_delivery_attempts_total: what an attempt sends.
+var DeliveryKinds = []string{"publication", "update", "thread_reply", "storm_summary", "final_edit", "webhook_event"}
+
+// DeliveryOutcomes are the outcome values of muster_delivery_attempts_total: delivered, or the error class of the
+// answer.
+var DeliveryOutcomes = []string{"delivered", "markup_rejected", "retry_after", "transient", "fatal", "unknown",
+	"template_error"}
+
+// DeliveryAttempts counts the calls the delivery worker made, by Destination, kind and outcome (C-11.FR-17).
+var DeliveryAttempts = newCounter(Definition{
+	Name: "muster_delivery_attempts_total",
+	Help: "Calls of the delivery worker to a Destination, one per attempt, by Destination, what it sent and its " +
+		"outcome.",
+	Labels: []Label{
+		entity("destination"),
+		closed("kind", "publication is a new Root message, update an edit of one, thread_reply a reply in its Thread, "+
+			"storm_summary and final_edit those messages, webhook_event an event of an outgoing webhook",
+			DeliveryKinds...),
+		closed("outcome", "delivered, or the error class of the answer", DeliveryOutcomes...),
+	},
+	Capability: "C-11",
+})
+
+// DeliveryLatency observes, at the call that delivers a change caused by a Snapshot, the time since its receipt.
+var DeliveryLatency = newHistogram(Definition{
+	Name: "muster_delivery_latency_seconds",
+	Help: "Time from the receipt of the Snapshot behind a change of a Root message to the messenger API call that " +
+		"delivered it, by Destination; changes made by Commands or timers are not observed. The service-level " +
+		"indicator of NFR-2.",
+	Labels:     []Label{entity("destination")},
+	Buckets:    []float64{0.25, 0.5, 1, 2, 3, 5, 10, 30, 60, 300, 900},
+	Capability: "C-11",
+})
+
+// DeliveryQueue is the number of pending deliveries and due Thread replies per Destination, exported by the Leader.
+var DeliveryQueue = newGauge(Definition{
+	Name: "muster_delivery_queue",
+	Help: "Pending deliveries and Thread replies that are due, per Destination that is not deleted, counted by the " +
+		"Leader.",
+	Labels:     []Label{entity("destination")},
+	Capability: "C-11",
+	LeaderOnly: true,
+})
+
+// DestinationInfo is 1 for every Destination that is not deleted; its labels carry the Destination's name.
+var DestinationInfo = newGauge(Definition{
+	Name: "muster_destination_info",
+	Help: "Always 1, one series per Destination that is not deleted; the labels carry its public_id and name.",
+	Labels: []Label{
+		entity("destination"),
+		info("name", "the name of the Destination"),
+	},
+	Capability: "C-11",
+})

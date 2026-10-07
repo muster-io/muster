@@ -29,9 +29,12 @@ func (s *Server) ListRoutes(ctx context.Context, _ gen.ListRoutesRequestObject) 
 	if err != nil {
 		return nil, err
 	}
+	body, err := s.routeListView(ctx, list)
+	if err != nil {
+		return nil, err
+	}
 	tag := etag(list.Version)
-	return gen.ListRoutes200JSONResponse{Body: routeListOf(list), Headers: gen.ListRoutes200ResponseHeaders{ETag: &tag}},
-		nil
+	return gen.ListRoutes200JSONResponse{Body: body, Headers: gen.ListRoutes200ResponseHeaders{ETag: &tag}}, nil
 }
 
 // CreateRoute is createRoute: the Route goes before the Default route.
@@ -48,8 +51,12 @@ func (s *Server) CreateRoute(ctx context.Context, req gen.CreateRouteRequestObje
 	if err != nil {
 		return nil, err
 	}
+	body, err := s.routeView(ctx, rt)
+	if err != nil {
+		return nil, err
+	}
 	tag, location := etag(rt.Version), BasePath+"/routes/"+rt.PublicID
-	return gen.CreateRoute201JSONResponse{Body: routeOf(rt),
+	return gen.CreateRoute201JSONResponse{Body: body,
 		Headers: gen.CreateRoute201ResponseHeaders{ETag: &tag, Location: &location}}, nil
 }
 
@@ -59,8 +66,12 @@ func (s *Server) GetRoute(ctx context.Context, req gen.GetRouteRequestObject) (g
 	if err != nil {
 		return nil, err
 	}
+	body, err := s.routeView(ctx, rt)
+	if err != nil {
+		return nil, err
+	}
 	tag := etag(rt.Version)
-	return gen.GetRoute200JSONResponse{Body: routeOf(rt), Headers: gen.GetRoute200ResponseHeaders{ETag: &tag}}, nil
+	return gen.GetRoute200JSONResponse{Body: body, Headers: gen.GetRoute200ResponseHeaders{ETag: &tag}}, nil
 }
 
 // UpdateRoute is updateRoute, with If-Match; it applies to the next Alerts routed.
@@ -81,9 +92,12 @@ func (s *Server) UpdateRoute(ctx context.Context, req gen.UpdateRouteRequestObje
 	if err != nil {
 		return nil, err
 	}
+	body, err := s.routeView(ctx, rt)
+	if err != nil {
+		return nil, err
+	}
 	tag := etag(rt.Version)
-	return gen.UpdateRoute200JSONResponse{Body: routeOf(rt), Headers: gen.UpdateRoute200ResponseHeaders{ETag: &tag}},
-		nil
+	return gen.UpdateRoute200JSONResponse{Body: body, Headers: gen.UpdateRoute200ResponseHeaders{ETag: &tag}}, nil
 }
 
 // DeleteRoute is deleteRoute: the Route leaves the evaluation order at once; the Default route cannot be deleted.
@@ -139,8 +153,12 @@ func (s *Server) ReorderRoutes(ctx context.Context, req gen.ReorderRoutesRequest
 	if err != nil {
 		return nil, err
 	}
+	body, err := s.routeListView(ctx, list)
+	if err != nil {
+		return nil, err
+	}
 	tag := etag(list.Version)
-	return gen.ReorderRoutes200JSONResponse{Body: routeListOf(list),
+	return gen.ReorderRoutes200JSONResponse{Body: body,
 		Headers: gen.ReorderRoutes200ResponseHeaders{ETag: &tag}}, nil
 }
 
@@ -238,8 +256,12 @@ func (s *Server) AcceptRouteSuggestion(ctx context.Context, req gen.AcceptRouteS
 	if err != nil {
 		return nil, err
 	}
+	body, err := s.routeView(ctx, rt)
+	if err != nil {
+		return nil, err
+	}
 	tag, location := etag(rt.Version), BasePath+"/routes/"+rt.PublicID
-	return gen.AcceptRouteSuggestion201JSONResponse{Body: routeOf(rt),
+	return gen.AcceptRouteSuggestion201JSONResponse{Body: body,
 		Headers: gen.AcceptRouteSuggestion201ResponseHeaders{ETag: &tag, Location: &location}}, nil
 }
 
@@ -285,7 +307,7 @@ func routeListOf(list routing.List) gen.RouteList {
 	return out
 }
 
-// routeOf is the API form of a Route. Destinations, the Storm state, the template error state and the count of open
+// routeOf is the API form of a Route without its Destinations, which routeView adds. The Storm state, the template error state and the count of open
 // Alert Groups arrive with their capabilities.
 func routeOf(rt routing.Route) gen.Route {
 	tag, description := etag(rt.Version), rt.Description
@@ -361,4 +383,47 @@ func templateOf(v nullable.Nullable[string]) *string {
 	}
 	s := v.MustGet()
 	return &s
+}
+
+// fillDestinations sets the Destinations of the API forms out of the Routes rts, one for one, with their health
+// (C-08.FR-1).
+func (s *Server) fillDestinations(ctx context.Context, rts []routing.Route, out []gen.Route) error {
+	if s.destinations == nil || len(rts) == 0 {
+		return nil
+	}
+	ids := make([]int64, len(rts))
+	for i, rt := range rts {
+		ids[i] = rt.ID
+	}
+	refs, err := s.destinations.RouteRefs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i, rt := range rts {
+		o := &out[i]
+		for _, r := range refs[rt.ID] {
+			o.DestinationIds = append(o.DestinationIds, r.PublicID)
+			o.Destinations = append(o.Destinations, gen.DestinationRef{Id: r.PublicID, Name: r.Name,
+				Type: gen.DestinationType(r.Type), Health: healthOf(r.Health)})
+		}
+	}
+	return nil
+}
+
+// routeView is the API form of one Route with its Destinations.
+func (s *Server) routeView(ctx context.Context, rt routing.Route) (gen.Route, error) {
+	out := []gen.Route{routeOf(rt)}
+	if err := s.fillDestinations(ctx, []routing.Route{rt}, out); err != nil {
+		return gen.Route{}, err
+	}
+	return out[0], nil
+}
+
+// routeListView is the API form of the Route list with their Destinations.
+func (s *Server) routeListView(ctx context.Context, list routing.List) (gen.RouteList, error) {
+	out := routeListOf(list)
+	if err := s.fillDestinations(ctx, list.Routes, out.Items); err != nil {
+		return gen.RouteList{}, err
+	}
+	return out, nil
 }

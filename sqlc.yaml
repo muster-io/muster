@@ -137,3 +137,17 @@ sql:
       go:
         <<: *go
         out: internal/timers/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/destinations/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/destinations/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/delivery/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/delivery/dbgen

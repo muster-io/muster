@@ -399,6 +399,20 @@ var AlertGroupsPurged = newEvent("alert_groups_purged", LevelInfo, "C-09",
 		"retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).",
 	"details", "summaries")
 
+// DeliveryAttempt is logged for every call of the delivery worker to a Destination (C-11.FR-17).
+var DeliveryAttempt = newEvent("delivery_attempt", LevelInfo, "C-11",
+	"The delivery worker called a Destination: destination is its public_id, group the #N of the Alert Group, kind "+
+		"what it sent (publication, update or thread_reply), outcome delivered or the error class of the answer, "+
+		"attempt the number of this attempt, duration_ms how long the call took and retry_after_ms the wait a "+
+		"RetryAfter asked for, 0 otherwise.",
+	"destination", "group", "kind", "outcome", "attempt", "duration_ms", "retry_after_ms")
+
+// DeliveryWorkFailed is logged when the delivery worker could not attempt a delivery or a Thread reply.
+var DeliveryWorkFailed = newEvent("delivery_work_failed", LevelWarn, "C-11",
+	"The delivery worker could not attempt a delivery or a Thread reply (work is delivery or thread_reply) because "+
+		"of error, such as a lost database connection. Any replica attempts it again once its lease runs out.",
+	"work", "error")
+
 // IngestReplayed is logged when muster ingest replay set Stored Snapshots back to pending.
 var IngestReplayed = newEvent("ingest_replayed", LevelInfo, "C-06",
 	"muster ingest replay set the Stored Snapshots received within the period back to pending, for processing again: "+

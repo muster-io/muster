@@ -25,8 +25,12 @@ import (
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/auth"
 	adb "github.com/muster-io/muster/internal/auth/dbgen"
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/destinations"
+	destdb "github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/heartbeat"
@@ -424,6 +428,57 @@ func (fakeTimersStore) Fire(context.Context, db.Lease, int64, timers.Timer, time
 func (fakeTimersStore) Next(_ context.Context, _ db.Lease, _ int64, _ []string, limit time.Duration) (time.Duration,
 	error) {
 	return limit, nil
+}
+
+// DeliveryStore has no database: every claim fails, and the delivery worker backs off.
+func (f *fakeDB) DeliveryStore() *delivery.Store { return delivery.NewStore(noDB{}, noDB{}) }
+
+// DestinationsStore has no Destinations.
+func (f *fakeDB) DestinationsStore() destinations.Store { return fakeDestinationsStore{} }
+
+var errNoDB = errors.New("no database in this test")
+
+// noDB is a database that answers every statement with errNoDB.
+type noDB struct{}
+
+func (noDB) Begin(context.Context) (pgx.Tx, error) { return nil, errNoDB }
+
+func (noDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, errNoDB
+}
+
+func (noDB) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, errNoDB }
+
+func (noDB) QueryRow(context.Context, string, ...any) pgx.Row { return noRow{} }
+
+type noRow struct{}
+
+func (noRow) Scan(...any) error { return errNoDB }
+
+type fakeDestinationsStore struct{}
+
+func (fakeDestinationsStore) ListDestinations(context.Context, destdb.ListDestinationsParams) (
+	[]destdb.ListDestinationsRow, error) {
+	return nil, nil
+}
+
+func (fakeDestinationsStore) GetDestination(context.Context, destdb.GetDestinationParams) (destdb.GetDestinationRow,
+	error) {
+	return destdb.GetDestinationRow{}, pgx.ErrNoRows
+}
+
+func (fakeDestinationsStore) ListDestinationRoutes(context.Context, destdb.ListDestinationRoutesParams) (
+	[]destdb.ListDestinationRoutesRow, error) {
+	return nil, nil
+}
+
+func (fakeDestinationsStore) ListRouteDestinationRefs(context.Context, destdb.ListRouteDestinationRefsParams) (
+	[]destdb.ListRouteDestinationRefsRow, error) {
+	return nil, nil
+}
+
+func (fakeDestinationsStore) ListDestinationInfo(context.Context, int64) ([]destdb.ListDestinationInfoRow, error) {
+	return nil, nil
 }
 
 // ClockStore reads the development clock of devOffset.
@@ -1476,5 +1531,23 @@ func TestGroupTimer(t *testing.T) {
 	if after, err := h(t.Context(), nil, 7, timers.Timer{AlertGroupID: &id}); after == nil || err != nil ||
 		len(fired) != 1 || fired[0] != 42 {
 		t.Errorf("fire = %v, fired %v", err, fired)
+	}
+}
+
+// TestDeliveryLeaderTasks: the Leader tasks of delivery act on this process's Organization only.
+func TestDeliveryLeaderTasks(t *testing.T) {
+	p := &process{orgID: 1, delivery: delivery.New(delivery.Config{OrgID: 1, Store: delivery.NewStore(noDB{}, noDB{}),
+		Business: clock.NewManual(time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC))})}
+	if err := p.deliveryQueue(t.Context(), 2); err != nil {
+		t.Errorf("another organization = %v", err)
+	}
+	if err := p.deliveryQueue(t.Context(), 1); !errors.Is(err, errNoDB) {
+		t.Errorf("queue = %v", err)
+	}
+	if n, err := p.threadReplyRetention(t.Context(), 2, time.Now()); n != 0 || err != nil {
+		t.Errorf("another organization = %d, %v", n, err)
+	}
+	if _, err := p.threadReplyRetention(t.Context(), 1, time.Now()); !errors.Is(err, errNoDB) {
+		t.Errorf("retention = %v", err)
 	}
 }

@@ -89,6 +89,9 @@ func (s *Service) routePublicID(ctx context.Context, q Queries, id int64) (strin
 func (s *Service) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []ingest.AlertChange) (ingest.Routed,
 	error) {
 	e := s.newEngine(s.queries(tx), tx)
+	if len(changes) > 0 {
+		ctx = withSnapshot(ctx, changes[0].StoredSnapshotID)
+	}
 	if err := e.changes(ctx, changes); err != nil {
 		return ingest.Routed{}, err
 	}

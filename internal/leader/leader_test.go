@@ -322,7 +322,7 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	}
 	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning",
 		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges",
-		"alert_group_retention"}
+		"alert_group_retention", "delivery_queue", "thread_reply_retention"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
@@ -436,6 +436,59 @@ func TestAlertGroupGauges(t *testing.T) {
 	work.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
 	if err := Tasks(work)()[8].Run(t.Context()); !errors.Is(err, orgsErr) {
 		t.Errorf("gauges = %v", err)
+	}
+}
+
+// TestDeliveryTasks: the Leader counts the delivery queues and runs the Thread reply retention in every Organization,
+// at one business time, and goes on past one that fails; without the work wired, both do nothing.
+func TestDeliveryTasks(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	var counted, pruned []int64
+	failed := errors.New("locked")
+	work := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		Business:      clock.NewManual(now),
+		DeliveryQueue: func(_ context.Context, org int64) error {
+			counted = append(counted, org)
+			if org == 1 {
+				return failed
+			}
+			return nil
+		},
+		ThreadReplyRetention: func(_ context.Context, org int64, at time.Time) (int64, error) {
+			if !at.Equal(now) {
+				t.Errorf("retention at %v", at)
+			}
+			pruned = append(pruned, org)
+			if org == 2 {
+				return 0, failed
+			}
+			return 3, nil
+		},
+	}
+	tasks := Tasks(work)()
+	queue, retention := tasks[10], tasks[11]
+	if queue.Every != DeliveryQueueInterval || retention.Every != MaintenanceInterval {
+		t.Errorf("intervals %v %v", queue.Every, retention.Every)
+	}
+	if err := queue.Run(t.Context()); !errors.Is(err, failed) || !slices.Equal(counted, []int64{1, 2}) {
+		t.Errorf("counted %v, %v", counted, err)
+	}
+	if err := retention.Run(t.Context()); !errors.Is(err, failed) || !slices.Equal(pruned, []int64{1, 2}) {
+		t.Errorf("pruned %v, %v", pruned, err)
+	}
+	orgsErr := errors.New("down")
+	work.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
+	tasks = Tasks(work)()
+	if err := tasks[10].Run(t.Context()); !errors.Is(err, orgsErr) {
+		t.Errorf("queue = %v", err)
+	}
+	if err := tasks[11].Run(t.Context()); !errors.Is(err, orgsErr) {
+		t.Errorf("retention = %v", err)
+	}
+	tasks = Tasks(Work{})()
+	if tasks[10].Run(t.Context()) != nil || tasks[11].Run(t.Context()) != nil {
+		t.Error("unwired delivery tasks did something")
 	}
 }
 

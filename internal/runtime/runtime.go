@@ -26,6 +26,8 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/heartbeat"
@@ -111,6 +113,9 @@ type database interface {
 	// GroupsStore serves the Alert Group lifecycle; TimersStore the timer worker.
 	GroupsStore() groups.Store
 	TimersStore() timers.Store
+	// DeliveryStore serves delivery and its worker; DestinationsStore the reads of Destinations.
+	DeliveryStore() *delivery.Store
+	DestinationsStore() destinations.Store
 	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
 	SessionListenConn(ctx context.Context) (db.ListenConn, error)
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
@@ -171,6 +176,10 @@ func (d pgDatabase) ClockStore() devmode.ClockStore { return devmode.NewClockSto
 func (d pgDatabase) GroupsStore() groups.Store { return groups.NewStore(d.Pool) }
 
 func (d pgDatabase) TimersStore() timers.Store { return timers.NewStore(d.Pool) }
+
+func (d pgDatabase) DeliveryStore() *delivery.Store { return delivery.NewStore(d.Pool, d.Pool) }
+
+func (d pgDatabase) DestinationsStore() destinations.Store { return destinations.NewStore(d.Pool) }
 
 func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
 	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
@@ -399,6 +408,11 @@ type process struct {
 	// groups is the Alert Group lifecycle, which groups the Alerts after routing, and timers fires its timers.
 	groups *groups.Service
 	timers *timers.Worker
+	// delivery is the delivery of the Organization, which the dispatcher's re-render step fills, and deliverer the
+	// delivery worker of this replica; destinations reads the Destinations.
+	delivery     *delivery.Service
+	deliverer    *delivery.Worker
+	destinations *destinations.Service
 	// devClock is the development clock of `muster dev`, nil outside development mode; clockMoved wakes the
 	// Leader's Heartbeat check and Stale scan when it moves.
 	devClock   *devmode.Clock
@@ -469,12 +483,14 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 	p.partitions = partitions.New(d.PartitionSession, clocks.Business, log)
 	p.worker = &ingest.Worker{Log: log, Real: clocks.Real}
 	p.timers = &timers.Worker{Log: log}
+	p.deliverer = &delivery.Worker{Log: log}
 	if opts.Development {
 		// The development clock comes before anything reads the business clock, the partitions among them. A move
-		// wakes the processing worker and the timer worker, which re-read their deadlines at the new time.
+		// wakes the processing worker, the timer worker and the delivery worker, which re-read their due times at the
+		// new time.
 		p.devClock = devmode.NewClock(d.ClockStore(), business, func(ctx context.Context, at time.Time) error {
 			return partitions.New(d.PartitionSession, clock.NewManual(at), log).Maintain(ctx)
-		}, p.worker.Wake, p.timers.Wake)
+		}, p.worker.Wake, p.timers.Wake, p.deliverer.Wake)
 		if err := p.devClock.Load(ctx); err != nil {
 			d.Close()
 			return nil, failed(ctx, log, err)
@@ -661,6 +677,11 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Restamp: func(ctx context.Context, tx groups.DBTX, alertIDs []int64, routeID int64) error {
 			return routing.RestampAlerts(ctx, tx, orgID, alertIDs, routeID)
 		}})
+	// The dispatcher's re-render step sets the Desired state of each Root message (ADR-0005).
+	p.delivery = delivery.New(delivery.Config{OrgID: orgID, Store: p.db.DeliveryStore(), Business: p.clocks.Business,
+		Log: p.log})
+	p.groups.SetRerender(p.delivery.Enqueue)
+	p.destinations = destinations.New(orgID, p.db.DestinationsStore())
 	if p.opts.Development {
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
 			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)
@@ -691,6 +712,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		AlertGroups:    p.groups,
 		Commands:       p.groups,
 		Directory:      users.NewDirectory(orgID, p.db.AdminStore()),
+		Destinations:   p.destinations,
+		Deliveries:     p.delivery,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -738,8 +761,10 @@ func (p *process) newKeeper() *leader.Keeper {
 			}
 			return p.groups.ExportGauges(ctx)
 		},
-		AlertGroupRetention: groups.RetentionTask(p.db.GroupsStore()),
-		ClockMoved:          p.clockMoved,
+		AlertGroupRetention:  groups.RetentionTask(p.db.GroupsStore()),
+		DeliveryQueue:        p.deliveryQueue,
+		ThreadReplyRetention: p.threadReplyRetention,
+		ClockMoved:           p.clockMoved,
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
 			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},
@@ -751,6 +776,22 @@ func (p *process) newKeeper() *leader.Keeper {
 			{Name: "oidc_auth_requests", Delete: oidc.NewPruner(p.db.OIDCPruner()).AuthRequests},
 		},
 	}))
+}
+
+// deliveryQueue is the Leader task delivery_queue for the Organization orgID: this process serves one.
+func (p *process) deliveryQueue(ctx context.Context, orgID int64) error {
+	if orgID != p.orgID {
+		return nil
+	}
+	return p.delivery.ExportQueue(ctx)
+}
+
+// threadReplyRetention is the Leader task thread_reply_retention for the Organization orgID.
+func (p *process) threadReplyRetention(ctx context.Context, orgID int64, now time.Time) (int64, error) {
+	if orgID != p.orgID {
+		return 0, nil
+	}
+	return p.delivery.PruneReplies(ctx, now)
 }
 
 // startWork starts the Leader lock keeper, the clock skew check, the live updates — the Hub's session check, the
@@ -773,6 +814,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	noticeTicks, stopNoticeTicks := every(live.CheckInterval)
 	infoTicks, stopInfoTicks := every(InfoRefreshInterval)
 	routeInfoTicks, stopRouteInfoTicks := every(InfoRefreshInterval)
+	destinationInfoTicks, stopDestinationInfoTicks := every(InfoRefreshInterval)
 	wg.Go(func() {
 		defer stopLeaderTicks()
 		p.keeper.Run(ctx, leaderTicks)
@@ -796,6 +838,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	// a notification was missed.
 	p.listener.Listen(ingest.SnapshotChannel, func(string) { p.worker.Wake() })
 	p.listener.Listen(groups.TimersChannel, func(string) { p.timers.Wake() })
+	p.listener.Listen(delivery.Channel, func(string) { p.deliverer.Wake() })
 	if p.devClock != nil {
 		p.listener.Listen(devmode.ClockChannel, func(string) {
 			p.loadDevClock(ctx)
@@ -822,10 +865,12 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 			}
 			p.worker.Wake()
 			p.timers.Wake()
+			p.deliverer.Wake()
 		})
 	})
 	wg.Go(func() { p.worker.Run(ctx) })
 	wg.Go(func() { p.timers.Run(ctx) })
+	wg.Go(func() { p.deliverer.Run(ctx) })
 	wg.Go(func() { p.rechecker().Run(ctx) })
 	wg.Go(func() { p.integrations.RunTouches(ctx) })
 	wg.Go(func() {
@@ -835,6 +880,10 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	wg.Go(func() {
 		defer stopRouteInfoTicks()
 		p.routes.RunInfo(ctx, routeInfoTicks)
+	})
+	wg.Go(func() {
+		defer stopDestinationInfoTicks()
+		p.destinations.RunInfo(ctx, destinationInfoTicks)
 	})
 	return func(wait context.Context) {
 		cancel()
@@ -865,7 +914,8 @@ func (p *process) loadDevClock(ctx context.Context) {
 // configureWorker completes the processing worker of this replica (C-06.FR-1) over the Organization, with leases held
 // by this replica's id, once both are known and before anything serves or runs that could wake it. Its Sink routes
 // the newly firing Alerts, then groups them, in each Snapshot's transaction; the timer worker fires the timers of
-// the Alert Groups.
+// the Alert Groups; the delivery worker delivers to the Destinations through the adapters of their types, which the
+// type capabilities register here (S-039 onward).
 func (p *process) configureWorker() {
 	sink := ingest.Chain(p.router, p.groups)
 	processor := ingest.NewProcessor(ingest.ProcessorConfig{OrgID: p.orgID, Store: p.db.ProcessStore(),
@@ -881,6 +931,10 @@ func (p *process) configureWorker() {
 	p.timers.Store = p.db.TimersStore()
 	p.timers.Lease = db.Lease{Owner: p.replica.ID(), Duration: timers.Lease, Clocks: p.clocks}
 	p.timers.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
+	p.deliverer.Store = p.db.DeliveryStore()
+	p.deliverer.Lease = db.Lease{Owner: p.replica.ID(), Duration: delivery.Lease, Clocks: p.clocks}
+	p.deliverer.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
+	p.deliverer.Adapters = delivery.Adapters{}
 	p.timers.Handlers = map[string]timers.Handler{
 		groups.TimerReopenWindowEnd: groupTimer(p.orgID, func(ctx context.Context, tx timersdb.DBTX, id int64) (
 			func(context.Context), error) {

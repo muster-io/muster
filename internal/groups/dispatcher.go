@@ -107,8 +107,11 @@ type Queries interface {
 	GetDefaultRouteID(ctx context.Context, orgID int64) (int64, error)
 	ListOpenGroupsOfRoute(ctx context.Context, arg dbgen.ListOpenGroupsOfRouteParams) ([]int64, error)
 	GetGroupRef(ctx context.Context, arg dbgen.GetGroupRefParams) (dbgen.GetGroupRefRow, error)
+	GetSnapshotReceivedAt(ctx context.Context, arg dbgen.GetSnapshotReceivedAtParams) (time.Time, error)
 	// Notify sends a live-update hint once the transaction commits.
 	Notify(ctx context.Context, h db.Hint) error
+	// DB is the connection or transaction the queries run on, which the re-render step writes through.
+	DB() DBTX
 	readQueries
 	listQueries
 	retentionQueries
@@ -132,13 +135,15 @@ func NewStore(pool *pgxpool.Pool) Store {
 type pgQueries struct {
 	*dbgen.Queries
 	audit.Store
-	exec db.Execer
+	exec dbgen.DBTX
 }
 
 // newQueries are the queries over a pool or a transaction.
 func newQueries(d dbgen.DBTX) Queries {
 	return pgQueries{Queries: dbgen.New(d), Store: audit.NewStore(d), exec: d}
 }
+
+func (q pgQueries) DB() DBTX { return q.exec }
 
 func (q pgQueries) Notify(ctx context.Context, h db.Hint) error {
 	return db.NotifyHint(ctx, q.exec, h)
@@ -365,6 +370,74 @@ func (c committed) run(ctx context.Context) {
 	}
 }
 
+// Rendering is what the re-render step of the dispatcher hands to delivery (C-11.FR-1, FR-20), inside the
+// dispatcher's transaction: the Alert Group as the change left it, who made the change, the lifecycle events it
+// recorded in their order, and ReceivedAt, the receipt time of the Stored Snapshot behind it, nil when a Command, a
+// timer or a person's change made it.
+type Rendering struct {
+	Group      *Group
+	Actor      Actor
+	Events     []Recorded
+	ReceivedAt *time.Time
+}
+
+// Recorded is one lifecycle event that a change recorded: its row of the table with its loudness and Mentions, its
+// number in the Alert Group, the fingerprints it names and its reason.
+type Recorded struct {
+	Seq          int64
+	Event        Event
+	Variant      Variant
+	Loudness     Loudness
+	Mentions     []Mention
+	Fingerprints []string
+	Reason       string
+}
+
+// Rerender is the re-render step of the dispatcher: delivery's Enqueue, which writes through tx, the dispatcher's
+// transaction.
+type Rerender func(ctx context.Context, tx DBTX, r Rendering) error
+
+// SetRerender fills the re-render step of the dispatcher, before anything changes an Alert Group.
+func (s *Service) SetRerender(r Rerender) {
+	s.d.rerender = func(ctx context.Context, q Queries, rd Rendering) error { return r(ctx, q.DB(), rd) }
+}
+
+// snapshotKey carries, in the context of a Snapshot's transaction, the Stored Snapshot behind its changes.
+type snapshotKey struct{}
+
+// snapshotRef is the Stored Snapshot behind the changes of a transaction, with its receipt time once read.
+type snapshotRef struct {
+	id   int64
+	at   *time.Time
+	read bool
+}
+
+// withSnapshot marks ctx as the transaction of the Stored Snapshot id.
+func withSnapshot(ctx context.Context, id int64) context.Context {
+	if id == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, snapshotKey{}, &snapshotRef{id: id})
+}
+
+// receivedAt is the receipt time of the Stored Snapshot behind the changes of ctx, read once per transaction; nil
+// outside a Snapshot's transaction.
+func (d *dispatcher) receivedAt(ctx context.Context, q Queries) (*time.Time, error) {
+	ref, _ := ctx.Value(snapshotKey{}).(*snapshotRef)
+	if ref == nil {
+		return nil, nil
+	}
+	if !ref.read {
+		at, err := q.GetSnapshotReceivedAt(ctx, dbgen.GetSnapshotReceivedAtParams{OrgID: d.orgID, ID: ref.id})
+		if err != nil {
+			return nil, fmt.Errorf("read when the snapshot was received: %w", err)
+		}
+		at = at.UTC()
+		ref.at, ref.read = &at, true
+	}
+	return ref.at, nil
+}
+
 // dispatcher is the one way an Alert Group changes (ADR-0004, ADR-0016): permission → precondition → transition →
 // Audit log → Timeline → re-render, inside the caller's transaction, on a row the caller locked FOR UPDATE, and the
 // live-update hints of the change once the transaction commits. System transitions need no Permission and write no
@@ -375,8 +448,8 @@ type dispatcher struct {
 	clock clock.Clock
 	log   *logging.Logger
 	audit *audit.Writer
-	// rerender is the re-render hook that delivery fills from S-034; nil until then.
-	rerender func(ctx context.Context, q Queries, g *Group) error
+	// rerender is the re-render step, delivery's Enqueue; nil when nothing delivers, as in some tests.
+	rerender func(ctx context.Context, q Queries, r Rendering) error
 	// routeIDs names Routes by public_id for the metrics and the log lines.
 	routeIDs func(ctx context.Context, q Queries, id int64) (string, error)
 }
@@ -407,8 +480,10 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 			return err
 		}
 	}
+	var recorded []Recorded
 	if len(c.entries) > 0 {
-		if err := d.record(ctx, q, g, actor, now, c.entries); err != nil {
+		var err error
+		if recorded, err = d.record(ctx, q, g, actor, now, c.entries); err != nil {
 			return err
 		}
 		g.LastChangedAt = now
@@ -417,7 +492,12 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 		return fmt.Errorf("save alert group #%d: %w", g.Number, err)
 	}
 	if d.rerender != nil {
-		if err := d.rerender(ctx, q, g); err != nil {
+		received, err := d.receivedAt(ctx, q)
+		if err != nil {
+			return err
+		}
+		if err := d.rerender(ctx, q, Rendering{Group: g, Actor: actor, Events: recorded,
+			ReceivedAt: received}); err != nil {
 			return err
 		}
 	}
@@ -432,14 +512,17 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	return nil
 }
 
-// record writes the entries of one change to the Timeline, numbering the lifecycle events of g; a Note is written to
-// notes with the number of its note_added.
-func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Actor, at time.Time, es []entry) error {
+// record writes the entries of one change to the Timeline, numbering the lifecycle events of g, and returns the
+// lifecycle events in their order; a Note is written to notes with the number of its note_added.
+func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Actor, at time.Time, es []entry) (
+	[]Recorded, error) {
+	var out []Recorded
 	for _, e := range es {
 		if e.Note != nil {
 			if err := d.recordNote(ctx, q, g, actor, at, e.Note); err != nil {
-				return err
+				return nil, err
 			}
+			out = append(out, Recorded{Seq: g.EventSeq, Event: EventNoteAdded, Variant: VariantAny, Loudness: Quiet})
 			continue
 		}
 		p := dbgen.InsertTimelineEntryParams{
@@ -472,17 +555,19 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 			for _, m := range row.Mentions {
 				p.Mentions = append(p.Mentions, string(m))
 			}
+			out = append(out, Recorded{Seq: g.EventSeq, Event: row.Event, Variant: row.Variant,
+				Loudness: row.Loudness, Mentions: row.Mentions, Fingerprints: e.Fingerprints, Reason: e.Reason})
 		}
 		if e.System != "" {
 			p.Kind = string(KindSystem)
 			p.SystemEvent = pgtype.Text{String: string(e.System), Valid: true}
 		}
 		if err := q.InsertTimelineEntry(ctx, p); err != nil {
-			return fmt.Errorf("record %s on alert group #%d: %w", cmp.Or(string(e.Event), string(e.System)), g.Number,
-				err)
+			return nil, fmt.Errorf("record %s on alert group #%d: %w", cmp.Or(string(e.Event), string(e.System)),
+				g.Number, err)
 		}
 	}
-	return nil
+	return out, nil
 }
 
 // recordNote writes a Note with its author, the token used and the Transport as the note_added lifecycle event of g

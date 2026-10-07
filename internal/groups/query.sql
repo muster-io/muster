@@ -857,3 +857,9 @@ WHERE g.org_id = @org_id AND g.id IN (
     ORDER BY e.resolved_at
     LIMIT @batch_size
     FOR UPDATE SKIP LOCKED);
+
+-- GetSnapshotReceivedAt reads when the Stored Snapshot behind a change was received, for the latency of its delivery.
+-- name: GetSnapshotReceivedAt :one
+SELECT received_at
+FROM stored_snapshots
+WHERE org_id = @org_id AND id = @id;

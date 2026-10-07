@@ -29,6 +29,10 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_db_pool_acquires_total` | counter | — | C-02 | no | Connections taken from the main database pool of this replica. |
 | `muster_db_pool_connections` | gauge | state | C-02 | no | Connections of the main database pool of this replica, by state. |
 | `muster_db_pool_max_connections` | gauge | — | C-02 | no | The most connections the main database pool of this replica opens. |
+| `muster_delivery_attempts_total` | counter | destination, kind, outcome | C-11 | no | Calls of the delivery worker to a Destination, one per attempt, by Destination, what it sent and its outcome. |
+| `muster_delivery_latency_seconds` | histogram | destination | C-11 | no | Time from the receipt of the Snapshot behind a change of a Root message to the messenger API call that delivered it, by Destination; changes made by Commands or timers are not observed. The service-level indicator of NFR-2. Buckets (le): 0.25, 0.5, 1, 2, 3, 5, 10, 30, 60, 300, 900. |
+| `muster_delivery_queue` | gauge | destination | C-11 | yes | Pending deliveries and Thread replies that are due, per Destination that is not deleted, counted by the Leader. |
+| `muster_destination_info` | gauge | destination, name | C-11 | no | Always 1, one series per Destination that is not deleted; the labels carry its public_id and name. |
 | `muster_heartbeat_lost` | gauge | integration | C-07 | yes | 1 while the Integration is Heartbeat lost, 0 while its Heartbeat is on and not lost; set by the Leader's Heartbeat check. |
 | `muster_ingest_backlog` | gauge | — | C-06 | yes | Stored Snapshots waiting for processing in every Organization, counted by the Leader. |
 | `muster_ingest_failed_snapshots_total` | counter | integration | C-06 | no | Stored Snapshots that could not be processed and were marked failed — a body that is not an Alertmanager webhook, or an error of processing — by Integration. |
@@ -73,6 +77,13 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_commands_total` | `transport` | `ui`, `api`, `mattermost`, `telegram`, `system` — how the Command reached Muster |
 | `muster_commands_total` | `outcome` | `done`, `unchanged`, `refused`, `skipped`, `failed` — done changed the Alert Group, unchanged was an idempotent repeat, refused a refusal or a missing Permission, skipped an Alert Group a bulk Acknowledge left to its Owner, failed an Alert Group that was not found |
 | `muster_db_pool_connections` | `state` | `acquired`, `idle`, `constructing` — the state of the connection |
+| `muster_delivery_attempts_total` | `destination` | entity: the public_id of the destination |
+| `muster_delivery_attempts_total` | `kind` | `publication`, `update`, `thread_reply`, `storm_summary`, `final_edit`, `webhook_event` — publication is a new Root message, update an edit of one, thread_reply a reply in its Thread, storm_summary and final_edit those messages, webhook_event an event of an outgoing webhook |
+| `muster_delivery_attempts_total` | `outcome` | `delivered`, `markup_rejected`, `retry_after`, `transient`, `fatal`, `unknown`, `template_error` — delivered, or the error class of the answer |
+| `muster_delivery_latency_seconds` | `destination` | entity: the public_id of the destination |
+| `muster_delivery_queue` | `destination` | entity: the public_id of the destination |
+| `muster_destination_info` | `destination` | entity: the public_id of the destination |
+| `muster_destination_info` | `name` | info: the name of the Destination |
 | `muster_heartbeat_lost` | `integration` | entity: the public_id of the integration |
 | `muster_ingest_failed_snapshots_total` | `integration` | entity: the public_id of the integration |
 | `muster_ingest_processing_delay_seconds` | `integration` | entity: the public_id of the integration |

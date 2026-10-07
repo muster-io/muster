@@ -92,6 +92,8 @@ type fakeDB struct {
 	// hints are the live-update hints sent, stats the rows the statistics queries answer.
 	hints []db.Hint
 	stats []dbgen.RouteStatisticsRow
+	// received are the receipt times of the Stored Snapshots, by id.
+	received map[int64]time.Time
 }
 
 func newDB() *fakeDB {
@@ -121,6 +123,22 @@ func (f *fakeDB) id() int64 {
 }
 
 func (f *fakeDB) InTx(_ context.Context, fn func(Queries) error) error { return fn(f) }
+
+// DB is no connection: the tests' re-render step writes nothing.
+func (f *fakeDB) DB() DBTX { return nil }
+
+func (f *fakeDB) GetSnapshotReceivedAt(_ context.Context, arg dbgen.GetSnapshotReceivedAtParams) (time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetSnapshotReceivedAt"); err != nil {
+		return time.Time{}, err
+	}
+	at, ok := f.received[arg.ID]
+	if !ok || arg.OrgID != orgID {
+		return time.Time{}, pgx.ErrNoRows
+	}
+	return at, nil
+}
 
 func (f *fakeDB) GetGroupingSettings(context.Context, int64) (dbgen.GetGroupingSettingsRow, error) {
 	f.mu.Lock()
@@ -1093,15 +1111,15 @@ func TestDispatch(t *testing.T) {
 		t.Errorf("refused = %v", err)
 	}
 	var rendered []int64
-	h.svc.d.rerender = func(_ context.Context, _ Queries, g *Group) error {
-		rendered = append(rendered, g.ID)
+	h.svc.d.rerender = func(_ context.Context, _ Queries, r Rendering) error {
+		rendered = append(rendered, r.Group.ID)
 		return nil
 	}
 	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1}, &after); err != nil ||
 		!slices.Equal(rendered, []int64{row.ID}) || row.RouteID != 1 {
 		t.Errorf("moved = %v, rendered %v", err, rendered)
 	}
-	h.svc.d.rerender = func(context.Context, Queries, *Group) error { return errBoom }
+	h.svc.d.rerender = func(context.Context, Queries, Rendering) error { return errBoom }
 	g.MovedFromRouteID = nil
 	g.RouteID = 2
 	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1}, &after); !errors.Is(err,
@@ -1113,6 +1131,71 @@ func TestDispatch(t *testing.T) {
 	b := h.alert(2, "warning", map[string]string{"alertname": "B", "cluster": "x"})
 	if _, err := h.apply(ingest.ChangeFired, b); !errors.Is(err, errBoom) {
 		t.Errorf("a status change without its route = %v", err)
+	}
+}
+
+// TestRerender is the re-render step of S-034: delivery gets, in the dispatcher's transaction, the changed Alert Group,
+// the actor, the lifecycle events recorded with their numbers, rows and fingerprints, and the receipt time of the
+// Stored Snapshot behind them, read once per transaction; a Command or a timer has none.
+func TestRerender(t *testing.T) {
+	h := newHarness(t)
+	received := t0.Add(-3 * time.Second)
+	h.db.received = map[int64]time.Time{77: received}
+	var got []Rendering
+	h.svc.SetRerender(func(_ context.Context, tx DBTX, r Rendering) error {
+		if tx != nil {
+			t.Errorf("tx = %v", tx)
+		}
+		got = append(got, r)
+		return nil
+	})
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "job": "j2"})
+	ctx := withSnapshot(t.Context(), 77)
+	if _, err := h.svc.AlertChanges(ctx, nil, []ingest.AlertChange{{Kind: ingest.ChangeFired, AlertID: a,
+		StoredSnapshotID: 77}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.AlertChanges(t.Context(), nil, []ingest.AlertChange{{Kind: ingest.ChangeFired, AlertID: b,
+		StoredSnapshotID: 77}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("renderings %+v", got)
+	}
+	c, j := got[0], got[1]
+	if c.ReceivedAt == nil || !c.ReceivedAt.Equal(received) || c.Actor.Kind != audit.ActorSystem ||
+		len(c.Events) != 1 || c.Events[0].Event != EventCreated || c.Events[0].Seq != 1 ||
+		c.Events[0].Loudness != Loud || !slices.Equal(c.Events[0].Mentions, []Mention{MentionNewAlertGroup}) ||
+		len(c.Events[0].Fingerprints) != 1 {
+		t.Errorf("created %+v", c)
+	}
+	if j.Group.ID != c.Group.ID || len(j.Events) != 1 || j.Events[0].Event != EventAlertsAdded ||
+		j.Events[0].Variant != VariantFiring || j.Events[0].Seq != 2 || j.ReceivedAt == nil {
+		t.Errorf("joined %+v", j)
+	}
+	if h.db.calls["GetSnapshotReceivedAt"] != 2 {
+		t.Errorf("read the receipt %d times", h.db.calls["GetSnapshotReceivedAt"])
+	}
+	// A note is a lifecycle event too; a Command has no Snapshot.
+	got = nil
+	g := h.groupOf(t, a)
+	if _, err := h.svc.AddNote(t.Context(), alice, g.PublicID, "looking"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ReceivedAt != nil || len(got[0].Events) != 1 ||
+		got[0].Events[0].Event != EventNoteAdded || got[0].Events[0].Seq != 3 {
+		t.Errorf("note %+v", got)
+	}
+	// A Snapshot that cannot be read fails the change.
+	h.db.fail["GetSnapshotReceivedAt"] = errBoom
+	other := h.alert(3, "warning", map[string]string{"alertname": "B", "cluster": "y"})
+	if _, err := h.svc.AlertChanges(t.Context(), nil, []ingest.AlertChange{{Kind: ingest.ChangeFired, AlertID: other,
+		StoredSnapshotID: 78}}); !errors.Is(err, errBoom) {
+		t.Errorf("unread snapshot = %v", err)
+	}
+	if withSnapshot(t.Context(), 0) != t.Context() {
+		t.Error("a change without a snapshot carries one")
 	}
 }
 

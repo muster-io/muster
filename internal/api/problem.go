@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
@@ -47,6 +50,7 @@ const (
 	typePreconditionRequired = "precondition-required"
 	typePayloadTooLarge      = "payload-too-large"
 	typeRateLimited          = "rate-limited"
+	typeInteractiveExhausted = "interactive-budget-exhausted"
 	typeInternal             = "internal"
 	typeNotImplemented       = "not-implemented"
 )
@@ -106,6 +110,7 @@ var titles = map[string]string{
 	typePreconditionRequired: "Precondition required",
 	typePayloadTooLarge:      "Payload too large",
 	typeRateLimited:          "Rate limited",
+	typeInteractiveExhausted: "Messenger is busy",
 	typeInternal:             "Internal error",
 	typeNotImplemented:       "Not implemented",
 }
@@ -226,6 +231,12 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		p.RetryAfter = t.Seconds()
 		return p
 	}
+	if l, ok := errors.AsType[*delivery.LimitedError](err); ok {
+		p := problem(http.StatusServiceUnavailable, typeInteractiveExhausted, "",
+			fmt.Sprintf("No rate-limit token was free within %d s.", int(delivery.InteractiveBudget.Seconds())))
+		p.RetryAfter = l.Seconds()
+		return p
+	}
 	if f, ok := errors.AsType[*tokens.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
@@ -300,6 +311,8 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 			"The built-in Muster Integration cannot be changed, deleted or given a token.")
 	case errors.Is(err, integrations.ErrVersionMismatch):
 		return errPreconditionFailed
+	case errors.Is(err, destinations.ErrNotFound):
+		return errDestinationNotFound
 	case errors.Is(err, routing.ErrNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Route.")
 	case errors.Is(err, routing.ErrNameTaken):
@@ -315,7 +328,7 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		return problem(http.StatusConflict, typeConflict, codeSuggestionObsolete,
 			"The Route suggestion no longer applies: a Route other than the Default route takes its alerts, or it "+
 				"needs a Destination.")
-	case errors.Is(err, groups.ErrNotFound):
+	case errors.Is(err, groups.ErrNotFound), errors.Is(err, delivery.ErrNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Alert Group.")
 	case errors.Is(err, groups.ErrRouteNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Route.")
