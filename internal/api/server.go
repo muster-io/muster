@@ -74,6 +74,11 @@ type UserAdmin interface {
 	CompleteSetup(ctx context.Context, token, password string, addr netip.Addr) error
 }
 
+// UserDirectory is what the API needs of the user directory in internal/users.
+type UserDirectory interface {
+	List(ctx context.Context, q string, after *users.Cursor, limit int) (users.DirectoryPage, error)
+}
+
 // AuditLog is what the API needs of the Audit log reader in internal/audit.
 type AuditLog interface {
 	List(ctx context.Context, f audit.Filter) (audit.Page, error)
@@ -193,6 +198,7 @@ type Config struct {
 	Routes       Routes
 	AlertGroups  AlertGroups
 	Commands     Commands
+	Directory    UserDirectory
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -220,6 +226,7 @@ type Server struct {
 	routes         Routes
 	alertGroups    AlertGroups
 	commands       Commands
+	directory      UserDirectory
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -259,6 +266,7 @@ var implemented = map[string]bool{
 	"GetAlertGroupStatistics": true,
 	"AcknowledgeAlertGroup":   true, "UnacknowledgeAlertGroup": true, "ResolveAlertGroup": true,
 	"UnresolveAlertGroup": true, "SnoozeAlertGroup": true, "UnsnoozeAlertGroup": true, "RunBulkCommand": true,
+	"ListAlertGroupNotes": true, "CreateAlertGroupNote": true, "ListUserDirectory": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -287,7 +295,8 @@ func New(cfg Config) (*Server, error) {
 		sessions: cfg.Sessions, users: cfg.Users, admin: cfg.Admin, auditLog: cfg.AuditLog, totp: cfg.TOTP,
 		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, oidc: cfg.OIDC, tokens: cfg.Tokens,
 		integrations: cfg.Integrations, snapshots: cfg.Snapshots, alerts: cfg.Alerts, routes: cfg.Routes,
-		alertGroups: cfg.AlertGroups, commands: cfg.Commands, trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
+		alertGroups: cfg.AlertGroups, commands: cfg.Commands, directory: cfg.Directory,
+		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}
 	mux := http.NewServeMux()

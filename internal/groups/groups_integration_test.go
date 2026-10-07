@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/timers"
 	timersdb "github.com/muster-io/muster/internal/timers/dbgen"
+	"github.com/muster-io/muster/internal/users"
 )
 
 func TestMain(m *testing.M) {
@@ -970,6 +972,279 @@ func TestIntegrationCommands(t *testing.T) {
 		}
 		if n := e.count(t, `SELECT count(*) FROM audit_log WHERE action LIKE 'alert_group.%'`); n != 6 {
 			t.Errorf("%d audit entries", n)
+		}
+	})
+}
+
+// TestIntegrationNotesSnoozeEndsAndRelease is S-063 on PostgreSQL: a Note and Resolve with a Note numbered among the
+// lifecycle events (C-10.FR-15); a Snooze until T whose timer two replicas fire exactly once at T, listing the Alert
+// that joined meanwhile (C-10.AC-10, C-09.FR-12); the Owner filters of the list and the counts (C-10.AC-19); and the
+// release of a disabled and a deleted Owner inside the transaction of the user administration, with no deadlock
+// against Snapshot processing that changes the same Alert Group meanwhile (C-03.FR-13, D267).
+func TestIntegrationNotesSnoozeEndsAndRelease(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		e.route(t, "db", "db", "pod")
+		perms := []auth.Permission{groups.PermissionAcknowledge, groups.PermissionResolve, groups.PermissionSnooze,
+			groups.PermissionNote}
+		caller := func(publicID, login string) groups.Caller {
+			return groups.Caller{Actor: audit.User(e.user(t, publicID, login), publicID), Transport: audit.TransportUI,
+				Permissions: perms}
+		}
+		alice, bob, carol := caller("SRAAAAAAAAAAA1", "alice"), caller("SRAAAAAAAAAAA2", "bob"),
+			caller("SRAAAAAAAAAAA3", "carol")
+		const s1 = "2026-10-07T11:00:00Z"
+		firing := func(pods ...string) []string {
+			var out []string
+			for _, p := range pods {
+				out = append(out, alert("firing", s1, "alertname", "DiskFull", "team", "db", "pod", p))
+			}
+			return out
+		}
+		e.process(t, gk, firing("a", "b", "c")...)
+		ga, gb, gc := e.groupOf(t, "a"), e.groupOf(t, "b"), e.groupOf(t, "c")
+
+		// Notes.
+		if _, err := e.groups.AddNote(ctx, bob, ga, "Looking."); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.groups.Resolve(ctx, alice, gc, ptr("Rolled back.")); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM notes n JOIN alert_groups g ON g.id = n.alert_group_id
+			WHERE (g.public_id = $1 AND n.event_seq = g.event_seq AND n.body = 'Looking.')
+			   OR (g.public_id = $2 AND n.event_seq = g.event_seq AND n.event_seq = (SELECT t.event_seq + 1
+			       FROM timeline_entries t WHERE t.alert_group_id = g.id AND t.event = 'resolved'))`, ga, gc); n != 2 {
+			t.Errorf("%d notes in place", n)
+		}
+		if got := e.events(t, gc); !slices.Equal(got[len(got)-2:], []string{"resolved", "note_added"}) {
+			t.Errorf("timeline of a resolve with a note = %v", got)
+		}
+
+		// A Snooze until T, an Alert joining meanwhile, and two replicas at T.
+		until := e.clock.Now().Add(10 * time.Minute)
+		if _, err := e.groups.Snooze(ctx, alice, gb, groups.SnoozeEnd{Until: &until}); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timers WHERE kind = 'snooze_end' AND deadline = $1`, until); n != 1 {
+			t.Fatalf("%d snooze_end timers", n)
+		}
+		e.clock.Advance(time.Minute)
+		e.process(t, gk, append(firing("a", "b", "c"), alert("firing", s1, "alertname", "DiskFull", "team", "db",
+			"pod", "b", "n", "2"))...)
+		e.clock.Advance(10 * time.Minute)
+		var mu sync.Mutex
+		fired := map[int64]int{}
+		worker := func(owner string) *timers.Worker {
+			return &timers.Worker{Store: timers.NewStore(e.d.Pool),
+				Lease: db.Lease{Owner: owner, Duration: timers.Lease, Clocks: clock.Clocks{Business: e.clock,
+					Real: clock.Real{}}},
+				Organizations: func(context.Context) ([]int64, error) { return []int64{e.orgID}, nil },
+				Log:           logging.New(&bytes.Buffer{}, logging.LevelInfo),
+				Handlers: map[string]timers.Handler{groups.TimerSnoozeEnd: func(ctx context.Context,
+					tx timersdb.DBTX, _ int64, tm timers.Timer) (func(context.Context), error) {
+					mu.Lock()
+					fired[tm.ID]++
+					mu.Unlock()
+					return e.groups.EndSnooze(ctx, tx, *tm.AlertGroupID)
+				}}}
+		}
+		var wg sync.WaitGroup
+		for _, owner := range []string{"a", "b"} {
+			w := worker(owner)
+			wg.Go(func() {
+				if _, err := w.Round(ctx); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		wg.Wait()
+		if len(fired) != 1 || e.count(t, `SELECT count(*) FROM timers WHERE kind = 'snooze_end'`) != 0 {
+			t.Errorf("fired %v", fired)
+		}
+		for id, n := range fired {
+			if n != 1 {
+				t.Errorf("timer %d fired %d times", id, n)
+			}
+		}
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries t JOIN alert_groups g ON g.id = t.alert_group_id
+			WHERE g.public_id = $1 AND g.status = 'firing' AND g.owner_user_id IS NULL AND t.event = 'snooze_ended'
+			  AND t.loudness = 'loud' AND t.mentions = '{snooze_ended}' AND cardinality(t.fingerprints) = 1`, gb); n != 1 {
+			var dump string
+			_ = e.d.Pool.QueryRow(ctx, `SELECT string_agg(concat_ws(' ', t.event, t.loudness, t.mentions::text,
+				t.fingerprints::text, g.status, g.owner_user_id), '; ') FROM timeline_entries t JOIN alert_groups g
+				ON g.id = t.alert_group_id WHERE g.public_id = $1`, gb).Scan(&dump)
+			t.Errorf("%d snooze_ended entries; timeline %s", n, dump)
+		}
+
+		// The Owner filters.
+		if _, err := e.groups.Acknowledge(ctx, bob, ga); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.groups.Snooze(ctx, alice, gb, groups.SnoozeEnd{NoEnd: true}); err != nil {
+			t.Fatal(err)
+		}
+		yes, no := true, false
+		for _, c := range []struct {
+			f    groups.Filter
+			want []string
+		}{
+			{groups.Filter{Owner: groups.OwnerMe, Me: bob.Actor}, []string{ga}},
+			{groups.Filter{Owner: strings.ToLower(bob.Actor.PublicID)}, []string{ga}},
+			{groups.Filter{SnoozedNoEnd: &no}, []string{ga}},
+			{groups.Filter{Owner: alice.Actor.PublicID}, nil},
+			{groups.Filter{Owner: groups.OwnerNone}, []string{gb}},
+			{groups.Filter{SnoozedNoEnd: &yes}, []string{gb}},
+		} {
+			page, err := e.groups.List(ctx, groups.ListRequest{Filter: c.f, Limit: 10})
+			var got []string
+			for _, v := range page.Groups {
+				got = append(got, v.PublicID)
+			}
+			counts, cerr := e.groups.Counts(ctx, c.f)
+			if err != nil || cerr != nil || !slices.Equal(got, c.want) || counts.All-counts.Resolved != int64(len(c.want)) {
+				t.Errorf("%+v = %v %v %v, counts %+v", c.f, err, cerr, got, counts)
+			}
+		}
+
+		// Disabling Bob releases ga in the transaction of the disable, with user.disabled the only Audit log entry.
+		w := audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), e.clock)
+		admin := users.NewAdmin(e.orgID, users.NewAdminStore(e.d.Pool), w, e.clock, &url.URL{Scheme: "http",
+			Host: "localhost"})
+		admin.SetOwnerReleaser(e.groups)
+		r := users.Requester{Actor: audit.System, Transport: audit.TransportSystem}
+		audits := e.count(t, `SELECT count(*) FROM audit_log`)
+		if _, err := admin.Disable(ctx, r, bob.Actor.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries t JOIN alert_groups g ON g.id = t.alert_group_id
+			WHERE g.public_id = $1 AND g.status = 'firing' AND t.event = 'unacknowledged' AND t.reason = 'owner_disabled'
+			  AND t.actor_kind = 'system' AND t.loudness = 'loud' AND t.previous_owner_user_id = $2`, ga,
+			bob.Actor.ID); n != 1 {
+			t.Errorf("%d releases; timeline %v", n, e.events(t, ga))
+		}
+		if n := e.count(t, `SELECT count(*) FROM audit_log`); n != audits+1 {
+			t.Errorf("%d audit entries", n-audits)
+		}
+		if _, err := admin.Enable(ctx, r, bob.Actor.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_groups WHERE public_id = $1 AND status = 'firing'`, ga); n != 1 {
+			t.Error("enabling gave the acknowledgement back")
+		}
+
+		// The release and Snapshot processing on the same Alert Group at once, while the delete also takes the
+		// counter row: neither waits for the other forever.
+		for i := range 5 {
+			if _, err := admin.Enable(ctx, r, carol.Actor.PublicID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.groups.Acknowledge(ctx, carol, ga); err != nil {
+				t.Fatal(err)
+			}
+			var wg sync.WaitGroup
+			var errs [2]error
+			wg.Go(func() { _, errs[0] = admin.Disable(ctx, r, carol.Actor.PublicID) })
+			wg.Go(func() {
+				errs[1] = e.snapshot(t, e.sink, gk, append(firing("a", "b", "c"), alert("firing", s1, "alertname",
+					"DiskFull", "team", "db", "pod", "a", "n", fmt.Sprint(i)), alert("firing", s1, "alertname",
+					"DiskFull", "team", "db", "pod", fmt.Sprintf("new%d", i)))...)
+			})
+			wg.Wait()
+			if errs[0] != nil || errs[1] != nil {
+				t.Fatalf("round %d: %v", i, errs)
+			}
+		}
+		// An Acknowledge racing the disable of its User never leaves that User as the Owner.
+		for i := range 5 {
+			if _, err := admin.Enable(ctx, r, bob.Actor.PublicID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.groups.Unacknowledge(ctx, alice, ga); err != nil && !strings.Contains(err.Error(),
+				"not_acknowledged") {
+				t.Fatal(err)
+			}
+			var wg sync.WaitGroup
+			var errs [2]error
+			wg.Go(func() { _, errs[0] = admin.Disable(ctx, r, bob.Actor.PublicID) })
+			wg.Go(func() { _, errs[1] = e.groups.Acknowledge(ctx, bob, ga) })
+			wg.Wait()
+			if _, forbidden := errors.AsType[*groups.ForbiddenError](errs[1]); errs[0] != nil ||
+				(errs[1] != nil && !forbidden) {
+				t.Fatalf("round %d: %v", i, errs)
+			}
+			if n := e.count(t, `SELECT count(*) FROM alert_groups WHERE owner_user_id = $1`, bob.Actor.ID); n != 0 {
+				t.Fatalf("round %d: the disabled user owns %d alert groups", i, n)
+			}
+		}
+
+		// Disabled and enabled again before the Reopen: a system-resolved Alert Group the user owned reopens into
+		// firing.
+		if _, err := admin.Enable(ctx, r, bob.Actor.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		e.process(t, gk, firing("a", "b", "c", "d")...)
+		gd := e.groupOf(t, "d")
+		if _, err := e.groups.Acknowledge(ctx, bob, gd); err != nil {
+			t.Fatal(err)
+		}
+		e.process(t, gk, append(firing("a", "b", "c"), alert("resolved", s1, "alertname", "DiskFull", "team", "db",
+			"pod", "d"))...)
+		for _, f := range []func(context.Context, users.Requester, string) (users.User, error){admin.Disable,
+			admin.Enable} {
+			if _, err := f(ctx, r, bob.Actor.PublicID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		e.clock.Advance(time.Minute)
+		e.process(t, gk, append(firing("a", "b", "c"), alert("firing", s1, "alertname", "DiskFull", "team", "db",
+			"pod", "d", "n", "2"))...)
+		if v, err := e.groups.Get(ctx, gd); err != nil || v.Status != groups.StatusFiring || v.Owner != nil ||
+			v.ReopenCount != 1 {
+			t.Errorf("reopened after the release = %v %+v", err, v)
+		}
+
+		// A Reopen into snoozed: the end of the Snooze lists the Alert that reopened it.
+		dn := alert("firing", s1, "alertname", "DiskFull", "team", "db", "pod", "d", "n", "2")
+		e.process(t, gk, append(firing("a", "b", "c", "e"), dn)...)
+		ge := e.groupOf(t, "e")
+		end := e.clock.Now().Add(time.Hour)
+		if _, err := e.groups.Snooze(ctx, alice, ge, groups.SnoozeEnd{Until: &end}); err != nil {
+			t.Fatal(err)
+		}
+		e.clock.Advance(time.Minute)
+		e.process(t, gk, append(firing("a", "b", "c"), dn, alert("resolved", s1, "alertname", "DiskFull", "team",
+			"db", "pod", "e"))...)
+		e.clock.Advance(time.Minute)
+		e.process(t, gk, append(firing("a", "b", "c"), dn, alert("firing", s1, "alertname", "DiskFull", "team", "db",
+			"pod", "e", "n", "2"))...)
+		if n := e.count(t, `SELECT count(*) FROM alert_groups WHERE public_id = $1 AND status = 'snoozed'`, ge); n != 1 {
+			t.Fatalf("not reopened into snoozed: %v", e.events(t, ge))
+		}
+		e.clock.Advance(time.Hour)
+		if _, err := worker("c").Round(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries t JOIN alert_groups g ON g.id = t.alert_group_id
+			WHERE g.public_id = $1 AND t.event = 'snooze_ended' AND cardinality(t.fingerprints) = 1`, ge); n != 1 {
+			t.Errorf("snooze_ended after a reopen: %v", e.events(t, ge))
+		}
+
+		if _, err := e.groups.Acknowledge(ctx, alice, ga); err != nil {
+			t.Fatal(err)
+		}
+		if err := admin.Delete(ctx, r, alice.Actor.PublicID, nil); err != nil {
+			t.Fatal(err)
+		}
+		v, err := e.groups.Get(ctx, ga)
+		if err != nil || v.Status != groups.StatusFiring || v.Owner != nil {
+			t.Fatalf("after the delete = %v %+v", err, v)
+		}
+		tl, err := e.groups.Timeline(ctx, ga, groups.TimelineFilter{Limit: 1})
+		if err != nil || len(tl.Entries) != 1 || *tl.Entries[0].Reason != groups.ReasonOwnerDeleted ||
+			tl.Entries[0].PreviousOwner == nil || !tl.Entries[0].PreviousOwner.Deactivated {
+			t.Errorf("released by the delete = %v %+v", err, tl.Entries)
 		}
 	})
 }

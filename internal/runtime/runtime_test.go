@@ -48,6 +48,7 @@ import (
 	rdb "github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/internal/timers"
+	timersdb "github.com/muster-io/muster/internal/timers/dbgen"
 	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
 	tdb "github.com/muster-io/muster/internal/totp/dbgen"
@@ -1451,5 +1452,29 @@ func TestResetTOTP(t *testing.T) {
 	}
 	if _, _, err := ResetTOTP(t.Context(), options(fake, &out, nil), reset); err == nil {
 		t.Error("without settings")
+	}
+}
+
+// TestGroupTimer: the handler of an Alert Group's timer fires only the timers of this Organization that name an
+// Alert Group, and hands over what fire returns.
+func TestGroupTimer(t *testing.T) {
+	var fired []int64
+	committed := func(context.Context) {}
+	h := groupTimer(7, func(_ context.Context, _ timersdb.DBTX, id int64) (func(context.Context), error) {
+		fired = append(fired, id)
+		return committed, nil
+	})
+	id := int64(42)
+	for _, c := range []struct {
+		org int64
+		t   timers.Timer
+	}{{8, timers.Timer{AlertGroupID: &id}}, {7, timers.Timer{}}} {
+		if after, err := h(t.Context(), nil, c.org, c.t); after != nil || err != nil {
+			t.Errorf("%+v = %v", c, err)
+		}
+	}
+	if after, err := h(t.Context(), nil, 7, timers.Timer{AlertGroupID: &id}); after == nil || err != nil ||
+		len(fired) != 1 || fired[0] != 42 {
+		t.Errorf("fire = %v, fired %v", err, fired)
 	}
 }

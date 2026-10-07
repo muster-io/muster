@@ -993,3 +993,42 @@ func TestHeartbeatSenders(t *testing.T) {
 		t.Errorf("send to a closed endpoint = %d", status)
 	}
 }
+
+// TestStoppedSenderTakesNoTick: a sender stopped while it is still signalling takes no tick once StopHeartbeat has
+// returned. Its loop may only come back to the ticks after the stop; without waiting for it, it would then choose at
+// random between the end of its context and a tick waiting to be sent.
+func TestStoppedSenderTakesNoTick(t *testing.T) {
+	for i := range 20 {
+		f := startFake(t)
+		release := make(chan struct{})
+		arrived := make(chan struct{}, 1)
+		slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			arrived <- struct{}{}
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		ticks := make(chan time.Time)
+		f.SetHeartbeatTicker(func(time.Duration) (<-chan time.Time, func()) { return ticks, func() {} })
+		if err := f.StartHeartbeat(t.Context(), fakealertmanager.HeartbeatSender{Name: "a", URL: slow.URL,
+			IntervalSeconds: 60}); err != nil {
+			t.Fatal(err)
+		}
+		ticks <- time.Time{}
+		<-arrived
+		stopped := make(chan bool)
+		go func() { stopped <- f.StopHeartbeat("a") }()
+		if !<-stopped {
+			t.Fatal("the sender was not started")
+		}
+		close(release)
+		select {
+		case ticks <- time.Time{}:
+			t.Fatalf("round %d: a stopped sender took a tick", i)
+		case <-time.After(50 * time.Millisecond):
+		}
+		slow.Close()
+	}
+}

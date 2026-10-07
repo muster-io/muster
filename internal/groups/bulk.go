@@ -27,7 +27,7 @@ const (
 )
 
 // BulkRequest is a bulk command (C-10.FR-14): Acknowledge, Resolve, Snooze or Unsnooze on the Alert Groups IDs, with
-// the end of a Snooze, or the Note of a Resolve, which waits for Notes (S-063).
+// the end of a Snooze, or the Note of a Resolve.
 type BulkRequest struct {
 	Command Command
 	IDs     []string
@@ -53,12 +53,15 @@ type BulkItem struct {
 func (s *Service) Bulk(ctx context.Context, c Caller, r BulkRequest) ([]BulkItem, error) {
 	switch r.Command {
 	case CommandAcknowledge, CommandResolve, CommandSnooze, CommandUnsnooze:
-	case CommandUnacknowledge, CommandUnresolve:
+	case CommandUnacknowledge, CommandUnresolve, CommandAddNote:
 		return nil, &FieldError{Pointer: "/command", Code: CodeInvalid, Detail: "This command has no bulk form."}
 	default:
 		return nil, &FieldError{Pointer: "/command", Code: CodeInvalid, Detail: "No such command."}
 	}
 	if err := s.permit(ctx, c, r.Command, "", len(r.IDs)); err != nil {
+		return nil, err
+	}
+	if err := s.permitNote(ctx, c, r.Command, args{note: r.Note}, "", len(r.IDs)); err != nil {
 		return nil, err
 	}
 	if len(r.IDs) == 0 || len(r.IDs) > BulkMax {
@@ -74,7 +77,7 @@ func (s *Service) Bulk(ctx context.Context, c Caller, r BulkRequest) ([]BulkItem
 		a.end = r.Snooze
 	case CommandResolve:
 		a.note = r.Note
-	case CommandAcknowledge, CommandUnacknowledge, CommandUnresolve, CommandUnsnooze:
+	case CommandAcknowledge, CommandUnacknowledge, CommandUnresolve, CommandUnsnooze, CommandAddNote:
 	}
 	if err := a.check("/snooze", s.clock.Now()); err != nil {
 		return nil, err

@@ -11,30 +11,43 @@ files_touched:
   - internal/groups/snooze.go
   - internal/groups/release.go
   - internal/groups/commands.go
+  - internal/groups/bulk.go
+  - internal/groups/dispatcher.go
+  - internal/groups/events.go
   - internal/groups/allowed.go
   - internal/groups/filters.go
-  - internal/groups/read.go
+  - internal/groups/list.go
+  - internal/groups/counts.go
   - internal/groups/query.sql
   - internal/groups/notes_test.go
   - internal/groups/release_test.go
   - internal/groups/commands_test.go
+  - internal/groups/bulk_test.go
+  - internal/groups/dispatcher_test.go
   - internal/groups/allowed_test.go
   - internal/groups/events_test.go
   - internal/groups/list_test.go
-  - internal/timers/worker.go
-  - internal/timers/worker_test.go
+  - internal/groups/groups_integration_test.go
   - internal/users/directory.go
   - internal/users/admin.go
   - internal/users/admin_test.go
+  - internal/users/admin_integration_test.go
   - internal/users/query.sql
   - internal/api/alertgroups.go
   - internal/api/alertgroups_test.go
+  - internal/api/commands.go
+  - internal/api/commands_test.go
   - internal/api/users.go
   - internal/api/users_test.go
   - internal/api/server.go
+  - internal/api/server_test.go
   - api/openapi.yaml
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - test/e2e/notes_test.go
+  - test/e2e/alert_group_list_test.go
+  - internal/fakes/fakealertmanager/fakealertmanager.go
+  - internal/fakes/fakealertmanager/fakealertmanager_test.go
   - design/prd/l1/defaults.md
   - design/prd/L1.md
 acceptance:
@@ -74,12 +87,12 @@ issue: 137
 - **Operations implemented**: `listAlertGroupNotes`, `createAlertGroupNote`, `listUserDirectory`;
   `resolveAlertGroup` accepts `note` (the `422 unsupported` of S-032 is removed); `listAlertGroups` and
   `getAlertGroupCounts` accept `owner` and `snoozed_no_end` (the `422 unsupported` of S-029 is removed, and its tests
-  in `list_test.go` and `alertgroups_test.go` change with it). Schemas: `NoteInput`, `Note(List)`,
+  in `list_test.go`, `alertgroups_test.go` and `test/e2e/alert_group_list_test.go` change with it). Schemas: `NoteInput`, `Note(List)`,
   `UserDirectoryList`; `createAlertGroupNote` gains `x-permission-check: dispatcher` in `api/openapi.yaml`, like the
   Commands of S-032, so its Permission is checked by the dispatcher.
 - **Notes** (C-10.FR-8, C-10.FR-1; `notes.go`, `notes`): Add Note through the dispatcher in any status, also after the
-  details were removed; Permission `alert-groups:note`; 1 to `alert_group.note_max_length` characters (`422
-  too_long`); a `notes` row with the author (User or Service account), token and Transport; `note_added`, Quiet,
+  details were removed; Permission `alert-groups:note`; 1 to `alert_group.note_max_length` characters (`too_long`:
+  `400` from the request validation of the API, `422` from the dispatcher); a `notes` row with the author (User or Service account), token and Transport; `note_added`, Quiet,
   without Mentions; the Audit log action `alert_group.note_added`; `muster_commands_total{command="add_note"}`.
   `resolveAlertGroup` with `note` records `resolved` and then `note_added` in the same transaction. Notes are kept
   with the summary row and go with it (C-09.FR-16); the Timeline of an Alert Group whose details were removed still
@@ -87,10 +100,13 @@ issue: 137
 - **`allowed_commands`** (C-10.FR-16): `add_note` always with `alert-groups:note`, whatever the status.
 - **Snooze end** (C-09.FR-8, FR-12; `snooze.go`, `timers`): a Snooze with `until` writes a `snooze_end` timer at
   `until` in the Command's transaction, a new `until` moves it, and Unsnooze, Acknowledge and Resolve remove it. The
-  worker of S-028 handles the kind `snooze_end`: a still snoozed Alert Group becomes firing without an Owner with
-  `snooze_ended` (Loud, `[snooze_ended]`) listing the fingerprints of the Alerts that joined during the Snooze. The
-  worker wakes on a move of the development clock (S-028), so an advance past `until` ends the Snooze at once. S-049
-  restarts the ack timeout there.
+  dispatcher keeps the timer with the Snooze on every path that enters, moves or leaves one — the Commands, bulk
+  Snooze, a resolution by the system, a Reopen into snoozed, a rise to Urgent and the end itself (D269). The worker of
+  S-028 handles the kind `snooze_end`: a still snoozed Alert Group becomes firing without an Owner with
+  `snooze_ended` (Loud, `[snooze_ended]`) listing the fingerprints of the Alerts that joined during the Snooze — after
+  the entry that took it into snoozed, and for a Reopen into snoozed also the Alerts that reopened it. The worker
+  wakes on a move of the development clock (S-028), so an advance past `until` ends the Snooze at once. S-049 restarts
+  the ack timeout there.
 - **Owner filters** (C-10.FR-13, C-09.FR-13; `filters.go`): `owner` — a user's `public_id`, `me` (`422 unsupported`
   for a Service account), or `none`; `snoozed_no_end`; for the list and the counts.
 - **User directory** (C-10.FR-13; `alert-groups:read`; `internal/users/directory.go`): every user, deleted ones
@@ -103,14 +119,20 @@ issue: 137
   userID, reason)`, where `tx` is the transaction the store's `InTx` runs on — and calls it after the status change of a
   disable and after the pseudonymization of a delete, before the Audit log entry; `groups` implements it, and
   `runtime.go` sets it on the `Admin` that the API uses. The `Admin` that `muster admin reset-password` builds never
-  disables or deletes and has none; a nil releaser is allowed only there. An error of the release rolls the disable or
-  the delete back. For each acknowledged Alert Group the user owns, the dispatcher runs a system transition — actor
+  disables or deletes and has none; an `Admin` without a releaser releases nothing. `ReleaseOwner` also returns what
+  to run once that transaction committed (the counters and log lines of the status changes), which `Admin` runs
+  after the commit. An error of the release rolls the disable or the delete back. It takes the locks in grouping's
+  order: the counter row, then the Alert Groups in id order. Acknowledge locks the row of its User `FOR SHARE` while
+  the User is active, before the Alert Group, so that an Acknowledge racing a disable or a delete is refused (`403`)
+  instead of leaving that User as the Owner. For each acknowledged Alert Group the user owns, the dispatcher runs a system transition — actor
   `system`, Transport `system`, no Permission and no Audit log entry of its own, since `user.disabled` or
   `user.deleted` records the cause — to firing without an Owner, recording `unacknowledged` with `reason`
   `owner_disabled` or `owner_deleted`, `previous_owner_user_id` the user, Loud and without Mentions (the row of
   C-09.FR-22). The re-render hook gives delivery its Thread reply from S-034 on, with the text of S-036; S-049 ends the
   Reminders and starts the ack timeout over, as after an Unacknowledge. A Reopen into acknowledged (S-028) whose Owner
-  is no longer active reopens into firing instead, with the Loud `reopened` of a Reopen into firing. Enabling the user
+  is no longer active reopens into firing instead, with the Loud `reopened` of a Reopen into firing; the release also
+  turns the status a system-resolved Alert Group of the user would reopen into, inside its Reopen window, into firing
+  (without a Timeline entry), so that enabling the user again before the Reopen gives nothing back. Enabling the user
   again changes no Alert Group.
 - **Wiring** (`internal/api/server.go`, `internal/runtime/runtime.go`): the three operations join the
   implemented-operations map; the API `Config` gains the user directory; the runtime sets the releaser.
@@ -165,7 +187,7 @@ curl -s "${A[@]}" "$API/alert-groups/$GF/timeline?limit=2" | jq -c '[.items[].ev
 curl -s "${H[@]}" -X POST "$API/alert-groups/$GE/acknowledge" > /dev/null
 curl -s "${HB[@]}" -X POST "$API/alert-groups/$GG/acknowledge" > /dev/null
 curl -s "${A[@]}" "$API/alert-groups?owner=me" | jq '[.items[].owner.login] | unique'                      # ["admin@example.org"]
-curl -s "${A[@]}" "$API/alert-groups?owner=none" | jq '[.items[].owner] | unique'                         # [null]
+curl -s "${A[@]}" "$API/alert-groups?owner=none&status=resolved" | jq -c '[.items[].owner] | unique'     # [null]
 curl -s "${S[@]}" "$API/alert-groups?owner=me" | jq -r '.errors[0].code'                                   # unsupported
 curl -s "${A[@]}" -X POST "$API/alert-groups/$GE/snooze" -d '{"no_end":true}' > /dev/null
 curl -s "${A[@]}" "$API/alert-groups?snoozed_no_end=true" | jq '[.items[].snooze_until] | unique'         # [null]
@@ -178,8 +200,9 @@ curl -s "${A[@]}" "$API/alert-groups/$GG/timeline?limit=1" | jq -c '.items[0] | 
 # {"event":"unacknowledged","a":"system","r":"owner_disabled","p":"bob","loudness":"loud","mentions":[]}
 curl -s "${A[@]}" "$API/audit-log?resource_id=$BOB" | jq -c '[.items[].action]'                              # ["user.disabled", …]   (no alert_group.* entry)
 curl -s "${H[@]}" -X POST "$API/users/$BOB/enable" > /dev/null; GET $GG | jq -r .status                  # firing
-# delete the user bob (S-011), then:
-curl -s "${V[@]}" "$API/user-directory?q=bob" | jq -c '.items[0] | {deactivated}'                          # {"deactivated":true}
+curl -s -o /dev/null -w '%{http_code}\n' "${H[@]}" -X DELETE "$API/users/$BOB"                            # 204
+curl -s "${V[@]}" "$API/user-directory" | jq -c --arg id "$BOB" '.items[] | select(.id == $id) | {deactivated}'
+# {"deactivated":true}
 ```
 
 C-10.AC-20 (a Note across both retention periods) runs as an end-to-end test with the development clock, and so does

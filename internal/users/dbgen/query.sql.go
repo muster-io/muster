@@ -375,6 +375,72 @@ func (q *Queries) InsertPasswordSetup(ctx context.Context, arg InsertPasswordSet
 	return err
 }
 
+const listUserDirectory = `-- name: ListUserDirectory :many
+SELECT u.id, u.public_id, u.login, u.name, u.status, lower(u.name)::text AS sort_name
+FROM users u
+WHERE u.org_id = $1
+  AND ($2::text IS NULL
+       OR strpos(lower(u.name), lower($2::text)) > 0
+       OR strpos(lower(u.login), lower($2::text)) > 0)
+  AND ($3::text IS NULL
+       OR (lower(u.name), u.id) > ($3::text, $4::bigint))
+ORDER BY lower(u.name), u.id
+LIMIT $5
+`
+
+type ListUserDirectoryParams struct {
+	OrgID     int64
+	Q         pgtype.Text
+	AfterName pgtype.Text
+	AfterID   pgtype.Int8
+	PageSize  int32
+}
+
+type ListUserDirectoryRow struct {
+	ID       int64
+	PublicID string
+	Login    string
+	Name     string
+	Status   string
+	SortName string
+}
+
+// ListUserDirectory is a page of the user directory (C-10.FR-13): every user, deleted ones included, with only what
+// pickers and filters show, in the order of the lowercased name, then id, after the cursor (after_name, after_id) when
+// one is given; q matches the name and the login case-insensitively, never the email.
+func (q *Queries) ListUserDirectory(ctx context.Context, arg ListUserDirectoryParams) ([]ListUserDirectoryRow, error) {
+	rows, err := q.db.Query(ctx, listUserDirectory,
+		arg.OrgID,
+		arg.Q,
+		arg.AfterName,
+		arg.AfterID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserDirectoryRow{}
+	for rows.Next() {
+		var i ListUserDirectoryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Login,
+			&i.Name,
+			&i.Status,
+			&i.SortName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsers = `-- name: ListUsers :many
 SELECT u.id, u.public_id, u.login, u.name, u.email, u.role, u.source, u.status, (u.password_hash IS NOT NULL)::boolean AS has_password,
        (u.oidc_subject IS NOT NULL)::boolean AS has_oidc_identity,

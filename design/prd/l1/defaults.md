@@ -116,7 +116,7 @@ Other lifecycle values:
 | `routing.group_key_preview_examples` | the 5 largest Alert Groups for each key | built in | C-08 | decided |
 | `routing.group_key_preview_max_alerts` | 10,000 Alerts, the newest first (the active Alerts of NFR-1) | built in | C-08 | decided |
 | `alert_group.list_range` | last 7 days (lifetime overlapping the range) | request | C-09 | decided |
-| `alert_group.note_max_length` | 4,000 characters | built in | C-10 | P-15 |
+| `alert_group.note_max_length` | 4,000 characters | built in | C-10 | decided |
 | `alert_group.bulk_max` | 100 Alert Groups per bulk command | built in | C-10 | decided |
 | `timers.auto_unacknowledge_after` | 2 unanswered Reminders in a row | built in | C-17 | decided |
 

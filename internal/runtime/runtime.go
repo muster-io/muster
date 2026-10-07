@@ -669,10 +669,13 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			return nil, fmt.Errorf("the demo integration: %w", err)
 		}
 	}
+	// The Admin of the API releases the acknowledgements of the users it disables or deletes (C-03.FR-13).
+	admin := users.NewAdmin(orgID, p.db.AdminStore(), w, p.clocks.Business, p.cfg.PublicURL)
+	admin.SetOwnerReleaser(p.groups)
 	return api.New(api.Config{
 		Sessions:     sessions,
 		Users:        users.NewService(orgID, p.db.UsersStore(), w, p.clocks.Business),
-		Admin:        users.NewAdmin(orgID, p.db.AdminStore(), w, p.clocks.Business, p.cfg.PublicURL),
+		Admin:        admin,
 		AuditLog:     audit.NewReader(orgID, p.db.AuditReader()),
 		TOTP:         factors,
 		Organization: organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business),
@@ -687,6 +690,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Routes:         p.routes,
 		AlertGroups:    p.groups,
 		Commands:       p.groups,
+		Directory:      users.NewDirectory(orgID, p.db.AdminStore()),
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -878,21 +882,31 @@ func (p *process) configureWorker() {
 	p.timers.Lease = db.Lease{Owner: p.replica.ID(), Duration: timers.Lease, Clocks: p.clocks}
 	p.timers.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
 	p.timers.Handlers = map[string]timers.Handler{
-		groups.TimerReopenWindowEnd: func(ctx context.Context, tx timersdb.DBTX, orgID int64, t timers.Timer) (
+		groups.TimerReopenWindowEnd: groupTimer(p.orgID, func(ctx context.Context, tx timersdb.DBTX, id int64) (
 			func(context.Context), error) {
-			if orgID != p.orgID || t.AlertGroupID == nil {
-				return nil, nil
-			}
-			return nil, p.groups.EndReopenWindow(ctx, tx, *t.AlertGroupID)
-		},
-		groups.TimerGracePeriodEnd: func(ctx context.Context, tx timersdb.DBTX, orgID int64, t timers.Timer) (
+			return nil, p.groups.EndReopenWindow(ctx, tx, id)
+		}),
+		groups.TimerGracePeriodEnd: groupTimer(p.orgID, func(ctx context.Context, tx timersdb.DBTX, id int64) (
 			func(context.Context), error) {
-			if orgID != p.orgID || t.AlertGroupID == nil {
-				return nil, nil
-			}
-			r, err := p.groups.EndGracePeriod(ctx, tx, *t.AlertGroupID)
+			r, err := p.groups.EndGracePeriod(ctx, tx, id)
 			return r.Committed, err
-		},
+		}),
+		groups.TimerSnoozeEnd: groupTimer(p.orgID, func(ctx context.Context, tx timersdb.DBTX, id int64) (
+			func(context.Context), error) {
+			return p.groups.EndSnooze(ctx, tx, id)
+		}),
+	}
+}
+
+// groupTimer is the timer handler that fires the timer of an Alert Group of the Organization orgID with fire; a timer
+// of another Organization, or without an Alert Group, changes nothing.
+func groupTimer(orgID int64, fire func(ctx context.Context, tx timersdb.DBTX, groupID int64) (func(context.Context),
+	error)) timers.Handler {
+	return func(ctx context.Context, tx timersdb.DBTX, org int64, t timers.Timer) (func(context.Context), error) {
+		if org != orgID || t.AlertGroupID == nil {
+			return nil, nil
+		}
+		return fire(ctx, tx, *t.AlertGroupID)
 	}
 }
 

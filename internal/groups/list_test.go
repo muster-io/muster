@@ -55,6 +55,9 @@ type fakeFilter struct {
 	pattern       pgtype.Text
 	statuses      []string
 	withoutStatus bool
+	ownerSet      bool
+	owner         pgtype.Int8
+	snoozedNoEnd  pgtype.Bool
 }
 
 func (f *fakeDB) matches(g *dbgen.LockGroupsRow, p fakeFilter) bool {
@@ -89,6 +92,12 @@ func (f *fakeDB) matches(g *dbgen.LockGroupsRow, p fakeFilter) bool {
 		return false
 	}
 	if p.reopened.Valid && (g.ReopenCount > 0) != p.reopened.Bool {
+		return false
+	}
+	if p.ownerSet && (g.OwnerUserID.Valid != p.owner.Valid || g.OwnerUserID.Int64 != p.owner.Int64) {
+		return false
+	}
+	if p.snoozedNoEnd.Valid && (g.Status == "snoozed" && g.SnoozeNoEnd) != p.snoozedNoEnd.Bool {
 		return false
 	}
 	if p.contains != nil {
@@ -135,7 +144,8 @@ func (f *fakeDB) list(name string, p dbgen.ListGroupsStartedDescParams, changed,
 	}
 	ff := fakeFilter{number: p.Number, from: p.RangeFrom, to: p.RangeTo, routes: p.RouteIds, ints: p.IntegrationIds,
 		severities: p.Severities, urgent: p.Urgent, resolvedBy: p.ResolvedBy, reason: p.ResolveReason,
-		reopened: p.Reopened, contains: p.Contains, pattern: p.Pattern, statuses: p.Statuses}
+		reopened: p.Reopened, contains: p.Contains, pattern: p.Pattern, statuses: p.Statuses, ownerSet: p.OwnerSet,
+		owner: p.OwnerID, snoozedNoEnd: p.SnoozedNoEnd}
 	key := func(g *dbgen.LockGroupsRow) time.Time {
 		if changed {
 			return g.LastChangedAt
@@ -216,7 +226,8 @@ func (f *fakeDB) CountGroups(_ context.Context, p dbgen.CountGroupsParams) ([]db
 	}
 	ff := fakeFilter{number: p.Number, from: p.RangeFrom, to: p.RangeTo, routes: p.RouteIds, ints: p.IntegrationIds,
 		severities: p.Severities, urgent: p.Urgent, resolvedBy: p.ResolvedBy, reason: p.ResolveReason,
-		reopened: p.Reopened, contains: p.Contains, pattern: p.Pattern, withoutStatus: true}
+		reopened: p.Reopened, contains: p.Contains, pattern: p.Pattern, withoutStatus: true, ownerSet: p.OwnerSet,
+		owner: p.OwnerID, snoozedNoEnd: p.SnoozedNoEnd}
 	counts := map[[2]string]int64{}
 	for _, g := range f.groups {
 		if !f.matches(g, ff) {
@@ -275,6 +286,22 @@ func (f *fakeDB) ListIntegrationsByPublicID(_ context.Context, arg dbgen.ListInt
 	for _, r := range f.ints {
 		if slices.Contains(arg.PublicIds, r.PublicID) {
 			out = append(out, dbgen.ListIntegrationsByPublicIDRow(r))
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeDB) ListUsersByPublicID(_ context.Context, arg dbgen.ListUsersByPublicIDParams) (
+	[]dbgen.ListUsersByPublicIDRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListUsersByPublicID"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListUsersByPublicIDRow
+	for _, u := range f.users {
+		if slices.Contains(arg.PublicIds, u.PublicID) {
+			out = append(out, dbgen.ListUsersByPublicIDRow{ID: u.ID, PublicID: u.PublicID, Name: u.Name})
 		}
 	}
 	return out, nil
@@ -798,6 +825,71 @@ func TestCounts(t *testing.T) {
 	}
 	if c, _ := h.svc.Counts(t.Context(), Filter{Query: "#5"}); c != (Counts{Resolved: 1, All: 1}) {
 		t.Errorf("#5 = %+v", c)
+	}
+}
+
+// TestOwnerFilters is C-10.FR-13, C-10.AC-19 and C-09.FR-13: owner=me, owner=none, owner=<id> and snoozed_no_end
+// select the list and the counts; owner=me is unsupported for a Service account, and an unknown user is unknown_id.
+func TestOwnerFilters(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	mine := h.summary(1, 2, t0.Add(-time.Hour), time.Time{}, "A", nil)
+	mine.Status, mine.OwnerUserID = string(StatusAcknowledged), i8(owner)
+	bobs := h.summary(2, 2, t0.Add(-time.Hour), time.Time{}, "B", nil)
+	bobs.Status, bobs.OwnerUserID = string(StatusAcknowledged), i8(bobID)
+	h.summary(3, 2, t0.Add(-time.Hour), time.Time{}, "C", nil)
+	noEnd := h.summary(4, 2, t0.Add(-time.Hour), time.Time{}, "D", nil)
+	noEnd.Status, noEnd.SnoozeNoEnd, noEnd.SnoozedByUserID = string(StatusSnoozed), true, i8(owner)
+	until := h.summary(5, 2, t0.Add(-time.Hour), time.Time{}, "E", nil)
+	until.Status, until.SnoozeUntil, until.SnoozedByUserID = string(StatusSnoozed), ts(t0.Add(time.Hour)), i8(owner)
+	h.summary(6, 2, t0.Add(-2*time.Hour), t0.Add(-time.Hour), "F", nil)
+	yes, no := true, false
+	for _, c := range []struct {
+		name   string
+		f      Filter
+		want   []int64
+		counts Counts
+	}{
+		{"me", Filter{Owner: OwnerMe, Me: alice.Actor}, []int64{1}, Counts{Acknowledged: 1, All: 1}},
+		{"a user", Filter{Owner: bob.Actor.PublicID}, []int64{2}, Counts{Acknowledged: 1, All: 1}},
+		{"a user, lower case", Filter{Owner: strings.ToLower(bob.Actor.PublicID)}, []int64{2},
+			Counts{Acknowledged: 1, All: 1}},
+		{"nobody", Filter{Owner: OwnerNone}, []int64{5, 4, 3}, Counts{Firing: 1, Snoozed: 2, Resolved: 1, All: 4}},
+		{"snoozed with no end", Filter{SnoozedNoEnd: &yes}, []int64{4}, Counts{Snoozed: 1, All: 1}},
+		{"not snoozed with no end", Filter{SnoozedNoEnd: &no}, []int64{5, 3, 2, 1},
+			Counts{Firing: 1, Acknowledged: 2, Snoozed: 1, Resolved: 1, All: 5}},
+		{"nobody, with no end", Filter{Owner: OwnerNone, SnoozedNoEnd: &yes}, []int64{4}, Counts{Snoozed: 1, All: 1}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := numbers(h.list(t, ListRequest{Filter: c.f})); !slices.Equal(got, c.want) {
+				t.Errorf("list = %v, want %v", got, c.want)
+			}
+			if got, err := h.svc.Counts(t.Context(), c.f); err != nil || got != c.counts {
+				t.Errorf("counts = %+v %v, want %+v", got, err, c.counts)
+			}
+		})
+	}
+	for _, c := range []struct {
+		f    Filter
+		code string
+	}{
+		{Filter{Owner: OwnerMe, Me: robot.Actor}, CodeUnsupported},
+		{Filter{Owner: OwnerMe}, CodeUnsupported},
+		{Filter{Owner: "SRZZZZZZZZZZZZ"}, CodeUnknownID},
+		{Filter{Owner: "bob"}, CodeUnknownID},
+	} {
+		_, err := h.svc.List(t.Context(), ListRequest{Filter: c.f, Limit: 5})
+		if f, ok := errors.AsType[*FieldError](err); !ok || f.Pointer != "/query/owner" || f.Code != c.code {
+			t.Errorf("list %+v = %v", c.f, err)
+		}
+		if _, err := h.svc.Counts(t.Context(), c.f); code(err) != "/query/owner "+c.code {
+			t.Errorf("counts %+v = %v", c.f, err)
+		}
+	}
+	h.db.fail["ListUsersByPublicID"] = errBoom
+	if _, err := h.svc.List(t.Context(), ListRequest{Filter: Filter{Owner: bob.Actor.PublicID}, Limit: 5}); !errors.Is(
+		err, errBoom) {
+		t.Errorf("a failing user lookup = %v", err)
 	}
 }
 

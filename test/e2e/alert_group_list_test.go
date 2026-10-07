@@ -229,9 +229,9 @@ func TestAlertGroupList(t *testing.T) {
 		c["all"] != 1.0 || c["resolved"] != 0.0 {
 		t.Errorf("counts = %v", c)
 	}
-	if a := pat.do(http.MethodGet, "/api/v1/alert-groups?owner=me", ""); a.status != http.StatusUnprocessableEntity ||
-		!strings.Contains(string(a.body), `"code":"unsupported"`) {
-		t.Errorf("owner = %d %s", a.status, a.body)
+	if a := pat.do(http.MethodGet, "/api/v1/alert-groups?delivery_problem=true", ""); a.status !=
+		http.StatusUnprocessableEntity || !strings.Contains(string(a.body), `"code":"unsupported"`) {
+		t.Errorf("delivery_problem = %d %s", a.status, a.body)
 	}
 	if n := read("/api/v1/integrations/" + intID)["open_alert_group_count"]; n != 2.0 {
 		t.Errorf("open_alert_group_count = %v", n)

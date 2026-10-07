@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -619,6 +620,50 @@ func TestIntegrationSetupLinkRaces(t *testing.T) {
 				t.Errorf("race %d: the Admin's change failed: %v", i, second)
 			case i > 0 && first != nil && !errors.Is(first, users.ErrLinkUsed):
 				t.Errorf("race %d: the setup failed with %v", i, first)
+			}
+		}
+	})
+}
+
+// TestIntegrationUserDirectory is C-10.FR-13 and C-10.AC-19 against PostgreSQL: the directory lists every user by
+// name, a deleted one as deactivated under its pseudonym, pages by cursor and matches q on the name and the login,
+// never the email.
+func TestIntegrationUserDirectory(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		bob, _, err := e.admin.Create(ctx, e.byOps, users.NewUser{Name: "Bob", Login: "bob", Role: auth.RoleResponder,
+			Email: ptr("bob@corp.test")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.create(t, "Carol", "carol", auth.RoleViewer, "carol-password-1")
+		if err := e.admin.Delete(ctx, e.byOps, bob.PublicID, nil); err != nil {
+			t.Fatal(err)
+		}
+		d := users.NewDirectory(e.orgID, users.NewAdminStore(e.d.Pool))
+		var got []string
+		var after *users.Cursor
+		for {
+			page, err := d.List(ctx, "", after, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, x := range page.Entries {
+				got = append(got, fmt.Sprintf("%s %s %v", x.Name, x.Login, x.Deactivated))
+			}
+			if after = page.Next; after == nil {
+				break
+			}
+		}
+		pseudonym := users.DeletedPrefix + bob.PublicID
+		if want := []string{"Carol carol false", pseudonym + " " + pseudonym + " true", "ops " + e.ops.Login +
+			" false"}; !slices.Equal(got, want) {
+			t.Errorf("directory = %v, want %v", got, want)
+		}
+		for q, want := range map[string]int{"CAR": 1, "carol": 1, "corp.test": 0, "deleted-user": 1, "zzz": 0} {
+			if page, err := d.List(ctx, q, nil, 10); err != nil || len(page.Entries) != want {
+				t.Errorf("q %q = %d, %v", q, len(page.Entries), err)
 			}
 		}
 	})

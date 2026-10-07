@@ -11,8 +11,11 @@ import (
 	"github.com/muster-io/muster/internal/users"
 )
 
-// usersCursor names the cursors of listUsers.
-const usersCursor = "users"
+// The cursors of listUsers and listUserDirectory.
+const (
+	usersCursor     = "users"
+	directoryCursor = "user-directory"
+)
 
 // userKey is the sort key of a listUsers cursor.
 type userKey struct {
@@ -64,6 +67,39 @@ func (s *Server) ListUsers(ctx context.Context, req gen.ListUsersRequestObject) 
 		out.NextCursor.SetNull()
 	}
 	return gen.ListUsers200JSONResponse(out), nil
+}
+
+// ListUserDirectory is listUserDirectory: every user, deleted ones as deactivated, with only their name and login,
+// for everyone who reads Alert Groups.
+func (s *Server) ListUserDirectory(ctx context.Context, req gen.ListUserDirectoryRequestObject) (
+	gen.ListUserDirectoryResponseObject, error) {
+	var q string
+	if req.Params.Q != nil {
+		q = *req.Params.Q
+	}
+	var after *users.Cursor
+	var key userKey
+	if ok, err := decodeCursor(req.Params.Cursor, directoryCursor, &key); err != nil {
+		return nil, err
+	} else if ok {
+		after = &users.Cursor{Name: key.Name, ID: key.ID}
+	}
+	page, err := s.directory.List(ctx, q, after, pageSize(req.Params.Limit))
+	if err != nil {
+		return nil, err
+	}
+	out := gen.UserDirectoryList{Items: make([]gen.UserRef, 0, len(page.Entries))}
+	for _, e := range page.Entries {
+		login := e.Login
+		out.Items = append(out.Items, gen.UserRef{Id: e.PublicID, Name: e.Name, Login: &login,
+			Deactivated: e.Deactivated})
+	}
+	if page.Next != nil {
+		out.NextCursor.Set(encodeCursor(directoryCursor, userKey{Name: page.Next.Name, ID: page.Next.ID}))
+	} else {
+		out.NextCursor.SetNull()
+	}
+	return gen.ListUserDirectory200JSONResponse(out), nil
 }
 
 // CreateUser is createUser: a local user and the single-use link that sets its first password (C-03.FR-3).

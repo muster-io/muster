@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -58,10 +59,11 @@ const (
 )
 
 var (
-	responder = []auth.Permission{"alert-groups:read", PermissionAcknowledge, PermissionResolve, PermissionSnooze}
-	alice     = Caller{Actor: audit.User(owner, "SRAAAAAAAAAAA9"), Transport: audit.TransportUI, Permissions: responder}
-	bob       = Caller{Actor: audit.User(bobID, "SRAAAAAAAAAAB0"), Transport: audit.TransportUI, Permissions: responder}
-	bobToken  = Caller{Actor: audit.User(bobID, "SRAAAAAAAAAAB0").Via(31, "script"), Transport: audit.TransportAPI,
+	responder = []auth.Permission{"alert-groups:read", PermissionAcknowledge, PermissionResolve, PermissionSnooze,
+		PermissionNote}
+	alice    = Caller{Actor: audit.User(owner, "SRAAAAAAAAAAA9"), Transport: audit.TransportUI, Permissions: responder}
+	bob      = Caller{Actor: audit.User(bobID, "SRAAAAAAAAAAB0"), Transport: audit.TransportUI, Permissions: responder}
+	bobToken = Caller{Actor: audit.User(bobID, "SRAAAAAAAAAAB0").Via(31, "script"), Transport: audit.TransportAPI,
 		Permissions: responder}
 	robot = Caller{Actor: audit.ServiceAccount(robotID, "SAAAAAAAAAAA20").Via(32, "ci"),
 		Transport: audit.TransportAPI, Permissions: responder}
@@ -460,9 +462,9 @@ func TestCommandRefusals(t *testing.T) {
 	if _, err := h.svc.Resolve(t.Context(), carol, g.PublicID, ptr("x")); code(err) != CodeForbidden {
 		t.Errorf("a viewer's resolve with a note = %v", err)
 	}
-	if _, err := h.svc.Resolve(t.Context(), alice, g.PublicID, ptr("x")); code(err) != "/note unsupported" ||
-		g.Status != "firing" {
-		t.Errorf("resolve with a note = %v", err)
+	if _, err := h.svc.Resolve(t.Context(), alice, g.PublicID, ptr(strings.Repeat("x", NoteMaxLength+1))); code(err) !=
+		"/note too_long" || g.Status != "firing" {
+		t.Errorf("resolve with a note too long = %v", err)
 	}
 	for _, id := range []string{"nonsense", "AGZZZZZZZZZZZZ"} {
 		if _, err := h.svc.Acknowledge(t.Context(), alice, id); !errors.Is(err, ErrNotFound) {
@@ -525,7 +527,7 @@ func TestCommandFailures(t *testing.T) {
 		t.Errorf("GetGroupRef failing = %v", err)
 	}
 	// An unknown command never reaches a transition.
-	if _, err := h.svc.transition(t.Context(), h.db, alice, "add_note", &Group{}, args{}, false); err == nil {
+	if _, err := h.svc.transition(t.Context(), h.db, alice, "still_on_it", &Group{}, args{}, false); err == nil {
 		t.Error("an unknown command ran")
 	}
 	// A row that disappears between the lookup and the lock is not found.
@@ -576,5 +578,267 @@ func TestUnresolveDeletedRoute(t *testing.T) {
 			t.Errorf("%s failing = %v", q, err)
 		}
 		delete(h.db.fail, q)
+	}
+}
+
+func (f *fakeDB) ListJoinedDuringSnooze(_ context.Context, arg dbgen.ListJoinedDuringSnoozeParams) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListJoinedDuringSnooze"); err != nil {
+		return nil, err
+	}
+	var since *fakeEntry
+	for _, e := range f.entries {
+		if e.AlertGroupID == arg.AlertGroupID && e.ToStatus.String == "snoozed" && e.FromStatus.String != "snoozed" &&
+			(since == nil || !e.At.Before(since.At)) {
+			since = e
+		}
+	}
+	if since == nil {
+		return nil, nil
+	}
+	joined := map[string]bool{}
+	for _, m := range f.members {
+		if m.group == arg.AlertGroupID && (m.joined.After(since.At) ||
+			(since.Event.String == "reopened" && m.joined.Equal(since.At))) {
+			joined[f.alerts[m.alert].Fingerprint] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(joined)), nil
+}
+
+// snoozeTimer is the deadline of the snooze_end timer of g, nil when it has none.
+func (h *harness) snoozeTimer(g *dbgen.LockGroupsRow) *time.Time {
+	d, ok := h.db.timers[timerKey(g.ID, TimerSnoozeEnd)]
+	if !ok {
+		return nil
+	}
+	return &d
+}
+
+// TestSnoozeEnd is C-10.AC-10, C-10.FR-6, C-09.FR-8 and C-09.FR-12: a Snooze until T sets the snooze_end timer at T;
+// at T the timer makes the Alert Group firing without an Owner, with a Loud snooze_ended by the system that lists the
+// Alerts that joined during the Snooze, and stops the timer. Fired before T, again, or for an Alert Group that is
+// gone, it changes nothing.
+func TestSnoozeEnd(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "1"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	if _, err := h.svc.Acknowledge(t.Context(), alice, g.PublicID); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.Advance(time.Minute)
+	until := h.clock.Now().Add(10 * time.Minute)
+	notified := h.db.notified
+	if _, err := h.svc.Snooze(t.Context(), bob, g.PublicID, SnoozeEnd{Until: &until}); err != nil {
+		t.Fatal(err)
+	}
+	if d := h.snoozeTimer(g); d == nil || !d.Equal(until) || h.db.notified != notified+1 {
+		t.Fatalf("snooze_end timer %v, %d notifications", d, h.db.notified-notified)
+	}
+	h.clock.Advance(time.Minute)
+	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+	h.changes(t, ingest.ChangeFired, b)
+
+	entries := len(h.entriesOf(g))
+	if after, err := h.svc.EndSnooze(t.Context(), nil, g.ID); err != nil || after != nil || g.Status != "snoozed" ||
+		len(h.entriesOf(g)) != entries {
+		t.Fatalf("early end = %v, %s", err, g.Status)
+	}
+	h.clock.Advance(9 * time.Minute)
+	after, err := h.svc.EndSnooze(t.Context(), nil, g.ID)
+	if err != nil || after == nil {
+		t.Fatalf("end = %v", err)
+	}
+	if g.Status != "firing" || g.OwnerUserID.Valid || g.SnoozeUntil.Valid || g.SnoozedByUserID.Valid ||
+		h.snoozeTimer(g) != nil {
+		t.Errorf("after the end: %+v, timer %v", g, h.snoozeTimer(g))
+	}
+	e := h.last(t, g)
+	if e.Event.String != "snooze_ended" || e.Loudness.String != "loud" ||
+		!slices.Equal(e.Mentions, []string{"snooze_ended"}) || e.ActorKind != "system" || e.Transport != "system" ||
+		!slices.Equal(e.Fingerprints, []string{fingerprintOf(b)}) || e.FromStatus.String != "snoozed" ||
+		e.ToStatus.String != "firing" {
+		t.Errorf("snooze_ended = %+v", e.InsertTimelineEntryParams)
+	}
+	after(t.Context())
+	if !strings.Contains(h.log.String(), `"from":"snoozed","to":"firing","reason":"snooze_ended","transport":"system"`) {
+		t.Errorf("log %s", h.log)
+	}
+	// Safe to fire twice, and for an Alert Group that is gone.
+	entries = len(h.entriesOf(g))
+	if after, err := h.svc.EndSnooze(t.Context(), nil, g.ID); err != nil || after != nil ||
+		len(h.entriesOf(g)) != entries {
+		t.Errorf("second end = %v", err)
+	}
+	if after, err := h.svc.EndSnooze(t.Context(), nil, 9999); err != nil || after != nil {
+		t.Errorf("end of a missing alert group = %v", err)
+	}
+	// Unsnooze is Quiet and stops the timer.
+	until = h.clock.Now().Add(time.Hour)
+	if _, err := h.svc.Snooze(t.Context(), bob, g.PublicID, SnoozeEnd{Until: &until}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.Unsnooze(t.Context(), bob, g.PublicID); err != nil || h.snoozeTimer(g) != nil ||
+		h.last(t, g).Loudness.String != "quiet" {
+		t.Errorf("unsnooze = %v, timer %v", err, h.snoozeTimer(g))
+	}
+	// Failures.
+	if _, err := h.svc.Snooze(t.Context(), bob, g.PublicID, SnoozeEnd{Until: &until}); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.Advance(2 * time.Hour)
+	for _, q := range []string{"LockGroups", "ListJoinedDuringSnooze", "DeleteTimer"} {
+		h.db.fail[q] = errBoom
+		if _, err := h.svc.EndSnooze(t.Context(), nil, g.ID); !errors.Is(err, errBoom) {
+			t.Errorf("%s failing = %v", q, err)
+		}
+		delete(h.db.fail, q)
+	}
+	h.db.fail["UpsertTimer"] = errBoom
+	if _, err := h.svc.Snooze(t.Context(), bob, h.firing(t, "y").PublicID, SnoozeEnd{Until: ptr(
+		h.clock.Now().Add(time.Hour))}); !errors.Is(err, errBoom) {
+		t.Errorf("a failing timer = %v", err)
+	}
+}
+
+// TestSnoozeTimer is D269 item 2: every path that enters, moves or leaves a Snooze with an end keeps its snooze_end
+// timer — Snooze, a new end, no end, Unsnooze, Acknowledge, Resolve, a bulk Snooze, a resolution by the system and the
+// Reopen into snoozed after it, a Reopen after the end, a rise to Urgent that ends the Snooze and one that does not.
+func TestSnoozeTimer(t *testing.T) {
+	hour := time.Hour
+	cases := []struct {
+		name string
+		// run changes the snoozed g, whose Snooze ends in an hour, and returns the deadline the timer must have.
+		run func(t *testing.T, h *harness, g *dbgen.LockGroupsRow, a int64) *time.Duration
+	}{
+		{"snooze", func(*testing.T, *harness, *dbgen.LockGroupsRow, int64) *time.Duration { return &hour }},
+		{"a new end", func(t *testing.T, h *harness, g *dbgen.LockGroupsRow, _ int64) *time.Duration {
+			if _, err := h.svc.Snooze(t.Context(), bob, g.PublicID, SnoozeEnd{Until: ptr(t0.Add(3 * hour))}); err != nil {
+				t.Fatal(err)
+			}
+			return ptr(3 * hour)
+		}},
+		{"no end", func(t *testing.T, h *harness, g *dbgen.LockGroupsRow, _ int64) *time.Duration {
+			if _, err := h.svc.Snooze(t.Context(), bob, g.PublicID, SnoozeEnd{NoEnd: true}); err != nil {
+				t.Fatal(err)
+			}
+			return nil
+		}},
+		{"unsnooze", func(t *testing.T, h *harness, g *dbgen.LockGroupsRow, _ int64) *time.Duration {
+			if _, err := h.svc.Unsnooze(t.Context(), bob, g.PublicID); err != nil {
+				t.Fatal(err)
+			}
+			return nil
+		}},
+		{"acknowledge", func(t *testing.T, h *harness, g *dbgen.LockGroupsRow, _ int64) *time.Duration {
+			if _, err := h.svc.Acknowledge(t.Context(), bob, g.PublicID); err != nil {
+				t.Fatal(err)
+			}
+			return nil
+		}},
+		{"resolve", func(t *testing.T, h *harness, g *dbgen.LockGroupsRow, _ int64) *time.Duration {
+			if _, err := h.svc.Resolve(t.Context(), robot, g.PublicID, nil); err != nil {
+				t.Fatal(err)
+			}
+			return nil
+		}},
+		{"bulk snooze", func(t *testing.T, h *harness, g *dbgen.LockGroupsRow, _ int64) *time.Duration {
+			if _, err := h.svc.Bulk(t.Context(), bob, BulkRequest{Command: CommandSnooze, IDs: []string{g.PublicID},
+				Snooze: &SnoozeEnd{Until: ptr(t0.Add(2 * hour))}}); err != nil {
+				t.Fatal(err)
+			}
+			return ptr(2 * hour)
+		}},
+		{"resolved by the system", func(t *testing.T, h *harness, _ *dbgen.LockGroupsRow, a int64) *time.Duration {
+			h.resolve(t, a)
+			return nil
+		}},
+		{"reopen into snoozed", func(t *testing.T, h *harness, g *dbgen.LockGroupsRow, a int64) *time.Duration {
+			h.resolve(t, a)
+			h.clock.Advance(5 * time.Minute)
+			h.refire(t, a)
+			if g.Status != "snoozed" {
+				t.Fatalf("reopened into %s", g.Status)
+			}
+			return &hour
+		}},
+		{"reopen after the end", func(t *testing.T, h *harness, g *dbgen.LockGroupsRow, a int64) *time.Duration {
+			if _, err := h.svc.Snooze(t.Context(), bob, g.PublicID, SnoozeEnd{Until: ptr(t0.Add(10 * time.Minute))}); err != nil {
+				t.Fatal(err)
+			}
+			h.resolve(t, a)
+			h.clock.Advance(11 * time.Minute)
+			h.refire(t, a)
+			if g.Status != "firing" {
+				t.Fatalf("reopened into %s", g.Status)
+			}
+			return nil
+		}},
+		{"a rise to urgent ends it", func(t *testing.T, h *harness, g *dbgen.LockGroupsRow, _ int64) *time.Duration {
+			c := h.alert(2, "critical", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+			h.changes(t, ingest.ChangeFired, c)
+			if g.Status != "firing" {
+				t.Fatalf("after the rise: %s", g.Status)
+			}
+			return nil
+		}},
+		{"a rise while snoozed urgent keeps it", func(t *testing.T, h *harness, g *dbgen.LockGroupsRow,
+			_ int64) *time.Duration {
+			g.SnoozedWhileUrgent = true
+			c := h.alert(2, "critical", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+			h.changes(t, ingest.ChangeFired, c)
+			if g.Status != "snoozed" {
+				t.Fatalf("after the rise: %s", g.Status)
+			}
+			return &hour
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.people()
+			a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "1"})
+			h.changes(t, ingest.ChangeFired, a)
+			g := h.groupOf(t, a)
+			if _, err := h.svc.Snooze(t.Context(), alice, g.PublicID, SnoozeEnd{Until: ptr(t0.Add(hour))}); err != nil {
+				t.Fatal(err)
+			}
+			want := c.run(t, h, g, a)
+			got := h.snoozeTimer(g)
+			if (want == nil) != (got == nil) || (want != nil && !got.Equal(t0.Add(*want))) {
+				t.Errorf("snooze_end timer %v, want %v after t0 (status %s)", got, want, g.Status)
+			}
+		})
+	}
+}
+
+// TestSnoozeEndAfterReopen: after a Reopen into snoozed, the end of the Snooze lists the Alerts that reopened it, and
+// not those of the Alert Group before.
+func TestSnoozeEndAfterReopen(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "1"})
+	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+	h.changes(t, ingest.ChangeFired, a, b)
+	g := h.groupOf(t, a)
+	if _, err := h.svc.Snooze(t.Context(), alice, g.PublicID, SnoozeEnd{Until: ptr(t0.Add(time.Hour))}); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.Advance(time.Minute)
+	h.resolve(t, a, b)
+	h.clock.Advance(time.Minute)
+	h.refire(t, b)
+	if g.Status != "snoozed" {
+		t.Fatalf("reopened into %s", g.Status)
+	}
+	h.clock.Advance(time.Hour)
+	if _, err := h.svc.EndSnooze(t.Context(), nil, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	if e := h.last(t, g); e.Event.String != "snooze_ended" || !slices.Equal(e.Fingerprints, []string{fingerprintOf(b)}) {
+		t.Errorf("snooze_ended = %+v", e.InsertTimelineEntryParams)
 	}
 }

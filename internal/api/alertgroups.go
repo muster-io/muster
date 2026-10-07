@@ -12,6 +12,7 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/matchers"
@@ -19,7 +20,7 @@ import (
 )
 
 // AlertGroups is what the API needs of internal/groups: the list with its counts, one Alert Group, its Alerts, its
-// Timeline and its related Alert Groups, the statistics, the open count of Integrations, and the move of a Route's
+// Timeline, its Notes and its related Alert Groups, the statistics, the open count of Integrations, and the move of a Route's
 // open Alert Groups to the Default route.
 type AlertGroups interface {
 	List(ctx context.Context, r groups.ListRequest) (groups.ListPage, error)
@@ -27,6 +28,7 @@ type AlertGroups interface {
 	Get(ctx context.Context, publicID string) (groups.View, error)
 	Alerts(ctx context.Context, publicID string, f groups.AlertFilter) (groups.AlertPage, error)
 	Timeline(ctx context.Context, publicID string, f groups.TimelineFilter) (groups.TimelinePage, error)
+	Notes(ctx context.Context, publicID string, after *groups.NotePosition, limit int) (groups.NotePage, error)
 	Related(ctx context.Context, publicID string, after *groups.ListPosition, limit int) (groups.RelatedPage, error)
 	Statistics(ctx context.Context, r groups.StatisticsRequest) (groups.Statistics, error)
 	OpenCounts(ctx context.Context, integrations []string) (map[string]int64, error)
@@ -41,6 +43,7 @@ const (
 	alertGroupsCursor        = "alert-groups"
 	alertGroupAlertsCursor   = "alert-group-alerts"
 	alertGroupTimelineCursor = "alert-group-timeline"
+	alertGroupNotesCursor    = "alert-group-notes"
 	relatedAlertGroupsCursor = "related-alert-groups"
 )
 
@@ -63,22 +66,27 @@ type filterParams struct {
 	unclaimed             *bool
 	from, to              *time.Time
 	q                     *string
+	// me is the caller, whom owner=me names.
+	me audit.Actor
 }
 
-// filterOf is the groups.Filter of the parameters. The filters Owner, "snoozed with no end", "Delivery problem" and
-// Unclaimed belong to later stories and answer 422 unsupported until then.
+// filterOf is the groups.Filter of the parameters. The filters "Delivery problem" and Unclaimed belong to later
+// stories and answer 422 unsupported until then.
 func filterOf(p filterParams) (groups.Filter, error) {
 	for _, u := range []struct {
 		name string
 		set  bool
-	}{{"owner", p.owner != nil}, {"snoozed_no_end", p.snoozedNoEnd != nil},
-		{"delivery_problem", p.problem != nil}, {"unclaimed", p.unclaimed != nil}} {
+	}{{"delivery_problem", p.problem != nil}, {"unclaimed", p.unclaimed != nil}} {
 		if u.set {
 			return groups.Filter{}, fieldProblem(http.StatusUnprocessableEntity, "/query/"+u.name, fieldUnsupported,
 				"This filter is not available yet.")
 		}
 	}
-	f := groups.Filter{Urgent: p.urgent, Reopened: p.reopened, From: p.from, To: p.to}
+	f := groups.Filter{Urgent: p.urgent, Reopened: p.reopened, From: p.from, To: p.to, SnoozedNoEnd: p.snoozedNoEnd,
+		Me: p.me}
+	if p.owner != nil {
+		f.Owner = *p.owner
+	}
 	if p.route != nil {
 		f.Routes = *p.route
 	}
@@ -117,10 +125,14 @@ func filterOf(p filterParams) (groups.Filter, error) {
 func (s *Server) ListAlertGroups(ctx context.Context, req gen.ListAlertGroupsRequestObject) (
 	gen.ListAlertGroupsResponseObject, error) {
 	p := req.Params
+	c, err := caller(ctx)
+	if err != nil {
+		return nil, err
+	}
 	f, err := filterOf(filterParams{route: p.Route, integration: p.Integration, severity: p.Severity,
 		urgent: p.Urgent, reopened: p.Reopened, resolvedBy: p.ResolvedBy, resolveReason: p.ResolveReason,
 		label: p.Label, owner: p.Owner, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
-		unclaimed: p.Unclaimed, from: p.From, to: p.To, q: p.Q})
+		unclaimed: p.Unclaimed, from: p.From, to: p.To, q: p.Q, me: c.Actor})
 	if err != nil {
 		return nil, err
 	}
@@ -147,10 +159,6 @@ func (s *Server) ListAlertGroups(ctx context.Context, req gen.ListAlertGroupsReq
 	} else if ok {
 		r.After = &groups.ListPosition{At: key.At, ID: key.ID}
 	}
-	c, err := caller(ctx)
-	if err != nil {
-		return nil, err
-	}
 	page, err := s.alertGroups.List(ctx, r)
 	if err != nil {
 		return nil, err
@@ -171,10 +179,14 @@ func (s *Server) ListAlertGroups(ctx context.Context, req gen.ListAlertGroupsReq
 func (s *Server) GetAlertGroupCounts(ctx context.Context, req gen.GetAlertGroupCountsRequestObject) (
 	gen.GetAlertGroupCountsResponseObject, error) {
 	p := req.Params
+	me, err := caller(ctx)
+	if err != nil {
+		return nil, err
+	}
 	f, err := filterOf(filterParams{route: p.Route, integration: p.Integration, severity: p.Severity,
 		urgent: p.Urgent, reopened: p.Reopened, resolvedBy: p.ResolvedBy, resolveReason: p.ResolveReason,
 		label: p.Label, owner: p.Owner, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
-		unclaimed: p.Unclaimed, from: p.From, to: p.To, q: p.Q})
+		unclaimed: p.Unclaimed, from: p.From, to: p.To, q: p.Q, me: me.Actor})
 	if err != nil {
 		return nil, err
 	}
@@ -373,6 +385,65 @@ func actorRefOf(a groups.ActorRef) gen.ActorRef {
 	return out
 }
 
+// noteOf is the API form of a Note.
+func noteOf(n groups.NoteView) gen.Note {
+	out := gen.Note{Id: n.PublicID, Body: n.Body, Transport: gen.Transport(n.Transport), CreatedAt: n.CreatedAt}
+	if n.Author != nil {
+		out.Author = actorRefOf(*n.Author)
+	}
+	return out
+}
+
+// noteKey is the position of a Note in its cursor: the time it was added and its id.
+type noteKey struct {
+	At time.Time `json:"t"`
+	ID int64     `json:"i"`
+}
+
+// ListAlertGroupNotes is listAlertGroupNotes: the Notes in the order they were added, also once the details of the
+// Alert Group were removed.
+func (s *Server) ListAlertGroupNotes(ctx context.Context, req gen.ListAlertGroupNotesRequestObject) (
+	gen.ListAlertGroupNotesResponseObject, error) {
+	var after *groups.NotePosition
+	var key noteKey
+	if ok, err := decodeCursor(req.Params.Cursor, alertGroupNotesCursor, &key); err != nil {
+		return nil, err
+	} else if ok {
+		after = &groups.NotePosition{At: key.At, ID: key.ID}
+	}
+	page, err := s.alertGroups.Notes(ctx, req.AlertGroupId, after, pageSize(req.Params.Limit))
+	if err != nil {
+		return nil, err
+	}
+	out := gen.NoteList{Items: make([]gen.Note, 0, len(page.Notes))}
+	for _, n := range page.Notes {
+		out.Items = append(out.Items, noteOf(n))
+	}
+	if page.Next != nil {
+		out.NextCursor.Set(encodeCursor(alertGroupNotesCursor, noteKey{At: page.Next.At, ID: page.Next.ID}))
+	} else {
+		out.NextCursor.SetNull()
+	}
+	return gen.ListAlertGroupNotes200JSONResponse(out), nil
+}
+
+// CreateAlertGroupNote is createAlertGroupNote: the Command Add Note, whose Permission the dispatcher checks.
+func (s *Server) CreateAlertGroupNote(ctx context.Context, req gen.CreateAlertGroupNoteRequestObject) (
+	gen.CreateAlertGroupNoteResponseObject, error) {
+	c, err := caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	n, err := s.commands.AddNote(ctx, c, req.AlertGroupId, req.Body.Body)
+	if err != nil {
+		return nil, err
+	}
+	return gen.CreateAlertGroupNote201JSONResponse(noteOf(n)), nil
+}
+
 // userRefOf is the API form of a User.
 func userRefOf(a *groups.ActorRef) *gen.UserRef {
 	if a == nil {
@@ -540,15 +611,9 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 		}
 		err = out.FromTimelineTimersEntry(v)
 	case groups.KindNotes:
-		n := e.Note
-		v := gen.TimelineNoteEntry{Id: e.PublicID, At: e.At, Kind: gen.TimelineNoteEntryKindNotes, Actor: actor,
-			Event: event, Loudness: loudness, Mentions: mentions,
-			Note: gen.Note{Id: n.PublicID, Body: n.Body, Transport: gen.Transport(n.Transport),
-				CreatedAt: n.CreatedAt}}
-		if n.Author != nil {
-			v.Note.Author = actorRefOf(*n.Author)
-		}
-		err = out.FromTimelineNoteEntry(v)
+		err = out.FromTimelineNoteEntry(gen.TimelineNoteEntry{Id: e.PublicID, At: e.At,
+			Kind: gen.TimelineNoteEntryKindNotes, Actor: actor, Event: event, Loudness: loudness, Mentions: mentions,
+			Note: noteOf(*e.Note)})
 	case groups.KindDelivery:
 		d := e.Delivery
 		err = out.FromTimelineDeliveryEntry(gen.TimelineDeliveryEntry{Id: e.PublicID, At: e.At,

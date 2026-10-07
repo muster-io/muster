@@ -88,6 +88,9 @@ type AdminQueries interface {
 	SupersedePasswordSetups(ctx context.Context, arg dbgen.SupersedePasswordSetupsParams) (int64, error)
 	GetPasswordSetup(ctx context.Context, arg dbgen.GetPasswordSetupParams) (dbgen.GetPasswordSetupRow, error)
 	MarkPasswordSetupUsed(ctx context.Context, arg dbgen.MarkPasswordSetupUsedParams) (int64, error)
+	ListUserDirectory(ctx context.Context, arg dbgen.ListUserDirectoryParams) ([]dbgen.ListUserDirectoryRow, error)
+	// Tx is the connection the queries run on: inside InTx, its transaction, which the OwnerReleaser joins.
+	Tx() dbgen.DBTX
 	audit.Store
 }
 
@@ -99,18 +102,43 @@ type AdminStore interface {
 
 // NewAdminStore is the AdminStore over the main pool.
 func NewAdminStore(pool *pgxpool.Pool) AdminStore {
-	return pgAdminStore{pgQueries: pgQueries{Queries: dbgen.New(pool), Store: audit.NewStore(pool)}, pool: pool}
+	return pgAdminStore{pgAdminQueries: adminQueriesOver(pool), pool: pool}
 }
 
-type pgAdminStore struct {
+// pgAdminQueries are the queries over a pool or a transaction, which Tx returns.
+type pgAdminQueries struct {
 	pgQueries
+	tx dbgen.DBTX
+}
+
+func adminQueriesOver(d dbgen.DBTX) pgAdminQueries {
+	return pgAdminQueries{pgQueries: pgQueries{Queries: dbgen.New(d), Store: audit.NewStore(d)}, tx: d}
+}
+
+func (q pgAdminQueries) Tx() dbgen.DBTX { return q.tx }
+
+type pgAdminStore struct {
+	pgAdminQueries
 	pool *pgxpool.Pool
 }
 
 func (s pgAdminStore) InTx(ctx context.Context, f func(AdminQueries) error) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		return f(pgQueries{Queries: dbgen.New(tx), Store: audit.NewStore(tx)})
-	})
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return f(adminQueriesOver(tx)) })
+}
+
+// The reasons of the release of an Owner, as OwnerReleaser takes them (C-03.FR-13).
+const (
+	ReleaseDisabled = "owner_disabled"
+	ReleaseDeleted  = "owner_deleted"
+)
+
+// OwnerReleaser releases the acknowledgements of a disabled or deleted user (C-03.FR-13): each acknowledged Alert Group
+// the user owns becomes firing without an Owner. Admin calls it inside the transaction tx of the disable or the
+// delete, after the status change and before the Audit log entry, with the reason ReleaseDisabled or ReleaseDeleted;
+// an error rolls the change back. It returns what to run once tx committed, or nil. The Alert Group lifecycle
+// implements it (ADR-0016: the interface is declared by its consumer, so users never imports groups).
+type OwnerReleaser interface {
+	ReleaseOwner(ctx context.Context, tx dbgen.DBTX, userID int64, reason string) (func(context.Context), error)
 }
 
 // Requester is who asks for an administrative change and how: the actor and the Transport of the Audit log entry, and
@@ -129,12 +157,34 @@ type Admin struct {
 	audit     *audit.Writer
 	clock     clock.Clock
 	publicURL *url.URL
+	releaser  OwnerReleaser
 }
 
 // NewAdmin returns the Admin of the Organization orgID; clock is the business clock and publicURL is
 // MUSTER_PUBLIC_URL, the base of the password setup links.
 func NewAdmin(orgID int64, s AdminStore, w *audit.Writer, business clock.Clock, publicURL *url.URL) *Admin {
 	return &Admin{orgID: orgID, store: s, audit: w, clock: business, publicURL: publicURL}
+}
+
+// SetOwnerReleaser sets what releases the acknowledgements of the users that Disable and Delete disable or delete;
+// the runtime sets it on the Admin the API uses. Only an Admin that never disables or deletes — the one of muster
+// admin reset-password — goes without; one without releases nothing.
+func (a *Admin) SetOwnerReleaser(r OwnerReleaser) { a.releaser = r }
+
+// release runs the OwnerReleaser for the user u in the transaction of q and adds what it returns to committed.
+func (a *Admin) release(ctx context.Context, q AdminQueries, u User, reason string,
+	committed *[]func(context.Context)) error {
+	if a.releaser == nil {
+		return nil
+	}
+	after, err := a.releaser.ReleaseOwner(ctx, q.Tx(), u.ID, reason)
+	if err != nil {
+		return fmt.Errorf("release the alert groups of %s: %w", u.PublicID, err)
+	}
+	if after != nil {
+		*committed = append(*committed, after)
+	}
+	return nil
 }
 
 // ListFilter selects users; empty fields do not filter. Q matches the name, the login and the email.
@@ -342,20 +392,25 @@ func (a *Admin) Update(ctx context.Context, r Requester, id string, version *int
 	return updated, nil
 }
 
-// Disable disables the user id and ends their sessions; until Enable they cannot sign in. Disabling the last active
-// Admin is ErrLastAdmin. A disabled user is returned unchanged.
+// Disable disables the user id and ends their sessions; until Enable they cannot sign in. Their acknowledged Alert
+// Groups are released in the same transaction (C-03.FR-13). Disabling the last active Admin is ErrLastAdmin. A
+// disabled user is returned unchanged.
 func (a *Admin) Disable(ctx context.Context, r Requester, id string) (User, error) {
 	return a.setStatus(ctx, r, id, StatusDisabled)
 }
 
-// Enable enables the user id again. An active user is returned unchanged.
+// Enable enables the user id again; no acknowledgement comes back. An active user is returned unchanged.
 func (a *Admin) Enable(ctx context.Context, r Requester, id string) (User, error) {
 	return a.setStatus(ctx, r, id, StatusActive)
 }
 
 func (a *Admin) setStatus(ctx context.Context, r Requester, id, status string) (User, error) {
-	var changed User
+	var (
+		changed   User
+		committed []func(context.Context)
+	)
 	err := a.store.InTx(ctx, func(q AdminQueries) error {
+		committed = nil
 		admins, before, err := a.lock(ctx, q, id, status == StatusDisabled)
 		if err != nil {
 			return err
@@ -383,6 +438,9 @@ func (a *Admin) setStatus(ctx context.Context, r Requester, id, status string) (
 			if err := a.dropCheck(ctx, q, before); err != nil {
 				return err
 			}
+			if err := a.release(ctx, q, before, ReleaseDisabled, &committed); err != nil {
+				return err
+			}
 		}
 		if changed, err = get(ctx, q, a.orgID, before.ID); err != nil {
 			return err
@@ -395,16 +453,21 @@ func (a *Admin) setStatus(ctx context.Context, r Requester, id, status string) (
 	if err != nil {
 		return User{}, err
 	}
+	for _, f := range committed {
+		f(ctx)
+	}
 	return changed, nil
 }
 
 // Delete deletes the user id (C-03.FR-13): the row stays with the status deleted, the name and the login become
 // deleted-user-<public_id>, the email and the password are erased, the sessions end, the Personal access tokens are
-// revoked with the reason owner_deleted (C-04.FR-1) and open password setup links are superseded. The Audit log keeps
-// the user's earlier entries, which show the new name. A non-nil version must be the user's; deleting the last active
-// Admin is ErrLastAdmin.
+// revoked with the reason owner_deleted (C-04.FR-1), open password setup links are superseded and their acknowledged
+// Alert Groups are released (C-03.FR-13). The Audit log keeps the user's earlier entries, which show the new name. A
+// non-nil version must be the user's; deleting the last active Admin is ErrLastAdmin.
 func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int64) error {
-	return a.store.InTx(ctx, func(q AdminQueries) error {
+	var committed []func(context.Context)
+	err := a.store.InTx(ctx, func(q AdminQueries) error {
+		committed = nil
 		admins, before, err := a.lock(ctx, q, id, true)
 		if err != nil {
 			return err
@@ -421,6 +484,9 @@ func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int
 			OrgID: a.orgID, ID: before.ID, Pseudonym: pseudonym, Now: now,
 		}); err != nil {
 			return fmt.Errorf("delete the user %s: %w", before.PublicID, err)
+		}
+		if err := a.release(ctx, q, before, ReleaseDeleted, &committed); err != nil {
+			return err
 		}
 		ended, err := a.endSessions(ctx, q, before, auth.EndUserDeleted, now)
 		if err != nil {
@@ -451,6 +517,13 @@ func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int
 			SourceAddress: r.Address,
 		})
 	})
+	if err != nil {
+		return err
+	}
+	for _, f := range committed {
+		f(ctx)
+	}
+	return nil
 }
 
 // lock locks the user id for the change, after the active Admins when the change may remove one, and reads it; a

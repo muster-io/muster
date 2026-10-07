@@ -571,3 +571,54 @@ func TestOIDCRefusalsOfUsers(t *testing.T) {
 		t.Errorf("changePassword of an OIDC account = %d %s", a.status, a.body)
 	}
 }
+
+// fakeDirectory stands for the user directory of internal/users.
+type fakeDirectory struct {
+	q     string
+	after *users.Cursor
+	limit int
+	page  users.DirectoryPage
+	err   error
+}
+
+func (f *fakeDirectory) List(_ context.Context, q string, after *users.Cursor, limit int) (users.DirectoryPage,
+	error) {
+	f.q, f.after, f.limit = q, after, limit
+	return f.page, f.err
+}
+
+// TestListUserDirectory is listUserDirectory (C-10.FR-13, C-10.AC-19): readable with alert-groups:read, as a Viewer
+// holds it; a deleted user is deactivated; only the id, name and login; q and the cursor reach the directory.
+func TestListUserDirectory(t *testing.T) {
+	x, _, _ := newAlertGroupsAPI(t)
+	fd := &fakeDirectory{page: users.DirectoryPage{Entries: []users.DirectoryEntry{{PublicID: bobPublicID,
+		Name: "deleted-user-" + bobPublicID, Login: "deleted-user-" + bobPublicID, Deactivated: true}},
+		Next: &users.Cursor{Name: "deleted-user-" + bobPublicID, ID: 2}}}
+	x.srv.directory = fd
+	a := x.call(t, http.MethodGet, "/api/v1/user-directory?q=bob&limit=1", "", "Cookie", viewerCookie)
+	var list gen.UserDirectoryList
+	decodeInto(t, a, &list)
+	if a.status != http.StatusOK || len(list.Items) != 1 || !list.Items[0].Deactivated || list.Items[0].Id != bobPublicID ||
+		*list.Items[0].Login != "deleted-user-"+bobPublicID || fd.q != "bob" || fd.limit != 1 || fd.after != nil ||
+		list.NextCursor.IsNull() || strings.Contains(string(a.body), "email") {
+		t.Fatalf("directory = %d %s", a.status, a.body)
+	}
+	fd.page.Next = nil
+	a = x.as(t, groupsReader, http.MethodGet, "/api/v1/user-directory?cursor="+list.NextCursor.MustGet(), "")
+	if a.status != http.StatusOK || fd.after == nil || fd.after.ID != 2 || fd.q != "" || fd.limit != 50 ||
+		a.json(t)["next_cursor"] != nil {
+		t.Errorf("second page = %d %s %+v", a.status, a.body, fd.after)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/user-directory?cursor="+encodeCursor(usersCursor,
+		userKey{ID: 1}), ""); a.status != http.StatusBadRequest {
+		t.Errorf("a cursor of listUsers = %d", a.status)
+	}
+	if a := x.as(t, groupsNone, http.MethodGet, "/api/v1/user-directory", ""); a.status != http.StatusForbidden {
+		t.Errorf("without alert-groups:read = %d", a.status)
+	}
+	fd.err = errors.New("boom")
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/user-directory", ""); a.status !=
+		http.StatusInternalServerError {
+		t.Errorf("a failing directory = %d", a.status)
+	}
+}

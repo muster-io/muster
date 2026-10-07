@@ -5965,10 +5965,10 @@ type GetAlertGroupCountsParams struct {
 	// Label Label filter: one Alertmanager-syntax Matcher per repeat of the parameter, combined with AND. Each value is a whole matcher: `label=namespace%3D%22payments%22&label=pod%3D~%22api-.*%22` means `namespace="payments"` and `pod=~"api-.*"`. There is no per-label shorthand. On Alert Groups the Matchers are matched against the common labels — the labels every Alert of the group has with the same value — so the filter also works on summary rows after the Alerts were removed; a label the Alerts do not share counts as absent. On the Alerts view of an Integration they are matched against each Alert's labels.
 	Label *LabelMatchers `form:"label,omitempty" json:"label,omitempty"`
 
-	// Owner A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns.
+	// Owner A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns, resolved ones included.
 	Owner *AgOwner `form:"owner,omitempty" json:"owner,omitempty"`
 
-	// SnoozedNoEnd Only Alert Groups snoozed with no end.
+	// SnoozedNoEnd True: only Alert Groups snoozed with no end. False: every Alert Group but those.
 	SnoozedNoEnd *AgSnoozedNoEnd `form:"snoozed_no_end,omitempty" json:"snoozed_no_end,omitempty"`
 
 	// DeliveryProblem Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.
@@ -6046,10 +6046,10 @@ type ListAlertGroupsParams struct {
 	// Label Label filter: one Alertmanager-syntax Matcher per repeat of the parameter, combined with AND. Each value is a whole matcher: `label=namespace%3D%22payments%22&label=pod%3D~%22api-.*%22` means `namespace="payments"` and `pod=~"api-.*"`. There is no per-label shorthand. On Alert Groups the Matchers are matched against the common labels — the labels every Alert of the group has with the same value — so the filter also works on summary rows after the Alerts were removed; a label the Alerts do not share counts as absent. On the Alerts view of an Integration they are matched against each Alert's labels.
 	Label *LabelMatchers `form:"label,omitempty" json:"label,omitempty"`
 
-	// Owner A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns.
+	// Owner A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns, resolved ones included.
 	Owner *AgOwner `form:"owner,omitempty" json:"owner,omitempty"`
 
-	// SnoozedNoEnd Only Alert Groups snoozed with no end.
+	// SnoozedNoEnd True: only Alert Groups snoozed with no end. False: every Alert Group but those.
 	SnoozedNoEnd *AgSnoozedNoEnd `form:"snoozed_no_end,omitempty" json:"snoozed_no_end,omitempty"`
 
 	// DeliveryProblem Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.

@@ -679,8 +679,9 @@ func TestDispatcherPermissionCheck(t *testing.T) {
 		}
 	}
 	slices.Sort(marked)
-	if want := []string{"acknowledgeAlertGroup", "resolveAlertGroup", "runBulkCommand", "snoozeAlertGroup",
-		"unacknowledgeAlertGroup", "unresolveAlertGroup", "unsnoozeAlertGroup"}; !slices.Equal(marked, want) {
+	if want := []string{"acknowledgeAlertGroup", "createAlertGroupNote", "resolveAlertGroup", "runBulkCommand",
+		"snoozeAlertGroup", "unacknowledgeAlertGroup", "unresolveAlertGroup", "unsnoozeAlertGroup"}; !slices.Equal(
+		marked, want) {
 		t.Errorf("marked %v, want %v", marked, want)
 	}
 }

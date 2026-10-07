@@ -10,8 +10,8 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 )
 
-// Commands is what the API needs of the command layer of internal/groups (ADR-0016): the Commands of C-10 and bulk
-// commands, each checked by the dispatcher, Permission included.
+// Commands is what the API needs of the command layer of internal/groups (ADR-0016): the Commands of C-10, Add Note
+// included, and bulk commands, each checked by the dispatcher, Permission included.
 type Commands interface {
 	Acknowledge(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
 	Unacknowledge(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
@@ -19,6 +19,7 @@ type Commands interface {
 	Unresolve(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
 	Snooze(ctx context.Context, c groups.Caller, publicID string, end groups.SnoozeEnd) (groups.Result, error)
 	Unsnooze(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
+	AddNote(ctx context.Context, c groups.Caller, publicID, body string) (groups.NoteView, error)
 	Bulk(ctx context.Context, c groups.Caller, r groups.BulkRequest) ([]groups.BulkItem, error)
 }
 
@@ -71,7 +72,7 @@ func (s *Server) UnacknowledgeAlertGroup(ctx context.Context, req gen.Unacknowle
 	return gen.UnacknowledgeAlertGroup200JSONResponse(out), nil
 }
 
-// ResolveAlertGroup is resolveAlertGroup; the command layer answers a Note with 422 unsupported until Notes exist.
+// ResolveAlertGroup is resolveAlertGroup, with an optional Note that the command layer records after the resolve.
 func (s *Server) ResolveAlertGroup(ctx context.Context, req gen.ResolveAlertGroupRequestObject) (
 	gen.ResolveAlertGroupResponseObject, error) {
 	var note *string
