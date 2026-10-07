@@ -71,6 +71,7 @@ export interface NavEntry {
 /** The labels of the entries; each page's story adds its own. */
 export type NavLabel =
   | "alertGroups"
+  | "statistics"
   | "integrations"
   | "routes"
   | "profile"
@@ -83,6 +84,7 @@ export type NavLabel =
 /** The pages register their entries here, in the order of the navigation. */
 export const NAVIGATION: readonly NavEntry[] = [
   { to: "/alert-groups", label: "alertGroups", permission: "alert-groups:read" },
+  { to: "/statistics", label: "statistics", permission: "alert-groups:read" },
   { to: "/integrations", label: "integrations", permission: "integrations:read" },
   { to: "/routes", label: "routes", permission: "routes:read" },
   { to: "/profile", label: "profile" },
@@ -105,6 +107,8 @@ function navLabel(t: (key: string) => string, label: NavLabel): string {
   switch (label) {
     case "alertGroups":
       return t("nav.alertGroups");
+    case "statistics":
+      return t("nav.statistics");
     case "integrations":
       return t("nav.integrations");
     case "routes":

@@ -2,9 +2,9 @@
 // Copyright The Muster Authors
 
 // The Alerts view of an Integration (C-06.FR-19): the Alerts Muster tracks for it, with their labels, the state
-// (firing, or resolved with its reason and time), the Route that took each, linked, and its Severity level with the
-// value as received when it has no mapping (C-08.FR-13), startsAt, the time last seen, the Alertmanager groups listing
-// them and the Static label warning. The full reason of a Gone or Stale Alert opens under its state by a tap, not only
+// (firing, or resolved with its reason and time), the Route that took each, linked, its Severity level with the
+// value as received when it has no mapping (C-08.FR-13), the Alert Group it lives in as #N, linked, startsAt, the time
+// last seen, the Alertmanager groups listing them and the Static label warning. The full reason of a Gone or Stale Alert opens under its state by a tap, not only
 // on hover (C-09.FR-24). State tabs, label Matchers, text search and the sort live in the URL of the page. Labels are
 // what Alertmanager sent: they show as text only.
 
@@ -215,6 +215,24 @@ function RouteCell({ row }: { row: IntegrationAlert }) {
       data-testid="alert-route"
     >
       {row.route.name}
+    </Link>
+  );
+}
+
+function AlertGroupCell({ row }: { row: IntegrationAlert }) {
+  const { t } = useTranslation();
+  if (row.alert_group === undefined) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <Link
+      to="/alert-groups/$alertGroupId"
+      params={{ alertGroupId: row.alert_group.id }}
+      className="whitespace-nowrap text-primary underline-offset-4 hover:underline focus-visible:underline"
+      aria-label={t("alerts.alertGroupLink", { number: row.alert_group.number })}
+      data-testid="alert-alert-group"
+    >
+      #{row.alert_group.number}
     </Link>
   );
 }
@@ -450,6 +468,7 @@ export function IntegrationAlerts({
       { id: "labels", header: t("alerts.columns.labels"), className: "min-w-56", Cell: LabelsCell },
       { id: "state", header: t("alerts.columns.state"), className: "min-w-32", Cell: StateCell },
       { id: "route", header: t("alerts.columns.route"), className: "min-w-28", Cell: RouteCell },
+      { id: "alert_group", header: t("alerts.columns.alertGroup"), Cell: AlertGroupCell },
       {
         id: "severity",
         header: t("alerts.columns.severity"),

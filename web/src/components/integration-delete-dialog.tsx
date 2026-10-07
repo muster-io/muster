@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Deleting an Integration (C-05.FR-8): the dialog says that its tokens stop working at once and how long its Stored
-// Snapshots are kept (retention.stored_snapshots of the Organization). The deletion is soft; the Integration leaves the
-// list.
+// Deleting an Integration (C-05.FR-8, C-09.FR-21): the dialog says that its tokens stop working at once, how long its
+// Stored Snapshots are kept (retention.stored_snapshots of the Organization) and how many open Alert Groups the
+// deletion resolves, read again when the dialog opens. The deletion is soft; the Integration leaves the list.
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import {
+  getGetAlertGroupCountsQueryKey,
+  getGetAlertGroupStatisticsQueryKey,
+  getListAlertGroupsQueryKey,
+} from "../api/gen/endpoints/alert-groups/alert-groups";
 import {
   deleteIntegration,
   getGetIntegrationQueryKey,
@@ -45,6 +50,9 @@ export function IntegrationDeleteDialog({ integration }: { integration: Integrat
       await navigate({ to: "/integrations" });
       queryClient.removeQueries({ queryKey: getGetIntegrationQueryKey(integration.id) });
       void queryClient.invalidateQueries({ queryKey: getListIntegrationsQueryKey() });
+      void queryClient.invalidateQueries({ queryKey: getListAlertGroupsQueryKey() });
+      void queryClient.invalidateQueries({ queryKey: getGetAlertGroupCountsQueryKey() });
+      void queryClient.invalidateQueries({ queryKey: getGetAlertGroupStatisticsQueryKey() });
     },
     // A newer version was read meanwhile: the page reads it again, and a second Delete sends it.
     onError: (err) => {
@@ -62,6 +70,10 @@ export function IntegrationDeleteDialog({ integration }: { integration: Integrat
         onClick={() => {
           remove.reset();
           setOpen(true);
+          // The count of open Alert Groups is read again for the dialog.
+          void queryClient.invalidateQueries({
+            queryKey: getGetIntegrationQueryKey(integration.id),
+          });
         }}
       >
         {t("integrations.delete.action")}
@@ -76,6 +88,16 @@ export function IntegrationDeleteDialog({ integration }: { integration: Integrat
               {t("integrations.delete.tokens")}
               {days !== undefined && (
                 <> {t("integrations.delete.snapshotsKept", { count: days })}</>
+              )}
+              {integration.open_alert_group_count > 0 && (
+                <>
+                  {" "}
+                  <span data-testid="integration-delete-open-alert-groups">
+                    {t("integrations.delete.openAlertGroups", {
+                      count: integration.open_alert_group_count,
+                    })}
+                  </span>
+                </>
               )}
             </DialogDescription>
           </DialogHeader>

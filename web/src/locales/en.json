@@ -153,7 +153,9 @@
     "title": "Alertmanager routes"
   },
   "alerts": {
+    "alertGroupLink": "Alert Group #{{number}}",
     "columns": {
+      "alertGroup": "Alert Group",
       "groups": "Alertmanager groups",
       "labels": "Labels",
       "lastSeen": "Last seen",
@@ -397,6 +399,8 @@
     },
     "delete": {
       "action": "Delete",
+      "openAlertGroups_one": "{{count}} open Alert Group will be resolved.",
+      "openAlertGroups_other": "{{count}} open Alert Groups will be resolved.",
       "snapshotsKept_one": "Its Stored Snapshots are kept for {{count}} day.",
       "snapshotsKept_other": "Its Stored Snapshots are kept for {{count}} days.",
       "title": "Delete integration {{name}}?",
@@ -511,6 +515,7 @@
     "routes": "Routes",
     "security": "Security",
     "serviceAccounts": "Service accounts",
+    "statistics": "Statistics",
     "users": "Users"
   },
   "notices": {
@@ -674,7 +679,10 @@
     "delete": {
       "action": "Delete",
       "description": "Alerts it would take go to the next matching Route.",
-      "openAlertGroups": "This route still has open Alert Groups, so it cannot be deleted yet.",
+      "moveAndDelete": "Move and delete",
+      "openAlertGroups_one": "This route has {{count}} open Alert Group. Move it to the Default route to delete the route.",
+      "openAlertGroups_other": "This route has {{count}} open Alert Groups. Move them to the Default route to delete it.",
+      "startedMeanwhile": "New Alert Groups started on this route meanwhile.",
       "title": "Delete route {{name}}?"
     },
     "edit": {
@@ -710,6 +718,18 @@
       "remove": "Remove {{label}} from the Group key"
     },
     "hint": "Muster checks the routes from the top: the first route whose Matchers all match takes the alert.",
+    "lifecycle": {
+      "gracePeriod": "Grace period",
+      "gracePeriodHint": "After a person resolves an Alert Group, alerts that still fire this long start a new one.",
+      "minutes": "minutes",
+      "minutesInvalid": "Enter a number of minutes, 0 or more.",
+      "off": "Off",
+      "on": "On",
+      "reopenWindow": "Reopen window",
+      "reopenWindowHint": "An alert with the same key firing this soon after Muster resolved the Alert Group reopens it.",
+      "title": "Lifecycle",
+      "urgentRise": "A rise to Urgent removes the acknowledgement"
+    },
     "list": {
       "defaultHint": "Takes every alert no other route took. Always last.",
       "dragHint": "Drag to change the order",
@@ -929,6 +949,59 @@
       "showAll": "Show all",
       "title": "Stored Snapshot"
     }
+  },
+  "statistics": {
+    "by": {
+      "integration": "By integration",
+      "label": "Show",
+      "route": "By route"
+    },
+    "columns": {
+      "alertGroups": "Alert Groups",
+      "integration": "Integration",
+      "median": "Median",
+      "p95": "95th percentile",
+      "route": "Route",
+      "timeToAcknowledge": "Time to acknowledge",
+      "timeToResolve": "Time to resolve"
+    },
+    "controls": "What to show",
+    "days": {
+      "ackMedian": "Median time to acknowledge",
+      "caption": "Alert Groups per day of start: {{name}}",
+      "day": "Day",
+      "empty": "No Alert Groups started in this period.",
+      "resolveMedian": "Median time to resolve"
+    },
+    "emptyIntegrations": "There are no integrations to show.",
+    "emptyRoutes": "There are no routes to show.",
+    "errors": {
+      "unknownItem": "A chosen item does not exist any more. Remove it from the choice."
+    },
+    "hint": "Alert Groups that started in the period, with the median and the 95th percentile of the time to acknowledge and the time to resolve. Days are split in your time zone, {{timeZone}}.",
+    "items": {
+      "allIntegrations": "All integrations; add one to narrow",
+      "allRoutes": "All routes; add one to narrow",
+      "integrations": "Integrations",
+      "routes": "Routes"
+    },
+    "none": "—",
+    "period": {
+      "custom": "Custom",
+      "from": "From",
+      "incomplete": "Choose both days of the period.",
+      "invalid": "The period must start before it ends.",
+      "label": "Period",
+      "last30Days": "Last 30 days",
+      "last7Days": "Last 7 days",
+      "last90Days": "Last 90 days",
+      "to": "To"
+    },
+    "table": {
+      "byIntegration": "Statistics by integration",
+      "byRoute": "Statistics by route"
+    },
+    "title": "Statistics"
   },
   "table": {
     "loadMore": "Load more"

@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as PasswordSetupRouteImport } from './routes/password-setup'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as StatisticsRouteImport } from './routes/statistics'
 import { Route as TotpEnrolmentRouteImport } from './routes/totp-enrolment'
 import { Route as AdminAuditLogRouteImport } from './routes/admin.audit-log'
 import { Route as AdminOidcRouteImport } from './routes/admin.oidc'
@@ -51,6 +52,11 @@ const ProfileRoute = ProfileRouteImport.update({
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StatisticsRoute = StatisticsRouteImport.update({
+  id: '/statistics',
+  path: '/statistics',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TotpEnrolmentRoute = TotpEnrolmentRouteImport.update({
@@ -160,6 +166,7 @@ export interface FileRoutesByFullPath {
   '/password-setup': typeof PasswordSetupRoute
   '/profile': typeof ProfileRoute
   '/sign-in': typeof SignInRouteWithChildren
+  '/statistics': typeof StatisticsRoute
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
@@ -185,6 +192,7 @@ export interface FileRoutesByTo {
   '/password-setup': typeof PasswordSetupRoute
   '/profile': typeof ProfileRoute
   '/sign-in': typeof SignInRouteWithChildren
+  '/statistics': typeof StatisticsRoute
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
@@ -211,6 +219,7 @@ export interface FileRoutesById {
   '/password-setup': typeof PasswordSetupRoute
   '/profile': typeof ProfileRoute
   '/sign-in': typeof SignInRouteWithChildren
+  '/statistics': typeof StatisticsRoute
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
@@ -238,6 +247,7 @@ export interface FileRouteTypes {
     | '/password-setup'
     | '/profile'
     | '/sign-in'
+    | '/statistics'
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
@@ -263,6 +273,7 @@ export interface FileRouteTypes {
     | '/password-setup'
     | '/profile'
     | '/sign-in'
+    | '/statistics'
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
@@ -288,6 +299,7 @@ export interface FileRouteTypes {
     | '/password-setup'
     | '/profile'
     | '/sign-in'
+    | '/statistics'
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
@@ -314,6 +326,7 @@ export interface RootRouteChildren {
   PasswordSetupRoute: typeof PasswordSetupRoute
   ProfileRoute: typeof ProfileRoute
   SignInRoute: typeof SignInRouteWithChildren
+  StatisticsRoute: typeof StatisticsRoute
   TotpEnrolmentRoute: typeof TotpEnrolmentRoute
   AdminAuditLogRoute: typeof AdminAuditLogRoute
   AdminOidcRoute: typeof AdminOidcRoute
@@ -362,6 +375,13 @@ declare module '@tanstack/react-router' {
       path: '/sign-in'
       fullPath: '/sign-in'
       preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/statistics': {
+      id: '/statistics'
+      path: '/statistics'
+      fullPath: '/statistics'
+      preLoaderRoute: typeof StatisticsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/totp-enrolment': {
@@ -516,6 +536,7 @@ const rootRouteChildren: RootRouteChildren = {
   PasswordSetupRoute: PasswordSetupRoute,
   ProfileRoute: ProfileRoute,
   SignInRoute: SignInRouteWithChildren,
+  StatisticsRoute: StatisticsRoute,
   TotpEnrolmentRoute: TotpEnrolmentRoute,
   AdminAuditLogRoute: AdminAuditLogRoute,
   AdminOidcRoute: AdminOidcRoute,

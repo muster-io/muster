@@ -40,8 +40,8 @@ interface Choice {
   label: string;
 }
 
-/** A picker of several values: a native select adds one, a chip removes it. */
-function MultiPicker({
+/** A picker of several values: a native select adds one, a chip removes it; the statistics page uses it too. */
+export function MultiPicker({
   label,
   placeholder,
   choices,

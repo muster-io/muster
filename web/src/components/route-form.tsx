@@ -2,9 +2,10 @@
 // Copyright The Muster Authors
 
 // The Route editor (C-08.FR-1, FR-2, FR-4, FR-5): the name, the description, the Matchers (none for the Default
-// route), the urgent mark and the Group key with its preview. The other fields of a Route — its Destinations and the
-// policy fields of later capabilities — are not shown yet: they travel unchanged from the profile of a new Route, or
-// from the stored Route, with every save. Without routes:write the editor only shows the Route.
+// route), the urgent mark, the Group key with its preview and the Lifecycle section (C-09.FR-4, FR-5, FR-9). The other
+// fields of a Route — its Destinations and the policy fields of later capabilities — are not shown yet: they travel
+// unchanged from the profile of a new Route, or from the stored Route, with every save. Without routes:write the
+// editor only shows the Route.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
@@ -28,6 +29,14 @@ import {
   matchersOf,
   sentRows,
 } from "./matcher-builder";
+import {
+  LIFECYCLE_POINTERS,
+  RoutePolicyLifecycle,
+  RoutePolicyLifecycleReadOnly,
+  lifecycleSchema,
+  lifecycleValues,
+  withLifecycle,
+} from "./route-policy-lifecycle";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -52,6 +61,7 @@ const formSchema = z
       }),
     ),
     group_key: z.array(z.string()),
+    ...lifecycleSchema,
   })
   .superRefine((v, ctx) => {
     v.matchers.forEach((row, index) => {
@@ -70,6 +80,7 @@ function formValues(base: RouteInput): FormValues {
     urgent: base.urgent,
     matchers: matcherRows(base.matchers),
     group_key: [...base.group_key],
+    ...lifecycleValues(base.policy),
   };
 }
 
@@ -91,7 +102,7 @@ function inputOf(base: RouteInput, v: FormValues, draft: string, isDefault: bool
     matchers: isDefault ? [] : matchersOf(v.matchers),
     group_key: withDraft(v.group_key, draft),
     destination_ids: [...base.destination_ids],
-    policy: base.policy,
+    policy: withLifecycle(base.policy, v),
   };
 }
 
@@ -222,8 +233,15 @@ export function RouteForm({
       applyFieldProblem(err, sent);
       const rest: string[] = [];
       for (const item of err.errors ?? []) {
+        const lifecycleField = LIFECYCLE_POINTERS[item.pointer];
         if (item.pointer === "/name") {
           form.setError("name", { type: item.code, message: item.code }, { shouldFocus: true });
+        } else if (lifecycleField !== undefined) {
+          form.setError(
+            lifecycleField,
+            { type: item.code, message: item.code },
+            { shouldFocus: true },
+          );
         } else if (item.pointer === "/description") {
           form.setError("description", { type: item.code, message: item.code });
         } else if (
@@ -311,6 +329,7 @@ export function RouteForm({
             readOnly
           />
         </div>
+        <RoutePolicyLifecycleReadOnly policy={base.policy} />
         <div>
           <Button type="button" variant="outline" onClick={onCancel}>
             {t("routes.form.back")}
@@ -449,6 +468,17 @@ export function RouteForm({
           }}
         />
       </div>
+      <RoutePolicyLifecycle
+        id={`${ID}-lifecycle`}
+        reopenWindow={form.register("reopen_window_minutes", { valueAsNumber: true })}
+        gracePeriod={form.register("grace_period_minutes", { valueAsNumber: true })}
+        urgentRise={form.register("urgent_rise_removes_ack")}
+        errors={{
+          reopen_window_minutes: errors.reopen_window_minutes?.message,
+          grace_period_minutes: errors.grace_period_minutes?.message,
+          urgent_rise_removes_ack: errors.urgent_rise_removes_ack?.message,
+        }}
+      />
       {showStale && (
         <Alert variant="destructive">
           <AlertDescription className="flex flex-wrap items-center gap-3 text-current">

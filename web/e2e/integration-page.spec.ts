@@ -96,6 +96,17 @@ function alertRows(page: Page, table = "Alerts"): Locator {
     });
 }
 
+/** The cell of a row of the Alerts view in the column with this header, wherever the column is. */
+async function alertCell(page: Page, row: Locator, header: string): Promise<Locator> {
+  const headers = await page
+    .getByRole("table", { name: "Alerts" })
+    .getByRole("columnheader")
+    .allTextContents();
+  const index = headers.indexOf(header);
+  expect(index, `the column ${header} among ${headers.join(", ")}`).toBeGreaterThanOrEqual(0);
+  return row.getByRole("cell").nth(index);
+}
+
 async function addMatcher(page: Page, matcher: string): Promise<void> {
   await page.getByRole("textbox", { name: "Label filters" }).fill(matcher);
   await page.getByRole("button", { name: "Add matcher" }).click();
@@ -262,9 +273,9 @@ test("shows learned routes, warnings, the built-in Integration and the Alerts vi
   await expect(dbA.getByText("cluster=a", { exact: true })).toBeVisible();
   // startsAt and the time last seen, in the browser's time zone.
   const shown = /^[A-Z][a-z]{2} \d{1,2}, \d{4}, \d{2}:\d{2}$/;
-  // The columns: labels, state, Route, Severity, startsAt, last seen.
-  await expect(dbA.getByRole("cell").nth(4)).toHaveText(shown);
-  await expect(dbA.getByRole("cell").nth(5)).toHaveText(shown);
+  await expect(await alertCell(page, dbA, "Started")).toHaveText(shown);
+  await expect(await alertCell(page, dbA, "Last seen")).toHaveText(shown);
+  await expect((await alertCell(page, dbA, "Alert Group")).getByRole("link")).toHaveText(/^#\d+$/);
   await expect(dbA.getByTestId("static-label-warning")).toHaveText(
     "Static label cluster not applied: the alert has its own value.",
   );
