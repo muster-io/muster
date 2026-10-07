@@ -649,6 +649,25 @@ func (q *Queries) GetRoutePolicy(ctx context.Context, arg GetRoutePolicyParams) 
 	return i, err
 }
 
+const getSnapshotReceivedAt = `-- name: GetSnapshotReceivedAt :one
+SELECT received_at
+FROM stored_snapshots
+WHERE org_id = $1 AND id = $2
+`
+
+type GetSnapshotReceivedAtParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// GetSnapshotReceivedAt reads when the Stored Snapshot behind a change was received, for the latency of its delivery.
+func (q *Queries) GetSnapshotReceivedAt(ctx context.Context, arg GetSnapshotReceivedAtParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getSnapshotReceivedAt, arg.OrgID, arg.ID)
+	var received_at time.Time
+	err := row.Scan(&received_at)
+	return received_at, err
+}
+
 const insertDowntimeEntries = `-- name: InsertDowntimeEntries :exec
 INSERT INTO timeline_entries (org_id, public_id, alert_group_id, at, kind, system_event, actor_kind, transport,
                               period_from, period_to)

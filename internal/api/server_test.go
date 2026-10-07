@@ -35,7 +35,7 @@ import (
 var t0 = time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 
 var roles = auth.Roles{
-	auth.RoleAdmin: {"alert-groups:acknowledge", "alert-groups:read", "alert-groups:resolve", "alert-groups:snooze",
+	auth.RoleAdmin: {"alert-groups:acknowledge", "alert-groups:read", "alert-groups:resolve", "alert-groups:snooze", "destinations:read",
 		"integrations:read", "integrations:write", "organization:write",
 		"service-accounts:read", "service-accounts:write", "stored-snapshots:read", "system-status:read", "users:read",
 		"users:write"},
@@ -418,8 +418,8 @@ func TestNotFoundAndNotImplemented(t *testing.T) {
 			t.Errorf("%s %s = %d %s", c.method, c.path, a.status, a.body)
 		}
 	}
-	// listAlertGroupDeliveries arrives with delivery, in a later phase.
-	deliveries := "/api/v1/alert-groups/AGAAAAAAAAAAAA/deliveries"
+	// getSystemStatus arrives with the System status page, in a later phase.
+	deliveries := "/api/v1/system-status"
 	a := x.call(t, http.MethodGet, deliveries, "", "Cookie", "admin-cookie")
 	if a.status != http.StatusNotImplemented || a.json(t)["type"] != problemBase+"not-implemented" {
 		t.Errorf("GET %s = %d %s", deliveries, a.status, a.body)
@@ -613,7 +613,7 @@ func TestPermissions(t *testing.T) {
 	}
 	_ = json.Unmarshal(a.body, &list)
 	if len(list.Items) != 3 || list.Items[0].Name != "admin" || list.Items[2].Name != "viewer" ||
-		len(list.Items[0].Permissions) != 13 || len(list.Items[2].Permissions) != 2 {
+		len(list.Items[0].Permissions) != 14 || len(list.Items[2].Permissions) != 2 {
 		t.Errorf("roles = %+v", list)
 	}
 	id := &auth.Identity{Permissions: []auth.Permission{"users:read"}}

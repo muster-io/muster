@@ -27,6 +27,9 @@ const BacklogInterval = 15 * time.Second
 // AlertGroupGaugeInterval is how often the Leader counts the open Alert Groups for muster_alert_groups.
 const AlertGroupGaugeInterval = 15 * time.Second
 
+// DeliveryQueueInterval is how often the Leader counts the pending deliveries for muster_delivery_queue.
+const DeliveryQueueInterval = 15 * time.Second
+
 // HeartbeatCheckInterval is how often the Leader runs the Heartbeat check, and StaleScanInterval the Stale scan.
 const (
 	HeartbeatCheckInterval = 10 * time.Second
@@ -121,8 +124,14 @@ type Work struct {
 	// AlertGroupRetention deletes, in batches, the details and the summary rows of the Alert Groups of the
 	// Organization orgID past their retention periods at now (C-09.FR-16) and returns how many of each it deleted.
 	AlertGroupRetention func(ctx context.Context, orgID int64, now time.Time) (details, summaries int64, err error)
-	// ClockMoved, in development mode, wakes the Heartbeat check, the Stale scan and the Alert Group retention when
-	// the development clock moved; nil otherwise.
+	// DeliveryQueue sets muster_delivery_queue from the pending deliveries and due Thread replies of the Organization
+	// orgID (C-11.FR-17).
+	DeliveryQueue func(ctx context.Context, orgID int64) error
+	// ThreadReplyRetention deletes, in batches, the Thread replies of the Organization orgID that are sent, dropped or
+	// not delivered and older than retention.alert_details at now, and returns how many it deleted.
+	ThreadReplyRetention func(ctx context.Context, orgID int64, now time.Time) (int64, error)
+	// ClockMoved, in development mode, wakes the Heartbeat check, the Stale scan, the Alert Group retention and the
+	// retention of Thread replies when the development clock moved; nil otherwise.
 	ClockMoved *Wakes
 }
 
@@ -180,13 +189,14 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 
 // Tasks returns the closed list of Leader tasks (ADR-0007): partition maintenance and retention, the alive mark, the
 // pruning of replica records, the pruning of short-lived state, the ingestion backlog, the retention of the Alerts
-// view, the Heartbeat check, the Stale scan, the count of open Alert Groups and the Alert Group retention. Later
-// capabilities add theirs here: Telegram polling, the outgoing
-// heartbeat and the OIDC client secret expiry check. The Keeper calls the result at every leadership, so each one
+// view, the Heartbeat check, the Stale scan, the count of open Alert Groups, the Alert Group retention, the count of
+// pending deliveries and the retention of Thread replies. Later capabilities add theirs here: Telegram polling, the
+// outgoing heartbeat and the OIDC client secret expiry check. The Keeper calls the result at every leadership, so each one
 // starts with a takeover; the Heartbeat check waits for it, so that it measures the timeouts from the end of a
 // downtime the takeover records (C-07.FR-4).
 func Tasks(w Work) func() []Task {
 	heartbeatWake, staleWake, retentionWake := w.ClockMoved.channel(), w.ClockMoved.channel(), w.ClockMoved.channel()
+	replyRetentionWake := w.ClockMoved.channel()
 	return func() []Task {
 		var takenOver atomic.Bool
 		return []Task{
@@ -219,6 +229,9 @@ func Tasks(w Work) func() []Task {
 			{Name: "alert_group_gauges", Every: AlertGroupGaugeInterval, Run: w.alertGroupGauges},
 			{Name: "alert_group_retention", Every: MaintenanceInterval, Wake: retentionWake,
 				Run: w.alertGroupRetention},
+			{Name: "delivery_queue", Every: DeliveryQueueInterval, Run: w.deliveryQueue},
+			{Name: "thread_reply_retention", Every: MaintenanceInterval, Wake: replyRetentionWake,
+				Run: w.threadReplyRetention},
 		}
 	}
 }
@@ -235,6 +248,41 @@ func (w Work) alertGroupGauges(ctx context.Context) error {
 	var errs []error
 	for _, org := range orgs {
 		errs = append(errs, w.AlertGroupGauges(ctx, org))
+	}
+	return errors.Join(errs...)
+}
+
+// deliveryQueue counts the pending deliveries of every Organization; counting twice sets the same values.
+func (w Work) deliveryQueue(ctx context.Context) error {
+	if w.DeliveryQueue == nil {
+		return nil
+	}
+	orgs, err := w.Organizations(ctx)
+	if err != nil {
+		return fmt.Errorf("list the organizations to count the delivery queues of: %w", err)
+	}
+	var errs []error
+	for _, org := range orgs {
+		errs = append(errs, w.DeliveryQueue(ctx, org))
+	}
+	return errors.Join(errs...)
+}
+
+// threadReplyRetention runs the retention of Thread replies in every Organization at the same now, on the business
+// clock; a failed Organization does not stop the others. Running it twice deletes nothing more.
+func (w Work) threadReplyRetention(ctx context.Context) error {
+	if w.ThreadReplyRetention == nil {
+		return nil
+	}
+	orgs, err := w.Organizations(ctx)
+	if err != nil {
+		return fmt.Errorf("list the organizations for the thread reply retention: %w", err)
+	}
+	now := w.Business.Now()
+	var errs []error
+	for _, org := range orgs {
+		_, err := w.ThreadReplyRetention(ctx, org, now)
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }

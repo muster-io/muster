@@ -14,6 +14,7 @@ import (
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/matchers"
 	"github.com/muster-io/muster/internal/organization"
@@ -665,4 +666,28 @@ func labelsOf(m map[string]string) gen.Labels {
 		return gen.Labels{}
 	}
 	return m
+}
+
+// ListAlertGroupDeliveries is listAlertGroupDeliveries: the delivery state of the Alert Group in each Destination.
+func (s *Server) ListAlertGroupDeliveries(ctx context.Context, req gen.ListAlertGroupDeliveriesRequestObject) (
+	gen.ListAlertGroupDeliveriesResponseObject, error) {
+	states, err := s.deliveries.States(ctx, req.AlertGroupId)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.ListAlertGroupDeliveries200JSONResponse{Items: make([]gen.AlertGroupDelivery, 0, len(states))}
+	for _, st := range states {
+		updated := st.UpdatedAt
+		item := gen.AlertGroupDelivery{
+			Destination: gen.DestinationRef{Id: st.Destination.PublicID, Name: st.Destination.Name,
+				Type: gen.DestinationType(st.Destination.Type),
+				Health: healthOf(destinations.Health{State: st.Destination.Health, Since: st.Destination.BrokenSince,
+					Reason: st.Destination.BrokenReason})},
+			State: gen.DeliveryState(st.State), ThreadNotAttached: st.ThreadNotAttached,
+			PossibleDuplicate: st.PossibleDuplicate, MessageUrl: nullableString(st.MessageURL),
+			Error: nullableString(st.Error), UpdatedAt: &updated,
+		}
+		out.Items = append(out.Items, item)
+	}
+	return out, nil
 }

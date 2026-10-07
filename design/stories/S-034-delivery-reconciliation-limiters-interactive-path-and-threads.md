@@ -17,6 +17,8 @@ files_touched:
   - internal/delivery/render.go
   - internal/delivery/query.sql
   - internal/delivery/deliverytest/recorder.go
+  - internal/delivery/deliverytest/recorder_test.go
+  - internal/delivery/export_test.go
   - internal/delivery/enqueue_test.go
   - internal/delivery/worker_test.go
   - internal/delivery/limiter_test.go
@@ -26,19 +28,22 @@ files_touched:
   - internal/destinations/query.sql
   - internal/destinations/destinations_test.go
   - internal/groups/dispatcher.go
-  - internal/groups/read.go
+  - internal/groups/dispatcher_test.go
+  - internal/groups/grouping.go
   - internal/groups/query.sql
-  - internal/routing/routes.go
   - internal/api/destinations.go
   - internal/api/alertgroups.go
+  - internal/api/routes.go
   - internal/api/destinations_test.go
   - internal/api/server.go
+  - internal/api/server_test.go
   - internal/api/problem.go
-  - internal/archlint/archlint.go
   - internal/leader/tasks.go
+  - internal/leader/leader_test.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - sqlc.yaml
 acceptance:
   - "[C-11.FR-1, C-11.AC-1] Ten Alerts in one Snapshot and an Acknowledge within 2 seconds produce, through the recording test adapter, one Publication and at most one edit; changes made while a call is pending collapse into the next call, which carries the latest Desired state."
@@ -91,9 +96,13 @@ issue: 34
   merges `TimelineDeliveryEntry`; `Route.destinations` and `listDestinations?route=` are filled. Schemas:
   `AlertGroupDelivery(List)`, `DeliveryState` (`pending` and `delivered` in this story), `Destination` with its three
   variants for reading, `DestinationList`, `DestinationRef`, `DestinationHealth`, `HealthState`, `Limiter`,
-  `MentionSettings`, `TimelineDeliveryEntry`, `DeliveryEventKind`.
+  `MentionSettings`, `TimelineDeliveryEntry`, `DeliveryEventKind`. The Timeline merge itself and the
+  `TimelineDeliveryEntry` mapping exist since S-028 (`internal/groups/read.go`); this story fills `delivery_events`.
 - **Desired state** (C-11.FR-1, ADR-0005; `deliveries`): the dispatcher's re-render step (the hook of S-028) calls
-  `delivery.Enqueue` inside the dispatcher's transaction with the Alert Group and the lifecycle event it recorded. For
+  `delivery.Enqueue` inside the dispatcher's transaction with the Alert Group and the lifecycle events it recorded
+  (`groups.Rendering`: the Alert Group, the actor, each event with its number, row, fingerprints and reason, and the
+  receipt time of the Stored Snapshot behind the change, which `grouping.go` marks in the Snapshot's context and the
+  dispatcher reads once per transaction). For
   each Destination of the Alert Group's Route that is not deleted, `Enqueue` creates the `deliveries` row if missing,
   renders the Root message through the renderer, and — when `desired_hash` changes — increments `desired_version`,
   stores `desired_text`, `desired_payload` and `desired_hash`, sets `desired_received_at` to the receipt time of the
@@ -141,8 +150,10 @@ issue: 34
   `reply_and_update` become Thread replies of the delivery, `pending` at once. `alerts_added` is batched: when
   `thread_batch_until` is empty or past, its reply is due at once and `thread_batch_until` becomes now +
   `route.thread_batching_window`; otherwise its fingerprints and `event_seqs` join the delivery's one `collecting` row,
-  due at `thread_batch_until`. Sending a new-Alerts reply sets `thread_batch_until` to its due time plus the window, so
-  Alerts that keep arriving produce one reply per window and the next ones after a longer quiet period go at once. A
+  due at `thread_batch_until`. A new collecting batch moves `thread_batch_until` to its due time plus the window — in
+  `Enqueue`, which holds the delivery row, so that the worker never locks a delivery while it holds a reply — so
+  Alerts that keep arriving produce one reply per window and the next ones after a longer quiet period go at once.
+  A collecting batch closes (becomes `pending`) when it is claimed; only earlier `pending` replies hold a reply back. A
   batch takes the loudness and Mentions of the loudest event it carries. A reply lists at most
   `delivery.thread_alerts_listed` new Alerts and then "…and K more — open in Muster". Replies of one delivery are sent
   in `id` order.
@@ -152,8 +163,9 @@ issue: 34
   Without a token the delivery is rescheduled to the time its tokens are due plus a short fixed margin — never failed.
   An outgoing webhook has only the Destination's bucket.
 - **`RetryAfter`** (C-11.FR-8): `next_attempt_at` = now + the delay exactly, `attempts` untouched; the bucket of the
-  outcome's scope is emptied until then (`tokens` 0, `refilled_at` in the future), so a Connection-wide `RetryAfter`
-  holds every Destination of the Connection.
+  outcome's scope is held until then — no token before that time and exactly one at it (`tokens` 1, `refilled_at` the
+  end of the delay, in the future) — so the next call goes exactly as asked, and a Connection-wide `RetryAfter` holds
+  every Destination of the Connection.
 - **Interactive path** (C-11.FR-2; `interactive.go`): `Interactive.Do(destination or connection, call)` takes a token
   from the same buckets, polling them during `delivery.interactive_budget`; since deliveries without a token wait for
   the margin, the interactive caller takes the next token first. It never queues and never writes `deliveries`. When the
@@ -182,15 +194,17 @@ issue: 34
   `muster_delivery_queue{destination}` (Leader gauge: `pending` deliveries and due Thread replies);
   `muster_destination_info{destination,name}`.
 - **Log events**: `delivery_attempt` (INFO: `destination`, `group` as `#N`, `kind`, `outcome`, `attempt`,
-  `duration_ms`, `retry_after_ms`).
+  `duration_ms`, `retry_after_ms`); `delivery_work_failed` (WARN: `work`, `error`) when the worker cannot attempt a
+  delivery or a Thread reply because of a database error, which any replica retries once its lease runs out.
+- **Leader tasks**: `delivery_queue` (every 15 s, `muster_delivery_queue`) and `thread_reply_retention` (hourly).
 - **Retention**: a Leader task deletes, in batches of at most 5,000 rows, `thread_replies` that are `sent`, `dropped` or
   `not_delivered` and older than `retention.alert_details` (`design/db/schema.md` §6), per Organization with its
   `org_id`.
 - **Architecture lint 3** (ADR-0016; `internal/archlint/archlint.go`): the rule and its fixtures exist since S-001;
   its configuration is `DefaultConfig().Messenger` in `archlint.go` — package `internal/delivery`, interface `Adapter`,
   methods `Publish`, `Update` and `Reply`, allowed in `worker.go`, `threads.go` and `interactive.go`. The real
-  interface must keep the name `delivery.Adapter` for the rule to find it, and every method an adapter offers to the
-  interactive path joins `Methods` there. `make lint-arch` passes over the real package and the fixtures in
+  interface keeps the name `delivery.Adapter`, so the configuration stays as it is; the interactive path takes the call
+  as a function and offers no adapter method yet, and every method a later story offers to it joins `Methods` there. `make lint-arch` passes over the real package and the fixtures in
   `internal/archlint/testdata/rule3` keep failing as before.
 - **Recording test adapter** (`deliverytest`): records every call with its time, Destination, message and loudness;
   answers from a script per call (`ok`, `retry_after` with a delay and scope, `transient`, `fatal`, `unknown`,
@@ -198,7 +212,8 @@ issue: 34
   `Check`. Every C-11 to C-16 test uses it through the adapter interface.
 - **Wiring** (`internal/api/server.go`, `sqlc.yaml`): the three operations join the implemented-operations map and
   the API `Config` gains the Destinations reader and the delivery state; `sqlc.yaml` gains the entries for
-  `internal/delivery/query.sql` and `internal/destinations/query.sql`.
+  `internal/delivery/query.sql` and `internal/destinations/query.sql`. `Route.destinations` and `destination_ids` are
+  composed in `internal/api/routes.go` from the Destinations reader, so `internal/routing` does not query Destinations.
 - **Defaults**: `delivery.interactive_budget`, `delivery.thread_alerts_listed`,
   `route.thread_batching_window`, `delivery.transient_backoff` (first step only, until S-035).
 
@@ -240,7 +255,8 @@ go test -tags integration -run TestLive -v ./internal/delivery/...
 # === RUN   TestLive/limiter_mixed_calls                (C-11.AC-14)
 #     limiter 6 per 60 s: calls 1–6 passed (3 publish, 3 update); call 7 (update) waited for a token
 # === RUN   TestLive/limiter_two_replicas
-#     two workers, limiter 6 per 60 s: 6 calls in the first minute, 12 after two minutes
+#     two workers, limiter 6 per 60 s: 6 calls at once, 11 in the first minute, 18 after two minutes — one token every
+#     10 s, the rate of one replica
 # === RUN   TestLive/urgent_first
 #     queue of 5 with one Urgent: the Urgent delivery was called first; the limiter held all of them
 # === RUN   TestLive/interactive_ahead_of_queue         (C-11.FR-2)
@@ -248,7 +264,7 @@ go test -tags integration -run TestLive -v ./internal/delivery/...
 # === RUN   TestLive/interactive_limited
 #     no token within 5 s: limited, retry after 7 s; the recorder saw no call
 # === RUN   TestLive/thread_batching                    (C-11.FR-4, FR-5)
-#     t=0 s reply (1 Alert); t=10–50 s collected; t=60 s reply listing 10 of 12 Alerts and "…and 2 more — open in Muster"; t=200 s reply at once
+#     t=0 s reply (1 Alert); t=10–55 s collected; t=60 s reply listing 10 of 12 Alerts and "…and 2 more — open in Muster"; t=200 s reply at once
 # === RUN   TestLive/clock_wake
 #     a Thread batch due in 60 s: an advance of the development clock by 60 s woke both workers and the reply went at once
 # === RUN   TestLive/lifecycle_rows                     (C-11.AC-10)
@@ -270,7 +286,7 @@ curl -s -b jar "$API/alert-groups/$G/deliveries" | jq -c .                   # {
 curl -s -b jar "$API/alert-groups/$G/timeline?kind=delivery" | jq -c .items  # []
 curl -s -b jar $API/routes | jq -c '[.items[] | {name, destinations}]'       # [{"name":"Default","destinations":[]}]
 curl -s -b jar $API/destinations/DS000000000000 | jq -r .status              # 404
-curl -s localhost:8082/metrics | grep -c '^# TYPE muster_delivery_attempts_total counter'   # 1
+curl -s localhost:8082/metrics | grep -c '^muster_delivery'                    # 0: a metric has series only per Destination
 make lint-arch && echo ok                                                    # ok
 ```
 
