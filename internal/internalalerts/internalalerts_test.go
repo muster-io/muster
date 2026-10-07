@@ -89,10 +89,14 @@ func TestRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 2 || defs[0] != HeartbeatLost || defs[1] != SnapshotTruncated ||
+	if len(defs) != 3 || defs[0] != DestinationBroken || defs[1] != HeartbeatLost || defs[2] != SnapshotTruncated ||
 		Lookup("MusterSnapshotTruncated") != SnapshotTruncated || Lookup("MusterHeartbeatLost") != HeartbeatLost ||
-		Lookup("MusterUnknown") != nil {
+		Lookup("MusterDestinationBroken") != DestinationBroken || Lookup("MusterUnknown") != nil {
 		t.Errorf("registry %v", defs)
+	}
+	if d := DestinationBroken; d.Severity != SeverityCritical || d.StaticLabels || d.Capability != "C-11" ||
+		!slices.Equal(d.Labels(), []string{"destination", "destination_name"}) {
+		t.Errorf("MusterDestinationBroken = %+v", d)
 	}
 	if h := HeartbeatLost; h.Severity != SeverityCritical || !h.StaticLabels || h.Capability != "C-07" ||
 		!slices.Equal(h.Labels(), []string{"integration", "integration_name"}) {

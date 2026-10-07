@@ -1,18 +1,21 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Copyright The Muster Authors
 
--- ListRoutes lists the Routes that are not deleted in evaluation order, the Default route last.
+-- ListRoutes lists the Routes that are not deleted in evaluation order, the Default route last, with their active
+-- Storm.
 -- name: ListRoutes :many
-SELECT id, public_id, name, description, position, is_default, urgent, group_key, reopen_window_seconds,
-       grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
-       storm_threshold, language, template_root_message, template_line, template_ack_timeout_notice,
-       ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
-       reminders_cap_seconds, auto_unacknowledge, created_at, version
-FROM routes
-WHERE org_id = @org_id AND deleted_at IS NULL
-ORDER BY is_default, position, id;
+SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urgent, r.group_key,
+       r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
+       r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
+       r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
+       r.reminders_enabled, r.reminders_first_interval_seconds, r.reminders_cap_seconds, r.auto_unacknowledge,
+       r.created_at, r.version, s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count
+FROM routes r
+LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
+WHERE r.org_id = @org_id AND r.deleted_at IS NULL
+ORDER BY r.is_default, r.position, r.id;
 
--- GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based.
+-- GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, and its active Storm.
 -- name: GetRoute :one
 SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urgent, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
@@ -23,8 +26,10 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urg
        (SELECT count(*)
         FROM routes o
         WHERE o.org_id = @org_id AND o.deleted_at IS NULL
-          AND (o.is_default, o.position, o.id) < (r.is_default, r.position, r.id))::bigint AS place
+          AND (o.is_default, o.position, o.id) < (r.is_default, r.position, r.id))::bigint AS place,
+       s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count
 FROM routes r
+LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
 WHERE r.org_id = @org_id AND r.public_id = @public_id AND r.deleted_at IS NULL;
 
 -- LockRoute locks a Route that is not deleted for a change; the lock leaves the key alone, so that routing, whose
@@ -210,3 +215,50 @@ GROUP BY route_id;
 UPDATE alerts
 SET route_id = @route_id
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
+
+-- ResolveDestinations reads the Destinations that are not deleted among the public_ids, for the Destinations of a
+-- Route.
+-- name: ResolveDestinations :many
+SELECT id, public_id
+FROM destinations
+WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND deleted_at IS NULL;
+
+-- ListRouteDestinationIDs lists the Destinations that are not deleted of the Routes, by public_id.
+-- name: ListRouteDestinationIDs :many
+SELECT rd.route_id, rd.destination_id, d.public_id
+FROM route_destinations rd
+JOIN destinations d ON d.org_id = rd.org_id AND d.id = rd.destination_id
+WHERE rd.org_id = @org_id AND rd.route_id = ANY(@route_ids::bigint[]) AND d.deleted_at IS NULL
+ORDER BY rd.route_id, d.public_id;
+
+-- InsertRouteDestinations adds Destinations to a Route, added now.
+-- name: InsertRouteDestinations :exec
+INSERT INTO route_destinations (route_id, destination_id, org_id, added_at)
+SELECT @route_id, unnest(@destination_ids::bigint[]), @org_id, @now;
+
+-- DeleteRouteDestinations removes Destinations from a Route.
+-- name: DeleteRouteDestinations :exec
+DELETE FROM route_destinations
+WHERE org_id = @org_id AND route_id = @route_id AND destination_id = ANY(@destination_ids::bigint[]);
+
+-- LockRouteMembership takes, until the transaction ends, the membership lock of a Route exclusively before its
+-- Destinations change: delivery's Enqueue takes it shared (ShareRouteMembership, class db.RouteMembershipLockClass),
+-- so that a change of the Destinations and an Enqueue on the Route serialize.
+-- name: LockRouteMembership :exec
+SELECT pg_advisory_xact_lock(@lock_class::int, hashint8(@route_id::bigint));
+
+-- BumpRoutesOfDestination gives each Route that is not deleted of a Destination about to leave them a new version,
+-- locking them in id order, and returns them in that order.
+-- name: BumpRoutesOfDestination :many
+UPDATE routes r
+SET version = r.version + 1, updated_at = @now
+FROM (SELECT x.id
+      FROM routes x
+      WHERE x.org_id = @org_id AND x.deleted_at IS NULL
+        AND x.id IN (SELECT rd.route_id
+                     FROM route_destinations rd
+                     WHERE rd.org_id = @org_id AND rd.destination_id = @destination_id)
+      ORDER BY x.id
+      FOR NO KEY UPDATE OF x) AS locked
+WHERE r.org_id = @org_id AND r.id = locked.id
+RETURNING r.id, r.public_id;

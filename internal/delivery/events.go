@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/outbound"
@@ -21,7 +19,7 @@ import (
 // Destination. Delivery events are not lifecycle events: they reach neither messengers nor outgoing webhook events.
 type EventKind string
 
-// The kinds of delivery events; this story records EventPublication, S-035 and S-042 the others.
+// The kinds of delivery events; S-042 records EventThreadNotAttached, delivery the others.
 const (
 	EventPublication          EventKind = "publication"
 	EventPossibleDuplicate    EventKind = "possible_duplicate"
@@ -37,12 +35,14 @@ const (
 	EventFinalEdit            EventKind = "final_edit"
 )
 
-// Event is one delivery event: when it happened, its Destination and, when it concerns one, its Alert Group; its
-// loudness and symbolic Mentions; for a failure its error class and the provider's masked error text; and details.
+// Event is one delivery event: when it happened, its Destination and, when it concerns one, its Alert Group or the
+// Storm of a Storm summary; its loudness and symbolic Mentions; for a failure its error class and the provider's masked
+// error text; and details.
 type Event struct {
 	At            time.Time
 	DestinationID int64
 	AlertGroupID  *int64
+	StormID       *int64
 	Kind          EventKind
 	Loudness      groups.Loudness
 	Mentions      []groups.Mention
@@ -69,13 +69,9 @@ func RecordEvent(ctx context.Context, q queries, orgID int64, e Event) error {
 			return fmt.Errorf("encode the details of the %s delivery event: %w", e.Kind, err)
 		}
 	}
-	var group pgtype.Int8
-	if e.AlertGroupID != nil {
-		group = pgtype.Int8{Int64: *e.AlertGroupID, Valid: true}
-	}
 	if err := q.InsertDeliveryEvent(ctx, dbgen.InsertDeliveryEventParams{OrgID: orgID,
 		PublicID: publicid.New(publicid.DeliveryEvent), OccurredAt: e.At.UTC(), DestinationID: e.DestinationID,
-		AlertGroupID: group, Kind: string(e.Kind), Loudness: string(loudness), Mentions: mentions,
+		AlertGroupID: nullInt(e.AlertGroupID), StormID: nullInt(e.StormID), Kind: string(e.Kind), Loudness: string(loudness), Mentions: mentions,
 		ErrorClass: nonEmpty(e.ErrorClass), Error: nonEmpty(string(e.Error)), Detail: detail}); err != nil {
 		return fmt.Errorf("record the %s delivery event: %w", e.Kind, err)
 	}

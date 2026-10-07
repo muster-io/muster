@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -15,11 +16,12 @@ import (
 )
 
 // Destinations is what the API needs of internal/destinations: reading Destinations of every type with their health
-// and Routes, and the Destinations of Routes.
+// and Routes, the Destinations of Routes, and deleting a Destination.
 type Destinations interface {
 	List(ctx context.Context, f destinations.ListFilter) (destinations.Page, error)
 	Get(ctx context.Context, publicID string) (destinations.Destination, error)
 	RouteRefs(ctx context.Context, routeIDs []int64) (map[int64][]destinations.Ref, error)
+	Delete(ctx context.Context, r destinations.Requester, publicID string, version *int64) error
 }
 
 // Deliveries is what the API needs of internal/delivery: the delivery state of an Alert Group per Destination.
@@ -82,6 +84,31 @@ func (s *Server) GetDestination(ctx context.Context, req gen.GetDestinationReque
 	}
 	tag := etag(d.Version)
 	return gen.GetDestination200JSONResponse{Body: body, Headers: gen.GetDestination200ResponseHeaders{ETag: &tag}}, nil
+}
+
+// DeleteDestination is deleteDestination (C-11.FR-14), with an optional If-Match: the Destination leaves every Route
+// and every list, its open Root messages get their final edit and its secrets are wiped once they are done.
+func (s *Server) DeleteDestination(ctx context.Context, req gen.DeleteDestinationRequestObject) (
+	gen.DeleteDestinationResponseObject, error) {
+	id, err := identity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var version *int64
+	if req.Params.IfMatch != nil {
+		if version, err = ifMatch(*req.Params.IfMatch); err != nil {
+			return nil, err
+		}
+	}
+	err = s.destinations.Delete(ctx, destinations.Requester{Actor: id.Actor(), Transport: id.Transport,
+		Address: clientAddress(ctx)}, req.DestinationId, version)
+	if errors.Is(err, destinations.ErrVersionMismatch) {
+		return nil, errPreconditionFailed
+	}
+	if err != nil {
+		return nil, err
+	}
+	return gen.DeleteDestination204Response{}, nil
 }
 
 // healthOf is the API form of the health of a Destination.

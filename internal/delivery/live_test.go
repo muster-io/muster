@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/clock"
@@ -26,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/destinations"
+	destinationsdb "github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/ingest"
@@ -33,6 +36,9 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
+	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
+	"github.com/muster-io/muster/internal/timers"
+	timersdb "github.com/muster-io/muster/internal/timers/dbgen"
 )
 
 func TestMain(m *testing.M) {
@@ -63,6 +69,11 @@ type live struct {
 	rec      *deliverytest.Recorder
 	a, b     *delivery.Worker
 	alice    groups.Caller
+	// dsvc deletes Destinations through delivery's Retire hook; timers fires the calm checks of Storms; defaultID is
+	// the Default route.
+	dsvc      *destinations.Service
+	timers    *timers.Worker
+	defaultID int64
 }
 
 func setupLive(t *testing.T, s dbtest.Server) *live {
@@ -130,6 +141,28 @@ func setupLive(t *testing.T, s dbtest.Server) *live {
 	store := delivery.NewStore(d.Pool, d.Pool)
 	l.svc = delivery.New(delivery.Config{OrgID: org.ID, Store: store, Business: l.business, Log: logger})
 	l.groups.SetRerender(l.svc.Enqueue)
+	// As the runtime wires them: Route membership, the deletion of Destinations and the calm checks of Storms.
+	l.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, routeID int64, added, removed []int64) error {
+		return l.svc.RouteDestinationsChanged(ctx, tx, routeID, added, removed)
+	})
+	l.dsvc = destinations.New(org.ID, destinations.NewStore(d.Pool))
+	l.dsvc.SetWriter(destinations.WriterConfig{Writer: destinations.NewWriter(d.Pool), Audit: w, Business: l.business,
+		Routes: func(ctx context.Context, tx destinationsdb.DBTX, id int64) error {
+			return l.routes.DestinationDeleted(ctx, tx, id)
+		},
+		Retire: func(ctx context.Context, tx destinationsdb.DBTX, id int64) error {
+			return l.svc.RetireDestination(ctx, tx, id)
+		}})
+	l.timers = &timers.Worker{Store: timers.NewStore(d.Pool), Lease: db.Lease{Owner: "t1", Duration: timers.Lease,
+		Clocks: clock.Clocks{Business: l.business, Real: l.real}},
+		Organizations: func(context.Context) ([]int64, error) { return []int64{org.ID}, nil }, Log: logger,
+		Handlers: map[string]timers.Handler{delivery.TimerStormCalmCheck: func(ctx context.Context, tx timersdb.DBTX,
+			_ int64, tm timers.Timer) (func(context.Context), error) {
+			if tm.StormID == nil {
+				return nil, nil
+			}
+			return l.svc.CheckStormCalm(ctx, tx, *tm.StormID)
+		}}}
 	l.sink = ingest.Chain(router, l.groups)
 	l.snaps = ingest.New(org.ID, ingest.NewStore(d.Pool), l.business)
 	ints := integrations.New(integrations.Config{OrgID: org.ID, Store: integrations.NewStore(d.Pool), Audit: w,
@@ -140,13 +173,20 @@ func setupLive(t *testing.T, s dbtest.Server) *live {
 		t.Fatal(err)
 	}
 	l.intID = in.ID
+	// The subtests create many Alert Groups a minute on this Route; a Storm would hold them (C-11.FR-6).
+	policy := routing.Profiles()[0].Policy
+	policy.StormThreshold = 1_000_000
 	rt, err := l.routes.Create(ctx, routing.Requester{Actor: audit.System, Transport: audit.TransportSystem},
-		routing.Input{Name: "db", GroupKey: []string{"alertname"}, Policy: routing.Profiles()[0].Policy,
+		routing.Input{Name: "db", GroupKey: []string{"alertname"}, Policy: policy,
 			Matchers: []routing.Matcher{{Label: "team", Op: "=", Value: "db"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	l.routeID = rt.ID
+	if err := d.Pool.QueryRow(ctx, `SELECT id FROM routes WHERE org_id = $1 AND is_default`, org.ID).Scan(
+		&l.defaultID); err != nil {
+		t.Fatal(err)
+	}
 	if err := d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name, mattermost_server_url,
 		bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
 		updated_at) VALUES ($1, 'CNAAAAAAAAAAA1', 'mattermost', 'bot', 'https://mm.example.org', '\x00', 'k1', $2,
@@ -181,7 +221,8 @@ func (l *live) worker(owner string) *delivery.Worker {
 	return &delivery.Worker{Store: delivery.NewStore(l.d.Pool, l.d.Pool), Lease: db.Lease{Owner: owner,
 		Duration: delivery.Lease, Clocks: clock.Clocks{Business: l.business, Real: l.real}},
 		Organizations: func(context.Context) ([]int64, error) { return []int64{l.orgID}, nil },
-		Adapters:      delivery.Adapters{delivery.TypeMattermost: l.rec}, Log: l.logger}
+		Adapters:      delivery.Adapters{delivery.TypeMattermost: l.rec}, Log: l.logger,
+		PublicURL: "http://localhost:8080"}
 }
 
 // attach puts Destinations on the Route, and only them.
@@ -210,11 +251,16 @@ func (l *live) count(t *testing.T, sql string, args ...any) int64 {
 	return n
 }
 
-// fresh starts a subtest from no delivery, Thread reply or bucket, at the given limiter of the Destinations.
+// fresh starts a subtest from no delivery, Thread reply, bucket, Route membership but the first Destination's on the
+// Route db, Storm or Broken Destination, at the given limiter of the Destinations.
 func (l *live) fresh(t *testing.T, limit, per int) {
 	t.Helper()
 	for _, stmt := range []string{`DELETE FROM thread_replies`, `DELETE FROM deliveries`,
-		`DELETE FROM rate_limit_buckets`, `DELETE FROM delivery_events`} {
+		`DELETE FROM rate_limit_buckets`, `DELETE FROM delivery_events`, `DELETE FROM route_destinations`,
+		`DELETE FROM timers WHERE kind = 'storm_calm_check'`,
+		`UPDATE storms SET ended_at = started_at WHERE ended_at IS NULL`,
+		`UPDATE destinations SET health = 'healthy', broken_since = NULL, broken_cause = NULL, broken_reason = NULL,
+			next_probe_at = NULL`} {
 		l.exec(t, stmt)
 	}
 	l.exec(t, `UPDATE destinations SET limiter_limit = $1, limiter_per_seconds = $2`, limit, per)
@@ -223,24 +269,63 @@ func (l *live) fresh(t *testing.T, limit, per int) {
 	l.business.Set(l.business.Now().Add(time.Hour).Truncate(time.Hour))
 }
 
-// fire stores a Snapshot of firing Alerts — one per alertname given, each its own Alert Group — and processes it.
+// fire stores a Snapshot of firing Alerts of the Route db — one per alertname given, each its own Alert Group — and
+// processes it.
 func (l *live) fire(t *testing.T, groupKey string, names ...string) {
 	t.Helper()
-	var alerts []string
-	for _, n := range names {
-		alerts = append(alerts, fmt.Sprintf(`{"status":"firing","labels":{"alertname":%q,"team":"db","disk":%q},`+
-			`"annotations":{},"startsAt":"2026-10-07T11:00:00Z"}`, strings.Split(n, "/")[0], n))
+	alerts := make([]alert, len(names))
+	for i, n := range names {
+		alerts[i] = alert{name: n, team: "db"}
 	}
-	body := `{"groupKey":"` + groupKey + `","status":"firing","alerts":[` + strings.Join(alerts, ",") + `]}`
+	l.fireAlerts(t, groupKey, alerts...)
+}
+
+// alert is a firing Alert: its alertname before the slash, its disk label the whole name, its team the Route it goes
+// to, and its severity when set.
+type alert struct {
+	name, team, severity string
+}
+
+// fireAlerts stores a Snapshot of firing Alerts and processes it, with the synthetic Snapshots of Internal alerts
+// waiting before it.
+func (l *live) fireAlerts(t *testing.T, groupKey string, alerts ...alert) {
+	t.Helper()
+	l.storeAlerts(t, groupKey, alerts...)
+	l.process(t)
+}
+
+// storeAlerts stores a Snapshot of firing Alerts without processing it.
+func (l *live) storeAlerts(t *testing.T, groupKey string, alerts ...alert) {
+	t.Helper()
+	var out []string
+	for _, a := range alerts {
+		labels := fmt.Sprintf(`"alertname":%q,"team":%q,"disk":%q`, strings.Split(a.name, "/")[0], a.team, a.name)
+		if a.severity != "" {
+			labels += fmt.Sprintf(`,"severity":%q`, a.severity)
+		}
+		out = append(out, `{"status":"firing","labels":{`+labels+`},"annotations":{},"startsAt":"2026-10-07T11:00:00Z"}`)
+	}
+	body := `{"groupKey":"` + groupKey + `","status":"firing","alerts":[` + strings.Join(out, ",") + `]}`
 	if _, err := l.snaps.Store(t.Context(), ingest.Received{IntegrationID: l.intID, Body: []byte(body)}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// process drains the pending Stored Snapshots, the synthetic ones of the Internal alerts included.
+func (l *live) process(t *testing.T) {
+	t.Helper()
+	if err := l.drain(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// drain drains the pending Stored Snapshots and returns how that failed.
+func (l *live) drain(ctx context.Context) error {
 	p := ingest.NewProcessor(ingest.ProcessorConfig{OrgID: l.orgID, Store: ingest.NewProcessStore(l.d.Pool),
 		Business: l.business, Log: l.logger, Sink: l.sink, Lease: db.Lease{Owner: "ingest", Duration: ingest.Lease,
 			Clocks: clock.Clocks{Business: l.business, Real: clock.Real{}}}})
-	if _, err := p.Drain(t.Context()); err != nil {
-		t.Fatal(err)
-	}
+	_, err := p.Drain(ctx)
+	return err
 }
 
 // group is the public_id of the newest Alert Group of an alertname.
@@ -283,7 +368,7 @@ func methods(calls []deliverytest.Call) string {
 	return strings.Join(out, ",")
 }
 
-// TestLive is the live check of S-034 (C-11, Verification).
+// TestLive is the live check of S-034 and S-035 (C-11, Verification).
 func TestLive(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		l := setupLive(t, s)
@@ -757,6 +842,39 @@ func TestLive(t *testing.T) {
 				"delivered it once")
 		})
 
+		// S-035.
+		for _, sub := range []struct {
+			name string
+			run  func(t *testing.T)
+		}{
+			{"storm", l.storm},
+			{"deleted_root", l.deletedRoot},
+			{"duplicate_after_crash", l.duplicateAfterCrash},
+			{"transient_budget", l.transientBudget},
+			{"fatal_is_broken", l.fatalIsBroken},
+			{"recovery_current_state", l.recoveryCurrentState},
+			{"unknown_not_delivered", l.unknownNotDelivered},
+			{"late_publication_retry_after", l.lateRetryAfter},
+			{"late_publication_transient", l.lateTransient},
+			{"probe_check", l.probeCheck},
+			{"markup_rejected", l.markupRejected},
+			{"destination_added_and_removed", l.destinationAddedAndRemoved},
+			{"moved_to_default_route", l.movedToDefaultRoute},
+			{"delivery_event_rows", l.deliveryEventRows},
+			// The review of S-035.
+			{"resolve_before_first_publication", l.resolveBeforeFirstPublication},
+			{"in_flight_races", l.inFlightRaces},
+			{"late_note_reopened", l.lateNoteReopened},
+			{"storm_membership", l.stormMembership},
+			{"storm_summary_after_end", l.stormSummaryAfterEnd},
+			{"deleted_broken_final_edit", l.deletedBrokenFinalEdit},
+			{"destination_deleted_bumps_routes", l.destinationDeletedBumpsRoutes},
+			{"membership_lock", l.membershipLock},
+			{"budget_reset_on_recovery", l.budgetResetOnRecovery},
+			{"abandon_connection", l.abandonConnection},
+		} {
+			t.Run(sub.name, sub.run)
+		}
 	})
 }
 
@@ -916,4 +1034,1488 @@ func (l *live) clockWake(t *testing.T) {
 		"reply went after %v", took.Round(time.Millisecond))
 	// The development clock goes back for the other subtests of this database.
 	l.exec(t, `UPDATE runtime_state SET dev_clock_offset_seconds = 0`)
+}
+
+// The live checks of S-035 (C-11.AC-3 to AC-13, C-09.FR-19, C-08.FR-1).
+
+// system is the requester of the changes the tests make through the API's services.
+var system = routing.Requester{Actor: audit.System, Transport: audit.TransportSystem}
+
+// newRoute creates the Route name for the Alerts whose team is name, with its Storm threshold and Destinations, and
+// returns its id and public_id.
+func (l *live) newRoute(t *testing.T, name string, threshold int64, dests ...string) (int64, string) {
+	t.Helper()
+	policy := routing.Profiles()[0].Policy
+	policy.StormThreshold = threshold
+	rt, err := l.routes.Create(t.Context(), system, routing.Input{Name: name, GroupKey: []string{"alertname"},
+		Policy: policy, Matchers: []routing.Matcher{{Label: "team", Op: "=", Value: name}}, DestinationIDs: dests})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rt.ID, rt.PublicID
+}
+
+// setDestinations is an updateRoute that changes only the Route's destination_ids.
+func (l *live) setDestinations(t *testing.T, publicID string, ids ...string) (routing.Route, error) {
+	t.Helper()
+	rt, err := l.routes.Get(t.Context(), publicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l.routes.Update(t.Context(), system, publicID, &rt.Version, routing.Input{Name: rt.Name,
+		Description: &rt.Description, Matchers: rt.Matchers, Urgent: rt.Urgent, GroupKey: rt.GroupKey,
+		DestinationIDs: append([]string{}, ids...), Policy: rt.Policy})
+}
+
+// newDest adds the Mattermost Destination DSAAAAAAAAAAA<n> of the Connection and returns its id.
+func (l *live) newDest(t *testing.T, n int) int64 {
+	t.Helper()
+	return l.newDestNamed(t, fmt.Sprintf("DSAAAAAAAAAAA%d", n))
+}
+
+// newDestNamed adds the Mattermost Destination publicID of the Connection and returns its id.
+func (l *live) newDestNamed(t *testing.T, publicID string) int64 {
+	t.Helper()
+	var id int64
+	if err := l.d.Pool.QueryRow(t.Context(), `INSERT INTO destinations (org_id, public_id, type, name, connection_id,
+		mattermost_team_id, mattermost_channel_id, mentions, limiter_limit, limiter_per_seconds, health, created_at,
+		updated_at) VALUES ($1, $2, 'mattermost', $3, $4, 'team', $5, '{}', 1000, 1, 'healthy', $6, $6) RETURNING id`,
+		l.orgID, publicID, "ops-"+publicID, l.conn, "chan-"+publicID, l.business.Now()).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// brk makes the Destination Broken directly, as after a 503, the start of a scenario about what follows.
+func (l *live) brk(t *testing.T, dest int64) {
+	t.Helper()
+	now := l.business.Now()
+	l.exec(t, `UPDATE destinations SET health = 'broken', broken_since = $2, broken_cause = 'fatal',
+		broken_reason = '503', next_probe_at = $3 WHERE id = $1`, dest, now, now.Add(delivery.BrokenProbeInterval))
+}
+
+// probe advances the business clock by delivery.broken_probe_interval and runs a round, which probes.
+func (l *live) probe(t *testing.T) {
+	t.Helper()
+	l.business.Advance(delivery.BrokenProbeInterval)
+	l.round(t, l.a)
+}
+
+// health is the health of the Destination and its reason.
+func (l *live) health(t *testing.T, dest int64) (string, string) {
+	t.Helper()
+	var health, reason string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT health, coalesce(broken_reason, '') FROM destinations
+		WHERE id = $1`, dest).Scan(&health, &reason); err != nil {
+		t.Fatal(err)
+	}
+	return health, reason
+}
+
+// state is the state of the delivery of the Alert Group publicID in the Destination.
+func (l *live) state(t *testing.T, publicID string, dest int64) string {
+	t.Helper()
+	var state string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT d.state FROM deliveries d JOIN alert_groups g ON g.id =
+		d.alert_group_id WHERE g.public_id = $1 AND d.destination_id = $2`, publicID, dest).Scan(&state); err != nil {
+		t.Fatalf("the delivery of %s: %v", publicID, err)
+	}
+	return state
+}
+
+// toNextAttempt sets the business clock to the next attempt of the only delivery.
+func (l *live) toNextAttempt(t *testing.T) {
+	t.Helper()
+	var at time.Time
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT next_attempt_at FROM deliveries`).Scan(&at); err != nil {
+		t.Fatal(err)
+	}
+	if at.After(l.business.Now()) {
+		l.business.Set(at)
+	}
+}
+
+// internalAlert is the status of MusterDestinationBroken about the Destination once processing reached its synthetic
+// Snapshots, empty when it never fired.
+func (l *live) internalAlert(t *testing.T, publicID string) string {
+	t.Helper()
+	l.process(t)
+	var status string
+	err := l.d.Pool.QueryRow(t.Context(), `SELECT status FROM alerts WHERE labels->>'alertname' =
+		'MusterDestinationBroken' AND labels->>'destination' = $1 ORDER BY id DESC LIMIT 1`, publicID).Scan(&status)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatal(err)
+	}
+	return status
+}
+
+// groupsUnchanged is a fingerprint of every Alert Group table: the events of each Alert Group, its Timeline and
+// notes.
+func (l *live) groupsUnchanged(t *testing.T) string {
+	t.Helper()
+	var out string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM alert_groups)::text || '/' ||
+		(SELECT coalesce(sum(event_seq), 0) FROM alert_groups)::text || '/' ||
+		(SELECT coalesce(max(last_changed_at), 'epoch') FROM alert_groups)::text || '/' ||
+		(SELECT count(*) FROM timeline_entries)::text || '/' || (SELECT count(*) FROM notes)::text`).Scan(
+		&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// calm fires the calm checks of the Storm of the Route, a minute of business time at a time, until it ends, and
+// returns how many checks moved its deadline first.
+func (l *live) calm(t *testing.T, routeID int64) int {
+	t.Helper()
+	moved := 0
+	for range 30 {
+		l.business.Advance(time.Minute)
+		before := l.count(t, `SELECT count(*) FROM timers WHERE kind = 'storm_calm_check' AND deadline <= $1`,
+			l.business.Now())
+		if _, err := l.timers.Round(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if l.count(t, `SELECT count(*) FROM storms WHERE route_id = $1 AND ended_at IS NULL`, routeID) == 0 {
+			return moved
+		}
+		if before > 0 {
+			moved++
+		}
+	}
+	t.Fatal("the storm never calmed")
+	return 0
+}
+
+// only is the calls of methods.
+func only(calls []deliverytest.Call, ms ...string) []deliverytest.Call {
+	return slices.DeleteFunc(slices.Clone(calls), func(c deliverytest.Call) bool { return !slices.Contains(ms, c.Method) })
+}
+
+// to is the calls to the Destination publicID.
+func to(calls []deliverytest.Call, publicID string) []deliverytest.Call {
+	return slices.DeleteFunc(slices.Clone(calls), func(c deliverytest.Call) bool {
+		return c.Destination.PublicID != publicID
+	})
+}
+
+func (l *live) ack(t *testing.T, publicID string) {
+	t.Helper()
+	if _, err := l.groups.Acknowledge(t.Context(), l.alice, publicID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (l *live) resolve(t *testing.T, publicID string) {
+	t.Helper()
+	if _, err := l.groups.Resolve(t.Context(), l.alice, publicID, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// storm is C-11.AC-3: threshold 20, 30 new Alert Groups in 50 s with 3 Urgent among the last 10.
+func (l *live) storm(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	routeID, routePublic := l.newRoute(t, "storm", 20, "DSAAAAAAAAAAA1", "DSAAAAAAAAAAA2")
+	start := l.business.Now()
+	urgent := map[int]bool{22: true, 25: true, 28: true}
+	for i := range 30 {
+		l.business.Set(start.Add(time.Duration(i) * 50 * time.Second / 29))
+		a := alert{name: fmt.Sprintf("Storm%02d/a", i), team: "storm"}
+		if urgent[i] {
+			a.severity = "critical"
+		}
+		l.fireAlerts(t, fmt.Sprintf("storm-%d", i), a)
+	}
+	took := l.business.Now().Sub(start)
+	var stormID int64
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT id FROM storms WHERE route_id = $1 AND ended_at IS NULL`,
+		routeID).Scan(&stormID); err != nil {
+		t.Fatalf("no storm: %v", err)
+	}
+	// Route.storm_active and muster_storm_active while it lasts.
+	rt, err := l.routes.Get(t.Context(), routePublic)
+	if err != nil || rt.Storm == nil || rt.Storm.AlertGroupCount != 10 {
+		t.Fatalf("route storm %+v %v", rt.Storm, err)
+	}
+	if err := l.svc.ExportStorms(t.Context()); err != nil ||
+		!strings.Contains(scrape(t), `muster_storm_active{route="`+routePublic+`"} 1`) {
+		t.Fatalf("muster_storm_active %v", err)
+	}
+	l.round(t, l.a)
+	calls := l.rec.Calls()
+	var groupsPublished, summaries, urgentFirst int
+	for i, c := range calls {
+		text := c.Message.Text()
+		switch {
+		case c.Method != deliverytest.MethodPublish:
+			t.Errorf("call %s", c.Method)
+		case strings.HasPrefix(text, "Storm on Route storm: 10 new Alert Groups since"):
+			summaries++
+			if c.Loudness != groups.Loud || !slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) {
+				t.Errorf("summary %s %v", c.Loudness, c.Mentions)
+			}
+		default:
+			groupsPublished++
+			n := 0
+			if _, err := fmt.Sscanf(strings.SplitN(c.Message.Sections[0], "Storm", 2)[1], "%02d", &n); err != nil {
+				t.Fatalf("%q: %v", text, err)
+			}
+			if n >= 20 && !urgent[n] {
+				t.Errorf("held alert group %d published", n)
+			}
+			if urgent[n] && i < 6 {
+				urgentFirst++
+			}
+		}
+	}
+	// 20 before the Storm and 3 Urgent, in each of the two Destinations; one summary each.
+	if groupsPublished != 46 || summaries != 2 || urgentFirst != 6 {
+		t.Fatalf("published %d, summaries %d, urgent first %d: %s", groupsPublished, summaries, urgentFirst,
+			methods(calls))
+	}
+	held := l.count(t, `SELECT count(*) FROM deliveries WHERE held_by_storm_id = $1`, stormID)
+	t.Logf("route threshold 20, 30 new Alert Groups in %.0f s (3 Urgent among the last 10): publish=20 before the "+
+		"Storm; storm summary: publish=1 loud [new_alert_group]; urgent publish=3 first (per Destination, 2 "+
+		"Destinations); held %d; storm_active true", took.Seconds(), held)
+	// Two held Alert Groups resolve during the Storm; the other five stay open.
+	for _, n := range []int{20, 21} {
+		l.resolve(t, l.group(t, fmt.Sprintf("Storm%02d", n)))
+	}
+	l.round(t, l.a)
+	if n := len(only(l.rec.Calls(), deliverytest.MethodPublish)); n != len(calls) {
+		t.Fatalf("published during the storm: %d", n)
+	}
+	l.rec.Reset()
+	moved := l.calm(t, routeID)
+	l.round(t, l.a)
+	calls = l.rec.Calls()
+	var over, quiet int
+	for _, c := range calls {
+		switch {
+		case c.Method == deliverytest.MethodUpdate && c.Message.Sections[0] == "Storm over: 5 Alert Groups still open":
+			over++
+			if !strings.HasPrefix(c.Message.Sections[1], "Route storm: 10 new Alert Groups from ") {
+				t.Errorf("final summary %q", c.Message.Text())
+			}
+		case c.Method == deliverytest.MethodPublish && c.Loudness == groups.Quiet && len(c.Mentions) == 0:
+			quiet++
+			if strings.Contains(c.Message.Sections[0], "Storm20") || strings.Contains(c.Message.Sections[0], "Storm21") {
+				t.Errorf("resolved held alert group published %q", c.Message.Sections[0])
+			}
+		default:
+			t.Errorf("after the storm: %s %s %q", c.Method, c.Loudness, c.Message.Text())
+		}
+	}
+	withheld := l.count(t, `SELECT count(*) FROM deliveries WHERE held_by_storm_id IS NULL AND state = 'withheld'
+		AND alert_group_id IN (SELECT id FROM alert_groups WHERE route_id = $1)`, routeID)
+	if over != 2 || quiet != 10 || withheld != 4 {
+		t.Fatalf("over %d, quiet %d, withheld %d: %s", over, quiet, withheld, methods(calls))
+	}
+	rt, err = l.routes.Get(t.Context(), routePublic)
+	if err != nil || rt.Storm != nil {
+		t.Errorf("route storm after the end %+v %v", rt.Storm, err)
+	}
+	if err := l.svc.ExportStorms(t.Context()); err != nil ||
+		!strings.Contains(scrape(t), `muster_storm_active{route="`+routePublic+`"} 0`) {
+		t.Errorf("muster_storm_active after the end %v", err)
+	}
+	if !strings.Contains(scrape(t), `muster_delivery_attempts_total{destination="DSAAAAAAAAAAA1",kind="storm_summary",`+
+		`outcome="delivered"}`) {
+		t.Error("no attempts of kind storm_summary")
+	}
+	if !strings.Contains(l.log.String(), `"event":"storm_started"`) || !strings.Contains(l.log.String(),
+		`"event":"storm_ended"`) {
+		t.Error("no storm_started or storm_ended line")
+	}
+	t.Logf("after the calm period (%d calm checks moved first): summary update=1 quiet (\"Storm over: 5 Alert "+
+		"Groups still open\"); quiet publish=5; withheld=2 (per Destination); storm_active false", moved)
+}
+
+// deletedRoot is C-11.AC-4.
+func (l *live) deletedRoot(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.fire(t, "dr", "DelRoot/a")
+	gid := l.group(t, "DelRoot")
+	l.round(t, l.a)
+	l.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeGone, "message not found"))
+	l.business.Advance(42 * time.Minute)
+	deleted := l.business.Now()
+	l.ack(t, gid)
+	l.round(t, l.a)
+	l.round(t, l.a)
+	calls := l.rec.Calls()
+	note := "The previous message was deleted at " + deleted.UTC().Format("15:04")
+	if methods(calls) != "publish,update,publish" || calls[2].Loudness != groups.Quiet || len(calls[2].Mentions) != 0 ||
+		calls[2].Message.Sections[len(calls[2].Message.Sections)-1] != note {
+		t.Fatalf("calls %s %+v", methods(calls), calls)
+	}
+	if n := l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'republished'`); n != 1 {
+		t.Errorf("republished events %d", n)
+	}
+	// Gone again: the pair is deleted in the messenger, and nothing more is sent, Thread replies included.
+	l.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeGone, "message not found"))
+	if _, err := l.groups.Unacknowledge(t.Context(), l.alice, gid); err != nil {
+		t.Fatal(err)
+	}
+	l.round(t, l.a)
+	l.round(t, l.a)
+	l.ack(t, gid)
+	l.fire(t, "dr", "DelRoot/a", "DelRoot/b")
+	l.round(t, l.a)
+	if got := methods(l.rec.Calls()); got != "publish,update,publish,update" ||
+		l.state(t, gid, l.dests[0]) != "deleted_in_messenger" ||
+		l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'deleted_in_messenger'`) != 1 {
+		t.Fatalf("after the second deletion: %s, %s", got, l.state(t, gid, l.dests[0]))
+	}
+	// A resolved Alert Group: only the mark.
+	l.fire(t, "dr2", "DelRootR/a")
+	rid := l.group(t, "DelRootR")
+	l.round(t, l.a)
+	l.rec.Reset()
+	l.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeGone, "message not found"))
+	l.resolve(t, rid)
+	l.round(t, l.a)
+	l.round(t, l.a)
+	if methods(l.rec.Calls()) != "update" || l.state(t, rid, l.dests[0]) != "deleted_in_messenger" {
+		t.Fatalf("resolved: %s %s", methods(l.rec.Calls()), l.state(t, rid, l.dests[0]))
+	}
+	t.Logf("gone → quiet republish=1 with %q; gone again → deleted_in_messenger; no further call; resolved: "+
+		"gone → deleted_in_messenger only", note)
+}
+
+// duplicateAfterCrash is C-11.AC-5.
+func (l *live) duplicateAfterCrash(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.fire(t, "dup", "Dup/a")
+	gid := l.group(t, "Dup")
+	crashed, crash := context.WithCancel(t.Context())
+	defer crash()
+	// The adapter accepts the Publication; the replica stops before it records the outcome.
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK},
+		Then: crash})
+	_, _ = l.worker("crashed").Round(crashed)
+	var started bool
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT publication_started_at IS NOT NULL AND message_id IS NULL
+		FROM deliveries`).Scan(&started); err != nil || !started {
+		t.Fatalf("publication_started_at not left set: %v", err)
+	}
+	l.real.Advance(delivery.Lease + time.Second)
+	l.round(t, l.b)
+	var dup bool
+	var state string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT possible_duplicate, state FROM deliveries`).Scan(&dup,
+		&state); err != nil || !dup || state != "delivered" || l.rec.Count(deliverytest.MethodPublish) != 2 {
+		t.Fatalf("possible_duplicate %v %s %v, publish %d", dup, state, err, l.rec.Count(deliverytest.MethodPublish))
+	}
+	page, err := l.groups.Timeline(t.Context(), gid, groups.TimelineFilter{Kinds: []groups.Kind{groups.KindDelivery},
+		Limit: 50, Ascending: true})
+	var events []string
+	for _, e := range page.Entries {
+		events = append(events, e.Delivery.Event)
+	}
+	if err != nil || !slices.Contains(events, "possible_duplicate") {
+		t.Fatalf("timeline %v %v", events, err)
+	}
+	states, err := l.svc.States(t.Context(), gid)
+	if err != nil || len(states) != 1 || !states[0].PossibleDuplicate {
+		t.Errorf("states %+v %v", states, err)
+	}
+	if !strings.Contains(l.log.String(), `"event":"delivery_possible_duplicate"`) {
+		t.Error("no delivery_possible_duplicate line")
+	}
+	t.Logf("worker stopped after the adapter accepted; second worker: publish=%d, possible_duplicate=%v, "+
+		"timeline delivery events %v", l.rec.Count(deliverytest.MethodPublish), dup, events)
+}
+
+// transientBudget is C-11.AC-6.
+func (l *live) transientBudget(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	for range 10 {
+		l.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeTransient, "503"))
+	}
+	l.fire(t, "tb2", "Transient/a")
+	gid := l.group(t, "Transient")
+	start := l.business.Now()
+	for i := range 10 {
+		if health, _ := l.health(t, l.dests[0]); health != "healthy" {
+			t.Fatalf("broken after %d attempts", i)
+		}
+		l.toNextAttempt(t)
+		l.round(t, l.a)
+	}
+	health, reason := l.health(t, l.dests[0])
+	state := l.state(t, gid, l.dests[0])
+	if l.rec.Count(deliverytest.MethodPublish) != 10 || health != "broken" ||
+		reason != "unavailable after repeated failures: 503" || state != "pending" {
+		t.Fatalf("after 10 transient attempts: %d calls, %s %q, %s", len(l.rec.Calls()), health, reason, state)
+	}
+	if n := l.count(t, `SELECT count(*) FROM destinations WHERE id = $1 AND broken_cause = 'unavailable'`,
+		l.dests[0]); n != 1 {
+		t.Error("broken_cause is not unavailable")
+	}
+	states, err := l.svc.States(t.Context(), gid)
+	if err != nil || states[0].State != delivery.StateWaitingForBroken {
+		t.Errorf("states %+v %v", states, err)
+	}
+	if err := l.svc.ExportBroken(t.Context()); err != nil ||
+		!strings.Contains(scrape(t), `muster_destination_broken{destination="DSAAAAAAAAAAA1"} 1`) {
+		t.Errorf("muster_destination_broken %v", err)
+	}
+	alert := l.internalAlert(t, "DSAAAAAAAAAAA1")
+	if alert != "firing" || l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'destination_broken'`) != 1 ||
+		!strings.Contains(l.log.String(), `"event":"destination_broken"`) || !strings.Contains(scrape(t),
+		`muster_delivery_attempts_total{destination="DSAAAAAAAAAAA1",kind="publication",outcome="transient"}`) {
+		t.Fatalf("MusterDestinationBroken %q", alert)
+	}
+	t.Logf("10 transient attempts in %v of business time → broken (%s); MusterDestinationBroken %s; "+
+		"muster_destination_broken 1; state %s (API %s)", l.business.Now().Sub(start).Round(time.Second), reason,
+		alert, state, states[0].State)
+}
+
+// fatalIsBroken is C-11.FR-8, FR-9: a Fatal outcome makes the Destination Broken at once.
+func (l *live) fatalIsBroken(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeFatal, "channel not found"))
+	l.fire(t, "fa", "Fatal/a")
+	gid := l.group(t, "Fatal")
+	l.round(t, l.a)
+	l.round(t, l.a)
+	health, reason := l.health(t, l.dests[0])
+	if len(l.rec.Calls()) != 1 || health != "broken" || reason != "channel not found" ||
+		l.state(t, gid, l.dests[0]) != "pending" || l.count(t, `SELECT count(*) FROM delivery_events
+		WHERE kind = 'destination_broken' AND error_class = 'fatal'`) != 1 || !strings.Contains(scrape(t),
+		`muster_delivery_attempts_total{destination="DSAAAAAAAAAAA1",kind="publication",outcome="fatal"}`) {
+		t.Fatalf("after a fatal outcome: %d calls, %s %q", len(l.rec.Calls()), health, reason)
+	}
+	t.Logf("one fatal outcome → broken at once (%s), the delivery waits (pending); no further call", reason)
+}
+
+// recoveryCurrentState is C-11.AC-7.
+func (l *live) recoveryCurrentState(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.fire(t, "recb", "RecB/a")
+	b := l.group(t, "RecB")
+	l.round(t, l.a)
+	// A starts while its Publication breaks the Destination.
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeFatal, "channel archived"))
+	l.fire(t, "reca", "RecA/a")
+	a := l.group(t, "RecA")
+	l.round(t, l.a)
+	if health, _ := l.health(t, l.dests[0]); health != "broken" {
+		t.Fatal("not broken")
+	}
+	// B is acknowledged and gets two new Alerts; C starts and resolves.
+	l.ack(t, b)
+	l.fire(t, "recb", "RecB/a", "RecB/b")
+	l.business.Advance(2 * time.Minute)
+	l.fire(t, "recb", "RecB/a", "RecB/b", "RecB/c")
+	l.fire(t, "recc", "RecC/a")
+	c := l.group(t, "RecC")
+	l.resolve(t, c)
+	l.round(t, l.a)
+	before := len(l.rec.Calls())
+	l.rec.Reset()
+	l.probe(t)
+	calls := l.rec.Calls()
+	pubs, upds := only(calls, deliverytest.MethodPublish), only(calls, deliverytest.MethodUpdate)
+	var bid int64
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT id FROM alert_groups WHERE public_id = $1`, b).Scan(
+		&bid); err != nil {
+		t.Fatal(err)
+	}
+	dropped := l.count(t, `SELECT count(*) FROM thread_replies WHERE alert_group_id = $1 AND state = 'dropped'`, bid)
+	var root string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT message_id FROM deliveries WHERE alert_group_id = $1`, bid).Scan(
+		&root); err != nil {
+		t.Fatal(err)
+	}
+	if before != 2 || len(pubs) != 1 || !strings.Contains(pubs[0].Message.Sections[0], "RecA") ||
+		pubs[0].Loudness != groups.Loud || !slices.Equal(pubs[0].Mentions,
+		[]groups.Mention{groups.MentionNewAlertGroup}) || len(upds) != 1 || upds[0].MessageID != root ||
+		upds[0].Loudness != groups.Quiet || len(only(calls, deliverytest.MethodReply)) != 0 || dropped != 2 ||
+		l.state(t, c, l.dests[0]) != "withheld" || l.state(t, a, l.dests[0]) != "delivered" {
+		t.Fatalf("after the probe: %s %+v, dropped %d", methods(calls), calls, dropped)
+	}
+	for _, call := range calls {
+		if call.Class != "delivery" {
+			t.Errorf("%s in class %s", call.Method, call.Class)
+		}
+	}
+	if health, _ := l.health(t, l.dests[0]); health != "healthy" || l.count(t,
+		`SELECT count(*) FROM delivery_events WHERE kind = 'destination_recovered'`) != 1 {
+		t.Errorf("not recovered")
+	}
+	t.Logf("A: publish loud %v; B: update=1, replies=0 (%d dropped); C: %s", pubs[0].Mentions, dropped,
+		l.state(t, c, l.dests[0]))
+}
+
+// unknownNotDelivered is C-11.AC-8 and AC-13.
+func (l *live) unknownNotDelivered(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.fire(t, "un", "Unknown/a")
+	gid := l.group(t, "Unknown")
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeUnknown, "HTTP 418: teapot"))
+	l.business.Advance(time.Second)
+	before, events := l.groupsUnchanged(t), l.count(t, `SELECT count(*) FROM delivery_events`)
+	l.round(t, l.a)
+	var state, errText string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT state, coalesce(last_error, '') FROM deliveries`).Scan(&state,
+		&errText); err != nil || state != "not_delivered" || errText != "HTTP 418: teapot" {
+		t.Fatalf("delivery %s %q %v", state, errText, err)
+	}
+	after := l.groupsUnchanged(t)
+	added := l.count(t, `SELECT count(*) FROM delivery_events`) - events
+	health, _ := l.health(t, l.dests[0])
+	if after != before || added != 1 || l.count(t, `SELECT count(*) FROM delivery_events
+		WHERE kind = 'not_delivered'`) != 1 || health != "healthy" || !strings.Contains(l.log.String(),
+		`"event":"delivery_not_delivered"`) || !strings.Contains(scrape(t),
+		`muster_delivery_attempts_total{destination="DSAAAAAAAAAAA1",kind="publication",outcome="unknown"}`) {
+		t.Fatalf("alert group tables %s → %s; delivery_events +%d; %s", before, after, added, health)
+	}
+	page, err := l.groups.Timeline(t.Context(), gid, groups.TimelineFilter{Limit: 50, Ascending: true})
+	if err != nil || len(page.Entries) != 2 || page.Entries[0].Event != "created" ||
+		page.Entries[1].Kind != groups.KindDelivery || page.Entries[1].Delivery.Event != "not_delivered" ||
+		page.Entries[1].At.Before(page.Entries[0].At) {
+		t.Fatalf("timeline %+v %v", page.Entries, err)
+	}
+	states, err := l.svc.States(t.Context(), gid)
+	if err != nil || states[0].State != "not_delivered" || states[0].Error == nil {
+		t.Errorf("states %+v %v", states, err)
+	}
+	// A later change of the Desired state starts a new delivery.
+	l.ack(t, gid)
+	l.round(t, l.a)
+	if methods(l.rec.Calls()) != "publish,publish" || l.state(t, gid, l.dests[0]) != "delivered" {
+		t.Fatalf("after a change: %s %s", methods(l.rec.Calls()), l.state(t, gid, l.dests[0]))
+	}
+	t.Logf("state not_delivered (%q); delivery_events +%d; Alert Group tables unchanged (%s); destination %s; "+
+		"timeline [%s %s, %s %s] in order; acknowledged → a new delivery published", errText, added, after, health,
+		page.Entries[0].Kind, page.Entries[0].Event, page.Entries[1].Kind, page.Entries[1].Delivery.Event)
+}
+
+// lateRetryAfter is C-11.AC-9.
+func (l *live) lateRetryAfter(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.RetryAfter(30*time.Second, delivery.ScopeDestination))
+	l.fire(t, "lra", "LateRA/a")
+	gid := l.group(t, "LateRA")
+	started := l.business.Now()
+	l.round(t, l.a)
+	l.business.Advance(10 * time.Second)
+	resolved := l.business.Now()
+	l.resolve(t, gid)
+	l.business.Advance(20*time.Second + delivery.TokenMargin)
+	l.round(t, l.a)
+	pubs := only(l.rec.Calls(), deliverytest.MethodPublish)
+	note := fmt.Sprintf("Delivered late: started %s, resolved %s while this Destination was unavailable.",
+		started.UTC().Format("15:04"), resolved.UTC().Format("15:04"))
+	if len(pubs) != 2 || pubs[1].Loudness != groups.Quiet || len(pubs[1].Mentions) != 0 ||
+		pubs[1].Message.Sections[len(pubs[1].Message.Sections)-1] != note || l.count(t,
+		`SELECT count(*) FROM delivery_events WHERE kind = 'delivered_late' AND loudness = 'quiet'`) != 1 {
+		t.Fatalf("calls %q / %q", pubs[len(pubs)-1].Message.Sections, note)
+	}
+	t.Logf("resolved while waiting 30 s: quiet publish with %q; delivered_late event", note)
+}
+
+// lateTransient is C-11.AC-12, and its exception: a Destination that became Broken first withholds it.
+func (l *live) lateTransient(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeTransient, "502"),
+		deliverytest.Failure(delivery.OutcomeTransient, "502"))
+	l.fire(t, "ltr", "LateTr/a")
+	gid := l.group(t, "LateTr")
+	started := l.business.Now()
+	l.round(t, l.a)
+	l.toNextAttempt(t)
+	l.round(t, l.a)
+	resolved := l.business.Now()
+	l.resolve(t, gid)
+	l.toNextAttempt(t)
+	l.round(t, l.a)
+	pubs := only(l.rec.Calls(), deliverytest.MethodPublish)
+	note := fmt.Sprintf("Delivered late: started %s, resolved %s while this Destination was unavailable.",
+		started.UTC().Format("15:04"), resolved.UTC().Format("15:04"))
+	if len(pubs) != 3 || pubs[2].Loudness != groups.Quiet ||
+		pubs[2].Message.Sections[len(pubs[2].Message.Sections)-1] != note || l.count(t,
+		`SELECT count(*) FROM delivery_events WHERE kind = 'delivered_late'`) != 1 {
+		t.Fatalf("calls %s, last %q, want %q", methods(l.rec.Calls()), pubs[len(pubs)-1].Message.Sections, note)
+	}
+	t.Logf("2 transient attempts, resolved within the budget: quiet publish with %q; delivered_late event", note)
+	// Broken first: the resolved Alert Group is withheld and never published, even after the recovery.
+	l.fresh(t, 1000, 1)
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeFatal, "bot removed"))
+	l.fire(t, "lbr", "BrokenLate/a")
+	bid := l.group(t, "BrokenLate")
+	l.round(t, l.a)
+	l.resolve(t, bid)
+	l.probe(t)
+	if health, _ := l.health(t, l.dests[0]); health != "healthy" || l.rec.Count(deliverytest.MethodPublish) != 1 ||
+		l.state(t, bid, l.dests[0]) != "withheld" || l.count(t, `SELECT count(*) FROM delivery_events
+		WHERE kind = 'delivered_late'`) != 0 {
+		t.Fatalf("broken first: %s, %s", methods(l.rec.Calls()), l.state(t, bid, l.dests[0]))
+	}
+	t.Log("broken before the late publication: withheld, never published; no delivered_late event")
+}
+
+// probeCheck is C-11.AC-11.
+func (l *live) probeCheck(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeFatal, "channel not found"))
+	l.fire(t, "pc", "Probe/a")
+	gid := l.group(t, "Probe")
+	l.round(t, l.a)
+	l.resolve(t, gid) // never published, Broken: withheld, so nothing waits
+	if l.state(t, gid, l.dests[0]) != "withheld" {
+		t.Fatal("not withheld")
+	}
+	l.rec.Reset()
+	l.rec.Script(deliverytest.MethodCheck, deliverytest.Failure(delivery.OutcomeFatal, "not a member"))
+	l.probe(t)
+	health, reason := l.health(t, l.dests[0])
+	if methods(l.rec.Calls()) != "check" || l.rec.Calls()[0].Class != "delivery" || health != "broken" ||
+		reason != "not a member" {
+		t.Fatalf("failing check: %s %s %q", methods(l.rec.Calls()), health, reason)
+	}
+	if alert := l.internalAlert(t, "DSAAAAAAAAAAA1"); alert != "firing" {
+		t.Fatalf("MusterDestinationBroken %q", alert)
+	}
+	before := l.groupsUnchanged(t)
+	l.probe(t)
+	health, _ = l.health(t, l.dests[0])
+	after := l.groupsUnchanged(t)
+	if methods(l.rec.Calls()) != "check,check" || health != "healthy" || after != before || l.count(t,
+		`SELECT count(*) FROM delivery_events WHERE kind = 'destination_recovered'`) != 1 {
+		t.Fatalf("passing check: %s %s, alert groups %s → %s", methods(l.rec.Calls()), health, before, after)
+	}
+	alert := l.internalAlert(t, "DSAAAAAAAAAAA1")
+	if alert != "resolved" || !strings.Contains(l.log.String(), `"event":"destination_recovered"`) {
+		t.Fatalf("MusterDestinationBroken %q", alert)
+	}
+	t.Logf("check fails → broken, reason %q; check passes → healthy, MusterDestinationBroken %s, "+
+		"destination_recovered, no Alert Group touched (%s)", reason, alert, after)
+	// With a delivery waiting, the probe attempts the oldest one instead of the check.
+	l.rec.Reset()
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeFatal, "channel not found"))
+	l.fire(t, "pc2", "ProbeWait/a")
+	l.round(t, l.a)
+	l.fire(t, "pc3", "ProbeLater/a")
+	l.probe(t)
+	if methods(l.rec.Calls()) != "publish,publish,publish" || l.rec.Count(deliverytest.MethodCheck) != 0 ||
+		!strings.Contains(l.rec.Calls()[1].Message.Sections[0], "ProbeWait") {
+		t.Fatalf("with a delivery waiting: %s", methods(l.rec.Calls()))
+	}
+	t.Log("with a delivery waiting: the probe published the oldest one (no check), then the rest followed")
+}
+
+// markupRejected is C-11.FR-8: the same text without markup in the same attempt.
+func (l *live) markupRejected(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeMarkupRejected, "bad markdown"))
+	l.fire(t, "mk", "Markup/a")
+	gid := l.group(t, "Markup")
+	l.round(t, l.a)
+	calls := l.rec.Calls()
+	if methods(calls) != "publish,publish" || calls[0].Plain || !calls[1].Plain ||
+		calls[0].Message.Text() != calls[1].Message.Text() || l.state(t, gid, l.dests[0]) != "delivered" ||
+		l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'markup_rejected'`) != 1 ||
+		!strings.Contains(scrape(t), `muster_delivery_attempts_total{destination="DSAAAAAAAAAAA1",kind="publication",`+
+			`outcome="markup_rejected"}`) {
+		t.Fatalf("calls %+v", calls)
+	}
+	t.Log("markup_rejected → the same text resent plain in the same attempt; delivered; counted; " +
+		"markup_rejected event")
+}
+
+// finalLink is the final note of the Alert Group publicID.
+func finalLink(publicID string) string {
+	return "No longer updated here; current state in Muster: http://localhost:8080/alert-groups/" + publicID
+}
+
+// isFinalEdit says whether a call is the Quiet final edit of the Alert Group publicID.
+func isFinalEdit(c deliverytest.Call, publicID string) bool {
+	s := c.Message.Sections
+	return c.Method == deliverytest.MethodUpdate && c.Loudness == groups.Quiet && len(c.Mentions) == 0 &&
+		len(s) > 0 && s[len(s)-1] == finalLink(publicID) && len(c.Message.Buttons) == 0
+}
+
+// finalEdits says whether calls are exactly one final edit of each Alert Group.
+func finalEdits(calls []deliverytest.Call, ids ...string) bool {
+	if len(calls) != len(ids) {
+		return false
+	}
+	for _, id := range ids {
+		if !slices.ContainsFunc(calls, func(c deliverytest.Call) bool { return isFinalEdit(c, id) }) {
+			return false
+		}
+	}
+	return true
+}
+
+// routeEdit is C-08.FR-1 and C-11.FR-14 for updateRoute: an edit of only destination_ids is saved with a new version,
+// recorded as route.updated with /destination_ids in its diff, and an unknown or deleted id is unknown_id at its
+// pointer. It returns the Route's public_id.
+func (l *live) routeEdit(t *testing.T, publicID string, ids ...string) routing.Route {
+	t.Helper()
+	before, err := l.routes.Get(t.Context(), publicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := l.setDestinations(t, publicID, ids...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var diff string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT diff::text FROM audit_log WHERE action = 'route.updated'
+		AND resource_public_id = $1 ORDER BY id DESC LIMIT 1`, publicID).Scan(&diff); err != nil {
+		t.Fatal(err)
+	}
+	if after.Version <= before.Version || !slices.Equal(after.DestinationIDs, ids) ||
+		!strings.Contains(diff, `"pointer": "/destination_ids"`) || strings.Contains(diff, `"/policy`) {
+		t.Fatalf("route edit: version %d → %d, %v, diff %s", before.Version, after.Version, after.DestinationIDs, diff)
+	}
+	return after
+}
+
+// destinationAddedAndRemoved is C-11.FR-14 and C-08.FR-1.
+func (l *live) destinationAddedAndRemoved(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	_, route := l.newRoute(t, "members", 1_000_000)
+	l.fireAlerts(t, "mem", alert{name: "MemA/a", team: "members"}, alert{name: "MemB/a", team: "members"})
+	ga, gb := l.group(t, "MemA"), l.group(t, "MemB")
+	l.round(t, l.a)
+	if len(l.rec.Calls()) != 0 {
+		t.Fatal("published without a destination")
+	}
+	// Added: a Quiet Publication of each open Alert Group of the Route.
+	rt := l.routeEdit(t, route, "DSAAAAAAAAAAA1")
+	l.round(t, l.a)
+	calls := l.rec.Calls()
+	for _, c := range calls {
+		if c.Method != deliverytest.MethodPublish || c.Loudness != groups.Quiet || len(c.Mentions) != 0 {
+			t.Errorf("added: %s %s %v", c.Method, c.Loudness, c.Mentions)
+		}
+	}
+	if len(calls) != 2 {
+		t.Fatalf("added: %s", methods(calls))
+	}
+	t.Logf("updateRoute of destination_ids only: version %d, route.updated with /destination_ids; added: quiet "+
+		"publish=%d", rt.Version, len(calls))
+	// Removed: one final Quiet edit each, and nothing after.
+	l.rec.Reset()
+	l.routeEdit(t, route)
+	l.round(t, l.a)
+	calls = l.rec.Calls()
+	if !finalEdits(calls, ga, gb) || l.state(t, ga, l.dests[0]) != "retired" ||
+		l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'final_edit'`) != 2 || !strings.Contains(scrape(t),
+		`muster_delivery_attempts_total{destination="DSAAAAAAAAAAA1",kind="final_edit",outcome="delivered"}`) {
+		t.Fatalf("removed: %+v", calls)
+	}
+	l.ack(t, ga)
+	l.fire(t, "mem2", "MemNone/a")
+	l.round(t, l.a)
+	if len(only(l.rec.Calls(), deliverytest.MethodUpdate, deliverytest.MethodReply)) != 2 {
+		t.Fatalf("a call after the final edit: %s", methods(l.rec.Calls()))
+	}
+	t.Logf("removed: final edit=%d %q; then nothing", len(calls),
+		calls[0].Message.Sections[len(calls[0].Message.Sections)-1])
+	// Deleted: removed from every Route, final edits, then its secrets wiped; the row stays, unlisted.
+	ds3 := l.newDest(t, 3)
+	l.exec(t, `UPDATE destinations SET proxy_password_ciphertext = '\x01', proxy_password_key_id = 'k1',
+		proxy_password_updated_at = $2 WHERE id = $1`, ds3, l.business.Now())
+	l.exec(t, `INSERT INTO destination_secrets (destination_id, org_id, name, value_ciphertext, value_key_id,
+		value_updated_at) VALUES ($1, $2, 'token', '\x00', 'k1', $3)`, ds3, l.orgID, l.business.Now())
+	l.routeEdit(t, route, "DSAAAAAAAAAAA3")
+	l.round(t, l.a)
+	l.rec.Reset()
+	if err := l.dsvc.Delete(t.Context(), destinations.Requester{Actor: audit.System,
+		Transport: audit.TransportSystem}, "DSAAAAAAAAAAA3", nil); err != nil {
+		t.Fatal(err)
+	}
+	secrets := func() int64 {
+		return l.count(t, `SELECT count(*) FROM destination_secrets WHERE destination_id = $1`, ds3) +
+			l.count(t, `SELECT count(*) FROM destinations WHERE id = $1 AND proxy_password_ciphertext IS NOT NULL`, ds3)
+	}
+	rt, err := l.routes.Get(t.Context(), route)
+	if err != nil || len(rt.DestinationIDs) != 0 || secrets() != 2 || l.count(t,
+		`SELECT count(*) FROM route_destinations WHERE destination_id = $1`, ds3) != 0 {
+		t.Fatalf("after the delete: %v %v, secrets %d", rt.DestinationIDs, err, secrets())
+	}
+	l.round(t, l.a)
+	calls = l.rec.Calls()
+	if !finalEdits(calls, ga, gb) || secrets() != 0 ||
+		l.count(t, `SELECT count(*) FROM destinations WHERE id = $1 AND deleted_at IS NOT NULL`, ds3) != 1 {
+		t.Fatalf("deleted: %s, secrets %d", methods(calls), secrets())
+	}
+	page, err := l.dsvc.List(t.Context(), destinations.ListFilter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range page.Destinations {
+		if d.PublicID == "DSAAAAAAAAAAA3" {
+			t.Error("a deleted destination is listed")
+		}
+	}
+	if _, err := l.dsvc.Get(t.Context(), "DSAAAAAAAAAAA3"); !errors.Is(err, destinations.ErrNotFound) {
+		t.Errorf("get a deleted destination: %v", err)
+	}
+	if l.count(t, `SELECT count(*) FROM audit_log WHERE action = 'destination.deleted'
+		AND resource_public_id = 'DSAAAAAAAAAAA3'`) != 1 {
+		t.Error("no destination.deleted entry")
+	}
+	// A deleted or unknown Destination is unknown_id at its pointer.
+	for _, ids := range [][]string{{"DSAAAAAAAAAAA1", "DSAAAAAAAAAAA3"}, {"DSZZZZZZZZZZZZ"}} {
+		_, err := l.setDestinations(t, route, ids...)
+		var fe *routing.FieldError
+		want := fmt.Sprintf("/destination_ids/%d", len(ids)-1)
+		if !errors.As(err, &fe) || fe.Code != routing.CodeUnknownID || fe.Pointer != want {
+			t.Errorf("%v: %v", ids, err)
+		}
+	}
+	t.Logf("deleteDestination: removed from every Route; final edit=%d; secrets wiped after them; row kept, "+
+		"not listed, read as not found; destination.deleted; a deleted or unknown id: 422 unknown_id at its pointer",
+		len(calls))
+}
+
+// movedToDefaultRoute is C-09.FR-19 and C-11.FR-14: the final edit in the Destinations an Alert Group leaves, a Quiet
+// Publication in those of the Default route it joins, and nothing extra in a Destination of both.
+func (l *live) movedToDefaultRoute(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	ds4 := l.newDest(t, 4)
+	_, route := l.newRoute(t, "mover", 1_000_000, "DSAAAAAAAAAAA1", "DSAAAAAAAAAAA2")
+	for _, d := range []int64{l.dests[1], ds4} {
+		l.exec(t, `INSERT INTO route_destinations (route_id, destination_id, org_id, added_at) VALUES ($1, $2, $3, $4)`,
+			l.defaultID, d, l.orgID, l.business.Now())
+	}
+	l.fireAlerts(t, "mv", alert{name: "MoveA/a", team: "mover"}, alert{name: "MoveB/a", team: "mover"})
+	ga, gb := l.group(t, "MoveA"), l.group(t, "MoveB")
+	l.round(t, l.a)
+	if l.rec.Count(deliverytest.MethodPublish) != 4 {
+		t.Fatalf("before the move: %s", methods(l.rec.Calls()))
+	}
+	l.rec.Reset()
+	moved, err := l.groups.MoveOpenAlertGroups(t.Context(), groups.Requester{Actor: audit.System,
+		Transport: audit.TransportSystem}, route)
+	if err != nil || moved != 2 {
+		t.Fatalf("moved %d %v", moved, err)
+	}
+	l.round(t, l.a)
+	calls := l.rec.Calls()
+	left, joined, both := to(calls, "DSAAAAAAAAAAA1"), to(calls, "DSAAAAAAAAAAA4"), to(calls, "DSAAAAAAAAAAA2")
+	for _, c := range left {
+		if !isFinalEdit(c, ga) && !isFinalEdit(c, gb) {
+			t.Errorf("left: %s %q", c.Method, c.Message.Text())
+		}
+	}
+	for _, c := range joined {
+		if c.Method != deliverytest.MethodPublish || c.Loudness != groups.Quiet || len(c.Mentions) != 0 {
+			t.Errorf("joined: %s %s %v", c.Method, c.Loudness, c.Mentions)
+		}
+	}
+	for _, c := range both {
+		if c.Method != deliverytest.MethodUpdate || strings.Contains(c.Message.Text(), "No longer updated here") {
+			t.Errorf("in both: %s %q", c.Method, c.Message.Text())
+		}
+	}
+	if len(left) != 2 || len(joined) != 2 || len(both) > 2 || l.state(t, ga, l.dests[0]) != "retired" ||
+		l.state(t, ga, l.dests[1]) != "delivered" {
+		t.Fatalf("after the move: %s", methods(calls))
+	}
+	t.Logf("moved to the Default route: final edit=%d in the Destination it left; quiet publish=%d in the Default "+
+		"route's own; %d edit(s), no final edit, in the Destination of both", len(left), len(joined), len(both))
+}
+
+// deliveryEventRows is C-11.AC-10 for the Loud/Quiet table of delivery events: every row, on real Alert Groups,
+// produces the new message, the edit or nothing it names, with its loudness and Mentions; the Publication after a
+// recovery is Loud only for an Alert Group firing at that moment.
+func (l *live) deliveryEventRows(t *testing.T) {
+	if len(delivery.DeliveryEvents) != 11 {
+		t.Fatalf("%d rows", len(delivery.DeliveryEvents))
+	}
+	n := 0
+	// start is a Route of its own with the first Destination and one published Alert Group on it.
+	start := func(t *testing.T, threshold int64, published bool) (string, string, int64) {
+		t.Helper()
+		l.fresh(t, 1000, 1)
+		n++
+		name := fmt.Sprintf("row%02d", n)
+		id, route := l.newRoute(t, name, threshold, "DSAAAAAAAAAAA1")
+		l.fireAlerts(t, name, alert{name: "Row" + name + "/a", team: name})
+		if published {
+			l.round(t, l.a)
+			l.rec.Reset()
+		}
+		return route, l.group(t, "Row"+name), id
+	}
+	// stormStarted starts a Storm on a Route of threshold 1 whose first summary is published: one Alert Group
+	// published, one held.
+	stormStarted := func(t *testing.T) (int64, string) {
+		t.Helper()
+		l.fresh(t, 1000, 1)
+		n++
+		name := fmt.Sprintf("row%02d", n)
+		id, _ := l.newRoute(t, name, 1, "DSAAAAAAAAAAA1")
+		l.fireAlerts(t, name, alert{name: "Row" + name + "x/a", team: name}, alert{name: "Row" + name + "y/a",
+			team: name})
+		l.round(t, l.a)
+		return id, name
+	}
+	summary := func(c deliverytest.Call) bool { return strings.HasPrefix(c.Message.Text(), "Storm") }
+	scenarios := map[string][]struct {
+		firing bool
+		run    func(t *testing.T) []deliverytest.Call
+	}{
+		delivery.DeliveryAddedDestination: {{true, func(t *testing.T) []deliverytest.Call {
+			route, _, _ := start(t, 1_000_000, true)
+			l.routeEdit(t, route, "DSAAAAAAAAAAA1", "DSAAAAAAAAAAA2")
+			l.round(t, l.a)
+			return l.rec.Calls()
+		}}},
+		delivery.DeliveryStormSummary: {{true, func(t *testing.T) []deliverytest.Call {
+			stormStarted(t)
+			return slices.DeleteFunc(l.rec.Calls(), func(c deliverytest.Call) bool { return !summary(c) })
+		}}},
+		delivery.DeliveryStormUpdate: {{true, func(t *testing.T) []deliverytest.Call {
+			_, name := stormStarted(t)
+			l.rec.Reset()
+			l.fireAlerts(t, name+"z", alert{name: "Row" + name + "z/a", team: name})
+			l.round(t, l.a)
+			return l.rec.Calls()
+		}}},
+		delivery.DeliveryAfterStorm: {{true, func(t *testing.T) []deliverytest.Call {
+			id, _ := stormStarted(t)
+			l.rec.Reset()
+			l.calm(t, id)
+			l.round(t, l.a)
+			return slices.DeleteFunc(l.rec.Calls(), summary)
+		}}},
+		delivery.DeliveryLate: {{true, func(t *testing.T) []deliverytest.Call {
+			_, gid, _ := start(t, 1_000_000, false)
+			l.rec.Script(deliverytest.MethodPublish, deliverytest.RetryAfter(30*time.Second, delivery.ScopeDestination))
+			l.round(t, l.a)
+			l.resolve(t, gid)
+			l.rec.Reset()
+			l.business.Advance(31 * time.Second)
+			l.round(t, l.a)
+			return only(l.rec.Calls(), deliverytest.MethodPublish, deliverytest.MethodUpdate)
+		}}},
+		delivery.DeliveryAfterRecovery: {
+			{true, func(t *testing.T) []deliverytest.Call {
+				start(t, 1_000_000, false)
+				l.brk(t, l.dests[0])
+				l.probe(t)
+				return l.rec.Calls()
+			}},
+			{false, func(t *testing.T) []deliverytest.Call {
+				_, gid, _ := start(t, 1_000_000, false)
+				l.brk(t, l.dests[0])
+				l.ack(t, gid)
+				l.probe(t)
+				return l.rec.Calls()
+			}},
+		},
+		delivery.DeliveryUpdateRecovery: {{true, func(t *testing.T) []deliverytest.Call {
+			_, gid, _ := start(t, 1_000_000, true)
+			l.brk(t, l.dests[0])
+			l.ack(t, gid)
+			l.probe(t)
+			return l.rec.Calls()
+		}}},
+		delivery.DeliveryRepliesWhileBroken: {{true, func(t *testing.T) []deliverytest.Call {
+			_, gid, _ := start(t, 1_000_000, true)
+			name := fmt.Sprintf("row%02d", n)
+			l.brk(t, l.dests[0])
+			l.fireAlerts(t, name, alert{name: "Row" + name + "/a", team: name}, alert{name: "Row" + name + "/b",
+				team: name})
+			l.probe(t)
+			if l.count(t, `SELECT count(*) FROM thread_replies WHERE state = 'dropped' AND alert_group_id =
+				(SELECT id FROM alert_groups WHERE public_id = $1)`, gid) != 1 {
+				t.Error("the reply was not dropped")
+			}
+			return only(l.rec.Calls(), deliverytest.MethodReply)
+		}}},
+		delivery.DeliveryResolvedBroken: {{true, func(t *testing.T) []deliverytest.Call {
+			_, gid, _ := start(t, 1_000_000, false)
+			l.brk(t, l.dests[0])
+			l.resolve(t, gid)
+			l.probe(t)
+			if l.state(t, gid, l.dests[0]) != "withheld" {
+				t.Errorf("resolved while broken: %s", l.state(t, gid, l.dests[0]))
+			}
+			return without(l.rec.Calls(), deliverytest.MethodCheck)
+		}}},
+		delivery.DeliveryRepublication: {{true, func(t *testing.T) []deliverytest.Call {
+			_, gid, _ := start(t, 1_000_000, true)
+			l.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeGone, "deleted"))
+			l.ack(t, gid)
+			l.round(t, l.a)
+			l.rec.Reset()
+			l.round(t, l.a)
+			return l.rec.Calls()
+		}}},
+		delivery.DeliveryFinalEdit: {{true, func(t *testing.T) []deliverytest.Call {
+			route, _, _ := start(t, 1_000_000, true)
+			l.routeEdit(t, route)
+			l.round(t, l.a)
+			return l.rec.Calls()
+		}}},
+	}
+	var lines []string
+	for _, row := range delivery.DeliveryEvents {
+		if scenarios[row.Name] == nil {
+			t.Errorf("no scenario for %s", row.Name)
+		}
+		for _, sc := range scenarios[row.Name] {
+			calls := sc.run(t)
+			loudness, mentions := row.Loudness, row.Mentions
+			if row.LoudWhenFiring && !sc.firing {
+				loudness, mentions = groups.Quiet, nil
+			}
+			want := map[delivery.Form]string{delivery.FormPublication: deliverytest.MethodPublish,
+				delivery.FormUpdate: deliverytest.MethodUpdate, delivery.FormNothing: ""}[row.Form]
+			got := "nothing"
+			switch {
+			case want == "" && len(calls) != 0:
+				t.Errorf("%s: sent %s", row.Name, methods(calls))
+			case want == "":
+			case len(calls) != 1 || calls[0].Method != want || calls[0].Loudness != loudness ||
+				len(calls[0].Mentions) != len(mentions) || !slices.Equal(calls[0].Mentions, mentions) &&
+				len(mentions) > 0:
+				t.Errorf("%s (firing %v): want one %s %s %v, got %+v", row.Name, sc.firing, want, loudness, mentions,
+					calls)
+			default:
+				got = fmt.Sprintf("%s %s %v", calls[0].Method, calls[0].Loudness, calls[0].Mentions)
+			}
+			lines = append(lines, fmt.Sprintf("%s: %s", row.Name, got))
+		}
+	}
+	t.Logf("%d rows of the Loud/Quiet table of delivery events, each as its row says: %s",
+		len(delivery.DeliveryEvents), strings.Join(lines, "; "))
+}
+
+// The live checks of the review of S-035.
+
+// deleteDest deletes the Destination publicID through deleteDestination's service, reporting a failure to t.
+func (l *live) deleteDest(t *testing.T, publicID string) {
+	t.Helper()
+	if err := l.dsvc.Delete(t.Context(), destinations.Requester{Actor: audit.System,
+		Transport: audit.TransportSystem}, publicID, nil); err != nil {
+		t.Error(err)
+	}
+}
+
+// row reads the delivery of the Alert Group publicID in the Destination: its state, whether it has a message,
+// whether its final edit waits, its late note, its loudness and its Transient attempts.
+type deliveryRow struct {
+	state                         string
+	message, retire, late, loud   bool
+	attempts                      int64
+	firstFailed                   bool
+	lastErrorClass, lastErrorText string
+}
+
+func (l *live) row(t *testing.T, publicID string, dest int64) deliveryRow {
+	t.Helper()
+	var r deliveryRow
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT d.state, d.message_id IS NOT NULL, d.desired_retire,
+		d.late_note, coalesce(d.publication_loud, false), d.attempts, d.first_failed_at IS NOT NULL,
+		coalesce(d.last_error_class, ''), coalesce(d.last_error, '')
+		FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+		WHERE g.public_id = $1 AND d.destination_id = $2`, publicID, dest).Scan(&r.state, &r.message, &r.retire,
+		&r.late, &r.loud, &r.attempts, &r.firstFailed, &r.lastErrorClass, &r.lastErrorText); err != nil {
+		t.Fatalf("the delivery of %s: %v", publicID, err)
+	}
+	return r
+}
+
+// resolveBeforeFirstPublication is C-11.FR-11 when no error was ever recorded (last_error_class NULL): an Alert Group
+// resolved while its first Publication waited only for limiter tokens, or before it was ever attempted, resolves —
+// the dispatcher's transaction commits — and its Publication goes without the late note.
+func (l *live) resolveBeforeFirstPublication(t *testing.T) {
+	l.fresh(t, 1, 3600)
+	l.fire(t, "rb", "EarlyTok/a", "EarlyWait/a")
+	l.round(t, l.a)
+	if l.rec.Count(deliverytest.MethodPublish) != 1 {
+		t.Fatalf("one token: %s", methods(l.rec.Calls()))
+	}
+	var waiting string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT g.public_id FROM deliveries d JOIN alert_groups g ON
+		g.id = d.alert_group_id WHERE d.message_id IS NULL AND d.state = 'pending' AND d.last_error_class IS NULL`).Scan(
+		&waiting); err != nil {
+		t.Fatalf("the delivery waiting for its token: %v", err)
+	}
+	l.resolve(t, waiting)
+	l.fire(t, "rb2", "EarlyNone/a")
+	never := l.group(t, "EarlyNone")
+	l.resolve(t, never)
+	for _, gid := range []string{waiting, never} {
+		r := l.row(t, gid, l.dests[0])
+		if r.state != "pending" || r.late || r.lastErrorClass != "" ||
+			l.count(t, `SELECT count(*) FROM alert_groups WHERE public_id = $1 AND status = 'resolved'`, gid) != 1 {
+			t.Fatalf("%s after the resolve: %+v", gid, r)
+		}
+	}
+	t.Log("resolved while waiting for a token, and before any attempt: both resolves committed; pending, no late note")
+}
+
+// inFlightRaces is C-11.FR-14 and FR-16 with a call in flight: a row that ended meanwhile is never revived, a probe's
+// success is never lost, a message created on an ended row is kept consistent, and the secrets of a Destination
+// deleted meanwhile are wiped.
+func (l *live) inFlightRaces(t *testing.T) {
+	// The probe's Publication is in flight when its Alert Group resolves: withheld with its lease kept, so the success
+	// is recorded and the Destination recovers; the message is then edited to the resolved state.
+	l.fresh(t, 1000, 1)
+	l.fire(t, "ifr1", "RaceProbe/a")
+	gid := l.group(t, "RaceProbe")
+	l.brk(t, l.dests[0])
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK},
+		Then: func() { l.resolve(t, gid) }})
+	l.probe(t)
+	health, _ := l.health(t, l.dests[0])
+	if r := l.row(t, gid, l.dests[0]); health != "healthy" || !r.message || r.state != "delivered" ||
+		methods(l.rec.Calls()) != "publish,update" {
+		t.Fatalf("probe publication resolved meanwhile: %s %+v %s", health, r, methods(l.rec.Calls()))
+	}
+	t.Log("probe publish in flight while resolved: success recorded, destination healthy, then one edit")
+
+	// A late Publication is in flight when its Destination is deleted: the row was withheld, but the message now
+	// exists, so it gets its final edit.
+	l.fresh(t, 1000, 1)
+	ds5 := l.newDest(t, 5)
+	l.attach(t, ds5)
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.RetryAfter(time.Second, delivery.ScopeDestination))
+	l.fire(t, "ifr2", "RaceLate/a")
+	late := l.group(t, "RaceLate")
+	l.round(t, l.a)
+	l.resolve(t, late)
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK},
+		Then: func() { l.deleteDest(t, "DSAAAAAAAAAAA5") }})
+	l.business.Advance(2 * time.Second)
+	l.round(t, l.a)
+	if r := l.row(t, late, ds5); r.state != "pending" || !r.message || !r.retire {
+		t.Fatalf("raced publication: %+v", r)
+	}
+	l.round(t, l.a)
+	calls := l.rec.Calls()
+	if r := l.row(t, late, ds5); r.state != "retired" || !isFinalEdit(calls[len(calls)-1], late) {
+		t.Fatalf("final edit of the raced publication: %+v %s", r, methods(calls))
+	}
+	t.Log("late publish in flight while its destination was deleted: message kept, final edit, retired")
+
+	// A Publication in flight when its Destination is deleted, which makes it its final edit, ends unknown: Not
+	// delivered, no final edit waits, and the secrets are wiped.
+	l.fresh(t, 1000, 1)
+	ds6 := l.newDest(t, 6)
+	l.exec(t, `UPDATE destinations SET proxy_password_ciphertext = '\x01', proxy_password_key_id = 'k1',
+		proxy_password_updated_at = $2 WHERE id = $1`, ds6, l.business.Now())
+	l.exec(t, `INSERT INTO destination_secrets (destination_id, org_id, name, value_ciphertext, value_key_id,
+		value_updated_at) VALUES ($1, $2, 'token', '\x00', 'k1', $3)`, ds6, l.orgID, l.business.Now())
+	l.attach(t, ds6)
+	l.fire(t, "ifr3", "RaceUnknown/a")
+	unknown := l.group(t, "RaceUnknown")
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{
+		Outcome: delivery.Outcome{Kind: delivery.OutcomeUnknown, Error: "odd"}, Then: func() {
+			l.deleteDest(t, "DSAAAAAAAAAAA6")
+			if r := l.row(t, unknown, ds6); !r.retire {
+				t.Errorf("the deletion did not make it the final edit: %+v", r)
+			}
+		}})
+	l.round(t, l.a)
+	secrets := l.count(t, `SELECT count(*) FROM destination_secrets WHERE destination_id = $1`, ds6) +
+		l.count(t, `SELECT count(*) FROM destinations WHERE id = $1 AND proxy_password_ciphertext IS NOT NULL`, ds6)
+	if r := l.row(t, unknown, ds6); r.state != "not_delivered" || r.retire || secrets != 0 {
+		t.Fatalf("unknown after the deletion: %+v, secrets %d", r, secrets)
+	}
+	t.Log("publish in flight while its destination was deleted, answered unknown: not_delivered, no final edit, " +
+		"secrets wiped")
+
+	// An edit of a resolved Alert Group is in flight when its Destination is deleted: retired without a call, it stays
+	// retired and receives nothing more.
+	l.fresh(t, 1000, 1)
+	ds7 := l.newDest(t, 7)
+	l.attach(t, ds7)
+	l.fire(t, "ifr4", "RaceEdit/a")
+	edit := l.group(t, "RaceEdit")
+	l.round(t, l.a)
+	l.resolve(t, edit)
+	l.rec.Script(deliverytest.MethodUpdate, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK},
+		Then: func() { l.deleteDest(t, "DSAAAAAAAAAAA7") }})
+	l.round(t, l.a)
+	l.round(t, l.a)
+	if r := l.row(t, edit, ds7); r.state != "retired" || methods(l.rec.Calls()) != "publish,update" {
+		t.Fatalf("edit in flight while retired: %+v %s", r, methods(l.rec.Calls()))
+	}
+	t.Log("edit in flight while its destination was deleted: stays retired, nothing more")
+}
+
+// lateNoteReopened is C-11.FR-11 when the Alert Group opens again before its late Publication: the note is gone and
+// the Publication follows the recovery rule, Loud with new_alert_group while it fires.
+func (l *live) lateNoteReopened(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.RetryAfter(30*time.Second, delivery.ScopeDestination))
+	l.fire(t, "lnr", "LateReopen/a")
+	gid := l.group(t, "LateReopen")
+	l.round(t, l.a)
+	l.resolve(t, gid)
+	if r := l.row(t, gid, l.dests[0]); !r.late || r.loud {
+		t.Fatalf("resolved while waiting: %+v", r)
+	}
+	if _, err := l.groups.Unresolve(t.Context(), l.alice, gid); err != nil {
+		t.Fatal(err)
+	}
+	if r := l.row(t, gid, l.dests[0]); r.late || !r.loud {
+		t.Fatalf("opened again: %+v", r)
+	}
+	l.business.Advance(31 * time.Second)
+	l.round(t, l.a)
+	pubs := only(l.rec.Calls(), deliverytest.MethodPublish)
+	pub := pubs[len(pubs)-1]
+	if len(pubs) != 2 || pub.Loudness != groups.Loud ||
+		!slices.Equal(pub.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) ||
+		strings.Contains(pub.Message.Text(), "Delivered late") ||
+		l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'delivered_late'`) != 0 {
+		t.Fatalf("publication after the reopen: %+v", pubs)
+	}
+	t.Log("resolved while waiting (late note), opened again: published loud [new_alert_group] without the note")
+}
+
+// stormMembership is C-11.FR-6 with C-11.FR-14: a Destination added to a Route during its Storm gets the Storm summary,
+// Loud, holds the Alert Groups the Storm holds and publishes the others Quietly; removed during the Storm, its summary
+// is retired and the Storm's later changes and its end no longer edit it.
+func (l *live) stormMembership(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	routeID, route := l.newRoute(t, "stormjoin", 2, "DSAAAAAAAAAAA1")
+	for _, a := range []alert{{name: "SJ0/a", team: "stormjoin"}, {name: "SJ1/a", team: "stormjoin"},
+		{name: "SJ2/a", team: "stormjoin"}, {name: "SJ3/a", team: "stormjoin", severity: "critical"},
+		{name: "SJ4/a", team: "stormjoin"}} {
+		l.fireAlerts(t, "sj-"+a.name, a)
+		l.business.Advance(time.Second)
+	}
+	l.round(t, l.a)
+	if l.count(t, `SELECT count(*) FROM storms WHERE route_id = $1 AND ended_at IS NULL`, routeID) != 1 {
+		t.Fatal("no storm")
+	}
+	l.rec.Reset()
+	l.routeEdit(t, route, "DSAAAAAAAAAAA1", "DSAAAAAAAAAAA2")
+	l.round(t, l.a)
+	var quiet []string
+	summaries := 0
+	for _, c := range to(l.rec.Calls(), "DSAAAAAAAAAAA2") {
+		switch {
+		case c.Method != deliverytest.MethodPublish:
+			t.Errorf("joined: %s", c.Method)
+		case strings.HasPrefix(c.Message.Text(), "Storm on Route"):
+			summaries++
+			if c.Loudness != groups.Loud {
+				t.Errorf("summary %+v", c)
+			}
+		case c.Loudness == groups.Quiet:
+			quiet = append(quiet, strings.Fields(c.Message.Sections[0])[1])
+		default:
+			t.Errorf("loud publication %+v", c)
+		}
+	}
+	slices.Sort(quiet)
+	held := l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1 AND held_by_storm_id IS NOT NULL`,
+		l.dests[1])
+	if summaries != 1 || !slices.Equal(quiet, []string{"SJ0", "SJ1", "SJ3"}) || held != 2 ||
+		len(to(l.rec.Calls(), "DSAAAAAAAAAAA1")) != 0 {
+		t.Fatalf("joined during the storm: summary %d, quiet %v, held %d, %s", summaries, quiet, held,
+			methods(l.rec.Calls()))
+	}
+	t.Logf("joined during the storm: summary publish loud; quiet publish=%d; held=%d", len(quiet), held)
+	l.rec.Reset()
+	l.routeEdit(t, route, "DSAAAAAAAAAAA1")
+	if l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1 AND storm_id IS NOT NULL
+		AND state = 'retired'`, l.dests[1]) != 1 {
+		t.Fatal("the summary of the destination that left is not retired")
+	}
+	l.fireAlerts(t, "sj-5", alert{name: "SJ5/a", team: "stormjoin"})
+	l.calm(t, routeID)
+	l.round(t, l.a)
+	left := to(l.rec.Calls(), "DSAAAAAAAAAAA2")
+	for _, c := range left {
+		if !strings.Contains(c.Message.Text(), "No longer updated here") {
+			t.Errorf("a call to the destination that left: %s %q", c.Method, c.Message.Text())
+		}
+	}
+	if len(left) != 3 || !slices.ContainsFunc(to(l.rec.Calls(), "DSAAAAAAAAAAA1"), func(c deliverytest.Call) bool {
+		return strings.HasPrefix(c.Message.Text(), "Storm over")
+	}) {
+		t.Fatalf("after leaving: %s", methods(l.rec.Calls()))
+	}
+	t.Logf("left during the storm: final edit=%d, summary retired, no summary edit there at the end", len(left))
+}
+
+// stormSummaryAfterEnd is C-11.FR-6: a Storm summary first published after its Storm ended is Quiet.
+func (l *live) stormSummaryAfterEnd(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	routeID, _ := l.newRoute(t, "stormquiet", 1, "DSAAAAAAAAAAA1")
+	l.fireAlerts(t, "sq", alert{name: "SQ0/a", team: "stormquiet"}, alert{name: "SQ1/a", team: "stormquiet"})
+	l.calm(t, routeID)
+	l.round(t, l.a)
+	var summary []deliverytest.Call
+	for _, c := range only(l.rec.Calls(), deliverytest.MethodPublish) {
+		if strings.HasPrefix(c.Message.Text(), "Storm") {
+			summary = append(summary, c)
+		}
+	}
+	if len(summary) != 1 || !strings.HasPrefix(summary[0].Message.Text(), "Storm over") ||
+		summary[0].Loudness != groups.Quiet || len(summary[0].Mentions) != 0 || l.count(t,
+		`SELECT count(*) FROM delivery_events WHERE kind = 'storm_summary' AND loudness = 'quiet'`) != 1 {
+		t.Fatalf("summary first published after the end: %+v", summary)
+	}
+	t.Log("summary first published after its storm ended: quiet, no mentions")
+}
+
+// deletedBrokenFinalEdit: a probe whose final edit reaches a deleted Broken Destination ends its Broken state without
+// a destination_recovered event or line.
+func (l *live) deletedBrokenFinalEdit(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	ds8 := l.newDest(t, 8)
+	l.attach(t, ds8)
+	l.fire(t, "dbf", "DeletedBroken/a")
+	gid := l.group(t, "DeletedBroken")
+	l.round(t, l.a)
+	l.brk(t, ds8)
+	l.deleteDest(t, "DSAAAAAAAAAAA8")
+	l.rec.Reset()
+	l.probe(t)
+	health, _ := l.health(t, ds8)
+	calls := l.rec.Calls()
+	if len(calls) != 1 || !isFinalEdit(calls[0], gid) || l.row(t, gid, ds8).state != "retired" || health != "healthy" {
+		t.Fatalf("probe of the deleted destination: %s %s", methods(calls), health)
+	}
+	if l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'destination_recovered'
+		AND destination_id = $1`, ds8) != 0 ||
+		strings.Contains(l.log.String(), `"event":"destination_recovered","destination":"DSAAAAAAAAAAA8"`) {
+		t.Fatal("a deleted destination recovered")
+	}
+	t.Log("final edit reached a deleted broken destination: retired, healthy, no destination_recovered")
+}
+
+// destinationDeletedBumpsRoutes is C-11.FR-14 on the Routes: deleting a Destination gives each Route it belonged to a
+// new version without it; another Route keeps its version.
+func (l *live) destinationDeletedBumpsRoutes(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.newDest(t, 9)
+	_, r1 := l.newRoute(t, "bump1", 1_000_000, "DSAAAAAAAAAAA9")
+	_, r2 := l.newRoute(t, "bump2", 1_000_000, "DSAAAAAAAAAAA9", "DSAAAAAAAAAAA1")
+	_, r3 := l.newRoute(t, "bump3", 1_000_000, "DSAAAAAAAAAAA1")
+	before := map[string]int64{}
+	for _, id := range []string{r1, r2, r3} {
+		rt, err := l.routes.Get(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[id] = rt.Version
+	}
+	l.deleteDest(t, "DSAAAAAAAAAAA9")
+	for id, want := range map[string][]string{r1: {}, r2: {"DSAAAAAAAAAAA1"}, r3: {"DSAAAAAAAAAAA1"}} {
+		rt, err := l.routes.Get(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bumped := rt.Version == before[id]+1
+		if !slices.Equal(rt.DestinationIDs, want) || bumped != (id != r3) || (id == r3 && rt.Version != before[id]) {
+			t.Errorf("%s: version %d → %d, destinations %v", rt.Name, before[id], rt.Version, rt.DestinationIDs)
+		}
+	}
+	t.Log("deleteDestination: its two Routes got a new version without it; the third kept its version")
+}
+
+// membershipLock is C-11.FR-14 between an Enqueue and a change of the Route's Destinations: while a change holds the
+// Route's membership lock, the re-render of a new Alert Group of the Route waits, and goes on once it commits.
+func (l *live) membershipLock(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	tx, err := l.d.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(t.Context()) }()
+	if _, err := tx.Exec(t.Context(), `SELECT pg_advisory_xact_lock($1, hashint8($2::bigint))`,
+		db.RouteMembershipLockClass, l.routeID); err != nil {
+		t.Fatal(err)
+	}
+	l.storeAlerts(t, "ml", alert{name: "Membership/a", team: "db"})
+	done := make(chan error, 1)
+	go func() { done <- l.drain(t.Context()) }()
+	waiting := false
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline) && !waiting; {
+		waiting = l.count(t, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+			AND classid = $1::bigint::oid`, int64(uint32(db.RouteMembershipLockClass))) == 1
+		select {
+		case err := <-done:
+			t.Fatalf("the re-render did not wait: %v", err)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	if !waiting || l.count(t, `SELECT count(*) FROM deliveries`) != 0 {
+		t.Fatal("the re-render does not wait for the membership lock")
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if l.count(t, `SELECT count(*) FROM deliveries`) != 1 {
+		t.Fatal("no delivery after the change committed")
+	}
+	t.Log("an Enqueue on the Route waited for the membership lock of a change of its Destinations, then delivered")
+}
+
+// budgetResetOnRecovery is C-11.FR-8 and FR-19: breaking a Destination leaves the Transient budget of its other
+// waiting deliveries alone — another replica may hold them — and the recovery gives them a fresh one.
+func (l *live) budgetResetOnRecovery(t *testing.T) {
+	l.fresh(t, 2, 3600)
+	l.fire(t, "brr", "BudgetA/a", "BudgetB/a")
+	a, b := l.group(t, "BudgetA"), l.group(t, "BudgetB")
+	l.exec(t, `UPDATE deliveries d SET attempts = 3, first_failed_at = $2, next_attempt_at = $3 FROM alert_groups g
+		WHERE g.id = d.alert_group_id AND g.public_id = $1`, b, l.business.Now(), l.business.Now().Add(time.Hour))
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeFatal, "HTTP 403"))
+	l.round(t, l.a)
+	health, _ := l.health(t, l.dests[0])
+	if r := l.row(t, b, l.dests[0]); health != "broken" || r.attempts != 3 || !r.firstFailed {
+		t.Fatalf("breaking touched another row: %s %+v", health, r)
+	}
+	l.probe(t)
+	health, _ = l.health(t, l.dests[0])
+	if r := l.row(t, b, l.dests[0]); health != "healthy" || r.attempts != 0 || r.firstFailed ||
+		l.row(t, a, l.dests[0]).state != "delivered" {
+		t.Fatalf("no fresh budget after the recovery: %s %+v", health, r)
+	}
+	t.Log("broken by A: B kept attempts=3; recovered: B attempts=0")
+}
+
+// abandonConnection is C-11.FR-14 for deleteConnection (S-039): the final edits still pending in its deleted
+// Destinations end Not delivered, each logged as delivery_not_delivered once the transaction committed.
+func (l *live) abandonConnection(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	ds := l.newDestNamed(t, "DSAAAAAAAAAAB1")
+	l.attach(t, ds)
+	l.fire(t, "ab", "Abandon/a")
+	gid := l.group(t, "Abandon")
+	l.round(t, l.a)
+	l.deleteDest(t, "DSAAAAAAAAAAB1")
+	l.log.Reset()
+	var committed func(context.Context)
+	if err := pgxTx(t, l, func(tx groups.DBTX) error {
+		var err error
+		committed, err = l.svc.AbandonConnection(t.Context(), tx, l.conn)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(l.log.String(), "delivery_not_delivered") {
+		t.Fatal("logged before the commit")
+	}
+	committed(t.Context())
+	r := l.row(t, gid, ds)
+	if r.state != "not_delivered" || r.retire || r.lastErrorText != "the Connection was deleted" ||
+		!strings.Contains(l.log.String(), `"event":"delivery_not_delivered","destination":"DSAAAAAAAAAAB1","group":"`+
+			gid+`","kind":"final_edit","error_class":"unknown"`) {
+		t.Fatalf("abandoned %+v, log %s", r, l.log)
+	}
+	t.Log("deleted connection: the pending final edit is not_delivered, logged after the commit")
 }

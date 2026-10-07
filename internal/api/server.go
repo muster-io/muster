@@ -271,7 +271,7 @@ var implemented = map[string]bool{
 	"AcknowledgeAlertGroup":   true, "UnacknowledgeAlertGroup": true, "ResolveAlertGroup": true,
 	"UnresolveAlertGroup": true, "SnoozeAlertGroup": true, "UnsnoozeAlertGroup": true, "RunBulkCommand": true,
 	"ListAlertGroupNotes": true, "CreateAlertGroupNote": true, "ListUserDirectory": true,
-	"ListAlertGroupDeliveries": true, "ListDestinations": true, "GetDestination": true,
+	"ListAlertGroupDeliveries": true, "ListDestinations": true, "GetDestination": true, "DeleteDestination": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how

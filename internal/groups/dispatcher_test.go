@@ -1142,26 +1142,37 @@ func TestRerender(t *testing.T) {
 	received := t0.Add(-3 * time.Second)
 	h.db.received = map[int64]time.Time{77: received}
 	var got []Rendering
+	var afterCommit []bool
 	h.svc.SetRerender(func(_ context.Context, tx DBTX, r Rendering) error {
 		if tx != nil {
 			t.Errorf("tx = %v", tx)
 		}
 		got = append(got, r)
+		// What the re-render queues runs once the change committed, not inside it.
+		i := len(afterCommit)
+		afterCommit = append(afterCommit, false)
+		r.After(func(context.Context) { afterCommit[i] = true })
+		if afterCommit[i] {
+			t.Error("the queued function ran inside the transaction")
+		}
 		return nil
 	})
 	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
 	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "job": "j2"})
 	ctx := withSnapshot(t.Context(), 77)
-	if _, err := h.svc.AlertChanges(ctx, nil, []ingest.AlertChange{{Kind: ingest.ChangeFired, AlertID: a,
-		StoredSnapshotID: 77}}); err != nil {
-		t.Fatal(err)
+	for _, id := range []int64{a, b} {
+		routed, err := h.svc.AlertChanges(ctx, nil, []ingest.AlertChange{{Kind: ingest.ChangeFired, AlertID: id,
+			StoredSnapshotID: 77}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if routed.Committed == nil {
+			t.Fatal("nothing to run once the snapshot committed")
+		}
+		routed.Committed(t.Context())
 	}
-	if _, err := h.svc.AlertChanges(t.Context(), nil, []ingest.AlertChange{{Kind: ingest.ChangeFired, AlertID: b,
-		StoredSnapshotID: 77}}); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("renderings %+v", got)
+	if len(got) != 2 || !slices.Equal(afterCommit, []bool{true, true}) {
+		t.Fatalf("renderings %+v, after commit %v", got, afterCommit)
 	}
 	c, j := got[0], got[1]
 	if c.ReceivedAt == nil || !c.ReceivedAt.Equal(received) || c.Actor.Kind != audit.ActorSystem ||

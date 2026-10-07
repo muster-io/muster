@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
+	idb "github.com/muster-io/muster/internal/internalalerts/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 )
@@ -41,26 +44,37 @@ var (
 // The tables of the fake database.
 type (
 	fakeDest struct {
-		id         int64
-		publicID   string
-		name, typ  string
-		connection *int64
-		health     string
-		limit, per int64
-		deleted    bool
+		id                        int64
+		publicID                  string
+		name, typ                 string
+		connection                *int64
+		health                    string
+		limit, per                int64
+		deleted                   bool
+		brokenSince, nextProbe    *time.Time
+		brokenCause, brokenReason *string
+		// probeOnNext is next_probe_at 'infinity': the next due delivery is the probe.
+		probeOnNext bool
+		// secrets are the encrypted secret columns that are set, and named its destination_secrets rows.
+		secrets, named int
 	}
 	fakeRoute struct {
-		language string
-		window   int64
+		language  string
+		window    int64
+		publicID  string
+		name      string
+		threshold int64
 	}
 	fakeGroup struct {
-		id       int64
-		publicID string
-		number   int64
-		title    string
-		status   string
-		urgent   bool
-		route    int64
+		id         int64
+		publicID   string
+		number     int64
+		title      string
+		status     string
+		urgent     bool
+		route      int64
+		created    time.Time
+		resolvedAt *time.Time
 	}
 	fakeDelivery struct {
 		id, dest, group                     int64
@@ -85,6 +99,11 @@ type (
 		possibleDuplicate                   bool
 		updated                             time.Time
 		anchorID, chainLastID               *string
+		firstFailed                         *time.Time
+		lateNote, republished               bool
+		// heldBy is held_by_storm_id and storm the storm_id of a Storm summary, 0 for none.
+		heldBy, storm int64
+		desiredRetire bool
 	}
 	fakeReply struct {
 		id, delivery, group, dest int64
@@ -100,6 +119,8 @@ type (
 		sentAt                    *time.Time
 		messageID                 *string
 		created                   time.Time
+		attempts                  int64
+		firstFailed               *time.Time
 	}
 	fakeBucket struct {
 		tokens   float64
@@ -132,13 +153,88 @@ type fakeDB struct {
 	before map[string]func()
 	// connLimits are the limiters of Connections, limit and per_seconds; connLimit per connPer otherwise.
 	connLimits map[int64][2]int64
+	// internal are the synthetic Snapshots of Internal alerts, and hints the live-update hints.
+	internal []fakeInternal
+	hints    []db.Hint
+	// storms are the Storms, timers the deadlines of their calm checks, timersNotified the wakes of the timer workers,
+	// and connDeleted the Connections whose deletion abandoned deliveries.
+	storms         map[int64]*fakeStorm
+	timers         map[int64]time.Time
+	timersNotified int
+	// membershipLocks are the Routes whose membership lock Enqueue took shared, in order.
+	membershipLocks []int64
+}
+
+// sqlBool is a boolean of SQL — true, false or NULL — with its three-valued logic, so that the fake meets a NULL where
+// a query does: a NULL from a nullable column in a boolean written to a NOT NULL column fails the statement.
+type sqlBool struct{ v, null bool }
+
+func sqlIs(b bool) sqlBool { return sqlBool{v: b} }
+
+// sqlIn is s IN (values): NULL when s is NULL.
+func sqlIn(s *string, values ...string) sqlBool {
+	if s == nil {
+		return sqlBool{null: true}
+	}
+	return sqlIs(slices.Contains(values, *s))
+}
+
+func (a sqlBool) and(b sqlBool) sqlBool {
+	switch {
+	case (!a.null && !a.v) || (!b.null && !b.v):
+		return sqlIs(false)
+	case a.null || b.null:
+		return sqlBool{null: true}
+	}
+	return sqlIs(true)
+}
+
+func (a sqlBool) or(b sqlBool) sqlBool {
+	switch {
+	case (!a.null && a.v) || (!b.null && b.v):
+		return sqlIs(true)
+	case a.null || b.null:
+		return sqlBool{null: true}
+	}
+	return sqlIs(false)
+}
+
+func (a sqlBool) coalesce(d bool) sqlBool {
+	if a.null {
+		return sqlIs(d)
+	}
+	return a
+}
+
+func (a sqlBool) isTrue() bool { return !a.null && a.v }
+
+// notNull is the value of a NOT NULL column, or the error PostgreSQL gives for a NULL.
+func notNull(column string, b sqlBool) (bool, error) {
+	if b.null {
+		return false, fmt.Errorf("null value in column %q of relation \"deliveries\" violates not-null constraint", column)
+	}
+	return b.v, nil
+}
+
+// fakeStorm is a row of storms.
+type fakeStorm struct {
+	id, route                    int64
+	started                      time.Time
+	calmSince, ended             *time.Time
+	alertGroupCount, urgentCount int64
+}
+
+// fakeInternal is a raise or a resolve of an Internal alert.
+type fakeInternal struct {
+	status, name string
+	labels       map[string]string
 }
 
 func newFakeDB() *fakeDB {
 	return &fakeDB{dests: map[int64]*fakeDest{}, routes: map[int64]fakeRoute{}, routeDests: map[int64][]int64{},
 		groups: map[int64]*fakeGroup{}, buckets: map[bucketKey]*fakeBucket{}, fail: map[string]error{},
 		calls: map[string]int{}, before: map[string]func(){}, details: 90, nextID: 100,
-		connLimits: map[int64][2]int64{}}
+		connLimits: map[int64][2]int64{}, storms: map[int64]*fakeStorm{}, timers: map[int64]time.Time{}}
 }
 
 func (f *fakeDB) call(name string) error {
@@ -216,7 +312,7 @@ func (f *fakeDB) ListRouteDestinations(_ context.Context, arg dbgen.ListRouteDes
 	for _, id := range f.routeDests[arg.RouteID] {
 		if d := f.dests[id]; d != nil && !d.deleted {
 			out = append(out, dbgen.ListRouteDestinationsRow{ID: d.id, PublicID: d.publicID, Name: d.name,
-				Type: d.typ, ConnectionID: nullInt(d.connection)})
+				Type: d.typ, ConnectionID: nullInt(d.connection), Health: d.health})
 		}
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListRouteDestinationsRow) int { return cmp.Compare(a.ID, b.ID) })
@@ -234,7 +330,18 @@ func (f *fakeDB) GetRouteDelivery(_ context.Context, arg dbgen.GetRouteDeliveryP
 	if !ok {
 		return dbgen.GetRouteDeliveryRow{}, pgx.ErrNoRows
 	}
-	return dbgen.GetRouteDeliveryRow{Language: r.language, ThreadBatchingWindowSeconds: r.window}, nil
+	return dbgen.GetRouteDeliveryRow{PublicID: r.publicID, Name: r.name, Language: r.language,
+		ThreadBatchingWindowSeconds: r.window, StormThreshold: r.threshold}, nil
+}
+
+func (f *fakeDB) ShareRouteMembership(_ context.Context, arg dbgen.ShareRouteMembershipParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if arg.LockClass != db.RouteMembershipLockClass {
+		return errors.New("not the membership lock")
+	}
+	f.membershipLocks = append(f.membershipLocks, arg.RouteID)
+	return f.call("ShareRouteMembership")
 }
 
 func (f *fakeDB) EnsureDelivery(_ context.Context, arg dbgen.EnsureDeliveryParams) (dbgen.EnsureDeliveryRow, error) {
@@ -246,20 +353,29 @@ func (f *fakeDB) EnsureDelivery(_ context.Context, arg dbgen.EnsureDeliveryParam
 	for _, d := range f.deliveries {
 		if d.group == arg.AlertGroupID.Int64 && d.dest == arg.DestinationID {
 			return dbgen.EnsureDeliveryRow{ID: d.id, DesiredVersion: d.version, DesiredHash: d.hash,
-				ThreadBatchUntil: tz(d.batchUntil)}, nil
+				ThreadBatchUntil: tz(d.batchUntil), State: d.state, HeldByStormID: heldOf(d)}, nil
 		}
 	}
 	d := &fakeDelivery{id: f.id(), dest: arg.DestinationID, group: arg.AlertGroupID.Int64, state: "pending",
-		urgent: arg.Urgent, loud: arg.PublicationLoud, next: arg.Now, threadState: "none", updated: arg.Now}
+		urgent: arg.Urgent, loud: arg.PublicationLoud, next: arg.Now, threadState: "none", updated: arg.Now,
+		heldBy: arg.HeldByStormID.Int64}
 	f.deliveries = append(f.deliveries, d)
-	return dbgen.EnsureDeliveryRow{ID: d.id, Inserted: true}, nil
+	return dbgen.EnsureDeliveryRow{ID: d.id, State: d.state, HeldByStormID: heldOf(d), Inserted: true}, nil
 }
 
-func (f *fakeDB) SetDesired(_ context.Context, arg dbgen.SetDesiredParams) error {
+// heldOf is held_by_storm_id of a delivery.
+func heldOf(d *fakeDelivery) pgtype.Int8 {
+	if d.heldBy == 0 {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: d.heldBy, Valid: true}
+}
+
+func (f *fakeDB) SetDesired(_ context.Context, arg dbgen.SetDesiredParams) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.call("SetDesired"); err != nil {
-		return err
+		return "", err
 	}
 	d := f.delivery(arg.ID)
 	d.version++
@@ -267,8 +383,20 @@ func (f *fakeDB) SetDesired(_ context.Context, arg dbgen.SetDesiredParams) error
 	if d.receivedAt == nil && arg.ReceivedAt.Valid {
 		d.receivedAt = at(arg.ReceivedAt.Time)
 	}
-	d.state, d.urgent, d.next, d.updated = "pending", arg.Urgent, arg.Now, arg.Now
-	return nil
+	if arg.Open && (d.state == "withheld" || (d.lateNote && d.messageID == nil)) {
+		d.loud = pgtype.Bool{Bool: arg.Firing, Valid: true}
+	}
+	if arg.Open {
+		d.lateNote = false
+	}
+	switch {
+	case d.state == "deleted_in_messenger" || d.state == "retired":
+	case d.state == "withheld" && !arg.Open:
+	default:
+		d.state = "pending"
+	}
+	d.urgent, d.next, d.updated = arg.Urgent, arg.Now, arg.Now
+	return d.state, nil
 }
 
 func (f *fakeDB) SetDeliveryUrgent(_ context.Context, arg dbgen.SetDeliveryUrgentParams) error {
@@ -299,7 +427,7 @@ func (f *fakeDB) InsertThreadReply(_ context.Context, arg dbgen.InsertThreadRepl
 	}
 	f.replies = append(f.replies, &fakeReply{id: f.id(), delivery: arg.DeliveryID, group: arg.AlertGroupID,
 		dest: arg.DestinationID, event: arg.Event, seqs: arg.EventSeqs, loudness: arg.Loudness, mentions: arg.Mentions,
-		fingerprints: arg.Fingerprints, state: "pending", next: arg.Due, created: arg.Now})
+		fingerprints: arg.Fingerprints, state: arg.State, next: arg.Due, created: arg.Now})
 	return nil
 }
 
@@ -338,16 +466,26 @@ func (f *fakeDB) CollectAlerts(_ context.Context, arg dbgen.CollectAlertsParams)
 func (f *fakeDB) NotifyDelivery(_ context.Context, channel string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if channel != delivery.Channel {
+	switch channel {
+	case delivery.Channel:
+		f.notified++
+	case groups.TimersChannel:
+		f.timersNotified++
+	default:
 		return errors.New("wrong channel")
 	}
-	f.notified++
 	return f.call("NotifyDelivery")
 }
 
 func (f *fakeDB) healthy(dest int64) bool {
 	d := f.dests[dest]
 	return d != nil && d.health == "healthy"
+}
+
+// work says whether a pending delivery is work for the worker: no Storm holds it, and its Destination is not deleted
+// unless it is its final edit.
+func (f *fakeDB) work(d *fakeDelivery) bool {
+	return d.heldBy == 0 && (!f.dests[d.dest].deleted || d.desiredRetire)
 }
 
 func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliveriesParams) (
@@ -360,7 +498,7 @@ func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliver
 	var due []*fakeDelivery
 	for _, d := range f.deliveries {
 		if d.state == "pending" && !d.next.After(arg.Due) && (d.owner == "" || !d.until.After(arg.Now)) &&
-			f.healthy(d.dest) {
+			f.healthy(d.dest) && f.work(d) {
 			due = append(due, d)
 		}
 	}
@@ -409,13 +547,22 @@ func (f *fakeDB) GetLeasedDelivery(_ context.Context, arg dbgen.GetLeasedDeliver
 	if d == nil || d.owner != arg.Owner || !d.until.After(arg.Now) {
 		return dbgen.GetLeasedDeliveryRow{}, pgx.ErrNoRows
 	}
-	ds, g := f.dests[d.dest], f.groups[d.group]
-	return dbgen.GetLeasedDeliveryRow{ID: d.id, AlertGroupID: d.group, DesiredVersion: d.version,
+	ds := f.dests[d.dest]
+	out := dbgen.GetLeasedDeliveryRow{ID: d.id, AlertGroupID: d.group, DesiredVersion: d.version,
 		DesiredPayload: d.payload, DesiredHash: d.hash, DesiredReceivedAt: tz(d.receivedAt), PublicationLoud: d.loud,
+		LateNote: d.lateNote, RepublishedAfterDelete: d.republished, DesiredRetire: d.desiredRetire,
 		ActualHash: d.actualHash, MessageID: txt(d.messageID), MessageUrl: txt(d.messageURL),
 		PublicationStartedAt: tz(d.started), Attempts: d.attempts, DestinationID: ds.id,
 		DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
-		ConnectionID: nullInt(ds.connection), AlertGroupPublicID: g.publicID, Number: g.number}, nil
+		ConnectionID: nullInt(ds.connection), DestinationHealth: ds.health, GroupCreatedAt: d.updated}
+	if d.storm != 0 {
+		out.StormID = pgtype.Int8{Int64: d.storm, Valid: true}
+		return out, nil
+	}
+	g := f.groups[d.group]
+	out.AlertGroupPublicID, out.Number, out.GroupStatus, out.GroupCreatedAt, out.GroupResolvedAt = g.publicID,
+		g.number, g.status, g.created, tz(g.resolvedAt)
+	return out, nil
 }
 
 func (f *fakeDB) RenewDeliveryLease(_ context.Context, arg dbgen.RenewDeliveryLeaseParams) error {
@@ -488,6 +635,16 @@ func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredPar
 	if d.owner != arg.Owner {
 		return "", pgx.ErrNoRows
 	}
+	ended := endedRow(d)
+	raced := ended && d.messageID == nil && arg.MessageID.Valid
+	g := f.groups[d.group]
+	left := f.dests[d.dest].deleted || g == nil || !slices.Contains(f.routeDests[g.route], d.dest)
+	// desired_retire = d.desired_retire OR (f.raced AND d.storm_id IS NULL AND f.left_destination)
+	retire, err := notNull("desired_retire", sqlIs(d.desiredRetire).or(sqlIs(raced).and(sqlIs(d.storm == 0)).and(
+		sqlIs(left))))
+	if err != nil {
+		return "", err
+	}
 	d.actualVersion, d.actualHash = arg.Version, arg.Hash
 	if arg.MessageID.Valid {
 		d.messageID = strOf(arg.MessageID)
@@ -502,26 +659,47 @@ func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredPar
 		d.publications++
 	}
 	d.lastDelivered = at(arg.Now)
-	d.state = "pending"
 	d.receivedAt = nil
-	if d.version == arg.Version {
+	switch { // the old desired_retire, as every SET expression reads the row before the update
+	case ended && !raced:
+	case raced && d.storm != 0:
+		d.state = "retired"
+	case raced && left:
+		d.state = "pending"
+	case d.version == arg.Version && !d.desiredRetire:
 		d.state = "delivered"
+	default:
+		d.state = "pending"
 	}
+	d.desiredRetire = retire
 	d.next, d.attempts, d.errorClass, d.lastError, d.owner, d.until = arg.Now, 0, nil, nil, "", time.Time{}
+	d.firstFailed = nil
 	return d.state, nil
 }
 
-func (f *fakeDB) RecordDeliveryRetry(_ context.Context, arg dbgen.RecordDeliveryRetryParams) error {
+func (f *fakeDB) RecordDeliveryRetry(_ context.Context, arg dbgen.RecordDeliveryRetryParams) (
+	dbgen.RecordDeliveryRetryRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.call("RecordDeliveryRetry"); err != nil {
-		return err
+		return dbgen.RecordDeliveryRetryRow{}, err
 	}
-	if d := f.delivery(arg.ID); d.owner == arg.Owner {
-		d.next, d.errorClass, d.lastError, d.owner, d.until = arg.At, strOf(arg.ErrorClass), strOf(arg.Error), "",
-			time.Time{}
+	d := f.delivery(arg.ID)
+	if d.owner != arg.Owner {
+		return dbgen.RecordDeliveryRetryRow{}, pgx.ErrNoRows
 	}
-	return nil
+	if arg.Counted {
+		d.attempts++
+		if d.firstFailed == nil {
+			d.firstFailed = at(arg.Now)
+		}
+	}
+	if d.messageID == nil {
+		d.started = nil
+	}
+	d.next, d.errorClass, d.lastError, d.owner, d.until = arg.At, strOf(arg.ErrorClass), strOf(arg.Error), "",
+		time.Time{}
+	return dbgen.RecordDeliveryRetryRow{Attempts: d.attempts, FirstFailedAt: tz(d.firstFailed)}, nil
 }
 
 // limiterOf is the capacity and the refill per second of a bucket.
@@ -655,9 +833,10 @@ func (f *fakeDB) GetLeasedReply(_ context.Context, arg dbgen.GetLeasedReplyParam
 		return dbgen.GetLeasedReplyRow{}, pgx.ErrNoRows
 	}
 	d, ds, g := f.delivery(r.delivery), f.dests[r.dest], f.groups[r.group]
-	return dbgen.GetLeasedReplyRow{ID: r.id, DeliveryID: r.delivery, Event: r.event, EventSeqs: r.seqs,
-		Loudness: r.loudness, Mentions: r.mentions, Fingerprints: r.fingerprints, MessageID: txt(d.messageID),
-		ThreadAnchorID: txt(d.anchorID), ThreadChainLastID: txt(d.chainLastID), DestinationID: ds.id,
+	return dbgen.GetLeasedReplyRow{ID: r.id, DeliveryID: r.delivery, AlertGroupID: r.group, Event: r.event,
+		EventSeqs: r.seqs, Loudness: r.loudness, Mentions: r.mentions, Fingerprints: r.fingerprints,
+		Attempts: r.attempts, MessageID: txt(d.messageID), ThreadAnchorID: txt(d.anchorID),
+		ThreadChainLastID: txt(d.chainLastID), RepublishedAfterDelete: d.republished, DestinationID: ds.id,
 		DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
 		ConnectionID: nullInt(ds.connection), AlertGroupPublicID: g.publicID, Number: g.number, Title: g.title,
 		Status: g.status, Urgent: g.urgent, Language: f.routes[g.route].language}, nil
@@ -687,17 +866,26 @@ func (f *fakeDB) RecordReplySent(_ context.Context, arg dbgen.RecordReplySentPar
 	return nil
 }
 
-func (f *fakeDB) RecordReplyRetry(_ context.Context, arg dbgen.RecordReplyRetryParams) error {
+func (f *fakeDB) RecordReplyRetry(_ context.Context, arg dbgen.RecordReplyRetryParams) (dbgen.RecordReplyRetryRow,
+	error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.call("RecordReplyRetry"); err != nil {
-		return err
+		return dbgen.RecordReplyRetryRow{}, err
 	}
-	if r := f.reply(arg.ID); r.owner == arg.Owner {
-		r.next, r.errorClass, r.lastError, r.owner, r.until = arg.At, strOf(arg.ErrorClass), strOf(arg.Error), "",
-			time.Time{}
+	r := f.reply(arg.ID)
+	if r.owner != arg.Owner {
+		return dbgen.RecordReplyRetryRow{}, pgx.ErrNoRows
 	}
-	return nil
+	if arg.Counted {
+		r.attempts++
+		if r.firstFailed == nil {
+			r.firstFailed = at(arg.Now)
+		}
+	}
+	r.next, r.errorClass, r.lastError, r.owner, r.until = arg.At, strOf(arg.ErrorClass), strOf(arg.Error), "",
+		time.Time{}
+	return dbgen.RecordReplyRetryRow{Attempts: r.attempts, FirstFailedAt: tz(r.firstFailed)}, nil
 }
 
 func (f *fakeDB) NextDeliveryWork(_ context.Context, arg dbgen.NextDeliveryWorkParams) (dbgen.NextDeliveryWorkRow,
@@ -718,8 +906,13 @@ func (f *fakeDB) NextDeliveryWork(_ context.Context, arg dbgen.NextDeliveryWorkP
 		}
 	}
 	for _, d := range f.deliveries {
-		if d.state == "pending" && f.healthy(d.dest) {
+		if d.state == "pending" && (f.healthy(d.dest) || f.dests[d.dest].probeOnNext) && f.work(d) {
 			add(d.next, d.owner, d.until)
+		}
+	}
+	for _, ds := range f.dests {
+		if ds.health == "broken" && (!ds.deleted || f.pendingOf(ds.id)) && !ds.probeOnNext {
+			add(*ds.nextProbe, "", time.Time{})
 		}
 	}
 	for _, r := range f.replies {
@@ -773,7 +966,7 @@ func (f *fakeDB) ListGroupDeliveries(_ context.Context, arg dbgen.ListGroupDeliv
 		out = append(out, dbgen.ListGroupDeliveriesRow{State: d.state, ThreadState: d.threadState,
 			PossibleDuplicate: d.possibleDuplicate, MessageUrl: txt(d.messageURL), LastError: txt(d.lastError),
 			UpdatedAt: d.updated, DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
-			Health: ds.health})
+			Health: ds.health, BrokenSince: tz(ds.brokenSince), BrokenReason: txt(ds.brokenReason)})
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListGroupDeliveriesRow) int {
 		return cmp.Compare(a.DestinationName, b.DestinationName)
@@ -795,7 +988,7 @@ func (f *fakeDB) CountDeliveryQueues(_ context.Context, arg dbgen.CountDeliveryQ
 		}
 		var n int64
 		for _, d := range f.deliveries {
-			if d.dest == ds.id && d.state == "pending" {
+			if d.dest == ds.id && d.state == "pending" && d.heldBy == 0 {
 				n++
 			}
 		}
@@ -831,6 +1024,442 @@ func (f *fakeDB) DeleteExpiredReplies(_ context.Context, arg dbgen.DeleteExpired
 		return false
 	})
 	return n, nil
+}
+
+func (f *fakeDB) RecordNotDelivered(_ context.Context, arg dbgen.RecordNotDeliveredParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RecordNotDelivered"); err != nil {
+		return 0, err
+	}
+	d := f.delivery(arg.ID)
+	if d.owner != arg.Owner {
+		return 0, pgx.ErrNoRows
+	}
+	if d.messageID == nil {
+		d.started = nil
+	}
+	if !endedRow(d) {
+		d.state = "not_delivered"
+	}
+	d.desiredRetire, d.attempts, d.firstFailed, d.errorClass, d.lastError = false, 0, nil, &arg.ErrorClass, &arg.Error
+	d.owner, d.until, d.updated = "", time.Time{}, arg.Now
+	return d.id, nil
+}
+
+func (f *fakeDB) RecordReplyNotDelivered(_ context.Context, arg dbgen.RecordReplyNotDeliveredParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RecordReplyNotDelivered"); err != nil {
+		return 0, err
+	}
+	r := f.reply(arg.ID)
+	if r.owner != arg.Owner {
+		return 0, pgx.ErrNoRows
+	}
+	r.state, r.errorClass, r.lastError, r.owner, r.until = "not_delivered", &arg.ErrorClass, &arg.Error, "",
+		time.Time{}
+	return r.id, nil
+}
+
+func (f *fakeDB) MarkPossibleDuplicate(_ context.Context, arg dbgen.MarkPossibleDuplicateParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("MarkPossibleDuplicate"); err != nil {
+		return err
+	}
+	if d := f.delivery(arg.ID); d.owner == arg.Owner {
+		d.possibleDuplicate, d.updated = true, arg.Now
+	}
+	return nil
+}
+
+func (f *fakeDB) GetLatestRepublishedAt(_ context.Context, arg dbgen.GetLatestRepublishedAtParams) (time.Time,
+	error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetLatestRepublishedAt"); err != nil {
+		return time.Time{}, err
+	}
+	latest := time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, e := range f.events {
+		if e.Kind == "republished" && e.AlertGroupID.Int64 == arg.AlertGroupID && e.DestinationID ==
+			arg.DestinationID && e.OccurredAt.After(latest) {
+			latest = e.OccurredAt
+		}
+	}
+	return latest, nil
+}
+
+// endedRow reports whether a delivery is in a state that nothing revives.
+func endedRow(d *fakeDelivery) bool {
+	return slices.Contains([]string{"withheld", "deleted_in_messenger", "retired"}, d.state)
+}
+
+func (f *fakeDB) ResetForRepublish(_ context.Context, arg dbgen.ResetForRepublishParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ResetForRepublish"); err != nil {
+		return 0, err
+	}
+	d := f.delivery(arg.ID)
+	if d.republished || endedRow(d) {
+		return 0, nil
+	}
+	d.messageID, d.messageURL, d.actualVersion, d.actualHash, d.started = nil, nil, 0, nil, nil
+	d.threadState, d.anchorID, d.chainLastID, d.republished = "none", nil, nil, true
+	d.loud, d.lateNote, d.state, d.attempts, d.firstFailed = pgtype.Bool{Bool: false, Valid: true}, false, "pending",
+		0, nil
+	d.errorClass, d.lastError, d.next, d.owner, d.until, d.updated = nil, nil, arg.Now, "", time.Time{}, arg.Now
+	return 1, nil
+}
+
+func (f *fakeDB) MarkDeletedInMessenger(_ context.Context, arg dbgen.MarkDeletedInMessengerParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("MarkDeletedInMessenger"); err != nil {
+		return 0, err
+	}
+	d := f.delivery(arg.ID)
+	if endedRow(d) {
+		return 0, nil
+	}
+	d.state, d.owner, d.until, d.updated = "deleted_in_messenger", "", time.Time{}, arg.Now
+	return 1, nil
+}
+
+func (f *fakeDB) DropPendingReplies(_ context.Context, arg dbgen.DropPendingRepliesParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("DropPendingReplies"); err != nil {
+		return err
+	}
+	for _, r := range f.replies {
+		if r.delivery == arg.DeliveryID && (r.state == "pending" || r.state == "collecting") {
+			r.state, r.owner, r.until = "dropped", "", time.Time{}
+		}
+	}
+	return nil
+}
+
+func (f *fakeDB) SettleResolvedPublication(_ context.Context, arg dbgen.SettleResolvedPublicationParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("SettleResolvedPublication"); err != nil {
+		return err
+	}
+	d := f.delivery(arg.ID)
+	if d.state != "pending" || d.messageID != nil || d.heldBy != 0 || d.storm != 0 {
+		return nil
+	}
+	health := f.dests[d.dest].health
+	// late_note = d.late_note OR coalesce(ds.health = 'healthy' AND d.last_error_class IN (...), false)
+	waited := sqlIs(health == "healthy").and(sqlIn(d.errorClass, "retry_after", "transient"))
+	late, err := notNull("late_note", sqlIs(d.lateNote).or(waited.coalesce(false)))
+	if err != nil {
+		return err
+	}
+	if health == "broken" {
+		d.state = "withheld"
+	}
+	if waited.isTrue() {
+		d.loud = pgtype.Bool{Bool: false, Valid: true}
+	}
+	d.lateNote, d.updated = late, arg.Now
+	return nil
+}
+
+func (f *fakeDB) ClaimBrokenProbes(_ context.Context, arg dbgen.ClaimBrokenProbesParams) (
+	[]dbgen.ClaimBrokenProbesRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ClaimBrokenProbes"); err != nil {
+		return nil, err
+	}
+	var due []*fakeDest
+	for _, ds := range f.dests {
+		if ds.health != "broken" || (ds.deleted && !f.pendingOf(ds.id)) {
+			continue
+		}
+		waiting := ds.probeOnNext && slices.ContainsFunc(f.deliveries, func(d *fakeDelivery) bool {
+			return d.dest == ds.id && d.state == "pending" && d.heldBy == 0 && !d.next.After(arg.Due) &&
+				(d.owner == "" || !d.until.After(arg.Now))
+		})
+		if waiting || (!ds.probeOnNext && !ds.nextProbe.After(arg.Due)) {
+			due = append(due, ds)
+		}
+	}
+	slices.SortFunc(due, func(a, b *fakeDest) int {
+		if a.probeOnNext != b.probeOnNext {
+			if a.probeOnNext {
+				return 1
+			}
+			return -1
+		}
+		if !a.probeOnNext {
+			if c := a.nextProbe.Compare(*b.nextProbe); c != 0 {
+				return c
+			}
+		}
+		return cmp.Compare(a.id, b.id)
+	})
+	var out []dbgen.ClaimBrokenProbesRow
+	for _, ds := range due {
+		if len(out) == int(arg.Lim) {
+			break
+		}
+		ds.nextProbe, ds.probeOnNext = at(arg.NextProbe), false
+		out = append(out, dbgen.ClaimBrokenProbesRow{ID: ds.id, PublicID: ds.publicID, Name: ds.name, Type: ds.typ,
+			ConnectionID: nullInt(ds.connection)})
+	}
+	return out, nil
+}
+
+func (f *fakeDB) LeaseOldestWaiting(_ context.Context, arg dbgen.LeaseOldestWaitingParams) (
+	dbgen.LeaseOldestWaitingRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("LeaseOldestWaiting"); err != nil {
+		return dbgen.LeaseOldestWaitingRow{}, err
+	}
+	var oldest *fakeDelivery
+	for _, d := range f.deliveries {
+		if d.dest == arg.DestinationID && d.state == "pending" && d.heldBy == 0 && (oldest == nil ||
+			cmp.Or(d.next.Compare(oldest.next), cmp.Compare(d.id, oldest.id)) < 0) {
+			oldest = d
+		}
+	}
+	if oldest == nil {
+		return dbgen.LeaseOldestWaitingRow{}, pgx.ErrNoRows
+	}
+	free := oldest.owner == "" || !oldest.until.After(arg.Now)
+	if free {
+		oldest.owner, oldest.until = arg.Owner, arg.LeaseUntil
+		if g := f.groups[oldest.group]; oldest.messageID == nil && oldest.storm == 0 && g != nil {
+			oldest.loud, oldest.lateNote = pgtype.Bool{Bool: g.status == "firing", Valid: true}, false
+		}
+	}
+	return dbgen.LeaseOldestWaitingRow{ID: oldest.id, Free: free}, nil
+}
+
+func (f *fakeDB) MarkProbeOnNextDelivery(_ context.Context, arg dbgen.MarkProbeOnNextDeliveryParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("MarkProbeOnNextDelivery"); err != nil {
+		return err
+	}
+	if ds := f.dests[arg.ID]; ds.health == "broken" {
+		ds.probeOnNext, ds.nextProbe = true, nil
+	}
+	return nil
+}
+
+func (f *fakeDB) BreakDestination(_ context.Context, arg dbgen.BreakDestinationParams) (dbgen.BreakDestinationRow,
+	error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("BreakDestination"); err != nil {
+		return dbgen.BreakDestinationRow{}, err
+	}
+	ds := f.dests[arg.ID]
+	if ds.health != "healthy" {
+		return dbgen.BreakDestinationRow{}, pgx.ErrNoRows
+	}
+	ds.health, ds.brokenSince, ds.brokenCause, ds.brokenReason = "broken", at(arg.Now), &arg.Cause, &arg.Reason
+	ds.nextProbe, ds.probeOnNext = at(arg.NextProbe), false
+	return dbgen.BreakDestinationRow{PublicID: ds.publicID, Name: ds.name}, nil
+}
+
+func (f *fakeDB) UpdateBrokenReason(_ context.Context, arg dbgen.UpdateBrokenReasonParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("UpdateBrokenReason"); err != nil {
+		return err
+	}
+	if ds := f.dests[arg.ID]; ds.health == "broken" {
+		ds.brokenReason = &arg.Reason
+		if arg.Cause.Valid {
+			ds.brokenCause = &arg.Cause.String
+		}
+	}
+	return nil
+}
+
+func (f *fakeDB) ResetDestinationBudgets(_ context.Context, arg dbgen.ResetDestinationBudgetsParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ResetDestinationBudgets"); err != nil {
+		return err
+	}
+	for _, d := range f.deliveries {
+		if d.dest == arg.DestinationID && d.state == "pending" {
+			d.attempts, d.firstFailed = 0, nil
+		}
+	}
+	for _, r := range f.replies {
+		if r.dest == arg.DestinationID && (r.state == "pending" || r.state == "collecting") {
+			r.attempts, r.firstFailed = 0, nil
+		}
+	}
+	return nil
+}
+
+func (f *fakeDB) MarkDestinationHealthy(_ context.Context, arg dbgen.MarkDestinationHealthyParams) (
+	dbgen.MarkDestinationHealthyRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("MarkDestinationHealthy"); err != nil {
+		return dbgen.MarkDestinationHealthyRow{}, err
+	}
+	ds := f.dests[arg.ID]
+	if ds.health != "broken" {
+		return dbgen.MarkDestinationHealthyRow{}, pgx.ErrNoRows
+	}
+	since := *ds.brokenSince
+	ds.health, ds.brokenSince, ds.brokenCause, ds.brokenReason, ds.nextProbe, ds.probeOnNext = "healthy", nil, nil,
+		nil, nil, false
+	return dbgen.MarkDestinationHealthyRow{PublicID: ds.publicID, Name: ds.name, WasBrokenSince: since,
+		Deleted: ds.deleted}, nil
+}
+
+func (f *fakeDB) DropDueReplies(_ context.Context, arg dbgen.DropDueRepliesParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("DropDueReplies"); err != nil {
+		return err
+	}
+	for _, r := range f.replies {
+		if r.dest == arg.DestinationID && (r.state == "pending" || r.state == "collecting") && !r.next.After(arg.Now) {
+			r.state, r.owner, r.until = "dropped", "", time.Time{}
+		}
+	}
+	return nil
+}
+
+// unpublished are the pending deliveries of a Destination never published there that no Storm holds, with whether
+// their Alert Group is resolved.
+func (f *fakeDB) unpublished(dest int64, f2 func(d *fakeDelivery, resolved bool)) {
+	for _, d := range f.deliveries {
+		if g := f.groups[d.group]; d.dest == dest && d.state == "pending" && d.messageID == nil && d.heldBy == 0 &&
+			d.storm == 0 && g != nil {
+			f2(d, g.status == "resolved")
+		}
+	}
+}
+
+func (f *fakeDB) WithholdResolvedUnpublished(_ context.Context, arg dbgen.WithholdResolvedUnpublishedParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("WithholdResolvedUnpublished"); err != nil {
+		return err
+	}
+	f.unpublished(arg.DestinationID, func(d *fakeDelivery, resolved bool) {
+		if resolved {
+			d.state, d.owner, d.until, d.updated = "withheld", "", time.Time{}, arg.Now
+		}
+	})
+	return nil
+}
+
+func (f *fakeDB) RecoverUnpublished(_ context.Context, arg dbgen.RecoverUnpublishedParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RecoverUnpublished"); err != nil {
+		return err
+	}
+	f.unpublished(arg.DestinationID, func(d *fakeDelivery, resolved bool) {
+		if !resolved {
+			d.loud = pgtype.Bool{Bool: f.groups[d.group].status == "firing", Valid: true}
+			d.lateNote, d.next, d.updated = false, arg.Now, arg.Now
+		}
+	})
+	return nil
+}
+
+func (f *fakeDB) RecoverPublished(_ context.Context, arg dbgen.RecoverPublishedParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RecoverPublished"); err != nil {
+		return err
+	}
+	for _, d := range f.deliveries {
+		if d.dest == arg.DestinationID && d.state == "pending" && d.messageID != nil && d.heldBy == 0 {
+			d.next, d.updated = arg.Now, arg.Now
+		}
+	}
+	return nil
+}
+
+func (f *fakeDB) ListDestinationHealth(_ context.Context, _ int64) ([]dbgen.ListDestinationHealthRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListDestinationHealth"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListDestinationHealthRow
+	for _, ds := range f.dests {
+		if !ds.deleted {
+			out = append(out, dbgen.ListDestinationHealthRow{PublicID: ds.publicID, Health: ds.health})
+		}
+	}
+	return out, nil
+}
+
+// The built-in Integration of the fake, which the synthetic Snapshots of Internal alerts belong to.
+const builtinID = 100
+
+func (f *fakeDB) FindBuiltinIntegration(context.Context, int64) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return builtinID, f.call("FindBuiltinIntegration")
+}
+
+func (f *fakeDB) InsertInternalBody(_ context.Context, arg idb.InsertInternalBodyParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("InsertInternalBody"); err != nil {
+		return err
+	}
+	var w struct {
+		Status string `json:"status"`
+		Alerts []struct {
+			Labels map[string]string `json:"labels"`
+		} `json:"alerts"`
+	}
+	if err := json.Unmarshal(arg.Body, &w); err != nil {
+		return err
+	}
+	labels := w.Alerts[0].Labels
+	f.internal = append(f.internal, fakeInternal{status: w.Status, name: labels["alertname"], labels: labels})
+	return nil
+}
+
+func (f *fakeDB) InsertInternalSnapshot(_ context.Context, arg idb.InsertInternalSnapshotParams) error {
+	if arg.IntegrationID != builtinID {
+		return errors.New("not the built-in integration")
+	}
+	return nil
+}
+
+func (f *fakeDB) NotifyInternalSnapshot(context.Context, idb.NotifyInternalSnapshotParams) error {
+	return nil
+}
+
+func (f *fakeDB) ListOpenInternalAlerts(context.Context, idb.ListOpenInternalAlertsParams) (
+	[]idb.ListOpenInternalAlertsRow, error) {
+	return nil, nil
+}
+
+func (f *fakeDB) ListPendingInternalRaises(context.Context, int64) ([][]byte, error) { return nil, nil }
+
+func (f *fakeDB) Notify(_ context.Context, h db.Hint) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("Notify"); err != nil {
+		return err
+	}
+	f.hints = append(f.hints, h)
+	return nil
 }
 
 // fakeTx is a transaction of the fake database, which is not transactional.
@@ -879,10 +1508,11 @@ func newEnv(t *testing.T) *env {
 		connection: &conn, health: "healthy", limit: 6, per: 60}
 	f.dests[destWH] = &fakeDest{id: destWH, publicID: "DSAAAAAAAAAA12", name: "hook", typ: delivery.TypeWebhook,
 		health: "healthy", limit: 600, per: 60}
-	f.routes[routeID] = fakeRoute{language: "en", window: 60}
+	f.routes[routeID] = fakeRoute{language: "en", window: 60, publicID: "RTAAAAAAAAAAA1", name: "payments",
+		threshold: 20}
 	f.routeDests[routeID] = []int64{destMM}
 	f.groups[groupID] = &fakeGroup{id: groupID, publicID: "AGAAAAAAAAAA21", number: 7, title: "disk full",
-		status: "firing", route: routeID}
+		status: "firing", route: routeID, created: business0}
 	e := &env{db: f, begin: &fakeBeginner{}, business: clock.NewManual(business0), real: clock.NewManual(real0),
 		rec: &deliverytest.Recorder{}, log: &bytes.Buffer{}}
 	e.rec.Clock = e.business
@@ -894,6 +1524,15 @@ func newEnv(t *testing.T) *env {
 		Organizations: func(context.Context) ([]int64, error) { return []int64{orgID}, nil },
 		Adapters:      delivery.Adapters{delivery.TypeMattermost: e.rec, delivery.TypeWebhook: e.rec}, Log: logger}
 	return e
+}
+
+// breakDest makes a Destination Broken as unavailable since now, with its probe due after
+// delivery.broken_probe_interval, as the outcome rules do.
+func (e *env) breakDest(id int64, reason string) {
+	ds := e.db.dests[id]
+	cause := "unavailable"
+	ds.health, ds.brokenSince, ds.brokenCause, ds.brokenReason = "broken", at(e.business.Now()), &cause, &reason
+	ds.nextProbe = at(e.business.Now().Add(delivery.BrokenProbeInterval))
 }
 
 // group is the Alert Group of the fixtures in a status, as the dispatcher hands it over.
@@ -1073,9 +1712,8 @@ func TestUrgentFirst(t *testing.T) {
 	}
 }
 
-// TestRecordOutcomes covers the outcomes this story handles and those S-035 gives a rule: a RetryAfter waits exactly
-// as asked and leaves attempts untouched; any other outcome waits the first step of delivery.transient_backoff with
-// its error class; a missing adapter is unknown.
+// TestRecordOutcomes: a RetryAfter waits exactly as asked, leaves attempts untouched and, since the messenger did not
+// take the Publication, clears its start; the other outcomes have their rules in outcomes_test.go.
 func TestRecordOutcomes(t *testing.T) {
 	e := newEnv(t)
 	e.db.dests[destMM].limit = 600
@@ -1084,7 +1722,7 @@ func TestRecordOutcomes(t *testing.T) {
 	e.rec.Script(deliverytest.MethodPublish, deliverytest.RetryAfter(7*time.Second, delivery.ScopeDestination))
 	e.round(t)
 	if d.state != "pending" || !d.next.Equal(business0.Add(7*time.Second+delivery.TokenMargin)) || d.attempts != 0 ||
-		*d.errorClass != "retry_after" || d.messageID != nil || d.started == nil {
+		*d.errorClass != "retry_after" || d.messageID != nil || d.started != nil || len(e.db.events) != 0 {
 		t.Errorf("retry after %+v", d)
 	}
 	if b := e.db.buckets[bucketKey{"destination", destMM}]; b.tokens != 1 || !b.refilled.Equal(business0.Add(7*time.Second)) {
@@ -1092,27 +1730,6 @@ func TestRecordOutcomes(t *testing.T) {
 	}
 	if !strings.Contains(e.log.String(), `"retry_after_ms":7000`) {
 		t.Errorf("log %s", e.log)
-	}
-	classed := map[delivery.OutcomeKind]bool{delivery.OutcomeTransient: true, delivery.OutcomeFatal: true,
-		delivery.OutcomeUnknown: true}
-	for _, kind := range []delivery.OutcomeKind{delivery.OutcomeTransient, delivery.OutcomeFatal, delivery.OutcomeUnknown, delivery.OutcomeMarkupRejected,
-		delivery.OutcomeGone, delivery.OutcomeThreadLost} {
-		e.business.Set(d.next)
-		e.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(kind, "failed: "+string(kind)))
-		e.round(t)
-		if d.state != "pending" || !d.next.Equal(e.business.Now().Add(delivery.TransientFirstStep)) ||
-			*d.lastError != "failed: "+string(kind) || classed[kind] != (d.errorClass != nil) {
-			t.Errorf("%s = %+v", kind, d)
-		}
-	}
-	delete(e.w.Adapters, delivery.TypeMattermost)
-	e.business.Set(d.next)
-	e.round(t)
-	if *d.errorClass != "unknown" || !strings.Contains(*d.lastError, "no adapter") {
-		t.Errorf("no adapter %+v", d)
-	}
-	if !strings.Contains(scrape(t), `kind="publication",outcome="markup_rejected"`) {
-		t.Error("markup_rejected not counted")
 	}
 }
 
@@ -1295,10 +1912,11 @@ func TestStatesAndLeaderTasks(t *testing.T) {
 	e := newEnv(t)
 	e.db.routeDests[routeID] = []int64{destMM, destWH}
 	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
-	e.db.dests[destWH].health = "broken"
+	e.breakDest(destWH, "HTTP 503")
 	e.round(t)
 	states, err := e.svc.States(t.Context(), "agaaaaaaaaaa21")
-	if err != nil || len(states) != 2 || states[0].Destination.Name != "hook" || states[0].State != "pending" ||
+	if err != nil || len(states) != 2 || states[0].Destination.Name != "hook" ||
+		states[0].State != delivery.StateWaitingForBroken || *states[0].Destination.BrokenReason != "HTTP 503" ||
 		states[1].State != "delivered" || states[1].MessageURL == nil || states[1].Error != nil {
 		t.Fatalf("states %+v, %v", states, err)
 	}

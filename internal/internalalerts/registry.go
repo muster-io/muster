@@ -105,6 +105,22 @@ var HeartbeatLost = register(&Definition{
 	Capability: "C-07",
 })
 
+// DestinationBroken is raised while a Destination is Broken (C-11.FR-9).
+var DestinationBroken = register(&Definition{
+	Name:      "MusterDestinationBroken",
+	Severity:  SeverityCritical,
+	Entity:    EntityDestination,
+	NameLabel: "destination_name",
+	Condition: "A Destination is Broken: the messenger answered with a Fatal error, or with Transient errors until the " +
+		"budget ran out, so its deliveries wait. It resolves when a probe, a Destination check or a Destination test " +
+		"succeeds.",
+	Summary: "Destination {name} is Broken",
+	Description: "Muster cannot deliver to Destination {name}: the messenger refuses or does not answer, and new " +
+		"Alert Groups wait. The Destination page shows the reason. Muster probes it every " +
+		"delivery.broken_probe_interval and sends the current state once it recovers.",
+	Capability: "C-11",
+})
+
 var (
 	registry []*Definition
 	nameRe   = regexp.MustCompile(`^Muster[A-Z][A-Za-z0-9]*$`)

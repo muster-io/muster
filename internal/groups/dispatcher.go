@@ -373,12 +373,14 @@ func (c committed) run(ctx context.Context) {
 // Rendering is what the re-render step of the dispatcher hands to delivery (C-11.FR-1, FR-20), inside the
 // dispatcher's transaction: the Alert Group as the change left it, who made the change, the lifecycle events it
 // recorded in their order, and ReceivedAt, the receipt time of the Stored Snapshot behind it, nil when a Command, a
-// timer or a person's change made it.
+// timer or a person's change made it. After queues a function, such as a log line, to run once the transaction
+// committed, never when it rolls back; nil outside the dispatcher.
 type Rendering struct {
 	Group      *Group
 	Actor      Actor
 	Events     []Recorded
 	ReceivedAt *time.Time
+	After      func(f func(ctx context.Context))
 }
 
 // Recorded is one lifecycle event that a change recorded: its row of the table with its loudness and Mentions, its
@@ -497,7 +499,7 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 			return err
 		}
 		if err := d.rerender(ctx, q, Rendering{Group: g, Actor: actor, Events: recorded,
-			ReceivedAt: received}); err != nil {
+			ReceivedAt: received, After: after.add}); err != nil {
 			return err
 		}
 	}

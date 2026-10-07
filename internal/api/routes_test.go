@@ -543,3 +543,17 @@ func TestSuggestionProblems(t *testing.T) {
 		t.Errorf("not found = %+v", p)
 	}
 }
+
+// TestRouteStormAPI is C-11.FR-6 on the Route: storm_active and storm, since when and how many new Alert Groups its
+// Storm summary counts, while a Storm is active; storm_active false and no storm otherwise.
+func TestRouteStormAPI(t *testing.T) {
+	x, fr := newRoutesAPI(t)
+	fr.list.Routes[0].Storm = &routing.Storm{Since: t0, AlertGroupCount: 21}
+	a := x.as(t, routesReader, http.MethodGet, "/api/v1/routes", "")
+	var list gen.RouteList
+	decodeInto(t, a, &list)
+	if p, d := list.Items[0], list.Items[1]; a.status != http.StatusOK || !p.StormActive || p.Storm == nil ||
+		!p.Storm.Since.Equal(t0) || p.Storm.AlertGroupCount != 21 || d.StormActive || d.Storm != nil {
+		t.Errorf("list = %d %s", a.status, a.body)
+	}
+}

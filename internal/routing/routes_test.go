@@ -19,6 +19,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/audit"
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
@@ -69,6 +70,21 @@ type fakeStore struct {
 
 	// open are the open Alert Groups of each Route by id.
 	open map[int64]int64
+
+	// dests are the Destinations by public_id, deleted the deleted ones, and links the Destinations of each Route with
+	// when they were added.
+	dests   map[string]int64
+	deleted map[string]bool
+	links   map[int64][]link
+
+	// membershipLocks are the Routes whose membership lock was taken, in order.
+	membershipLocks []int64
+}
+
+// link is a row of route_destinations.
+type link struct {
+	dest  int64
+	added time.Time
 }
 
 func newStore() *fakeStore {
@@ -77,7 +93,7 @@ func newStore() *fakeStore {
 		mapping: []byte(`[{"value":"critical","level":"critical"},{"value":"warning","level":"warning"},` +
 			`{"value":"info","level":"info"},{"value":"none","level":"info"}]`),
 		alerts: map[int64][]byte{}, routed: map[int64]dbgen.SetAlertRoutesParams{}, dismissals: map[int64][]string{},
-		open: map[int64]int64{}}
+		open: map[int64]int64{}, dests: map[string]int64{}, deleted: map[string]bool{}, links: map[int64][]link{}}
 }
 
 func (s *fakeStore) call(name string) error {
@@ -365,11 +381,109 @@ func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error {
 		rows[i] = &c
 	}
 	ms, order, audits, hints, next := maps.Clone(s.matchers), s.order, len(s.audit), len(s.hints), s.nextID
+	links := maps.Clone(s.links)
 	if err := f(s); err != nil {
 		s.rows, s.matchers, s.order, s.audit, s.hints, s.nextID = rows, ms, order, s.audit[:audits], s.hints[:hints], next
+		s.links = links
 		return err
 	}
 	return nil
+}
+
+func (s *fakeStore) ResolveDestinations(_ context.Context, arg dbgen.ResolveDestinationsParams) (
+	[]dbgen.ResolveDestinationsRow, error) {
+	if err := s.call("ResolveDestinations"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ResolveDestinationsRow
+	for _, id := range arg.PublicIds {
+		if internal, ok := s.dests[id]; ok && !s.deleted[id] && arg.OrgID == orgID {
+			out = append(out, dbgen.ResolveDestinationsRow{ID: internal, PublicID: id})
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) publicOf(id int64) string {
+	for p, internal := range s.dests {
+		if internal == id {
+			return p
+		}
+	}
+	return ""
+}
+
+func (s *fakeStore) ListRouteDestinationIDs(_ context.Context, arg dbgen.ListRouteDestinationIDsParams) (
+	[]dbgen.ListRouteDestinationIDsRow, error) {
+	if err := s.call("ListRouteDestinationIDs"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListRouteDestinationIDsRow
+	for _, route := range slices.Sorted(slices.Values(arg.RouteIds)) {
+		var rows []dbgen.ListRouteDestinationIDsRow
+		for _, l := range s.links[route] {
+			if p := s.publicOf(l.dest); !s.deleted[p] {
+				rows = append(rows, dbgen.ListRouteDestinationIDsRow{RouteID: route, DestinationID: l.dest, PublicID: p})
+			}
+		}
+		slices.SortFunc(rows, func(a, b dbgen.ListRouteDestinationIDsRow) int { return cmp.Compare(a.PublicID, b.PublicID) })
+		out = append(out, rows...)
+	}
+	return out, nil
+}
+
+func (s *fakeStore) InsertRouteDestinations(_ context.Context, arg dbgen.InsertRouteDestinationsParams) error {
+	if err := s.call("InsertRouteDestinations"); err != nil {
+		return err
+	}
+	links := slices.Clone(s.links[arg.RouteID])
+	for _, d := range arg.DestinationIds {
+		links = append(links, link{dest: d, added: arg.Now})
+	}
+	s.links[arg.RouteID] = links
+	return nil
+}
+
+func (s *fakeStore) DeleteRouteDestinations(_ context.Context, arg dbgen.DeleteRouteDestinationsParams) error {
+	if err := s.call("DeleteRouteDestinations"); err != nil {
+		return err
+	}
+	s.links[arg.RouteID] = slices.DeleteFunc(slices.Clone(s.links[arg.RouteID]), func(l link) bool {
+		return slices.Contains(arg.DestinationIds, l.dest)
+	})
+	return nil
+}
+
+func (s *fakeStore) DB() dbgen.DBTX { return nil }
+
+func (s *fakeStore) On(dbgen.DBTX) Queries { return s }
+
+func (s *fakeStore) LockRouteMembership(_ context.Context, arg dbgen.LockRouteMembershipParams) error {
+	if err := s.call("LockRouteMembership"); err != nil {
+		return err
+	}
+	if arg.LockClass != db.RouteMembershipLockClass {
+		return errors.New("not the membership lock")
+	}
+	s.membershipLocks = append(s.membershipLocks, arg.RouteID)
+	return nil
+}
+
+func (s *fakeStore) BumpRoutesOfDestination(_ context.Context, arg dbgen.BumpRoutesOfDestinationParams) (
+	[]dbgen.BumpRoutesOfDestinationRow, error) {
+	if err := s.call("BumpRoutesOfDestination"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.BumpRoutesOfDestinationRow
+	for _, r := range s.rows {
+		if !r.deleted && slices.ContainsFunc(s.links[r.ID], func(l link) bool { return l.dest == arg.DestinationID }) {
+			r.Version++
+			out = append(out, dbgen.BumpRoutesOfDestinationRow{ID: r.ID, PublicID: r.PublicID})
+		}
+	}
+	// The order of RETURNING is not guaranteed; the caller sorts.
+	slices.Reverse(out)
+	return out, nil
 }
 
 // getRowOf is a row of ListRoutes with its place in evaluation order, as GetRoute reads it.
@@ -383,7 +497,8 @@ func getRowOf(r dbgen.ListRoutesRow, place int64) dbgen.GetRouteRow {
 		TemplateAckTimeoutNotice: r.TemplateAckTimeoutNotice, AckTimeoutEnabled: r.AckTimeoutEnabled,
 		AckTimeoutFirstIntervalSeconds: r.AckTimeoutFirstIntervalSeconds, RemindersEnabled: r.RemindersEnabled,
 		RemindersFirstIntervalSeconds: r.RemindersFirstIntervalSeconds, RemindersCapSeconds: r.RemindersCapSeconds,
-		AutoUnacknowledge: r.AutoUnacknowledge, CreatedAt: r.CreatedAt, Version: r.Version, Place: place}
+		AutoUnacknowledge: r.AutoUnacknowledge, CreatedAt: r.CreatedAt, Version: r.Version, Place: place,
+		StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount}
 }
 
 func newService(t *testing.T) (*Service, *fakeStore, *clock.Manual) {
@@ -839,6 +954,210 @@ func TestFailures(t *testing.T) {
 				t.Errorf("%s with %s failing moved the version", name, query)
 			}
 		}
+	}
+}
+
+// The Destinations of the fake: two that exist and one deleted.
+const (
+	destA    = "DSAAAAAAAAAAA1"
+	destB    = "DSAAAAAAAAAAA2"
+	destGone = "DSAAAAAAAAAAA3"
+)
+
+// membershipCall is a call of the membership hook.
+type membershipCall struct {
+	route          int64
+	added, removed []int64
+}
+
+func withDestinations(t *testing.T) (*Service, *fakeStore, *clock.Manual, *[]membershipCall) {
+	t.Helper()
+	svc, store, c := newService(t)
+	store.dests[destA], store.dests[destB], store.dests[destGone] = 51, 52, 53
+	store.deleted[destGone] = true
+	var calls []membershipCall
+	svc.SetMembership(func(_ context.Context, tx dbgen.DBTX, routeID int64, added, removed []int64) error {
+		if tx != nil {
+			t.Error("the hook runs outside the transaction")
+		}
+		calls = append(calls, membershipCall{route: routeID, added: added, removed: removed})
+		return store.fail["membership"]
+	})
+	return svc, store, c, &calls
+}
+
+// TestRouteDestinations is C-08.FR-1 and C-11.FR-14: createRoute and updateRoute write destination_ids in the Route's
+// transaction — added, kept with their added_at, or removed — and run delivery's membership hook with the changes; an
+// edit that changes only destination_ids is saved with a new version and records route.updated with /destination_ids
+// in its diff; an id that names no Destination, a deleted one or a malformed one is a 422 unknown_id at its pointer.
+func TestRouteDestinations(t *testing.T) {
+	svc, store, c, calls := withDestinations(t)
+	in := input("r")
+	in.DestinationIDs = []string{destB, strings.ToLower(destA), destB}
+	created, err := svc.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(created.DestinationIDs, []string{destA, destB}) || len(*calls) != 1 ||
+		!slices.Equal((*calls)[0].added, []int64{51, 52}) || (*calls)[0].removed != nil ||
+		(*calls)[0].route != created.ID {
+		t.Fatalf("created %+v, hook %+v", created.DestinationIDs, *calls)
+	}
+	var diff []audit.Change
+	_ = json.Unmarshal(store.audit[len(store.audit)-1].Diff, &diff)
+	if !slices.ContainsFunc(diff, func(ch audit.Change) bool { return ch.Pointer == "/destination_ids" }) {
+		t.Errorf("creation diff %+v", diff)
+	}
+	firstAdded := store.links[created.ID][0].added
+
+	c.Advance(time.Minute)
+	in.DestinationIDs = []string{destA}
+	got, err := svc.Update(t.Context(), by, created.PublicID, ptr(created.Version), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := store.audit[len(store.audit)-1]
+	diff = nil
+	_ = json.Unmarshal(e.Diff, &diff)
+	if got.Version != created.Version+1 || !slices.Equal(got.DestinationIDs, []string{destA}) ||
+		e.Action != ActionUpdated || len(diff) != 1 || diff[0].Pointer != "/destination_ids" ||
+		store.hints[len(store.hints)-1].ID != created.PublicID {
+		t.Errorf("updated %+v, audit %s %+v", got, e.Action, diff)
+	}
+	if len(*calls) != 2 || (*calls)[1].added != nil || !slices.Equal((*calls)[1].removed, []int64{52}) {
+		t.Errorf("hook %+v", *calls)
+	}
+	// Each change of the Destinations takes the Route's membership lock, which an Enqueue on the Route takes shared.
+	if !slices.Equal(store.membershipLocks, []int64{created.ID, created.ID}) {
+		t.Errorf("membership locks %v", store.membershipLocks)
+	}
+	if l := store.links[created.ID]; len(l) != 1 || l[0].dest != 51 || !l[0].added.Equal(firstAdded) {
+		t.Errorf("kept destination %+v", l)
+	}
+	in.DestinationIDs = []string{destB, destA}
+	if got, err = svc.Update(t.Context(), by, created.PublicID, nil, in); err != nil ||
+		!slices.Equal((*calls)[2].added, []int64{52}) {
+		t.Errorf("added again %+v %v %+v", got, err, *calls)
+	}
+	if got, err = svc.Update(t.Context(), by, created.PublicID, nil, in); err != nil || len(*calls) != 3 {
+		t.Errorf("no change = %+v %v, %d calls", got, err, len(*calls))
+	}
+
+	for name, ids := range map[string][]string{"unknown": {destA, "DSZZZZZZZZZZZZ"}, "deleted": {destA, destGone},
+		"malformed": {destA, "nope"}} {
+		in.DestinationIDs = ids
+		if f := fieldError(t, func() error {
+			_, err := svc.Update(t.Context(), by, created.PublicID, nil, in)
+			return err
+		}()); f.Pointer != "/destination_ids/1" || f.Code != CodeUnknownID {
+			t.Errorf("%s update: %+v", name, f)
+		}
+		cIn := input("other-" + name)
+		cIn.DestinationIDs = ids
+		if f := fieldError(t, func() error { _, err := svc.Create(t.Context(), by, cIn); return err }()); f.Pointer !=
+			"/destination_ids/1" || f.Code != CodeUnknownID {
+			t.Errorf("%s create: %+v", name, f)
+		}
+	}
+
+	// A failing hook rolls the change back; so does a failing write.
+	in.DestinationIDs = nil
+	store.fail["membership"] = errBoom
+	if _, err := svc.Update(t.Context(), by, created.PublicID, nil, in); !errors.Is(err, errBoom) ||
+		len(store.links[created.ID]) != 2 {
+		t.Errorf("failed hook = %v, links %+v", err, store.links[created.ID])
+	}
+	delete(store.fail, "membership")
+	for _, q := range []string{"ResolveDestinations", "LockRouteMembership", "ListRouteDestinationIDs",
+		"DeleteRouteDestinations", "InsertRouteDestinations"} {
+		store.fail[q] = errBoom
+		in.DestinationIDs = []string{destA}
+		if q == "InsertRouteDestinations" {
+			in.DestinationIDs = []string{destA, destB}
+			store.links[created.ID] = nil
+		}
+		if _, err := svc.Update(t.Context(), by, created.PublicID, nil, in); !errors.Is(err, errBoom) {
+			t.Errorf("%s = %v", q, err)
+		}
+		delete(store.fail, q)
+	}
+	svc.SetMembership(nil)
+	in.DestinationIDs = []string{destB}
+	if got, err := svc.Update(t.Context(), by, created.PublicID, nil, in); err != nil ||
+		!slices.Equal(got.DestinationIDs, []string{destB}) {
+		t.Errorf("without a hook = %+v %v", got, err)
+	}
+}
+
+// TestDestinationDeleted is C-11.FR-14 on the Routes: a Destination being deleted leaves each Route it belongs to, so
+// each Route that is not deleted gets a new version and its hint, and its membership lock is taken in id order; a
+// Route without it is untouched.
+func TestDestinationDeleted(t *testing.T) {
+	svc, store, _, _ := withDestinations(t)
+	var ids []int64
+	for _, name := range []string{"one", "two", "three"} {
+		in := input(name)
+		in.DestinationIDs = []string{destA}
+		if name == "three" {
+			in.DestinationIDs = []string{destB}
+		}
+		r, err := svc.Create(t.Context(), by, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, r.ID)
+	}
+	versions := map[int64]int64{}
+	for _, r := range store.rows {
+		versions[r.ID] = r.Version
+	}
+	store.membershipLocks, store.hints = nil, nil
+	if err := svc.DestinationDeleted(t.Context(), nil, 51); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range store.rows {
+		want := versions[r.ID]
+		if r.ID == ids[0] || r.ID == ids[1] {
+			want++
+		}
+		if r.Version != want {
+			t.Errorf("route %s version %d, want %d", r.Name, r.Version, want)
+		}
+	}
+	if !slices.Equal(store.membershipLocks, ids[:2]) || len(store.hints) != 2 ||
+		store.hints[0] != (db.Hint{OrgID: orgID, Type: Hint, ID: store.rows[1].PublicID}) {
+		t.Errorf("locks %v, hints %+v", store.membershipLocks, store.hints)
+	}
+	for _, q := range []string{"BumpRoutesOfDestination", "LockRouteMembership", "Notify"} {
+		store.fail[q] = errBoom
+		if err := svc.DestinationDeleted(t.Context(), nil, 51); !errors.Is(err, errBoom) {
+			t.Errorf("%s = %v", q, err)
+		}
+		delete(store.fail, q)
+	}
+}
+
+// TestRouteStorm is C-11.FR-6 on the Route: its active Storm, since when and how many new Alert Groups it counted,
+// read with the Route and the list; none when no Storm is active.
+func TestRouteStorm(t *testing.T) {
+	svc, store, _ := newService(t)
+	created, err := svc.Create(t.Context(), by, input("r"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Storm != nil {
+		t.Errorf("storm %+v", created.Storm)
+	}
+	r := store.find(created.PublicID)
+	r.StormSince = pgtype.Timestamptz{Time: t0, Valid: true}
+	r.StormAlertGroupCount = pgtype.Int8{Int64: 12, Valid: true}
+	got, err := svc.Get(t.Context(), created.PublicID)
+	if err != nil || got.Storm == nil || !got.Storm.Since.Equal(t0) || got.Storm.AlertGroupCount != 12 {
+		t.Errorf("get %+v %v", got.Storm, err)
+	}
+	list, err := svc.List(t.Context())
+	if err != nil || list.Routes[0].Storm == nil || list.Routes[1].Storm != nil {
+		t.Errorf("list %+v %v", list.Routes, err)
 	}
 }
 

@@ -14,5 +14,6 @@ Internal alert carries the annotations `summary`, `description` and `runbook_url
 
 | Internal alert | Severity | Labels | Capability | Runbook | Raised while |
 |---|---|---|---|---|---|
+| `MusterDestinationBroken` | critical | `destination`, `destination_name` | C-11 | `operations/runbooks/MusterDestinationBroken/` | A Destination is Broken: the messenger answered with a Fatal error, or with Transient errors until the budget ran out, so its deliveries wait. It resolves when a probe, a Destination check or a Destination test succeeds. |
 | `MusterHeartbeatLost` | critical | `integration`, `integration_name`, the Integration's Static labels | C-07 | `operations/runbooks/MusterHeartbeatLost/` | An Integration is Heartbeat lost: no Heartbeat signal arrived within its Heartbeat timeout, so the path from its Alertmanager to Muster may be broken and Stale resolution is paused. It resolves with the next signal, when the Heartbeat is turned off or when the Integration is deleted. |
 | `MusterSnapshotTruncated` | warning | `integration`, `integration_name` | C-06 | `operations/runbooks/MusterSnapshotTruncated/` | An Integration has a truncated groupKey: Alertmanager cut a Snapshot with max_alerts, so Muster keeps the unlisted Alerts alive and cannot resolve them by absence. It resolves with the next untruncated Snapshot of every truncated groupKey. |

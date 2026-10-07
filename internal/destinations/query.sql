@@ -64,3 +64,21 @@ ORDER BY d.name, d.id;
 SELECT public_id, name
 FROM destinations
 WHERE org_id = @org_id AND deleted_at IS NULL;
+
+-- LockDestination locks a Destination that is not deleted for a change and reads what its Audit log entry names.
+-- name: LockDestination :one
+SELECT id, public_id, name, version
+FROM destinations
+WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL
+FOR NO KEY UPDATE;
+
+-- MarkDestinationDeleted soft-deletes a Destination: it leaves every list and reads as missing, the row stays.
+-- name: MarkDestinationDeleted :exec
+UPDATE destinations
+SET deleted_at = @now, updated_at = @now, version = version + 1
+WHERE org_id = @org_id AND id = @id;
+
+-- DeleteDestinationRoutes removes a deleted Destination from every Route.
+-- name: DeleteDestinationRoutes :exec
+DELETE FROM route_destinations
+WHERE org_id = @org_id AND destination_id = @destination_id;
