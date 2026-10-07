@@ -1,4 +1,69 @@
 {
+  "alertmanagerRoutes": {
+    "columns": {
+      "repeatInterval": "Интервал повтора",
+      "resolvesAfter": "Закрытие по отсутствию через",
+      "route": "Маршрут",
+      "truncatedGroups": "Обрезанные группы"
+    },
+    "empty": "Снимков с маршрутом пока не было.",
+    "hint": "Маршруты, которые Muster увидел в снимках этой интеграции, и интервал повтора, который он по ним узнал.",
+    "notLearned": "Ещё не известен",
+    "snippet": "Рекомендуемая настройка маршрута",
+    "title": "Маршруты Alertmanager"
+  },
+  "alerts": {
+    "columns": {
+      "groups": "Группы Alertmanager",
+      "labels": "Метки",
+      "lastSeen": "Последний раз виден",
+      "startsAt": "Начало",
+      "state": "Состояние"
+    },
+    "empty": "Алертов пока нет.",
+    "emptyFiltered": "Нет алертов, подходящих под эти фильтры.",
+    "emptyFiring": "Горящих алертов нет.",
+    "emptyResolved": "Закрытых алертов нет.",
+    "filters": {
+      "label": "Фильтры алертов",
+      "search": "Поиск",
+      "searchPlaceholder": "Значение метки",
+      "sort": "Сортировка"
+    },
+    "groups_one": "{{count}} группа",
+    "groups_few": "{{count}} группы",
+    "groups_many": "{{count}} групп",
+    "groups_other": "{{count}} группы",
+    "hint": "Алерты, которые Muster отслеживает для этой интеграции.",
+    "reason": {
+      "gone": "пропал",
+      "integrationDeleted": "интеграция удалена",
+      "resolved": "закрыт в Alertmanager",
+      "stale": "устарел"
+    },
+    "reasonText": {
+      "absent": "Alertmanager больше не присылает этот алерт — он закрылся без уведомления, был заглушён или подавлен в Alertmanager, либо изменилась маршрутизация Alertmanager"
+    },
+    "sort": {
+      "lastSeenAsc": "Последний раз виден, сначала старые",
+      "lastSeenDesc": "Последний раз виден, сначала новые",
+      "startsAtAsc": "Начало, сначала старые",
+      "startsAtDesc": "Начало, сначала новые"
+    },
+    "state": {
+      "firing": "Горит",
+      "resolved": "Закрыт",
+      "resolvedWith": "Закрыт: {{reason}}"
+    },
+    "staticLabelWarning": "Статическая метка {{label}} не применена: у алерта своё значение.",
+    "tabs": {
+      "all": "Все",
+      "firing": "Горят",
+      "label": "Какие алерты показать",
+      "resolved": "Закрытые"
+    },
+    "title": "Алерты"
+  },
   "audit": {
     "actor": {
       "bootstrap": "Первичная настройка",
@@ -77,6 +142,12 @@
     "save": "Сохранить",
     "saved": "Сохранено."
   },
+  "duration": {
+    "hours": "{{value}} ч",
+    "hoursMinutes": "{{hours}} ч {{minutes}} мин",
+    "minutes": "{{value}} мин",
+    "seconds": "{{value}} с"
+  },
   "errors": {
     "forbidden": "У вас нет прав на это действие.",
     "generic": "Что-то пошло не так. Попробуйте ещё раз.",
@@ -117,6 +188,10 @@
     "title": "Добро пожаловать, {{name}}"
   },
   "integrations": {
+    "builtin": {
+      "badge": "Встроенная",
+      "explanation": "Через эту интеграцию Muster поднимает свои внутренние алерты. У неё нет токенов, и её нельзя изменить."
+    },
     "connectionMode": {
       "precision": "Алерт, разрешённый в Alertmanager, закрывается сразу. Алерт, который Alertmanager перестал присылать, становится пропавшим не позже чем через два интервала повтора, но не раньше чем через 5 минут, а устаревшим — через три интервала повтора, которые узнал Muster.",
       "webhookOnly": "Только вебхук"
@@ -193,6 +268,18 @@
       "unnamed": "Токен без названия"
     }
   },
+  "integrationWarnings": {
+    "label": "Предупреждения",
+    "longRepeatInterval": "У маршрута Alertmanager {{route}} интервал повтора {{interval}}; Muster сможет закрывать его алерты по отсутствию только через {{absence}}. Задайте на маршруте, ведущем в Muster, интервал повтора от 5 до 15 минут.",
+    "mark_one": "{{count}} предупреждение",
+    "mark_few": "{{count}} предупреждения",
+    "mark_many": "{{count}} предупреждений",
+    "mark_other": "{{count}} предупреждения",
+    "snapshotTruncated_one": "Alertmanager обрезает снимки для {{count}} группы. Задайте max_alerts: 0 в получателе Alertmanager.",
+    "snapshotTruncated_few": "Alertmanager обрезает снимки для {{count}} групп. Задайте max_alerts: 0 в получателе Alertmanager.",
+    "snapshotTruncated_many": "Alertmanager обрезает снимки для {{count}} групп. Задайте max_alerts: 0 в получателе Alertmanager.",
+    "snapshotTruncated_other": "Alertmanager обрезает снимки для {{count}} группы. Задайте max_alerts: 0 в получателе Alertmanager."
+  },
   "labels": {
     "add": "Добавить метку",
     "errors": {
@@ -205,6 +292,28 @@
     "removeEmpty": "Удалить эту метку",
     "valuePlaceholder": "prod-eu",
     "valueRow": "Значение метки {{row}}"
+  },
+  "matchers": {
+    "add": "Добавить матчер",
+    "applied": "Применённые матчеры",
+    "errors": {
+      "applied": "Матчер {{matcher}}: {{error}}",
+      "invalidFormat": "Фильтр по метке — это один матчер Alertmanager, например namespace=\"payments\" или pod=~\"api-.*\".",
+      "invalidRegex": "Некорректное регулярное выражение.",
+      "invalidRegexDetail": "Некорректное регулярное выражение: {{detail}}"
+    },
+    "hint": "Матчеры Alertmanager, например namespace=\"payments\" или pod=~\"api-.*\"; алерт должен подходить под все.",
+    "label": "Фильтры по меткам",
+    "remove": "Убрать матчер {{matcher}}",
+    "syntax": {
+      "afterValue": "После значения в кавычках ничего не должно быть.",
+      "duplicate": "Этот матчер уже применён.",
+      "name": "Матчер начинается с названия метки, например namespace.",
+      "operator": "После названия метки поставьте =, !=, =~ или !~.",
+      "quoteInValue": "Возьмите в кавычки всё значение или уберите из него кавычки.",
+      "unclosedName": "Закройте название метки в кавычках второй кавычкой.",
+      "unclosedValue": "Закройте значение в кавычках второй кавычкой."
+    }
   },
   "nav": {
     "auditLog": "Журнал аудита",

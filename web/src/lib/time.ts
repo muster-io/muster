@@ -6,6 +6,7 @@
 
 import { TZDate } from "@date-fns/tz";
 import { addDays } from "date-fns";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 
 import { useSession } from "./api";
@@ -93,4 +94,23 @@ export function useTimeFormat(): {
     dateTime: (iso) => formatDateTime(iso, timeZone, locale),
     date: (day) => formatDate(day, locale),
   };
+}
+
+/**
+ * A duration in whole seconds as the pages show intervals, such as "45 s", "5 min", "2 h" or "1 h 30 min": seconds
+ * below a minute, whole minutes below an hour, then hours with the minutes left over.
+ */
+export function formatDuration(t: TFunction, seconds: number): string {
+  if (seconds < 60) {
+    return t("duration.seconds", { value: Math.max(0, Math.round(seconds)) });
+  }
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return t("duration.minutes", { value: minutes });
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0
+    ? t("duration.hours", { value: hours })
+    : t("duration.hoursMinutes", { hours, minutes: rest });
 }

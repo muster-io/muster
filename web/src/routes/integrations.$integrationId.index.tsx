@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// An Integration's page (C-05.FR-1, FR-2, FR-7, FR-8): the details with the Connection mode and its precision, the
-// Static labels and the duplicate window; the last Snapshot and the number received; the tokens; the Stored Snapshots
-// for stored-snapshots:read; Edit and Delete for integrations:write.
+// An Integration's page (C-05.FR-1, FR-2, FR-7, FR-8, C-06.FR-14, FR-18, FR-19): the details with the Connection mode
+// and its precision, the Static labels and the duplicate window; the last Snapshot and the number received; the
+// tokens; the warnings; the learned Alertmanager routes; the Alerts view for alerts:read; the Stored Snapshots for
+// stored-snapshots:read; Edit and Delete for integrations:write. The built-in Integration "Muster" shows only what it
+// is, its Alerts view and its Stored Snapshots.
 
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeftIcon, PencilIcon } from "lucide-react";
@@ -12,10 +14,14 @@ import { useTranslation } from "react-i18next";
 
 import { useGetIntegration } from "../api/gen/endpoints/integrations/integrations";
 import type { Integration } from "../api/gen/model";
+import { AlertmanagerRoutes } from "../components/alertmanager-routes";
 import { RequirePermission, useCan } from "../components/app-shell";
+import { IntegrationAlerts } from "../components/integration-alerts";
+import { type AlertSearch, alertSearchSchema } from "../components/integration-alerts-search";
 import { IntegrationDeleteDialog } from "../components/integration-delete-dialog";
-import { ConnectionMode } from "../components/integration-form";
+import { BuiltinBadge, ConnectionMode } from "../components/integration-form";
 import { IntegrationTokens } from "../components/integration-tokens";
+import { IntegrationWarnings } from "../components/integration-warnings";
 import { type SnapshotSearch, snapshotSearchSchema } from "../components/stored-snapshot-search";
 import { StoredSnapshots } from "../components/stored-snapshots";
 import { buttonVariants } from "../components/ui/button";
@@ -24,7 +30,7 @@ import { problemText } from "../lib/api";
 import { useTimeFormat } from "../lib/time";
 
 export const Route = createFileRoute("/integrations/$integrationId/")({
-  validateSearch: snapshotSearchSchema,
+  validateSearch: snapshotSearchSchema.extend(alertSearchSchema.shape),
   staticData: { shell: true },
   component: IntegrationPage,
 });
@@ -134,11 +140,12 @@ function IntegrationView({ integrationId }: { integrationId: string }) {
   const { t } = useTranslation();
   const canWrite = useCan("integrations:write");
   const canReadSnapshots = useCan("stored-snapshots:read");
+  const canReadAlerts = useCan("alerts:read");
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const query = useGetIntegration(integrationId);
   const integration = query.data;
-  const onSearch = (patch: Partial<SnapshotSearch>) =>
+  const onSearch = (patch: Partial<SnapshotSearch & AlertSearch>) =>
     void navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true });
   const writable = canWrite && integration?.builtin === false;
   return (
@@ -152,9 +159,12 @@ function IntegrationView({ integrationId }: { integrationId: string }) {
           {t("integrations.title")}
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="min-w-0 text-2xl font-semibold tracking-tight break-words">
-            {integration?.name ?? t("integrations.page.title")}
-          </h1>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h1 className="min-w-0 text-2xl font-semibold tracking-tight break-words">
+              {integration?.name ?? t("integrations.page.title")}
+            </h1>
+            {integration?.builtin === true && <BuiltinBadge />}
+          </div>
           {integration !== undefined && writable && (
             <div className="flex flex-wrap gap-2">
               <Link
@@ -169,6 +179,11 @@ function IntegrationView({ integrationId }: { integrationId: string }) {
             </div>
           )}
         </div>
+        {integration?.builtin === true && (
+          <p className="text-muted-foreground" data-testid="builtin-explanation">
+            {t("integrations.builtin.explanation")}
+          </p>
+        )}
       </div>
       {integration === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">
@@ -176,13 +191,20 @@ function IntegrationView({ integrationId }: { integrationId: string }) {
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <Details integration={integration} />
-          <div className="flex flex-col gap-6">
-            <SnapshotsSummary integration={integration} />
-            {!integration.builtin && (
-              <IntegrationTokens integration={integration} canWrite={canWrite} />
-            )}
-          </div>
+          {!integration.builtin && (
+            <>
+              <Details integration={integration} />
+              <div className="flex flex-col gap-6">
+                <SnapshotsSummary integration={integration} />
+                <IntegrationTokens integration={integration} canWrite={canWrite} />
+              </div>
+              <IntegrationWarnings warnings={integration.warnings} />
+              <AlertmanagerRoutes integrationId={integration.id} />
+            </>
+          )}
+          {canReadAlerts && (
+            <IntegrationAlerts integrationId={integration.id} search={search} onSearch={onSearch} />
+          )}
           {canReadSnapshots && (
             <StoredSnapshots integrationId={integration.id} search={search} onSearch={onSearch} />
           )}

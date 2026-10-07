@@ -46,6 +46,19 @@ export function connectionModeLabel(t: TFunction, mode: Integration["connection_
   return mode === "webhook_only" ? t("integrations.connectionMode.webhookOnly") : mode;
 }
 
+/** The mark of the built-in Integration "Muster" (C-06.FR-14). */
+export function BuiltinBadge() {
+  const { t } = useTranslation();
+  return (
+    <span
+      className="inline-flex w-fit items-center rounded-md border px-1.5 py-0.5 text-xs font-medium whitespace-nowrap text-muted-foreground"
+      data-testid="builtin-badge"
+    >
+      {t("integrations.builtin.badge")}
+    </span>
+  );
+}
+
 const formSchema = z
   .object({
     name: z.string().trim().min(1, "required").max(NAME_MAX, "too_long"),
