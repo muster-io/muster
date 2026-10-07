@@ -15,6 +15,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/fakes/fakealertmanager"
+	"github.com/muster-io/muster/internal/heartbeat"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/logging"
@@ -30,8 +31,10 @@ func (e *env) processor(owner string, sink ingest.Sink) *ingest.Processor {
 }
 
 // TestIntegrationFacts runs every scenario of the fake Alertmanager — one per verified Alertmanager fact that
-// processing relies on, F-033 to F-044, F-046 and F-048 to F-053 — through ingestion and processing on PostgreSQL
-// with a manual clock, and checks the requirement that cites the fact.
+// processing relies on, F-033 to F-053 — through ingestion, processing, the Heartbeat signals and the Stale scan on
+// PostgreSQL with a manual clock, and checks the requirement that cites the fact. F-045 and F-047 run with a live
+// Heartbeat; every other scenario has none, and the Stale scan before each expectation resolves nothing there
+// (C-06.AC-3).
 func TestIntegrationFacts(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		e := setup(t, s)
@@ -49,10 +52,14 @@ func runScenario(t *testing.T, e *env, sc fakealertmanager.Scenario) {
 	start := t0
 	e.clock.Set(start)
 	in, err := e.ints.Create(ctx, by, integrations.Input{Name: strings.ToLower(sc.Fact),
-		ConnectionMode: integrations.ConnectionWebhookOnly, DuplicateWindowSeconds: 45})
+		ConnectionMode: integrations.ConnectionWebhookOnly, DuplicateWindowSeconds: 45,
+		Heartbeat: integrations.HeartbeatInput{Enabled: sc.Heartbeat}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	signals := heartbeat.New(heartbeat.Config{OrgID: e.orgID, Store: heartbeat.NewStore(e.d.Pool), Business: e.clock,
+		Log: logging.New(&e.processLog, logging.LevelInfo)})
+	scanner := e.processor("replica-a/stale-scan", nil)
 	fake := fakealertmanager.New()
 	fake.SetClock(e.clock.Now)
 	if err := fake.Register(fakealertmanager.Receiver{Name: fakealertmanager.ScenarioReceiver,
@@ -102,7 +109,17 @@ func runScenario(t *testing.T, e *env, sc fakealertmanager.Scenario) {
 					t.Fatalf("step %d: processed %d, %v", i, n, err)
 				}
 			}
+		case st.Signal:
+			if err := signals.Signal(ctx, in.ID); err != nil {
+				t.Fatal(err)
+			}
 		case st.Expect != nil:
+			if err := scanner.StaleScan(ctx); err != nil {
+				t.Fatalf("step %d: stale scan: %v", i, err)
+			}
+			if _, err := p.Drain(ctx); err != nil {
+				t.Fatal(err)
+			}
 			check(t, e, i, in, fake, keys, start, *st.Expect)
 		}
 	}

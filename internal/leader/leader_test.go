@@ -321,14 +321,17 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		names = append(names, task.Name)
 	}
 	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning",
-		"ingest_backlog", "alert_retention"}
+		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
 	if tasks[0].Every != time.Hour || tasks[1].Every != AliveMarkInterval || tasks[2].Every != time.Hour ||
 		tasks[3].Every != MaintenanceInterval || tasks[4].Every != BacklogInterval ||
-		tasks[5].Every != MaintenanceInterval {
+		tasks[5].Every != MaintenanceInterval || tasks[6].Every != 10*time.Second || tasks[7].Every != 30*time.Second {
 		t.Errorf("intervals %v %v %v %v", tasks[0].Every, tasks[1].Every, tasks[2].Every, tasks[3].Every)
+	}
+	if tasks[6].Wake != nil || tasks[7].Wake != nil {
+		t.Error("tasks are woken outside development mode")
 	}
 	// Partition maintenance logs its own failures; the runner gets none to log twice.
 	if err := tasks[0].Run(t.Context()); err != nil {
@@ -349,6 +352,115 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	if err := tasks[5].Run(t.Context()); err != nil {
 		t.Errorf("alert retention without a retention: %v", err)
 	}
+}
+
+// TestHeartbeatAndStaleTasks covers C-07.FR-8 and C-02.FR-10: the Heartbeat check runs over every Organization only
+// once this leadership's takeover ran, so that it measures from the end of a downtime the takeover records; the Stale
+// scan runs per Organization and goes on past one that fails; in development mode a move of the development clock
+// wakes both.
+func TestHeartbeatAndStaleTasks(t *testing.T) {
+	w := newWorld(0)
+	var checked [][]int64
+	var scanned []int64
+	failed := errors.New("locked")
+	moved := &Wakes{}
+	work := Work{
+		Alive:         w.alive("a"),
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		HeartbeatCheck: func(_ context.Context, orgs []int64) error {
+			checked = append(checked, orgs)
+			return nil
+		},
+		StaleScan: func(_ context.Context, org int64) error {
+			scanned = append(scanned, org)
+			if org == 1 {
+				return failed
+			}
+			return nil
+		},
+		ClockMoved: moved,
+	}
+	tasks := Tasks(work)()
+	check, scan := tasks[6], tasks[7]
+	if err := check.Run(t.Context()); err != nil || len(checked) != 0 {
+		t.Fatalf("checked before the takeover: %v, %v", checked, err)
+	}
+	if err := tasks[1].Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := check.Run(t.Context()); err != nil || len(checked) != 1 || !slices.Equal(checked[0], []int64{1, 2}) {
+		t.Errorf("checked %v, %v", checked, err)
+	}
+	if err := scan.Run(t.Context()); !errors.Is(err, failed) || !slices.Equal(scanned, []int64{1, 2}) {
+		t.Errorf("scanned %v, %v", scanned, err)
+	}
+	moved.Wake()
+	moved.Wake()
+	for _, task := range []Task{check, scan} {
+		select {
+		case <-task.Wake:
+		default:
+			t.Errorf("%s was not woken", task.Name)
+		}
+		select {
+		case <-task.Wake:
+			t.Errorf("%s was woken twice", task.Name)
+		default:
+		}
+	}
+	// A new leadership takes over again before it checks.
+	if err := Tasks(work)()[6].Run(t.Context()); err != nil || len(checked) != 1 {
+		t.Errorf("a new leadership checked before its takeover: %v", checked)
+	}
+	orgsErr := errors.New("down")
+	work.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
+	tasks = Tasks(work)()
+	if err := tasks[7].Run(t.Context()); !errors.Is(err, orgsErr) {
+		t.Errorf("scan = %v", err)
+	}
+	if err := tasks[1].Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks[6].Run(t.Context()); !errors.Is(err, orgsErr) {
+		t.Errorf("check = %v", err)
+	}
+	// Without a check or a scan the tasks do nothing.
+	empty := Tasks(Work{Alive: w.alive("b")})()
+	if err := empty[7].Run(t.Context()); err != nil {
+		t.Errorf("scan without a scan: %v", err)
+	}
+	if err := empty[1].Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := empty[6].Run(t.Context()); err != nil {
+		t.Errorf("check without a check: %v", err)
+	}
+	var none *Wakes
+	none.Wake()
+}
+
+// TestWokenTask: a task runs again at once when it is woken, between its ticks.
+func TestWokenTask(t *testing.T) {
+	var log bytes.Buffer
+	ticks := make(chan time.Time)
+	wake := make(chan struct{})
+	runs := make(chan struct{}, 4)
+	k := NewKeeper(nil, clock.Real{}, logging.New(&log, logging.LevelInfo), "a", nil)
+	k.every = func(time.Duration) (<-chan time.Time, func()) { return ticks, func() {} }
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		k.runTask(ctx, Task{Name: "woken", Wake: wake, Run: func(context.Context) error {
+			runs <- struct{}{}
+			return nil
+		}})
+		close(done)
+	}()
+	<-runs
+	wake <- struct{}{}
+	<-runs
+	cancel()
+	<-done
 }
 
 // TestAlertRetentionTask: the retention of the Alerts view runs in every Organization at the same now on the business

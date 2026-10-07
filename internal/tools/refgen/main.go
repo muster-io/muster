@@ -172,6 +172,9 @@ func internalAlertsMarkdown(defs []*internalalerts.Definition) string {
 		for _, l := range d.Labels() {
 			labels = append(labels, "`"+l+"`")
 		}
+		if d.StaticLabels {
+			labels = append(labels, "the Integration's Static labels")
+		}
 		list := strings.Join(labels, ", ")
 		if list == "" {
 			list = "—"

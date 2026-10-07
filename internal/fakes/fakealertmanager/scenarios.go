@@ -4,30 +4,33 @@
 package fakealertmanager
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
 
 // The scenario library: one timed request sequence per verified Alertmanager fact that processing relies on — F-033
-// to F-044, F-046 and F-048 to F-053 of design/facts.md — with what processing must show after it. F-045 and F-047
-// need the Heartbeat and join with it. internal/ingest/facts_test.go runs every scenario through processing with a
-// manual clock.
+// to F-053 of design/facts.md — with what processing must show after it. F-045 and F-047 run with a live Heartbeat,
+// whose signals are steps of their own, because only the Stale scan resolves what a muted group never sends.
+// internal/ingest/facts_test.go runs every scenario through processing and the Stale scan with a manual clock.
 
 // ScenarioReceiver is the receiver every scenario's groups send to.
 const ScenarioReceiver = "scenario"
 
-// Scenario replays one fact.
+// Scenario replays one fact; Heartbeat says that its Integration has its Heartbeat on.
 type Scenario struct {
 	Fact        string
 	Requirement string
 	Title       string
+	Heartbeat   bool
 	Steps       []Step
 }
 
 // Step is one request of a scenario, At after its start: a group defined, an Alert set or removed, a notification
-// sent — its copies CopyDelayMs apart — or an expectation checked. StartsAt and EndsAt, offsets from the start, set
-// the times of an Alert that the step sets.
+// sent — its copies CopyDelayMs apart — a Heartbeat signal, or an expectation checked after the Stale scan. StartsAt
+// and EndsAt, offsets from the start, set the times of an Alert that the step sets.
 type Step struct {
 	At       time.Duration
 	Group    string
@@ -38,6 +41,7 @@ type Step struct {
 	EndsAt   *time.Duration
 	Remove   bool
 	Notify   *NotifyOptions
+	Signal   bool
 	Expect   *Expect
 }
 
@@ -124,6 +128,23 @@ func steps(parts ...any) []Step {
 			out = append(out, v...)
 		}
 	}
+	return out
+}
+
+// signals are Heartbeat signals every minute from from to to, both included.
+func signals(from, to time.Duration) []Step {
+	var out []Step
+	for t := from; t <= to; t += time.Minute {
+		out = append(out, Step{At: t, Signal: true})
+	}
+	return out
+}
+
+// timeline is steps in the order of their times; steps of the same time keep the order they are given in, so that a
+// Heartbeat signal given first comes before a notification of the same time.
+func timeline(parts ...any) []Step {
+	out := steps(parts...)
+	slices.SortStableFunc(out, func(a, b Step) int { return cmp.Compare(a.At, b.At) })
 	return out
 }
 
@@ -262,6 +283,21 @@ func Scenarios() []Scenario {
 				notify(s(300), "g10", "all alerts resolved", NotifyOptions{List: list("z", 0)}),
 				expect(s(300), Expect{Resolved: resolvedAll(append(names("g20", "y", 20), names("g10", "z", 10)...),
 					"resolved"), Dropped: count(0)}))},
+		{Fact: "F-045", Requirement: "C-06.FR-8", Title: "a wholly muted group sends nothing", Heartbeat: true,
+			Steps: timeline(signals(0, s(2400)),
+				defineGroup("g", `{}/{team="ops"}`, map[string]string{"alertname": "Muted"}),
+				fire(0, "g", "a", map[string]string{"instance": "a"}),
+				notify(0, "g", "first notification", NotifyOptions{}),
+				notify(s(300), "g", "repeat interval elapsed", NotifyOptions{}),
+				notify(s(600), "g", "repeat interval elapsed", NotifyOptions{}),
+				notify(s(900), "g", "repeat interval elapsed", NotifyOptions{}),
+				// The whole group is silenced from here: nothing is sent, repeats included.
+				expect(s(1800), Expect{Firing: []string{"g/a"},
+					Learned: map[string][2]time.Duration{`{}/{team="ops"}`: {s(300), s(300)}}}),
+				expect(s(1860), Expect{Resolved: map[string]string{"g/a": "stale"}}),
+				// After a long mute the group returns as a first notification: a new firing.
+				notify(s(2400), "g", "first notification", NotifyOptions{}),
+				expect(s(2400), Expect{Firing: []string{"g/a"}, Episodes: map[string]int64{"g/a": 2}}))},
 		{Fact: "F-046", Requirement: "C-06.FR-4", Title: "resolves come back for about 15 minutes",
 			Steps: steps(defineGroup("g", "{}", labelsA),
 				fire(0, "g", "a", map[string]string{"instance": "a"}),
@@ -282,6 +318,29 @@ func Scenarios() []Scenario {
 				notify(s(900), "g", "some alerts resolved", NotifyOptions{}),
 				expect(s(900), Expect{Firing: []string{"g/a", "g/b"}, Episodes: map[string]int64{"g/a": 2},
 					StartsAt: map[string]time.Duration{"g/a": s(840)}, Dropped: count(0)}))},
+		{Fact: "F-047", Requirement: "C-06.FR-8", Title: "a resolve during a mute arrives if the mute ends soon",
+			Heartbeat: true,
+			Steps: timeline(signals(0, s(1860)),
+				defineGroup("short", `{}/{mute="short"}`, map[string]string{"alertname": "Short"}),
+				defineGroup("long", `{}/{mute="long"}`, map[string]string{"alertname": "Long"}),
+				fire(0, "short", "a", map[string]string{"instance": "a"}),
+				fire(0, "long", "b", map[string]string{"instance": "b"}),
+				notify(0, "short", "first notification", NotifyOptions{}),
+				notify(0, "long", "first notification", NotifyOptions{}),
+				notify(s(300), "short", "repeat interval elapsed", NotifyOptions{}),
+				notify(s(300), "long", "repeat interval elapsed", NotifyOptions{}),
+				notify(s(600), "short", "repeat interval elapsed", NotifyOptions{}),
+				notify(s(600), "long", "repeat interval elapsed", NotifyOptions{}),
+				notify(s(900), "short", "repeat interval elapsed", NotifyOptions{}),
+				notify(s(900), "long", "repeat interval elapsed", NotifyOptions{}),
+				// Both groups are muted from here, and both alerts resolve during the mute.
+				resolve(s(1020), "short/a", map[string]string{"instance": "a"}),
+				resolve(s(1020), "long/b", map[string]string{"instance": "b"}),
+				// The short mute ends after 10 minutes, and its resolve arrives then.
+				notify(s(1500), "short", "all alerts resolved", NotifyOptions{}),
+				expect(s(1500), Expect{Resolved: map[string]string{"short/a": "resolved"}, Firing: []string{"long/b"}}),
+				// The long mute never sends the resolve: the Alert goes Stale.
+				expect(s(1860), Expect{Resolved: map[string]string{"short/a": "resolved", "long/b": "stale"}}))},
 		{Fact: "F-048", Requirement: "C-06.FR-6", Title: "max_alerts keeps the first alerts",
 			Steps: steps(defineGroup("g", "{}", labelsA),
 				fire(0, "g", "i3", map[string]string{"instance": "i3"}),

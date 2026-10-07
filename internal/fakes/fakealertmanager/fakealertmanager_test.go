@@ -793,10 +793,11 @@ func TestGroupErrors(t *testing.T) {
 }
 
 // TestScenarios checks the scenario library: one scenario per fact that processing relies on, steps in time order,
-// groups defined before use and every expectation naming an Alert that a step set; every notification builds.
+// groups defined before use and every expectation naming an Alert that a step set; every notification builds; only a
+// scenario with a Heartbeat signals.
 func TestScenarios(t *testing.T) {
 	want := []string{"F-033", "F-034", "F-035", "F-036", "F-037", "F-038", "F-039", "F-040", "F-041", "F-042", "F-043",
-		"F-044", "F-046", "F-048", "F-049", "F-050", "F-051", "F-052", "F-053"}
+		"F-044", "F-045", "F-046", "F-047", "F-048", "F-049", "F-050", "F-051", "F-052", "F-053"}
 	var facts []string
 	for _, sc := range fakealertmanager.Scenarios() {
 		facts = append(facts, sc.Fact)
@@ -835,6 +836,10 @@ func TestScenarios(t *testing.T) {
 				if _, _, _, err := f.Snapshots(st.Group, *st.Notify); err != nil {
 					t.Errorf("%s step %d: %v", sc.Fact, i, err)
 				}
+			case st.Signal:
+				if !sc.Heartbeat {
+					t.Errorf("%s step %d signals without a Heartbeat", sc.Fact, i)
+				}
 			case st.Expect != nil:
 				e := st.Expect
 				var named []string
@@ -862,5 +867,129 @@ func TestScenarios(t *testing.T) {
 	}
 	if strings.Join(facts, " ") != strings.Join(want, " ") {
 		t.Errorf("facts %v, want %v", facts, want)
+	}
+}
+
+// heartbeatSink stands for Muster's Heartbeat endpoint: it keeps the method, path and Authorization header of each
+// signal and answers 204.
+type heartbeatSink struct {
+	*httptest.Server
+	got chan string
+}
+
+func newHeartbeatSink(t *testing.T) *heartbeatSink {
+	t.Helper()
+	s := &heartbeatSink{got: make(chan string, 16)}
+	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		s.got <- r.Method + " " + r.URL.Path + " " + r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(s.Close)
+	return s
+}
+
+func (s *heartbeatSink) next(t *testing.T) string {
+	t.Helper()
+	select {
+	case got := <-s.got:
+		return got
+	case <-time.After(5 * time.Second):
+		t.Fatal("no signal arrived")
+		return ""
+	}
+}
+
+// TestHeartbeatSenders covers C-01.FR-13: a Heartbeat sender signals on request, by POST or GET, with the token as a
+// bearer token or in the path; with an interval it signals at every tick; stopped, it signals no more, as a cut
+// network would.
+func TestHeartbeatSenders(t *testing.T) {
+	f := startFake(t)
+	hb := newHeartbeatSink(t)
+	ticks := make(chan time.Time)
+	f.SetHeartbeatTicker(func(d time.Duration) (<-chan time.Time, func()) {
+		if d != 60*time.Second {
+			t.Errorf("interval %v", d)
+		}
+		return ticks, func() {}
+	})
+	control := f.URL() + "/_fake/heartbeats"
+	if status, body := post(t, control, `{"name":"a","url":"`+hb.URL+`/api/v1/heartbeat","token":"mstr_int_x",
+		"interval_seconds":60}`); status != http.StatusNoContent {
+		t.Fatalf("start = %d %s", status, body)
+	}
+	if status, body := post(t, control+"/a/send", ""); status != http.StatusOK || body != `{"status":204}`+"\n" {
+		t.Errorf("send = %d %q", status, body)
+	}
+	if got := hb.next(t); got != "POST /api/v1/heartbeat Bearer mstr_int_x" {
+		t.Errorf("signal %q", got)
+	}
+	ticks <- time.Time{}
+	if got := hb.next(t); got != "POST /api/v1/heartbeat Bearer mstr_int_x" {
+		t.Errorf("tick %q", got)
+	}
+	if status, body := post(t, control, `{"name":"b","url":"`+hb.URL+`/api/v1/heartbeat","token":"mstr_int_y",
+		"token_in":"path","method":"get"}`); status != http.StatusNoContent {
+		t.Fatalf("start b = %d %s", status, body)
+	}
+	if status, err := f.SendHeartbeat(t.Context(), "b"); err != nil || status != http.StatusNoContent {
+		t.Errorf("send b = %d %v", status, err)
+	}
+	if got := hb.next(t); got != "GET /api/v1/heartbeat/mstr_int_y " {
+		t.Errorf("signal b %q", got)
+	}
+	del := func(name string) int {
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodDelete, control+"/"+name, nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if status := del("a"); status != http.StatusNoContent {
+		t.Errorf("stop = %d", status)
+	}
+	if status := del("a"); status != http.StatusNotFound {
+		t.Errorf("stop again = %d", status)
+	}
+	if status, _ := post(t, control+"/a/send", ""); status != http.StatusNotFound {
+		t.Errorf("send after the stop = %d", status)
+	}
+	if _, err := f.SendHeartbeat(t.Context(), "a"); err == nil {
+		t.Error("a stopped sender signalled")
+	}
+	select {
+	case ticks <- time.Time{}:
+		t.Error("a stopped sender still ticks")
+	case <-time.After(100 * time.Millisecond):
+	}
+	for name, body := range map[string]string{
+		"remote url":    `{"name":"c","url":"http://example.org/api/v1/heartbeat"}`,
+		"no name":       `{"url":"` + hb.URL + `"}`,
+		"token place":   `{"name":"c","url":"` + hb.URL + `","token_in":"query"}`,
+		"method":        `{"name":"c","url":"` + hb.URL + `","method":"PUT"}`,
+		"interval":      `{"name":"c","url":"` + hb.URL + `","interval_seconds":-1}`,
+		"unknown field": `{"name":"c","url":"` + hb.URL + `","every":1}`,
+	} {
+		if status, _ := post(t, control, body); status != http.StatusBadRequest {
+			t.Errorf("%s = %d", name, status)
+		}
+	}
+	// A replaced sender stops ticking, and StopHeartbeats stops every sender.
+	if err := f.StartHeartbeat(t.Context(), fakealertmanager.HeartbeatSender{Name: "b", URL: hb.URL,
+		IntervalSeconds: 60}); err != nil {
+		t.Fatal(err)
+	}
+	f.StopHeartbeats()
+	if _, err := f.SendHeartbeat(t.Context(), "b"); err == nil {
+		t.Error("StopHeartbeats left a sender")
+	}
+	hb.Close()
+	if err := f.StartHeartbeat(t.Context(), fakealertmanager.HeartbeatSender{Name: "d", URL: hb.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := post(t, control+"/d/send", ""); status != http.StatusBadGateway {
+		t.Errorf("send to a closed endpoint = %d", status)
 	}
 }

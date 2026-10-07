@@ -177,10 +177,22 @@ func OIDCDemo() oidc.Demo {
 }
 
 // IntegrationDemo is the demo Integration that `muster dev` ensures at start: dev-alertmanager with the Static label
-// cluster=dev and the published token that the fake Alertmanager's receiver muster sends with.
+// cluster=dev, its Heartbeat on, and the published token that the fake Alertmanager's receiver muster and its
+// Heartbeat sender send with.
 func IntegrationDemo() integrations.Demo {
-	return integrations.Demo{Name: IntegrationName, StaticLabels: map[string]string{"cluster": "dev"},
+	return integrations.Demo{Name: IntegrationName, StaticLabels: map[string]string{"cluster": "dev"}, Heartbeat: true,
 		Token: IntegrationToken, TokenName: "dev"}
+}
+
+// HeartbeatInterval is how often the fake Alertmanager signals the Heartbeat of the demo Integration.
+const HeartbeatInterval = 60
+
+// StartHeartbeat starts the fake Alertmanager's Heartbeat sender muster: a signal of the demo Integration to the
+// Heartbeat endpoint under ingestURL every HeartbeatInterval seconds, until the fake servers stop.
+func StartHeartbeat(ctx context.Context, f *fakealertmanager.Fake, ingestURL string) error {
+	return f.StartHeartbeat(ctx, fakealertmanager.HeartbeatSender{Name: IntegrationReceiver,
+		URL:   strings.TrimSuffix(ingestURL, "/") + integrations.HeartbeatPath,
+		Token: IntegrationToken, IntervalSeconds: HeartbeatInterval})
 }
 
 // RegisterReceiver registers the receiver muster with the fake Alertmanager: the ingestion endpoint under ingestURL
@@ -233,8 +245,10 @@ func StartFakes(ctx context.Context, addrs Addresses) (*Fakes, error) {
 	return f, nil
 }
 
-// Close stops the fake servers and the fake proxies, waiting at most until ctx ends.
+// Close stops the fake Alertmanager's Heartbeat senders, the fake servers and the fake proxies, waiting at most until
+// ctx ends.
 func (f *Fakes) Close(ctx context.Context) error {
+	f.Alertmanager.StopHeartbeats()
 	return errors.Join(f.HTTPProxy.Close(), f.SOCKSProxy.Close(), closeAll(ctx, f.servers()))
 }
 
@@ -248,8 +262,8 @@ func closeAll(ctx context.Context, servers []*fakeserver.Server) error {
 	return errors.Join(errs...)
 }
 
-// Run starts the fake servers at addrs, registers the receiver muster with the fake Alertmanager for MUSTER_INGEST_URL,
-// prints their addresses, then runs Muster in the same process with serve until ctx ends or serve fails; the fake
+// Run starts the fake servers at addrs, registers the receiver muster with the fake Alertmanager for MUSTER_INGEST_URL
+// and starts its Heartbeat sender for the demo Integration, prints their addresses, then runs Muster in the same process with serve until ctx ends or serve fails; the fake
 // servers stop after it.
 func Run(ctx context.Context, w io.Writer, addrs Addresses, serve func(context.Context) error) error {
 	f, err := StartFakes(ctx, addrs)
@@ -261,6 +275,9 @@ func Run(ctx context.Context, w io.Writer, addrs Addresses, serve func(context.C
 		ingestURL = IngestURL
 	}
 	if err := RegisterReceiver(f.Alertmanager, ingestURL); err != nil {
+		return errors.Join(err, f.Close(context.WithoutCancel(ctx)))
+	}
+	if err := StartHeartbeat(ctx, f.Alertmanager, ingestURL); err != nil {
 		return errors.Join(err, f.Close(context.WithoutCancel(ctx)))
 	}
 	// Telegram comes last: the end-to-end harness waits for its line, printed once every fake listens.

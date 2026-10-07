@@ -27,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/heartbeat"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/keyring"
@@ -93,6 +94,8 @@ type database interface {
 	OIDCStore() oidc.Store
 	TokensStore() tokens.Store
 	IntegrationsStore() integrations.Store
+	// HeartbeatStore serves the Heartbeat endpoint and the Heartbeat check.
+	HeartbeatStore() heartbeat.Store
 	IngestStore() ingest.Store
 	// ProcessStore serves Snapshot processing and the Alerts view; ClockStore the development clock.
 	ProcessStore() ingest.ProcessStore
@@ -143,6 +146,8 @@ func (d pgDatabase) OIDCStore() oidc.Store { return oidc.NewStore(d.Pool) }
 func (d pgDatabase) TokensStore() tokens.Store { return tokens.NewStore(d.Pool) }
 
 func (d pgDatabase) IntegrationsStore() integrations.Store { return integrations.NewStore(d.Pool) }
+
+func (d pgDatabase) HeartbeatStore() heartbeat.Store { return heartbeat.NewStore(d.Pool) }
 
 func (d pgDatabase) IngestStore() ingest.Store { return ingest.NewStore(d.Pool) }
 
@@ -366,13 +371,17 @@ type process struct {
 	// orgID and signIn are the Organization and its OIDC service, for the background re-checks.
 	orgID  int64
 	signIn *oidc.Service
-	// integrations and snapshots serve ingestion on the ingest listener besides the API; worker processes the
-	// Stored Snapshots.
+	// integrations and snapshots serve ingestion on the ingest listener besides the API, and signals the Heartbeat
+	// endpoint; worker processes the Stored Snapshots, and scanner runs the Leader's Stale scan.
 	integrations *integrations.Service
 	snapshots    *ingest.Service
+	signals      *heartbeat.Service
 	worker       *ingest.Worker
-	// devClock is the development clock of `muster dev`, nil outside development mode.
-	devClock *devmode.Clock
+	scanner      *ingest.Processor
+	// devClock is the development clock of `muster dev`, nil outside development mode; clockMoved wakes the
+	// Leader's Heartbeat check and Stale scan when it moves.
+	devClock   *devmode.Clock
+	clockMoved *leader.Wakes
 }
 
 func setup(ctx context.Context, opts Options) (config.Config, *logging.Logger, error) {
@@ -447,6 +456,7 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 			d.Close()
 			return nil, failed(ctx, log, err)
 		}
+		p.clockMoved = &leader.Wakes{}
 		log.Log(ctx, logging.DevClockLoaded, logging.F("offset_seconds", p.devClock.OffsetSeconds()))
 	}
 	if err := p.bootstrap(ctx); err != nil {
@@ -477,10 +487,12 @@ func (p *process) serve(ctx context.Context) error {
 		App: p.cfg.ListenApp, Ingest: p.cfg.ListenIngest, Internal: p.cfg.ListenInternal,
 	}, server.Handlers{
 		App: server.App(p.api, web.Dist(), p.cfg.PublicURL.Scheme == "https"),
-		Ingest: ingest.NewHandler(ingest.HandlerConfig{
+		Ingest: server.Ingest(ingest.NewHandler(ingest.HandlerConfig{
 			Auth: p.integrations, Snapshots: p.snapshots, Log: p.log, Real: p.clocks.Real,
 			TrustedProxies: p.cfg.TrustedProxies,
-		}),
+		}), heartbeat.NewHandler(heartbeat.HandlerConfig{
+			Auth: p.integrations, Signals: p.signals, Log: p.log, TrustedProxies: p.cfg.TrustedProxies,
+		})),
 		Internal: p.internalHandler(health),
 	})
 	if err != nil {
@@ -614,6 +626,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		RunbookBase: p.cfg.RunbookBaseURL.String(),
 	})
 	p.snapshots = ingest.New(orgID, p.db.IngestStore(), p.clocks.Business)
+	p.signals = heartbeat.New(heartbeat.Config{OrgID: orgID, Store: p.db.HeartbeatStore(), Business: p.clocks.Business,
+		Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String()})
 	alerts := ingest.NewAlertsView(orgID, p.db.ProcessStore(), p.clocks.Business)
 	if p.opts.Development {
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
@@ -665,6 +679,15 @@ func (p *process) newKeeper() *leader.Keeper {
 		AlertRetention: func(ctx context.Context, orgID int64, now time.Time) (int64, error) {
 			return ingest.PruneAlerts(ctx, p.db.ProcessStore(), orgID, now)
 		},
+		HeartbeatCheck: (&heartbeat.Checker{Store: p.db.HeartbeatStore(), Business: p.clocks.Business, Log: p.log,
+			RunbookBase: p.cfg.RunbookBaseURL.String()}).Check,
+		StaleScan: func(ctx context.Context, orgID int64) error {
+			if orgID != p.orgID {
+				return nil
+			}
+			return p.scanner.StaleScan(ctx)
+		},
+		ClockMoved: p.clockMoved,
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
 			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},
@@ -720,7 +743,10 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	// a notification was missed.
 	p.listener.Listen(ingest.SnapshotChannel, func(string) { p.worker.Wake() })
 	if p.devClock != nil {
-		p.listener.Listen(devmode.ClockChannel, func(string) { p.loadDevClock(ctx) })
+		p.listener.Listen(devmode.ClockChannel, func(string) {
+			p.loadDevClock(ctx)
+			p.clockMoved.Wake()
+		})
 	}
 	wg.Go(func() {
 		p.listener.Run(ctx, func(h db.Hint) {
@@ -776,6 +802,11 @@ func (p *process) configureWorker() {
 	processor := ingest.NewProcessor(ingest.ProcessorConfig{OrgID: p.orgID, Store: p.db.ProcessStore(),
 		Business: p.clocks.Business, Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String(),
 		Lease: db.Lease{Owner: p.replica.ID(), Duration: ingest.Lease, Clocks: p.clocks}})
+	// The Stale scan claims Integrations under a lease of its own, so that it never takes over one that this replica's
+	// worker processes.
+	p.scanner = ingest.NewProcessor(ingest.ProcessorConfig{OrgID: p.orgID, Store: p.db.ProcessStore(),
+		Business: p.clocks.Business, Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String(),
+		Lease: db.Lease{Owner: p.replica.ID() + "/stale-scan", Duration: ingest.Lease, Clocks: p.clocks}})
 	p.worker.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
 	p.worker.Processor = func(orgID int64) (*ingest.Processor, bool) { return processor, orgID == p.orgID }
 }

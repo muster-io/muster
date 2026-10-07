@@ -2,7 +2,7 @@
 // Copyright The Muster Authors
 
 // Package integrations holds the Integrations of C-05: one per Alertmanager cluster, with its Connection mode, Static
-// labels, duplicate window, stored Heartbeat settings and Integration tokens. A token is `mstr_int_` followed by 32
+// labels, duplicate window, Heartbeat settings and Integration tokens. A token is `mstr_int_` followed by 32
 // random bytes; only its SHA-256 is stored and the value is shown once, with the Alertmanager snippet that carries it
 // (ADR-0011). Deletion is soft: the Integration leaves every list and its tokens stop working at once, while its
 // Stored Snapshots stay until retention. Every change is recorded in the Audit log and announced with the live hint
@@ -42,8 +42,13 @@ import (
 // The Connection modes; L1 has only webhook-only (integration.connection_mode).
 const ConnectionWebhookOnly = "webhook_only"
 
-// HeartbeatNotConfigured is the Heartbeat state of an Integration whose Heartbeat is off.
-const HeartbeatNotConfigured = "not_configured"
+// The Heartbeat states of an Integration (C-07.FR-3): off, waiting for the first signal, live, and lost.
+const (
+	HeartbeatNotConfigured = "not_configured"
+	HeartbeatWaiting       = "waiting"
+	HeartbeatLive          = "live"
+	HeartbeatLost          = "lost"
+)
 
 // LongRepeatWarning is processing.long_repeat_warning: a learned repeat interval above it warns about its
 // Alertmanager route (C-06.FR-18).
@@ -103,19 +108,24 @@ var (
 // BuiltinName is the name of the built-in Integration of the Internal alerts (integrations.builtin).
 const BuiltinName = "Muster"
 
-// The kinds of the warnings of an Integration (C-06.FR-18).
+// The kinds of the warnings of an Integration (C-06.FR-18, C-07.FR-5).
 const (
-	WarningSnapshotTruncated  = "snapshot_truncated"
-	WarningLongRepeatInterval = "long_repeat_interval"
+	WarningSnapshotTruncated      = "snapshot_truncated"
+	WarningLongRepeatInterval     = "long_repeat_interval"
+	WarningHeartbeatNotConfigured = "heartbeat_not_configured"
+	WarningHeartbeatWaiting       = "heartbeat_waiting"
+	WarningHeartbeatLost          = "heartbeat_lost"
 )
 
-// Warning is a warning of an Integration: snapshot_truncated with the count of truncated groupKeys, or
-// long_repeat_interval with the Alertmanager route and its learned repeat interval.
+// Warning is a warning of an Integration: snapshot_truncated with the count of truncated groupKeys,
+// long_repeat_interval with the Alertmanager route and its learned repeat interval, or one of the Heartbeat warnings,
+// heartbeat_lost with the time of the last signal in Since.
 type Warning struct {
 	Kind                  string
 	TruncatedGroupCount   int64
 	RoutePath             string
 	RepeatIntervalSeconds int64
+	Since                 *time.Time
 }
 
 // FieldError is a field of a request that is not valid, at a JSON pointer of the request body, with a stable code of
@@ -415,9 +425,9 @@ func (s *Service) decorate(ctx context.Context, q Queries, list []Integration) e
 	return s.withWarnings(ctx, q, list)
 }
 
-// withWarnings sets the warnings of each Integration (C-06.FR-18): snapshot_truncated while any of its groupKeys is
-// truncated, and one long_repeat_interval per Alertmanager route whose learned repeat interval is above
-// LongRepeatWarning.
+// withWarnings sets the warnings of each Integration: the Heartbeat warning of its state, except on the built-in one
+// (C-07.FR-5); snapshot_truncated while any of its groupKeys is truncated, and one long_repeat_interval per
+// Alertmanager route whose learned repeat interval is above LongRepeatWarning (C-06.FR-18).
 func (s *Service) withWarnings(ctx context.Context, q Queries, list []Integration) error {
 	if len(list) == 0 {
 		return nil
@@ -426,6 +436,9 @@ func (s *Service) withWarnings(ctx context.Context, q Queries, list []Integratio
 	for i, in := range list {
 		ids[i] = in.ID
 		list[i].Warnings = []Warning{}
+		if w, ok := heartbeatWarning(in); ok {
+			list[i].Warnings = append(list[i].Warnings, w)
+		}
 	}
 	truncated, err := q.CountTruncatedGroupsOf(ctx, dbgen.CountTruncatedGroupsOfParams{OrgID: s.orgID,
 		IntegrationIds: ids})
@@ -450,6 +463,23 @@ func (s *Service) withWarnings(ctx context.Context, q Queries, list []Integratio
 		}
 	}
 	return nil
+}
+
+// heartbeatWarning is the warning of the Heartbeat state of an Integration that is not the built-in one: without a
+// Heartbeat, before its first signal, or lost since its last signal.
+func heartbeatWarning(in Integration) (Warning, bool) {
+	if in.Builtin {
+		return Warning{}, false
+	}
+	switch in.Heartbeat.State {
+	case HeartbeatNotConfigured:
+		return Warning{Kind: WarningHeartbeatNotConfigured}, true
+	case HeartbeatWaiting:
+		return Warning{Kind: WarningHeartbeatWaiting}, true
+	case HeartbeatLost:
+		return Warning{Kind: WarningHeartbeatLost, Since: in.Heartbeat.LostSince}, true
+	}
+	return Warning{}, false
 }
 
 // withLastSnapshot sets the receipt time of the newest Stored Snapshot of each Integration.
@@ -489,7 +519,7 @@ func (s *Service) lock(ctx context.Context, q Queries, publicID string) (Integra
 	return s.get(ctx, q, id)
 }
 
-// check refuses an Input that is not valid; Heartbeats are refused until the Heartbeat endpoint exists.
+// check refuses an Input that is not valid.
 func check(in Input) error {
 	if err := checkName("/name", in.Name); err != nil {
 		return err
@@ -512,10 +542,6 @@ func check(in Input) error {
 	if in.Heartbeat.TimeoutSeconds != nil && *in.Heartbeat.TimeoutSeconds < 1 {
 		return &FieldError{Pointer: "/heartbeat/timeout_seconds", Code: CodeOutOfRange,
 			Detail: "The Heartbeat timeout is at least 1 second."}
-	}
-	if in.Heartbeat.Enabled {
-		return &FieldError{Pointer: "/heartbeat/enabled", Code: CodeUnsupported,
-			Detail: "The Heartbeat cannot be switched on yet."}
 	}
 	return nil
 }
@@ -546,7 +572,8 @@ func resourceOf(in Integration) audit.Resource {
 	return audit.Resource{Type: ResourceIntegration, PublicID: in.PublicID, Name: in.Name}
 }
 
-// Create creates an Integration with its Heartbeat off; a name another Integration has is ErrNameTaken.
+// Create creates an Integration; a Heartbeat that is on waits for its first signal (C-07.FR-3). A name another
+// Integration has is ErrNameTaken.
 func (s *Service) Create(ctx context.Context, r Requester, in Input) (Integration, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if err := check(in); err != nil {
@@ -590,8 +617,8 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input) (Integration,
 	id := publicid.New(publicid.Integration)
 	if _, err := q.InsertIntegration(ctx, dbgen.InsertIntegrationParams{
 		OrgID: s.orgID, PublicID: id, Name: in.Name, Description: description, ConnectionMode: in.ConnectionMode,
-		StaticLabels: labels, DuplicateWindowSeconds: in.DuplicateWindowSeconds, HeartbeatTimeoutSeconds: timeout,
-		Now: s.clock.Now().UTC(),
+		StaticLabels: labels, DuplicateWindowSeconds: in.DuplicateWindowSeconds, HeartbeatEnabled: in.Heartbeat.Enabled,
+		HeartbeatTimeoutSeconds: timeout, Now: s.clock.Now().UTC(),
 	}); err != nil {
 		return Integration{}, fmt.Errorf("create the integration: %w", nameTaken(err))
 	}
@@ -600,7 +627,9 @@ func (s *Service) insert(ctx context.Context, q Queries, in Input) (Integration,
 
 // Update replaces the configured fields of the Integration publicID; a non-nil version must be its current one
 // (If-Match). The built-in Integration is ErrBuiltinImmutable. A new name raises every open Internal alert about the
-// Integration again with it, in the same transaction, so that its name label follows (C-06.AC-11).
+// Integration again with it, in the same transaction, so that its name label follows (C-06.AC-11). Turning the
+// Heartbeat on makes it wait for its first signal; turning it off makes it not configured and resolves
+// MusterHeartbeatLost while it is lost (C-07.FR-3).
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Integration,
 	error) {
 	in.Name = strings.TrimSpace(in.Name)
@@ -621,6 +650,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		}
 		next := before
 		next.Name, next.StaticLabels, next.DuplicateWindowSeconds = in.Name, in.StaticLabels, in.DuplicateWindowSeconds
+		next.Heartbeat.Enabled = in.Heartbeat.Enabled
 		if in.Description != nil {
 			next.Description = *in.Description
 		}
@@ -638,8 +668,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		}
 		if err := q.UpdateIntegration(ctx, dbgen.UpdateIntegrationParams{
 			OrgID: s.orgID, ID: before.ID, Name: next.Name, Description: next.Description, StaticLabels: labels,
-			DuplicateWindowSeconds: next.DuplicateWindowSeconds, HeartbeatTimeoutSeconds: next.Heartbeat.TimeoutSeconds,
-			Now: s.clock.Now().UTC(),
+			DuplicateWindowSeconds: next.DuplicateWindowSeconds, HeartbeatEnabled: next.Heartbeat.Enabled,
+			HeartbeatTimeoutSeconds: next.Heartbeat.TimeoutSeconds, Now: s.clock.Now().UTC(),
 		}); err != nil {
 			return fmt.Errorf("update the integration %s: %w", before.PublicID, nameTaken(err))
 		}
@@ -650,6 +680,12 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			if err := s.internal.Renamed(ctx, q, s.clock.Now(), internalalerts.EntityIntegration, updated.PublicID,
 				updated.Name); err != nil {
 				return fmt.Errorf("rename the internal alerts of %s: %w", updated.PublicID, err)
+			}
+		}
+		if before.Heartbeat.State == HeartbeatLost && !updated.Heartbeat.Enabled {
+			if err := s.internal.Resolve(ctx, q, s.clock.Now(), internalalerts.HeartbeatLost,
+				updated.PublicID); err != nil {
+				return fmt.Errorf("resolve MusterHeartbeatLost of %s: %w", updated.PublicID, err)
 			}
 		}
 		if err := s.audit.Record(ctx, q, audit.Entry{
@@ -727,11 +763,12 @@ func EnsureBuiltin(ctx context.Context, q Queries, orgID int64, now time.Time) e
 	return nil
 }
 
-// Demo is the Integration of the development mode: its name and Static labels, and the published token that the
-// fake Alertmanager sends with.
+// Demo is the Integration of the development mode: its name, Static labels and Heartbeat, and the published token
+// that the fake Alertmanager sends with.
 type Demo struct {
 	Name         string
 	StaticLabels map[string]string
+	Heartbeat    bool
 	Token        string
 	TokenName    string
 }
@@ -753,7 +790,8 @@ func (s *Service) EnsureDemo(ctx context.Context, d Demo) error {
 		case errors.Is(err, pgx.ErrNoRows):
 			window := int64(DefaultDuplicateWindow.Seconds())
 			if in, err = s.insert(ctx, q, Input{Name: d.Name, ConnectionMode: ConnectionWebhookOnly,
-				StaticLabels: d.StaticLabels, DuplicateWindowSeconds: window}); err != nil {
+				StaticLabels: d.StaticLabels, DuplicateWindowSeconds: window,
+				Heartbeat: HeartbeatInput{Enabled: d.Heartbeat}}); err != nil {
 				return err
 			}
 			if err := s.audit.Record(ctx, q, audit.Entry{

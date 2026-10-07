@@ -272,16 +272,18 @@ var SnapshotAccepted = newEvent("snapshot_accepted", LevelInfo, "C-05",
 
 // IngestRejected is logged when the ingestion endpoint refused a request: 401 or 413.
 var IngestRejected = newEvent("ingest_rejected", LevelInfo, "C-05",
-	"An ingestion request was refused: outcome unauthorized (401, a missing, wrong or revoked token, or one of a "+
-		"deleted Integration) or too_large (413, a body above ingest.body_limit). integration is the public_id of the "+
-		"token's Integration, or unknown; route_pattern is the route it came by — never the path, which may carry the "+
-		"token — and client_address the sender. The chart rule MusterIngestRejected reports them.",
+	"An ingestion or Heartbeat request was refused: outcome unauthorized (401, a missing, wrong or revoked token, an "+
+		"API token, or one of a deleted Integration) or too_large (413, a body above ingest.body_limit). integration "+
+		"is the public_id of the token's Integration, or unknown; route_pattern is the route it came by — never the "+
+		"path, which may carry the token — and client_address the sender. Refused ingestion requests are also "+
+		"counted in muster_ingest_requests_total, which the chart rule MusterIngestRejected reports.",
 	"integration", "outcome", "route_pattern", "client_address")
 
 // IngestFailed is logged when the ingestion endpoint could not read the token or store the body and answered 500.
 var IngestFailed = newEvent("ingest_failed", LevelError, "C-05",
-	"An ingestion request answered 500 because the database could not look up the token or store the Stored Snapshot, "+
-		"usually because it was unavailable; Alertmanager retries it. integration is the public_id of the token's "+
+	"An ingestion or Heartbeat request answered 500 because the database could not look up the token, store the "+
+		"Stored Snapshot or record the Heartbeat signal, usually because it was unavailable; Alertmanager retries "+
+		"an ingestion request, and the next signal replaces a lost one. integration is the public_id of the token's "+
 		"Integration, or unknown when the lookup failed; route_pattern is the route it came by.",
 	"integration", "route_pattern", "error")
 
@@ -325,6 +327,28 @@ var InternalAlertResolved = newEvent("internal_alert_resolved", LevelInfo, "C-06
 		"fingerprint is the Alert's, and entity the public_id of the Integration, Route or Destination it is about, "+
 		"empty when it is about none.",
 	"alertname", "fingerprint", "entity")
+
+// AlertsStale is logged when the Stale scan resolved Alerts of an Integration as Stale; a scan that resolves nothing
+// logs nothing.
+var AlertsStale = newEvent("alerts_stale", LevelInfo, "C-06",
+	"The Stale scan resolved Alerts of an Integration with a live Heartbeat as Stale, because Alertmanager had not "+
+		"listed them for stale_after of live time in any Alertmanager group: integration is the public_id of the "+
+		"Integration and count how many Alerts resolved.",
+	"integration", "count")
+
+// HeartbeatLive is logged when the Heartbeat of an Integration becomes live: its first signal, or the first after it
+// was lost.
+var HeartbeatLive = newEvent("heartbeat_live", LevelInfo, "C-07",
+	"The Heartbeat of an Integration became live: integration is its public_id, and first is true for the first "+
+		"signal after the Heartbeat was turned on and false for a signal that ended a loss, which resolves "+
+		"MusterHeartbeatLost.",
+	"integration", "first")
+
+// HeartbeatLost is logged when the Leader's Heartbeat check finds that no signal arrived within the timeout.
+var HeartbeatLost = newEvent("heartbeat_lost", LevelWarn, "C-07",
+	"No Heartbeat signal arrived for an Integration within its Heartbeat timeout, so it is Heartbeat lost and "+
+		"MusterHeartbeatLost is raised: integration is its public_id and last_signal_at the time of its last signal.",
+	"integration", "last_signal_at")
 
 // IngestReplayed is logged when muster ingest replay set Stored Snapshots back to pending.
 var IngestReplayed = newEvent("ingest_replayed", LevelInfo, "C-06",

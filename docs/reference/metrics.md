@@ -22,6 +22,7 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_db_pool_acquires_total` | counter | — | C-02 | no | Connections taken from the main database pool of this replica. |
 | `muster_db_pool_connections` | gauge | state | C-02 | no | Connections of the main database pool of this replica, by state. |
 | `muster_db_pool_max_connections` | gauge | — | C-02 | no | The most connections the main database pool of this replica opens. |
+| `muster_heartbeat_lost` | gauge | integration | C-07 | yes | 1 while the Integration is Heartbeat lost, 0 while its Heartbeat is on and not lost; set by the Leader's Heartbeat check. |
 | `muster_ingest_backlog` | gauge | — | C-06 | yes | Stored Snapshots waiting for processing in every Organization, counted by the Leader. |
 | `muster_ingest_failed_snapshots_total` | counter | integration | C-06 | no | Stored Snapshots that could not be processed and were marked failed — a body that is not an Alertmanager webhook, or an error of processing — by Integration. |
 | `muster_ingest_processing_delay_seconds` | histogram | integration | C-06 | no | Time from the receipt of a Stored Snapshot to the end of its processing, processed or failed, by Integration. Buckets (le): 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600. |
@@ -53,6 +54,7 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_client_requests_total` | `client` | `delivery`, `interactive`, `background`, `heartbeat` — the client class of ADR-0015 |
 | `muster_client_requests_total` | `outcome` | `ok`, `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect` — the classified outcome of the request |
 | `muster_db_pool_connections` | `state` | `acquired`, `idle`, `constructing` — the state of the connection |
+| `muster_heartbeat_lost` | `integration` | entity: the public_id of the integration |
 | `muster_ingest_failed_snapshots_total` | `integration` | entity: the public_id of the integration |
 | `muster_ingest_processing_delay_seconds` | `integration` | entity: the public_id of the integration |
 | `muster_ingest_requests_total` | `integration` | entity: the public_id of the token's Integration, a revoked token's included, or unknown when the token matches no Integration that is not deleted |

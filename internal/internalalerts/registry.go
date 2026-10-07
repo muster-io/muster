@@ -41,6 +41,9 @@ type Definition struct {
 	Entity    string
 	NameLabel string
 	Extra     []string
+	// StaticLabels adds the Static labels of the Integration it is about; the labels above win over a Static label
+	// of the same name.
+	StaticLabels bool
 	// Condition says while what it fires; Summary and Description are its annotations, where {name} is the entity's
 	// current name.
 	Condition   string
@@ -64,6 +67,11 @@ func (d *Definition) Labels() []string {
 	return append(out, d.Extra...)
 }
 
+// reserved reports whether a Static label named name gives way to a label of d itself.
+func (d *Definition) reserved(name string) bool {
+	return name == "alertname" || name == "severity" || slices.Contains(d.Labels(), name)
+}
+
 // SnapshotTruncated is raised while any groupKey of an Integration is truncated (C-06.FR-6).
 var SnapshotTruncated = register(&Definition{
 	Name:      "MusterSnapshotTruncated",
@@ -78,6 +86,23 @@ var SnapshotTruncated = register(&Definition{
 		"has max_alerts set. Muster keeps the Alerts it does not list alive and cannot tell when they resolve. Set " +
 		"max_alerts: 0 on the Muster receiver.",
 	Capability: "C-06",
+})
+
+// HeartbeatLost is raised while an Integration is Heartbeat lost (C-07.FR-4).
+var HeartbeatLost = register(&Definition{
+	Name:         "MusterHeartbeatLost",
+	Severity:     SeverityCritical,
+	Entity:       EntityIntegration,
+	NameLabel:    "integration_name",
+	StaticLabels: true,
+	Condition: "An Integration is Heartbeat lost: no Heartbeat signal arrived within its Heartbeat timeout, so the " +
+		"path from its Alertmanager to Muster may be broken and Stale resolution is paused. It resolves with the next " +
+		"signal, when the Heartbeat is turned off or when the Integration is deleted.",
+	Summary: "No Heartbeat from the Alertmanager of Integration {name}",
+	Description: "Muster has received no Heartbeat signal for Integration {name} within its Heartbeat timeout: " +
+		"Alertmanager, its network path to Muster or the Heartbeat route may be broken, and new alerts may not arrive. " +
+		"Nothing is resolved as Stale until the signal returns.",
+	Capability: "C-07",
 })
 
 var (
@@ -139,6 +164,9 @@ func Definitions() ([]*Definition, error) {
 		}
 		if len(slices.Compact(slices.Sorted(slices.Values(labels)))) != len(labels) {
 			errs = append(errs, fmt.Errorf("internal alert %q: a label is listed twice", d.Name))
+		}
+		if d.StaticLabels && d.Entity != EntityIntegration {
+			errs = append(errs, fmt.Errorf("internal alert %q: Static labels need the integration entity", d.Name))
 		}
 		if strings.TrimSpace(d.Condition) == "" || strings.TrimSpace(d.Summary) == "" ||
 			strings.TrimSpace(d.Description) == "" || d.Capability == "" {

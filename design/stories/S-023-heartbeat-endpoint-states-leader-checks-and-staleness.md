@@ -16,16 +16,28 @@ files_touched:
   - internal/heartbeat/check_test.go
   - internal/ingest/stale.go
   - internal/ingest/stale_test.go
+  - internal/ingest/stale_integration_test.go
   - internal/ingest/facts_test.go
+  - internal/ingest/internal_integration_test.go
   - internal/ingest/query.sql
+  - internal/ingest/worker.go
   - internal/internalalerts/registry.go
+  - internal/internalalerts/raise.go
+  - internal/internalalerts/internalalerts_test.go
   - internal/integrations/integrations.go
   - internal/integrations/tokens.go
+  - internal/integrations/query.sql
   - internal/integrations/integrations_test.go
   - internal/api/integrations.go
   - internal/api/integrations_test.go
   - internal/server/server.go
   - internal/leader/tasks.go
+  - internal/leader/leader.go
+  - internal/leader/leader_test.go
+  - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
+  - internal/tools/refgen/main.go
+  - sqlc.yaml
   - internal/metrics/catalogue.go
   - internal/logging/events.go
   - internal/archlint/secretleak.go
@@ -34,6 +46,7 @@ files_touched:
   - internal/fakes/fakealertmanager/fakealertmanager_test.go
   - internal/devmode/devmode.go
   - test/e2e/heartbeat_test.go
+  - test/e2e/internal_alerts_test.go
   - docs/integrations/heartbeat.md
 acceptance:
   - "[C-07.FR-2, C-07.FR-3, C-05.FR-1] `heartbeat.enabled` is off by default; turning it on moves the state from `not_configured` to `waiting`, with `timeout_seconds` defaulting to `integration.heartbeat_timeout`; turning it off returns to `not_configured` and resolves an open `MusterHeartbeatLost`."
@@ -85,8 +98,9 @@ issue: 23
   (nothing raised, the clock not advanced); `live` → the gap since `heartbeat_last_signal_at` is added to
   `liveness_clock_ms` when it is at most `heartbeat_timeout_seconds`; `lost` → `live`, `heartbeat_lost_since` cleared,
   `MusterHeartbeatLost` resolved, the clock not advanced; then `heartbeat_last_signal_at` = now. An Integration whose
-  Heartbeat is off answers `204` and records nothing (C-07.FR-1). Lines about it name the route pattern, and the
-  lint-5 probe sends a known token in the path.
+  Heartbeat is off answers `204` and records nothing (C-07.FR-1). Lines about it name the route pattern — a refused
+  request is the `ingest_rejected` line of the ingest listener and a failed one `ingest_failed` — and the lint-5 probe
+  sends a known token in the path.
 - **Heartbeat check** (C-07.FR-4, FR-8, ADR-0007; Leader task every 10 seconds): a `live` Integration whose last signal
   is older than its timeout becomes `lost` with `heartbeat_lost_since` = the last signal, and raises
   `MusterHeartbeatLost` through S-021 — labels `alertname`, `severity=critical`, `integration`, `integration_name` and
@@ -94,16 +108,18 @@ issue: 23
   current Leader started leading after a recorded downtime (`runtime_state.leader_since`, C-07.FR-4). `waiting` never
   becomes `lost`. This check and the Stale scan below run per Organization: each iterates over the Organizations (one
   in L1) and passes `org_id` to every query (lint 1).
-- **Registry**: `MusterHeartbeatLost` (severity `critical`; labels `integration`, `integration_name`, the Static labels)
-  joins the registry of S-021; deletion of an Integration (S-021) and a rename resolve or relabel it like
-  `MusterSnapshotTruncated`.
+- **Registry**: `MusterHeartbeatLost` (severity `critical`; labels `integration`, `integration_name`, the Static labels,
+  its own labels winning over a Static label of the same name) joins the registry of S-021; deletion of an Integration
+  (S-021) and a rename resolve or relabel it like `MusterSnapshotTruncated`.
 - **Stale scan** (C-06.FR-6, FR-7, FR-8, FR-9, FR-10; Leader task every 30 seconds, in `internal/ingest`): for each
   Integration whose Heartbeat is `live` — never `waiting`, `lost`, off, or the built-in one — it takes the Integration's
-  ingestion claim of S-020, so it never runs beside its processing, and computes the effective clock E =
-  `liveness_clock_ms` plus the time since the last signal when that is at most the timeout. An active presence is
-  `stale` when E minus its reference exceeds `stale_after` of its Alertmanager route, the reference being
-  `last_seen_clock_ms` — or, while its `groupKey` is truncated, the group's `last_snapshot_clock_ms`. An Alert whose
-  presences are all `gone` or `stale` resolves with the reason `stale` and the text of C-06.FR-10 (Alert change
+  ingestion claim of S-020 under a lease owner of its own, so it never runs beside its processing, and computes the
+  effective clock E = `liveness_clock_ms` plus the time since the last signal when that is at most the timeout.
+  Processing records E at receipt, the liveness clock at receipt of S-020, as `last_seen_clock_ms` and
+  `last_snapshot_clock_ms`. An active presence is `stale` when E minus its reference exceeds `stale_after` of its
+  Alertmanager route, the reference being `last_seen_clock_ms` — or, while its `groupKey` is truncated, the group's
+  `last_snapshot_clock_ms`. An Alert whose presences are all `gone` or `stale` resolves with the reason `stale` and
+  the text of C-06.FR-10 (Alert change
   `resolved`, `muster_alerts_resolved_total{reason="stale"}`). A truncated `groupKey` whose `last_snapshot_clock_ms` is
   more than `stale_after` behind E stops being truncated, which may resolve `MusterSnapshotTruncated`. Time with the
   Heartbeat lost and a Muster downtime longer than the timeout never advance the clock, so they never count
@@ -125,7 +141,8 @@ issue: 23
   Alerts go Stale) and F-047 (a resolve during a mute arrives when the mute ends within about 14 minutes), and
   `facts_test.go` runs them through the Stale scan.
 - **Development mode**: the Integration `dev-alertmanager` has its Heartbeat on, and the fake Alertmanager signals it
-  every 60 seconds.
+  every 60 seconds. A move of the development clock wakes the Leader's Heartbeat check and Stale scan, which then act
+  at the new time at once instead of at their next tick.
 - **Documentation** (C-07.FR-6): `docs/integrations/heartbeat.md` — why the Heartbeat is part of the recommended setup,
   the rule, route and receiver of the snippet, `Watchdog` in kube-prometheus-stack, a cron job as an alternative that
   proves less, what "lost" means and that Stale resolution pauses meanwhile.
@@ -146,15 +163,18 @@ issue: 23
 ```sh
 make dev > dev.log 2>&1 &
 # as in S-020: an Integration "hb" with the Static label env=prod (id INT), its token TOK registered as the fake
-# receiver "hb", and the helpers ADV and NOTIFY. The clock jumps by hours below, longer than a session lives, so the
-# checks use a Personal access token with all of the Admin's Permissions:
-API=localhost:8080/api/v1; FAM=127.0.0.1:19093/_fake
+# receiver "hb", and the helpers ADV and NOTIFY; ADV waits a second, as NOTIFY does, for the Heartbeat check and the
+# Stale scan that the move of the clock wakes on the Leader. The clock jumps by hours below, longer than a session
+# lives, so the checks use a Personal access token with all of the Admin's Permissions. The demo Integration's
+# MusterHeartbeatLost comes and goes with the jumps, so FIRING_BUILTIN lists only the Internal alerts about "hb":
+API=localhost:8080/api/v1; FAM=127.0.0.1:19093/_fake; CLK=localhost:8082/_dev/clock
+ADV() { curl -s -X POST $CLK -d "{\"advance_seconds\":$1}" > /dev/null; sleep 1; }
 PAT=$(curl -s "${H[@]}" -d "{\"name\":\"verify\",\"permissions\":$(curl -s -b jar $API/me | jq -c .permissions)}" \
   $API/me/personal-access-tokens | jq -r .value)
 A=(-H "Authorization: Bearer $PAT" -H 'Content-Type: application/json')
 VIEW() { curl -s "${A[@]}" "$API/integrations/$INT/alerts?$1"; }
 BI=$(curl -s "${A[@]}" $API/integrations | jq -r '.items[] | select(.builtin) | .id')
-FIRING_BUILTIN() { curl -s "${A[@]}" "$API/integrations/$BI/alerts?state=firing"; }
+FIRING_BUILTIN() { curl -s "${A[@]}" "$API/integrations/$BI/alerts?state=firing&label=integration%3D%22$INT%22"; }
 HB() { curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $TOK" localhost:8081/api/v1/heartbeat; }
 
 curl -s "${A[@]}" "$API/integrations/$INT" | jq -c '{h: .heartbeat.state, w: [.warnings[].kind]}'
@@ -208,9 +228,9 @@ VIEW 'state=resolved&label=svc%3D%22a%22' | jq -r '.items[0].resolve_reason'    
 # C-07.FR-6: the Heartbeat snippet
 curl -s "${A[@]}" -d '{"name":"hb-2"}' "$API/integrations/$INT/tokens" | jq -r .heartbeat_snippet \
   | grep -E 'vector\(1\)|repeat_interval|/api/v1/heartbeat'
-#     expr: vector(1)
-#     repeat_interval: 1m
-#   - url: http://localhost:8081/api/v1/heartbeat
+#         expr: vector(1)
+#       repeat_interval: 1m
+#       - url: http://localhost:8081/api/v1/heartbeat
 
 # C-07.AC-5: deletion resolves MusterHeartbeatLost
 ADV 360; FIRING_BUILTIN | jq '.items | length'                                            # 1

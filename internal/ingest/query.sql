@@ -102,7 +102,8 @@ SET lease_until = @lease_until
 FROM integrations i
 WHERE c.org_id = @org_id AND c.integration_id = @integration_id AND c.lease_owner = @owner
   AND i.org_id = @org_id AND i.id = c.integration_id
-RETURNING i.public_id, i.name, i.static_labels, i.duplicate_window_seconds, i.liveness_clock_ms, i.deleted_at;
+RETURNING i.public_id, i.name, i.builtin, i.static_labels, i.duplicate_window_seconds, i.liveness_clock_ms,
+    i.heartbeat_state, i.heartbeat_last_signal_at, i.heartbeat_timeout_seconds, i.deleted_at;
 
 -- ReleaseIngestClaim frees the lease this replica holds.
 -- name: ReleaseIngestClaim :exec
@@ -423,3 +424,67 @@ SELECT name
 FROM integrations
 WHERE org_id = @org_id AND id = @integration_id
 FOR KEY SHARE;
+
+-- ListLiveIntegrations lists the Integrations whose Heartbeat is live, for the Stale scan; the built-in one never has a
+-- Heartbeat.
+-- name: ListLiveIntegrations :many
+SELECT id
+FROM integrations
+WHERE org_id = @org_id AND deleted_at IS NULL AND heartbeat_state = 'live' AND NOT builtin
+ORDER BY id;
+
+-- HasPendingSnapshots reports whether an Integration has Stored Snapshots received since @horizon that wait for
+-- processing; the Stale scan leaves such an Integration to the next run, so that it never resolves an Alert that a
+-- Snapshot waiting in the queue still lists.
+-- name: HasPendingSnapshots :one
+SELECT EXISTS (SELECT 1
+               FROM stored_snapshots
+               WHERE org_id = @org_id AND integration_id = @integration_id AND state = 'pending'
+                 AND received_at >= @horizon::timestamptz)::boolean AS pending;
+
+-- ListStalePresences lists the active presences of an Integration that are Stale at the liveness clock @clock_ms: the
+-- clock is more than stale_after of their Alertmanager route past their reference, which is the clock when they were
+-- last listed or, while their groupKey is truncated, the clock at its last Snapshot. stale_after is @factor learned
+-- repeat intervals, or @unlearned_ms before one is learned.
+-- name: ListStalePresences :many
+SELECT p.alert_id, p.alertmanager_group_id
+FROM alert_presences p
+JOIN alertmanager_groups g ON g.org_id = @org_id AND g.id = p.alertmanager_group_id
+JOIN alertmanager_routes r ON r.org_id = @org_id AND r.id = g.alertmanager_route_id
+WHERE p.org_id = @org_id AND p.integration_id = @integration_id AND p.state IN ('listed', 'missed')
+  AND CASE WHEN g.truncated THEN greatest(p.last_seen_clock_ms, g.last_snapshot_clock_ms)
+           ELSE p.last_seen_clock_ms END
+      + coalesce(r.learned_repeat_interval_ms * @factor::bigint, @unlearned_ms::bigint) < @clock_ms::bigint
+ORDER BY p.alert_id, p.alertmanager_group_id;
+
+-- MarkPresencesStale makes active presences, given as parallel arrays of Alert and Alertmanager group ids, Stale.
+-- name: MarkPresencesStale :exec
+UPDATE alert_presences p
+SET state = 'stale', missed_since = NULL
+WHERE p.org_id = @org_id AND p.state IN ('listed', 'missed')
+  AND (p.alert_id, p.alertmanager_group_id) IN (SELECT unnest(@alert_ids::bigint[]),
+                                                       unnest(@alertmanager_group_ids::bigint[]));
+
+-- ResolveStaleAlerts resolves, with the reason stale, the firing Alerts among @alert_ids that have no active presence
+-- left (C-06.FR-7), and returns them.
+-- name: ResolveStaleAlerts :many
+UPDATE alerts a
+SET status = 'resolved', resolved_at = @resolved_at::timestamptz, resolve_reason = 'stale',
+    resolve_reason_text = @reason_text::text, updated_at = @updated_at::timestamptz
+WHERE a.org_id = @org_id AND a.integration_id = @integration_id AND a.id = ANY(@alert_ids::bigint[])
+  AND a.status = 'firing'
+  AND NOT EXISTS (SELECT 1
+                  FROM alert_presences o
+                  WHERE o.org_id = @org_id AND o.alert_id = a.id AND o.state IN ('listed', 'missed'))
+RETURNING a.id, a.fingerprint, a.episode;
+
+-- ExpireTruncation ends the truncation of the groupKeys of an Integration whose last Snapshot is more than
+-- stale_after of their Alertmanager route behind the liveness clock @clock_ms (C-06.FR-6), and returns how many ended.
+-- name: ExpireTruncation :execrows
+UPDATE alertmanager_groups g
+SET truncated = false, truncated_since = NULL
+FROM alertmanager_routes r
+WHERE g.org_id = @org_id AND g.integration_id = @integration_id AND g.truncated
+  AND r.org_id = @org_id AND r.id = g.alertmanager_route_id
+  AND g.last_snapshot_clock_ms + coalesce(r.learned_repeat_interval_ms * @factor::bigint, @unlearned_ms::bigint)
+      < @clock_ms::bigint;

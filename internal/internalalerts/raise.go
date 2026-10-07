@@ -93,7 +93,9 @@ func NewRaiser(orgID int64, runbookBase string) *Raiser {
 	return &Raiser{orgID: orgID, base: strings.TrimSuffix(runbookBase, "/")}
 }
 
-// Raise raises the Internal alert d about the entity e at now, with its extra labels.
+// Raise raises the Internal alert d about the entity e at now, with its extra labels. For an Internal alert that
+// carries the Static labels of its Integration, extra holds them too; its own labels win over a Static label of the
+// same name.
 func (r *Raiser) Raise(ctx context.Context, q Store, now time.Time, d *Definition, e Entity,
 	extra map[string]string) error {
 	labels := map[string]string{"alertname": d.Name, "severity": d.Severity}
@@ -102,6 +104,13 @@ func (r *Raiser) Raise(ctx context.Context, q Store, now time.Time, d *Definitio
 	}
 	for _, l := range d.Extra {
 		labels[l] = extra[l]
+	}
+	if d.StaticLabels {
+		for name, value := range extra {
+			if !d.reserved(name) {
+				labels[name] = value
+			}
+		}
 	}
 	return r.raise(ctx, q, now, d, labels, now)
 }

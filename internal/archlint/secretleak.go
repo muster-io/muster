@@ -34,6 +34,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/doctor"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
+	"github.com/muster-io/muster/internal/heartbeat"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
 	intdb "github.com/muster-io/muster/internal/integrations/dbgen"
@@ -81,6 +82,7 @@ var registry = []Probe{
 	{Name: "oidc", Run: probeOIDC},
 	{Name: "api_tokens", Run: probeTokens},
 	{Name: "ingestion", Run: probeIngestion},
+	{Name: "heartbeat", Run: probeHeartbeat},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -1074,6 +1076,78 @@ func (s *probeIntegrationStore) FindIngestToken(_ context.Context, arg intdb.Fin
 }
 
 func (s *probeIntegrationStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
+	return nil
+}
+
+// probeHeartbeat sends known secrets as Integration tokens to the Heartbeat endpoint (C-07.FR-1, C-07.AC-3): in the
+// path, which only the route pattern may name, and as a bearer token, with and without the mstr_int_ prefix, by GET
+// and POST. It also issues a token and signals with it in the path while recording succeeds and while it fails, and
+// while the token lookup fails. None of the answers, errors or log lines may carry a token; as in probeIngestion, the
+// probe looks for the issued value itself.
+func probeHeartbeat(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	business := clock.NewManual(time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC))
+	store := &probeIntegrationStore{}
+	svc := integrations.New(integrations.Config{OrgID: 1, Store: store, Audit: audit.NewWriter(logger, business),
+		Business: business})
+	by := integrations.Requester{Actor: audit.User(1, "SRAAAAAAAAAAAA"), Transport: audit.TransportUI}
+	issued, err := svc.CreateToken(ctx, by, "NTAAAAAAAAAAAA", "probe")
+	errs := []error{err}
+	store.hash = tokens.Hash(issued.Value)
+	signals := &probeSignals{}
+	h := heartbeat.NewHandler(heartbeat.HandlerConfig{Auth: svc, Signals: signals, Log: logger})
+	var answers []string
+	send := func(method, path, bearer string) error {
+		r, err := http.NewRequestWithContext(ctx, method, path, strings.NewReader("anything"))
+		if err != nil {
+			return err
+		}
+		if bearer != "" {
+			r.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		rec := &probeRecorder{header: http.Header{}}
+		h.ServeHTTP(rec, r)
+		answers = append(answers, rec.body.String())
+		return nil
+	}
+	var values []string
+	for _, secret := range secrets {
+		values = append(values, secret, integrations.Unknown, "mstr_int_"+secret)
+	}
+	values = append(values, issued.Value)
+	for _, value := range values {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			errs = append(errs, send(method, "/api/v1/heartbeat/"+url.PathEscape(value), ""),
+				send(method, "/api/v1/heartbeat", value))
+		}
+	}
+	signals.fail = errors.New("the database is unavailable")
+	errs = append(errs, send(http.MethodPost, "/api/v1/heartbeat/"+url.PathEscape(issued.Value), ""))
+	store.fail = errors.New("the database is unavailable")
+	errs = append(errs, send(http.MethodGet, "/api/v1/heartbeat/"+url.PathEscape(issued.Value), ""))
+	errs = append(errs, fmt.Errorf("answers: %s", strings.Join(answers, " | ")))
+	out := errors.Join(errs...)
+	if issued.Value == "" || signals.recorded == 0 {
+		return fmt.Errorf("no token was issued or accepted: %w", out)
+	}
+	lw, ok := log.(interface{ String() string })
+	if strings.Contains(out.Error(), issued.Value) || (ok && strings.Contains(lw.String(), issued.Value)) {
+		return fmt.Errorf("an issued token value leaked; reported as %s", secrets[0])
+	}
+	return out
+}
+
+// probeSignals records Heartbeat signals until fail is set.
+type probeSignals struct {
+	recorded int
+	fail     error
+}
+
+func (s *probeSignals) Signal(context.Context, int64) error {
+	if s.fail != nil {
+		return s.fail
+	}
+	s.recorded++
 	return nil
 }
 

@@ -280,9 +280,13 @@ func (s *fakeStore) InsertIntegration(_ context.Context, arg dbgen.InsertIntegra
 	s.rows = append(s.rows, &row{GetIntegrationRow: dbgen.GetIntegrationRow{
 		ID: s.nextID, PublicID: arg.PublicID, Name: arg.Name, Description: arg.Description,
 		ConnectionMode: arg.ConnectionMode, StaticLabels: arg.StaticLabels,
-		DuplicateWindowSeconds: arg.DuplicateWindowSeconds, HeartbeatTimeoutSeconds: arg.HeartbeatTimeoutSeconds,
-		HeartbeatState: HeartbeatNotConfigured, CreatedAt: arg.Now, Version: 1,
+		DuplicateWindowSeconds: arg.DuplicateWindowSeconds, HeartbeatEnabled: arg.HeartbeatEnabled,
+		HeartbeatTimeoutSeconds: arg.HeartbeatTimeoutSeconds, HeartbeatState: HeartbeatNotConfigured, CreatedAt: arg.Now,
+		Version: 1,
 	}})
+	if arg.HeartbeatEnabled {
+		s.rows[len(s.rows)-1].HeartbeatState = HeartbeatWaiting
+	}
 	return s.nextID, nil
 }
 
@@ -305,6 +309,13 @@ func (s *fakeStore) UpdateIntegration(_ context.Context, arg dbgen.UpdateIntegra
 	r := s.byID(arg.ID)
 	r.Name, r.Description, r.StaticLabels = arg.Name, arg.Description, arg.StaticLabels
 	r.DuplicateWindowSeconds, r.HeartbeatTimeoutSeconds = arg.DuplicateWindowSeconds, arg.HeartbeatTimeoutSeconds
+	r.HeartbeatEnabled = arg.HeartbeatEnabled
+	switch {
+	case !arg.HeartbeatEnabled:
+		r.HeartbeatState, r.HeartbeatLostSince = HeartbeatNotConfigured, pgtype.Timestamptz{}
+	case r.HeartbeatState == HeartbeatNotConfigured:
+		r.HeartbeatState = HeartbeatWaiting
+	}
 	r.Version++
 	return nil
 }
@@ -583,7 +594,6 @@ func TestCreateRefusals(t *testing.T) {
 		{"zero window", func(in *Input) { in.DuplicateWindowSeconds = 0 }, "/duplicate_window_seconds", CodeOutOfRange},
 		{"zero timeout", func(in *Input) { in.Heartbeat.TimeoutSeconds = ptr(int64(0)) }, "/heartbeat/timeout_seconds",
 			CodeOutOfRange},
-		{"heartbeat on", func(in *Input) { in.Heartbeat.Enabled = true }, "/heartbeat/enabled", CodeUnsupported},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -671,11 +681,6 @@ func TestUpdate(t *testing.T) {
 	}
 	if _, err := svc.Update(t.Context(), by, "not-an-id", nil, in); !errors.Is(err, ErrNotFound) {
 		t.Errorf("malformed id = %v", err)
-	}
-	bad := in
-	bad.Heartbeat.Enabled = true
-	if _, err := svc.Update(t.Context(), by, created.PublicID, nil, bad); fieldErr(t, err).Code != CodeUnsupported {
-		t.Errorf("heartbeat on = %v", err)
 	}
 }
 
@@ -1134,13 +1139,13 @@ func TestWarnings(t *testing.T) {
 		{IntegrationID: b.ID, RoutePath: `{}/{x="y"}`, LearnedRepeatIntervalMs: 86_400_000},
 	}
 	got, err := svc.Get(ctx, a.PublicID)
-	want := []Warning{{Kind: WarningSnapshotTruncated, TruncatedGroupCount: 2},
+	want := []Warning{{Kind: WarningHeartbeatNotConfigured}, {Kind: WarningSnapshotTruncated, TruncatedGroupCount: 2},
 		{Kind: WarningLongRepeatInterval, RoutePath: `{}/{kind="info"}`, RepeatIntervalSeconds: 7200}}
 	if err != nil || !slices.Equal(got.Warnings, want) {
 		t.Errorf("warnings of a = %+v, %v", got.Warnings, err)
 	}
 	page, err := svc.List(ctx, ListFilter{Limit: 10})
-	if err != nil || len(page.Integrations[1].Warnings) != 1 || page.Integrations[1].Warnings[0].RoutePath != `{}/{x="y"}` {
+	if err != nil || len(page.Integrations[1].Warnings) != 2 || page.Integrations[1].Warnings[1].RoutePath != `{}/{x="y"}` {
 		t.Errorf("list %+v, %v", page, err)
 	}
 	for _, name := range []string{"CountTruncatedGroupsOf", "ListLongRepeatRoutes"} {
@@ -1221,5 +1226,92 @@ func TestDeleteMarksDeletion(t *testing.T) {
 	store.fail["InsertInternalSnapshot"] = errors.New("down")
 	if err := svc.Delete(ctx, by, other.PublicID, nil); err == nil {
 		t.Error("a failed marker was ignored")
+	}
+}
+
+// TestHeartbeatSettings covers C-07.FR-2, C-07.FR-3 and C-07.FR-5 on the settings: the Heartbeat is off by default
+// with the warning heartbeat_not_configured; turned on it waits for its first signal with
+// integration.heartbeat_timeout and the warning heartbeat_waiting; lost it warns since its last signal; turned off it
+// is not configured again, no longer lost, and its MusterHeartbeatLost resolves; a token issued while it is on says so
+// for the Heartbeat snippet. The built-in Integration has no Heartbeat warning.
+func TestHeartbeatSettings(t *testing.T) {
+	svc, store, c, _ := newService(t)
+	ctx := t.Context()
+	if err := EnsureBuiltin(ctx, store, orgID, t0); err != nil {
+		t.Fatal(err)
+	}
+	in, err := svc.Create(ctx, by, input("hb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.Heartbeat.Enabled || in.Heartbeat.State != HeartbeatNotConfigured ||
+		!slices.Equal(in.Warnings, []Warning{{Kind: WarningHeartbeatNotConfigured}}) {
+		t.Fatalf("created %+v", in)
+	}
+	created, err := svc.CreateToken(ctx, by, in.PublicID, "")
+	if err != nil || created.Heartbeat || created.Integration != "hb" {
+		t.Fatalf("token without a heartbeat %+v, %v", created, err)
+	}
+
+	on := input("hb")
+	on.Heartbeat.Enabled = true
+	got, err := svc.Update(ctx, by, in.PublicID, nil, on)
+	if err != nil || !got.Heartbeat.Enabled || got.Heartbeat.State != HeartbeatWaiting ||
+		got.Heartbeat.TimeoutSeconds != 300 || !slices.Equal(got.Warnings, []Warning{{Kind: WarningHeartbeatWaiting}}) ||
+		got.Version != in.Version+1 {
+		t.Fatalf("turned on %+v, %v", got, err)
+	}
+	if e, diff := store.lastAudit(t); e.Action != "integration.updated" || len(diff) != 1 ||
+		diff[0].Pointer != "/heartbeat/enabled" {
+		t.Errorf("audit %s %+v", e.Action, diff)
+	}
+	if created, err := svc.CreateToken(ctx, by, in.PublicID, ""); err != nil || !created.Heartbeat {
+		t.Errorf("token with the heartbeat on %+v, %v", created, err)
+	}
+
+	r := store.byID(in.ID)
+	r.HeartbeatState = HeartbeatLost
+	r.HeartbeatLastSignalAt = pgtype.Timestamptz{Time: t0, Valid: true}
+	r.HeartbeatLostSince = r.HeartbeatLastSignalAt
+	lost, err := svc.Get(ctx, in.PublicID)
+	if err != nil || len(lost.Warnings) != 1 || lost.Warnings[0].Kind != WarningHeartbeatLost ||
+		!lost.Warnings[0].Since.Equal(t0) {
+		t.Fatalf("lost %+v, %v", lost, err)
+	}
+	c.Advance(time.Minute)
+	off, err := svc.Update(ctx, by, in.PublicID, nil, input("hb"))
+	if err != nil || off.Heartbeat.Enabled || off.Heartbeat.State != HeartbeatNotConfigured ||
+		off.Heartbeat.LostSince != nil {
+		t.Fatalf("turned off %+v, %v", off, err)
+	}
+	if len(store.snapshots) != 1 || !strings.Contains(string(store.snapshots[0].body),
+		`"alertname":"MusterHeartbeatLost"`) || !strings.Contains(string(store.snapshots[0].body), `"status":"resolved"`) {
+		t.Errorf("snapshots %+v", store.snapshots)
+	}
+	// Turning a Heartbeat off that was not lost resolves nothing.
+	if _, err := svc.Update(ctx, by, in.PublicID, nil, on); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Update(ctx, by, in.PublicID, nil, input("hb")); err != nil || len(store.snapshots) != 1 {
+		t.Errorf("turned off while waiting: %v, %d snapshots", err, len(store.snapshots))
+	}
+	created2, err := svc.Create(ctx, by, on)
+	if err == nil || !errors.Is(err, ErrNameTaken) {
+		t.Errorf("a second hb = %+v, %v", created2, err)
+	}
+	on.Name = "hb-2"
+	if created2, err = svc.Create(ctx, by, on); err != nil || created2.Heartbeat.State != HeartbeatWaiting {
+		t.Errorf("created with the heartbeat on %+v, %v", created2, err)
+	}
+	page, err := svc.List(ctx, ListFilter{Limit: 10})
+	if err != nil || page.Integrations[0].Name != BuiltinName || len(page.Integrations[0].Warnings) != 0 {
+		t.Errorf("the built-in integration %+v, %v", page.Integrations[0], err)
+	}
+	r = store.byID(in.ID)
+	r.HeartbeatEnabled, r.HeartbeatState = true, HeartbeatLost
+	r.HeartbeatLostSince = pgtype.Timestamptz{Time: t0, Valid: true}
+	store.fail["InsertInternalSnapshot"] = errors.New("down")
+	if _, err := svc.Update(ctx, by, in.PublicID, nil, input("hb")); err == nil {
+		t.Error("a failed resolve was ignored")
 	}
 }
