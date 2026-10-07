@@ -19,7 +19,7 @@
  */
 
 /**
- * Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. A template that fails its dry run against recent Stored Snapshots is refused with `422`.
+ * Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.
  */
 export interface RouteTemplates {
   /**

@@ -18,6 +18,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/internalalerts"
+	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
@@ -49,17 +50,6 @@ type membershipQueries interface {
 		[]dbgen.AbandonConnectionDeliveriesRow, error)
 	ListDeletedDestinationsOfConnection(ctx context.Context, arg dbgen.ListDeletedDestinationsOfConnectionParams) (
 		[]int64, error)
-}
-
-// finalNote is the note of the final edit of a Root message, with the link to its Alert Group in Muster.
-func finalNote(link string) string {
-	return "No longer updated here; current state in Muster: " + link
-}
-
-// finalEdit is the last state of a Root message in a Destination it leaves: what it shows now with the final note,
-// and no buttons, since nothing there is answered any more.
-func finalEdit(m Message, link string) Message {
-	return Message{Sections: append(slices.Clone(m.Sections), finalNote(link)), Buttons: []Button{}, Colour: m.Colour}
 }
 
 // link is the page of the Alert Group publicID in Muster, under MUSTER_PUBLIC_URL.
@@ -94,7 +84,7 @@ func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, r
 		}
 	}
 	if len(added) > 0 {
-		if err := s.publishRoute(ctx, q, routeID, added, now); err != nil {
+		if err := s.publishRoute(ctx, tx, q, routeID, added, now); err != nil {
 			return err
 		}
 	}
@@ -103,7 +93,11 @@ func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, r
 
 // publishRoute publishes the open Alert Groups of the Route routeID Quietly in the Destinations added to it; during a
 // Storm of the Route each of them gets its Storm summary, and the Alert Groups the Storm holds are held there too.
-func (s *Service) publishRoute(ctx context.Context, q queries, routeID int64, added []int64, now time.Time) error {
+// Each Alert Group is rendered once for the markups of the added Destinations, through tx; the counter and log lines
+// of a Route template that fails here are left to the next render through the dispatcher, which records them in the
+// Timeline too.
+func (s *Service) publishRoute(ctx context.Context, tx dbgen.DBTX, q queries, routeID int64, added []int64,
+	now time.Time) error {
 	var st *storm
 	active, err := q.GetActiveStorm(ctx, dbgen.GetActiveStormParams{OrgID: s.orgID, RouteID: routeID})
 	switch {
@@ -134,22 +128,35 @@ func (s *Service) publishRoute(ctx context.Context, q queries, routeID int64, ad
 		return fmt.Errorf("read the route %d: %w", routeID, err)
 	}
 	dests = slices.DeleteFunc(dests, func(d dbgen.ListRouteDestinationsRow) bool { return !slices.Contains(added, d.ID) })
+	types := make([]string, len(dests))
+	for i, d := range dests {
+		types[i] = d.Type
+	}
+	roots := make([]Roots, len(open))
+	for i, g := range open {
+		view := GroupView{ID: g.ID, PublicID: g.PublicID, Number: g.Number, Title: g.Title,
+			Status: groups.Status(g.Status), Urgent: g.Urgent}
+		if roots[i], err = s.renderer.Roots(ctx, tx, view, markupsOf(types)); err != nil {
+			return fmt.Errorf("render alert group #%d: %w", g.Number, err)
+		}
+	}
 	for _, d := range dests {
 		dst := Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name, Type: d.Type, Connection: int8Of(d.ConnectionID)}
-		for _, g := range open {
-			view := GroupView{PublicID: g.PublicID, Number: g.Number, Title: g.Title, Status: groups.Status(g.Status),
-				Urgent: g.Urgent}
+		for i, g := range open {
+			view := GroupView{ID: g.ID, PublicID: g.PublicID, Number: g.Number, Title: g.Title,
+				Status: groups.Status(g.Status), Urgent: g.Urgent}
 			var heldBy *int64
 			if g.Held {
 				heldBy = &st.id
 			}
-			if err := s.join(ctx, q, g.ID, view, dst, route.Language, heldBy, now); err != nil {
+			if err := s.join(ctx, q, view, dst, roots[i].Messages[markupOf(dst.Type)], heldBy, now); err != nil {
 				return err
 			}
 		}
 	}
 	if st != nil {
-		return s.renderSummaries(ctx, q, st, route.Name, dests, now)
+		return s.renderSummaries(ctx, q, st, stormRoute{publicID: route.PublicID, name: route.Name,
+			language: route.Language}, dests, now)
 	}
 	return nil
 }
@@ -157,8 +164,9 @@ func (s *Service) publishRoute(ctx context.Context, q queries, routeID int64, ad
 // join makes the delivery of an open Alert Group current in a Destination that joined its Route: a Quiet
 // Publication, held by the Storm heldBy when one holds the Alert Group, or an edit of a Root message whose final edit
 // still waited.
-func (s *Service) join(ctx context.Context, q queries, groupID int64, g GroupView, d Destination, language string,
+func (s *Service) join(ctx context.Context, q queries, g GroupView, d Destination, rd messages.Rendered,
 	heldBy *int64, now time.Time) error {
+	groupID := g.ID
 	loud := deliveryEvent(DeliveryAddedDestination).loud(g.Status == groups.StatusFiring)
 	row, err := q.EnsureDelivery(ctx, dbgen.EnsureDeliveryParams{OrgID: s.orgID, DestinationID: d.ID,
 		AlertGroupID: pgtype.Int8{Int64: groupID, Valid: true}, HeldByStormID: nullInt(heldBy), Urgent: g.Urgent,
@@ -172,12 +180,13 @@ func (s *Service) join(ctx context.Context, q queries, groupID int64, g GroupVie
 			return fmt.Errorf("publish alert group #%d in %s again: %w", g.Number, d.PublicID, err)
 		}
 	}
-	msg := encode(s.renderer.Render(g, d, language))
+	msg := encodeRoot(rd)
 	if bytes.Equal(row.DesiredHash, msg.hash) {
 		return nil
 	}
 	if _, err := q.SetDesired(ctx, dbgen.SetDesiredParams{OrgID: s.orgID, ID: row.ID, DesiredText: msg.text,
-		DesiredPayload: msg.payload, DesiredHash: msg.hash, Open: true, Firing: loud, Urgent: g.Urgent,
+		DesiredPayload: msg.payload, DesiredHash: msg.hash, ButtonKeyID: nonEmpty(msg.keyID), Open: true,
+		Firing: loud, Urgent: g.Urgent,
 		Now: now}); err != nil {
 		return fmt.Errorf("set the desired state of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 	}

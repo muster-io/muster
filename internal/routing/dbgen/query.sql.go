@@ -254,7 +254,7 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urg
        r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
        r.reminders_enabled, r.reminders_first_interval_seconds, r.reminders_cap_seconds, r.auto_unacknowledge,
-       r.created_at, r.version,
+       r.created_at, r.version, r.template_error_since, r.template_error,
        (SELECT count(*)
         FROM routes o
         WHERE o.org_id = $1 AND o.deleted_at IS NULL
@@ -297,12 +297,15 @@ type GetRouteRow struct {
 	AutoUnacknowledge              bool
 	CreatedAt                      time.Time
 	Version                        int64
+	TemplateErrorSince             pgtype.Timestamptz
+	TemplateError                  pgtype.Text
 	Place                          int64
 	StormSince                     pgtype.Timestamptz
 	StormAlertGroupCount           pgtype.Int8
 }
 
-// GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, and its active Storm.
+// GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, its template error and its
+// active Storm.
 func (q *Queries) GetRoute(ctx context.Context, arg GetRouteParams) (GetRouteRow, error) {
 	row := q.db.QueryRow(ctx, getRoute, arg.OrgID, arg.PublicID)
 	var i GetRouteRow
@@ -333,6 +336,8 @@ func (q *Queries) GetRoute(ctx context.Context, arg GetRouteParams) (GetRouteRow
 		&i.AutoUnacknowledge,
 		&i.CreatedAt,
 		&i.Version,
+		&i.TemplateErrorSince,
+		&i.TemplateError,
 		&i.Place,
 		&i.StormSince,
 		&i.StormAlertGroupCount,
@@ -781,7 +786,8 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urg
        r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
        r.reminders_enabled, r.reminders_first_interval_seconds, r.reminders_cap_seconds, r.auto_unacknowledge,
-       r.created_at, r.version, s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count
+       r.created_at, r.version, r.template_error_since, r.template_error, s.started_at AS storm_since,
+       s.alert_group_count AS storm_alert_group_count
 FROM routes r
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
 WHERE r.org_id = $1 AND r.deleted_at IS NULL
@@ -815,14 +821,16 @@ type ListRoutesRow struct {
 	AutoUnacknowledge              bool
 	CreatedAt                      time.Time
 	Version                        int64
+	TemplateErrorSince             pgtype.Timestamptz
+	TemplateError                  pgtype.Text
 	StormSince                     pgtype.Timestamptz
 	StormAlertGroupCount           pgtype.Int8
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
-// ListRoutes lists the Routes that are not deleted in evaluation order, the Default route last, with their active
-// Storm.
+// ListRoutes lists the Routes that are not deleted in evaluation order, the Default route last, with their template
+// error and their active Storm.
 func (q *Queries) ListRoutes(ctx context.Context, orgID int64) ([]ListRoutesRow, error) {
 	rows, err := q.db.Query(ctx, listRoutes, orgID)
 	if err != nil {
@@ -859,6 +867,8 @@ func (q *Queries) ListRoutes(ctx context.Context, orgID int64) ([]ListRoutesRow,
 			&i.AutoUnacknowledge,
 			&i.CreatedAt,
 			&i.Version,
+			&i.TemplateErrorSince,
+			&i.TemplateError,
 			&i.StormSince,
 			&i.StormAlertGroupCount,
 		); err != nil {

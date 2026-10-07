@@ -1613,7 +1613,7 @@ func (q *Queries) ListStormSummaries(ctx context.Context, arg ListStormSummaries
 
 const lockStorm = `-- name: LockStorm :one
 SELECT s.id, s.route_id, s.started_at, s.calm_since, s.alert_group_count, s.urgent_count, r.public_id AS route_public_id,
-       r.name AS route_name, r.storm_threshold
+       r.name AS route_name, r.language AS route_language, r.storm_threshold
 FROM storms s
 JOIN routes r ON r.org_id = s.org_id AND r.id = s.route_id
 WHERE s.org_id = $1 AND s.id = $2 AND s.ended_at IS NULL
@@ -1634,6 +1634,7 @@ type LockStormRow struct {
 	UrgentCount     int64
 	RoutePublicID   string
 	RouteName       string
+	RouteLanguage   string
 	StormThreshold  int64
 }
 
@@ -1650,6 +1651,7 @@ func (q *Queries) LockStorm(ctx context.Context, arg LockStormParams) (LockStorm
 		&i.UrgentCount,
 		&i.RoutePublicID,
 		&i.RouteName,
+		&i.RouteLanguage,
 		&i.StormThreshold,
 	)
 	return i, err
@@ -2673,22 +2675,23 @@ SET desired_version     = desired_version + 1,
     desired_text        = $1::text,
     desired_payload     = $2,
     desired_hash        = $3,
-    desired_received_at = coalesce(desired_received_at, $4::timestamptz),
+    desired_button_key_id = $4::text,
+    desired_received_at = coalesce(desired_received_at, $5::timestamptz),
     state               = CASE
                               WHEN state IN ('deleted_in_messenger', 'retired') THEN state
-                              WHEN state = 'withheld' AND NOT $5::boolean THEN state
+                              WHEN state = 'withheld' AND NOT $6::boolean THEN state
                               ELSE 'pending'
                           END,
     publication_loud    = CASE
-                              WHEN (state = 'withheld' OR (late_note AND message_id IS NULL)) AND $5::boolean
-                                  THEN $6::boolean
+                              WHEN (state = 'withheld' OR (late_note AND message_id IS NULL)) AND $6::boolean
+                                  THEN $7::boolean
                               ELSE publication_loud
                           END,
-    late_note           = CASE WHEN $5::boolean THEN false ELSE late_note END,
-    urgent              = $7,
-    next_attempt_at     = $8,
-    updated_at          = $8
-WHERE org_id = $9 AND id = $10
+    late_note           = CASE WHEN $6::boolean THEN false ELSE late_note END,
+    urgent              = $8,
+    next_attempt_at     = $9,
+    updated_at          = $9
+WHERE org_id = $10 AND id = $11
 RETURNING state
 `
 
@@ -2696,6 +2699,7 @@ type SetDesiredParams struct {
 	DesiredText    string
 	DesiredPayload []byte
 	DesiredHash    []byte
+	ButtonKeyID    pgtype.Text
 	ReceivedAt     pgtype.Timestamptz
 	Open           bool
 	Firing         bool
@@ -2705,17 +2709,18 @@ type SetDesiredParams struct {
 	ID             int64
 }
 
-// SetDesired stores a new Desired state: the next version, its text, payload and hash, the receipt time of the oldest
-// Snapshot it carries that is not delivered yet, and makes the delivery due now, and returns the state it leaves. A
-// delivery deleted in the messenger or retired stays so; a withheld one stays so unless its Alert Group is open again
-// (@open), when it is published after all, Loud when it is @firing (C-11.FR-19); a Not delivered one starts a new
-// delivery (C-11.FR-10). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
+// SetDesired stores a new Desired state: the next version, its text, payload and hash, the key that signed its
+// buttons, the receipt time of the oldest Snapshot it carries that is not delivered yet, and makes the delivery due
+// now, and returns the state it leaves. A delivery deleted in the messenger or retired stays so; a withheld one stays
+// so unless its Alert Group is open again (@open), when it is published after all, Loud when it is @firing
+// (C-11.FR-19); a Not delivered one starts a new delivery (C-11.FR-10). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
 // before it was made loses the note and takes the loudness of the recovery rule, Loud when @firing (C-11.FR-11).
 func (q *Queries) SetDesired(ctx context.Context, arg SetDesiredParams) (string, error) {
 	row := q.db.QueryRow(ctx, setDesired,
 		arg.DesiredText,
 		arg.DesiredPayload,
 		arg.DesiredHash,
+		arg.ButtonKeyID,
 		arg.ReceivedAt,
 		arg.Open,
 		arg.Firing,

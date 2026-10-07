@@ -52,3 +52,12 @@ data-vertical from shadcn/ui (https://github.com/shadcn-ui/ui), licensed under t
   SOFTWARE.
 
 The same licence covers the copied components in web/src/components/ui, listed above.
+
+
+Template functions
+==================
+
+The template sandbox (internal/templates, ADR-0012) uses the function registries of sprout
+(https://github.com/go-sprout/sprout), licensed under the MIT License, Copyright (C) 2013-2020 Masterminds, as a
+library dependency of the shipped binary; no sprout code is copied. Alertmanager's template functions are
+re-implemented under their Alertmanager names from their documented behaviour; no Alertmanager code is copied.

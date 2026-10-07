@@ -22,7 +22,7 @@ func TestRecorder(t *testing.T) {
 	d := delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1", Type: delivery.TypeMattermost}
 	call := delivery.Call{Class: "delivery", Destination: d, Loudness: groups.Loud,
 		Mentions: []groups.Mention{groups.MentionNewAlertGroup}}
-	msg := delivery.Message{Sections: []string{"#1 disk"}}
+	msg := delivery.Message{Lines: []string{"#1 disk"}}
 	hooked := false
 	var answers []Answer
 	for _, k := range delivery.Outcomes {

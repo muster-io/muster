@@ -22,6 +22,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
 )
@@ -327,7 +328,7 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 			return err
 		}
 		if row.DesiredRetire {
-			msg = finalEdit(msg, w.link(row.AlertGroupPublicID))
+			msg = messages.FinalEdit(msg, w.link(row.AlertGroupPublicID))
 		}
 		a = attempt{row: row, destination: d, publication: !row.MessageID.Valid, message: msg, at: now}
 		if err := q.RenewDeliveryLease(ctx, dbgen.RenewDeliveryLeaseParams{OrgID: org, ID: id, Owner: w.Lease.Owner,

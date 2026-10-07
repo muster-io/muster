@@ -403,7 +403,7 @@ func TestStorm(t *testing.T) {
 		case c.Method == deliverytest.MethodPublish && strings.HasPrefix(c.Message.Text(), "Storm on Route payments"):
 			summaries++
 			if c.Loudness != groups.Loud || !slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) ||
-				!strings.Contains(c.Message.Text(), "1 new Alert Groups since 12:00, 0 Urgent") {
+				!strings.Contains(c.Message.Text(), "1 new Alert Groups, 0 Urgent") {
 				t.Errorf("summary %+v", c)
 			}
 		case c.Method == deliverytest.MethodPublish:
@@ -420,7 +420,7 @@ func TestStorm(t *testing.T) {
 	}
 	last := e.rec.Calls()[len(e.rec.Calls())-1]
 	if loud != 23 || summaries != 1 || edits != 9 ||
-		!strings.Contains(last.Message.Text(), "10 new Alert Groups since 12:00, 3 Urgent") {
+		!strings.Contains(last.Message.Text(), "10 new Alert Groups, 3 Urgent") {
 		t.Errorf("publications %d, summaries %d, edits %d, last %q", loud, summaries, edits, last.Message.Text())
 	}
 	var held []*fakeDelivery
@@ -485,7 +485,7 @@ func TestStorm(t *testing.T) {
 		}
 	}
 	if len(final) != 1 || final[0].Loudness != groups.Quiet || final[0].Message.Text() !=
-		"Storm over: 5 Alert Groups still open\nRoute payments: 10 new Alert Groups from 12:00 to 12:06" {
+		"Storm over: 5 Alert Groups still open" {
 		t.Errorf("final summary %+v", final)
 	}
 	if len(quiet) != 5 || slices.ContainsFunc(quiet, func(c deliverytest.Call) bool {

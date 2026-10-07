@@ -11,27 +11,13 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/messages"
 )
 
 // Publications that need more than one call (C-11.FR-11, FR-12, FR-13): the late Publication of an Alert Group that
 // resolved while its first Publication waited, the possible duplicate after a Publication whose outcome was never
-// recorded, and the Root message deleted in the messenger. Their notes are fixed English lines in UTC until S-036
-// renders them in the Organization's language and time zone; they are added at call time and never change the hash
-// of the Desired state.
-
-// The format of the times of the notes.
-const noteClock = "15:04"
-
-// lateNote is the note of a late Publication.
-func lateNote(started, resolved time.Time) string {
-	return fmt.Sprintf("Delivered late: started %s, resolved %s while this Destination was unavailable.",
-		started.UTC().Format(noteClock), resolved.UTC().Format(noteClock))
-}
-
-// deletedNote is the note of a Root message published again after it was deleted in the messenger.
-func deletedNote(at time.Time) string {
-	return "The previous message was deleted at " + at.UTC().Format(noteClock)
-}
+// recorded, and the Root message deleted in the messenger. Their notes are rendered in the language and time zone of
+// the message (C-12.FR-3); they are added at call time and never change the hash of the Desired state.
 
 // settleResolved decides, when an Alert Group resolves, its first Publication in a Destination that is still pending
 // (C-11.FR-11, FR-19): withheld while the Destination is Broken; Quiet with the late note when it waited for a
@@ -48,7 +34,7 @@ func publicationNotes(ctx context.Context, q queries, org int64, row dbgen.GetLe
 	bool, error) {
 	late := false
 	if row.LateNote && row.GroupStatus == string(groups.StatusResolved) && row.GroupResolvedAt.Valid {
-		m.Sections = append(m.Sections, lateNote(row.GroupCreatedAt, row.GroupResolvedAt.Time))
+		m = messages.LateNote(m, row.GroupCreatedAt, row.GroupResolvedAt.Time)
 		late = true
 	}
 	if row.RepublishedAfterDelete {
@@ -58,7 +44,7 @@ func publicationNotes(ctx context.Context, q queries, org int64, row dbgen.GetLe
 			return m, false, fmt.Errorf("read when the root message was deleted: %w", err)
 		}
 		if at.Year() > 1 {
-			m.Sections = append(m.Sections, deletedNote(at))
+			m = messages.DeletedNote(m, at)
 		}
 	}
 	return m, late, nil

@@ -156,8 +156,10 @@ func statusVariant(s Status) Variant {
 // SystemEvent is the system_event of a system entry.
 type SystemEvent string
 
-// The system entries this capability writes.
+// The system entries this capability writes, and fallback_template_used, which the dispatcher records when the
+// re-render step reports a Route template that failed (C-12.FR-6).
 const (
-	SystemMovedToDefaultRoute SystemEvent = "moved_to_default_route"
-	SystemMusterUnavailable   SystemEvent = "muster_unavailable"
+	SystemMovedToDefaultRoute  SystemEvent = "moved_to_default_route"
+	SystemMusterUnavailable    SystemEvent = "muster_unavailable"
+	SystemFallbackTemplateUsed SystemEvent = "fallback_template_used"
 )

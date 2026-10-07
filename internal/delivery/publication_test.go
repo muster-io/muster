@@ -68,7 +68,7 @@ func TestDeletedRootMessage(t *testing.T) {
 	}
 	pub := calls[1]
 	if pub.Loudness != groups.Quiet || len(pub.Mentions) != 0 ||
-		pub.Message.Sections[len(pub.Message.Sections)-1] != "The previous message was deleted at 12:42" ||
+		pub.Message.Notices[len(pub.Message.Notices)-1] != "The previous message was deleted at 12:42." ||
 		!strings.Contains(pub.Message.Text(), "Acknowledged") {
 		t.Errorf("republication %+v", pub)
 	}
@@ -219,7 +219,7 @@ func TestLatePublication(t *testing.T) {
 			calls := e.publications()
 			pub := calls[len(calls)-1]
 			if len(calls) != 2 || pub.Loudness != groups.Quiet ||
-				len(pub.Mentions) != 0 || pub.Message.Sections[len(pub.Message.Sections)-1] !=
+				len(pub.Mentions) != 0 || pub.Message.Notices[len(pub.Message.Notices)-1] !=
 				"Delivered late: started 12:00, resolved 12:00 while this Destination was unavailable." {
 				t.Fatalf("late publication %+v", calls)
 			}

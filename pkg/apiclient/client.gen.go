@@ -4595,7 +4595,7 @@ type RoutePolicy struct {
 	// StormThreshold New Alert Groups per minute above which a Storm starts.
 	StormThreshold int `json:"storm_threshold"`
 
-	// Templates Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. A template that fails its dry run against recent Stored Snapshots is refused with `422`.
+	// Templates Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.
 	Templates                   RouteTemplates `json:"templates"`
 	ThreadBatchingWindowSeconds int            `json:"thread_batching_window_seconds"`
 	UrgentRiseRemovesAck        bool           `json:"urgent_rise_removes_ack"`
@@ -4650,7 +4650,7 @@ type RouteSuggestionList struct {
 	Items []RouteSuggestion `json:"items"`
 }
 
-// RouteTemplates Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. A template that fails its dry run against recent Stored Snapshots is refused with `422`.
+// RouteTemplates Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.
 type RouteTemplates struct {
 	AckTimeoutNotice nullable.Nullable[string] `json:"ack_timeout_notice,omitempty"`
 	Line             nullable.Nullable[string] `json:"line,omitempty"`

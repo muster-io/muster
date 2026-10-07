@@ -38,6 +38,7 @@ import (
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/routing/dbgen"
+	"github.com/muster-io/muster/internal/templates"
 )
 
 // The languages of a Route (route.language).
@@ -85,6 +86,9 @@ type FieldError struct {
 	Pointer string
 	Code    string
 	Detail  string
+	// Line and Column are the 1-based position of a template error, 0 when unknown.
+	Line   int
+	Column int
 }
 
 func (e *FieldError) Error() string {
@@ -133,6 +137,61 @@ type Templates struct {
 	AckTimeoutNotice *string `json:"ack_timeout_notice"`
 }
 
+// The kinds of Route templates, as the API and the template error state name them.
+const (
+	TemplateRootMessage      = "root_message"
+	TemplateLine             = "line"
+	TemplateAckTimeoutNotice = "ack_timeout_notice"
+)
+
+// KeepTemplates says, for updateRoute, which templates the request left out: those keep the stored template, while a
+// template given as null resets it to the built-in one (C-08.FR-1). A creation ignores it: a template left out is the
+// built-in one.
+type KeepTemplates struct {
+	RootMessage      bool
+	Line             bool
+	AckTimeoutNotice bool
+}
+
+// TemplateError is the template error state of a Route (C-12.FR-6): since when a template of it keeps failing and what
+// failed.
+type TemplateError struct {
+	Since time.Time
+	Error string
+}
+
+// TemplateHooks are the template checks of messages, wired in the runtime: Check dry-runs a template of the Route
+// routeID, 0 for a new Route, and returns a *templates.Error for a template that fails; Saved clears the Route's
+// template error, in the transaction tx that saved new templates of the kinds given.
+type TemplateHooks struct {
+	Check func(ctx context.Context, routeID int64, kind, source, language string) error
+	Saved func(ctx context.Context, tx dbgen.DBTX, routeID int64, publicID string, kinds []string) error
+}
+
+// named are the templates of t by kind.
+func (t Templates) named() []namedTemplate {
+	return []namedTemplate{{TemplateRootMessage, t.RootMessage}, {TemplateLine, t.Line},
+		{TemplateAckTimeoutNotice, t.AckTimeoutNotice}}
+}
+
+type namedTemplate struct {
+	kind  string
+	value *string
+}
+
+// keep sets in t the templates k keeps from stored.
+func (k KeepTemplates) keep(t *Templates, stored Templates) {
+	if k.RootMessage {
+		t.RootMessage = stored.RootMessage
+	}
+	if k.Line {
+		t.Line = stored.Line
+	}
+	if k.AckTimeoutNotice {
+		t.AckTimeoutNotice = stored.AckTimeoutNotice
+	}
+}
+
 // AckTimeout is route.ack_timeout.
 type AckTimeout struct {
 	Enabled              bool  `json:"enabled"`
@@ -161,6 +220,7 @@ type Route struct {
 	Policy         Policy
 	DestinationIDs []string
 	Storm          *Storm
+	TemplateError  *TemplateError
 	CreatedAt      time.Time
 	Version        int64
 	// OpenAlertGroupCount is the number of its open Alert Groups, which block its deletion (C-09.FR-19).
@@ -198,6 +258,8 @@ type Input struct {
 	GroupKey       []string
 	DestinationIDs []string
 	Policy         Policy
+	// Keep are the templates an update leaves as they are stored.
+	Keep KeepTemplates
 }
 
 // List is every Route that is not deleted in evaluation order, the Default route last, with the version of the list
@@ -324,6 +386,8 @@ type Service struct {
 
 	// membership is the hook of delivery for Destinations added to or removed from a Route; nil changes nothing.
 	membership Membership
+	// templates are the template checks of messages; without them templates are saved without a dry run.
+	templates TemplateHooks
 
 	// info holds the muster_route_info series this replica exports, by public_id to name.
 	infoMu sync.Mutex
@@ -375,6 +439,11 @@ func (s *Service) SetMembership(m Membership) {
 	s.membership = m
 }
 
+// SetTemplates fills the template checks of messages, before any Route is created or updated.
+func (s *Service) SetTemplates(h TemplateHooks) {
+	s.templates = h
+}
+
 // List lists the Routes that are not deleted in evaluation order with the version of the list. The version is read
 // first, so that the list is never older than its ETag.
 func (s *Service) List(ctx context.Context) (List, error) {
@@ -402,6 +471,7 @@ func (s *Service) list(ctx context.Context, q Queries) (List, error) {
 			AckTimeoutFirstIntervalSeconds: r.AckTimeoutFirstIntervalSeconds, RemindersEnabled: r.RemindersEnabled,
 			RemindersFirstIntervalSeconds: r.RemindersFirstIntervalSeconds, RemindersCapSeconds: r.RemindersCapSeconds,
 			AutoUnacknowledge: r.AutoUnacknowledge, CreatedAt: r.CreatedAt, Version: r.Version, Place: int64(i),
+			TemplateErrorSince: r.TemplateErrorSince, TemplateError: r.TemplateError,
 			StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount})
 	}
 	if err := s.withMatchers(ctx, q, out.Routes); err != nil {
@@ -614,6 +684,7 @@ func (s *Service) lock(ctx context.Context, q Queries, publicID string) (Route, 
 }
 
 // Create creates a Route at the last position before the Default route; a name another Route has is ErrNameTaken.
+// Its templates are dry-run against the built-in example first (C-12.FR-5).
 func (s *Service) Create(ctx context.Context, r Requester, in Input) (Route, error) {
 	return s.create(ctx, r, in, creation{})
 }
@@ -629,6 +700,9 @@ type creation struct {
 func (s *Service) create(ctx context.Context, r Requester, in Input, how creation) (Route, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if err := check(in); err != nil {
+		return Route{}, err
+	}
+	if err := s.checkTemplates(ctx, 0, in.Policy, Templates{}, map[string]string{}); err != nil {
 		return Route{}, err
 	}
 	var created Route
@@ -705,11 +779,26 @@ func (s *Service) writeMatchers(ctx context.Context, q Queries, routeID int64, m
 
 // Update replaces the configured fields of the Route publicID; a non-nil version must be its current one (If-Match).
 // The change applies at once to the next Alerts routed; an Alert already routed keeps its Route (C-08.FR-8). The
-// Default route takes no Matchers.
+// Default route takes no Matchers. A template in.Keep names stays as stored; a new template is dry-run first, and
+// saving one clears the Route's template error about it (C-12.FR-5, FR-6).
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Route, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if err := check(in); err != nil {
 		return Route{}, err
+	}
+	// The dry run reads Stored Snapshots and renders them, so it runs before the Route is locked; a template that
+	// changed meanwhile is dry-run again under the lock.
+	checked := map[string]string{}
+	if s.templates.Check != nil {
+		current, err := s.Get(ctx, publicID)
+		if err != nil {
+			return Route{}, err
+		}
+		proposed := in.Policy
+		in.Keep.keep(&proposed.Templates, current.Policy.Templates)
+		if err := s.checkTemplates(ctx, current.ID, proposed, current.Policy.Templates, checked); err != nil {
+			return Route{}, err
+		}
 	}
 	var before, updated Route
 	err := s.store.InTx(ctx, func(q Queries) error {
@@ -723,6 +812,10 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if before.IsDefault && len(in.Matchers) > 0 {
 			return &FieldError{Pointer: "/matchers", Code: CodeUnsupported,
 				Detail: "The Default route takes every Alert no other Route took; it has no Matchers."}
+		}
+		in.Keep.keep(&in.Policy.Templates, before.Policy.Templates)
+		if err := s.checkTemplates(ctx, before.ID, in.Policy, before.Policy.Templates, checked); err != nil {
+			return err
 		}
 		dests, err := s.resolveDestinations(ctx, q, in.DestinationIDs)
 		if err != nil {
@@ -754,6 +847,12 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			Now: s.clock.Now().UTC(),
 		}); err != nil {
 			return fmt.Errorf("update the route %s: %w", before.PublicID, nameTaken(err))
+		}
+		if kinds := changedTemplates(before.Policy.Templates, p.Templates); len(kinds) > 0 &&
+			s.templates.Saved != nil {
+			if err := s.templates.Saved(ctx, q.DB(), before.ID, before.PublicID, kinds); err != nil {
+				return err
+			}
 		}
 		if !slices.Equal(before.Matchers, next.Matchers) {
 			if err := q.DeleteRouteMatchers(ctx, dbgen.DeleteRouteMatchersParams{OrgID: s.orgID,
@@ -1012,8 +1111,8 @@ func checkMatcher(i int, m Matcher) error {
 	return nil
 }
 
-// checkPolicy refuses policy values outside the CHECKs of the routes table, and templates until messages can dry-run
-// them (C-12).
+// checkPolicy refuses policy values outside the CHECKs of the routes table; the templates are dry-run by
+// checkTemplates.
 func checkPolicy(p Policy) error {
 	nonNegative := []struct {
 		pointer string
@@ -1054,21 +1153,48 @@ func checkPolicy(p Policy) error {
 	if p.Language != LanguageEnglish && p.Language != LanguageRussian {
 		return &FieldError{Pointer: "/policy/language", Code: CodeInvalidFormat, Detail: "The language is en or ru."}
 	}
-	templates := []struct {
-		name  string
-		value *string
-	}{
-		{"root_message", p.Templates.RootMessage},
-		{"line", p.Templates.Line},
-		{"ack_timeout_notice", p.Templates.AckTimeoutNotice},
+	return nil
+}
+
+// checkTemplates dry-runs the templates of p that are set, differ from those of before and are not in checked, the
+// texts already dry-run by kind (C-12.FR-5): a template that fails is refused at /policy/templates/<kind> with the
+// code and the position of the sandbox. It adds the texts it dry-ran to checked.
+func (s *Service) checkTemplates(ctx context.Context, routeID int64, p Policy, before Templates,
+	checked map[string]string) error {
+	if s.templates.Check == nil {
+		return nil
 	}
-	for _, t := range templates {
-		if t.value != nil {
-			return &FieldError{Pointer: "/policy/templates/" + t.name, Code: CodeUnsupported,
-				Detail: "Only the built-in templates are available until templates can be checked."}
+	was := before.named()
+	for i, t := range p.Templates.named() {
+		if t.value == nil || (was[i].value != nil && *was[i].value == *t.value) {
+			continue
 		}
+		if done, ok := checked[t.kind]; ok && done == *t.value {
+			continue
+		}
+		err := s.templates.Check(ctx, routeID, t.kind, *t.value, p.Language)
+		if e, ok := errors.AsType[*templates.Error](err); ok {
+			return &FieldError{Pointer: "/policy/templates/" + t.kind, Code: e.Code, Detail: e.Detail, Line: e.Line,
+				Column: e.Column}
+		}
+		if err != nil {
+			return fmt.Errorf("check the %s template: %w", t.kind, err)
+		}
+		checked[t.kind] = *t.value
 	}
 	return nil
+}
+
+// changedTemplates are the kinds of templates whose text changes from before to after, a reset included.
+func changedTemplates(before, after Templates) []string {
+	var out []string
+	was := before.named()
+	for i, t := range after.named() {
+		if (t.value == nil) != (was[i].value == nil) || (t.value != nil && *t.value != *was[i].value) {
+			out = append(out, t.kind)
+		}
+	}
+	return out
 }
 
 // nameTaken maps the refusal of the unique index of the names to ErrNameTaken.
@@ -1121,7 +1247,11 @@ func routeOf(r dbgen.GetRouteRow) Route {
 	if r.StormSince.Valid {
 		st = &Storm{Since: r.StormSince.Time.UTC(), AlertGroupCount: r.StormAlertGroupCount.Int64}
 	}
-	return Route{Storm: st,
+	var te *TemplateError
+	if r.TemplateErrorSince.Valid {
+		te = &TemplateError{Since: r.TemplateErrorSince.Time.UTC(), Error: r.TemplateError.String}
+	}
+	return Route{Storm: st, TemplateError: te,
 		ID: r.ID, PublicID: r.PublicID, Name: r.Name, Description: r.Description, Position: int(r.Place),
 		IsDefault: r.IsDefault, Urgent: r.Urgent, GroupKey: r.GroupKey, CreatedAt: r.CreatedAt.UTC(),
 		Version: r.Version,

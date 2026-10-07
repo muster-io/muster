@@ -194,3 +194,19 @@ func Definitions() ([]*Definition, error) {
 	slices.SortFunc(out, func(a, b *Definition) int { return strings.Compare(a.Name, b.Name) })
 	return out, errors.Join(errs...)
 }
+
+// TemplateError is raised while a template of a Route keeps failing (C-12.FR-6, ADR-0012).
+var TemplateError = register(&Definition{
+	Name:      "MusterTemplateError",
+	Severity:  SeverityWarning,
+	Entity:    EntityRoute,
+	NameLabel: "route_name",
+	Extra:     []string{"template"},
+	Condition: "A template of a Route failed while rendering a message, so its messages use the Fallback template. It " +
+		"resolves when the template renders again or a new template is saved.",
+	Summary: "A template of Route {name} keeps failing",
+	Description: "A message template of Route {name} failed while rendering, so its messages show every label in the " +
+		"Fallback template instead. The Route page shows the error with its line and column; fix the template in the " +
+		"Route's Message settings.",
+	Capability: "C-12",
+})

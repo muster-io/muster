@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/audit"
@@ -69,6 +70,9 @@ func (f *fakeRoutes) Create(_ context.Context, r routing.Requester, in routing.I
 	case len(in.Matchers) > 0 && in.Matchers[0].Value == "api-(":
 		return routing.Route{}, &routing.FieldError{Pointer: "/matchers/0/value", Code: routing.CodeInvalidRegex,
 			Detail: "error parsing regexp: missing closing ): `api-(`"}
+	case in.Policy.Templates.RootMessage != nil && *in.Policy.Templates.RootMessage == `{{ env "HOME" }}`:
+		return routing.Route{}, &routing.FieldError{Pointer: "/policy/templates/root_message",
+			Code: "unknown_function", Detail: `function "env" is not defined`, Line: 1, Column: 4}
 	}
 	out := f.list.Routes[0]
 	out.Name, out.Matchers, out.Version = in.Name, nil, 1
@@ -316,6 +320,41 @@ func TestRoutesAPI(t *testing.T) {
 	}
 	if a = x.call(t, http.MethodGet, "/api/v1/routes", "", bearer(readOnlyToken)...); a.status != http.StatusForbidden {
 		t.Errorf("list without routes:read = %d", a.status)
+	}
+}
+
+// TestRouteTemplatesAPI is C-12.AC-2, C-12.FR-2 and C-08.FR-1 at the API: a template the dry run refuses answers 422
+// at /policy/templates/root_message with its code, line and column; a template key left out of policy.templates
+// keeps the stored template and null resets it; a Route shows its template error state.
+func TestRouteTemplatesAPI(t *testing.T) {
+	x, fr := newRoutesAPI(t)
+	body := strings.Replace(routeBody, `"root_message":null`, `"root_message":"{{ env \"HOME\" }}"`, 1)
+	a := x.as(t, routesWriter, http.MethodPost, "/api/v1/routes", body)
+	errs, _ := a.json(t)["errors"].([]any)
+	first, _ := errs[0].(map[string]any)
+	if a.status != http.StatusUnprocessableEntity || first["pointer"] != "/policy/templates/root_message" ||
+		first["code"] != "unknown_function" || first["line"] != float64(1) || first["column"] != float64(4) {
+		t.Errorf("refused = %d %s", a.status, a.body)
+	}
+	a = x.as(t, routesWriter, http.MethodPut, "/api/v1/routes/"+routeID, strings.Replace(routeBody,
+		`"templates":{"root_message":null}`, `"templates":{"line":"{{ .Labels.pod }}"}`, 1), "If-Match", `"3"`)
+	in := fr.inputs[len(fr.inputs)-1]
+	if a.status != http.StatusOK || in.Keep != (routing.KeepTemplates{RootMessage: true, AckTimeoutNotice: true}) ||
+		*in.Policy.Templates.Line != "{{ .Labels.pod }}" {
+		t.Errorf("update = %d, keep %+v", a.status, in.Keep)
+	}
+	x.as(t, routesWriter, http.MethodPut, "/api/v1/routes/"+routeID, routeBody, "If-Match", `"3"`)
+	if in := fr.inputs[len(fr.inputs)-1]; in.Keep != (routing.KeepTemplates{Line: true, AckTimeoutNotice: true}) ||
+		in.Policy.Templates.RootMessage != nil {
+		t.Errorf("null resets: keep %+v", in.Keep)
+	}
+	fr.list.Routes[0].TemplateError = &routing.TemplateError{Since: t0,
+		Error: "root_message template failed: line 1: x"}
+	a = x.as(t, routesReader, http.MethodGet, "/api/v1/routes/"+routeID, "")
+	te, _ := a.json(t)["template_error"].(map[string]any)
+	if te["error"] != "root_message template failed: line 1: x" || te["fallback"] != "fallback_template" ||
+		te["since"] != t0.Format(time.RFC3339) {
+		t.Errorf("template error %s", a.body)
 	}
 }
 

@@ -18,8 +18,8 @@ import (
 
 // TestRouting is S-025 against `muster dev`, with E2E_REPLICAS=2 on two replicas: the Route profiles (C-08.AC-11),
 // the first matching Route taking each newly firing Alert before and after a reorder (C-08.AC-1), the refusals of a
-// stale ETag, of the Default route and of another set (C-08.AC-6, AC-7, AC-11), invalid regular expressions and
-// templates (C-08.AC-10), Severity levels (C-08.AC-9), a deletion leaving the evaluation order at once,
+// stale ETag, of the Default route and of another set (C-08.AC-6, AC-7, AC-11), invalid regular expressions
+// (C-08.AC-10) and templates (C-12.AC-2), Severity levels (C-08.AC-9), a deletion leaving the evaluation order at once,
 // muster_route_info on every replica (C-08.FR-12) and the Routes recorded on the Stored Snapshots.
 func TestRouting(t *testing.T) {
 	h := Start(t, DevProcess)
@@ -239,14 +239,14 @@ func TestRouting(t *testing.T) {
 		t.Errorf("stale update = %d", a.status)
 	}
 
-	// C-08.AC-10 and the templates until S-036.
+	// C-08.AC-10, and a template that calls an unregistered function (C-12.AC-2).
 	if s, _, pointer, code := problem(mk("C", `[{"label":"pod","op":"=~","value":"api-("}]`, onCall)); s !=
 		http.StatusUnprocessableEntity || pointer != "/matchers/0/value" || code != "invalid_regex" {
 		t.Errorf("invalid regex = %d %s %s", s, pointer, code)
 	}
-	templated := strings.Replace(string(onCall), `"root_message":null`, `"root_message":"{{ .Title }}"`, 1)
+	templated := strings.Replace(string(onCall), `"root_message":null`, `"root_message":"{{ env \"HOME\" }}"`, 1)
 	if s, _, pointer, code := problem(mk("T", `[]`, json.RawMessage(templated))); s != http.StatusUnprocessableEntity ||
-		pointer != "/policy/templates/root_message" || code != "unsupported" {
+		pointer != "/policy/templates/root_message" || code != "unknown_function" {
 		t.Errorf("template = %d %s %s", s, pointer, code)
 	}
 

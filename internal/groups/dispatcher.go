@@ -332,6 +332,7 @@ type entry struct {
 	Conflicts     []string
 	PeriodFrom    *time.Time
 	PeriodTo      *time.Time
+	Detail        string
 	// Note is the Note of a note_added, written to notes instead of the Timeline entries.
 	Note *noteEntry
 }
@@ -374,13 +375,22 @@ func (c committed) run(ctx context.Context) {
 // dispatcher's transaction: the Alert Group as the change left it, who made the change, the lifecycle events it
 // recorded in their order, and ReceivedAt, the receipt time of the Stored Snapshot behind it, nil when a Command, a
 // timer or a person's change made it. After queues a function, such as a log line, to run once the transaction
-// committed, never when it rolls back; nil outside the dispatcher.
+// committed, never when it rolls back; Fallback reports a Route template that failed, which the dispatcher records
+// in the Timeline once the re-render step returned. Both are nil outside the dispatcher.
 type Rendering struct {
 	Group      *Group
 	Actor      Actor
 	Events     []Recorded
 	ReceivedAt *time.Time
 	After      func(f func(ctx context.Context))
+	Fallback   func(f TemplateFailure)
+}
+
+// TemplateFailure is a Route template that failed while the re-render step rendered a message of the Alert Group,
+// which then used the Fallback template (C-12.FR-6): its kind and what failed.
+type TemplateFailure struct {
+	Template string
+	Detail   string
 }
 
 // Recorded is one lifecycle event that a change recorded: its row of the table with its loudness and Mentions, its
@@ -498,8 +508,13 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 		if err != nil {
 			return err
 		}
+		var failures []TemplateFailure
 		if err := d.rerender(ctx, q, Rendering{Group: g, Actor: actor, Events: recorded,
-			ReceivedAt: received, After: after.add}); err != nil {
+			ReceivedAt: received, After: after.add,
+			Fallback: func(f TemplateFailure) { failures = append(failures, f) }}); err != nil {
+			return err
+		}
+		if err := d.recordFallbacks(ctx, q, g, failures, now); err != nil {
 			return err
 		}
 	}
@@ -512,6 +527,21 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 		}
 	}
 	return nil
+}
+
+// recordFallbacks records, as the system, one system entry fallback_template_used per Route template the re-render
+// step reported failing, with what failed (C-12.FR-6).
+func (d *dispatcher) recordFallbacks(ctx context.Context, q Queries, g *Group, failures []TemplateFailure,
+	now time.Time) error {
+	if len(failures) == 0 {
+		return nil
+	}
+	entries := make([]entry, len(failures))
+	for i, f := range failures {
+		entries[i] = entry{System: SystemFallbackTemplateUsed, Detail: f.Detail}
+	}
+	_, err := d.record(ctx, q, g, System, now, entries)
+	return err
 }
 
 // record writes the entries of one change to the Timeline, numbering the lifecycle events of g, and returns the
@@ -534,7 +564,7 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 			OwnerUserID: nullInt(e.OwnerUserID), PreviousOwnerUserID: nullInt(e.PreviousOwner),
 			SnoozeUntil: timestamptz(e.SnoozeUntil), Fingerprints: e.Fingerprints,
 			ReplacedLabel: nonEmpty(e.ReplacedLabel), LabelConflicts: e.Conflicts,
-			PeriodFrom: timestamptz(e.PeriodFrom), PeriodTo: timestamptz(e.PeriodTo),
+			PeriodFrom: timestamptz(e.PeriodFrom), PeriodTo: timestamptz(e.PeriodTo), Detail: nonEmpty(e.Detail),
 		}
 		switch person := actor.Person; person.Kind {
 		case audit.ActorUser:

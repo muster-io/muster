@@ -28,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/routing/dbgen"
+	"github.com/muster-io/muster/internal/templates"
 )
 
 const orgID = 7
@@ -498,6 +499,7 @@ func getRowOf(r dbgen.ListRoutesRow, place int64) dbgen.GetRouteRow {
 		AckTimeoutFirstIntervalSeconds: r.AckTimeoutFirstIntervalSeconds, RemindersEnabled: r.RemindersEnabled,
 		RemindersFirstIntervalSeconds: r.RemindersFirstIntervalSeconds, RemindersCapSeconds: r.RemindersCapSeconds,
 		AutoUnacknowledge: r.AutoUnacknowledge, CreatedAt: r.CreatedAt, Version: r.Version, Place: place,
+		TemplateErrorSince: r.TemplateErrorSince, TemplateError: r.TemplateError,
 		StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount}
 }
 
@@ -682,9 +684,6 @@ func TestCheck(t *testing.T) {
 		"snooze":        {func(in *Input) { in.Policy.SnoozeDurationsSeconds = []int64{60, 0} }, "/policy/snooze_durations_seconds/1", CodeOutOfRange},
 		"cap":           {func(in *Input) { in.Policy.Reminders.CapSeconds = 60 }, "/policy/reminders/cap_seconds", CodeOutOfRange},
 		"language":      {func(in *Input) { in.Policy.Language = "de" }, "/policy/language", CodeInvalidFormat},
-		"root message":  {func(in *Input) { in.Policy.Templates.RootMessage = ptr("{{ .Title }}") }, "/policy/templates/root_message", CodeUnsupported},
-		"line":          {func(in *Input) { in.Policy.Templates.Line = ptr("") }, "/policy/templates/line", CodeUnsupported},
-		"notice":        {func(in *Input) { in.Policy.Templates.AckTimeoutNotice = ptr("x") }, "/policy/templates/ack_timeout_notice", CodeUnsupported},
 	} {
 		in := input("r")
 		c.change(&in)
@@ -703,6 +702,114 @@ func TestCheck(t *testing.T) {
 	valid.Policy.Reminders.CapSeconds = valid.Policy.Reminders.FirstIntervalSeconds
 	if _, err := svc.Create(t.Context(), by, valid); err != nil {
 		t.Errorf("valid = %v", err)
+	}
+}
+
+// TestTemplates is C-12.FR-2, FR-5 and C-08.FR-1: a template is dry-run on save and one that fails is refused at its
+// pointer with the code and position of the sandbox; an update keeps a template it leaves out, resets one given as
+// null and dry-runs only a template that changed, against the Route's own Stored Snapshots; saving a changed template
+// clears the Route's template error; a Route reads its template error state. Without the hooks nothing is dry-run.
+func TestTemplates(t *testing.T) {
+	svc, store, _ := newService(t)
+	in := input("r")
+	in.Policy.Templates = Templates{RootMessage: ptr("{{ .AlertGroup.Title }}"), Line: ptr("{{ .Labels.pod }}")}
+	if _, err := svc.Create(t.Context(), by, in); err != nil {
+		t.Fatalf("without hooks = %v", err)
+	}
+	type check struct {
+		route        int64
+		kind, source string
+		lang         string
+	}
+	var checks []check
+	var saved [][]string
+	svc.SetTemplates(TemplateHooks{
+		Check: func(_ context.Context, routeID int64, kind, source, lang string) error {
+			checks = append(checks, check{routeID, kind, source, lang})
+			switch source {
+			case "{{ env }}":
+				return &templates.Error{Code: templates.CodeUnknownFunction, Line: 1, Column: 4, Detail: "env"}
+			case "boom":
+				return errBoom
+			}
+			return nil
+		},
+		Saved: func(_ context.Context, _ dbgen.DBTX, routeID int64, publicID string, kinds []string) error {
+			saved = append(saved, kinds)
+			if routeID == 0 || publicID == "" {
+				t.Errorf("saved %d %q", routeID, publicID)
+			}
+			if slices.Contains(kinds, "ack_timeout_notice") {
+				return errBoom
+			}
+			return nil
+		}})
+	in = input("t")
+	in.Policy.Templates.RootMessage = ptr("{{ env }}")
+	f := fieldError(t, func() error { _, err := svc.Create(t.Context(), by, in); return err }())
+	if f.Pointer != "/policy/templates/root_message" || f.Code != "unknown_function" || f.Line != 1 || f.Column != 4 ||
+		len(checks) != 1 || checks[0] != (check{0, "root_message", "{{ env }}", "en"}) {
+		t.Errorf("refused %+v, checks %+v", f, checks)
+	}
+	in.Policy.Templates.RootMessage = ptr("boom")
+	if _, err := svc.Create(t.Context(), by, in); !errors.Is(err, errBoom) {
+		t.Errorf("a failed check = %v", err)
+	}
+	in.Policy.Templates = Templates{Line: ptr("{{ .Labels.pod }}"), AckTimeoutNotice: ptr("late")}
+	rt, err := svc.Create(t.Context(), by, in)
+	if err != nil || *rt.Policy.Templates.Line != "{{ .Labels.pod }}" || rt.Policy.Templates.RootMessage != nil {
+		t.Fatalf("created %+v, %v", rt.Policy.Templates, err)
+	}
+	// Absent keeps, null resets, a changed template is dry-run with the Route's id; an unchanged one is not.
+	checks, saved = nil, nil
+	up := input("t")
+	up.Policy.Templates = Templates{RootMessage: ptr("{{ .Status }}")}
+	up.Keep = KeepTemplates{Line: true}
+	if _, err := svc.Update(t.Context(), by, rt.PublicID, nil, up); !errors.Is(err, errBoom) {
+		t.Fatalf("resetting the ack timeout notice = %v; Saved fails for it", err)
+	}
+	up.Keep.AckTimeoutNotice = true
+	rt, err = svc.Update(t.Context(), by, rt.PublicID, nil, up)
+	if err != nil || *rt.Policy.Templates.Line != "{{ .Labels.pod }}" || *rt.Policy.Templates.RootMessage !=
+		"{{ .Status }}" || *rt.Policy.Templates.AckTimeoutNotice != "late" {
+		t.Fatalf("updated %+v, %v", rt.Policy.Templates, err)
+	}
+	if len(checks) != 2 || checks[1] != (check{rt.ID, "root_message", "{{ .Status }}", "en"}) ||
+		!slices.Equal(saved[len(saved)-1], []string{"root_message"}) {
+		t.Errorf("checks %+v, saved %v", checks, saved)
+	}
+	up = input("t")
+	up.Keep = KeepTemplates{RootMessage: true, AckTimeoutNotice: true}
+	rt, err = svc.Update(t.Context(), by, rt.PublicID, nil, up)
+	if err != nil || rt.Policy.Templates.Line != nil || *rt.Policy.Templates.RootMessage != "{{ .Status }}" ||
+		len(checks) != 2 || !slices.Equal(saved[len(saved)-1], []string{"line"}) {
+		t.Errorf("reset %+v, %v, checks %d, saved %v", rt.Policy.Templates, err, len(checks), saved)
+	}
+	up.Policy.Templates.Line = ptr("{{ env }}")
+	up.Keep.Line = false
+	f = fieldError(t, func() error { _, err := svc.Update(t.Context(), by, rt.PublicID, nil, up); return err }())
+	if f.Pointer != "/policy/templates/line" || f.Line != 1 {
+		t.Errorf("update refused %+v", f)
+	}
+	if _, err := svc.Update(t.Context(), by, "RTZZZZZZZZZZZZ", nil, up); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an unknown route = %v", err)
+	}
+	// The template error state of the row.
+	row := store.find(rt.PublicID)
+	row.TemplateErrorSince = pgtype.Timestamptz{Time: t0, Valid: true}
+	row.TemplateError = pgtype.Text{String: "root_message template failed: line 1: x", Valid: true}
+	got, err := svc.Get(t.Context(), rt.PublicID)
+	if err != nil || got.TemplateError == nil || got.TemplateError.Error != row.TemplateError.String ||
+		!got.TemplateError.Since.Equal(t0) {
+		t.Errorf("template error %+v, %v", got.TemplateError, err)
+	}
+	list, _ := svc.List(t.Context())
+	if list.Routes[1].TemplateError == nil {
+		t.Errorf("list %+v", list.Routes[1])
+	}
+	if changedTemplates(Templates{Line: ptr("a")}, Templates{Line: ptr("a")}) != nil ||
+		!slices.Equal(changedTemplates(Templates{Line: ptr("a")}, Templates{Line: ptr("b")}), []string{"line"}) {
+		t.Error("changed templates")
 	}
 }
 

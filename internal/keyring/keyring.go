@@ -227,6 +227,26 @@ func (k *Keyring) Verify(p Purpose, keyID string, msg, mac []byte) (bool, error)
 	return hmac.Equal(mac, want), nil
 }
 
+// MinSignaturePrefix is the shortest signature VerifyPrefix accepts: 128 bits.
+const MinSignaturePrefix = 16
+
+// VerifyPrefix checks a signature made by Sign with the key keyID, which may be any key of the Keyring, and cut to its
+// first bytes, at least MinSignaturePrefix of them, as a button action id carries it.
+func (k *Keyring) VerifyPrefix(p Purpose, keyID string, msg, prefix []byte) (bool, error) {
+	if len(prefix) < MinSignaturePrefix {
+		return false, fmt.Errorf("verify a %s signature: shorter than %d bytes", p, MinSignaturePrefix)
+	}
+	kk, ok := k.byID[keyID]
+	if !ok {
+		return false, fmt.Errorf("verify a %s signature: %w: %s", p, ErrKeyNotHeld, keyID)
+	}
+	want, err := kk.mac(p, msg)
+	if err != nil {
+		return false, err
+	}
+	return len(prefix) <= len(want) && hmac.Equal(prefix, want[:len(prefix)]), nil
+}
+
 func (kk *key) mac(p Purpose, msg []byte) ([]byte, error) {
 	sub, ok := kk.macs[p]
 	if !ok {

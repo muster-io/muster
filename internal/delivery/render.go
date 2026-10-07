@@ -4,35 +4,25 @@
 package delivery
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/messages"
 )
 
-// Message is a rendered message, neutral of any markup: its sections of text, its buttons and its colour. Each adapter
-// turns it into its messenger's markup and escapes it (ADR-0005, output safety).
-type Message struct {
-	Sections []string `json:"sections"`
-	Buttons  []Button `json:"buttons"`
-	Colour   string   `json:"colour"`
-}
+// Message is a rendered message, neutral of any markup (C-12.FR-1): each adapter lays it out for its messenger and
+// escapes its neutral text (ADR-0005, output safety).
+type Message = messages.Message
 
-// Button is a Command button of a Root message or a Thread reply: the Command it runs and its label.
-type Button struct {
-	Command string `json:"command"`
-	Label   string `json:"label"`
-}
+// Button is a Command button of a Root message or a Thread reply.
+type Button = messages.Button
 
-// Text is the plain text of the message, its sections one per line.
-func (m Message) Text() string {
-	return strings.Join(m.Sections, "\n")
-}
-
-// GroupView is an Alert Group as the renderer shows it.
+// GroupView is an Alert Group as delivery renders it.
 type GroupView struct {
+	ID       int64
 	PublicID string
 	Number   int64
 	Title    string
@@ -42,111 +32,120 @@ type GroupView struct {
 
 // viewOf is the view of an Alert Group the dispatcher changed.
 func viewOf(g *groups.Group) GroupView {
-	return GroupView{PublicID: g.PublicID, Number: g.Number, Title: g.Title, Status: g.Status, Urgent: g.Urgent}
+	return GroupView{ID: g.ID, PublicID: g.PublicID, Number: g.Number, Title: g.Title, Status: g.Status,
+		Urgent: g.Urgent}
 }
 
-// ReplyView is a Thread reply as the renderer shows it: its lifecycle event, the fingerprints of the new Alerts it
-// lists, the language of the Route and how many Alerts it lists at most.
+// ReplyView is a Thread reply as the renderer shows it: its lifecycle event, the number of the first event it stands
+// for, the fingerprints of the new Alerts it lists, the language of the Route and how many Alerts it lists at most.
 type ReplyView struct {
 	Event        groups.Event
+	Seq          int64
 	Fingerprints []string
 	Language     string
 	Listed       int
 }
 
-// Renderer renders Root messages and Thread replies (C-12). The minimal renderer stands in until S-036 brings the
-// default layout, the built-in texts, templates and buttons.
+// Roots are the Root messages of one Alert Group, one per markup of its Destinations, as one render produced them:
+// the Route templates that failed, whose messages are the Fallback template, and what to run once the transaction
+// committed.
+type Roots struct {
+	Messages map[messages.Markup]messages.Rendered
+	Failures []messages.Failure
+	After    func(ctx context.Context)
+}
+
+// Renderer renders what delivery stores and sends (C-12), declared here by its consumer: Root messages, read through
+// the transaction of the change, Thread replies when the worker sends them, and the Storm summary. MessageRenderer is
+// the one of the runtime.
 type Renderer interface {
-	Render(g GroupView, d Destination, language string) Message
-	RenderReply(r ReplyView, g GroupView, d Destination) Message
+	Roots(ctx context.Context, db messages.DBTX, g GroupView, markups []messages.Markup) (Roots, error)
+	Reply(ctx context.Context, db messages.DBTX, r ReplyView, g GroupView) (Message, error)
+	Storm(routePublicID, routeName, language string, count, urgent int64) Message
+	StormOver(routePublicID, language string, open int64) Message
 }
 
-// MinimalRenderer shows the status, #N and title of an Alert Group with the buttons of its status (reference.md,
-// buttons and links by status), and for a Thread reply its event and the fingerprints of its new Alerts, at most
-// Listed of them and then "…and K more — open in Muster".
-type MinimalRenderer struct{}
-
-// The labels of the minimal renderer per language; English for any other.
-var minimalTexts = map[string]map[string]string{
-	"en": {
-		"firing": "Firing", "acknowledged": "Acknowledged", "snoozed": "Snoozed", "resolved": "Resolved",
-		"urgent": "Urgent", "acknowledge": "Ack", "unacknowledge": "Unack", "resolve": "Resolve", "snooze": "Snooze",
-		"unsnooze": "Unsnooze", "open": "Open in Muster", "more": "…and %d more — open in Muster",
-	},
-	"ru": {
-		"firing": "Горит", "acknowledged": "Подтверждена", "snoozed": "Отложена", "resolved": "Закрыта",
-		"urgent": "Срочная", "acknowledge": "Подтвердить", "unacknowledge": "Снять подтверждение",
-		"resolve": "Закрыть", "snooze": "Отложить", "unsnooze": "Отменить откладывание", "open": "Открыть в Muster",
-		"more": "…и ещё %d — откройте в Muster",
-	},
+// MessageRenderer is the Renderer of messages.Renderer: a Root message is rendered once per markup and the template
+// error state of its Route settled in the same transaction (C-12.FR-6).
+type MessageRenderer struct {
+	*messages.Renderer
 }
 
-// The colours of the statuses.
-var statusColours = map[groups.Status]string{
-	groups.StatusFiring: "#d93025", groups.StatusAcknowledged: "#f29900", groups.StatusSnoozed: "#80868b",
-	groups.StatusResolved: "#1e8e3e",
-}
-
-// The Commands of the buttons of each status; a resolved Root message has none.
-var statusButtons = map[groups.Status][]string{
-	groups.StatusFiring:       {"acknowledge", "resolve", "snooze"},
-	groups.StatusAcknowledged: {"unacknowledge", "resolve", "snooze"},
-	groups.StatusSnoozed:      {"acknowledge", "unsnooze", "resolve"},
-}
-
-func textsOf(language string) map[string]string {
-	if t, ok := minimalTexts[language]; ok {
-		return t
+// Roots renders the Root message of g in each markup.
+func (r MessageRenderer) Roots(ctx context.Context, db messages.DBTX, g GroupView, markups []messages.Markup) (Roots,
+	error) {
+	src, err := r.Load(ctx, db, g.ID)
+	if err != nil {
+		return Roots{}, err
 	}
-	return minimalTexts["en"]
+	out := Roots{Messages: make(map[messages.Markup]messages.Rendered, len(markups))}
+	var rendered []string
+	failed := map[string]bool{}
+	for _, mk := range markups {
+		if _, ok := out.Messages[mk]; ok {
+			continue
+		}
+		rd := r.Root(src, mk)
+		out.Messages[mk] = rd
+		if f := rd.Failure; f != nil && !failed[f.Template] {
+			failed[f.Template] = true
+			out.Failures = append(out.Failures, *f)
+		}
+		rendered = append(rendered, rd.Rendered...)
+	}
+	if out.After, err = r.Settle(ctx, db, src, out.Failures, rendered); err != nil {
+		return Roots{}, err
+	}
+	return out, nil
 }
 
-// Render is the Root message of g.
-func (MinimalRenderer) Render(g GroupView, _ Destination, language string) Message {
-	t := textsOf(language)
-	status := t[string(g.Status)]
-	if g.Urgent {
-		status += " · " + t["urgent"]
-	}
-	m := Message{Sections: []string{fmt.Sprintf("#%d %s", g.Number, g.Title), status},
-		Buttons: []Button{}, Colour: statusColours[g.Status]}
-	for _, c := range statusButtons[g.Status] {
-		m.Buttons = append(m.Buttons, Button{Command: c, Label: t[c]})
-	}
-	if len(m.Buttons) == 0 {
-		m.Sections = append(m.Sections, t["open"])
-	}
-	return m
+// Reply renders a Thread reply of g.
+func (r MessageRenderer) Reply(ctx context.Context, db messages.DBTX, rv ReplyView, g GroupView) (Message, error) {
+	return r.Renderer.Reply(ctx, db, g.ID, messages.ReplyInput{Event: string(rv.Event), Seq: rv.Seq,
+		Fingerprints: rv.Fingerprints, Listed: rv.Listed})
 }
 
-// RenderReply is the Thread reply r about g.
-func (MinimalRenderer) RenderReply(r ReplyView, g GroupView, _ Destination) Message {
-	t := textsOf(r.Language)
-	m := Message{Sections: []string{fmt.Sprintf("#%d %s", g.Number, r.Event)}, Buttons: []Button{},
-		Colour: statusColours[g.Status]}
-	listed := r.Fingerprints
-	if r.Listed >= 0 && len(listed) > r.Listed {
-		listed = listed[:r.Listed]
+// markupOf is the markup a Destination type writes: Markdown in Mattermost, HTML in Telegram, plain text for an
+// outgoing webhook.
+func markupOf(destinationType string) messages.Markup {
+	switch destinationType {
+	case TypeMattermost:
+		return messages.MarkupMarkdown
+	case TypeTelegram:
+		return messages.MarkupHTML
 	}
-	m.Sections = append(m.Sections, listed...)
-	if more := len(r.Fingerprints) - len(listed); more > 0 {
-		m.Sections = append(m.Sections, fmt.Sprintf(t["more"], more))
-	}
-	return m
+	return messages.MarkupPlain
 }
 
-// encoded is a rendered message as the Desired state stores it: its text, the payload that restores it and the hash of
-// what it shows — text, buttons and colour, never Mentions.
+// markupsOf are the markups of Destinations of the types given.
+func markupsOf(types []string) []messages.Markup {
+	out := make([]messages.Markup, 0, len(types))
+	for _, t := range types {
+		out = append(out, markupOf(t))
+	}
+	return out
+}
+
+// encoded is a rendered message as the Desired state stores it: its text, the payload that restores it, the hash of
+// what it shows — text, buttons and colour, never Mentions — and the key that signed its buttons.
 type encoded struct {
 	text    string
 	payload []byte
 	hash    []byte
+	keyID   string
 }
 
 func encode(m Message) encoded {
-	payload, _ := json.Marshal(m) // a Message is plain strings
+	payload, _ := json.Marshal(m) // a Message is plain strings and numbers
 	sum := sha256.Sum256(payload)
 	return encoded{text: m.Text(), payload: payload, hash: sum[:]}
+}
+
+// encodeRoot is a Root message with the key that signed its buttons.
+func encodeRoot(rd messages.Rendered) encoded {
+	e := encode(rd.Message)
+	e.keyID = rd.KeyID
+	return e
 }
 
 // decode restores the message of a Desired state.

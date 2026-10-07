@@ -33,7 +33,10 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
 	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
@@ -74,6 +77,8 @@ type live struct {
 	dsvc      *destinations.Service
 	timers    *timers.Worker
 	defaultID int64
+	// renderer renders messages as the runtime does (C-12).
+	renderer *messages.Renderer
 }
 
 func setupLive(t *testing.T, s dbtest.Server) *live {
@@ -138,8 +143,28 @@ func setupLive(t *testing.T, s dbtest.Server) *live {
 		Log: logger, Restamp: func(ctx context.Context, tx groups.DBTX, ids []int64, routeID int64) error {
 			return routing.RestampAlerts(ctx, tx, org.ID, ids, routeID)
 		}})
+	// Messages are rendered as the runtime renders them: the sandbox, the buttons signed by an opened Keyring, and the
+	// templates of Routes dry-run on save.
+	keys, err := keyring.New([][]byte{bytes.Repeat([]byte{'k'}, keyring.KeySize)}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := keys.Establish(ctx, keyring.NewStore(d.Pool), t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := keys.Open(ctx, logger, state); err != nil {
+		t.Fatal(err)
+	}
+	l.renderer = messages.New(messages.Config{OrgID: org.ID, DB: d.Pool, PublicURL: "http://localhost:8080",
+		Business: l.business, Real: l.real, Keys: keys, Log: logger})
+	l.routes.SetTemplates(routing.TemplateHooks{Check: l.renderer.CheckTemplate,
+		Saved: func(ctx context.Context, tx routingdb.DBTX, routeID int64, publicID string, kinds []string) error {
+			return l.renderer.TemplateSaved(ctx, tx, routeID, publicID, kinds)
+		}})
 	store := delivery.NewStore(d.Pool, d.Pool)
-	l.svc = delivery.New(delivery.Config{OrgID: org.ID, Store: store, Business: l.business, Log: logger})
+	l.svc = delivery.New(delivery.Config{OrgID: org.ID, Store: store, Business: l.business, Log: logger,
+		Renderer: delivery.MessageRenderer{Renderer: l.renderer}})
 	l.groups.SetRerender(l.svc.Enqueue)
 	// As the runtime wires them: Route membership, the deletion of Destinations and the calm checks of Storms.
 	l.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, routeID int64, added, removed []int64) error {
@@ -222,7 +247,7 @@ func (l *live) worker(owner string) *delivery.Worker {
 		Duration: delivery.Lease, Clocks: clock.Clocks{Business: l.business, Real: l.real}},
 		Organizations: func(context.Context) ([]int64, error) { return []int64{l.orgID}, nil },
 		Adapters:      delivery.Adapters{delivery.TypeMattermost: l.rec}, Log: l.logger,
-		PublicURL: "http://localhost:8080"}
+		PublicURL: "http://localhost:8080", Renderer: delivery.MessageRenderer{Renderer: l.renderer}}
 }
 
 // attach puts Destinations on the Route, and only them.
@@ -360,6 +385,17 @@ func (l *live) both(t *testing.T) {
 	}
 }
 
+// head is "#N title" of a Root message, or the first line of another message.
+func head(m delivery.Message) string {
+	if m.Heading != nil {
+		return fmt.Sprintf("#%d %s", m.Heading.Number, m.Heading.Title)
+	}
+	if len(m.Lines) > 0 {
+		return m.Lines[0]
+	}
+	return ""
+}
+
 func methods(calls []deliverytest.Call) string {
 	var out []string
 	for _, c := range calls {
@@ -368,7 +404,7 @@ func methods(calls []deliverytest.Call) string {
 	return strings.Join(out, ",")
 }
 
-// TestLive is the live check of S-034 and S-035 (C-11, Verification).
+// TestLive is the live check of S-034, S-035 and S-036 (C-11, C-12, Verification).
 func TestLive(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		l := setupLive(t, s)
@@ -581,10 +617,10 @@ func TestLive(t *testing.T) {
 			// No call twice: every Alert Group has at most one Publication.
 			seen := map[string]bool{}
 			for _, c := range l.rec.Calls() {
-				if seen[c.Message.Sections[0]] {
-					t.Errorf("published twice: %s", c.Message.Sections[0])
+				if seen[head(c.Message)] {
+					t.Errorf("published twice: %s", head(c.Message))
 				}
-				seen[c.Message.Sections[0]] = true
+				seen[head(c.Message)] = true
 			}
 			t.Logf("two workers, limiter 6 per 60 s from %s: 6 calls at once, %d in the first minute, %d after two "+
 				"minutes — one token every 10 s, the rate of one replica", start.Format(time.TimeOnly), counts[60],
@@ -598,7 +634,7 @@ func TestLive(t *testing.T) {
 				WHERE title LIKE 'Urg3%')`)
 			l.round(t, l.a)
 			calls := l.rec.Calls()
-			if len(calls) != 1 || !strings.Contains(calls[0].Message.Sections[0], "Urg3") {
+			if len(calls) != 1 || !strings.Contains(head(calls[0].Message), "Urg3") {
 				t.Fatalf("calls %+v", calls)
 			}
 			if n := l.count(t, `SELECT count(*) FROM deliveries WHERE state = 'pending' AND next_attempt_at > $1`,
@@ -681,14 +717,14 @@ func TestLive(t *testing.T) {
 				}
 				return out
 			}
-			if r := replies(); len(r) != 1 || len(r[0].Message.Sections) != 2 {
+			if r := replies(); len(r) != 1 || len(r[0].Message.Lines) != 2 {
 				t.Fatalf("before the window closes %+v", r)
 			}
 			l.business.Set(start.Add(60 * time.Second))
 			l.round(t, l.a)
 			r := replies()
-			if len(r) != 2 || len(r[1].Message.Sections) != 12 ||
-				r[1].Message.Sections[11] != "…and 2 more — open in Muster" {
+			if len(r) != 2 || len(r[1].Message.Lines) != 12 ||
+				r[1].Message.Lines[11] != "…and 2 more — open in Muster" {
 				t.Fatalf("at 60 s %+v", r)
 			}
 			l.business.Set(start.Add(200 * time.Second))
@@ -741,12 +777,15 @@ func TestLive(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				// The renderer reads the Alert Group through the transaction: a change of what it shows is a
+				// change of its row.
+				l.exec(t, `UPDATE alert_groups SET title = 'Rows' WHERE id = $1`, id)
 				if row.Form != delivery.FormPublication {
 					render(g, created())
 					l.round(t, l.a)
 					l.rec.Reset()
 					if row.Form == delivery.FormUpdate || row.Form == delivery.FormReplyAndUpdate {
-						g.Title = "Rows changed"
+						l.exec(t, `UPDATE alert_groups SET title = 'Rows changed' WHERE id = $1`, id)
 					}
 				}
 				render(g, ev)
@@ -872,6 +911,10 @@ func TestLive(t *testing.T) {
 			{"membership_lock", l.membershipLock},
 			{"budget_reset_on_recovery", l.budgetResetOnRecovery},
 			{"abandon_connection", l.abandonConnection},
+			// S-036.
+			{"fallback_template", l.fallbackTemplate},
+			{"russian_replies", l.russianReplies},
+			{"storm_texts", l.stormTexts},
 		} {
 			t.Run(sub.name, sub.run)
 		}
@@ -988,7 +1031,7 @@ func (l *live) clockWake(t *testing.T) {
 	}
 	// A new Alert Group on the replicas' time: NOTIFY delivery wakes a worker, which publishes it.
 	svc := delivery.New(delivery.Config{OrgID: l.orgID, Store: delivery.NewStore(l.d.Pool, l.d.Pool),
-		Business: replicas[0].business, Log: l.logger})
+		Business: replicas[0].business, Log: l.logger, Renderer: delivery.MessageRenderer{Renderer: l.renderer}})
 	l.fire(t, "cw", "Wake/a")
 	gid := l.group(t, "Wake")
 	var id, number int64
@@ -1250,7 +1293,7 @@ func (l *live) storm(t *testing.T) {
 		switch {
 		case c.Method != deliverytest.MethodPublish:
 			t.Errorf("call %s", c.Method)
-		case strings.HasPrefix(text, "Storm on Route storm: 10 new Alert Groups since"):
+		case strings.HasPrefix(text, "⛈ Storm on storm: 10 Alert Groups, "):
 			summaries++
 			if c.Loudness != groups.Loud || !slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) {
 				t.Errorf("summary %s %v", c.Loudness, c.Mentions)
@@ -1258,7 +1301,7 @@ func (l *live) storm(t *testing.T) {
 		default:
 			groupsPublished++
 			n := 0
-			if _, err := fmt.Sscanf(strings.SplitN(c.Message.Sections[0], "Storm", 2)[1], "%02d", &n); err != nil {
+			if _, err := fmt.Sscanf(strings.SplitN(head(c.Message), "Storm", 2)[1], "%02d", &n); err != nil {
 				t.Fatalf("%q: %v", text, err)
 			}
 			if n >= 20 && !urgent[n] {
@@ -1293,15 +1336,12 @@ func (l *live) storm(t *testing.T) {
 	var over, quiet int
 	for _, c := range calls {
 		switch {
-		case c.Method == deliverytest.MethodUpdate && c.Message.Sections[0] == "Storm over: 5 Alert Groups still open":
+		case c.Method == deliverytest.MethodUpdate && c.Message.Lines[0] == "Storm over: 5 Alert Groups still open":
 			over++
-			if !strings.HasPrefix(c.Message.Sections[1], "Route storm: 10 new Alert Groups from ") {
-				t.Errorf("final summary %q", c.Message.Text())
-			}
 		case c.Method == deliverytest.MethodPublish && c.Loudness == groups.Quiet && len(c.Mentions) == 0:
 			quiet++
-			if strings.Contains(c.Message.Sections[0], "Storm20") || strings.Contains(c.Message.Sections[0], "Storm21") {
-				t.Errorf("resolved held alert group published %q", c.Message.Sections[0])
+			if strings.Contains(head(c.Message), "Storm20") || strings.Contains(head(c.Message), "Storm21") {
+				t.Errorf("resolved held alert group published %q", head(c.Message))
 			}
 		default:
 			t.Errorf("after the storm: %s %s %q", c.Method, c.Loudness, c.Message.Text())
@@ -1345,9 +1385,9 @@ func (l *live) deletedRoot(t *testing.T) {
 	l.round(t, l.a)
 	l.round(t, l.a)
 	calls := l.rec.Calls()
-	note := "The previous message was deleted at " + deleted.UTC().Format("15:04")
+	note := "The previous message was deleted at " + deleted.UTC().Format("15:04") + "."
 	if methods(calls) != "publish,update,publish" || calls[2].Loudness != groups.Quiet || len(calls[2].Mentions) != 0 ||
-		calls[2].Message.Sections[len(calls[2].Message.Sections)-1] != note {
+		calls[2].Message.Notices[len(calls[2].Message.Notices)-1] != note {
 		t.Fatalf("calls %s %+v", methods(calls), calls)
 	}
 	if n := l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'republished'`); n != 1 {
@@ -1530,7 +1570,7 @@ func (l *live) recoveryCurrentState(t *testing.T) {
 		&root); err != nil {
 		t.Fatal(err)
 	}
-	if before != 2 || len(pubs) != 1 || !strings.Contains(pubs[0].Message.Sections[0], "RecA") ||
+	if before != 2 || len(pubs) != 1 || !strings.Contains(head(pubs[0].Message), "RecA") ||
 		pubs[0].Loudness != groups.Loud || !slices.Equal(pubs[0].Mentions,
 		[]groups.Mention{groups.MentionNewAlertGroup}) || len(upds) != 1 || upds[0].MessageID != root ||
 		upds[0].Loudness != groups.Quiet || len(only(calls, deliverytest.MethodReply)) != 0 || dropped != 2 ||
@@ -1611,9 +1651,9 @@ func (l *live) lateRetryAfter(t *testing.T) {
 	note := fmt.Sprintf("Delivered late: started %s, resolved %s while this Destination was unavailable.",
 		started.UTC().Format("15:04"), resolved.UTC().Format("15:04"))
 	if len(pubs) != 2 || pubs[1].Loudness != groups.Quiet || len(pubs[1].Mentions) != 0 ||
-		pubs[1].Message.Sections[len(pubs[1].Message.Sections)-1] != note || l.count(t,
+		pubs[1].Message.Notices[len(pubs[1].Message.Notices)-1] != note || l.count(t,
 		`SELECT count(*) FROM delivery_events WHERE kind = 'delivered_late' AND loudness = 'quiet'`) != 1 {
-		t.Fatalf("calls %q / %q", pubs[len(pubs)-1].Message.Sections, note)
+		t.Fatalf("calls %q / %q", pubs[len(pubs)-1].Message.Notices, note)
 	}
 	t.Logf("resolved while waiting 30 s: quiet publish with %q; delivered_late event", note)
 }
@@ -1637,9 +1677,9 @@ func (l *live) lateTransient(t *testing.T) {
 	note := fmt.Sprintf("Delivered late: started %s, resolved %s while this Destination was unavailable.",
 		started.UTC().Format("15:04"), resolved.UTC().Format("15:04"))
 	if len(pubs) != 3 || pubs[2].Loudness != groups.Quiet ||
-		pubs[2].Message.Sections[len(pubs[2].Message.Sections)-1] != note || l.count(t,
+		pubs[2].Message.Notices[len(pubs[2].Message.Notices)-1] != note || l.count(t,
 		`SELECT count(*) FROM delivery_events WHERE kind = 'delivered_late'`) != 1 {
-		t.Fatalf("calls %s, last %q, want %q", methods(l.rec.Calls()), pubs[len(pubs)-1].Message.Sections, note)
+		t.Fatalf("calls %s, last %q, want %q", methods(l.rec.Calls()), pubs[len(pubs)-1].Message.Notices, note)
 	}
 	t.Logf("2 transient attempts, resolved within the budget: quiet publish with %q; delivered_late event", note)
 	// Broken first: the resolved Alert Group is withheld and never published, even after the recovery.
@@ -1702,7 +1742,7 @@ func (l *live) probeCheck(t *testing.T) {
 	l.fire(t, "pc3", "ProbeLater/a")
 	l.probe(t)
 	if methods(l.rec.Calls()) != "publish,publish,publish" || l.rec.Count(deliverytest.MethodCheck) != 0 ||
-		!strings.Contains(l.rec.Calls()[1].Message.Sections[0], "ProbeWait") {
+		!strings.Contains(head(l.rec.Calls()[1].Message), "ProbeWait") {
 		t.Fatalf("with a delivery waiting: %s", methods(l.rec.Calls()))
 	}
 	t.Log("with a delivery waiting: the probe published the oldest one (no check), then the rest followed")
@@ -1734,7 +1774,7 @@ func finalLink(publicID string) string {
 
 // isFinalEdit says whether a call is the Quiet final edit of the Alert Group publicID.
 func isFinalEdit(c deliverytest.Call, publicID string) bool {
-	s := c.Message.Sections
+	s := c.Message.Notices
 	return c.Method == deliverytest.MethodUpdate && c.Loudness == groups.Quiet && len(c.Mentions) == 0 &&
 		len(s) > 0 && s[len(s)-1] == finalLink(publicID) && len(c.Message.Buttons) == 0
 }
@@ -1818,7 +1858,7 @@ func (l *live) destinationAddedAndRemoved(t *testing.T) {
 		t.Fatalf("a call after the final edit: %s", methods(l.rec.Calls()))
 	}
 	t.Logf("removed: final edit=%d %q; then nothing", len(calls),
-		calls[0].Message.Sections[len(calls[0].Message.Sections)-1])
+		calls[0].Message.Notices[len(calls[0].Message.Notices)-1])
 	// Deleted: removed from every Route, final edits, then its secrets wiped; the row stays, unlisted.
 	ds3 := l.newDest(t, 3)
 	l.exec(t, `UPDATE destinations SET proxy_password_ciphertext = '\x01', proxy_password_key_id = 'k1',
@@ -1960,7 +2000,7 @@ func (l *live) deliveryEventRows(t *testing.T) {
 		l.round(t, l.a)
 		return id, name
 	}
-	summary := func(c deliverytest.Call) bool { return strings.HasPrefix(c.Message.Text(), "Storm") }
+	summary := func(c deliverytest.Call) bool { return c.Message.Kind == messages.KindStorm }
 	scenarios := map[string][]struct {
 		firing bool
 		run    func(t *testing.T) []deliverytest.Call
@@ -2304,13 +2344,13 @@ func (l *live) stormMembership(t *testing.T) {
 		switch {
 		case c.Method != deliverytest.MethodPublish:
 			t.Errorf("joined: %s", c.Method)
-		case strings.HasPrefix(c.Message.Text(), "Storm on Route"):
+		case strings.HasPrefix(c.Message.Text(), "⛈ Storm on"):
 			summaries++
 			if c.Loudness != groups.Loud {
 				t.Errorf("summary %+v", c)
 			}
 		case c.Loudness == groups.Quiet:
-			quiet = append(quiet, strings.Fields(c.Message.Sections[0])[1])
+			quiet = append(quiet, strings.Fields(head(c.Message))[1])
 		default:
 			t.Errorf("loud publication %+v", c)
 		}
@@ -2356,7 +2396,7 @@ func (l *live) stormSummaryAfterEnd(t *testing.T) {
 	l.round(t, l.a)
 	var summary []deliverytest.Call
 	for _, c := range only(l.rec.Calls(), deliverytest.MethodPublish) {
-		if strings.HasPrefix(c.Message.Text(), "Storm") {
+		if c.Message.Kind == messages.KindStorm {
 			summary = append(summary, c)
 		}
 	}
@@ -2518,4 +2558,150 @@ func (l *live) abandonConnection(t *testing.T) {
 		t.Fatalf("abandoned %+v, log %s", r, l.log)
 	}
 	t.Log("deleted connection: the pending final edit is not_delivered, logged after the commit")
+}
+
+// fallbackTemplate is C-12.AC-3: a Route template that passed its dry run against the Route's Stored Snapshot of two
+// Alerts fails on an Alert Group of one Alert; that message is the Fallback template, muster_template_errors_total
+// grows, the Route shows its template error, the Timeline records fallback_template_used and MusterTemplateError
+// fires; the next good render clears the error and resolves the Internal alert.
+func (l *live) fallbackTemplate(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	id, publicID := l.newRoute(t, "fb", 1_000_000, "DSAAAAAAAAAAA1")
+	l.fireAlerts(t, "fb1", alert{name: "Fb/a", team: "fb"}, alert{name: "Fb/b", team: "fb"})
+	rt, err := l.routes.Get(t.Context(), publicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := routing.Input{Name: rt.Name, Matchers: rt.Matchers, GroupKey: rt.GroupKey, DestinationIDs: rt.DestinationIDs,
+		Policy: rt.Policy}
+	in.Policy.Templates.RootMessage = ptrTo(`second alert {{ (index .Alerts 1).Labels.disk }}`)
+	if _, err := l.routes.Update(t.Context(), system, publicID, nil, in); err != nil {
+		t.Fatalf("the template failed its dry run: %v", err)
+	}
+	bad := in
+	bad.Policy.Templates.RootMessage = ptrTo(`{{ env "HOME" }}`)
+	if _, err := l.routes.Update(t.Context(), system, publicID, nil, bad); err == nil {
+		t.Fatal("a template with env was saved")
+	}
+	counter := func() uint64 { return metrics.TemplateErrors.With(publicID, "", "root_message").Get() }
+	before := counter()
+	l.round(t, l.a)
+	l.rec.Reset()
+	l.fireAlerts(t, "fb2", alert{name: "FbOne/a", team: "fb"})
+	l.round(t, l.a)
+	gid := l.group(t, "FbOne")
+	pubs := only(l.rec.Calls(), deliverytest.MethodPublish)
+	if len(pubs) != 1 || head(pubs[0].Message) == "" || len(pubs[0].Message.Buttons) != 5 ||
+		!strings.Contains(pubs[0].Message.Text(), "The message template of this Route failed") ||
+		!strings.Contains(pubs[0].Message.Text(), "disk=FbOne/a") || pubs[0].Message.Body != nil {
+		t.Fatalf("fallback publication %+v", pubs)
+	}
+	var errTemplate, detail string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT r.template_error_template, e.detail FROM routes r,
+		timeline_entries e JOIN alert_groups g ON g.id = e.alert_group_id WHERE r.id = $1 AND g.public_id = $2
+		AND e.system_event = 'fallback_template_used'`, id, gid).Scan(&errTemplate, &detail); err != nil {
+		t.Fatal(err)
+	}
+	route, err := l.routes.Get(t.Context(), publicID)
+	if err != nil || errTemplate != "root_message" || route.TemplateError == nil ||
+		!strings.HasPrefix(detail, "root_message template failed: line 1, column ") || counter() != before+1 ||
+		l.templateAlert(t, publicID) != "firing" || !strings.Contains(l.log.String(), `"event":"fallback_template_used"`) {
+		t.Fatalf("error state %q, route %+v, detail %q, counter +%d, internal alert %q", errTemplate,
+			route.TemplateError, detail, counter()-before, l.templateAlert(t, publicID))
+	}
+	t.Logf("template passed its dry run (2 Alerts); Alert Group with 1 Alert: fallback used; "+
+		"muster_template_errors_total{template=\"root_message\"} +%d; route template_error set (%s); timeline "+
+		"system_event=fallback_template_used (%q); MusterTemplateError %s", counter()-before, errTemplate, detail,
+		l.templateAlert(t, publicID))
+	// The next Alert Group renders again: the error clears and the Internal alert resolves.
+	l.rec.Reset()
+	l.fireAlerts(t, "fb3", alert{name: "FbTwo/a", team: "fb"}, alert{name: "FbTwo/b", team: "fb"})
+	l.round(t, l.a)
+	pubs = only(l.rec.Calls(), deliverytest.MethodPublish)
+	if len(pubs) != 1 || pubs[0].Message.Body == nil || pubs[0].Message.Body.Text != `second alert FbTwo/a` ||
+		l.count(t, `SELECT count(*) FROM routes WHERE id = $1 AND template_error IS NULL`, id) != 1 ||
+		l.templateAlert(t, publicID) != "resolved" || !strings.Contains(l.log.String(), `"event":"template_recovered"`) {
+		t.Fatalf("recovery %+v, internal alert %q", pubs, l.templateAlert(t, publicID))
+	}
+	t.Log("next good render: cleared and resolved")
+}
+
+// templateAlert is the status of MusterTemplateError about the Route publicID, after processing the synthetic
+// Snapshots, empty when it never fired.
+func (l *live) templateAlert(t *testing.T, publicID string) string {
+	t.Helper()
+	l.process(t)
+	var status string
+	err := l.d.Pool.QueryRow(t.Context(), `SELECT status FROM alerts WHERE labels->>'alertname' =
+		'MusterTemplateError' AND labels->>'route' = $1 ORDER BY id DESC LIMIT 1`, publicID).Scan(&status)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatal(err)
+	}
+	return status
+}
+
+func ptrTo(s string) *string { return &s }
+
+// russianReplies is C-12.AC-5: with route.language ru, the Root message and the Thread replies are in Russian.
+func (l *live) russianReplies(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	id, _ := l.newRoute(t, "ru", 1_000_000, "DSAAAAAAAAAAA1")
+	l.exec(t, `UPDATE routes SET language = 'ru' WHERE id = $1`, id)
+	l.fireAlerts(t, "ru1", alert{name: "Ru/a", team: "ru"})
+	l.round(t, l.a)
+	l.business.Advance(2 * time.Minute)
+	l.fireAlerts(t, "ru1", alert{name: "Ru/a", team: "ru"}, alert{name: "Ru/b", team: "ru"},
+		alert{name: "Ru/c", team: "ru"})
+	l.round(t, l.a)
+	pubs, replies := only(l.rec.Calls(), deliverytest.MethodPublish), only(l.rec.Calls(), deliverytest.MethodReply)
+	if len(pubs) != 1 || len(replies) != 1 {
+		t.Fatalf("calls %s", methods(l.rec.Calls()))
+	}
+	root, reply := pubs[0].Message, replies[0].Message
+	if !strings.Contains(root.Environment, "Начало: ") || root.Buttons[0].Label != "Подтвердить" ||
+		root.Links[0].Text != "Открыть в Muster" || reply.Lines[0] != "Новые алерты (2):" ||
+		!strings.HasPrefix(reply.Lines[1], "• disk: Ru/") {
+		t.Fatalf("root %q, reply %q", root.Text(), reply.Lines)
+	}
+	l.resolve(t, l.group(t, "Ru"))
+	l.round(t, l.a)
+	updates := only(l.rec.Calls(), deliverytest.MethodUpdate)
+	if len(updates) == 0 || updates[len(updates)-1].Message.Footer != "Закрыл(а): alice" {
+		t.Fatalf("updates %+v", updates)
+	}
+	t.Logf("thread reply: %q; root message: %q; footer %q", strings.Join(reply.Lines, " "), root.Environment,
+		updates[len(updates)-1].Message.Footer)
+}
+
+// stormTexts is C-12.FR-10: the Storm summary and its final state read as the PRD says.
+func (l *live) stormTexts(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	id, _ := l.newRoute(t, "st", 1, "DSAAAAAAAAAAA1")
+	l.fireAlerts(t, "st1", alert{name: "StA/a", team: "st"}, alert{name: "StB/a", team: "st", severity: "critical"},
+		alert{name: "StC/a", team: "st"})
+	l.round(t, l.a)
+	var summary string
+	for _, c := range l.rec.Calls() {
+		if c.Message.Kind == messages.KindStorm {
+			summary = c.Message.Lines[0]
+		}
+	}
+	if !strings.HasPrefix(summary, "⛈ Storm on st: ") || !strings.HasSuffix(summary, " — open in Muster") {
+		t.Fatalf("summary %q in %s", summary, methods(l.rec.Calls()))
+	}
+	l.rec.Reset()
+	l.calm(t, id)
+	l.round(t, l.a)
+	var over string
+	for _, c := range l.rec.Calls() {
+		if c.Message.Kind == messages.KindStorm {
+			over = c.Message.Lines[0]
+		}
+	}
+	// The final state counts the Alert Groups the Storm held that are still open: the second one; the first was
+	// published before the Storm and the Urgent third was released at once.
+	if over != "Storm over: 1 Alert Group still open" {
+		t.Fatalf("final state %q", over)
+	}
+	t.Logf("%q … %q", summary, over)
 }
