@@ -111,7 +111,7 @@ from?: FromParameter;
  */
 to?: ToParameter;
 /**
- * The Alert Group with exactly this `#N`. The default time range does not apply: a number is found whatever its age (while its summary row is kept).
+ * The Alert Group with exactly this `#N`. Neither the default time range nor the default status applies: a number is found whatever its age and status (while its summary row is kept); the other filters still apply.
  * @minimum 1
  */
 number?: AgNumberParameter;

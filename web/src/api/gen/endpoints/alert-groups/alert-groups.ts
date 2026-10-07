@@ -140,7 +140,7 @@ export const getListAlertGroupsQueryKey = (params?: ListAlertGroupsParams,) => {
     }
 
 
-export const getListAlertGroupsQueryOptions = <TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+export const getListAlertGroupsQueryOptions = <TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(params?: ListAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -159,10 +159,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListAlertGroupsQueryResult = NonNullable<Awaited<ReturnType<typeof listAlertGroups>>>
-export type ListAlertGroupsQueryError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse
+export type ListAlertGroupsQueryError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse
 
 
-export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
  params: undefined |  ListAlertGroupsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroups>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listAlertGroups>>,
@@ -172,7 +172,7 @@ export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGr
       >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
  params?: ListAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroups>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listAlertGroups>>,
@@ -182,7 +182,7 @@ export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGr
       >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
  params?: ListAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -190,7 +190,7 @@ export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGr
  * @summary List Alert Groups
  */
 
-export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+export function useListAlertGroups<TData = Awaited<ReturnType<typeof listAlertGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
  params?: ListAlertGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAlertGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -256,7 +256,7 @@ export const getGetAlertGroupCountsQueryKey = (params?: GetAlertGroupCountsParam
     }
 
 
-export const getGetAlertGroupCountsQueryOptions = <TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: GetAlertGroupCountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupCounts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+export const getGetAlertGroupCountsQueryOptions = <TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(params?: GetAlertGroupCountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupCounts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -275,10 +275,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetAlertGroupCountsQueryResult = NonNullable<Awaited<ReturnType<typeof getAlertGroupCounts>>>
-export type GetAlertGroupCountsQueryError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse
+export type GetAlertGroupCountsQueryError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse
 
 
-export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
  params: undefined |  GetAlertGroupCountsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupCounts>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getAlertGroupCounts>>,
@@ -288,7 +288,7 @@ export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAler
       >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
  params?: GetAlertGroupCountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupCounts>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getAlertGroupCounts>>,
@@ -298,7 +298,7 @@ export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAler
       >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
  params?: GetAlertGroupCountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupCounts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -306,7 +306,7 @@ export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAler
  * @summary Count Alert Groups per status
  */
 
-export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+export function useGetAlertGroupCounts<TData = Awaited<ReturnType<typeof getAlertGroupCounts>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
  params?: GetAlertGroupCountsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupCounts>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {

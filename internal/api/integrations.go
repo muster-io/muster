@@ -48,9 +48,17 @@ func (s *Server) ListIntegrations(ctx context.Context, req gen.ListIntegrationsR
 	if err != nil {
 		return nil, err
 	}
+	ids := make([]string, len(page.Integrations))
+	for i, in := range page.Integrations {
+		ids[i] = in.PublicID
+	}
+	counts, err := s.alertGroups.OpenCounts(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	out := gen.IntegrationList{Items: make([]gen.Integration, 0, len(page.Integrations))}
 	for _, in := range page.Integrations {
-		out.Items = append(out.Items, s.integrationOf(in))
+		out.Items = append(out.Items, s.integrationOf(in, counts[in.PublicID]))
 	}
 	if page.Next != nil {
 		out.NextCursor.Set(encodeCursor(integrationsCursor, integrationKey{ID: *page.Next}))
@@ -76,7 +84,7 @@ func (s *Server) CreateIntegration(ctx context.Context, req gen.CreateIntegratio
 	}
 	tag, location := etag(in.Version), BasePath+"/integrations/"+in.PublicID
 	return gen.CreateIntegration201JSONResponse{
-		Body:    s.integrationOf(in),
+		Body:    s.integrationOf(in, 0),
 		Headers: gen.CreateIntegration201ResponseHeaders{ETag: &tag, Location: &location},
 	}, nil
 }
@@ -88,8 +96,12 @@ func (s *Server) GetIntegration(ctx context.Context, req gen.GetIntegrationReque
 	if err != nil {
 		return nil, err
 	}
+	count, err := s.openAlertGroupCount(ctx, in.PublicID)
+	if err != nil {
+		return nil, err
+	}
 	tag := etag(in.Version)
-	return gen.GetIntegration200JSONResponse{Body: s.integrationOf(in),
+	return gen.GetIntegration200JSONResponse{Body: s.integrationOf(in, count),
 		Headers: gen.GetIntegration200ResponseHeaders{ETag: &tag}}, nil
 }
 
@@ -111,8 +123,12 @@ func (s *Server) UpdateIntegration(ctx context.Context, req gen.UpdateIntegratio
 	if err != nil {
 		return nil, err
 	}
+	count, err := s.openAlertGroupCount(ctx, in.PublicID)
+	if err != nil {
+		return nil, err
+	}
 	tag := etag(in.Version)
-	return gen.UpdateIntegration200JSONResponse{Body: s.integrationOf(in),
+	return gen.UpdateIntegration200JSONResponse{Body: s.integrationOf(in, count),
 		Headers: gen.UpdateIntegration200ResponseHeaders{ETag: &tag}}, nil
 }
 
@@ -334,9 +350,18 @@ func integrationInputOf(in gen.IntegrationInput) integrations.Input {
 	return out
 }
 
-// integrationOf is the API form of an Integration, with the URLs of the ingest listener and its warnings. The count
-// of open Alert Groups arrives with them.
-func (s *Server) integrationOf(in integrations.Integration) gen.Integration {
+// openAlertGroupCount is the count of the open Alert Groups with an Alert from the Integration (C-09.FR-21).
+func (s *Server) openAlertGroupCount(ctx context.Context, publicID string) (int64, error) {
+	counts, err := s.alertGroups.OpenCounts(ctx, []string{publicID})
+	if err != nil {
+		return 0, err
+	}
+	return counts[publicID], nil
+}
+
+// integrationOf is the API form of an Integration, with the URLs of the ingest listener, its warnings and the count
+// of its open Alert Groups, which deleting it would resolve.
+func (s *Server) integrationOf(in integrations.Integration, openAlertGroups int64) gen.Integration {
 	tag := etag(in.Version)
 	description, ingestURL, heartbeatURL := in.Description, s.integrations.IngestURL(), s.integrations.HeartbeatURL()
 	labels := in.StaticLabels
@@ -351,7 +376,7 @@ func (s *Server) integrationOf(in integrations.Integration) gen.Integration {
 			State: gen.HeartbeatState(in.Heartbeat.State), Url: &heartbeatURL,
 			LastSignalAt: nullableTime(in.Heartbeat.LastSignalAt), LostSince: nullableTime(in.Heartbeat.LostSince)},
 		LastSnapshotAt: nullableTime(in.LastSnapshotAt), SnapshotCount: int(in.SnapshotCount),
-		Warnings: make([]gen.IntegrationWarning, 0, len(in.Warnings)), OpenAlertGroupCount: 0,
+		Warnings: make([]gen.IntegrationWarning, 0, len(in.Warnings)), OpenAlertGroupCount: int(openAlertGroups),
 		CreatedAt: in.CreatedAt.UTC(), Etag: &tag,
 	}
 	for _, w := range in.Warnings {

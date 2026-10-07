@@ -253,6 +253,8 @@ var implemented = map[string]bool{
 	"ReorderRoutes": true, "ListRouteProfiles": true, "PreviewGroupKey": true, "ListRouteSuggestions": true,
 	"AcceptRouteSuggestion": true, "DismissRouteSuggestion": true,
 	"GetAlertGroup": true, "ListAlertGroupAlerts": true, "GetAlertGroupTimeline": true, "MoveOpenAlertGroups": true,
+	"ListAlertGroups": true, "GetAlertGroupCounts": true, "ListRelatedAlertGroups": true,
+	"GetAlertGroupStatistics": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how

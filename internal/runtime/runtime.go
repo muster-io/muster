@@ -732,7 +732,8 @@ func (p *process) newKeeper() *leader.Keeper {
 			}
 			return p.groups.ExportGauges(ctx)
 		},
-		ClockMoved: p.clockMoved,
+		AlertGroupRetention: groups.RetentionTask(p.db.GroupsStore()),
+		ClockMoved:          p.clockMoved,
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
 			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},

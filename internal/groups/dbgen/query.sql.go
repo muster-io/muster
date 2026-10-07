@@ -12,6 +12,132 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countGroups = `-- name: CountGroups :many
+SELECT g.status, (CASE WHEN $1::boolean THEN g.common_labels END)::jsonb AS common_labels,
+       count(*)::bigint AS count
+FROM alert_groups g
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
+WHERE g.org_id = $2
+  AND ($3::bigint IS NULL OR g.number = $3::bigint)
+  AND ($3::bigint IS NOT NULL
+       OR (g.created_at < $4::timestamptz
+           AND (g.status <> 'resolved' OR (g.status = 'resolved' AND g.resolved_at >= $5::timestamptz))))
+  AND (cardinality($6::bigint[]) = 0 OR g.route_id = ANY($6::bigint[]))
+  AND (cardinality($7::bigint[]) = 0 OR g.integration_ids && $7::bigint[])
+  AND (cardinality($8::text[]) = 0 OR g.severity_level = ANY($8::text[]))
+  AND ($9::boolean IS NULL
+       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = $9::boolean)
+  AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
+  AND ($11::text IS NULL OR g.resolve_reason = $11::text)
+  AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
+  AND ($13::jsonb IS NULL OR g.common_labels @> $13::jsonb)
+  AND ($14::text IS NULL OR g.title ILIKE $14::text
+       OR g.summary ILIKE $14::text)
+GROUP BY g.status, (CASE WHEN $1::boolean THEN g.common_labels END)
+`
+
+type CountGroupsParams struct {
+	WithLabels     bool
+	OrgID          int64
+	Number         pgtype.Int8
+	RangeTo        time.Time
+	RangeFrom      time.Time
+	RouteIds       []int64
+	IntegrationIds []int64
+	Severities     []string
+	Urgent         pgtype.Bool
+	ResolvedBy     pgtype.Text
+	ResolveReason  pgtype.Text
+	Reopened       pgtype.Bool
+	Contains       []byte
+	Pattern        pgtype.Text
+}
+
+type CountGroupsRow struct {
+	Status       string
+	CommonLabels []byte
+	Count        int64
+}
+
+// CountGroups counts the Alert Groups of the list's filters per status, without the status and the cursor; with
+// @with_labels it groups them by common_labels too, for the Matchers that Go applies.
+func (q *Queries) CountGroups(ctx context.Context, arg CountGroupsParams) ([]CountGroupsRow, error) {
+	rows, err := q.db.Query(ctx, countGroups,
+		arg.WithLabels,
+		arg.OrgID,
+		arg.Number,
+		arg.RangeTo,
+		arg.RangeFrom,
+		arg.RouteIds,
+		arg.IntegrationIds,
+		arg.Severities,
+		arg.Urgent,
+		arg.ResolvedBy,
+		arg.ResolveReason,
+		arg.Reopened,
+		arg.Contains,
+		arg.Pattern,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountGroupsRow{}
+	for rows.Next() {
+		var i CountGroupsRow
+		if err := rows.Scan(&i.Status, &i.CommonLabels, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countOpenGroupsByIntegration = `-- name: CountOpenGroupsByIntegration :many
+SELECT i.public_id, count(*)::bigint AS count
+FROM alert_groups g
+CROSS JOIN LATERAL unnest(g.integration_ids) AS u(integration_id)
+JOIN integrations i ON i.org_id = g.org_id AND i.id = u.integration_id
+WHERE g.org_id = $1 AND g.status <> 'resolved' AND i.public_id = ANY($2::text[])
+GROUP BY i.public_id
+`
+
+type CountOpenGroupsByIntegrationParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type CountOpenGroupsByIntegrationRow struct {
+	PublicID string
+	Count    int64
+}
+
+// CountOpenGroupsByIntegration counts the open Alert Groups with an Alert from each of the Integrations
+// (C-09.FR-21): those that deleting it would resolve.
+func (q *Queries) CountOpenGroupsByIntegration(ctx context.Context, arg CountOpenGroupsByIntegrationParams) ([]CountOpenGroupsByIntegrationRow, error) {
+	rows, err := q.db.Query(ctx, countOpenGroupsByIntegration, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountOpenGroupsByIntegrationRow{}
+	for rows.Next() {
+		var i CountOpenGroupsByIntegrationRow
+		if err := rows.Scan(&i.PublicID, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countOpenGroupsByRoute = `-- name: CountOpenGroupsByRoute :many
 SELECT r.public_id, g.status, count(*)::bigint AS count
 FROM alert_groups g
@@ -46,6 +172,64 @@ func (q *Queries) CountOpenGroupsByRoute(ctx context.Context, orgID int64) ([]Co
 		return nil, err
 	}
 	return items, nil
+}
+
+const deleteExpiredGroups = `-- name: DeleteExpiredGroups :execrows
+DELETE FROM alert_groups g
+WHERE g.org_id = $1 AND g.id IN (
+    SELECT e.id
+    FROM alert_groups e
+    WHERE e.org_id = $1 AND e.status = 'resolved' AND e.resolved_at < $2::timestamptz
+      AND NOT EXISTS (SELECT 1
+                      FROM alert_group_alerts m
+                      WHERE m.org_id = $1 AND m.moved_to_alert_group_id = e.id)
+    ORDER BY e.resolved_at
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED)
+`
+
+type DeleteExpiredGroupsParams struct {
+	OrgID     int64
+	Cutoff    time.Time
+	BatchSize int32
+}
+
+// DeleteExpiredGroups deletes at most @batch_size summary rows resolved before @cutoff. A summary row that an Alert
+// inside another Alert Group still names as where it moved waits for the details of that one to go first; a later
+// Alert Group that fires again after it keeps its row, without the reference (ON DELETE SET NULL).
+func (q *Queries) DeleteExpiredGroups(ctx context.Context, arg DeleteExpiredGroupsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredGroups, arg.OrgID, arg.Cutoff, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteExpiredMemberships = `-- name: DeleteExpiredMemberships :execrows
+DELETE FROM alert_group_alerts m
+WHERE m.org_id = $1 AND m.id IN (
+    SELECT e.id
+    FROM alert_group_alerts e
+    WHERE e.org_id = $1 AND e.state <> 'firing' AND e.ended_at < $2::timestamptz
+    ORDER BY e.ended_at
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED)
+`
+
+type DeleteExpiredMembershipsParams struct {
+	OrgID     int64
+	Cutoff    time.Time
+	BatchSize int32
+}
+
+// DeleteExpiredMemberships deletes at most @batch_size Alerts inside Alert Groups that ended before @cutoff; rows
+// another transaction holds wait for the next run.
+func (q *Queries) DeleteExpiredMemberships(ctx context.Context, arg DeleteExpiredMembershipsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredMemberships, arg.OrgID, arg.Cutoff, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteTimer = `-- name: DeleteTimer :exec
@@ -144,7 +328,8 @@ func (q *Queries) GetDefaultRouteID(ctx context.Context, orgID int64) (int64, er
 }
 
 const getGroup = `-- name: GetGroup :one
-SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level, g.urgent, g.group_key_values,
+SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
+       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.group_key_values,
        g.common_labels, g.common_annotations, g.integration_ids, g.reopen_count, g.firing_alert_count,
        g.resolved_alert_count, g.resolved_at, g.resolved_by_kind, g.resolved_by_user_id,
        g.resolved_by_service_account_id, g.resolve_reason, g.resolve_reason_text, g.created_at, g.last_changed_at,
@@ -159,9 +344,11 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
                  LIMIT 1), '')::text AS replaced_label,
        (SELECT count(*)
         FROM alert_group_alerts m
-        WHERE m.org_id = g.org_id AND m.alert_group_id = g.id AND m.state = 'firing')::bigint AS still_firing
+        WHERE m.org_id = g.org_id AND m.alert_group_id = g.id AND m.state = 'firing')::bigint AS still_firing,
+       o.retention_alert_details_days
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
 WHERE g.org_id = $1 AND g.public_id = $2
 `
 
@@ -199,10 +386,13 @@ type GetGroupRow struct {
 	FiringAgainAfterNumber     int64
 	ReplacedLabel              string
 	StillFiring                int64
+	RetentionAlertDetailsDays  int64
 }
 
 // GetGroup reads an Alert Group by public_id with its Route, the #N of the Alert Group it fires again after, the
-// label of its latest Replacement and the Alerts still firing in it.
+// label of its latest Replacement, the Alerts still firing in it and retention.alert_details. Urgency is derived from
+// the Route and organization.critical_is_urgent as they are now (C-08.FR-6), so that marking a Route urgent or
+// changing the setting shows on open Alert Groups at once without changing them.
 func (q *Queries) GetGroup(ctx context.Context, arg GetGroupParams) (GetGroupRow, error) {
 	row := q.db.QueryRow(ctx, getGroup, arg.OrgID, arg.PublicID)
 	var i GetGroupRow
@@ -235,14 +425,16 @@ func (q *Queries) GetGroup(ctx context.Context, arg GetGroupParams) (GetGroupRow
 		&i.FiringAgainAfterNumber,
 		&i.ReplacedLabel,
 		&i.StillFiring,
+		&i.RetentionAlertDetailsDays,
 	)
 	return i, err
 }
 
 const getGroupID = `-- name: GetGroupID :one
-SELECT id
-FROM alert_groups
-WHERE org_id = $1 AND public_id = $2
+SELECT g.id, g.resolved_at, o.retention_alert_details_days
+FROM alert_groups g
+JOIN organizations o ON o.id = g.org_id
+WHERE g.org_id = $1 AND g.public_id = $2
 `
 
 type GetGroupIDParams struct {
@@ -250,12 +442,44 @@ type GetGroupIDParams struct {
 	PublicID string
 }
 
-// GetGroupID reads the id of an Alert Group by public_id.
-func (q *Queries) GetGroupID(ctx context.Context, arg GetGroupIDParams) (int64, error) {
+type GetGroupIDRow struct {
+	ID                        int64
+	ResolvedAt                pgtype.Timestamptz
+	RetentionAlertDetailsDays int64
+}
+
+// GetGroupID reads the id of an Alert Group by public_id, with when it was resolved and retention.alert_details, which
+// decide whether its details are removed.
+func (q *Queries) GetGroupID(ctx context.Context, arg GetGroupIDParams) (GetGroupIDRow, error) {
 	row := q.db.QueryRow(ctx, getGroupID, arg.OrgID, arg.PublicID)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	var i GetGroupIDRow
+	err := row.Scan(&i.ID, &i.ResolvedAt, &i.RetentionAlertDetailsDays)
+	return i, err
+}
+
+const getGroupKey = `-- name: GetGroupKey :one
+SELECT id, route_id, group_key_sha256
+FROM alert_groups
+WHERE org_id = $1 AND public_id = $2
+`
+
+type GetGroupKeyParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+type GetGroupKeyRow struct {
+	ID             int64
+	RouteID        int64
+	GroupKeySha256 []byte
+}
+
+// GetGroupKey reads the Route and the Group key of an Alert Group, for its related Alert Groups.
+func (q *Queries) GetGroupKey(ctx context.Context, arg GetGroupKeyParams) (GetGroupKeyRow, error) {
+	row := q.db.QueryRow(ctx, getGroupKey, arg.OrgID, arg.PublicID)
+	var i GetGroupKeyRow
+	err := row.Scan(&i.ID, &i.RouteID, &i.GroupKeySha256)
+	return i, err
 }
 
 const getGroupingSettings = `-- name: GetGroupingSettings :one
@@ -280,6 +504,50 @@ func (q *Queries) GetGroupingSettings(ctx context.Context, orgID int64) (GetGrou
 	row := q.db.QueryRow(ctx, getGroupingSettings, orgID)
 	var i GetGroupingSettingsRow
 	err := row.Scan(&i.CriticalIsUrgent, &i.InstanceLabels)
+	return i, err
+}
+
+const getListSettings = `-- name: GetListSettings :one
+SELECT retention_alert_details_days, time_zone
+FROM organizations
+WHERE id = $1
+`
+
+type GetListSettingsRow struct {
+	RetentionAlertDetailsDays int64
+	TimeZone                  string
+}
+
+// GetListSettings reads what the list and the reads of one Alert Group need of the Organization: retention.alert_details
+// and organization.time_zone.
+func (q *Queries) GetListSettings(ctx context.Context, orgID int64) (GetListSettingsRow, error) {
+	row := q.db.QueryRow(ctx, getListSettings, orgID)
+	var i GetListSettingsRow
+	err := row.Scan(&i.RetentionAlertDetailsDays, &i.TimeZone)
+	return i, err
+}
+
+const getRetentionPeriods = `-- name: GetRetentionPeriods :one
+
+SELECT retention_alert_details_days, retention_alert_group_summaries_days
+FROM organizations
+WHERE id = $1
+`
+
+type GetRetentionPeriodsRow struct {
+	RetentionAlertDetailsDays        int64
+	RetentionAlertGroupSummariesDays int64
+}
+
+// Retention (C-09.FR-16; design/db/schema.md §6) deletes in batches on the Leader, the rows that already qualify only,
+// so that running it twice deletes nothing more. Details go first: the Alerts inside Alert Groups that ended
+// retention.alert_details ago; then the summary rows resolved retention.alert_group_summaries ago, with their Notes,
+// timers, deliveries and queue rows by cascade.
+// GetRetentionPeriods reads retention.alert_details and retention.alert_group_summaries, in days.
+func (q *Queries) GetRetentionPeriods(ctx context.Context, orgID int64) (GetRetentionPeriodsRow, error) {
+	row := q.db.QueryRow(ctx, getRetentionPeriods, orgID)
+	var i GetRetentionPeriodsRow
+	err := row.Scan(&i.RetentionAlertDetailsDays, &i.RetentionAlertGroupSummariesDays)
 	return i, err
 }
 
@@ -524,6 +792,85 @@ func (q *Queries) InsertTimelineEntry(ctx context.Context, arg InsertTimelineEnt
 		arg.Detail,
 	)
 	return err
+}
+
+const integrationStatistics = `-- name: IntegrationStatistics :many
+SELECT s.subject_id, s.day, (GROUPING(s.day) = 1)::boolean AS total, count(*)::bigint AS alert_group_count,
+       count(s.resolve)::bigint AS resolve_count,
+       coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.resolve), 0)::float8 AS resolve_median,
+       coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.resolve), 0)::float8 AS resolve_p95,
+       count(s.ack)::bigint AS ack_count,
+       coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.ack), 0)::float8 AS ack_median,
+       coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.ack), 0)::float8 AS ack_p95
+FROM (SELECT i.integration_id::bigint AS subject_id, (g.created_at AT TIME ZONE $1::text)::date AS day,
+             extract(epoch FROM g.resolved_at - g.created_at)::float8 AS resolve,
+             extract(epoch FROM g.first_acknowledged_at - g.created_at)::float8 AS ack
+      FROM alert_groups g
+      CROSS JOIN LATERAL unnest(g.integration_ids) AS i(integration_id)
+      WHERE g.org_id = $2 AND g.created_at >= $3::timestamptz AND g.created_at < $4::timestamptz
+        AND (cardinality($5::bigint[]) = 0 OR i.integration_id = ANY($5::bigint[]))) AS s
+GROUP BY GROUPING SETS ((s.subject_id), (s.subject_id, s.day))
+ORDER BY s.subject_id, s.day NULLS FIRST
+`
+
+type IntegrationStatisticsParams struct {
+	TimeZone       string
+	OrgID          int64
+	RangeFrom      time.Time
+	RangeTo        time.Time
+	IntegrationIds []int64
+}
+
+type IntegrationStatisticsRow struct {
+	SubjectID       int64
+	Day             pgtype.Date
+	Total           bool
+	AlertGroupCount int64
+	ResolveCount    int64
+	ResolveMedian   float64
+	ResolveP95      float64
+	AckCount        int64
+	AckMedian       float64
+	AckP95          float64
+}
+
+// IntegrationStatistics aggregates the Alert Groups per Integration — one with Alerts from several counts for each —
+// only the Integrations @integration_ids when set.
+func (q *Queries) IntegrationStatistics(ctx context.Context, arg IntegrationStatisticsParams) ([]IntegrationStatisticsRow, error) {
+	rows, err := q.db.Query(ctx, integrationStatistics,
+		arg.TimeZone,
+		arg.OrgID,
+		arg.RangeFrom,
+		arg.RangeTo,
+		arg.IntegrationIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IntegrationStatisticsRow{}
+	for rows.Next() {
+		var i IntegrationStatisticsRow
+		if err := rows.Scan(
+			&i.SubjectID,
+			&i.Day,
+			&i.Total,
+			&i.AlertGroupCount,
+			&i.ResolveCount,
+			&i.ResolveMedian,
+			&i.ResolveP95,
+			&i.AckCount,
+			&i.AckMedian,
+			&i.AckP95,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const isActiveUser = `-- name: IsActiveUser :one
@@ -847,6 +1194,575 @@ func (q *Queries) ListGroupFiringAlerts(ctx context.Context, arg ListGroupFiring
 	return items, nil
 }
 
+const listGroupsChangedAsc = `-- name: ListGroupsChangedAsc :many
+SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
+       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
+       g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
+       g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+FROM alert_groups g
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
+WHERE g.org_id = $1 AND g.status = ANY($2::text[])
+  AND ($3::bigint IS NULL OR g.number = $3::bigint)
+  AND ($3::bigint IS NOT NULL
+       OR (g.created_at < $4::timestamptz
+           AND (g.status <> 'resolved' OR (g.status = 'resolved' AND g.resolved_at >= $5::timestamptz))))
+  AND (cardinality($6::bigint[]) = 0 OR g.route_id = ANY($6::bigint[]))
+  AND (cardinality($7::bigint[]) = 0 OR g.integration_ids && $7::bigint[])
+  AND (cardinality($8::text[]) = 0 OR g.severity_level = ANY($8::text[]))
+  AND ($9::boolean IS NULL
+       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = $9::boolean)
+  AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
+  AND ($11::text IS NULL OR g.resolve_reason = $11::text)
+  AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
+  AND ($13::jsonb IS NULL OR g.common_labels @> $13::jsonb)
+  AND ($14::text IS NULL OR g.title ILIKE $14::text
+       OR g.summary ILIKE $14::text)
+  AND ($15::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) > ($15::timestamptz, $16::bigint))
+ORDER BY g.last_changed_at, g.id
+LIMIT $17
+`
+
+type ListGroupsChangedAscParams struct {
+	OrgID          int64
+	Statuses       []string
+	Number         pgtype.Int8
+	RangeTo        time.Time
+	RangeFrom      time.Time
+	RouteIds       []int64
+	IntegrationIds []int64
+	Severities     []string
+	Urgent         pgtype.Bool
+	ResolvedBy     pgtype.Text
+	ResolveReason  pgtype.Text
+	Reopened       pgtype.Bool
+	Contains       []byte
+	Pattern        pgtype.Text
+	AfterAt        pgtype.Timestamptz
+	AfterID        pgtype.Int8
+	Lim            int32
+}
+
+type ListGroupsChangedAscRow struct {
+	ID                         int64
+	PublicID                   string
+	Number                     int64
+	Title                      string
+	Summary                    pgtype.Text
+	Status                     string
+	SeverityLevel              string
+	Urgent                     bool
+	CommonLabels               []byte
+	IntegrationIds             []int64
+	ReopenCount                int64
+	FiringAlertCount           int64
+	ResolvedAlertCount         int64
+	ResolvedAt                 pgtype.Timestamptz
+	ResolvedByKind             pgtype.Text
+	ResolvedByUserID           pgtype.Int8
+	ResolvedByServiceAccountID pgtype.Int8
+	ResolveReason              pgtype.Text
+	ResolveReasonText          pgtype.Text
+	CreatedAt                  time.Time
+	LastChangedAt              time.Time
+	RoutePublicID              string
+	RouteName                  string
+}
+
+// ListGroupsChangedAsc reads a batch of the Alert Group list, earliest change first, after the cursor when given.
+func (q *Queries) ListGroupsChangedAsc(ctx context.Context, arg ListGroupsChangedAscParams) ([]ListGroupsChangedAscRow, error) {
+	rows, err := q.db.Query(ctx, listGroupsChangedAsc,
+		arg.OrgID,
+		arg.Statuses,
+		arg.Number,
+		arg.RangeTo,
+		arg.RangeFrom,
+		arg.RouteIds,
+		arg.IntegrationIds,
+		arg.Severities,
+		arg.Urgent,
+		arg.ResolvedBy,
+		arg.ResolveReason,
+		arg.Reopened,
+		arg.Contains,
+		arg.Pattern,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGroupsChangedAscRow{}
+	for rows.Next() {
+		var i ListGroupsChangedAscRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Number,
+			&i.Title,
+			&i.Summary,
+			&i.Status,
+			&i.SeverityLevel,
+			&i.Urgent,
+			&i.CommonLabels,
+			&i.IntegrationIds,
+			&i.ReopenCount,
+			&i.FiringAlertCount,
+			&i.ResolvedAlertCount,
+			&i.ResolvedAt,
+			&i.ResolvedByKind,
+			&i.ResolvedByUserID,
+			&i.ResolvedByServiceAccountID,
+			&i.ResolveReason,
+			&i.ResolveReasonText,
+			&i.CreatedAt,
+			&i.LastChangedAt,
+			&i.RoutePublicID,
+			&i.RouteName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupsChangedDesc = `-- name: ListGroupsChangedDesc :many
+SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
+       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
+       g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
+       g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+FROM alert_groups g
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
+WHERE g.org_id = $1 AND g.status = ANY($2::text[])
+  AND ($3::bigint IS NULL OR g.number = $3::bigint)
+  AND ($3::bigint IS NOT NULL
+       OR (g.created_at < $4::timestamptz
+           AND (g.status <> 'resolved' OR (g.status = 'resolved' AND g.resolved_at >= $5::timestamptz))))
+  AND (cardinality($6::bigint[]) = 0 OR g.route_id = ANY($6::bigint[]))
+  AND (cardinality($7::bigint[]) = 0 OR g.integration_ids && $7::bigint[])
+  AND (cardinality($8::text[]) = 0 OR g.severity_level = ANY($8::text[]))
+  AND ($9::boolean IS NULL
+       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = $9::boolean)
+  AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
+  AND ($11::text IS NULL OR g.resolve_reason = $11::text)
+  AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
+  AND ($13::jsonb IS NULL OR g.common_labels @> $13::jsonb)
+  AND ($14::text IS NULL OR g.title ILIKE $14::text
+       OR g.summary ILIKE $14::text)
+  AND ($15::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) < ($15::timestamptz, $16::bigint))
+ORDER BY g.last_changed_at DESC, g.id DESC
+LIMIT $17
+`
+
+type ListGroupsChangedDescParams struct {
+	OrgID          int64
+	Statuses       []string
+	Number         pgtype.Int8
+	RangeTo        time.Time
+	RangeFrom      time.Time
+	RouteIds       []int64
+	IntegrationIds []int64
+	Severities     []string
+	Urgent         pgtype.Bool
+	ResolvedBy     pgtype.Text
+	ResolveReason  pgtype.Text
+	Reopened       pgtype.Bool
+	Contains       []byte
+	Pattern        pgtype.Text
+	AfterAt        pgtype.Timestamptz
+	AfterID        pgtype.Int8
+	Lim            int32
+}
+
+type ListGroupsChangedDescRow struct {
+	ID                         int64
+	PublicID                   string
+	Number                     int64
+	Title                      string
+	Summary                    pgtype.Text
+	Status                     string
+	SeverityLevel              string
+	Urgent                     bool
+	CommonLabels               []byte
+	IntegrationIds             []int64
+	ReopenCount                int64
+	FiringAlertCount           int64
+	ResolvedAlertCount         int64
+	ResolvedAt                 pgtype.Timestamptz
+	ResolvedByKind             pgtype.Text
+	ResolvedByUserID           pgtype.Int8
+	ResolvedByServiceAccountID pgtype.Int8
+	ResolveReason              pgtype.Text
+	ResolveReasonText          pgtype.Text
+	CreatedAt                  time.Time
+	LastChangedAt              time.Time
+	RoutePublicID              string
+	RouteName                  string
+}
+
+// ListGroupsChangedDesc reads a batch of the Alert Group list, latest change first, after the cursor when given.
+func (q *Queries) ListGroupsChangedDesc(ctx context.Context, arg ListGroupsChangedDescParams) ([]ListGroupsChangedDescRow, error) {
+	rows, err := q.db.Query(ctx, listGroupsChangedDesc,
+		arg.OrgID,
+		arg.Statuses,
+		arg.Number,
+		arg.RangeTo,
+		arg.RangeFrom,
+		arg.RouteIds,
+		arg.IntegrationIds,
+		arg.Severities,
+		arg.Urgent,
+		arg.ResolvedBy,
+		arg.ResolveReason,
+		arg.Reopened,
+		arg.Contains,
+		arg.Pattern,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGroupsChangedDescRow{}
+	for rows.Next() {
+		var i ListGroupsChangedDescRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Number,
+			&i.Title,
+			&i.Summary,
+			&i.Status,
+			&i.SeverityLevel,
+			&i.Urgent,
+			&i.CommonLabels,
+			&i.IntegrationIds,
+			&i.ReopenCount,
+			&i.FiringAlertCount,
+			&i.ResolvedAlertCount,
+			&i.ResolvedAt,
+			&i.ResolvedByKind,
+			&i.ResolvedByUserID,
+			&i.ResolvedByServiceAccountID,
+			&i.ResolveReason,
+			&i.ResolveReasonText,
+			&i.CreatedAt,
+			&i.LastChangedAt,
+			&i.RoutePublicID,
+			&i.RouteName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupsStartedAsc = `-- name: ListGroupsStartedAsc :many
+SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
+       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
+       g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
+       g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+FROM alert_groups g
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
+WHERE g.org_id = $1 AND g.status = ANY($2::text[])
+  AND ($3::bigint IS NULL OR g.number = $3::bigint)
+  AND ($3::bigint IS NOT NULL
+       OR (g.created_at < $4::timestamptz
+           AND (g.status <> 'resolved' OR (g.status = 'resolved' AND g.resolved_at >= $5::timestamptz))))
+  AND (cardinality($6::bigint[]) = 0 OR g.route_id = ANY($6::bigint[]))
+  AND (cardinality($7::bigint[]) = 0 OR g.integration_ids && $7::bigint[])
+  AND (cardinality($8::text[]) = 0 OR g.severity_level = ANY($8::text[]))
+  AND ($9::boolean IS NULL
+       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = $9::boolean)
+  AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
+  AND ($11::text IS NULL OR g.resolve_reason = $11::text)
+  AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
+  AND ($13::jsonb IS NULL OR g.common_labels @> $13::jsonb)
+  AND ($14::text IS NULL OR g.title ILIKE $14::text
+       OR g.summary ILIKE $14::text)
+  AND ($15::timestamptz IS NULL
+       OR (g.created_at, g.id) > ($15::timestamptz, $16::bigint))
+ORDER BY g.created_at, g.id
+LIMIT $17
+`
+
+type ListGroupsStartedAscParams struct {
+	OrgID          int64
+	Statuses       []string
+	Number         pgtype.Int8
+	RangeTo        time.Time
+	RangeFrom      time.Time
+	RouteIds       []int64
+	IntegrationIds []int64
+	Severities     []string
+	Urgent         pgtype.Bool
+	ResolvedBy     pgtype.Text
+	ResolveReason  pgtype.Text
+	Reopened       pgtype.Bool
+	Contains       []byte
+	Pattern        pgtype.Text
+	AfterAt        pgtype.Timestamptz
+	AfterID        pgtype.Int8
+	Lim            int32
+}
+
+type ListGroupsStartedAscRow struct {
+	ID                         int64
+	PublicID                   string
+	Number                     int64
+	Title                      string
+	Summary                    pgtype.Text
+	Status                     string
+	SeverityLevel              string
+	Urgent                     bool
+	CommonLabels               []byte
+	IntegrationIds             []int64
+	ReopenCount                int64
+	FiringAlertCount           int64
+	ResolvedAlertCount         int64
+	ResolvedAt                 pgtype.Timestamptz
+	ResolvedByKind             pgtype.Text
+	ResolvedByUserID           pgtype.Int8
+	ResolvedByServiceAccountID pgtype.Int8
+	ResolveReason              pgtype.Text
+	ResolveReasonText          pgtype.Text
+	CreatedAt                  time.Time
+	LastChangedAt              time.Time
+	RoutePublicID              string
+	RouteName                  string
+}
+
+// ListGroupsStartedAsc reads a batch of the Alert Group list, oldest start first, after the cursor when given.
+func (q *Queries) ListGroupsStartedAsc(ctx context.Context, arg ListGroupsStartedAscParams) ([]ListGroupsStartedAscRow, error) {
+	rows, err := q.db.Query(ctx, listGroupsStartedAsc,
+		arg.OrgID,
+		arg.Statuses,
+		arg.Number,
+		arg.RangeTo,
+		arg.RangeFrom,
+		arg.RouteIds,
+		arg.IntegrationIds,
+		arg.Severities,
+		arg.Urgent,
+		arg.ResolvedBy,
+		arg.ResolveReason,
+		arg.Reopened,
+		arg.Contains,
+		arg.Pattern,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGroupsStartedAscRow{}
+	for rows.Next() {
+		var i ListGroupsStartedAscRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Number,
+			&i.Title,
+			&i.Summary,
+			&i.Status,
+			&i.SeverityLevel,
+			&i.Urgent,
+			&i.CommonLabels,
+			&i.IntegrationIds,
+			&i.ReopenCount,
+			&i.FiringAlertCount,
+			&i.ResolvedAlertCount,
+			&i.ResolvedAt,
+			&i.ResolvedByKind,
+			&i.ResolvedByUserID,
+			&i.ResolvedByServiceAccountID,
+			&i.ResolveReason,
+			&i.ResolveReasonText,
+			&i.CreatedAt,
+			&i.LastChangedAt,
+			&i.RoutePublicID,
+			&i.RouteName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupsStartedDesc = `-- name: ListGroupsStartedDesc :many
+
+SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
+       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
+       g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
+       g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+FROM alert_groups g
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+JOIN organizations o ON o.id = g.org_id
+WHERE g.org_id = $1 AND g.status = ANY($2::text[])
+  AND ($3::bigint IS NULL OR g.number = $3::bigint)
+  AND ($3::bigint IS NOT NULL
+       OR (g.created_at < $4::timestamptz
+           AND (g.status <> 'resolved' OR (g.status = 'resolved' AND g.resolved_at >= $5::timestamptz))))
+  AND (cardinality($6::bigint[]) = 0 OR g.route_id = ANY($6::bigint[]))
+  AND (cardinality($7::bigint[]) = 0 OR g.integration_ids && $7::bigint[])
+  AND (cardinality($8::text[]) = 0 OR g.severity_level = ANY($8::text[]))
+  AND ($9::boolean IS NULL
+       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = $9::boolean)
+  AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
+  AND ($11::text IS NULL OR g.resolve_reason = $11::text)
+  AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
+  AND ($13::jsonb IS NULL OR g.common_labels @> $13::jsonb)
+  AND ($14::text IS NULL OR g.title ILIKE $14::text
+       OR g.summary ILIKE $14::text)
+  AND ($15::timestamptz IS NULL
+       OR (g.created_at, g.id) < ($15::timestamptz, $16::bigint))
+ORDER BY g.created_at DESC, g.id DESC
+LIMIT $17
+`
+
+type ListGroupsStartedDescParams struct {
+	OrgID          int64
+	Statuses       []string
+	Number         pgtype.Int8
+	RangeTo        time.Time
+	RangeFrom      time.Time
+	RouteIds       []int64
+	IntegrationIds []int64
+	Severities     []string
+	Urgent         pgtype.Bool
+	ResolvedBy     pgtype.Text
+	ResolveReason  pgtype.Text
+	Reopened       pgtype.Bool
+	Contains       []byte
+	Pattern        pgtype.Text
+	AfterAt        pgtype.Timestamptz
+	AfterID        pgtype.Int8
+	Lim            int32
+}
+
+type ListGroupsStartedDescRow struct {
+	ID                         int64
+	PublicID                   string
+	Number                     int64
+	Title                      string
+	Summary                    pgtype.Text
+	Status                     string
+	SeverityLevel              string
+	Urgent                     bool
+	CommonLabels               []byte
+	IntegrationIds             []int64
+	ReopenCount                int64
+	FiringAlertCount           int64
+	ResolvedAlertCount         int64
+	ResolvedAt                 pgtype.Timestamptz
+	ResolvedByKind             pgtype.Text
+	ResolvedByUserID           pgtype.Int8
+	ResolvedByServiceAccountID pgtype.Int8
+	ResolveReason              pgtype.Text
+	ResolveReasonText          pgtype.Text
+	CreatedAt                  time.Time
+	LastChangedAt              time.Time
+	RoutePublicID              string
+	RouteName                  string
+}
+
+// The Alert Group list (C-09.FR-13) reads the summary rows in one of four orders. Every query runs with the plan of its
+// parameters (Store.CustomPlans), so that the filters left unset fold away and the planner picks the index of the
+// filters that are set: the partial open index for the default tab, the started or changed index for a range, the
+// trigram indexes for text, the jsonb_path_ops index for = label Matchers, the unique (org_id, number) for #N. The time
+// range selects lifetimes that overlap it — created_at < to AND (resolved_at IS NULL OR resolved_at >= from), written
+// with the status that the CHECK ties to resolved_at, so that the open index and alert_groups_resolved_idx serve it —
+// and is ignored for a number. Label Matchers other than = with a value are matched in Go on common_labels, after
+// these conditions; urgency is derived as in GetGroup.
+// ListGroupsStartedDesc reads a batch of the Alert Group list, newest start first, after the cursor when given.
+func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStartedDescParams) ([]ListGroupsStartedDescRow, error) {
+	rows, err := q.db.Query(ctx, listGroupsStartedDesc,
+		arg.OrgID,
+		arg.Statuses,
+		arg.Number,
+		arg.RangeTo,
+		arg.RangeFrom,
+		arg.RouteIds,
+		arg.IntegrationIds,
+		arg.Severities,
+		arg.Urgent,
+		arg.ResolvedBy,
+		arg.ResolveReason,
+		arg.Reopened,
+		arg.Contains,
+		arg.Pattern,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGroupsStartedDescRow{}
+	for rows.Next() {
+		var i ListGroupsStartedDescRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Number,
+			&i.Title,
+			&i.Summary,
+			&i.Status,
+			&i.SeverityLevel,
+			&i.Urgent,
+			&i.CommonLabels,
+			&i.IntegrationIds,
+			&i.ReopenCount,
+			&i.FiringAlertCount,
+			&i.ResolvedAlertCount,
+			&i.ResolvedAt,
+			&i.ResolvedByKind,
+			&i.ResolvedByUserID,
+			&i.ResolvedByServiceAccountID,
+			&i.ResolveReason,
+			&i.ResolveReasonText,
+			&i.CreatedAt,
+			&i.LastChangedAt,
+			&i.RoutePublicID,
+			&i.RouteName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIntegrationRefs = `-- name: ListIntegrationRefs :many
 SELECT id, public_id, name
 FROM integrations
@@ -875,6 +1791,44 @@ func (q *Queries) ListIntegrationRefs(ctx context.Context, arg ListIntegrationRe
 	items := []ListIntegrationRefsRow{}
 	for rows.Next() {
 		var i ListIntegrationRefsRow
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIntegrationsByPublicID = `-- name: ListIntegrationsByPublicID :many
+SELECT id, public_id, name
+FROM integrations
+WHERE org_id = $1 AND public_id = ANY($2::text[])
+`
+
+type ListIntegrationsByPublicIDParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type ListIntegrationsByPublicIDRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+}
+
+// ListIntegrationsByPublicID names Integrations, deleted ones included, by public_id.
+func (q *Queries) ListIntegrationsByPublicID(ctx context.Context, arg ListIntegrationsByPublicIDParams) ([]ListIntegrationsByPublicIDRow, error) {
+	rows, err := q.db.Query(ctx, listIntegrationsByPublicID, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIntegrationsByPublicIDRow{}
+	for rows.Next() {
+		var i ListIntegrationsByPublicIDRow
 		if err := rows.Scan(&i.ID, &i.PublicID, &i.Name); err != nil {
 			return nil, err
 		}
@@ -947,6 +1901,83 @@ func (q *Queries) ListOpenGroupsOfRoute(ctx context.Context, arg ListOpenGroupsO
 	return items, nil
 }
 
+const listRelatedGroups = `-- name: ListRelatedGroups :many
+SELECT g.id, g.public_id, g.number, g.status, g.created_at, g.resolved_at, g.resolved_by_kind, g.resolved_by_user_id,
+       g.resolved_by_service_account_id, g.resolve_reason, g.resolve_reason_text
+FROM alert_groups g
+WHERE g.org_id = $1 AND g.route_id = $2 AND g.group_key_sha256 = $3 AND g.id <> $4
+  AND ($5::timestamptz IS NULL
+       OR (g.created_at, g.id) < ($5::timestamptz, $6::bigint))
+ORDER BY g.created_at DESC, g.id DESC
+LIMIT $7
+`
+
+type ListRelatedGroupsParams struct {
+	OrgID          int64
+	RouteID        int64
+	GroupKeySha256 []byte
+	ID             int64
+	AfterAt        pgtype.Timestamptz
+	AfterID        pgtype.Int8
+	Lim            int32
+}
+
+type ListRelatedGroupsRow struct {
+	ID                         int64
+	PublicID                   string
+	Number                     int64
+	Status                     string
+	CreatedAt                  time.Time
+	ResolvedAt                 pgtype.Timestamptz
+	ResolvedByKind             pgtype.Text
+	ResolvedByUserID           pgtype.Int8
+	ResolvedByServiceAccountID pgtype.Int8
+	ResolveReason              pgtype.Text
+	ResolveReasonText          pgtype.Text
+}
+
+// ListRelatedGroups lists the other Alert Groups of a Route with the same Group key values, newest first, after the
+// cursor when given (C-09.FR-20; alert_groups_related_idx).
+func (q *Queries) ListRelatedGroups(ctx context.Context, arg ListRelatedGroupsParams) ([]ListRelatedGroupsRow, error) {
+	rows, err := q.db.Query(ctx, listRelatedGroups,
+		arg.OrgID,
+		arg.RouteID,
+		arg.GroupKeySha256,
+		arg.ID,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRelatedGroupsRow{}
+	for rows.Next() {
+		var i ListRelatedGroupsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Number,
+			&i.Status,
+			&i.CreatedAt,
+			&i.ResolvedAt,
+			&i.ResolvedByKind,
+			&i.ResolvedByUserID,
+			&i.ResolvedByServiceAccountID,
+			&i.ResolveReason,
+			&i.ResolveReasonText,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRoutePublicIDs = `-- name: ListRoutePublicIDs :many
 SELECT public_id
 FROM routes
@@ -967,6 +1998,45 @@ func (q *Queries) ListRoutePublicIDs(ctx context.Context, orgID int64) ([]string
 			return nil, err
 		}
 		items = append(items, public_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRoutesByPublicID = `-- name: ListRoutesByPublicID :many
+SELECT id, public_id, name
+FROM routes
+WHERE org_id = $1 AND public_id = ANY($2::text[])
+`
+
+type ListRoutesByPublicIDParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type ListRoutesByPublicIDRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+}
+
+// ListRoutesByPublicID names Routes, deleted ones included, by public_id: the Route filter of the list and of the
+// statistics.
+func (q *Queries) ListRoutesByPublicID(ctx context.Context, arg ListRoutesByPublicIDParams) ([]ListRoutesByPublicIDRow, error) {
+	rows, err := q.db.Query(ctx, listRoutesByPublicID, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRoutesByPublicIDRow{}
+	for rows.Next() {
+		var i ListRoutesByPublicIDRow
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1008,6 +2078,91 @@ func (q *Queries) ListServiceAccountRefs(ctx context.Context, arg ListServiceAcc
 			&i.Name,
 			&i.Status,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStatisticsIntegrations = `-- name: ListStatisticsIntegrations :many
+SELECT id, public_id, name
+FROM integrations
+WHERE org_id = $1
+  AND (CASE WHEN cardinality($2::bigint[]) > 0 THEN id = ANY($2::bigint[])
+            ELSE deleted_at IS NULL OR id = ANY($3::bigint[]) END)
+ORDER BY name, id
+`
+
+type ListStatisticsIntegrationsParams struct {
+	OrgID   int64
+	OnlyIds []int64
+	WithIds []int64
+}
+
+type ListStatisticsIntegrationsRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+}
+
+// ListStatisticsIntegrations lists the subjects of the statistics per Integration, as ListStatisticsRoutes does.
+func (q *Queries) ListStatisticsIntegrations(ctx context.Context, arg ListStatisticsIntegrationsParams) ([]ListStatisticsIntegrationsRow, error) {
+	rows, err := q.db.Query(ctx, listStatisticsIntegrations, arg.OrgID, arg.OnlyIds, arg.WithIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStatisticsIntegrationsRow{}
+	for rows.Next() {
+		var i ListStatisticsIntegrationsRow
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStatisticsRoutes = `-- name: ListStatisticsRoutes :many
+SELECT id, public_id, name
+FROM routes
+WHERE org_id = $1
+  AND (CASE WHEN cardinality($2::bigint[]) > 0 THEN id = ANY($2::bigint[])
+            ELSE deleted_at IS NULL OR id = ANY($3::bigint[]) END)
+ORDER BY name, id
+`
+
+type ListStatisticsRoutesParams struct {
+	OrgID   int64
+	OnlyIds []int64
+	WithIds []int64
+}
+
+type ListStatisticsRoutesRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+}
+
+// ListStatisticsRoutes lists the subjects of the statistics per Route: those that are not deleted and @with_ids (the
+// deleted ones with Alert Groups in the period), or only @only_ids when set.
+func (q *Queries) ListStatisticsRoutes(ctx context.Context, arg ListStatisticsRoutesParams) ([]ListStatisticsRoutesRow, error) {
+	rows, err := q.db.Query(ctx, listStatisticsRoutes, arg.OrgID, arg.OnlyIds, arg.WithIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStatisticsRoutesRow{}
+	for rows.Next() {
+		var i ListStatisticsRoutesRow
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1827,6 +2982,88 @@ func (q *Queries) ResolveMemberships(ctx context.Context, arg ResolveMemberships
 		arg.ReasonTexts,
 	)
 	return err
+}
+
+const routeStatistics = `-- name: RouteStatistics :many
+
+SELECT s.subject_id, s.day, (GROUPING(s.day) = 1)::boolean AS total, count(*)::bigint AS alert_group_count,
+       count(s.resolve)::bigint AS resolve_count,
+       coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.resolve), 0)::float8 AS resolve_median,
+       coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.resolve), 0)::float8 AS resolve_p95,
+       count(s.ack)::bigint AS ack_count,
+       coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.ack), 0)::float8 AS ack_median,
+       coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.ack), 0)::float8 AS ack_p95
+FROM (SELECT g.route_id AS subject_id, (g.created_at AT TIME ZONE $1::text)::date AS day,
+             extract(epoch FROM g.resolved_at - g.created_at)::float8 AS resolve,
+             extract(epoch FROM g.first_acknowledged_at - g.created_at)::float8 AS ack
+      FROM alert_groups g
+      WHERE g.org_id = $2 AND g.created_at >= $3::timestamptz AND g.created_at < $4::timestamptz
+        AND (cardinality($5::bigint[]) = 0 OR g.route_id = ANY($5::bigint[]))) AS s
+GROUP BY GROUPING SETS ((s.subject_id), (s.subject_id, s.day))
+ORDER BY s.subject_id, s.day NULLS FIRST
+`
+
+type RouteStatisticsParams struct {
+	TimeZone  string
+	OrgID     int64
+	RangeFrom time.Time
+	RangeTo   time.Time
+	RouteIds  []int64
+}
+
+type RouteStatisticsRow struct {
+	SubjectID       int64
+	Day             pgtype.Date
+	Total           bool
+	AlertGroupCount int64
+	ResolveCount    int64
+	ResolveMedian   float64
+	ResolveP95      float64
+	AckCount        int64
+	AckMedian       float64
+	AckP95          float64
+}
+
+// The statistics (C-09.FR-15) aggregate the summary rows that started in [@range_from, @range_to): per subject, and
+// per subject and day of start in the time zone @time_zone. Time to resolve counts the resolved ones, time to
+// acknowledge those acknowledged at least once; both are seconds, their median and 95th percentile interpolated, and 0
+// when their count is 0.
+// RouteStatistics aggregates the Alert Groups per Route, only the Routes @route_ids when set.
+func (q *Queries) RouteStatistics(ctx context.Context, arg RouteStatisticsParams) ([]RouteStatisticsRow, error) {
+	rows, err := q.db.Query(ctx, routeStatistics,
+		arg.TimeZone,
+		arg.OrgID,
+		arg.RangeFrom,
+		arg.RangeTo,
+		arg.RouteIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RouteStatisticsRow{}
+	for rows.Next() {
+		var i RouteStatisticsRow
+		if err := rows.Scan(
+			&i.SubjectID,
+			&i.Day,
+			&i.Total,
+			&i.AlertGroupCount,
+			&i.ResolveCount,
+			&i.ResolveMedian,
+			&i.ResolveP95,
+			&i.AckCount,
+			&i.AckMedian,
+			&i.AckP95,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const saveGroup = `-- name: SaveGroup :exec

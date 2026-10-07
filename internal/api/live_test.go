@@ -134,14 +134,18 @@ func TestStreamLiveUpdates(t *testing.T) {
 	}
 	hub.Send(live.Hint{Type: live.HintSystemNotices}, func(s live.Subscriber) bool { return s.Admin })
 	hub.Receive(db.Hint{OrgID: 1, Type: live.HintOrganization})
+	// Both Roles read Alert Groups, so both get their hints.
+	hub.Receive(db.Hint{OrgID: 1, Type: live.HintAlertGroup, ID: "AGAAAAAAAAAAAA"})
 	want := []string{"event: hint", "id: 1", `data: {"type":"system-notices","id":null}`, "", "event: hint", "id: 2",
-		`data: {"type":"organization","id":null}`, ""}
+		`data: {"type":"organization","id":null}`, "", "event: hint", "id: 3",
+		`data: {"type":"alert-group","id":"AGAAAAAAAAAAAA"}`, ""}
 	for _, w := range want {
 		if l := line(ar); l != w {
 			t.Errorf("Admin's stream: %q, want %q", l, w)
 		}
 	}
-	for _, w := range []string{"event: hint", "id: 1", `data: {"type":"organization","id":null}`} {
+	for _, w := range []string{"event: hint", "id: 1", `data: {"type":"organization","id":null}`, "",
+		"event: hint", "id: 2", `data: {"type":"alert-group","id":"AGAAAAAAAAAAAA"}`} {
 		if l := line(vr); l != w {
 			t.Errorf("Viewer's stream: %q, want %q", l, w)
 		}

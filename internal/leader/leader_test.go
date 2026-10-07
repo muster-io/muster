@@ -321,7 +321,8 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		names = append(names, task.Name)
 	}
 	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning",
-		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges"}
+		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges",
+		"alert_group_retention"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
@@ -355,6 +356,60 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	// Without a counter of Alert Groups the task does nothing.
 	if tasks[8].Every != AlertGroupGaugeInterval || tasks[8].Run(t.Context()) != nil {
 		t.Errorf("alert group gauges without a counter")
+	}
+	// Without a retention of Alert Groups the task does nothing.
+	if tasks[9].Every != MaintenanceInterval || tasks[9].Wake != nil || tasks[9].Run(t.Context()) != nil {
+		t.Errorf("alert group retention without a retention")
+	}
+}
+
+// TestAlertGroupRetentionTask: the Leader runs the Alert Group retention in every Organization at one business time,
+// goes on past one that fails, logs what it deleted once, and runs when the development clock moves.
+func TestAlertGroupRetentionTask(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	var log bytes.Buffer
+	var purged []int64
+	var at []time.Time
+	failed := errors.New("locked")
+	moved := &Wakes{}
+	work := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		Business:      clock.NewManual(now),
+		Log:           logging.New(&log, logging.LevelInfo),
+		AlertGroupRetention: func(_ context.Context, org int64, n time.Time) (int64, int64, error) {
+			purged, at = append(purged, org), append(at, n)
+			if org == 1 {
+				return 3, 0, failed
+			}
+			return 4, 1, nil
+		},
+		ClockMoved: moved,
+	}
+	task := Tasks(work)()[9]
+	if err := task.Run(t.Context()); !errors.Is(err, failed) || !slices.Equal(purged, []int64{1, 2}) ||
+		!at[0].Equal(now) || !at[1].Equal(now) {
+		t.Errorf("purged %v at %v: %v", purged, at, err)
+	}
+	if got := log.String(); strings.Count(got, `"event":"alert_groups_purged"`) != 1 ||
+		!strings.Contains(got, `"details":7`) || !strings.Contains(got, `"summaries":1`) {
+		t.Errorf("log %s", got)
+	}
+	moved.Wake()
+	select {
+	case <-task.Wake:
+	default:
+		t.Error("the alert group retention was not woken")
+	}
+	// Nothing deleted, nothing logged.
+	log.Reset()
+	work.AlertGroupRetention = func(context.Context, int64, time.Time) (int64, int64, error) { return 0, 0, nil }
+	if err := Tasks(work)()[9].Run(t.Context()); err != nil || log.Len() != 0 {
+		t.Errorf("an empty run = %v, log %s", err, log.String())
+	}
+	orgsErr := errors.New("down")
+	work.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
+	if err := Tasks(work)()[9].Run(t.Context()); !errors.Is(err, orgsErr) {
+		t.Errorf("retention = %v", err)
 	}
 }
 

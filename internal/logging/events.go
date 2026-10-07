@@ -378,6 +378,13 @@ var TimerFailed = newEvent("timer_failed", LevelWarn, "C-09",
 		"once its lease runs out.",
 	"kind", "error")
 
+// AlertGroupsPurged is logged when the Alert Group retention of the Leader deleted details or summary rows.
+var AlertGroupsPurged = newEvent("alert_groups_purged", LevelInfo, "C-09",
+	"The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended "+
+		"retention.alert_details ago (details, the rows deleted) and the summary rows of Alert Groups resolved "+
+		"retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).",
+	"details", "summaries")
+
 // IngestReplayed is logged when muster ingest replay set Stored Snapshots back to pending.
 var IngestReplayed = newEvent("ingest_replayed", LevelInfo, "C-06",
 	"muster ingest replay set the Stored Snapshots received within the period back to pending, for processing again: "+

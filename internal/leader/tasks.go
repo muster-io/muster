@@ -18,7 +18,7 @@ import (
 )
 
 // MaintenanceInterval is how often the hourly Leader tasks run: partition maintenance, replica pruning, short-lived
-// pruning and the retention of the Alerts view.
+// pruning, the retention of the Alerts view and the Alert Group retention.
 const MaintenanceInterval = time.Hour
 
 // BacklogInterval is how often the Leader counts the pending Stored Snapshots for muster_ingest_backlog.
@@ -118,8 +118,11 @@ type Work struct {
 	StaleScan func(ctx context.Context, orgID int64) error
 	// AlertGroupGauges sets muster_alert_groups from the open Alert Groups of the Organization orgID (C-09).
 	AlertGroupGauges func(ctx context.Context, orgID int64) error
-	// ClockMoved, in development mode, wakes the Heartbeat check and the Stale scan when the development clock moved;
-	// nil otherwise.
+	// AlertGroupRetention deletes, in batches, the details and the summary rows of the Alert Groups of the
+	// Organization orgID past their retention periods at now (C-09.FR-16) and returns how many of each it deleted.
+	AlertGroupRetention func(ctx context.Context, orgID int64, now time.Time) (details, summaries int64, err error)
+	// ClockMoved, in development mode, wakes the Heartbeat check, the Stale scan and the Alert Group retention when
+	// the development clock moved; nil otherwise.
 	ClockMoved *Wakes
 }
 
@@ -177,12 +180,13 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 
 // Tasks returns the closed list of Leader tasks (ADR-0007): partition maintenance and retention, the alive mark, the
 // pruning of replica records, the pruning of short-lived state, the ingestion backlog, the retention of the Alerts
-// view, the Heartbeat check, the Stale scan and the count of open Alert Groups. Later capabilities add theirs here: Telegram polling, the outgoing
+// view, the Heartbeat check, the Stale scan, the count of open Alert Groups and the Alert Group retention. Later
+// capabilities add theirs here: Telegram polling, the outgoing
 // heartbeat and the OIDC client secret expiry check. The Keeper calls the result at every leadership, so each one
 // starts with a takeover; the Heartbeat check waits for it, so that it measures the timeouts from the end of a
 // downtime the takeover records (C-07.FR-4).
 func Tasks(w Work) func() []Task {
-	heartbeatWake, staleWake := w.ClockMoved.channel(), w.ClockMoved.channel()
+	heartbeatWake, staleWake, retentionWake := w.ClockMoved.channel(), w.ClockMoved.channel(), w.ClockMoved.channel()
 	return func() []Task {
 		var takenOver atomic.Bool
 		return []Task{
@@ -213,6 +217,8 @@ func Tasks(w Work) func() []Task {
 				}},
 			{Name: "stale_scan", Every: StaleScanInterval, Wake: staleWake, Run: w.staleScan},
 			{Name: "alert_group_gauges", Every: AlertGroupGaugeInterval, Run: w.alertGroupGauges},
+			{Name: "alert_group_retention", Every: MaintenanceInterval, Wake: retentionWake,
+				Run: w.alertGroupRetention},
 		}
 	}
 }
@@ -229,6 +235,30 @@ func (w Work) alertGroupGauges(ctx context.Context) error {
 	var errs []error
 	for _, org := range orgs {
 		errs = append(errs, w.AlertGroupGauges(ctx, org))
+	}
+	return errors.Join(errs...)
+}
+
+// alertGroupRetention runs the Alert Group retention in every Organization at the same now, on the business clock, and
+// logs what it deleted; a failed Organization does not stop the others. Running it twice deletes nothing more.
+func (w Work) alertGroupRetention(ctx context.Context) error {
+	if w.AlertGroupRetention == nil {
+		return nil
+	}
+	orgs, err := w.Organizations(ctx)
+	if err != nil {
+		return fmt.Errorf("list the organizations for the alert group retention: %w", err)
+	}
+	now := w.Business.Now()
+	var errs []error
+	var details, summaries int64
+	for _, org := range orgs {
+		d, s, err := w.AlertGroupRetention(ctx, org, now)
+		details, summaries = details+d, summaries+s
+		errs = append(errs, err)
+	}
+	if details > 0 || summaries > 0 {
+		w.Log.Log(ctx, logging.AlertGroupsPurged, logging.F("details", details), logging.F("summaries", summaries))
 	}
 	return errors.Join(errs...)
 }

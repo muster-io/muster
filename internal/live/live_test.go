@@ -108,6 +108,31 @@ func TestHubFanOut(t *testing.T) {
 	}
 }
 
+// TestHubAlertGroupHints: the hints about Alert Groups (C-09.FR-25) reach only the streams whose identity reads Alert
+// Groups, and a restored LISTEN sends them alert-groups.
+func TestHubAlertGroupHints(t *testing.T) {
+	h, _ := newHub(nil)
+	reader, other := subscribe(t, h, Subscriber{SessionID: 1, AlertGroups: true}), subscribe(t, h,
+		Subscriber{SessionID: 2})
+	h.Receive(db.Hint{OrgID: 1, Type: HintAlertGroup, ID: "AGAAAAAAAAAAAA"})
+	h.Receive(db.Hint{OrgID: 1, Type: HintAlertGroups})
+	h.Receive(db.Hint{OrgID: 1, Type: HintOrganization})
+	if got := received(reader); !slices.Equal(got, []Hint{{Type: HintAlertGroup, ID: "AGAAAAAAAAAAAA"},
+		{Type: HintAlertGroups}, {Type: HintOrganization}}) {
+		t.Errorf("reader = %v", got)
+	}
+	if got := received(other); !slices.Equal(got, []Hint{{Type: HintOrganization}}) {
+		t.Errorf("a stream without alert-groups:read = %v", got)
+	}
+	h.Listening(true)
+	if got := received(reader); !slices.Contains(got, Hint{Type: HintAlertGroups}) {
+		t.Errorf("a restored LISTEN sent %v", got)
+	}
+	if got := received(other); slices.Contains(got, Hint{Type: HintAlertGroups}) {
+		t.Errorf("a restored LISTEN sent alert-groups to %v", got)
+	}
+}
+
 // TestHubLimits: a session gets at most MaxStreamsPerSession streams and the replica MaxStreams; a stream that falls
 // behind is closed; an unsubscribed stream frees its place.
 func TestHubLimits(t *testing.T) {
@@ -235,7 +260,7 @@ func TestStream(t *testing.T) {
 		every = d
 		return keepalive, func() {}
 	}
-	sub := subscribe(t, h, Subscriber{SessionID: 1})
+	sub := subscribe(t, h, Subscriber{SessionID: 1, AlertGroups: true})
 	var w syncWriter
 	flushes := 0
 	var mu sync.Mutex

@@ -148,7 +148,9 @@ func newIntegrationsAPI(t *testing.T) (*testAPI, *fakeIntegrations, *fakeSnapsho
 	t.Helper()
 	x, _, _, _ := newTokensAPI(t)
 	fi, fs := newFakeIntegrations(), &fakeSnapshots{}
-	x.srv.integrations, x.srv.snapshots = fi, fs
+	fg := newFakeAlertGroups()
+	fg.open = map[string]int64{integrationID: 3}
+	x.srv.integrations, x.srv.snapshots, x.srv.alertGroups = fi, fs, fg
 	return x, fi, fs
 }
 
@@ -204,7 +206,7 @@ func TestIntegrationsAPI(t *testing.T) {
 		}
 	}
 	if a = x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID, "", "Cookie", viewerCookie); a.status !=
-		http.StatusOK || a.header.Get("ETag") != `"1"` {
+		http.StatusOK || a.header.Get("ETag") != `"1"` || a.json(t)["open_alert_group_count"] != 3.0 {
 		t.Errorf("get by a viewer = %d %s", a.status, a.body)
 	}
 	if a = x.mutate(t, viewerCookie, http.MethodPost, "/api/v1/integrations", integrationBody); a.status !=

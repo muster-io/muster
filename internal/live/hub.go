@@ -20,11 +20,18 @@ import (
 const (
 	HintOrganization  = "organization"
 	HintSystemNotices = "system-notices"
+	// HintAlertGroup names an Alert Group that changed; HintAlertGroups, without an id, says that new Alert Groups
+	// may match a list (C-09.FR-25).
+	HintAlertGroup  = "alert-group"
+	HintAlertGroups = "alert-groups"
 )
 
 // resyncTypes are the hints of everything a client may hold, sent to every stream when the replica listens again
 // after a loss, because the hints sent meanwhile are gone.
-var resyncTypes = []string{HintOrganization, HintSystemNotices}
+var resyncTypes = []string{HintOrganization, HintSystemNotices, HintAlertGroups}
+
+// alertGroupHints are the hint types about Alert Groups, which only streams whose identity reads Alert Groups get.
+var alertGroupHints = map[string]bool{HintAlertGroup: true, HintAlertGroups: true}
 
 const (
 	// MaxStreams is live.max_streams: the streams one replica serves at once.
@@ -48,11 +55,18 @@ type Hint struct {
 	ID   string
 }
 
-// Subscriber is who reads a stream: the session, and whether its identity sees the notices for Admins
-// (system-status:read).
+// Subscriber is who reads a stream: the session, whether its identity sees the notices for Admins
+// (system-status:read) and whether it reads Alert Groups (alert-groups:read).
 type Subscriber struct {
-	SessionID int64
-	Admin     bool
+	SessionID   int64
+	Admin       bool
+	AlertGroups bool
+}
+
+// accepts reports whether the subscriber may get a hint of the type: the hints about Alert Groups go only to those
+// who read them.
+func (s Subscriber) accepts(hintType string) bool {
+	return !alertGroupHints[hintType] || s.AlertGroups
 }
 
 // Subscription is one stream's share of the Hub.
@@ -138,7 +152,8 @@ func (h *Hub) Streams() int {
 	return len(h.subs)
 }
 
-// Receive takes a hint of LISTEN/NOTIFY and sends it to every stream when it belongs to the Hub's Organization.
+// Receive takes a hint of LISTEN/NOTIFY and sends it to every stream that may get it when it belongs to the Hub's
+// Organization.
 func (h *Hub) Receive(n db.Hint) {
 	if n.OrgID != h.orgID {
 		return
@@ -157,13 +172,13 @@ func (h *Hub) Listening(restored bool) {
 	}
 }
 
-// Send sends hint to the streams whose subscriber to accepts, every stream when to is nil. A stream whose hints are
-// not read fast enough is closed instead.
+// Send sends hint to the streams whose subscriber to accepts, every stream when to is nil, the hints about Alert
+// Groups only to those who read them. A stream whose hints are not read fast enough is closed instead.
 func (h *Hub) Send(hint Hint, to func(Subscriber) bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for sub := range h.subs {
-		if to != nil && !to(sub.Subscriber) {
+		if (to != nil && !to(sub.Subscriber)) || !sub.accepts(hint.Type) {
 			continue
 		}
 		select {

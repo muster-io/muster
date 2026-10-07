@@ -22,6 +22,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/logging"
@@ -83,6 +84,12 @@ type fakeDB struct {
 	locked   [][]int64
 	// before runs before a query of that name, for changes that race the transaction.
 	before map[string]func()
+	// details and summaries are the retention periods in days, timeZone organization.time_zone.
+	details, summaries int64
+	timeZone           string
+	// hints are the live-update hints sent, stats the rows the statistics queries answer.
+	hints []db.Hint
+	stats []dbgen.RouteStatisticsRow
 }
 
 func newDB() *fakeDB {
@@ -92,7 +99,7 @@ func newDB() *fakeDB {
 		timers: map[string]time.Time{}, users: map[int64]dbgen.ListUserRefsRow{},
 		accounts: map[int64]dbgen.ListServiceAccountRefsRow{}, ints: map[int64]dbgen.ListIntegrationRefsRow{},
 		keys: map[int64][]string{}, fail: map[string]error{}, calls: map[string]int{}, before: map[string]func(){},
-		nextID: 100}
+		nextID: 100, details: 90, summaries: 730, timeZone: "UTC"}
 }
 
 func (f *fakeDB) call(name string) error {
@@ -596,13 +603,13 @@ func (f *fakeDB) GetGroup(_ context.Context, arg dbgen.GetGroupParams) (dbgen.Ge
 	}
 	r := f.routes[g.RouteID]
 	out := dbgen.GetGroupRow{ID: g.ID, PublicID: g.PublicID, Number: g.Number, Title: g.Title, Summary: g.Summary,
-		Status: g.Status, SeverityLevel: g.SeverityLevel, Urgent: g.Urgent, GroupKeyValues: g.GroupKeyValues,
+		Status: g.Status, SeverityLevel: g.SeverityLevel, Urgent: f.urgent(g), GroupKeyValues: g.GroupKeyValues,
 		CommonLabels: g.CommonLabels, CommonAnnotations: g.CommonAnnotations, IntegrationIds: g.IntegrationIds,
 		ReopenCount: g.ReopenCount, FiringAlertCount: g.FiringAlertCount, ResolvedAlertCount: g.ResolvedAlertCount,
 		ResolvedAt: g.ResolvedAt, ResolvedByKind: g.ResolvedByKind, ResolvedByUserID: g.ResolvedByUserID,
 		ResolvedByServiceAccountID: g.ResolvedByServiceAccountID, ResolveReason: g.ResolveReason,
 		ResolveReasonText: g.ResolveReasonText, CreatedAt: g.CreatedAt, LastChangedAt: g.LastChangedAt,
-		RoutePublicID: r.PublicID, RouteName: r.name}
+		RoutePublicID: r.PublicID, RouteName: r.name, RetentionAlertDetailsDays: f.details}
 	if g.FiringAgainAfterID.Valid {
 		out.FiringAgainAfterNumber = f.groups[g.FiringAgainAfterID.Int64].Number
 	}
@@ -619,16 +626,21 @@ func (f *fakeDB) GetGroup(_ context.Context, arg dbgen.GetGroupParams) (dbgen.Ge
 	return out, nil
 }
 
-func (f *fakeDB) GetGroupID(_ context.Context, arg dbgen.GetGroupIDParams) (int64, error) {
+func (f *fakeDB) GetGroupID(_ context.Context, arg dbgen.GetGroupIDParams) (dbgen.GetGroupIDRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.call("GetGroupID"); err != nil {
-		return 0, err
+		return dbgen.GetGroupIDRow{}, err
 	}
 	if g := f.byPublicID(arg.PublicID); g != nil {
-		return g.ID, nil
+		return dbgen.GetGroupIDRow{ID: g.ID, ResolvedAt: g.ResolvedAt, RetentionAlertDetailsDays: f.details}, nil
 	}
-	return 0, pgx.ErrNoRows
+	return dbgen.GetGroupIDRow{}, pgx.ErrNoRows
+}
+
+// urgent is the urgency of an Alert Group as the reads derive it from its Route and critical is Urgent.
+func (f *fakeDB) urgent(g *dbgen.LockGroupsRow) bool {
+	return f.routes[g.RouteID].Urgent || (g.SeverityLevel == "critical" && f.settings.CriticalIsUrgent)
 }
 
 func (f *fakeDB) ListIntegrationRefs(_ context.Context, arg dbgen.ListIntegrationRefsParams) (

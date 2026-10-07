@@ -5,7 +5,10 @@
 - Migrations: [`0001_init.up.sql`](../../internal/db/migrations/0001_init.up.sql) and
   [`0001_init.down.sql`](../../internal/db/migrations/0001_init.down.sql), then
   [`0002_stored_snapshots_replayed_at`](../../internal/db/migrations/0002_stored_snapshots_replayed_at.up.sql)
-  (`stored_snapshots.replayed_at`, S-021), in `internal/db/migrations/` — golang-migrate format, hand-written SQL,
+  (`stored_snapshots.replayed_at`, S-021) and
+  [`0003_alert_groups_firing_again_after_on_delete`](../../internal/db/migrations/0003_alert_groups_firing_again_after_on_delete.up.sql)
+  (`alert_groups.firing_again_after_id` `ON DELETE SET NULL`, S-029), in `internal/db/migrations/` — golang-migrate
+  format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
   ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md))
 - PostgreSQL 14 or newer; one extension, `pg_trgm`
@@ -820,7 +823,7 @@ Columns by concern:
 | Status | `status`, `severity_level`, `urgent`, `owner_user_id` and `acknowledged_at`, `first_acknowledged_at`, `snooze_until`, `snooze_no_end`, `snoozed_while_urgent`, `snoozed_by_user_id` or `snoozed_by_service_account_id` |
 | Resolution | `resolved_at`, `resolved_by_kind` (`user` or `system`), `resolved_by_user_id` or `resolved_by_service_account_id` (the `ActorRef` kinds), `resolve_reason` and `resolve_reason_text` |
 | Reopen window | `reopen_deadline`, `prior_status`, `prior_owner_user_id`, `prior_snooze_until`, `prior_snooze_no_end`, `prior_snoozed_while_urgent`, `prior_snoozed_by_user_id`, `prior_snoozed_by_service_account_id` |
-| Grace period | `grace_deadline`, `firing_again_after_id` ("firing again after a manual resolve of #N") |
+| Grace period | `grace_deadline`, `firing_again_after_id` ("firing again after a manual resolve of #N"; `ON DELETE SET NULL` since migration 0003, so that summary retention can delete the earlier Alert Group) |
 | Counters | `firing_alert_count`, `resolved_alert_count`, `reopen_count`, `event_seq` |
 | Timers | `first_published_at`, `ack_timeout_started_at`, `ack_timeout_notices_sent`, `unclaimed`, `reminders_sent`, `reminders_unanswered`, `last_reminder_at`, `owner_answered_at` |
 | Time | `created_at` (start), `last_changed_at` |
@@ -860,7 +863,14 @@ Indexes and the queries they serve:
 | GIN on `integration_ids` | Integration filter, statistics per Integration (an Alert Group counts for each of its Integrations) |
 
 The list's time range selects Alert Groups whose lifetime overlaps it: `created_at < $to AND (resolved_at IS NULL OR
-resolved_at >= $from)`. "Delivery problem" is not a column (delivery may not write Alert Group tables): it is an
+resolved_at >= $from)`, written with the status that the resolution `CHECK` ties to `resolved_at` — `status <>
+'resolved' OR (status = 'resolved' AND resolved_at >= $from)` — so that the partial open index and
+`alert_groups_resolved_idx` serve it. The list and count queries run as unnamed statements, planned with their
+parameters, so that the optional filters left unset fold away. A text of fewer than three characters cannot use the
+trigram indexes and is filtered row by row within the other conditions, and counts with Matchers other than `=` read
+one row per status and set of common labels in the range; both are bounded by the time range. `urgent` is the urgency judged at the last rise (S-028);
+the reads derive the urgency they show and filter by from the Route and `organizations.critical_is_urgent` as they are
+now (C-08.FR-6). "Delivery problem" is not a column (delivery may not write Alert Group tables): it is an
 `EXISTS` over `deliveries` of the Alert Group. "Details removed" is derived: `resolved_at` older than
 `retention.alert_details`.
 
@@ -1123,6 +1133,16 @@ covers. Every Leader task is idempotent (`IF NOT EXISTS`, drops of what exists),
 **Batched deletes** run on the Leader for the unpartitioned tables, in small batches (for example 5,000 rows per
 transaction by primary key ranges) so that no long transaction holds locks or bloats the tables. The cutoffs come from
 `organizations.retention_*`; the `CHECK` that summaries outlive details keeps the cascade order right.
+
+**Alert Group retention** (S-029) is the hourly Leader task `alert_group_retention`, which also runs when the
+development clock moves. Per Organization, at one business time, it deletes first the `alert_group_alerts` rows that
+ended `retention.alert_details` ago, then the `alert_groups` resolved `retention.alert_group_summaries` ago, 5,000 rows
+per statement (`FOR UPDATE SKIP LOCKED`) until a batch comes back short; their Notes, timers, deliveries and queue rows
+go by cascade. Two references between summary rows have no cascade: `firing_again_after_id` becomes null when the
+earlier Alert Group goes (migration 0003; the later one loses the notice `firing_again_after_manual_resolve`), and a
+summary row that an Alert of another Alert Group still names in `moved_to_alert_group_id` waits until that row's
+details are deleted — which, as the move happened while the target was open, is by the same run or an earlier one. The
+reads hide the details of an Alert Group resolved `retention.alert_details` ago whether or not the rows are gone yet.
 
 **Foreign keys and partitions.** Partitioned tables reference only `organizations` by foreign key. Their other
 references — `alert_group_id`, `integration_id`, `destination_id`, actors and tokens — are kept by their single writer:
