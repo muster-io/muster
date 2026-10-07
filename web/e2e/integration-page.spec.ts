@@ -331,7 +331,7 @@ test("shows learned routes, warnings, the built-in Integration and the Alerts vi
   await expect(alertRows(page).first().locator("time")).not.toHaveCount(0);
 
   // 7. The syntax is checked as typed; a regular expression that does not compile gets the server's error under the
-  // field, and the rows and the URL stay.
+  // field, against the value as typed, and the rows and the URL stay.
   const url = page.url();
   const field = page.getByRole("textbox", { name: "Label filters" });
   await field.fill('pod=~"[');
@@ -342,7 +342,7 @@ test("shows learned routes, warnings, the built-in Integration and the Alerts vi
   await field.fill('pod=~"["');
   await page.getByRole("button", { name: "Add matcher" }).click();
   await expect(page.getByTestId("matcher-error")).toHaveText(
-    /^The regular expression is not valid: error parsing regexp: missing closing \]/,
+    "The regular expression is not valid: error parsing regexp: missing closing ]: `[`",
   );
   await expect(field).toHaveAttribute("aria-invalid", "true");
   await expect(field).toHaveValue('pod=~"["');

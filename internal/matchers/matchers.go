@@ -55,6 +55,11 @@ func New(name string, op Op, value string) (Matcher, error) {
 	case Regexp, NotRegexp:
 		re, err := regexp.Compile("^(?:" + value + ")$")
 		if err != nil {
+			// The error is reported against the value as typed, not the anchored expression built from it; the
+			// anchored error remains for a value that compiles alone.
+			if _, alone := regexp.Compile(value); alone != nil {
+				err = alone
+			}
 			return Matcher{}, &RegexpError{Err: err}
 		}
 		m.re = re

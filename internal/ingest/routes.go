@@ -29,7 +29,8 @@ type routeQueries interface {
 // AlertmanagerRoute is an Alertmanager route Muster learned from the groupKeys of an Integration (C-06.FR-18).
 type AlertmanagerRoute struct {
 	RoutePath string
-	// LearnedRepeatInterval is nil before an interval is learned; ResolveByAbsenceAfter is stale_after.
+	// LearnedRepeatInterval is nil before an interval is learned, and in whole seconds; ResolveByAbsenceAfter is
+	// stale_after of that interval.
 	LearnedRepeatInterval *time.Duration
 	ResolveByAbsenceAfter time.Duration
 	TruncatedGroupCount   int64
@@ -73,7 +74,9 @@ func (v *AlertsView) Routes(ctx context.Context, integration string) ([]Alertman
 func routeOf(path string, learnedMs int64, learned bool, truncated int64) AlertmanagerRoute {
 	r := AlertmanagerRoute{RoutePath: path, TruncatedGroupCount: truncated, ResolveByAbsenceAfter: StaleAfter(nil)}
 	if learned {
-		d := time.Duration(learnedMs) * time.Millisecond
+		// The view shows whole seconds: the time to resolve by absence is derived from the rounded interval, so that
+		// it is always stale_after_factor times the interval shown, never a separately rounded product.
+		d := (time.Duration(learnedMs) * time.Millisecond).Round(time.Second)
 		r.LearnedRepeatInterval, r.ResolveByAbsenceAfter = &d, StaleAfter(&d)
 		if d > integrations.LongRepeatWarning {
 			r.LongIntervalWarning, r.RecommendedSnippet = true, RouteSnippet(path, d)

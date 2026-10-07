@@ -485,15 +485,16 @@ func TestIntegrationAlertsAPI(t *testing.T) {
 	if a.status != http.StatusBadRequest || !strings.Contains(string(a.body), "invalid_cursor") {
 		t.Errorf("a cursor of another sort = %d %s", a.status, a.body)
 	}
-	for _, tt := range []struct{ label, code, pointer string }{
-		{`instance`, "invalid_format", "/query/label/0"},
-		{`pod=~"api-(.*"`, "invalid_regex", "/query/label/0"},
+	for _, tt := range []struct{ label, code, pointer, detail string }{
+		{`instance`, "invalid_format", "/query/label/0", "one Alertmanager matcher"},
+		{`pod=~"api-(.*"`, "invalid_regex", "/query/label/0", "error parsing regexp: missing closing ): `api-(.*`"},
 	} {
 		a = x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID+"/alerts?label=a%3D%22b%22&label="+
 			url.QueryEscape(tt.label), "", "Cookie", viewerCookie)
 		want := strings.Replace(tt.pointer, "0", "1", 1)
 		if a.status != http.StatusBadRequest || !strings.Contains(string(a.body), tt.code) ||
-			!strings.Contains(string(a.body), want) {
+			!strings.Contains(string(a.body), want) || !strings.Contains(string(a.body), tt.detail) ||
+			strings.Contains(string(a.body), ")$") {
 			t.Errorf("label %s = %d %s", tt.label, a.status, a.body)
 		}
 	}
@@ -583,7 +584,7 @@ func TestAlertmanagerRoutesAPI(t *testing.T) {
 	x, _, _ := newIntegrationsAPI(t)
 	fa := &fakeAlerts{}
 	x.srv.alerts = fa
-	five := 5*time.Minute + 400*time.Millisecond
+	five := 5 * time.Minute
 	two := 2 * time.Hour
 	fa.routes = []ingest.AlertmanagerRoute{
 		{RoutePath: "{}", ResolveByAbsenceAfter: 25 * time.Hour, TruncatedGroupCount: 1},
@@ -603,7 +604,7 @@ func TestAlertmanagerRoutesAPI(t *testing.T) {
 		unlearned.TruncatedGroupCount != 1 || unlearned.LongIntervalWarning || !unlearned.RecommendedSnippet.IsNull() {
 		t.Errorf("unlearned %s", a.body)
 	}
-	if web.LearnedRepeatIntervalSeconds.MustGet() != 300 || web.ResolveByAbsenceAfterSeconds.MustGet() != 901 {
+	if web.LearnedRepeatIntervalSeconds.MustGet() != 300 || web.ResolveByAbsenceAfterSeconds.MustGet() != 900 {
 		t.Errorf("web %s", a.body)
 	}
 	if info.LearnedRepeatIntervalSeconds.MustGet() != 7200 || !info.LongIntervalWarning ||
