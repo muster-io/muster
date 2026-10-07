@@ -304,16 +304,13 @@ func TestIntegrationNanosecondStartsAt(t *testing.T) {
 			`"startsAt":"2026-10-06T11:00:00.123456789Z"}]}`)
 		e.storeAt(t, in.ID, t0, body)
 		e.storeAt(t, in.ID, t0.Add(time.Minute), body)
-		sink := newOrderSink()
+		sink := &changeSink{}
 		if n, err := e.processor("replica-a", sink).Drain(ctx); n != 2 || err != nil {
 			t.Fatalf("Drain = %d, %v", n, err)
 		}
-		var continued int
-		for _, ids := range sink.order {
-			continued += len(ids)
-		}
-		if continued != 1 {
-			t.Errorf("%d snapshots made changes, want only the first", continued)
+		// The second Snapshot lists the Alert again without a change.
+		if changes := sink.take(); len(changes) != 1 || changes[0].Kind != ingest.ChangeFired || sink.listed != 1 {
+			t.Errorf("changes %+v, %d listed; want only the firing of the first", changes, sink.listed)
 		}
 	})
 }

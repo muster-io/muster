@@ -312,7 +312,7 @@ func (e *engine) change(kind ChangeKind, a *alert) {
 		e.stats.Fired++
 	case ChangeContinued:
 		e.stats.Continued++
-	case ChangeResolved, ChangeAnnotations:
+	case ChangeResolved, ChangeAnnotations, ChangeListed:
 	}
 	e.changes = append(e.changes, pendingChange{kind: kind, alert: a})
 }
@@ -401,14 +401,34 @@ func (p *Processor) applySnapshot(ctx context.Context, q ProcessQueries, tx dbge
 				c.alert.Labels))
 		}
 	}
-	if p.sink != nil && len(out.Changes) > 0 {
-		routed, err := p.sink.AlertChanges(ctx, tx, out.Changes)
+	handed := append(slices.Clip(out.Changes), e.listed(in.StoredSnapshotID)...)
+	if p.sink != nil && len(handed) > 0 {
+		routed, err := p.sink.AlertChanges(ctx, tx, handed)
 		if err != nil {
 			return processedSnapshot{}, fmt.Errorf("hand over the alert changes: %w", err)
 		}
 		out.Routed = routed
 	}
 	return out, nil
+}
+
+// listed are the firing Alerts the Snapshot lists that did not fire in it, as ChangeListed, so that routing and
+// grouping find one that has no Route or no Alert Group.
+func (e *engine) listed(storedSnapshotID int64) []AlertChange {
+	fired := map[int64]bool{}
+	for _, c := range e.changes {
+		if c.kind == ChangeFired {
+			fired[c.alert.ID] = true
+		}
+	}
+	var out []AlertChange
+	for _, a := range e.listedAlerts {
+		if a.Status == StatusFiring && a.ID != 0 && !fired[a.ID] {
+			out = append(out, AlertChange{Kind: ChangeListed, AlertID: a.ID, Fingerprint: a.Fingerprint,
+				Episode: a.Episode, StoredSnapshotID: storedSnapshotID})
+		}
+	}
+	return out
 }
 
 // readGroup finds or creates the Alertmanager route and group of the Snapshot's groupKey; the group's row stays

@@ -80,11 +80,12 @@ func (r *Router) Invalidate() {
 	r.cached = nil
 }
 
-// AlertChanges routes the Alerts of the fired changes in the Snapshot's transaction tx; other changes are not routed.
-// It returns the Routes that took them, in evaluation order.
+// AlertChanges routes the Alerts of the fired changes in the Snapshot's transaction tx, and the listed Alerts that
+// fire without a Route, such as one that fired before routing took it; other changes are not routed. It returns the
+// Routes that took them, in evaluation order.
 func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []ingest.AlertChange) (ingest.Routed,
 	error) {
-	var ids []int64
+	var ids, listed []int64
 	seen := make(map[int64]bool, len(changes))
 	for _, c := range changes {
 		if c.Kind == ingest.ChangeFired && !seen[c.AlertID] {
@@ -92,10 +93,23 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 			ids = append(ids, c.AlertID)
 		}
 	}
-	if len(ids) == 0 {
+	for _, c := range changes {
+		if c.Kind == ingest.ChangeListed && !seen[c.AlertID] {
+			seen[c.AlertID] = true
+			listed = append(listed, c.AlertID)
+		}
+	}
+	if len(seen) == 0 {
 		return ingest.Routed{}, nil
 	}
 	q := r.queries(tx)
+	rows, err := q.ListAlertLabels(ctx, dbgen.ListAlertLabelsParams{OrgID: r.orgID, Ids: ids, ListedIds: listed})
+	if err != nil {
+		return ingest.Routed{}, fmt.Errorf("read the labels of the alerts: %w", err)
+	}
+	if len(rows) == 0 {
+		return ingest.Routed{}, nil
+	}
 	st, err := q.GetRoutingStamp(ctx, r.orgID)
 	if err != nil {
 		return ingest.Routed{}, fmt.Errorf("read the routing stamp: %w", err)
@@ -107,10 +121,6 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 	o, err := r.order(ctx, q, stamp{order: st.RouteOrderVersion, versions: st.RouteVersions})
 	if err != nil {
 		return ingest.Routed{}, err
-	}
-	rows, err := q.ListAlertLabels(ctx, dbgen.ListAlertLabelsParams{OrgID: r.orgID, Ids: ids})
-	if err != nil {
-		return ingest.Routed{}, fmt.Errorf("read the labels of the alerts: %w", err)
 	}
 	set := dbgen.SetAlertRoutesParams{OrgID: r.orgID, Ids: make([]int64, 0, len(rows)),
 		RouteIds: make([]int64, 0, len(rows)), SeverityLevels: make([]string, 0, len(rows)),

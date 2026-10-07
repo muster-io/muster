@@ -152,11 +152,14 @@ SELECT o.route_order_version,
 FROM organizations o
 WHERE o.id = @org_id;
 
--- ListAlertLabels reads the labels of Alerts, with their Static labels applied.
+-- ListAlertLabels reads the labels of Alerts, with their Static labels applied: the Alerts ids, and the Alerts
+-- listed_ids that fire without a Route.
 -- name: ListAlertLabels :many
 SELECT id, labels
 FROM alerts
-WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
+WHERE org_id = @org_id
+  AND (id = ANY(@ids::bigint[])
+       OR (id = ANY(@listed_ids::bigint[]) AND status = 'firing' AND route_id IS NULL));
 
 -- SetAlertRoutes records the Route and the Severity level of the current firing of each Alert; a route id of 0 and
 -- an empty raw value are null.

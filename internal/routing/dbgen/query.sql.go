@@ -425,12 +425,15 @@ func (q *Queries) InsertRouteMatcher(ctx context.Context, arg InsertRouteMatcher
 const listAlertLabels = `-- name: ListAlertLabels :many
 SELECT id, labels
 FROM alerts
-WHERE org_id = $1 AND id = ANY($2::bigint[])
+WHERE org_id = $1
+  AND (id = ANY($2::bigint[])
+       OR (id = ANY($3::bigint[]) AND status = 'firing' AND route_id IS NULL))
 `
 
 type ListAlertLabelsParams struct {
-	OrgID int64
-	Ids   []int64
+	OrgID     int64
+	Ids       []int64
+	ListedIds []int64
 }
 
 type ListAlertLabelsRow struct {
@@ -438,9 +441,10 @@ type ListAlertLabelsRow struct {
 	Labels []byte
 }
 
-// ListAlertLabels reads the labels of Alerts, with their Static labels applied.
+// ListAlertLabels reads the labels of Alerts, with their Static labels applied: the Alerts ids, and the Alerts
+// listed_ids that fire without a Route.
 func (q *Queries) ListAlertLabels(ctx context.Context, arg ListAlertLabelsParams) ([]ListAlertLabelsRow, error) {
-	rows, err := q.db.Query(ctx, listAlertLabels, arg.OrgID, arg.Ids)
+	rows, err := q.db.Query(ctx, listAlertLabels, arg.OrgID, arg.Ids, arg.ListedIds)
 	if err != nil {
 		return nil, err
 	}

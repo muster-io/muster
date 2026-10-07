@@ -37,6 +37,11 @@ func (s *fakeStore) ListAlertLabels(_ context.Context, arg dbgen.ListAlertLabels
 			out = append(out, dbgen.ListAlertLabelsRow{ID: id, Labels: labels})
 		}
 	}
+	for _, id := range arg.ListedIds {
+		if labels, ok := s.alerts[id]; ok && arg.OrgID == orgID && s.routed[id].Ids == nil {
+			out = append(out, dbgen.ListAlertLabelsRow{ID: id, Labels: labels})
+		}
+	}
 	return out, nil
 }
 
@@ -211,6 +216,39 @@ func TestRouter(t *testing.T) {
 	if got, err := router.AlertChanges(t.Context(), nil, []ingest.AlertChange{{Kind: ingest.ChangeResolved,
 		AlertID: 1}}); err != nil || got.IDs != nil || len(store.calls) != 0 {
 		t.Errorf("no fired change = %+v %v, queries %v", got, err, store.calls)
+	}
+}
+
+// TestRouterListed: a listed Alert that fires without a Route, such as one that fired before routing took it, is
+// routed as a newly firing one; a listed Alert that has its Route keeps it, and a Snapshot whose listed Alerts all
+// have one reads nothing else.
+func TestRouterListed(t *testing.T) {
+	svc, store, _ := newService(t)
+	router := newRouter(store)
+	a, _ := svc.Create(t.Context(), by, input("A", Matcher{"team", "=", "x"}))
+	store.alerts[1] = []byte(`{"team":"x"}`)
+	store.alerts[2] = []byte(`{"team":"x"}`)
+	if _, err := router.AlertChanges(t.Context(), nil, fired(1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Update(t.Context(), by, a.PublicID, nil, input("A", Matcher{"team", "=", "y"})); err != nil {
+		t.Fatal(err)
+	}
+	listed := []ingest.AlertChange{{Kind: ingest.ChangeListed, AlertID: 1}, {Kind: ingest.ChangeListed, AlertID: 2}}
+	got, err := router.AlertChanges(t.Context(), nil, listed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := svc.List(t.Context())
+	def := list.Routes[1]
+	if routeOfAlert(t, svc, store, 1) != "A" || routeOfAlert(t, svc, store, 2) != "Default" ||
+		!slices.Equal(got.PublicIDs, []string{def.PublicID}) {
+		t.Errorf("routes %q %q, routed %+v", routeOfAlert(t, svc, store, 1), routeOfAlert(t, svc, store, 2), got)
+	}
+	store.calls = map[string]int{}
+	if got, err := router.AlertChanges(t.Context(), nil, listed); err != nil || got.IDs != nil ||
+		store.calls["GetRoutingStamp"] != 0 || store.calls["SetAlertRoutes"] != 0 {
+		t.Errorf("all routed = %+v %v, queries %v", got, err, store.calls)
 	}
 }
 

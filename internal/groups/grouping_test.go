@@ -425,3 +425,114 @@ func TestBadRows(t *testing.T) {
 		t.Error("a bad alert group row")
 	}
 }
+
+// TestListedAlertsWithoutAlertGroup: every firing, routed Alert belongs to an Alert Group. A Snapshot that lists
+// firing Alerts without a change groups those that fire in none — such as Alerts that fired before grouping existed
+// — as if they had just fired: one joins the open Alert Group of its key with a Loud alerts_added, another starts a
+// new one with `created`; an Alert without a Route stays out. The same Snapshot again changes nothing and takes no
+// lock.
+func TestListedAlertsWithoutAlertGroup(t *testing.T) {
+	h := newHarness(t)
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "1"})
+	h.changes(t, ingest.ChangeFired, a)
+	g1 := h.groupOf(t, a)
+	b := h.alert(2, "critical", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+	c := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "y"})
+	u := h.alert(0, "warning", map[string]string{"alertname": "U"})
+	out := h.changes(t, ingest.ChangeListed, a, b, c, u)
+	g2 := h.groupOf(t, c)
+	if h.groupOf(t, b) != g1 || g2 == g1 || g2.Number != 2 || len(h.db.groups) != 2 {
+		t.Fatalf("grouped into #%d and #%d, %d alert groups", h.groupOf(t, b).Number, g2.Number, len(h.db.groups))
+	}
+	if !slices.Equal(h.events(g1), []string{"created", "alerts_added", "urgency_raised"}) {
+		t.Errorf("events of #1 %v", h.events(g1))
+	}
+	added := h.entriesOf(g1)[1]
+	if added.Event.String != "alerts_added" || added.Loudness.String != "loud" ||
+		!slices.Equal(added.Fingerprints, []string{fingerprintOf(b)}) || g1.FiringAlertCount != 2 ||
+		g1.SeverityLevel != "critical" {
+		t.Errorf("alerts_added %+v, alert group %+v", added.InsertTimelineEntryParams, g1)
+	}
+	if !slices.Equal(h.events(g2), []string{"created"}) || g2.FiringAlertCount != 1 {
+		t.Errorf("events of #2 %v", h.events(g2))
+	}
+	for _, m := range h.db.members {
+		if m.alert == u {
+			t.Errorf("an alert without a route was grouped")
+		}
+	}
+	if !slices.Equal(out.AlertGroups, []int64{1, 2}) {
+		t.Errorf("routed %+v", out)
+	}
+	entries, members := len(h.db.entries), len(h.db.members)
+	h.db.calls = map[string]int{}
+	out = h.changes(t, ingest.ChangeListed, a, b, c)
+	if len(h.db.entries) != entries || len(h.db.members) != members || out.AlertGroups != nil ||
+		h.db.calls["LockRoutes"]+h.db.calls["LockCounter"]+h.db.calls["LockGroups"]+h.db.calls["ListChangedAlerts"] != 0 {
+		t.Errorf("a repeat changed %d entries, %d members, routed %+v, calls %v", len(h.db.entries)-entries,
+			len(h.db.members)-members, out, h.db.calls)
+	}
+	// A listed Alert with a change of its own and no Alert Group is grouped too; the change applies to nothing.
+	d := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "z"})
+	if _, err := h.svc.AlertChanges(t.Context(), nil, []ingest.AlertChange{{Kind: ingest.ChangeContinued, AlertID: d},
+		{Kind: ingest.ChangeListed, AlertID: d}}); err != nil {
+		t.Fatal(err)
+	}
+	if g := h.groupOf(t, d); g.Number != 3 || !slices.Equal(h.events(g), []string{"created"}) {
+		t.Errorf("alert with a continuation: #%d %v", g.Number, h.events(g))
+	}
+}
+
+// TestListedAlertGroupedMeanwhile: a listed Alert that another transaction groups while this one waits for the counter
+// row is left where it went: one membership, and its Alert Group neither locked nor changed again.
+func TestListedAlertGroupedMeanwhile(t *testing.T) {
+	h := newHarness(t)
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "y"})
+	h.db.before["LockCounter"] = func() {
+		h.changes(t, ingest.ChangeFired, a)
+	}
+	h.db.locked = nil
+	out := h.changes(t, ingest.ChangeListed, a, b)
+	ga, gb := h.groupOf(t, a), h.groupOf(t, b)
+	count := 0
+	for _, m := range h.db.members {
+		if m.alert == a {
+			count++
+		}
+	}
+	if count != 1 || ga == gb || !slices.Equal(h.events(ga), []string{"created"}) || len(h.db.groups) != 2 ||
+		!slices.Equal(out.AlertGroups, []int64{gb.Number}) {
+		t.Errorf("memberships of a %d, events %v, %d alert groups, routed %+v", count, h.events(ga), len(h.db.groups),
+			out)
+	}
+	for _, ids := range h.db.locked {
+		if slices.Contains(ids, ga.ID) {
+			t.Errorf("locked #%d: %v", ga.Number, h.db.locked)
+		}
+	}
+	// Grouped meanwhile with nothing else to group: nothing is created.
+	c := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "w"})
+	h.db.before["LockCounter"] = func() {
+		h.changes(t, ingest.ChangeFired, c)
+	}
+	if out := h.changes(t, ingest.ChangeListed, c); out.AlertGroups != nil || len(h.db.groups) != 3 {
+		t.Errorf("routed %+v, %d alert groups", out, len(h.db.groups))
+	}
+}
+
+// TestListedFailures: a failing read of where the listed Alerts fire fails the Snapshot, before and under the counter
+// row.
+func TestListedFailures(t *testing.T) {
+	h := newHarness(t)
+	a := h.alert(2, "warning", map[string]string{"alertname": "A"})
+	h.db.fail["ListFiringMemberships"] = errBoom
+	if _, err := h.apply(ingest.ChangeListed, a); !errors.Is(err, errBoom) {
+		t.Errorf("before the counter = %v", err)
+	}
+	delete(h.db.fail, "ListFiringMemberships")
+	h.db.before["LockCounter"] = func() { h.db.fail["ListFiringMemberships"] = errBoom }
+	if _, err := h.apply(ingest.ChangeListed, a); !errors.Is(err, errBoom) {
+		t.Errorf("under the counter = %v", err)
+	}
+}
