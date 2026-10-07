@@ -7,7 +7,6 @@ layer: L1
 depends_on: [S-019, S-027, S-030]
 covers: [C-09.FR-15, C-09.FR-19, C-09.FR-21, C-09.FR-4, C-09.FR-5, C-09.FR-9, C-09.AC-17, C-06.FR-19, C-08.FR-1]
 files_touched:
-  - web/package.json
   - web/src/routes/statistics.tsx
   - web/src/components/statistics-table.tsx
   - web/src/components/statistics-chart.tsx
@@ -17,14 +16,15 @@ files_touched:
   - web/src/components/route-delete-dialog.tsx
   - web/src/components/integration-delete-dialog.tsx
   - web/src/components/integration-alerts.tsx
+  - web/src/components/alert-group-filters.tsx
   - web/src/components/app-shell.tsx
   - web/src/components/app-shell.test.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
-  - NOTICE
   - web/e2e/statistics.spec.ts
   - web/e2e/route-delete.spec.ts
   - web/e2e/integration-page.spec.ts
+  - web/e2e/integrations.spec.ts
 acceptance:
   - "[C-09.FR-15, C-09.AC-17] The statistics page shows, per Route or per Integration and for a chosen period, the number of Alert Groups and the median and 95th percentile of time to acknowledge and time to resolve, as totals and per day; for a Route whose three Alert Groups resolved 10, 20 and 30 minutes after they started it shows 3 and a median time to resolve of 20 min, and the same Alert Groups under their Integration."
   - "[C-09.FR-19] Deleting a Route with open Alert Groups shows \"This route has N open Alert Groups. Move them to the Default route to delete it.\"; \"Move and delete\" moves them and deletes the Route, and each moved Alert Group's Timeline shows the move."
@@ -61,12 +61,12 @@ issue: 31
   or "By integration"; the items to show (all by default); the period ("Last 7 days" by default, "Last 30 days", "Last
   90 days", "Custom"); the request passes the profile's time zone, so days split where the user's days do. A table per
   item: "Alert Groups", "Time to acknowledge" and "Time to resolve" with the median and the 95th percentile as durations
-  ("—" without data); expanding an item shows its days as a bar chart of the count with the medians beside it. The chart
-  library is under the shipped licence list and listed in NOTICE, and works under the Content Security Policy of the
-  app listener, `style-src 'self'` (`internal/server/spa.go`): it injects no `<style>` element and sets no `style`
-  attribute from markup — a library that needs either is not used; bars drawn as SVG or with Tailwind classes are
-  fine. `statistics.spec.ts` collects violations with `watchCsp` (`web/e2e/support.ts`) and expects none. The period
-  and the choice are kept in the URL.
+  ("—" without data); expanding an item shows its days as a bar chart of the count with the medians beside it. The bars
+  are drawn as SVG by the page itself, with no chart library; a library added later must be under the shipped licence
+  list, be listed in NOTICE and work under the Content Security Policy of the app listener, `style-src 'self'`
+  (`internal/server/spa.go`): it injects no `<style>` element and sets no `style` attribute from markup — a library
+  that needs either is not used; bars drawn as SVG or with Tailwind classes are fine. `statistics.spec.ts` collects
+  violations with `watchCsp` (`web/e2e/support.ts`) and expects none. The period and the choice are kept in the URL.
 - **Lifecycle section** (C-09.FR-4, FR-5, FR-9): in `route-form.tsx`, "Reopen window" and "Grace period" in minutes
   (`policy.reopen_window_seconds`, `policy.grace_period_seconds`) with the hints "An alert with the same key firing
   this soon after Muster resolved the Alert Group reopens it." and "After a person resolves an Alert Group, alerts that

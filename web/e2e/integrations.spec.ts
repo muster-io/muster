@@ -255,8 +255,9 @@ test("creates an Integration with a token, receives webhooks, edits, revokes and
   const confirm = page.getByRole("dialog");
   await expect(confirm.getByRole("heading", { name: "Delete integration prod-eu?" })).toBeVisible();
   await expect(confirm.getByText(/Its tokens stop working at once\./)).toBeVisible();
+  // The Alert of the webhook above is in an open Alert Group, which the deletion resolves (C-09.FR-21).
   await expect(confirm.getByTestId("integration-delete-description")).toHaveText(
-    "Its tokens stop working at once. Its Stored Snapshots are kept for 14 days.",
+    "Its tokens stop working at once. Its Stored Snapshots are kept for 14 days. 1 open Alert Group will be resolved.",
   );
   await shot(page, "integration-delete-dialog");
   await confirm.getByRole("button", { name: "Delete" }).click();

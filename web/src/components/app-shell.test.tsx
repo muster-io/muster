@@ -23,7 +23,7 @@ import { type SessionRead, safeReturnTo } from "../lib/api";
 import { connectLiveUpdates } from "../lib/live";
 import { browserTimeZone, formatTime } from "../lib/time";
 import { guardTarget } from "../routes/__root";
-import { Navigation, type NavEntry, visibleEntries } from "./app-shell";
+import { NAVIGATION, Navigation, type NavEntry, visibleEntries } from "./app-shell";
 import { NoticeBanners } from "./notice-banners";
 
 /** A stand-in for the browser's EventSource that the test drives. */
@@ -101,9 +101,12 @@ describe("navigation", () => {
     ]);
   });
 
-  async function renderNavigation(permissions: Permission[]) {
+  async function renderNavigation(
+    permissions: Permission[],
+    shownEntries: readonly NavEntry[] = entries,
+  ) {
     const rootRoute = createRootRoute({
-      component: () => <Navigation entries={entries} permissions={permissions} />,
+      component: () => <Navigation entries={shownEntries} permissions={permissions} />,
     });
     const router = createRouter({
       routeTree: rootRoute,
@@ -122,6 +125,19 @@ describe("navigation", () => {
 
     const holding = await renderNavigation(["alert-groups:read"]);
     await expect.element(holding.getByRole("link", { name: "Alert Groups" })).toBeVisible();
+  });
+
+  test("Statistics follows Alert Groups and needs alert-groups:read", async () => {
+    const index = NAVIGATION.findIndex((e) => e.to === "/statistics");
+    expect(NAVIGATION[index - 1]?.to).toBe("/alert-groups");
+    expect(NAVIGATION[index]?.permission).toBe("alert-groups:read");
+
+    const shown = await renderNavigation(["alert-groups:read"], NAVIGATION);
+    await expect.element(shown.getByRole("link", { name: "Statistics" })).toBeVisible();
+    await shown.unmount();
+
+    const without = await renderNavigation([], NAVIGATION);
+    await expect.element(without.getByRole("link", { name: "Statistics" })).not.toBeInTheDocument();
   });
 });
 
@@ -187,6 +203,32 @@ describe("translations", () => {
     expect(tr("errors.tooManyAttempts", { count: 3 })).toContain("3 секунды");
     expect(tr("errors.tooManyAttempts", { count: 5 })).toContain("5 секунд");
     expect(tr("errors.tooManyAttempts", { count: 21 })).toContain("21 секунду");
+  });
+
+  test("the open Alert Groups of the delete dialogs, in both languages", () => {
+    const en = i18n.getFixedT("en");
+    expect(en("routes.delete.openAlertGroups", { count: 2 })).toBe(
+      "This route has 2 open Alert Groups. Move them to the Default route to delete it.",
+    );
+    expect(en("integrations.delete.openAlertGroups", { count: 2 })).toBe(
+      "2 open Alert Groups will be resolved.",
+    );
+    expect(en("integrations.delete.openAlertGroups", { count: 1 })).toBe(
+      "1 open Alert Group will be resolved.",
+    );
+    const ru = i18n.getFixedT("ru");
+    expect(ru("integrations.delete.openAlertGroups", { count: 1 })).toBe(
+      "Будет закрыта 1 открытая группа алертов.",
+    );
+    expect(ru("integrations.delete.openAlertGroups", { count: 2 })).toBe(
+      "Будут закрыты 2 открытые группы алертов.",
+    );
+    expect(ru("integrations.delete.openAlertGroups", { count: 5 })).toBe(
+      "Будут закрыты 5 открытых групп алертов.",
+    );
+    expect(ru("routes.delete.openAlertGroups", { count: 21 })).toContain(
+      "21 открытая группа алертов",
+    );
   });
 });
 
