@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/muster-io/muster/internal/devmode"
 )
@@ -231,12 +233,16 @@ func TestCommands(t *testing.T) {
 	for _, c := range []string{"s1", "s2", "s3"} {
 		alert("stats", c, c, "")
 	}
+	// The business clock follows the real one between the moves, so each time to acknowledge is the moves plus the
+	// real time the requests took, at most elapsed.
+	began := time.Now()
 	notify("new alerts added")
 	s1, s2, s3 := groupOf("s1"), groupOf("s2"), groupOf("s3")
 	advance(t, r, 300)
 	command(s1, "acknowledge", "", http.StatusOK)
 	advance(t, r, 600)
 	command(s2, "acknowledge", "", http.StatusOK)
+	elapsed := math.Ceil(time.Since(began).Seconds())
 	command(s2, "unacknowledge", "", http.StatusOK)
 	advance(t, r, 60)
 	command(s2, "acknowledge", "", http.StatusOK)
@@ -256,7 +262,8 @@ func TestCommands(t *testing.T) {
 	st := read("/api/v1/alert-group-statistics?group_by=route&route=" + stats)
 	item := st["items"].([]any)[0].(map[string]any)
 	ack := item["time_to_acknowledge"].(map[string]any)
-	if ack["count"] != 2.0 || ack["median_seconds"] != 600.0 {
+	median, _ := ack["median_seconds"].(float64)
+	if ack["count"] != 2.0 || median < 600 || median > 600+elapsed {
 		t.Errorf("time to acknowledge = %v", ack)
 	}
 	t.Logf("statistics of the route: alert_group_count=%v time_to_acknowledge=%v", item["alert_group_count"], ack)

@@ -36,6 +36,7 @@ files_touched:
   - internal/logging/events.go
   - internal/runtime/runtime.go
   - test/e2e/commands_test.go
+  - test/e2e/alert_group_list_test.go
 acceptance:
   - "[C-10.FR-1, C-10.FR-3, C-10.FR-5, C-10.FR-11] Acknowledge, Unacknowledge, Resolve, Unresolve, Snooze and Unsnooze change an Alert Group as the table of C-10.FR-1 says, through the dispatcher, with the Transport `ui` from a session and `api` from a token; status changes made by a person are Quiet; the dispatcher also records the Transports `mattermost` and `telegram` that S-061 and S-042 pass in."
   - "[C-09.FR-1] `getAlertGroup` and the items of `listAlertGroups` carry `owner`, `snooze_until` and `snoozed_by` as the Commands set them."
