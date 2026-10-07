@@ -23,6 +23,10 @@ const (
 	ChangeContinued ChangeKind = "continued"
 	// ChangeAnnotations is a change in the annotations of a firing Alert (C-06.FR-12).
 	ChangeAnnotations ChangeKind = "annotations_changed"
+	// ChangeListed is no change: a firing Alert that the Snapshot lists without firing it. It is handed over so that
+	// every firing Alert gets its Route and its Alert Group, also one that fired before routing or grouping took it,
+	// or whose grouping a failure or a configuration change left undone; Alerts that have both ignore it.
+	ChangeListed ChangeKind = "listed"
 )
 
 // AlertChange is one change of an Alert, made by the Stored Snapshot StoredSnapshotID.
@@ -57,7 +61,7 @@ func (r Routed) committed(ctx context.Context) {
 
 // Sink takes the Alert changes of a Snapshot inside the Snapshot's transaction, tx, which it may write through; an
 // error rolls the Snapshot back. Routing (C-08) attaches here and says which Routes took the newly firing Alerts;
-// grouping (C-09) follows it.
+// grouping (C-09) follows it. A Snapshot also hands over its firing Alerts that did not fire in it, as ChangeListed.
 type Sink interface {
 	AlertChanges(ctx context.Context, tx dbgen.DBTX, changes []AlertChange) (Routed, error)
 }

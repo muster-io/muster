@@ -705,3 +705,158 @@ func TestIntegrationGauges(t *testing.T) {
 		}
 	})
 }
+
+// TestIntegrationListedAlertsWithoutAlertGroup: every firing, routed Alert belongs to an Alert Group. Alerts that
+// fired before grouping took them — routed but in no Alert Group, or not even routed — are grouped by the next
+// Snapshot that lists them without a change, as one `created` entry; that Snapshot again changes nothing.
+func TestIntegrationListedAlertsWithoutAlertGroup(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		r := e.route(t, "db", "db", "alertname")
+		const s1 = "2026-10-07T11:00:00Z"
+		a := alert("firing", s1, "alertname", "DiskFull", "team", "db", "pod", "a")
+		b := alert("firing", s1, "alertname", "DiskFull", "team", "db", "pod", "b")
+		c := alert("firing", s1, "alertname", "Other", "team", "db", "pod", "c")
+		const gkc = `{}:{alertname=\"Other\"}`
+		// Before routing and grouping existed: a and b are routed only, c is neither.
+		if err := e.snapshot(t, ingest.Chain(e.router), gk, a, b); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.snapshot(t, nil, gkc, c); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_groups`); n != 0 {
+			t.Fatalf("%d alert groups before grouping", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alerts WHERE route_id IS NULL`); n != 1 {
+			t.Fatalf("%d alerts without a route", n)
+		}
+		e.clock.Advance(5 * time.Minute)
+		e.process(t, gk, a, b)
+		e.process(t, gkc, c)
+		ga, gc := e.groupOf(t, "a"), e.groupOf(t, "c")
+		if e.groupOf(t, "b") != ga || ga == gc {
+			t.Fatalf("groups %s %s %s", ga, e.groupOf(t, "b"), gc)
+		}
+		va, err := e.groups.Get(t.Context(), ga)
+		if err != nil {
+			t.Fatal(err)
+		}
+		vc, err := e.groups.Get(t.Context(), gc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if va.Route.PublicID != r.PublicID || va.FiringCount != 2 || va.Status != "firing" ||
+			vc.Route.PublicID != r.PublicID || vc.FiringCount != 1 {
+			t.Errorf("alert groups %+v %+v", va, vc)
+		}
+		if !slices.Equal(e.events(t, ga), []string{"created"}) || !slices.Equal(e.events(t, gc), []string{"created"}) {
+			t.Errorf("events %v %v", e.events(t, ga), e.events(t, gc))
+		}
+		state := func() [3]int64 {
+			return [3]int64{e.count(t, `SELECT count(*) FROM alert_groups`),
+				e.count(t, `SELECT count(*) FROM alert_group_alerts`), e.count(t, `SELECT count(*) FROM timeline_entries`)}
+		}
+		before := state()
+		e.clock.Advance(5 * time.Minute)
+		e.process(t, gk, a, b)
+		e.process(t, gkc, c)
+		if after := state(); after != before || before != [3]int64{2, 3, 2} {
+			t.Errorf("a repeat changed %v to %v", before, after)
+		}
+	})
+}
+
+// TestIntegrationListedAlertRace: two workers that find the same firing Alert, or two Alerts of one key, without an
+// Alert Group group them once — one Alert Group, one membership each, one `created` — whichever commits first.
+func TestIntegrationListedAlertRace(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		r := e.route(t, "db", "db", "alertname")
+		var x int64
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO alerts (org_id, integration_id, fingerprint, labels, annotations,
+			status, starts_at, fired_at, first_seen_at, last_seen_at, updated_at, route_id, severity_level)
+			VALUES ($1, $2, 'x', '{"alertname":"X","team":"db","pod":"x"}', '{}', 'firing', $3, $3, $3, $3, $3, $4,
+			'warning') RETURNING id`, e.orgID, e.intID, t0, r.ID).Scan(&x); err != nil {
+			t.Fatal(err)
+		}
+		listed := []ingest.AlertChange{{Kind: ingest.ChangeListed, AlertID: x}}
+		first, err := e.d.Pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.sink.AlertChanges(ctx, first, listed); err != nil {
+			t.Fatal(err)
+		}
+		second := make(chan error, 1)
+		go func() {
+			second <- pgx.BeginFunc(ctx, e.d.Pool, func(tx pgx.Tx) error {
+				_, err := e.sink.AlertChanges(ctx, tx, listed)
+				return err
+			})
+		}()
+		select {
+		case err := <-second:
+			t.Fatalf("the second worker did not wait for the counter: %v", err)
+		case <-time.After(300 * time.Millisecond):
+		}
+		if err := first.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-second; err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_group_alerts WHERE alert_id = $1`, x); n != 1 {
+			t.Errorf("%d memberships", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_groups WHERE title = 'X'`); n != 1 {
+			t.Errorf("%d alert groups", n)
+		}
+		if ev := e.events(t, e.groupOf(t, "x")); !slices.Equal(ev, []string{"created"}) {
+			t.Errorf("events %v", ev)
+		}
+		// Two Integrations list an Alert of one key each, routed and in no Alert Group, on two workers at once.
+		other, err := e.ints.Create(ctx, integrations.Requester{Actor: audit.System, Transport: audit.TransportSystem},
+			integrations.Input{Name: "lab2", ConnectionMode: "webhook_only", DuplicateWindowSeconds: 45})
+		if err != nil {
+			t.Fatal(err)
+		}
+		const s1 = "2026-10-07T11:00:00Z"
+		body := `{"groupKey":"{}:{alertname=\"Race\"}","status":"firing","alerts":[` + alert("firing", s1,
+			"alertname", "Race", "team", "db", "pod", "r") + `]}`
+		drain := func(sink ingest.Sink) {
+			var wg sync.WaitGroup
+			for _, owner := range []string{"r1", "r2"} {
+				p := ingest.NewProcessor(ingest.ProcessorConfig{OrgID: e.orgID, Store: ingest.NewProcessStore(e.d.Pool),
+					Business: e.clock, Log: logging.New(&bytes.Buffer{}, logging.LevelInfo), Sink: sink,
+					Lease: db.Lease{Owner: owner, Duration: ingest.Lease, Clocks: clock.Clocks{Business: e.clock,
+						Real: clock.Real{}}}})
+				wg.Go(func() { _, _ = p.Drain(ctx) })
+			}
+			wg.Wait()
+		}
+		store := func() {
+			for _, id := range []int64{e.intID, other.ID} {
+				if _, err := e.snaps.Store(ctx, ingest.Received{IntegrationID: id, Body: []byte(body)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		store()
+		drain(ingest.Chain(e.router))
+		e.clock.Advance(5 * time.Minute)
+		store()
+		drain(e.sink)
+		if n := e.count(t, `SELECT count(*) FROM alert_groups WHERE title = 'Race'`); n != 1 {
+			t.Errorf("%d alert groups for one key", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_group_alerts m JOIN alert_groups g ON g.id = m.alert_group_id
+			WHERE g.title = 'Race' AND m.state = 'firing'`); n != 2 {
+			t.Errorf("%d memberships", n)
+		}
+		if e.count(t, `SELECT count(*) FROM stored_snapshots WHERE state <> 'processed'`) != 0 {
+			t.Error("a racing snapshot did not process")
+		}
+	})
+}

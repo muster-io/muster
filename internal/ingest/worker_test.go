@@ -383,7 +383,8 @@ func TestProcessPending(t *testing.T) {
 			t.Errorf("change %+v", c)
 		}
 	}
-	if !slices.Equal(kinds, []string{"fired:db-a", "fired:db-b", "resolved:db-a"}) {
+	// The third Snapshot lists db-b firing again: no change, handed over as listed for routing and grouping.
+	if !slices.Equal(kinds, []string{"fired:db-a", "fired:db-b", "resolved:db-a", "listed:db-b"}) {
 		t.Errorf("sink %v", kinds)
 	}
 	var names []string

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 
@@ -81,8 +82,9 @@ func (s *Service) routePublicID(ctx context.Context, q Queries, id int64) (strin
 // AlertChanges is the grouping Sink (C-09.FR-3): in the Snapshot's transaction tx, after routing, the newly firing
 // Alerts join the open Alert Group of their Route and Group key, reopen a system-resolved one inside its Reopen
 // window or start a new one; Continuations, annotation changes and resolutions apply to the Alert Group each Alert
-// fires in. It returns the #N of the Alert Groups it created or changed, and what to count and log once the
-// Snapshot committed.
+// fires in. Every firing, routed Alert belongs to an Alert Group: a listed Alert that fires in none — it fired before
+// grouping existed, or a failure or a configuration change left it out — is grouped as if it had just fired. It
+// returns the #N of the Alert Groups it created or changed, and what to count and log once the Snapshot committed.
 func (s *Service) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []ingest.AlertChange) (ingest.Routed,
 	error) {
 	e := s.newEngine(s.queries(tx), tx)
@@ -170,9 +172,13 @@ type engine struct {
 	defaultRoute  *routeInfo
 	policies      map[int64]*routeInfo
 	counterLocked bool
+	// recheck reads again, under the counter row, where the Alerts to group fire.
+	recheck bool
 
-	alerts   map[int64]*alertRow
-	firing   map[int64]*membership
+	alerts map[int64]*alertRow
+	firing map[int64]*membership
+	// listed are the Alerts handed over only as listed, which grouping takes when they fire in no Alert Group.
+	listed   map[int64]bool
 	slots    []*slot
 	groups   map[int64]*Group
 	batches  map[int64]*batch
@@ -194,12 +200,9 @@ func (s *Service) newEngine(q Queries, tx dbgen.DBTX) *engine {
 
 // changes applies the Alert changes of a Snapshot.
 func (e *engine) changes(ctx context.Context, changes []ingest.AlertChange) error {
-	if len(changes) == 0 {
-		return nil
-	}
-	ids := make([]int64, 0, len(changes))
-	for _, c := range changes {
-		ids = append(ids, c.AlertID)
+	ids, err := e.handed(ctx, changes)
+	if err != nil || len(ids) == 0 {
+		return err
 	}
 	if err := e.loadAlerts(ctx, ids); err != nil {
 		return err
@@ -208,12 +211,15 @@ func (e *engine) changes(ctx context.Context, changes []ingest.AlertChange) erro
 	seen := map[int64]bool{}
 	for _, c := range changes {
 		a := e.alerts[c.AlertID]
-		if c.Kind != ingest.ChangeFired || a == nil || !a.Firing || seen[a.ID] || e.firing[a.ID] != nil {
+		if a == nil || !a.Firing || seen[a.ID] || e.firing[a.ID] != nil {
 			continue
 		}
-		seen[a.ID] = true
-		fired = append(fired, a)
+		if c.Kind == ingest.ChangeFired || (c.Kind == ingest.ChangeListed && a.RouteID != 0) {
+			seen[a.ID] = true
+			fired = append(fired, a)
+		}
 	}
+	e.recheck = true
 	if err := e.place(ctx, fired); err != nil {
 		return err
 	}
@@ -224,6 +230,36 @@ func (e *engine) changes(ctx context.Context, changes []ingest.AlertChange) erro
 		e.member(c)
 	}
 	return e.apply(ctx)
+}
+
+// handed are the Alerts of the changes that grouping reads: those of every change, and the listed ones that fire in
+// no Alert Group, which it groups.
+func (e *engine) handed(ctx context.Context, changes []ingest.AlertChange) ([]int64, error) {
+	changed, listed := map[int64]bool{}, map[int64]bool{}
+	for _, c := range changes {
+		if c.Kind == ingest.ChangeListed {
+			listed[c.AlertID] = true
+		} else {
+			changed[c.AlertID] = true
+		}
+	}
+	for id := range changed {
+		delete(listed, id)
+	}
+	ids := slices.Sorted(maps.Keys(changed))
+	if len(listed) == 0 {
+		return ids, nil
+	}
+	only := slices.Sorted(maps.Keys(listed))
+	ms, err := e.q.ListFiringMemberships(ctx, dbgen.ListFiringMembershipsParams{OrgID: e.s.orgID, AlertIds: only})
+	if err != nil {
+		return nil, fmt.Errorf("read where the listed alerts fire: %w", err)
+	}
+	for _, m := range ms {
+		delete(listed, m.AlertID)
+	}
+	e.listed = listed
+	return append(ids, slices.Sorted(maps.Keys(listed))...), nil
 }
 
 // loadAlerts reads the Alerts and where they fire.
@@ -304,7 +340,39 @@ func (e *engine) place(ctx context.Context, fired []*alertRow) error {
 			return err
 		}
 	}
+	if e.recheck {
+		if err := e.unplace(ctx); err != nil {
+			return err
+		}
+	}
 	return e.discover(ctx)
+}
+
+// unplace takes out of the slots the Alerts that fire in an Alert Group after all: another transaction grouped them
+// after this one read where they fire, and committed before this one took the counter row, which every grouping
+// takes. A listed Alert taken out is forgotten, so that its Alert Group is neither locked nor changed.
+func (e *engine) unplace(ctx context.Context) error {
+	if err := e.loadFiring(ctx, e.alertIDs()); err != nil {
+		return err
+	}
+	slots := e.slots[:0]
+	for _, s := range e.slots {
+		s.joins = slices.DeleteFunc(s.joins, func(a *alertRow) bool {
+			if e.firing[a.ID] == nil {
+				return false
+			}
+			if e.listed[a.ID] {
+				delete(e.alerts, a.ID)
+				delete(e.firing, a.ID)
+			}
+			return true
+		})
+		if len(s.joins) > 0 {
+			slots = append(slots, s)
+		}
+	}
+	e.slots = slots
+	return nil
 }
 
 // slotOf adds a to the slot of its Route and Group key values.
@@ -524,7 +592,7 @@ func (e *engine) member(c ingest.AlertChange) {
 		b.annotated = append(b.annotated, a)
 	case ingest.ChangeResolved:
 		b.resolved = append(b.resolved, resolution{alert: a, member: m, reason: c.Reason, text: c.ReasonText})
-	case ingest.ChangeFired:
+	case ingest.ChangeFired, ingest.ChangeListed:
 	}
 }
 

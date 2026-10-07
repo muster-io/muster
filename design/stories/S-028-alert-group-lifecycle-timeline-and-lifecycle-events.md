@@ -362,6 +362,11 @@ None.
 - Alerts of one Snapshot form one entry per Alert Group: a new Alert Group and its first Alerts are one `created`, not a
   `created` followed by `alerts_added`, so delivery (C-11) does not post a Thread reply right after the Publication.
 - `events_test.go` is the evidence for C-09.AC-21; the pull request lists the rows it covers.
+- Every firing, routed Alert belongs to an Alert Group — an open one, or a person-resolved one until its Grace period
+  ends (C-09.FR-5): a Snapshot also hands over its firing Alerts that did not fire in it (`listed`), and grouping takes
+  those that fire in no Alert Group — Alerts that fired before grouping existed, or whose grouping a failure or a
+  configuration change left undone — exactly as newly fired ones, with the same Route, Group key, locks, counter and
+  Timeline; routing first routes a listed Alert that has no Route.
 
 ## Coverage
 

@@ -26,17 +26,25 @@ import (
 	"github.com/muster-io/muster/internal/metrics"
 )
 
-// changeSink records every Alert change that processing hands over.
+// changeSink records every Alert change that processing hands over; the listed Alerts, which are no change, it
+// counts apart.
 type changeSink struct {
 	mu      sync.Mutex
 	changes []ingest.AlertChange
+	listed  int
 }
 
 func (s *changeSink) AlertChanges(_ context.Context, _ dbgen.DBTX, changes []ingest.AlertChange) (ingest.Routed,
 	error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.changes = append(s.changes, changes...)
+	for _, c := range changes {
+		if c.Kind == ingest.ChangeListed {
+			s.listed++
+			continue
+		}
+		s.changes = append(s.changes, c)
+	}
 	return ingest.Routed{}, nil
 }
 
