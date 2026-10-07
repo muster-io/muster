@@ -5,12 +5,15 @@
 // desktop and a sheet on a phone, time range, search by #N or text, sort, label columns and "Load more", all in the
 // URL. Live hints keep it current without moving it: a changed Alert Group updates its row in place, and Alert Groups
 // that newly match are announced as "N new" above the list and shown when that is pressed. After a reconnect of the
-// stream everything is read again.
+// stream everything is read again. "Mine" filters the Alert Groups the user owns (C-10.FR-13); "Select" puts
+// checkboxes on the rows for a bulk command (C-10.FR-14), the selection kept across "Load more" and dropped when the
+// view changes.
 
 import {
   type InfiniteData,
   keepPreviousData,
   useInfiniteQuery,
+  useIsMutating,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -34,10 +37,18 @@ import {
   AgSortParameter,
 } from "../api/gen/model";
 import { AlertGroupFilters } from "../components/alert-group-filters";
-import { AlertGroupTable, useWideLayout } from "../components/alert-group-table";
-import { RequirePermission } from "../components/app-shell";
+import {
+  AlertGroupTable,
+  type Selection,
+  SelectionContext,
+  useWideLayout,
+} from "../components/alert-group-table";
+import { RequirePermission, useCan } from "../components/app-shell";
+import { BulkActionsBar } from "../components/bulk-actions-bar";
+import { personName } from "../components/command-buttons";
 import type { CursorList } from "../components/data-table";
 import { NewAlertGroupsBanner } from "../components/new-alert-groups-banner";
+import { MineToggle } from "../components/owner-filter";
 import { StatusTabs } from "../components/status-tabs";
 import { TimeRangePicker } from "../components/time-range-picker";
 import { Button } from "../components/ui/button";
@@ -56,6 +67,7 @@ import {
   countParams,
   listParams,
 } from "../lib/alert-group-search";
+import { BULK_COMMAND_KEY, putListRow } from "../lib/commands";
 import { onHint } from "../lib/live";
 
 export const Route = createFileRoute("/alert-groups/")({
@@ -325,8 +337,43 @@ function useLiveList(search: AlertGroupSearch, at: number, enabled: boolean) {
   };
 }
 
+/** The selection of the list: kept across "Load more", dropped when the view changes. */
+function useSelection(viewKey: string) {
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [view, setView] = useState(viewKey);
+  if (view !== viewKey) {
+    setView(viewKey);
+    setSelected(new Set());
+  }
+  const selection: Selection = {
+    selecting,
+    selected,
+    toggle: (id) =>
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
+      }),
+  };
+  return {
+    selection,
+    setSelected,
+    start: () => setSelecting(true),
+    stop: () => {
+      setSelecting(false);
+      setSelected(new Set());
+    },
+  };
+}
+
 function AlertGroups() {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const wide = useWideLayout();
@@ -366,6 +413,31 @@ function AlertGroups() {
   );
   const panelId = "alert-groups-panel";
   const active = activeFilterCount(search);
+  const canAck = useCan("alert-groups:acknowledge");
+  const canResolve = useCan("alert-groups:resolve");
+  const canSnooze = useCan("alert-groups:snooze");
+  const canBulk = canAck || canResolve || canSnooze;
+  const { selection, setSelected, start, stop } = useSelection(JSON.stringify(search));
+  const shownIds = list.items.map((g) => g.id);
+  // Only rows the user sees are sent: one that left the list (after "N new" read it again) is no longer selected.
+  const selectedIds = shownIds.filter((id) => selection.selected.has(id));
+  const bulkBusy = useIsMutating({ mutationKey: BULK_COMMAND_KEY }) > 0;
+  const allShown = shownIds.length > 0 && shownIds.every((id) => selection.selected.has(id));
+  const owners = new Map(
+    list.items.flatMap((g) => (g.owner === undefined ? [] : [[g.id, personName(t, g.owner)]])),
+  );
+  // After a bulk command each Alert Group it ran on is read again and replaced in place, as a live hint would.
+  const refreshRows = (ids: readonly string[]) => {
+    setSelected(new Set());
+    void queryClient.invalidateQueries({ queryKey: getGetAlertGroupCountsQueryKey() });
+    for (const id of ids) {
+      void getAlertGroup(id)
+        .then((fresh) => putListRow(queryClient, fresh))
+        .catch(() => {
+          // A row that cannot be read stays as it was.
+        });
+    }
+  };
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-2xl font-semibold tracking-tight">{t("alertGroups.title")}</h1>
@@ -461,6 +533,20 @@ function AlertGroups() {
           id={panelId}
           aria-labelledby={`${panelId}-tab-${tab}`}
         >
+          <div className="flex flex-wrap items-center gap-2">
+            <MineToggle value={search.owner} onChange={(owner) => update({ owner })} />
+            {canBulk && (
+              <Button
+                variant="outline"
+                aria-pressed={selection.selecting}
+                disabled={bulkBusy}
+                onClick={selection.selecting ? stop : start}
+                data-testid="select-button"
+              >
+                {selection.selecting ? t("commands.bulk.stop") : t("commands.bulk.select")}
+              </Button>
+            )}
+          </div>
           <NewAlertGroupsBanner
             count={newCount}
             onShow={() => {
@@ -469,12 +555,24 @@ function AlertGroups() {
               panel.current?.focus();
             }}
           />
-          <AlertGroupTable
-            list={list}
-            labelColumns={search.columns ?? []}
-            empty={empty}
-            wide={wide}
-          />
+          <SelectionContext value={selection}>
+            <AlertGroupTable
+              list={list}
+              labelColumns={search.columns ?? []}
+              empty={empty}
+              wide={wide}
+            />
+          </SelectionContext>
+          {selection.selecting && (
+            <BulkActionsBar
+              ids={selectedIds}
+              owners={owners}
+              allShown={allShown}
+              onToggleAllShown={() => setSelected(allShown ? new Set() : new Set(shownIds))}
+              onClear={() => setSelected(new Set())}
+              onDone={refreshRows}
+            />
+          )}
         </div>
       </div>
     </div>

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The view of the Alert Group list in the URL (C-09.FR-13): tab, filters, time range, search, label columns and sort as
+// The view of the Alert Group list in the URL (C-09.FR-13, C-10.FR-13): tab, filters (the Owner and "Snoozed with no
+// end" among them), time range, search, label columns and sort as
 // typed search parameters, so that a view is shared as a link. The list route validates them before its page loads,
 // so this module stays small: it loads with the application.
 
@@ -16,6 +17,10 @@ import {
   ResolverKind,
   SeverityLevel,
 } from "../api/gen/model";
+
+/** The Owner filter of "Mine" and of nobody; any other value is a user's public_id. */
+export const OWNER_ME = "me";
+export const OWNER_NONE = "none";
 
 /** The status tabs; Open (firing, acknowledged and snoozed) when the URL names none. */
 export const ALERT_GROUP_TABS = [
@@ -79,6 +84,8 @@ export const alertGroupSearchSchema = z.object({
   resolve_reason: z.enum(ResolveReason).optional().catch(undefined),
   reopened: z.boolean().optional().catch(undefined),
   label: strings,
+  owner: text,
+  snoozed_no_end: z.literal(true).optional().catch(undefined),
   range: z.enum(TIME_RANGES).optional().catch(undefined),
   from: instant,
   to: instant,
@@ -98,6 +105,8 @@ export const FILTER_KEYS = [
   "resolve_reason",
   "reopened",
   "label",
+  "owner",
+  "snoozed_no_end",
 ] as const satisfies readonly (keyof AlertGroupSearch)[];
 
 /** How many filters of the panel are set, for the "Filters" button of a phone. */
@@ -144,6 +153,8 @@ export function countParams(search: AlertGroupSearch, now: number): GetAlertGrou
     resolve_reason: search.resolved_by === "system" ? search.resolve_reason : undefined,
     reopened: search.reopened,
     label: search.label,
+    owner: search.owner,
+    snoozed_no_end: search.snoozed_no_end,
     ...rangeParams(search, now),
     q: q ? q : undefined,
   };

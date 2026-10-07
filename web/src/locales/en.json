@@ -17,8 +17,10 @@
       "hint": "A label's value shows when all alerts of the Alert Group share it.",
       "labelColumns": "Label columns",
       "lastChange": "Last change",
+      "owner": "Owner",
       "remove": "Remove the column {{label}}",
       "reopened": "Reopened",
+      "snoozeEnd": "Snooze end",
       "status": "Status",
       "title": "Title"
     },
@@ -49,8 +51,14 @@
       "clear": "Clear filters",
       "done": "Show Alert Groups",
       "integration": "Integrations",
+      "mine": "Mine",
       "neverReopened": "Never reopened",
+      "nobody": "Nobody",
       "notUrgent": "Not urgent",
+      "owner": "Owner",
+      "ownerNoMatch": "No users match.",
+      "ownerSearch": "Find a user",
+      "ownerUnknown": "A user",
       "reason": "Reason",
       "remove": "Remove {{value}}",
       "reopened": "Reopened",
@@ -58,9 +66,11 @@
       "resolvedBy": "Resolved by",
       "route": "Routes",
       "severity": "Severity",
+      "snoozedNoEnd": "Snoozed with no end",
       "title": "Filters",
       "urgent": "Urgent",
-      "urgentOnly": "Urgent only"
+      "urgentOnly": "Urgent only",
+      "userWithLogin": "{{name}} ({{login}})"
     },
     "labels": {
       "annotations": "Common annotations",
@@ -73,6 +83,7 @@
     "newCount_other": "{{count}} new",
     "newCountLabel_one": "{{count}} new Alert Group, show it",
     "newCountLabel_other": "{{count}} new Alert Groups, show them",
+    "noEnd": "No end",
     "notices": {
       "days_one": "{{count}} day",
       "days_other": "{{count}} days",
@@ -82,6 +93,7 @@
       "stillFiring_one": "⚠ {{count}} alert still firing in Alertmanager",
       "stillFiring_other": "⚠ {{count}} alerts still firing in Alertmanager"
     },
+    "owner": "Owner: {{name}}",
     "page": {
       "back": "Alert Groups"
     },
@@ -108,12 +120,16 @@
       "byUnknown": "Resolved by a person"
     },
     "rowLabel": "{{title}}, #{{number}}, {{status}}, {{duration}}",
+    "rowLabelOwner": "{{label}}, Owner: {{name}}",
     "rowLabelUrgent": "{{title}}, #{{number}}, {{status}}, Urgent, {{duration}}",
     "search": {
       "label": "Search",
       "placeholder": "#123 or text",
       "region": "Search and sort"
     },
+    "snoozedBy": "Snoozed by {{name}}",
+    "snoozedNoEnd": "Snoozed with no end",
+    "snoozedUntil": "Snoozed until {{until}}",
     "sort": {
       "label": "Sort by",
       "lastChangeAsc": "Last change, oldest first",
@@ -296,6 +312,90 @@
       "ui": "Web UI"
     },
     "yes": "yes"
+  },
+  "commands": {
+    "bulk": {
+      "actions": "Commands for the selected Alert Groups",
+      "clear": "Clear",
+      "item": "{{subject}}: {{outcome}}",
+      "outcomes": {
+        "done": "done",
+        "failed": "failed",
+        "notFound": "not found",
+        "refused": "refused",
+        "skipped": "skipped",
+        "skippedOwned": "skipped: owned by {{name}}",
+        "unchanged": "no change"
+      },
+      "region": "Selected Alert Groups",
+      "resolveTitle_one": "Resolve {{count}} Alert Group",
+      "resolveTitle_other": "Resolve {{count}} Alert Groups",
+      "resultSummary_one": "Done for {{done}} of {{count}} Alert Group.",
+      "resultSummary_other": "Done for {{done}} of {{count}} Alert Groups.",
+      "resultTitle": "Result: {{command}}",
+      "select": "Select",
+      "selectAll": "Select all shown",
+      "selectColumn": "Select",
+      "selected_one": "{{count}} selected",
+      "selected_other": "{{count}} selected",
+      "selectNone": "Select none",
+      "selectOne": "Select #{{number}}",
+      "snoozeTitle_one": "Snooze {{count}} Alert Group",
+      "snoozeTitle_other": "Snooze {{count}} Alert Groups",
+      "stop": "Cancel selection",
+      "tooMany": "Select at most {{max}} Alert Groups."
+    },
+    "buttons": {
+      "acknowledge": "Acknowledge",
+      "resolve": "Resolve",
+      "snooze": "Snooze",
+      "takeOver": "Take over from {{name}}",
+      "unacknowledge": "Unacknowledge",
+      "unresolve": "Unresolve",
+      "unsnooze": "Unsnooze"
+    },
+    "column": "Commands",
+    "label": "Commands",
+    "menu": "Commands for #{{number}}",
+    "newerExists": "A newer Alert Group exists: #{{number}}",
+    "refusals": {
+      "allAlertsResolved": "All alerts of this Alert Group have already resolved.",
+      "alreadyResolved": "This Alert Group is already resolved.",
+      "forbidden": "You are not permitted to do this.",
+      "newerExists": "A newer open Alert Group #{{number}} exists.",
+      "newerExistsLinked": "A newer open Alert Group <groupLink>#{{number}}</groupLink> exists.",
+      "newerExistsUnknown": "A newer open Alert Group exists.",
+      "notAcknowledged": "This Alert Group is not acknowledged.",
+      "notResolved": "This Alert Group is not resolved.",
+      "notSnoozed": "This Alert Group is not snoozed.",
+      "ownerMustBeUser": "A Service account cannot be an Owner.",
+      "resolvedAutomatically": "Muster resolved this Alert Group automatically; it reopens by itself when an alert returns.",
+      "routeDeleted": "The Route of this Alert Group was deleted; alerts that still fire start a new Alert Group on the Default route."
+    },
+    "resolve": {
+      "description": "A Note, if you add one, is recorded together with the resolve.",
+      "note": "Add a note (optional)",
+      "title": "Resolve #{{number}}"
+    },
+    "snooze": {
+      "date": "Date",
+      "description": "When the Snooze ends, the Alert Group is firing again without an Owner.",
+      "for": "How long",
+      "incomplete": "Enter a date and a time.",
+      "noEnd": "No end",
+      "noEndWarning": "This Alert Group stays snoozed until someone unsnoozes it.",
+      "noEndWarningBulk": "These Alert Groups stay snoozed until someone unsnoozes them.",
+      "past": "The Snooze end must be in the future.",
+      "time": "Time",
+      "timeZone": "Time zone: {{zone}}",
+      "title": "Snooze #{{number}}",
+      "understood": "I understand",
+      "until": "Until"
+    },
+    "unresolve": {
+      "question": "Bring this Alert Group back as firing without an Owner?",
+      "title": "Unresolve #{{number}}"
+    }
   },
   "common": {
     "cancel": "Cancel",
@@ -517,6 +617,13 @@
     "serviceAccounts": "Service accounts",
     "statistics": "Statistics",
     "users": "Users"
+  },
+  "notes": {
+    "add": "Add note",
+    "counter": "{{length}}/{{max}}",
+    "label": "Note",
+    "title": "Add a note",
+    "tooLong": "A Note has at most {{max}} characters."
   },
   "notices": {
     "noReplicaLeading": "No replica is leading: Telegram polling, Heartbeat and Stale checks are paused.",
@@ -789,6 +896,21 @@
       "onCallLine": "For alerts someone must act on: ack timeout and Reminders on.",
       "title": "Choose a profile"
     },
+    "snooze": {
+      "add": "Add",
+      "days": "days",
+      "duplicate": "This duration is already in the list.",
+      "duration": "Duration",
+      "hint": "The quick choices of the Snooze dialog and of messengers.",
+      "hours": "hours",
+      "invalid": "Enter a whole number, 1 or more.",
+      "list": "Durations offered",
+      "minutes": "minutes",
+      "none": "No durations: only an end of the user's choosing.",
+      "remove": "Remove {{duration}}",
+      "title": "Snooze durations",
+      "unit": "Unit"
+    },
     "suggestions": {
       "accept": "Create the route",
       "dismiss": "Dismiss",
@@ -957,6 +1079,7 @@
       "route": "By route"
     },
     "columns": {
+      "acknowledged": "Acknowledged",
       "alertGroups": "Alert Groups",
       "integration": "Integration",
       "median": "Median",
