@@ -22,6 +22,7 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/oidc"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
@@ -37,6 +38,7 @@ const (
 	typeForbidden            = "forbidden"
 	typeNotFound             = "not-found"
 	typeConflict             = "conflict"
+	typeDefaultRoute         = "default-route-immutable"
 	typeGone                 = "gone"
 	typePreconditionFailed   = "precondition-failed"
 	typePreconditionRequired = "precondition-required"
@@ -92,6 +94,7 @@ var titles = map[string]string{
 	typeForbidden:            "Forbidden",
 	typeNotFound:             "Not found",
 	typeConflict:             "Conflict",
+	typeDefaultRoute:         "Default route immutable",
 	typeGone:                 "Gone",
 	typePreconditionFailed:   "Precondition failed",
 	typePreconditionRequired: "Precondition required",
@@ -208,6 +211,9 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	if f, ok := errors.AsType[*integrations.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
+	if f, ok := errors.AsType[*routing.FieldError](err); ok {
+		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
 	if f, ok := errors.AsType[*users.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
@@ -250,6 +256,15 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		return problem(http.StatusConflict, typeConflict, codeBuiltinImmutable,
 			"The built-in Muster Integration cannot be changed, deleted or given a token.")
 	case errors.Is(err, integrations.ErrVersionMismatch):
+		return errPreconditionFailed
+	case errors.Is(err, routing.ErrNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Route.")
+	case errors.Is(err, routing.ErrNameTaken):
+		return problem(http.StatusConflict, typeConflict, codeNameTaken, "Another Route has this name.")
+	case errors.Is(err, routing.ErrDefaultImmutable):
+		return problem(http.StatusConflict, typeDefaultRoute, "",
+			"The Default route is always last: it cannot be deleted or moved.")
+	case errors.Is(err, routing.ErrVersionMismatch):
 		return errPreconditionFailed
 	case errors.Is(err, ingest.ErrNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Stored Snapshot, or it is past retention.")

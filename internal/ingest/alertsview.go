@@ -82,6 +82,17 @@ type ViewAlert struct {
 	// already carried.
 	GroupKeys []string
 	Warnings  []string
+	// Route is the Route that took its current or last firing, nil before routing; SeverityLevel its Severity level
+	// and SeverityRaw the severity value as received when it has no mapping (C-06.FR-19, C-08.FR-13).
+	Route         *RouteRef
+	SeverityLevel *string
+	SeverityRaw   *string
+}
+
+// RouteRef names a Route by its public_id and name.
+type RouteRef struct {
+	PublicID string
+	Name     string
 }
 
 // AlertPage is a page of the Alerts view; Next, the position to continue after, is nil on the last page.
@@ -119,6 +130,10 @@ type viewRow struct {
 	ResolvedAt           pgtype.Timestamptz
 	ResolveReason        pgtype.Text
 	ResolveReasonText    pgtype.Text
+	RoutePublicID        pgtype.Text
+	RouteName            pgtype.Text
+	SeverityLevel        pgtype.Text
+	SeverityRaw          pgtype.Text
 }
 
 // List lists the Alerts of an Integration that is not deleted: firing ones and those resolved within
@@ -272,7 +287,11 @@ func (v *AlertsView) batch(ctx context.Context, b batchQuery) ([]viewRow, error)
 func viewAlertOf(r viewRow) (ViewAlert, error) {
 	a := ViewAlert{ID: r.ID, Fingerprint: r.Fingerprint, State: r.Status, StartsAt: r.StartsAt.UTC(),
 		LastSeenAt: r.LastSeenAt.UTC(), ResolvedAt: timeOf(r.ResolvedAt), Reason: textOf(r.ResolveReason),
-		ReasonText: textOf(r.ResolveReasonText), Warnings: r.StaticLabelConflicts, GroupKeys: []string{}}
+		ReasonText: textOf(r.ResolveReasonText), Warnings: r.StaticLabelConflicts, GroupKeys: []string{},
+		SeverityLevel: textOf(r.SeverityLevel), SeverityRaw: textOf(r.SeverityRaw)}
+	if r.RoutePublicID.Valid {
+		a.Route = &RouteRef{PublicID: r.RoutePublicID.String, Name: r.RouteName.String}
+	}
 	if a.Warnings == nil {
 		a.Warnings = []string{}
 	}

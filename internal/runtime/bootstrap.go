@@ -15,6 +15,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/users"
 )
 
@@ -26,8 +27,8 @@ type ensureStep struct {
 	run  func(context.Context, *process) error
 }
 
-// ensureSteps grow with the capabilities: the built-in Integration follows the Organization, and the Default route
-// (S-025) and the built-in Link rule (S-037) will follow it. The partitions that the next days and months need are created
+// ensureSteps grow with the capabilities: the built-in Integration and the Default route follow the Organization, and
+// the built-in Link rule (S-037) will follow them. The partitions that the next days and months need are created
 // before serving, so that no write finds its partition missing; the bootstrap Admin comes after them, because its
 // creation writes the Audit log.
 var ensureSteps = []ensureStep{
@@ -40,6 +41,13 @@ var ensureSteps = []ensureStep{
 			return err
 		}
 		return integrations.EnsureBuiltin(ctx, p.db.IntegrationsStore(), orgID, p.clocks.Business.Now())
+	}},
+	{name: "default route", run: func(ctx context.Context, p *process) error {
+		orgID, err := p.organizationID(ctx)
+		if err != nil {
+			return err
+		}
+		return routing.EnsureDefault(ctx, p.db.RoutingStore(), orgID, p.clocks.Business.Now())
 	}},
 	{name: "partitions", run: func(ctx context.Context, p *process) error {
 		return p.partitions.Create(ctx)

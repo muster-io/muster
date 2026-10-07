@@ -32,11 +32,12 @@ type changeSink struct {
 	changes []ingest.AlertChange
 }
 
-func (s *changeSink) AlertChanges(_ context.Context, _ dbgen.DBTX, changes []ingest.AlertChange) error {
+func (s *changeSink) AlertChanges(_ context.Context, _ dbgen.DBTX, changes []ingest.AlertChange) (ingest.Routed,
+	error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.changes = append(s.changes, changes...)
-	return nil
+	return ingest.Routed{}, nil
 }
 
 func (s *changeSink) take() []ingest.AlertChange {

@@ -30,6 +30,7 @@ import (
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
@@ -157,6 +158,17 @@ type Alerts interface {
 	Routes(ctx context.Context, integration string) ([]ingest.AlertmanagerRoute, error)
 }
 
+// Routes is what the API needs of internal/routing: Routes and their order.
+type Routes interface {
+	List(ctx context.Context) (routing.List, error)
+	Get(ctx context.Context, publicID string) (routing.Route, error)
+	Create(ctx context.Context, r routing.Requester, in routing.Input) (routing.Route, error)
+	Update(ctx context.Context, r routing.Requester, publicID string, version *int64, in routing.Input) (
+		routing.Route, error)
+	Delete(ctx context.Context, r routing.Requester, publicID string, version *int64) error
+	Reorder(ctx context.Context, r routing.Requester, version *int64, ids []string) (routing.List, error)
+}
+
 // Config is what the API serves with.
 type Config struct {
 	Sessions     Sessions
@@ -172,6 +184,7 @@ type Config struct {
 	Integrations Integrations
 	Snapshots    StoredSnapshots
 	Alerts       Alerts
+	Routes       Routes
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -196,6 +209,7 @@ type Server struct {
 	integrations   Integrations
 	snapshots      StoredSnapshots
 	alerts         Alerts
+	routes         Routes
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -227,6 +241,8 @@ var implemented = map[string]bool{
 	"DeleteIntegration": true, "ListIntegrationTokens": true, "CreateIntegrationToken": true,
 	"RevokeIntegrationToken": true, "ListStoredSnapshots": true, "GetStoredSnapshot": true,
 	"ListIntegrationAlerts": true, "ListAlertmanagerRoutes": true,
+	"ListRoutes": true, "CreateRoute": true, "GetRoute": true, "UpdateRoute": true, "DeleteRoute": true,
+	"ReorderRoutes": true, "ListRouteProfiles": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -254,8 +270,8 @@ func New(cfg Config) (*Server, error) {
 	s := &Server{
 		sessions: cfg.Sessions, users: cfg.Users, admin: cfg.Admin, auditLog: cfg.AuditLog, totp: cfg.TOTP,
 		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, oidc: cfg.OIDC, tokens: cfg.Tokens,
-		integrations: cfg.Integrations, snapshots: cfg.Snapshots, alerts: cfg.Alerts, trustedProxies: cfg.TrustedProxies, log: cfg.Log,
-		real:   cfg.Real,
+		integrations: cfg.Integrations, snapshots: cfg.Snapshots, alerts: cfg.Alerts, routes: cfg.Routes,
+		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}
 	mux := http.NewServeMux()

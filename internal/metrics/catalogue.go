@@ -263,3 +263,15 @@ var IntegrationInfo = newGauge(Definition{
 	},
 	Capability: "C-05",
 })
+
+// RouteInfo is 1 for every Route that is not deleted, the Default route included; its labels carry the Route's name.
+var RouteInfo = newGauge(Definition{
+	Name: "muster_route_info",
+	Help: "Always 1, one series per Route that is not deleted, the Default route included; the labels carry its " +
+		"public_id and name.",
+	Labels: []Label{
+		entity("route"),
+		info("name", "the name of the Route"),
+	},
+	Capability: "C-08",
+})

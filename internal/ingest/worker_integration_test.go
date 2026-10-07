@@ -38,7 +38,8 @@ func newOrderSink() *orderSink {
 		at: map[string]time.Time{}}
 }
 
-func (s *orderSink) AlertChanges(_ context.Context, _ dbgen.DBTX, changes []ingest.AlertChange) error {
+func (s *orderSink) AlertChanges(_ context.Context, _ dbgen.DBTX, changes []ingest.AlertChange) (ingest.Routed,
+	error) {
 	key, _, _ := strings.Cut(changes[0].Fingerprint, "-")
 	s.mu.Lock()
 	s.running[key]++
@@ -53,7 +54,7 @@ func (s *orderSink) AlertChanges(_ context.Context, _ dbgen.DBTX, changes []inge
 	s.mu.Lock()
 	s.running[key]--
 	s.mu.Unlock()
-	return nil
+	return ingest.Routed{}, nil
 }
 
 // webhookOf is a Snapshot of one Alert of the Integration key whose startsAt is minute n, so that every Snapshot

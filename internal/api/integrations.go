@@ -309,6 +309,14 @@ func integrationAlertOf(a ingest.ViewAlert) gen.IntegrationAlert {
 	} else {
 		out.ResolveReason.SetNull()
 	}
+	if a.Route != nil {
+		out.Route = &gen.EntityRef{Id: a.Route.PublicID, Name: a.Route.Name}
+	}
+	if a.SeverityLevel != nil {
+		level := gen.SeverityLevel(*a.SeverityLevel)
+		out.SeverityLevel = &level
+		out.SeverityRaw = nullableString(a.SeverityRaw)
+	}
 	return out
 }
 

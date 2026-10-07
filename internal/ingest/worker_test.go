@@ -268,12 +268,13 @@ func (f *fakeProcess) add(id int64, at time.Time, body string) {
 
 type recordingSink struct {
 	changes []AlertChange
+	routed  Routed
 	err     error
 }
 
-func (s *recordingSink) AlertChanges(_ context.Context, _ dbgen.DBTX, changes []AlertChange) error {
+func (s *recordingSink) AlertChanges(_ context.Context, _ dbgen.DBTX, changes []AlertChange) (Routed, error) {
 	s.changes = append(s.changes, changes...)
-	return s.err
+	return s.routed, s.err
 }
 
 func newTestProcessor(store ProcessStore, business clock.Clock, log *bytes.Buffer, sink Sink) *Processor {
@@ -316,7 +317,7 @@ func TestProcessPending(t *testing.T) {
 	store := newFakeProcess()
 	c := clock.NewManual(t0.Add(2 * time.Second))
 	var log bytes.Buffer
-	sink := &recordingSink{}
+	sink := &recordingSink{routed: Routed{IDs: []int64{4}, PublicIDs: []string{"RTAAAAAAAAAAAA"}}}
 	p := newTestProcessor(store, c, &log, sink)
 	integration := "NTAAAAAAAAAAAA"
 	failed0 := metrics.IngestFailedSnapshots.With(integration).Get()
@@ -337,8 +338,11 @@ func TestProcessPending(t *testing.T) {
 	first, bad, third := store.finished[0], store.finished[1], store.finished[2]
 	if first.State != StateProcessed || first.GroupKey.String != `{}/{team="db"}:{alertname="DiskFull"}` ||
 		first.AlertCount.Int64 != 2 || !first.TruncatedAlerts.Valid || first.ProcessingError.Valid ||
-		!first.ProcessedAt.Time.Equal(t0.Add(2*time.Second)) {
+		!first.ProcessedAt.Time.Equal(t0.Add(2*time.Second)) || !slices.Equal(first.RouteIds, []int64{4}) {
 		t.Errorf("first = %+v", first)
+	}
+	if bad.RouteIds == nil || len(bad.RouteIds) != 0 {
+		t.Errorf("the failed snapshot names routes %v", bad.RouteIds)
 	}
 	if bad.State != StateFailed || bad.GroupKey.Valid || bad.ProcessingError.String !=
 		"the body is not valid JSON: invalid character 'o' in literal null (expecting 'u')" {
@@ -387,6 +391,10 @@ func TestProcessPending(t *testing.T) {
 			(e["alerts"] != 3.0 || e["resolved"] != 1.0 || e["dropped"] != 1.0 || e["integration"] != integration) {
 			t.Errorf("line %v", e)
 		}
+		if routes, _ := e["routes"].([]any); e["event"] == "snapshot_processed" &&
+			(len(routes) != 1 || routes[0] != "RTAAAAAAAAAAAA") {
+			t.Errorf("routes of %v", e)
+		}
 	}
 	if !slices.Equal(names, []string{"snapshot_processed", "snapshot_failed", "snapshot_processed"}) {
 		t.Errorf("events %v", names)
@@ -431,7 +439,7 @@ func TestProcessErrors(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			store := newFakeProcess()
-			sink := &recordingSink{}
+			sink := &recordingSink{routed: Routed{IDs: []int64{4}, PublicIDs: []string{"RTAAAAAAAAAAAA"}}}
 			tt.setup(store, sink)
 			var log bytes.Buffer
 			p := newTestProcessor(store, clock.NewManual(t0), &log, sink)
@@ -443,7 +451,8 @@ func TestProcessErrors(t *testing.T) {
 			if tt.pending && (len(store.pending) != 1 || n != 0) {
 				t.Errorf("not pending: %d processed, %+v", n, store.finished)
 			}
-			if tt.state != "" && (len(store.finished) != 1 || store.finished[0].State != tt.state) {
+			if tt.state != "" && (len(store.finished) != 1 || store.finished[0].State != tt.state ||
+				len(store.finished[0].RouteIds) != 0) {
 				t.Errorf("finished %+v", store.finished)
 			}
 		})

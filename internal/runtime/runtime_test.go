@@ -43,6 +43,8 @@ import (
 	"github.com/muster-io/muster/internal/organization"
 	odb "github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/partitions"
+	"github.com/muster-io/muster/internal/routing"
+	rdb "github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
@@ -67,6 +69,7 @@ type fakeDB struct {
 	totp  totp.Store
 	oidc  fakeOIDCStore
 	integ fakeIntegrationsStore
+	route fakeRoutingStore
 	// devOffset is the offset of the development clock in runtime_state; nil has no row. devErr fails its read.
 	devOffset *int64
 	devErr    error
@@ -158,6 +161,32 @@ func (s *fakeIntegrationsStore) InsertAuditEntry(_ context.Context, arg auditdb.
 	defer s.mu.Unlock()
 	s.audited = append(s.audited, arg.Action)
 	return nil
+}
+
+// fakeRoutingStore records the ensures of the Default route; only the first creates it.
+type fakeRoutingStore struct {
+	routing.Store
+	mu       sync.Mutex
+	defaults []rdb.EnsureDefaultRouteParams
+}
+
+func (s *fakeRoutingStore) EnsureDefaultRoute(_ context.Context, arg rdb.EnsureDefaultRouteParams) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.defaults = append(s.defaults, arg)
+	if len(s.defaults) > 1 {
+		return "", pgx.ErrNoRows
+	}
+	return arg.PublicID, nil
+}
+
+func (s *fakeRoutingStore) ListRouteInfo(context.Context, int64) ([]rdb.ListRouteInfoRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.defaults) == 0 {
+		return nil, nil
+	}
+	return []rdb.ListRouteInfoRow{{PublicID: s.defaults[0].PublicID, Name: s.defaults[0].Name}}, nil
 }
 
 // fakeOIDCStore records the demo OIDC configuration of development mode.
@@ -326,6 +355,8 @@ func (f *fakeDB) AuthStore() auth.Store { return fakeAuthStore{} }
 func (f *fakeDB) TokensStore() tokens.Store { return nil }
 
 func (f *fakeDB) IntegrationsStore() integrations.Store { return &f.integ }
+
+func (f *fakeDB) RoutingStore() routing.Store { return &f.route }
 
 func (f *fakeDB) IngestStore() ingest.Store { return nil }
 
@@ -1048,6 +1079,10 @@ func TestDevelopmentKeyInDevelopmentMode(t *testing.T) {
 	}
 	if !slices.Equal(fake.integ.audited, []string{"integration.created", "integration_token.created"}) {
 		t.Errorf("integration audited = %v", fake.integ.audited)
+	}
+	if len(fake.route.defaults) != 1 || fake.route.defaults[0].Name != routing.DefaultName ||
+		!slices.Equal(fake.route.defaults[0].GroupKey, []string{"alertname", "severity", "cluster"}) {
+		t.Errorf("default route = %+v", fake.route.defaults)
 	}
 
 	plain := &fakeDB{}

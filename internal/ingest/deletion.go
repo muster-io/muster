@@ -58,7 +58,7 @@ func (p *Processor) applyDeletion(ctx context.Context, q ProcessQueries, tx dbge
 		return processedSnapshot{}, fmt.Errorf("resolve the internal alerts of the deleted integration: %w", err)
 	}
 	if p.sink != nil && len(out.Changes) > 0 {
-		if err := p.sink.AlertChanges(ctx, tx, out.Changes); err != nil {
+		if _, err := p.sink.AlertChanges(ctx, tx, out.Changes); err != nil {
 			return processedSnapshot{}, fmt.Errorf("hand over the alert changes: %w", err)
 		}
 	}

@@ -146,6 +146,10 @@ func newView() *fakeView {
 		}
 		if i == 3 {
 			r.StaticLabelConflicts = []string{"cluster"}
+			r.RoutePublicID = pgtype.Text{String: "RTAAAAAAAAAAAA", Valid: true}
+			r.RouteName = pgtype.Text{String: "payments", Valid: true}
+			r.SeverityLevel = pgtype.Text{String: "warning", Valid: true}
+			r.SeverityRaw = pgtype.Text{String: "P5", Valid: true}
 		}
 		f.rows = append(f.rows, r)
 	}
@@ -186,12 +190,14 @@ func TestAlertsView(t *testing.T) {
 	}
 	a3 := all[slices.IndexFunc(all, func(a ViewAlert) bool { return a.ID == 3 })]
 	if !slices.Equal(a3.Warnings, []string{"cluster"}) || !slices.Equal(a3.GroupKeys, []string{`{}:{n="3"}`}) ||
-		a3.State != StatusFiring || a3.Reason != nil || a3.Annotations["summary"] != "s" {
+		a3.State != StatusFiring || a3.Reason != nil || a3.Annotations["summary"] != "s" ||
+		*a3.Route != (RouteRef{PublicID: "RTAAAAAAAAAAAA", Name: "payments"}) || *a3.SeverityLevel != "warning" ||
+		*a3.SeverityRaw != "P5" {
 		t.Errorf("alert 3 = %+v", a3)
 	}
 	a2 := all[slices.IndexFunc(all, func(a ViewAlert) bool { return a.ID == 2 })]
 	if a2.State != StatusResolved || *a2.Reason != ResolveGone || *a2.ReasonText != GoneReasonText ||
-		a2.ResolvedAt == nil || a2.Warnings == nil {
+		a2.ResolvedAt == nil || a2.Warnings == nil || a2.Route != nil || a2.SeverityLevel != nil || a2.SeverityRaw != nil {
 		t.Errorf("alert 2 = %+v", a2)
 	}
 	for _, sort := range []string{SortLastSeen, SortStarts, SortStartsDesc} {
