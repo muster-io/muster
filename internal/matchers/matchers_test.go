@@ -5,6 +5,7 @@ package matchers
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -50,6 +51,20 @@ func TestParseErrors(t *testing.T) {
 	var re *RegexpError
 	if !errors.As(err, &re) || re.Unwrap() == nil || re.Error() == "" {
 		t.Errorf("an invalid regexp = %v", err)
+	}
+	for in, want := range map[string]string{
+		`pod=~"["`:       "error parsing regexp: missing closing ]: `[`",
+		`pod!~"api-(.*"`: "error parsing regexp: missing closing ): `api-(.*`",
+		`pod=~"a\\"`:     "error parsing regexp: trailing backslash at end of expression: ``",
+	} {
+		if _, err := Parse(in); !errors.As(err, &re) || err.Error() != want {
+			t.Errorf("Parse(%s) = %v, want %s", in, err, want)
+		}
+	}
+	// One level of nesting below the limit compiles alone, and the anchoring group takes it over the limit.
+	deep := strings.Repeat("(", 999) + strings.Repeat(")", 999)
+	if _, err := New("a", Regexp, deep); !errors.As(err, &re) || !strings.Contains(err.Error(), "nests too deeply") {
+		t.Errorf("a value that only fails anchored = %v", err)
 	}
 	if _, err := New("a", "<>", "x"); !errors.Is(err, ErrSyntax) {
 		t.Errorf("New with a bad operator = %v", err)

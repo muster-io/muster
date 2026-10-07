@@ -85,7 +85,7 @@ beforeEach(async () => {
             {
               pointer: `/query/label/${labels.findIndex((l) => l.includes("["))}`,
               code: "invalid_regex",
-              detail: "error parsing regexp: missing closing ]: `[)$`",
+              detail: "error parsing regexp: missing closing ]: `[`",
             },
           ],
         }),
@@ -233,7 +233,7 @@ describe("IntegrationAlerts", () => {
     await expect
       .element(page.getByTestId("matcher-error"))
       .toHaveTextContent(
-        "The regular expression is not valid: error parsing regexp: missing closing ]: `[)$`",
+        "The regular expression is not valid: error parsing regexp: missing closing ]: `[`",
       );
     expect(requests.at(-1)?.searchParams.getAll("label")).toEqual(['instance="db-a"', 'pod=~"["']);
     expect(onSearch.mock.calls.length).toBe(calls);

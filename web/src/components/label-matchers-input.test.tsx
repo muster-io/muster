@@ -152,7 +152,7 @@ describe("LabelMatchersInput", () => {
                   {
                     pointer: "/query/label/1",
                     code: "invalid_regex",
-                    detail: "error parsing regexp: missing closing ]: `[)$`",
+                    detail: "error parsing regexp: missing closing ]: `[`",
                   },
                 ],
               },
@@ -167,7 +167,7 @@ describe("LabelMatchersInput", () => {
     await expect
       .element(page.getByTestId("matcher-error"))
       .toHaveTextContent(
-        "The regular expression is not valid: error parsing regexp: missing closing ]: `[)$`",
+        "The regular expression is not valid: error parsing regexp: missing closing ]: `[`",
       );
     await expect.element(field()).toHaveValue('pod=~"["');
     await expect.element(field()).toHaveAttribute("aria-invalid", "true");
