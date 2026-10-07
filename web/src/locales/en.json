@@ -1,4 +1,144 @@
 {
+  "alertGroups": {
+    "alertCounts_one": "{{count}} of {{total}} firing",
+    "alertCounts_other": "{{count}} of {{total}} firing",
+    "alerts": {
+      "details": "Details",
+      "fingerprint": "Fingerprint",
+      "openSource": "Open the source",
+      "reason": "Reason",
+      "resolvedAt": "Resolved",
+      "source": "Source"
+    },
+    "columns": {
+      "add": "Add column",
+      "chosen": "Chosen label columns",
+      "duplicate": "This column is already shown.",
+      "hint": "A label's value shows when all alerts of the Alert Group share it.",
+      "labelColumns": "Label columns",
+      "lastChange": "Last change",
+      "remove": "Remove the column {{label}}",
+      "reopened": "Reopened",
+      "status": "Status",
+      "title": "Title"
+    },
+    "deactivated": "{{name}} (deactivated)",
+    "empty": "No Alert Groups in this time range.",
+    "emptyFiltered": "No Alert Groups match these filters.",
+    "fields": {
+      "alerts": "Alerts",
+      "duration": "Duration",
+      "integrations": "Integrations",
+      "route": "Route",
+      "severity": "Severity",
+      "started": "Started"
+    },
+    "filters": {
+      "addIntegration": "Add an integration…",
+      "addRoute": "Add a route…",
+      "addSeverity": "Add a severity…",
+      "any": "Any",
+      "anyone": "Anyone",
+      "anyReason": "Any reason",
+      "button": "Filters",
+      "buttonActive_one": "Filters ({{count}})",
+      "buttonActive_other": "Filters ({{count}})",
+      "byPerson": "A person",
+      "bySystem": "The system",
+      "chosen": "Chosen: {{label}}",
+      "clear": "Clear filters",
+      "done": "Show Alert Groups",
+      "integration": "Integrations",
+      "neverReopened": "Never reopened",
+      "notUrgent": "Not urgent",
+      "reason": "Reason",
+      "remove": "Remove {{value}}",
+      "reopened": "Reopened",
+      "reopenedOnly": "Reopened at least once",
+      "resolvedBy": "Resolved by",
+      "route": "Routes",
+      "severity": "Severity",
+      "title": "Filters",
+      "urgent": "Urgent",
+      "urgentOnly": "Urgent only"
+    },
+    "labels": {
+      "annotations": "Common annotations",
+      "common": "Common labels",
+      "group": "Group labels",
+      "none": "None.",
+      "title": "Labels"
+    },
+    "newCount_one": "{{count}} new",
+    "newCount_other": "{{count}} new",
+    "newCountLabel_one": "{{count}} new Alert Group, show it",
+    "newCountLabel_other": "{{count}} new Alert Groups, show them",
+    "notices": {
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days",
+      "detailsRemoved": "Alerts and Timeline of this Alert Group were removed after {{period}}; only its summary and Notes are kept.",
+      "firingAgain": "Firing again after a manual resolve of <link>#{{number}}</link>",
+      "replacement": "Alerts were replaced because <label></label> changed. Consider removing Instance labels from the rule, for example <code>without(pod, instance)</code>.",
+      "stillFiring_one": "⚠ {{count}} alert still firing in Alertmanager",
+      "stillFiring_other": "⚠ {{count}} alerts still firing in Alertmanager"
+    },
+    "page": {
+      "back": "Alert Groups"
+    },
+    "range": {
+      "custom": "Custom",
+      "from": "From",
+      "invalid": "The time range must start before it ends.",
+      "label": "Time range",
+      "last24Hours": "Last 24 hours",
+      "last30Days": "Last 30 days",
+      "last7Days": "Last 7 days",
+      "lastHour": "Last hour",
+      "to": "To"
+    },
+    "related": {
+      "empty": "No earlier Alert Groups with the same key.",
+      "title": "Previous Alert Groups"
+    },
+    "reopened": "🔁 Reopened ×{{value}}",
+    "resolution": {
+      "byPerson": "Resolved by {{name}}",
+      "bySystem": "Resolved: {{reason}}",
+      "bySystemNoReason": "Resolved by Muster",
+      "byUnknown": "Resolved by a person"
+    },
+    "rowLabel": "{{title}}, #{{number}}, {{status}}, {{duration}}",
+    "rowLabelUrgent": "{{title}}, #{{number}}, {{status}}, Urgent, {{duration}}",
+    "search": {
+      "label": "Search",
+      "placeholder": "#123 or text",
+      "region": "Search and sort"
+    },
+    "sort": {
+      "label": "Sort by",
+      "lastChangeAsc": "Last change, oldest first",
+      "lastChangeDesc": "Last change, newest first",
+      "startedAsc": "Started, oldest first",
+      "startedDesc": "Started, newest first"
+    },
+    "status": {
+      "acknowledged": "Acknowledged",
+      "firing": "Firing",
+      "resolved": "Resolved",
+      "snoozed": "Snoozed"
+    },
+    "tabs": {
+      "acknowledged": "Acknowledged",
+      "all": "All",
+      "firing": "Firing",
+      "label": "Statuses to show",
+      "open": "Open",
+      "resolved": "Resolved",
+      "snoozed": "Snoozed"
+    },
+    "title": "Alert Groups",
+    "urgent": "Urgent"
+  },
   "alertmanagerRoutes": {
     "columns": {
       "repeatInterval": "Repeat interval",
@@ -166,10 +306,14 @@
     "saved": "Saved."
   },
   "duration": {
+    "between": "{{start}} – {{end}}",
+    "days": "{{value}} d",
+    "daysHours": "{{days}} d {{hours}} h",
     "hours": "{{value}} h",
     "hoursMinutes": "{{hours}} h {{minutes}} min",
     "minutes": "{{value}} min",
-    "seconds": "{{value}} s"
+    "seconds": "{{value}} s",
+    "since": "Since {{start}}"
   },
   "errors": {
     "forbidden": "You do not have permission to do this.",
@@ -236,10 +380,6 @@
       "waiting": "Waiting"
     },
     "title": "Heartbeat"
-  },
-  "home": {
-    "placeholder": "Alert Groups will appear here.",
-    "title": "Welcome, {{name}}"
   },
   "integrations": {
     "builtin": {
@@ -362,8 +502,8 @@
     }
   },
   "nav": {
+    "alertGroups": "Alert Groups",
     "auditLog": "Audit log",
-    "home": "Home",
     "integrations": "Integrations",
     "label": "Main",
     "oidc": "OIDC",
@@ -792,6 +932,109 @@
   },
   "table": {
     "loadMore": "Load more"
+  },
+  "timeline": {
+    "actorVia": "{{actor}} via {{transport}}",
+    "actorWithToken": "{{actor}} via {{transport}}, token {{token}}",
+    "deletedActor": "A deleted account",
+    "delivery": {
+      "deletedInMessenger": "Deleted in the messenger: {{destination}}",
+      "deliveredLate": "Delivered late to {{destination}}",
+      "destinationBroken": "{{destination}} is Broken",
+      "destinationRecovered": "{{destination}} recovered",
+      "finalEdit": "No longer updated in {{destination}}",
+      "markupRejected": "{{destination}} rejected the formatting",
+      "notDelivered": "Not delivered to {{destination}}",
+      "other": "Delivery event in {{destination}}",
+      "possibleDuplicate": "Possible duplicate in {{destination}}",
+      "publication": "Published in {{destination}}",
+      "republished": "Published again in {{destination}}",
+      "stormSummary": "Storm summary in {{destination}}",
+      "threadNotAttached": "Thread not attached to the post in {{destination}}"
+    },
+    "details": {
+      "detail": "Detail",
+      "error": "Error",
+      "fingerprints_one": "{{count}} fingerprint",
+      "fingerprints_other": "{{count}} fingerprints",
+      "labelConflicts": "Static labels the alerts already had",
+      "owner": "Owner",
+      "previousOwner": "Previous owner",
+      "replacedLabel": "Changed label"
+    },
+    "empty": "No entries.",
+    "events": {
+      "acknowledged": "Acknowledged",
+      "ackTimeout": "Not acknowledged in time, notice {{number}}",
+      "alertContinued_one": "{{count}} alert continued with a new start time",
+      "alertContinued_other": "{{count}} alerts continued with a new start time",
+      "alertReplaced": "Alert replaced",
+      "alertResolved_one": "{{count}} alert resolved",
+      "alertResolved_other": "{{count}} alerts resolved",
+      "alertsAdded_one": "{{count}} alert added",
+      "alertsAdded_other": "{{count}} alerts added",
+      "annotationsChanged": "Annotations changed",
+      "autoUnacknowledged": "Acknowledgement released: Reminders went unanswered",
+      "created": "Alert Group created",
+      "movedToDefaultRoute": "Moved to the Default route",
+      "noteAdded": "Note",
+      "noticesMissed_one": "{{count}} notice missed while Muster was unavailable",
+      "noticesMissed_other": "{{count}} notices missed while Muster was unavailable",
+      "other": "Other event",
+      "reminder": "Reminder {{number}}",
+      "reminderAnswered": "Reminder answered: still on it",
+      "reopened": "Reopened",
+      "resolved": "Resolved",
+      "resolvedWith": "Resolved: {{reason}}",
+      "severityRaised": "Severity raised",
+      "snoozedNoEnd": "Snoozed with no end",
+      "snoozedUntil": "Snoozed until {{until}}",
+      "snoozeEnded": "Snooze ended while alerts still fire",
+      "takeover": "Taken over from {{name}}",
+      "unacknowledged": "Unacknowledged",
+      "unacknowledgedWith": "Unacknowledged: {{reason}}",
+      "unclaimed": "Nobody has taken this",
+      "unresolved": "Unresolved",
+      "unsnoozed": "Unsnoozed",
+      "urgencyRaised": "Became Urgent"
+    },
+    "kinds": {
+      "alerts": "Alerts",
+      "delivery": "Delivery",
+      "notes": "Notes",
+      "status": "Status",
+      "system": "System",
+      "timers": "Timers"
+    },
+    "kindsLabel": "Kinds of entries to show",
+    "loud": "Loud",
+    "mentions": "Mentions: {{mentions}}",
+    "muster": "Muster",
+    "nobody": "nobody",
+    "order": {
+      "label": "Order",
+      "newest": "Newest first",
+      "oldest": "Oldest first"
+    },
+    "reasons": {
+      "ownerDeleted": "the owner was deleted",
+      "ownerDisabled": "the owner was disabled"
+    },
+    "system": {
+      "fallbackTemplateUsed": "Messages used the fallback template",
+      "musterUnavailable": "Muster was unavailable from {{from}} to {{to}}",
+      "musterUnavailableUnknown": "Muster was unavailable",
+      "templateValueMissing": "A template value was missing"
+    },
+    "title": "Timeline",
+    "transport": {
+      "api": "the API",
+      "cli": "the CLI",
+      "mattermost": "Mattermost",
+      "system": "Muster",
+      "telegram": "Telegram",
+      "ui": "the UI"
+    }
   },
   "tokens": {
     "create": {

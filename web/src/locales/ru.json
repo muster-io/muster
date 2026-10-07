@@ -1,4 +1,156 @@
 {
+  "alertGroups": {
+    "alertCounts_one": "горит {{count}} из {{total}}",
+    "alertCounts_few": "горят {{count}} из {{total}}",
+    "alertCounts_many": "горят {{count}} из {{total}}",
+    "alertCounts_other": "горят {{count}} из {{total}}",
+    "alerts": {
+      "details": "Подробности",
+      "fingerprint": "Отпечаток",
+      "openSource": "Открыть источник",
+      "reason": "Причина",
+      "resolvedAt": "Закрыт",
+      "source": "Источник"
+    },
+    "columns": {
+      "add": "Добавить столбец",
+      "chosen": "Выбранные столбцы с метками",
+      "duplicate": "Этот столбец уже показан.",
+      "hint": "Значение метки видно, если оно одинаково у всех алертов группы.",
+      "labelColumns": "Столбцы с метками",
+      "lastChange": "Последнее изменение",
+      "remove": "Убрать столбец {{label}}",
+      "reopened": "Переоткрыта",
+      "status": "Статус",
+      "title": "Название"
+    },
+    "deactivated": "{{name}} (деактивирован)",
+    "empty": "За этот период групп алертов нет.",
+    "emptyFiltered": "Нет групп алертов, подходящих под эти фильтры.",
+    "fields": {
+      "alerts": "Алерты",
+      "duration": "Длительность",
+      "integrations": "Интеграции",
+      "route": "Маршрут",
+      "severity": "Важность",
+      "started": "Начало"
+    },
+    "filters": {
+      "addIntegration": "Добавить интеграцию…",
+      "addRoute": "Добавить маршрут…",
+      "addSeverity": "Добавить важность…",
+      "any": "Любые",
+      "anyone": "Кто угодно",
+      "anyReason": "Любая причина",
+      "button": "Фильтры",
+      "buttonActive_one": "Фильтры ({{count}})",
+      "buttonActive_few": "Фильтры ({{count}})",
+      "buttonActive_many": "Фильтры ({{count}})",
+      "buttonActive_other": "Фильтры ({{count}})",
+      "byPerson": "Человек",
+      "bySystem": "Система",
+      "chosen": "Выбрано: {{label}}",
+      "clear": "Сбросить фильтры",
+      "done": "Показать группы алертов",
+      "integration": "Интеграции",
+      "neverReopened": "Не переоткрывались",
+      "notUrgent": "Несрочные",
+      "reason": "Причина",
+      "remove": "Убрать {{value}}",
+      "reopened": "Переоткрытие",
+      "reopenedOnly": "Переоткрывались хотя бы раз",
+      "resolvedBy": "Кто закрыл",
+      "route": "Маршруты",
+      "severity": "Важность",
+      "title": "Фильтры",
+      "urgent": "Срочность",
+      "urgentOnly": "Только срочные"
+    },
+    "labels": {
+      "annotations": "Общие аннотации",
+      "common": "Общие метки",
+      "group": "Метки группы",
+      "none": "Нет.",
+      "title": "Метки"
+    },
+    "newCount_one": "{{count}} новая",
+    "newCount_few": "{{count}} новые",
+    "newCount_many": "{{count}} новых",
+    "newCount_other": "{{count}} новых",
+    "newCountLabel_one": "{{count}} новая группа алертов, показать",
+    "newCountLabel_few": "{{count}} новые группы алертов, показать",
+    "newCountLabel_many": "{{count}} новых групп алертов, показать",
+    "newCountLabel_other": "{{count}} новых групп алертов, показать",
+    "notices": {
+      "days_one": "{{count}} день",
+      "days_few": "{{count}} дня",
+      "days_many": "{{count}} дней",
+      "days_other": "{{count}} дня",
+      "detailsRemoved": "Алерты и хронология этой группы удалены через {{period}}; остались только сводка и заметки.",
+      "firingAgain": "Снова горит после ручного закрытия <link>#{{number}}</link>",
+      "replacement": "Алерты заменились, потому что изменилась метка <label></label>. Стоит убрать метки экземпляра из правила, например <code>without(pod, instance)</code>.",
+      "stillFiring_one": "⚠ В Alertmanager ещё горит {{count}} алерт",
+      "stillFiring_few": "⚠ В Alertmanager ещё горят {{count}} алерта",
+      "stillFiring_many": "⚠ В Alertmanager ещё горят {{count}} алертов",
+      "stillFiring_other": "⚠ В Alertmanager ещё горят {{count}} алерта"
+    },
+    "page": {
+      "back": "Группы алертов"
+    },
+    "range": {
+      "custom": "Свой период",
+      "from": "С",
+      "invalid": "Начало периода должно быть раньше конца.",
+      "label": "Период",
+      "last24Hours": "Последние 24 часа",
+      "last30Days": "Последние 30 дней",
+      "last7Days": "Последние 7 дней",
+      "lastHour": "Последний час",
+      "to": "По"
+    },
+    "related": {
+      "empty": "Более ранних групп с тем же ключом нет.",
+      "title": "Предыдущие группы алертов"
+    },
+    "reopened": "🔁 Переоткрыта ×{{value}}",
+    "resolution": {
+      "byPerson": "Закрыта вручную: {{name}}",
+      "bySystem": "Закрыта: {{reason}}",
+      "bySystemNoReason": "Закрыта Muster",
+      "byUnknown": "Закрыта человеком"
+    },
+    "rowLabel": "{{title}}, #{{number}}, {{status}}, {{duration}}",
+    "rowLabelUrgent": "{{title}}, #{{number}}, {{status}}, срочная, {{duration}}",
+    "search": {
+      "label": "Поиск",
+      "placeholder": "#123 или текст",
+      "region": "Поиск и сортировка"
+    },
+    "sort": {
+      "label": "Сортировка",
+      "lastChangeAsc": "Последнее изменение, сначала старые",
+      "lastChangeDesc": "Последнее изменение, сначала новые",
+      "startedAsc": "Начало, сначала старые",
+      "startedDesc": "Начало, сначала новые"
+    },
+    "status": {
+      "acknowledged": "Подтверждена",
+      "firing": "Горит",
+      "resolved": "Закрыта",
+      "snoozed": "Отложена"
+    },
+    "tabs": {
+      "acknowledged": "Подтверждённые",
+      "all": "Все",
+      "firing": "Горят",
+      "label": "Какие статусы показать",
+      "open": "Открытые",
+      "resolved": "Закрытые",
+      "snoozed": "Отложенные"
+    },
+    "title": "Группы алертов",
+    "urgent": "Срочная"
+  },
   "alertmanagerRoutes": {
     "columns": {
       "repeatInterval": "Интервал повтора",
@@ -168,10 +320,14 @@
     "saved": "Сохранено."
   },
   "duration": {
+    "between": "{{start}} – {{end}}",
+    "days": "{{value}} д",
+    "daysHours": "{{days}} д {{hours}} ч",
     "hours": "{{value}} ч",
     "hoursMinutes": "{{hours}} ч {{minutes}} мин",
     "minutes": "{{value}} мин",
-    "seconds": "{{value}} с"
+    "seconds": "{{value}} с",
+    "since": "С {{start}}"
   },
   "errors": {
     "forbidden": "У вас нет прав на это действие.",
@@ -240,10 +396,6 @@
       "waiting": "Ожидание"
     },
     "title": "Heartbeat"
-  },
-  "home": {
-    "placeholder": "Здесь появятся группы алертов.",
-    "title": "Добро пожаловать, {{name}}"
   },
   "integrations": {
     "builtin": {
@@ -374,8 +526,8 @@
     }
   },
   "nav": {
+    "alertGroups": "Группы алертов",
     "auditLog": "Журнал аудита",
-    "home": "Главная",
     "integrations": "Интеграции",
     "label": "Основная",
     "oidc": "OIDC",
@@ -816,6 +968,119 @@
   },
   "table": {
     "loadMore": "Показать ещё"
+  },
+  "timeline": {
+    "actorVia": "{{actor}} через {{transport}}",
+    "actorWithToken": "{{actor}} через {{transport}}, токен {{token}}",
+    "deletedActor": "Удалённая учётная запись",
+    "delivery": {
+      "deletedInMessenger": "Удалена в мессенджере: {{destination}}",
+      "deliveredLate": "Доставлена в {{destination}} с опозданием",
+      "destinationBroken": "{{destination}} сломан",
+      "destinationRecovered": "{{destination}} снова работает",
+      "finalEdit": "Больше не обновляется в {{destination}}",
+      "markupRejected": "{{destination}} не принял разметку",
+      "notDelivered": "Не доставлена в {{destination}}",
+      "other": "Событие доставки в {{destination}}",
+      "possibleDuplicate": "Возможный дубль в {{destination}}",
+      "publication": "Опубликована в {{destination}}",
+      "republished": "Опубликована заново в {{destination}}",
+      "stormSummary": "Сводка шторма в {{destination}}",
+      "threadNotAttached": "Тред не прикреплён к сообщению в {{destination}}"
+    },
+    "details": {
+      "detail": "Подробности",
+      "error": "Ошибка",
+      "fingerprints_one": "{{count}} отпечаток",
+      "fingerprints_few": "{{count}} отпечатка",
+      "fingerprints_many": "{{count}} отпечатков",
+      "fingerprints_other": "{{count}} отпечатка",
+      "labelConflicts": "Статические метки, которые уже были у алертов",
+      "owner": "Владелец",
+      "previousOwner": "Прежний владелец",
+      "replacedLabel": "Изменившаяся метка"
+    },
+    "empty": "Записей нет.",
+    "events": {
+      "acknowledged": "Подтверждена",
+      "ackTimeout": "Не подтверждена вовремя, уведомление {{number}}",
+      "alertContinued_one": "{{count}} алерт продолжился с новым временем начала",
+      "alertContinued_few": "{{count}} алерта продолжились с новым временем начала",
+      "alertContinued_many": "{{count}} алертов продолжились с новым временем начала",
+      "alertContinued_other": "{{count}} алерта продолжились с новым временем начала",
+      "alertReplaced": "Алерт заменён",
+      "alertResolved_one": "Закрыт {{count}} алерт",
+      "alertResolved_few": "Закрыты {{count}} алерта",
+      "alertResolved_many": "Закрыто {{count}} алертов",
+      "alertResolved_other": "Закрыто {{count}} алерта",
+      "alertsAdded_one": "Добавлен {{count}} алерт",
+      "alertsAdded_few": "Добавлены {{count}} алерта",
+      "alertsAdded_many": "Добавлено {{count}} алертов",
+      "alertsAdded_other": "Добавлено {{count}} алерта",
+      "annotationsChanged": "Изменились аннотации",
+      "autoUnacknowledged": "Подтверждение снято: на напоминания не ответили",
+      "created": "Группа алертов создана",
+      "movedToDefaultRoute": "Перенесена в маршрут по умолчанию",
+      "noteAdded": "Заметка",
+      "noticesMissed_one": "Пока Muster был недоступен, пропущено {{count}} уведомление",
+      "noticesMissed_few": "Пока Muster был недоступен, пропущено {{count}} уведомления",
+      "noticesMissed_many": "Пока Muster был недоступен, пропущено {{count}} уведомлений",
+      "noticesMissed_other": "Пока Muster был недоступен, пропущено {{count}} уведомления",
+      "other": "Другое событие",
+      "reminder": "Напоминание {{number}}",
+      "reminderAnswered": "На напоминание ответили: ещё работаю",
+      "reopened": "Переоткрыта",
+      "resolved": "Закрыта",
+      "resolvedWith": "Закрыта: {{reason}}",
+      "severityRaised": "Важность повысилась",
+      "snoozedNoEnd": "Отложена без срока",
+      "snoozedUntil": "Отложена до {{until}}",
+      "snoozeEnded": "Откладывание закончилось, а алерты ещё горят",
+      "takeover": "Перехвачена у {{name}}",
+      "unacknowledged": "Подтверждение снято",
+      "unacknowledgedWith": "Подтверждение снято: {{reason}}",
+      "unclaimed": "Никто не взял",
+      "unresolved": "Снова открыта",
+      "unsnoozed": "Откладывание снято",
+      "urgencyRaised": "Стала срочной"
+    },
+    "kinds": {
+      "alerts": "Алерты",
+      "delivery": "Доставка",
+      "notes": "Заметки",
+      "status": "Статус",
+      "system": "Система",
+      "timers": "Таймеры"
+    },
+    "kindsLabel": "Какие записи показать",
+    "loud": "Громко",
+    "mentions": "Упоминания: {{mentions}}",
+    "muster": "Muster",
+    "nobody": "никто",
+    "order": {
+      "label": "Порядок",
+      "newest": "Сначала новые",
+      "oldest": "Сначала старые"
+    },
+    "reasons": {
+      "ownerDeleted": "владелец удалён",
+      "ownerDisabled": "владелец отключён"
+    },
+    "system": {
+      "fallbackTemplateUsed": "Сообщения отправлены по запасному шаблону",
+      "musterUnavailable": "Muster был недоступен с {{from}} до {{to}}",
+      "musterUnavailableUnknown": "Muster был недоступен",
+      "templateValueMissing": "В шаблоне не хватило значения"
+    },
+    "title": "Хронология",
+    "transport": {
+      "api": "API",
+      "cli": "CLI",
+      "mattermost": "Mattermost",
+      "system": "Muster",
+      "telegram": "Telegram",
+      "ui": "интерфейс"
+    }
   },
   "tokens": {
     "create": {

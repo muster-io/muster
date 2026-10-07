@@ -9,10 +9,18 @@
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { adminApi, expectNoHorizontalScroll, shot, signIn, signInAdmin, watchCsp } from "./support";
+import {
+  INGEST_URL,
+  adminApi,
+  expectNoHorizontalScroll,
+  fam,
+  notify,
+  shot,
+  signIn,
+  signInAdmin,
+  watchCsp,
+} from "./support";
 
-const FAM = "http://127.0.0.1:19093/_fake";
-const INGEST_URL = "http://localhost:8081/api/v1/ingest";
 const SUGGESTION =
   "Muster raises MusterHeartbeatLost when an Integration loses its Heartbeat, and only the Default route takes it now.";
 const STALE_ORDER = "Someone else changed the order. Reload to see it.";
@@ -25,30 +33,6 @@ interface ApiRoute {
   id: string;
   name: string;
   is_default: boolean;
-}
-
-async function fam(method: string, path: string, body: unknown): Promise<void> {
-  const res = await fetch(`${FAM}${path}`, { method, body: JSON.stringify(body) });
-  expect(res.ok, `${method} ${path}: ${res.status} ${await res.text()}`).toBe(true);
-}
-
-/** Sends a notification of a fake group and waits until Muster processed every Snapshot of "lab-routes". */
-async function notify(name: string, reason: string): Promise<void> {
-  await fam("POST", `/groups/${name}/notify`, { reason });
-  const admin = await adminApi();
-  try {
-    await expect
-      .poll(async () => {
-        const page = await admin.call<{ items: unknown[] }>(
-          "GET",
-          `/api/v1/stored-snapshots?integration=${labId}&state=pending`,
-        );
-        return page.items.length;
-      })
-      .toBe(0);
-  } finally {
-    await admin.dispose();
-  }
 }
 
 /** The Route that took the Alert of "lab-routes" with the label node, as the API reads it. */
@@ -116,11 +100,7 @@ async function prepare(): Promise<void> {
     });
   }
   await admin.dispose();
-  const res = await fetch(`${FAM}/receivers`, {
-    method: "POST",
-    body: JSON.stringify({ name: "lab-routes", url: INGEST_URL, token: token.value }),
-  });
-  expect(res.status).toBe(204);
+  await fam("POST", "/receivers", { name: "lab-routes", url: INGEST_URL, token: token.value });
   await fam("PUT", "/groups/rr2", {
     receiver: "lab-routes",
     route: "{}",
@@ -129,7 +109,7 @@ async function prepare(): Promise<void> {
   await fam("PUT", "/groups/rr2/alerts/n", { labels: { severity: "none", k: "none" } });
   await fam("PUT", "/groups/rr2/alerts/p", { labels: { severity: "P5", k: "p5" } });
   await fam("PUT", "/groups/rr2/alerts/m", { labels: { k: "missing" } });
-  await notify("rr2", "first notification");
+  await notify(labId, "rr2", { reason: "first notification" });
   await fam("PUT", "/groups/rdisk", {
     receiver: "lab-routes",
     route: "{}",
@@ -163,7 +143,7 @@ async function dragAbove(page: Page, name: string, target: string): Promise<void
 /** A new alert of the group rdisk with severity="info", sent and processed. */
 async function newDiskAlert(node: string): Promise<void> {
   await fam("PUT", `/groups/rdisk/alerts/${node}`, { labels: { node, severity: "info" } });
-  await notify("rdisk", "new alerts added");
+  await notify(labId, "rdisk", { reason: "new alerts added" });
 }
 
 test("lists the Routes, reorders them by dragging and refuses a move over a newer order", async ({

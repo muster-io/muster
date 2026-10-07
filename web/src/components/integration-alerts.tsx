@@ -4,8 +4,9 @@
 // The Alerts view of an Integration (C-06.FR-19): the Alerts Muster tracks for it, with their labels, the state
 // (firing, or resolved with its reason and time), the Route that took each, linked, and its Severity level with the
 // value as received when it has no mapping (C-08.FR-13), startsAt, the time last seen, the Alertmanager groups listing
-// them and the Static label warning. State tabs, label Matchers, text search and the sort live in the URL of the page.
-// Labels are what Alertmanager sent: they show as text only.
+// them and the Static label warning. The full reason of a Gone or Stale Alert opens under its state by a tap, not only
+// on hover (C-09.FR-24). State tabs, label Matchers, text search and the sort live in the URL of the page. Labels are
+// what Alertmanager sent: they show as text only.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -88,7 +89,10 @@ export function reasonLabel(t: TFunction, reason: NullableResolveReason | undefi
  * The full reason of a resolved Alert in the language of the page: the text of C-06.FR-10 for Gone and Stale, else
  * the server's text (which names a deleted Integration).
  */
-export function reasonText(t: TFunction, alert: IntegrationAlert): string | null {
+export function reasonText(
+  t: TFunction,
+  alert: Pick<IntegrationAlert, "resolve_reason" | "resolve_reason_text">,
+): string | null {
   switch (alert.resolve_reason) {
     case "gone":
     case "stale":
@@ -143,12 +147,27 @@ function StateCell({ row }: { row: IntegrationAlert }) {
   }
   const reason = reasonLabel(t, row.resolve_reason);
   const full = reasonText(t, row) ?? reason;
+  const label = reason ? t("alerts.state.resolvedWith", { reason }) : t("alerts.state.resolved");
   return (
     <div className="flex flex-col gap-0.5">
-      <span title={full} data-testid="alert-state" className="whitespace-nowrap">
-        {reason ? t("alerts.state.resolvedWith", { reason }) : t("alerts.state.resolved")}
-        {full !== reason && <span className="sr-only">: {full}</span>}
-      </span>
+      {full !== reason && full !== "" ? (
+        <details data-testid="alert-reason-details">
+          <summary
+            title={full}
+            data-testid="alert-state"
+            className="w-fit cursor-pointer rounded-md whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {label}
+          </summary>
+          <p className="mt-1 max-w-64 text-xs wrap-anywhere" data-testid="alert-reason">
+            {full}
+          </p>
+        </details>
+      ) : (
+        <span data-testid="alert-state" className="whitespace-nowrap">
+          {label}
+        </span>
+      )}
       {row.resolved_at && (
         <time
           className="text-xs whitespace-nowrap text-muted-foreground"

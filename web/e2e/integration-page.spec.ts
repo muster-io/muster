@@ -11,17 +11,17 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   APP,
+  INGEST_URL,
   adminApi,
+  advance,
   expectNoHorizontalScroll,
+  fam,
+  notify,
   shot,
   signIn,
   signInAdmin,
   watchCsp,
 } from "./support";
-
-const FAM = "http://127.0.0.1:19093/_fake";
-const CLOCK = "http://localhost:8082/_dev/clock";
-const INGEST_URL = "http://localhost:8081/api/v1/ingest";
 
 const MARKUP = "<img src=x onerror=alert(1)>";
 const TEMPLATE = "{{count}} $t(errors.generic)";
@@ -33,38 +33,6 @@ test.describe.configure({ mode: "serial" });
 
 let labId = "";
 let builtinId = "";
-
-async function fam(method: string, path: string, body: unknown): Promise<void> {
-  const res = await fetch(`${FAM}${path}`, { method, body: JSON.stringify(body) });
-  expect(res.ok, `${method} ${path}: ${res.status} ${await res.text()}`).toBe(true);
-}
-
-async function advance(seconds: number): Promise<void> {
-  const res = await fetch(CLOCK, {
-    method: "POST",
-    body: JSON.stringify({ advance_seconds: seconds }),
-  });
-  expect(res.ok).toBe(true);
-}
-
-/** Sends a notification of a fake group and waits until Muster processed every Snapshot of "lab". */
-async function notify(name: string, options: Record<string, unknown>): Promise<void> {
-  await fam("POST", `/groups/${name}/notify`, options);
-  const admin = await adminApi();
-  try {
-    await expect
-      .poll(async () => {
-        const page = await admin.call<{ items: unknown[] }>(
-          "GET",
-          `/api/v1/stored-snapshots?integration=${labId}&state=pending`,
-        );
-        return page.items.length;
-      })
-      .toBe(0);
-  } finally {
-    await admin.dispose();
-  }
-}
 
 async function group(
   name: string,
@@ -103,11 +71,7 @@ async function prepare(): Promise<void> {
   builtinId = list.items.find((i) => i.builtin)?.id ?? "";
   expect(builtinId).not.toBe("");
   await admin.dispose();
-  const res = await fetch(`${FAM}/receivers`, {
-    method: "POST",
-    body: JSON.stringify({ name: "lab", url: INGEST_URL, token: token.value }),
-  });
-  expect(res.status).toBe(204);
+  await fam("POST", "/receivers", { name: "lab", url: INGEST_URL, token: token.value });
 }
 
 function integrationRow(page: Page, name: string, table = "Integrations"): Locator {
@@ -176,10 +140,10 @@ test("shows learned routes, warnings, the built-in Integration and the Alerts vi
 
   // 2. Group g6 four times 300 s apart: the route {}/{team="web"} learns 5 minutes, resolving by absence after 15.
   await group("g6", '{}/{team="web"}', { alertname: "Slow" }, { s: { host: "web-1" } });
-  await notify("g6", { reason: "first notification" });
+  await notify(labId, "g6", { reason: "first notification" });
   for (let k = 0; k < 3; k++) {
     await advance(300);
-    await notify("g6", { reason: "repeat interval elapsed" });
+    await notify(labId, "g6", { reason: "repeat interval elapsed" });
   }
   // 3. Group g7 once: not learned yet; again two hours later: the long-interval warning with its snippet.
   await group(
@@ -188,7 +152,7 @@ test("shows learned routes, warnings, the built-in Integration and the Alerts vi
     { alertname: "CertExpiry" },
     { c: { domain: "example.org" } },
   );
-  await notify("g7", { reason: "first notification" });
+  await notify(labId, "g7", { reason: "first notification" });
   await page.goto(`/integrations/${labId}`);
   const web = routeRow(page, '{}/{team="web"}');
   await expect(web.getByTestId("route-repeat-interval")).toHaveText("5 min");
@@ -202,7 +166,7 @@ test("shows learned routes, warnings, the built-in Integration and the Alerts vi
   );
 
   await advance(7200);
-  await notify("g7", { reason: "repeat interval elapsed" });
+  await notify(labId, "g7", { reason: "repeat interval elapsed" });
   await page.reload();
   const longText =
     'Alertmanager route {}/{kind="info"} repeats every 2 h; Muster can resolve its alerts by absence only after 6 h. Use a repeat interval of 5–15 minutes on the route to Muster.';
@@ -233,9 +197,9 @@ test("shows learned routes, warnings, the built-in Integration and the Alerts vi
     { alertname: "PodDown" },
     Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`x${i}`, { pod: `p${i}` }])),
   );
-  await notify("g2", { reason: "first notification" });
+  await notify(labId, "g2", { reason: "first notification" });
   await advance(60);
-  await notify("g2", { reason: "repeat interval elapsed", max_alerts: 2 });
+  await notify(labId, "g2", { reason: "repeat interval elapsed", max_alerts: 2 });
   const truncated =
     "Alertmanager truncates Snapshots for 1 group. Set max_alerts: 0 on the Alertmanager receiver.";
   await page.reload();
@@ -280,7 +244,7 @@ test("shows learned routes, warnings, the built-in Integration and the Alerts vi
     { alertname: "DiskFull" },
     { a: { instance: "db-a", cluster: "a" }, b: { instance: "db-b" }, c: { instance: "db-c" } },
   );
-  await notify("g1", { reason: "first notification" });
+  await notify(labId, "g1", { reason: "first notification" });
   // A group whose route and labels carry markup and template syntax: shown as text.
   await group(
     "g8",
@@ -288,7 +252,7 @@ test("shows learned routes, warnings, the built-in Integration and the Alerts vi
     { alertname: "Markup" },
     { m: { payload: MARKUP, note: TEMPLATE } },
   );
-  await notify("g8", { reason: "first notification" });
+  await notify(labId, "g8", { reason: "first notification" });
 
   await page.goto(`/integrations/${labId}`);
   await expect(page.getByRole("tab", { name: "Firing" })).toHaveAttribute("aria-selected", "true");
@@ -313,11 +277,11 @@ test("shows learned routes, warnings, the built-in Integration and the Alerts vi
 
   // 6. db-c missing from Snapshots past processing.gone_min_absence: Gone, with the full reason on hover.
   await advance(20);
-  await notify("g1", { reason: "repeat interval elapsed", list: ["a", "b"] });
+  await notify(labId, "g1", { reason: "repeat interval elapsed", list: ["a", "b"] });
   await advance(60);
-  await notify("g1", { reason: "repeat interval elapsed", list: ["a", "b"] });
+  await notify(labId, "g1", { reason: "repeat interval elapsed", list: ["a", "b"] });
   await advance(300);
-  await notify("g1", { reason: "repeat interval elapsed", list: ["a", "b"] });
+  await notify(labId, "g1", { reason: "repeat interval elapsed", list: ["a", "b"] });
   await page.getByRole("button", { name: 'Remove matcher instance="db-a"' }).click();
   await expect(page.getByTestId("matcher-chip")).toHaveCount(0);
   await page.getByRole("tab", { name: "Resolved" }).click();
@@ -325,10 +289,15 @@ test("shows learned routes, warnings, the built-in Integration and the Alerts vi
   await addMatcher(page, 'instance="db-c"');
   await expect(alertRows(page)).toHaveCount(1);
   const gone = alertRows(page).first().getByTestId("alert-state");
-  await expect(gone).toHaveText(`Resolved: Gone: ${GONE_TEXT}`);
+  await expect(gone).toHaveText("Resolved: Gone");
   await expect(gone).toHaveAttribute("title", GONE_TEXT);
   await gone.hover();
   await expect(gone).toBeVisible();
+  // ...and by a tap, for a phone: the details under the state open with the full reason (C-09.FR-24).
+  const reason = alertRows(page).first().getByTestId("alert-reason");
+  await expect(reason).toBeHidden();
+  await gone.click();
+  await expect(reason).toHaveText(GONE_TEXT);
   await expect(alertRows(page).first().locator("time")).not.toHaveCount(0);
 
   // 7. The syntax is checked as typed; a regular expression that does not compile gets the server's error under the
@@ -461,7 +430,7 @@ test("shows the routes, the warnings and the Alerts view in Russian", async ({ p
 
   // An untruncated Snapshot of the group ends the truncation warning, on the page and in the list.
   await advance(60);
-  await notify("g2", { reason: "repeat interval elapsed" });
+  await notify(labId, "g2", { reason: "repeat interval elapsed" });
   await page.goto(`/integrations/${labId}`);
   await expect(page.getByTestId("route-long-interval")).toBeVisible();
   await expect(page.getByTestId("integration-warning")).toHaveCount(1);

@@ -9,38 +9,21 @@
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { adminApi, expectNoHorizontalScroll, shot, signIn, signInAdmin, watchCsp } from "./support";
-
-const FAM = "http://127.0.0.1:19093/_fake";
-const INGEST_URL = "http://localhost:8081/api/v1/ingest";
+import {
+  INGEST_URL,
+  adminApi,
+  expectNoHorizontalScroll,
+  fam,
+  notify,
+  shot,
+  signIn,
+  signInAdmin,
+  watchCsp,
+} from "./support";
 
 test.describe.configure({ mode: "serial" });
 
 let pvId = "";
-
-async function fam(method: string, path: string, body: unknown): Promise<void> {
-  const res = await fetch(`${FAM}${path}`, { method, body: JSON.stringify(body) });
-  expect(res.ok, `${method} ${path}: ${res.status} ${await res.text()}`).toBe(true);
-}
-
-/** Sends a notification of a fake group and waits until Muster processed every Snapshot of "pv". */
-async function notify(name: string, reason: string): Promise<void> {
-  await fam("POST", `/groups/${name}/notify`, { reason });
-  const admin = await adminApi();
-  try {
-    await expect
-      .poll(async () => {
-        const page = await admin.call<{ items: unknown[] }>(
-          "GET",
-          `/api/v1/stored-snapshots?integration=${pvId}&state=pending`,
-        );
-        return page.items.length;
-      })
-      .toBe(0);
-  } finally {
-    await admin.dispose();
-  }
-}
 
 /** "pv" without Static labels, its fake receiver, and the group rk1 sent once. */
 async function prepare(): Promise<void> {
@@ -61,11 +44,7 @@ async function prepare(): Promise<void> {
     },
   );
   await admin.dispose();
-  const res = await fetch(`${FAM}/receivers`, {
-    method: "POST",
-    body: JSON.stringify({ name: "pv", url: INGEST_URL, token: token.value }),
-  });
-  expect(res.status).toBe(204);
+  await fam("POST", "/receivers", { name: "pv", url: INGEST_URL, token: token.value });
   await fam("PUT", "/groups/rk1", { receiver: "pv", route: "{}", labels: { alertname: "Disk" } });
   for (const node of ["a1", "a2"]) {
     await fam("PUT", `/groups/rk1/alerts/${node}`, { labels: { cluster: "a", node } });
@@ -73,7 +52,7 @@ async function prepare(): Promise<void> {
   for (const node of ["m1", "m2"]) {
     await fam("PUT", `/groups/rk1/alerts/${node}`, { labels: { node } });
   }
-  await notify("rk1", "first notification");
+  await notify(pvId, "rk1", { reason: "first notification" });
 }
 
 function routeRow(page: Page, name: string): Locator {

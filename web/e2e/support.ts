@@ -12,6 +12,11 @@ import { Client, type QueryResult } from "pg";
 export const APP = "http://localhost:8080";
 export const FAKE_IDP = "http://127.0.0.1:18090";
 export const ADMIN_LOGIN = "admin@example.org";
+/** The control API of the fake Alertmanager of `muster dev`. */
+export const FAM = "http://127.0.0.1:19093/_fake";
+/** The ingestion endpoint that the fake Alertmanager's receivers send to. */
+export const INGEST_URL = "http://localhost:8081/api/v1/ingest";
+const CLOCK = "http://localhost:8082/_dev/clock";
 // The published development password of `muster dev`.
 export const ADMIN_PASSWORD = "muster-dev-password";
 
@@ -24,6 +29,112 @@ export async function devClockOffset(): Promise<number> {
   expect(res.ok).toBe(true);
   const body = parse<{ offset_seconds: number }>(await res.text());
   return body.offset_seconds;
+}
+
+/** Moves the development clock forward; it moves the business clock of `muster dev`, never the real clock. */
+export async function advance(seconds: number): Promise<void> {
+  const res = await fetch(CLOCK, {
+    method: "POST",
+    body: JSON.stringify({ advance_seconds: seconds }),
+  });
+  expect(res.ok).toBe(true);
+}
+
+/** Calls the control API of the fake Alertmanager: groups, their Alerts, receivers and notifications. */
+export async function fam(method: string, path: string, body?: unknown): Promise<void> {
+  const res = await fetch(`${FAM}${path}`, {
+    method,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  expect(res.ok, `${method} ${path}: ${res.status} ${await res.text()}`).toBe(true);
+}
+
+/**
+ * Sends a notification of a fake group with its options (reason, list, max_alerts, …) and waits until Muster processed
+ * every Snapshot of the Integration it goes to.
+ */
+export async function notify(
+  integrationId: string,
+  group: string,
+  options: Record<string, unknown>,
+): Promise<void> {
+  await fam("POST", `/groups/${group}/notify`, options);
+  const admin = await adminApi();
+  try {
+    await expect
+      .poll(async () => {
+        const page = await admin.call<{ items: unknown[] }>(
+          "GET",
+          `/api/v1/stored-snapshots?integration=${integrationId}&state=pending`,
+        );
+        return page.items.length;
+      })
+      .toBe(0);
+  } finally {
+    await admin.dispose();
+  }
+}
+
+/**
+ * Creates an Integration without Static labels, a token for it and a receiver of the fake Alertmanager with the same
+ * name that sends to it. Returns the Integration's id.
+ */
+export async function fakeIntegration(name: string): Promise<string> {
+  const admin = await adminApi();
+  try {
+    const integration = await admin.call<{ id: string }>("POST", "/api/v1/integrations", {
+      name,
+      connection_mode: "webhook_only",
+      static_labels: {},
+      duplicate_window_seconds: 45,
+      heartbeat: { enabled: false },
+    });
+    const token = await admin.call<{ value: string }>(
+      "POST",
+      `/api/v1/integrations/${integration.id}/tokens`,
+      { name: "fake" },
+    );
+    await fam("POST", "/receivers", { name, url: INGEST_URL, token: token.value });
+    return integration.id;
+  } finally {
+    await admin.dispose();
+  }
+}
+
+/** Creates a Route with the On-call profile for the alerts with team=<team>, grouped by groupKey. Returns its id. */
+export async function createRoute(name: string, team: string, groupKey: string[]): Promise<string> {
+  const admin = await adminApi();
+  try {
+    const profiles = await admin.call<{ items: { id: string; policy: unknown }[] }>(
+      "GET",
+      "/api/v1/route-profiles",
+    );
+    const route = await admin.call<{ id: string }>("POST", "/api/v1/routes", {
+      name,
+      matchers: [{ label: "team", op: "=", value: team }],
+      urgent: false,
+      group_key: groupKey,
+      destination_ids: [],
+      policy: profiles.items.find((p) => p.id === "on_call")?.policy,
+    });
+    return route.id;
+  } finally {
+    await admin.dispose();
+  }
+}
+
+/**
+ * Moves the open Alert Groups of a Route to the Default route and deletes the Route, so that the specs after this one
+ * see only their own Routes.
+ */
+export async function deleteRoute(id: string): Promise<void> {
+  const admin = await adminApi();
+  try {
+    await admin.call("POST", `/api/v1/routes/${id}/move-open-alert-groups`);
+    await admin.call("DELETE", `/api/v1/routes/${id}`);
+  } finally {
+    await admin.dispose();
+  }
 }
 
 /** Runs SQL on the database of the run, which the global setup created. */
