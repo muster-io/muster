@@ -295,6 +295,8 @@ None.
   system transitions of S-028 reached through the acknowledged and snoozed states.
 - `IDS3` in Verification stands for three new firing Alert Groups prepared the same way; the pull request shows them.
 - GD has one Alert of its own when resolved above, so `alerts_still_firing` counts 1.
+- The command result returns the Alert Group even to a Personal access token narrowed without `alert-groups:read`,
+  because every Role holds that Permission (maintainer decision on the pull request).
 
 ## Coverage
 
