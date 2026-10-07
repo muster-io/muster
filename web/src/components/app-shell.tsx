@@ -70,7 +70,7 @@ export interface NavEntry {
 
 /** The labels of the entries; each page's story adds its own. */
 export type NavLabel =
-  | "home"
+  | "alertGroups"
   | "integrations"
   | "routes"
   | "profile"
@@ -82,7 +82,7 @@ export type NavLabel =
 
 /** The pages register their entries here, in the order of the navigation. */
 export const NAVIGATION: readonly NavEntry[] = [
-  { to: "/", label: "home", exact: true },
+  { to: "/alert-groups", label: "alertGroups", permission: "alert-groups:read" },
   { to: "/integrations", label: "integrations", permission: "integrations:read" },
   { to: "/routes", label: "routes", permission: "routes:read" },
   { to: "/profile", label: "profile" },
@@ -103,8 +103,8 @@ export function visibleEntries(
 
 function navLabel(t: (key: string) => string, label: NavLabel): string {
   switch (label) {
-    case "home":
-      return t("nav.home");
+    case "alertGroups":
+      return t("nav.alertGroups");
     case "integrations":
       return t("nav.integrations");
     case "routes":
@@ -255,7 +255,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="border-b bg-background">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-3 sm:gap-4 sm:px-6">
           <Link
-            to="/"
+            to="/alert-groups"
             className="flex shrink-0 items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <BrandMark className="size-7" />

@@ -206,13 +206,18 @@ describe("IntegrationAlerts", () => {
     expect(alerted).not.toHaveBeenCalled();
   });
 
-  test("shows the reason of a resolved Alert, its full text on hover, and the tabs filter by state", async () => {
+  test("shows the reason of a resolved Alert, its full text on a tap and on hover, and the tabs filter by state", async () => {
     const { onSearch } = await renderView();
     await page.getByRole("tab", { name: "Resolved" }).click();
     expect(onSearch).toHaveBeenLastCalledWith({ alerts_state: "resolved" });
     const state = rowOf("instance=db-c").getByTestId("alert-state");
-    await expect.element(state).toHaveTextContent(`Resolved: Gone: ${GONE_TEXT}`);
+    await expect.element(state).toHaveTextContent("Resolved: Gone");
     await expect.element(state).toHaveAttribute("title", GONE_TEXT);
+    const reason = rowOf("instance=db-c").getByTestId("alert-reason");
+    await expect.element(reason).not.toBeVisible();
+    await state.click();
+    await expect.element(reason).toBeVisible();
+    await expect.element(reason).toHaveTextContent(GONE_TEXT);
 
     // The full reason is in the language of the page.
     const RU_ABSENT =
@@ -221,7 +226,8 @@ describe("IntegrationAlerts", () => {
     // The table is named in Russian now; the Resolved tab has the one row.
     const ruState = page.getByTestId("alert-state");
     await expect.element(ruState).toHaveAttribute("title", RU_ABSENT);
-    await expect.element(ruState).toHaveTextContent(`Закрыт: пропал: ${RU_ABSENT}`);
+    await expect.element(ruState).toHaveTextContent("Закрыт: пропал");
+    await expect.element(page.getByTestId("alert-reason")).toHaveTextContent(RU_ABSENT);
     await i18n.changeLanguage("en");
     expect(requests.at(-1)?.searchParams.get("state")).toBe("resolved");
     await expect
@@ -229,6 +235,7 @@ describe("IntegrationAlerts", () => {
       .toHaveAttribute("aria-selected", "true");
 
     // The arrow keys move between the tabs; All sends no state.
+    await page.getByRole("tab", { name: "Resolved" }).click();
     await userEvent.keyboard("{ArrowRight}");
     await expect.element(page.getByRole("tab", { name: "All" })).toHaveFocus();
     expect(onSearch).toHaveBeenLastCalledWith({ alerts_state: "all" });

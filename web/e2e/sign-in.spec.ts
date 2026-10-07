@@ -41,7 +41,7 @@ test("opens the sign-in page, signs the Admin in and shows the recovery banner l
   await page.emulateMedia({ colorScheme: "light" });
 
   await signInLocally(page, ADMIN_LOGIN, ADMIN_PASSWORD);
-  await expect(page).toHaveURL(`${APP}/`);
+  await expect(page).toHaveURL(`${APP}/alert-groups`);
   await expect(page.getByTestId("user-menu-name")).toHaveText("admin");
 
   // The notice starts and ends through its data, without a reload; the hint arrives within the 5 s check interval.
@@ -84,7 +84,7 @@ test("keeps return_to inside the application", async ({ page }) => {
 
   await page.goto("/sign-in?return_to=//evil.example/x");
   await signInLocally(page, ADMIN_LOGIN, ADMIN_PASSWORD);
-  await expect(page).toHaveURL(`${APP}/`);
+  await expect(page).toHaveURL(`${APP}/alert-groups`);
   expect(csp).toEqual([]);
 });
 
@@ -104,7 +104,7 @@ test("signs in through the fake IdP and shows the refusal texts of the callback"
   await nextIdpUser("u-web-oscar", "oscar", ["oncall"]);
   await page.goto("/sign-in");
   await page.getByText("Sign in with Dev IdP").click();
-  await expect(page).toHaveURL(`${APP}/`);
+  await expect(page).toHaveURL(`${APP}/alert-groups`);
   await expect(page.getByTestId("user-menu-name")).toHaveText("oscar");
   await page.getByRole("button", { name: /oscar/ }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
@@ -213,7 +213,7 @@ test("TOTP required for everyone: a new user reaches only the enrolment, then si
     const recovery = (await codes.first().textContent()) ?? "";
     await shot(page, "totp-recovery-codes");
     await page.getByRole("button", { name: "Continue" }).click();
-    await expect(page).toHaveURL(`${APP}/`);
+    await expect(page).toHaveURL(`${APP}/alert-groups`);
     await expect(page.getByTestId("user-menu-name")).toHaveText("carol");
 
     // With TOTP, the code is asked after the password, then the recovery code works instead.
@@ -225,7 +225,7 @@ test("TOTP required for everyone: a new user reaches only the enrolment, then si
     await shot(page, "sign-in-totp");
     await page.getByLabel("Code", { exact: true }).fill(await freshCode(page, secret, 1));
     await page.getByRole("button", { name: "Continue" }).click();
-    await expect(page).toHaveURL(`${APP}/`);
+    await expect(page).toHaveURL(`${APP}/alert-groups`);
 
     await page.getByRole("button", { name: /carol/ }).click();
     await page.getByRole("menuitem", { name: "Sign out" }).click();
@@ -233,7 +233,7 @@ test("TOTP required for everyone: a new user reaches only the enrolment, then si
     await page.getByRole("button", { name: "Use a recovery code instead" }).click();
     await page.getByLabel("Recovery code").fill(recovery);
     await page.getByRole("button", { name: "Continue" }).click();
-    await expect(page).toHaveURL(`${APP}/`);
+    await expect(page).toHaveURL(`${APP}/alert-groups`);
   } finally {
     await admin.setTotpPolicy("nobody");
     await admin.dispose();

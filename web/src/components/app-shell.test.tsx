@@ -89,13 +89,16 @@ function withProviders(queryClient: QueryClient, children: ReactNode) {
 
 describe("navigation", () => {
   const entries: NavEntry[] = [
-    { to: "/", label: "home", exact: true },
-    { to: "/profile", label: "profile", permission: "users:read" },
+    { to: "/profile", label: "profile" },
+    { to: "/alert-groups", label: "alertGroups", permission: "alert-groups:read" },
   ];
 
   test("visibleEntries keeps the entries without a Permission and those the session holds", () => {
-    expect(visibleEntries(entries, []).map((e) => e.to)).toEqual(["/"]);
-    expect(visibleEntries(entries, ["users:read"]).map((e) => e.to)).toEqual(["/", "/profile"]);
+    expect(visibleEntries(entries, []).map((e) => e.to)).toEqual(["/profile"]);
+    expect(visibleEntries(entries, ["alert-groups:read"]).map((e) => e.to)).toEqual([
+      "/profile",
+      "/alert-groups",
+    ]);
   });
 
   async function renderNavigation(permissions: Permission[]) {
@@ -111,12 +114,14 @@ describe("navigation", () => {
 
   test("shows an entry only to a session that holds its Permission", async () => {
     const without = await renderNavigation([]);
-    await expect.element(without.getByRole("link", { name: "Home" })).toBeVisible();
-    await expect.element(without.getByRole("link", { name: "Profile" })).not.toBeInTheDocument();
+    await expect.element(without.getByRole("link", { name: "Profile" })).toBeVisible();
+    await expect
+      .element(without.getByRole("link", { name: "Alert Groups" }))
+      .not.toBeInTheDocument();
     await without.unmount();
 
-    const holding = await renderNavigation(["users:read"]);
-    await expect.element(holding.getByRole("link", { name: "Profile" })).toBeVisible();
+    const holding = await renderNavigation(["alert-groups:read"]);
+    await expect.element(holding.getByRole("link", { name: "Alert Groups" })).toBeVisible();
   });
 });
 

@@ -9,9 +9,16 @@
 
 import { expect, test, type Page } from "@playwright/test";
 
-import { adminApi, expectNoHorizontalScroll, shot, signIn, signInAdmin, watchCsp } from "./support";
+import {
+  adminApi,
+  advance,
+  expectNoHorizontalScroll,
+  shot,
+  signIn,
+  signInAdmin,
+  watchCsp,
+} from "./support";
 
-const CLOCK = "http://localhost:8082/_dev/clock";
 // The fake Alertmanager's Heartbeat sender of the demo Integration.
 const DEMO_HEARTBEAT = "http://127.0.0.1:19093/_fake/heartbeats/muster/send";
 const HEARTBEAT_URL = "http://localhost:8081/api/v1/heartbeat";
@@ -20,14 +27,6 @@ const TIME_ZONE = "Europe/Berlin";
 const NOT_CONFIGURED =
   "No Heartbeat: Muster will not notice when Alertmanager goes quiet, and Stale resolution is off.";
 const WAITING = "Waiting for the first Heartbeat signal. Stale resolution is off until it arrives.";
-
-async function advance(seconds: number): Promise<void> {
-  const res = await fetch(CLOCK, {
-    method: "POST",
-    body: JSON.stringify({ advance_seconds: seconds }),
-  });
-  expect(res.ok).toBe(true);
-}
 
 /** Sends one Heartbeat signal with an Integration token, as Alertmanager's receiver would. */
 async function signal(token: string): Promise<void> {

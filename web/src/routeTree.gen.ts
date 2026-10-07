@@ -16,6 +16,8 @@ import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as TotpEnrolmentRouteImport } from './routes/totp-enrolment'
 import { Route as AdminAuditLogRouteImport } from './routes/admin.audit-log'
 import { Route as AdminOidcRouteImport } from './routes/admin.oidc'
+import { Route as AlertGroupsIndexRouteImport } from './routes/alert-groups.index'
+import { Route as AlertGroupsAlertGroupIdRouteImport } from './routes/alert-groups.$alertGroupId'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
 import { Route as IntegrationsNewRouteImport } from './routes/integrations.new'
 import { Route as RoutesIndexRouteImport } from './routes/routes.index'
@@ -64,6 +66,16 @@ const AdminAuditLogRoute = AdminAuditLogRouteImport.update({
 const AdminOidcRoute = AdminOidcRouteImport.update({
   id: '/admin/oidc',
   path: '/admin/oidc',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AlertGroupsIndexRoute = AlertGroupsIndexRouteImport.update({
+  id: '/alert-groups/',
+  path: '/alert-groups/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AlertGroupsAlertGroupIdRoute = AlertGroupsAlertGroupIdRouteImport.update({
+  id: '/alert-groups/$alertGroupId',
+  path: '/alert-groups/$alertGroupId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
@@ -151,10 +163,12 @@ export interface FileRoutesByFullPath {
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
+  '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
+  '/alert-groups/': typeof AlertGroupsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
@@ -174,10 +188,12 @@ export interface FileRoutesByTo {
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
+  '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
+  '/alert-groups': typeof AlertGroupsIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
   '/routes': typeof RoutesIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
@@ -198,10 +214,12 @@ export interface FileRoutesById {
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
+  '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
+  '/alert-groups/': typeof AlertGroupsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
@@ -223,10 +241,12 @@ export interface FileRouteTypes {
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
+    | '/alert-groups/$alertGroupId'
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
     | '/sign-in/totp'
+    | '/alert-groups/'
     | '/integrations/'
     | '/routes/'
     | '/admin/organization/security'
@@ -246,10 +266,12 @@ export interface FileRouteTypes {
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
+    | '/alert-groups/$alertGroupId'
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
     | '/sign-in/totp'
+    | '/alert-groups'
     | '/integrations'
     | '/routes'
     | '/admin/organization/security'
@@ -269,10 +291,12 @@ export interface FileRouteTypes {
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
+    | '/alert-groups/$alertGroupId'
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
     | '/sign-in/totp'
+    | '/alert-groups/'
     | '/integrations/'
     | '/routes/'
     | '/admin/organization/security'
@@ -293,9 +317,11 @@ export interface RootRouteChildren {
   TotpEnrolmentRoute: typeof TotpEnrolmentRoute
   AdminAuditLogRoute: typeof AdminAuditLogRoute
   AdminOidcRoute: typeof AdminOidcRoute
+  AlertGroupsAlertGroupIdRoute: typeof AlertGroupsAlertGroupIdRoute
   IntegrationsNewRoute: typeof IntegrationsNewRoute
   RoutesRouteIdRoute: typeof RoutesRouteIdRoute
   RoutesNewRoute: typeof RoutesNewRoute
+  AlertGroupsIndexRoute: typeof AlertGroupsIndexRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
   RoutesIndexRoute: typeof RoutesIndexRoute
   AdminOrganizationSecurityRoute: typeof AdminOrganizationSecurityRoute
@@ -357,6 +383,20 @@ declare module '@tanstack/react-router' {
       path: '/admin/oidc'
       fullPath: '/admin/oidc'
       preLoaderRoute: typeof AdminOidcRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/alert-groups/': {
+      id: '/alert-groups/'
+      path: '/alert-groups'
+      fullPath: '/alert-groups/'
+      preLoaderRoute: typeof AlertGroupsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/alert-groups/$alertGroupId': {
+      id: '/alert-groups/$alertGroupId'
+      path: '/alert-groups/$alertGroupId'
+      fullPath: '/alert-groups/$alertGroupId'
+      preLoaderRoute: typeof AlertGroupsAlertGroupIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integrations/': {
@@ -479,9 +519,11 @@ const rootRouteChildren: RootRouteChildren = {
   TotpEnrolmentRoute: TotpEnrolmentRoute,
   AdminAuditLogRoute: AdminAuditLogRoute,
   AdminOidcRoute: AdminOidcRoute,
+  AlertGroupsAlertGroupIdRoute: AlertGroupsAlertGroupIdRoute,
   IntegrationsNewRoute: IntegrationsNewRoute,
   RoutesRouteIdRoute: RoutesRouteIdRoute,
   RoutesNewRoute: RoutesNewRoute,
+  AlertGroupsIndexRoute: AlertGroupsIndexRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
   RoutesIndexRoute: RoutesIndexRoute,
   AdminOrganizationSecurityRoute: AdminOrganizationSecurityRoute,
