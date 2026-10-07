@@ -31,6 +31,9 @@ type operation struct {
 	path string
 	// permissions are the values of x-permission: one Permission, alternatives, or a special value.
 	permissions []string
+	// dispatcherChecks are the Command operations marked x-permission-check: dispatcher, whose Permission the
+	// dispatcher of internal/groups checks as its first step (ADR-0016); the middleware checks only authentication.
+	dispatcherChecks bool
 	// public operations need no credentials: security is empty.
 	public bool
 	// sessionOnly operations accept only the web session (C-03.FR-27).
@@ -38,6 +41,9 @@ type operation struct {
 	// validate is false for the ingestion operations, which take any body (ADR-0002).
 	validate bool
 }
+
+// permissionCheckDispatcher is the value of x-permission-check that leaves the Permission to the dispatcher.
+const permissionCheckDispatcher = "dispatcher"
 
 // operationStreamLiveUpdates is the live-updates stream, which the request duration metric leaves out.
 const operationStreamLiveUpdates = "streamLiveUpdates"
@@ -65,6 +71,8 @@ func readOperations(doc *openapi3.T) map[*openapi3.Operation]*operation {
 				continue
 			}
 			o := &operation{id: op.OperationID, path: path, permissions: xPermission(op), validate: true}
+			check, _ := op.Extensions["x-permission-check"].(string)
+			o.dispatcherChecks = check == permissionCheckDispatcher
 			if op.Security != nil {
 				o.public = len(*op.Security) == 0
 				o.sessionOnly = !o.public && slices.IndexFunc(*op.Security, func(req openapi3.SecurityRequirement) bool {
@@ -262,7 +270,8 @@ func credentialsAllowed(id *auth.Identity, op *operation) *Problem {
 	return nil
 }
 
-// permit checks the Permission of the operation's x-permission; it runs after request validation.
+// permit checks the Permission of the operation's x-permission; it runs after request validation. A Command operation
+// marked x-permission-check: dispatcher only needs an identity: the dispatcher checks its Permission.
 func (s *Server) permit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		op := infoFrom(r.Context()).operation
@@ -275,9 +284,8 @@ func (s *Server) permit(next http.Handler) http.Handler {
 			writeProblem(w, r, errUnauthenticated)
 			return
 		}
-		if !allowed(id, op.permissions) {
-			writeProblem(w, r, problem(http.StatusForbidden, typeForbidden, "",
-				"This needs the Permission "+strings.Join(op.permissions, " or ")+"."))
+		if !op.dispatcherChecks && !allowed(id, op.permissions) {
+			writeProblem(w, r, forbidden(op.permissions...))
 			return
 		}
 		next.ServeHTTP(w, r)

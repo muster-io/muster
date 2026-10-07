@@ -114,13 +114,17 @@ func (f *fakeDB) matches(g *dbgen.LockGroupsRow, p fakeFilter) bool {
 
 func (f *fakeDB) listRow(g *dbgen.LockGroupsRow) listRow {
 	r := f.routes[g.RouteID]
+	newerID, newerNumber := f.newer(g)
 	return listRow{ID: g.ID, PublicID: g.PublicID, Number: g.Number, Title: g.Title, Summary: g.Summary,
 		Status: g.Status, SeverityLevel: g.SeverityLevel, Urgent: f.urgent(g), CommonLabels: g.CommonLabels,
 		IntegrationIds: g.IntegrationIds, ReopenCount: g.ReopenCount, FiringAlertCount: g.FiringAlertCount,
 		ResolvedAlertCount: g.ResolvedAlertCount, ResolvedAt: g.ResolvedAt, ResolvedByKind: g.ResolvedByKind,
 		ResolvedByUserID: g.ResolvedByUserID, ResolvedByServiceAccountID: g.ResolvedByServiceAccountID,
 		ResolveReason: g.ResolveReason, ResolveReasonText: g.ResolveReasonText, CreatedAt: g.CreatedAt,
-		LastChangedAt: g.LastChangedAt, RoutePublicID: r.PublicID, RouteName: r.name}
+		LastChangedAt: g.LastChangedAt, RoutePublicID: r.PublicID, RouteName: r.name, OwnerUserID: g.OwnerUserID,
+		SnoozeUntil: g.SnoozeUntil, SnoozedByUserID: g.SnoozedByUserID,
+		SnoozedByServiceAccountID: g.SnoozedByServiceAccountID, NewerPublicID: newerID, NewerNumber: newerNumber,
+		RouteDeleted: r.deleted}
 }
 
 func (f *fakeDB) list(name string, p dbgen.ListGroupsStartedDescParams, changed, asc bool) ([]listRow, error) {

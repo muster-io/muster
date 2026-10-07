@@ -685,6 +685,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Alerts:         alerts,
 		Routes:         p.routes,
 		AlertGroups:    p.groups,
+		Commands:       p.groups,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,

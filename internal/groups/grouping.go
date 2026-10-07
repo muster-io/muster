@@ -50,7 +50,7 @@ type Config struct {
 }
 
 // Service is the Alert Group lifecycle of an Organization: the grouping Sink of Snapshot processing, the system
-// transitions of timers, downtime and Route deletion, and the reads of one Alert Group.
+// transitions of timers, downtime and Route deletion, the Commands, and the reads of Alert Groups.
 type Service struct {
 	orgID   int64
 	store   Store
@@ -66,7 +66,8 @@ type Service struct {
 func New(cfg Config) *Service {
 	s := &Service{orgID: cfg.OrgID, store: cfg.Store, audit: cfg.Audit, clock: cfg.Business, log: cfg.Log,
 		restamp: cfg.Restamp, queries: newQueries}
-	s.d = &dispatcher{orgID: cfg.OrgID, clock: cfg.Business, log: cfg.Log, routeIDs: s.routePublicID}
+	s.d = &dispatcher{orgID: cfg.OrgID, clock: cfg.Business, log: cfg.Log, audit: cfg.Audit,
+		routeIDs: s.routePublicID}
 	return s
 }
 

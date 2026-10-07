@@ -11,6 +11,7 @@ replica that is the Leader. The capability is the one that exports the metric.
 
 | Metric | Type | Labels | Capability | Leader only | Description |
 |---|---|---|---|---|---|
+| `muster_alert_group_time_to_ack_seconds` | histogram | route | C-10 | no | Time from the start of an Alert Group to its first acknowledgement, observed once per Alert Group, by Route. Buckets (le): 60, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400. |
 | `muster_alert_group_time_to_resolve_seconds` | histogram | route | C-09 | no | Time from the start of an Alert Group to its resolution, observed at each resolution, by Route. Buckets (le): 60, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400. |
 | `muster_alert_groups` | gauge | route, status | C-09 | yes | Open Alert Groups by Route and status, counted by the Leader; an Alert Group moved to the Default route counts there. |
 | `muster_alert_groups_created_total` | counter | route | C-09 | no | Alert Groups that started, by Route. |
@@ -23,6 +24,7 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_client_request_duration_seconds` | histogram | client, outcome | C-02 | no | Duration of outbound HTTP requests, one per attempt, from the dial to the end of the body, by client class and outcome. Buckets (le): 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60. |
 | `muster_client_requests_total` | counter | client, outcome | C-02 | no | Outbound HTTP requests, one per attempt, by client class and classified outcome. |
 | `muster_clock_skew_seconds` | gauge | — | C-02 | no | This replica's clock minus the database clock, corrected by half the round trip; positive when the replica is ahead. |
+| `muster_commands_total` | counter | command, transport, outcome | C-10 | no | Commands run on Alert Groups, one per Alert Group, by command, Transport and outcome. |
 | `muster_db_pool_acquire_wait_seconds_total` | counter | — | C-02 | no | Seconds spent waiting for a connection of the main database pool of this replica, summed over every acquire. |
 | `muster_db_pool_acquires_total` | counter | — | C-02 | no | Connections taken from the main database pool of this replica. |
 | `muster_db_pool_connections` | gauge | state | C-02 | no | Connections of the main database pool of this replica, by state. |
@@ -46,6 +48,7 @@ replica that is the Leader. The capability is the one that exports the metric.
 
 | Metric | Label | Values |
 |---|---|---|
+| `muster_alert_group_time_to_ack_seconds` | `route` | entity: the public_id of the route |
 | `muster_alert_group_time_to_resolve_seconds` | `route` | entity: the public_id of the route |
 | `muster_alert_groups` | `route` | entity: the public_id of the route |
 | `muster_alert_groups` | `status` | `firing`, `acknowledged`, `snoozed` — the status of the open Alert Groups |
@@ -66,6 +69,9 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_client_request_duration_seconds` | `outcome` | `ok`, `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect` — the classified outcome of the request |
 | `muster_client_requests_total` | `client` | `delivery`, `interactive`, `background`, `heartbeat` — the client class of ADR-0015 |
 | `muster_client_requests_total` | `outcome` | `ok`, `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect` — the classified outcome of the request |
+| `muster_commands_total` | `command` | `acknowledge`, `unacknowledge`, `resolve`, `unresolve`, `snooze`, `unsnooze`, `add_note`, `still_on_it` — the Command |
+| `muster_commands_total` | `transport` | `ui`, `api`, `mattermost`, `telegram`, `system` — how the Command reached Muster |
+| `muster_commands_total` | `outcome` | `done`, `unchanged`, `refused`, `skipped`, `failed` — done changed the Alert Group, unchanged was an idempotent repeat, refused a refusal or a missing Permission, skipped an Alert Group a bulk Acknowledge left to its Owner, failed an Alert Group that was not found |
 | `muster_db_pool_connections` | `state` | `acquired`, `idle`, `constructing` — the state of the connection |
 | `muster_heartbeat_lost` | `integration` | entity: the public_id of the integration |
 | `muster_ingest_failed_snapshots_total` | `integration` | entity: the public_id of the integration |

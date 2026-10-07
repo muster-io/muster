@@ -64,6 +64,7 @@ const (
 	AlertsStillFiring             AlertGroupNoticeKind = "alerts_still_firing"
 	DetailsRemoved                AlertGroupNoticeKind = "details_removed"
 	FiringAgainAfterManualResolve AlertGroupNoticeKind = "firing_again_after_manual_resolve"
+	NewerAlertGroupExists         AlertGroupNoticeKind = "newer_alert_group_exists"
 	Replacement                   AlertGroupNoticeKind = "replacement"
 )
 
@@ -75,6 +76,8 @@ func (e AlertGroupNoticeKind) Valid() bool {
 	case DetailsRemoved:
 		return true
 	case FiringAgainAfterManualResolve:
+		return true
+	case NewerAlertGroupExists:
 		return true
 	case Replacement:
 		return true
@@ -2741,6 +2744,9 @@ type AlertGroupNotice struct {
 
 	// Label The Instance label that changed, for `replacement`.
 	Label nullable.Nullable[string] `json:"label,omitempty"`
+
+	// RelatedAlertGroup For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that takes part in grouping, shown as a link in place of Unresolve.
+	RelatedAlertGroup *AlertGroupRef `json:"related_alert_group,omitempty"`
 
 	// ResolvedNumber The `#N` of the manually resolved Alert Group, for `firing_again_after_manual_resolve`.
 	ResolvedNumber nullable.Nullable[int] `json:"resolved_number,omitempty"`
@@ -15239,6 +15245,22 @@ func (response ResolveAlertGroup409ApplicationProblemPlusJSONResponse) VisitReso
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResolveAlertGroup422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response ResolveAlertGroup422ApplicationProblemPlusJSONResponse) VisitResolveAlertGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }

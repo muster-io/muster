@@ -324,3 +324,32 @@ var AlertGroupTimeToResolve = newHistogram(Definition{
 	Buckets:    []float64{60, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400},
 	Capability: "C-09",
 })
+
+// CommandNames are the command values of muster_commands_total: the Commands of C-10 and "Still on it".
+var CommandNames = []string{"acknowledge", "unacknowledge", "resolve", "unresolve", "snooze", "unsnooze", "add_note",
+	"still_on_it"}
+
+// Commands counts the Commands run on Alert Groups, by command, Transport and outcome; a bulk command counts each
+// Alert Group.
+var Commands = newCounter(Definition{
+	Name: "muster_commands_total",
+	Help: "Commands run on Alert Groups, one per Alert Group, by command, Transport and outcome.",
+	Labels: []Label{
+		closed("command", "the Command", CommandNames...),
+		closed("transport", "how the Command reached Muster", "ui", "api", "mattermost", "telegram", "system"),
+		closed("outcome", "done changed the Alert Group, unchanged was an idempotent repeat, refused a refusal or a "+
+			"missing Permission, skipped an Alert Group a bulk Acknowledge left to its Owner, failed an Alert Group "+
+			"that was not found", "done", "unchanged", "refused", "skipped", "failed"),
+	},
+	Capability: "C-10",
+})
+
+// AlertGroupTimeToAck observes, at the first acknowledgement of an Alert Group, the time from its start.
+var AlertGroupTimeToAck = newHistogram(Definition{
+	Name: "muster_alert_group_time_to_ack_seconds",
+	Help: "Time from the start of an Alert Group to its first acknowledgement, observed once per Alert Group, by " +
+		"Route.",
+	Labels:     []Label{entity("route")},
+	Buckets:    []float64{60, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400},
+	Capability: "C-10",
+})

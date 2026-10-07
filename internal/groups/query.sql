@@ -84,7 +84,7 @@ SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, g
        resolve_reason_text, reopen_deadline, prior_status, prior_owner_user_id, prior_snooze_until,
        prior_snooze_no_end, prior_snoozed_while_urgent, prior_snoozed_by_user_id,
        prior_snoozed_by_service_account_id, grace_deadline, firing_again_after_id, event_seq, created_at,
-       last_changed_at
+       last_changed_at, first_acknowledged_at
 FROM alert_groups
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[])
 ORDER BY id
@@ -147,7 +147,8 @@ SET route_id = @route_id, moved_from_route_id = sqlc.narg('moved_from_route_id')
     prior_snoozed_while_urgent = sqlc.narg('prior_snoozed_while_urgent'),
     prior_snoozed_by_user_id = sqlc.narg('prior_snoozed_by_user_id'),
     prior_snoozed_by_service_account_id = sqlc.narg('prior_snoozed_by_service_account_id'),
-    grace_deadline = sqlc.narg('grace_deadline'), event_seq = @event_seq, last_changed_at = @last_changed_at
+    grace_deadline = sqlc.narg('grace_deadline'), event_seq = @event_seq, last_changed_at = @last_changed_at,
+    first_acknowledged_at = sqlc.narg('first_acknowledged_at')
 WHERE org_id = @org_id AND id = @id;
 
 -- IsActiveUser reports whether a User can still own an Alert Group: a disabled or deleted Owner has no
@@ -269,7 +270,9 @@ WHERE org_id = @org_id AND route_id = @route_id AND status <> 'resolved' AND mov
 ORDER BY id;
 
 -- GetGroup reads an Alert Group by public_id with its Route, the #N of the Alert Group it fires again after, the
--- label of its latest Replacement, the Alerts still firing in it and retention.alert_details. Urgency is derived from
+-- label of its latest Replacement, the Alerts still firing in it, retention.alert_details, its Owner and Snooze, and,
+-- when a person resolved it, the open Alert Group of the same Route and key that takes part in grouping (C-10.FR-7),
+-- and whether its Route was deleted, which Unresolve needs. Urgency is derived from
 -- the Route and organization.critical_is_urgent as they are now (C-08.FR-6), so that marking a Route urgent or
 -- changing the setting shows on open Alert Groups at once without changing them.
 -- name: GetGroup :one
@@ -290,10 +293,19 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        (SELECT count(*)
         FROM alert_group_alerts m
         WHERE m.org_id = g.org_id AND m.alert_group_id = g.id AND m.state = 'firing')::bigint AS still_firing,
-       o.retention_alert_details_days
+       o.retention_alert_details_days, g.owner_user_id, g.snooze_until, g.snoozed_by_user_id,
+       g.snoozed_by_service_account_id,
+       coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
+LEFT JOIN LATERAL (SELECT n.public_id, n.number
+                   FROM alert_groups n
+                   WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
+                     AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
+                     AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
+                   LIMIT 1) nw ON true
 WHERE g.org_id = @org_id AND g.public_id = @public_id;
 
 -- GetGroupID reads the id of an Alert Group by public_id, with when it was resolved and retention.alert_details, which
@@ -303,6 +315,12 @@ SELECT g.id, g.resolved_at, o.retention_alert_details_days
 FROM alert_groups g
 JOIN organizations o ON o.id = g.org_id
 WHERE g.org_id = @org_id AND g.public_id = @public_id;
+
+-- GetGroupRef names an Alert Group by id: its public_id and #N.
+-- name: GetGroupRef :one
+SELECT public_id, number
+FROM alert_groups
+WHERE org_id = @org_id AND id = @id;
 
 -- ListIntegrationRefs names Integrations, deleted ones included.
 -- name: ListIntegrationRefs :many
@@ -431,7 +449,7 @@ WHERE org_id = @org_id AND deleted_at IS NULL;
 -- range selects lifetimes that overlap it — created_at < to AND (resolved_at IS NULL OR resolved_at >= from), written
 -- with the status that the CHECK ties to resolved_at, so that the open index and alert_groups_resolved_idx serve it —
 -- and is ignored for a number. Label Matchers other than = with a value are matched in Go on common_labels, after
--- these conditions; urgency is derived as in GetGroup.
+-- these conditions; urgency and the newer open Alert Group are derived as in GetGroup.
 
 -- ListGroupsStartedDesc reads a batch of the Alert Group list, newest start first, after the cursor when given.
 -- name: ListGroupsStartedDesc :many
@@ -439,10 +457,19 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
        g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
        g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
-       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
+       g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
+       coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
+LEFT JOIN LATERAL (SELECT n.public_id, n.number
+                   FROM alert_groups n
+                   WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
+                     AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
+                     AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
+                   LIMIT 1) nw ON true
 WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL
@@ -470,10 +497,19 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
        g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
        g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
-       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
+       g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
+       coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
+LEFT JOIN LATERAL (SELECT n.public_id, n.number
+                   FROM alert_groups n
+                   WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
+                     AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
+                     AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
+                   LIMIT 1) nw ON true
 WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL
@@ -501,10 +537,19 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
        g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
        g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
-       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
+       g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
+       coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
+LEFT JOIN LATERAL (SELECT n.public_id, n.number
+                   FROM alert_groups n
+                   WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
+                     AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
+                     AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
+                   LIMIT 1) nw ON true
 WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL
@@ -532,10 +577,19 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
        g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
        g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
-       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
+       g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
+       coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
+LEFT JOIN LATERAL (SELECT n.public_id, n.number
+                   FROM alert_groups n
+                   WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
+                     AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
+                     AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
+                   LIMIT 1) nw ON true
 WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL

@@ -25,6 +25,15 @@ const (
 	EventUnacknowledged      Event = "unacknowledged"
 )
 
+// The lifecycle events of the Commands (C-10.FR-15); note_added is recorded by its Note (S-063).
+const (
+	EventAcknowledged Event = "acknowledged"
+	EventTakeover     Event = "takeover"
+	EventUnresolved   Event = "unresolved"
+	EventSnoozed      Event = "snoozed"
+	EventUnsnoozed    Event = "unsnoozed"
+)
+
 // Kind is the Timeline kind of an entry.
 type Kind string
 
@@ -67,14 +76,17 @@ const (
 // Urgent removed an acknowledgement or a Snooze.
 type Variant string
 
-// The variants of the rows of C-09.FR-22; VariantAny is an event with a single row.
+// The variants of the rows of C-09.FR-22 and C-10.FR-15; VariantAny is an event with a single row. unacknowledged
+// has two: by the Command Unacknowledge, and when its Owner is disabled or deleted (S-063).
 const (
-	VariantAny          Variant = ""
-	VariantFiring       Variant = "firing"
-	VariantAcknowledged Variant = "acknowledged"
-	VariantSnoozed      Variant = "snoozed"
-	VariantRemoves      Variant = "removes"
-	VariantRemovesNone  Variant = "removes_none"
+	VariantAny           Variant = ""
+	VariantFiring        Variant = "firing"
+	VariantAcknowledged  Variant = "acknowledged"
+	VariantSnoozed       Variant = "snoozed"
+	VariantRemoves       Variant = "removes"
+	VariantRemovesNone   Variant = "removes_none"
+	VariantCommand       Variant = "command"
+	VariantOwnerReleased Variant = "owner_released"
 )
 
 // Row is one row of the lifecycle event table: its event and variant, its Timeline kind, loudness and Mentions.
@@ -86,8 +98,9 @@ type Row struct {
 	Mentions []Mention
 }
 
-// Table is the lifecycle event table of C-09.FR-22, a closed list: every transition and change of an Alert Group
-// records exactly one entry of one of its rows. The CHECKs of timeline_entries back the kinds and Mentions.
+// Table is the lifecycle event table of C-09.FR-22 with the rows of C-10.FR-15, a closed list: every transition and
+// change of an Alert Group records exactly one entry of one of its rows. The CHECKs of timeline_entries back the kinds
+// and Mentions.
 var Table = []Row{
 	{EventCreated, VariantAny, KindStatus, Loud, []Mention{MentionNewAlertGroup}},
 	{EventAlertsAdded, VariantFiring, KindAlerts, Loud, []Mention{MentionNewAlerts}},
@@ -106,7 +119,13 @@ var Table = []Row{
 	{EventSnoozeEnded, VariantAny, KindStatus, Loud, []Mention{MentionSnoozeEnded}},
 	{EventResolved, VariantAny, KindStatus, Quiet, nil},
 	{EventMovedToDefaultRoute, VariantAny, KindSystem, Quiet, nil},
-	{EventUnacknowledged, VariantAny, KindStatus, Loud, nil},
+	{EventUnacknowledged, VariantOwnerReleased, KindStatus, Loud, nil},
+	{EventAcknowledged, VariantAny, KindStatus, Quiet, nil},
+	{EventTakeover, VariantAny, KindStatus, Loud, []Mention{MentionPreviousOwner}},
+	{EventUnacknowledged, VariantCommand, KindStatus, Quiet, nil},
+	{EventUnresolved, VariantAny, KindStatus, Quiet, nil},
+	{EventSnoozed, VariantAny, KindStatus, Quiet, nil},
+	{EventUnsnoozed, VariantAny, KindStatus, Quiet, nil},
 }
 
 // rowOf is the row of the event and variant; an event outside the table is a programming error.

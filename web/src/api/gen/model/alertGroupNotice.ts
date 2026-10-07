@@ -18,6 +18,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AlertGroupNoticeKind } from './alertGroupNoticeKind';
+import type { AlertGroupRef } from './alertGroupRef';
 
 /**
  * A banner for the Alert Group page; the UI owns the wording.
@@ -38,4 +39,6 @@ export interface AlertGroupNotice {
      * @nullable
      */
   resolved_number?: number | null;
+  /** For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that takes part in grouping, shown as a link in place of Unresolve. */
+  related_alert_group?: AlertGroupRef;
 }

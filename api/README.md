@@ -98,6 +98,7 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 | Extension | Where | Meaning |
 |---|---|---|
 | `x-permission` | operation | The Permission needed (`<resource>:<verb>`, see the `Permission` schema for the Role matrix), a list of alternatives, or `authenticated` (any signed-in identity), `integration-token` or `none`. |
+| `x-permission-check` | operation | `dispatcher` on the Command operations: the middleware checks only that the caller is authenticated, and the dispatcher of `internal/groups` checks the Permission of `x-permission` as its first step, logs `command_refused` and answers the same `403` `forbidden` (ADR-0016). Without it the middleware checks `x-permission`. |
 | `x-listener` | operation, server | `app`, `ingest` or `internal`. |
 | `x-problem-types` | `Problem` schema | Stable problem types with their statuses. |
 | `x-problem-codes` | `Problem` schema | The stable `code` values of each problem type, and whether they appear in `code` or in `errors[].code`. |

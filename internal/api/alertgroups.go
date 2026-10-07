@@ -147,13 +147,17 @@ func (s *Server) ListAlertGroups(ctx context.Context, req gen.ListAlertGroupsReq
 	} else if ok {
 		r.After = &groups.ListPosition{At: key.At, ID: key.ID}
 	}
+	c, err := caller(ctx)
+	if err != nil {
+		return nil, err
+	}
 	page, err := s.alertGroups.List(ctx, r)
 	if err != nil {
 		return nil, err
 	}
 	out := gen.AlertGroupList{Items: make([]gen.AlertGroup, 0, len(page.Groups))}
 	for _, v := range page.Groups {
-		out.Items = append(out.Items, alertGroupOf(v))
+		out.Items = append(out.Items, alertGroupOf(v, c))
 	}
 	if page.Next != nil {
 		out.NextCursor.Set(encodeCursor(list, alertGroupKey{At: page.Next.At, ID: page.Next.ID}))
@@ -267,20 +271,24 @@ func durationStatsOf(d groups.DurationStats) gen.DurationStats {
 	return out
 }
 
-// GetAlertGroup is getAlertGroup: the Alert Group with its resolution, labels and notices.
+// GetAlertGroup is getAlertGroup: the Alert Group with its resolution, Owner, Snooze, labels, notices and the
+// Commands the caller may run.
 func (s *Server) GetAlertGroup(ctx context.Context, req gen.GetAlertGroupRequestObject) (
 	gen.GetAlertGroupResponseObject, error) {
+	c, err := caller(ctx)
+	if err != nil {
+		return nil, err
+	}
 	v, err := s.alertGroups.Get(ctx, req.AlertGroupId)
 	if err != nil {
 		return nil, err
 	}
-	return gen.GetAlertGroup200JSONResponse(alertGroupOf(v)), nil
+	return gen.GetAlertGroup200JSONResponse(alertGroupOf(v, c)), nil
 }
 
-// alertGroupOf is the API form of an Alert Group, of its page or of a list item; a list item leaves out the labels
-// and the notices. The Owner, the Snooze and the allowed Commands arrive with the Commands, the links, Unclaimed and
-// the delivery problem with their capabilities.
-func alertGroupOf(v groups.View) gen.AlertGroup {
+// alertGroupOf is the API form of an Alert Group for the caller c, of its page or of a list item; a list item leaves
+// out the labels and the notices. The links, Unclaimed and the delivery problem arrive with their capabilities.
+func alertGroupOf(v groups.View, c groups.Caller) gen.AlertGroup {
 	out := gen.AlertGroup{
 		Id: v.PublicID, Number: int(v.Number), Title: v.Title, Summary: nullableString(v.Summary),
 		Status: gen.AlertGroupStatus(v.Status), SeverityLevel: gen.SeverityLevel(v.Severity), Urgent: v.Urgent,
@@ -289,6 +297,17 @@ func alertGroupOf(v groups.View) gen.AlertGroup {
 		ReopenCount: int(v.ReopenCount), FiringAlertCount: int(v.FiringCount),
 		ResolvedAlertCount: int(v.ResolvedCount), AllowedCommands: []gen.CommandName{},
 		Links: &[]gen.AlertGroupLink{}, DetailsRemoved: &v.DetailsRemoved, Resolution: resolvedByOf(v.Resolution),
+		Owner: userRefOf(v.Owner),
+	}
+	for _, cmd := range v.Allowed(c) {
+		out.AllowedCommands = append(out.AllowedCommands, gen.CommandName(cmd))
+	}
+	if v.Status == groups.StatusSnoozed {
+		out.SnoozeUntil = nullableTime(v.SnoozeUntil)
+		if v.SnoozedBy != nil {
+			by := actorRefOf(*v.SnoozedBy)
+			out.SnoozedBy = &by
+		}
 	}
 	for _, i := range v.Integrations {
 		out.Integrations = append(out.Integrations, gen.EntityRef{Id: i.PublicID, Name: i.Name})
@@ -316,6 +335,9 @@ func alertGroupOf(v groups.View) gen.AlertGroup {
 		}
 		if n.RetentionDays != nil {
 			g.RetentionDays.Set(int(*n.RetentionDays))
+		}
+		if n.Related != nil {
+			g.RelatedAlertGroup = &gen.AlertGroupRef{Id: n.Related.PublicID, Number: int(n.Related.Number)}
 		}
 		notices = append(notices, g)
 	}

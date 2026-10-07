@@ -12,18 +12,20 @@ files_touched:
   - internal/groups/allowed.go
   - internal/groups/dispatcher.go
   - internal/groups/grouping.go
-  - internal/groups/transitions.go
   - internal/groups/events.go
   - internal/groups/read.go
+  - internal/groups/list.go
   - internal/groups/query.sql
   - internal/groups/commands_test.go
   - internal/groups/bulk_test.go
   - internal/groups/allowed_test.go
   - internal/groups/events_test.go
+  - internal/groups/dispatcher_test.go
+  - internal/groups/list_test.go
+  - internal/groups/groups_integration_test.go
   - internal/api/commands.go
   - internal/api/commands_test.go
   - internal/api/alertgroups.go
-  - internal/api/alertgroups_test.go
   - internal/api/middleware.go
   - internal/api/server.go
   - internal/api/server_test.go
@@ -117,10 +119,11 @@ issue: 32
     period of S-028 starts. Resolved: `409 already_resolved`. The optional Note is S-063's.
   - **Unresolve** (UI and API only): resolved by a person → firing without an Owner, its Alerts still firing active
     again, the Grace period timer removed. Refused, in this order, with `not_resolved` when it is not resolved,
-    `resolved_automatically` when the system resolved it, `newer_alert_group_exists` with `related_alert_group` when an
-    open Alert Group of the same Route and key takes part in grouping (never for an Alert Group moved to the Default
-    route, which stays out of it, `design/db/schema.md` §4.9), and `all_alerts_resolved` when none of its Alerts still
-    fires.
+    `resolved_automatically` when the system resolved it, `route_deleted` when its Route was deleted meanwhile
+    (Unresolve takes the Route FOR SHARE and then the counter row, as grouping does), `newer_alert_group_exists` with
+    `related_alert_group` when an open Alert Group of the same Route and key takes part in grouping (never for an
+    Alert Group moved to the Default route, which stays out of it, `design/db/schema.md` §4.9), and
+    `all_alerts_resolved` when none of its Alerts still fires.
   - **Snooze**: firing, acknowledged or snoozed → snoozed with exactly one of `until` (in the future, otherwise `422
     out_of_range` at `/until`) and `no_end: true` (neither or both: `422 one_of_required`); the snoozer kept in
     `snoozed_by_*`, `snoozed_while_urgent` from the current urgency; an acknowledged Alert Group loses its Owner, whom
@@ -128,14 +131,15 @@ issue: 32
     `snooze_end` timer at `until` is S-063's.
   - **Unsnooze**: snoozed → firing without an Owner; otherwise `409 not_snoozed`.
 - **Refusal codes** (C-10.FR-2): `already_resolved`, `not_acknowledged`, `not_snoozed`, `not_resolved`,
-  `all_alerts_resolved`, `resolved_automatically`, `newer_alert_group_exists`, `owner_must_be_user` as
+  `all_alerts_resolved`, `resolved_automatically`, `route_deleted`, `newer_alert_group_exists`, `owner_must_be_user` as
   `409 command-refused`, mapped in `internal/api/problem.go`; a missing Permission as `403`. Every refusal writes
   `command_refused` and nothing else.
-- **`allowed_commands`** (C-10.FR-16): from the status, the caller's Permissions and identity — firing: `acknowledge`,
-  `resolve`, `snooze`; acknowledged: `acknowledge` (a Takeover for another user), `unacknowledge`, `resolve`, `snooze`;
-  snoozed: `acknowledge`, `unsnooze`, `resolve`, `snooze`; resolved by a person: `unresolve` only while every
-  precondition of Unresolve holds — no newer open Alert Group of the same Route and key and at least one Alert still
-  firing; never `acknowledge` for a Service account; `add_note` from S-063, `still_on_it` from S-049.
+- **`allowed_commands`** (C-10.FR-16): from the status, the caller's Permissions and identity, in the order of
+  `CommandName` — firing: `acknowledge`, `resolve`, `snooze`; acknowledged: `acknowledge` (a Takeover, so not offered
+  to the current Owner, for whom it changes nothing), `unacknowledge`, `resolve`, `snooze`; snoozed: `acknowledge`,
+  `resolve`, `snooze`, `unsnooze`; resolved by a person: `unresolve` only while every precondition of Unresolve holds
+  — its Route not deleted, no newer open Alert Group of the same Route and key and at least one Alert still firing;
+  never `acknowledge` for a Service account; `add_note` from S-063, `still_on_it` from S-049.
 - **Notice of a newer Alert Group** (C-10.FR-7; `api/openapi.yaml`): a person-resolved Alert Group for which a newer
   open Alert Group of the same Route and key takes part in grouping carries the notice `newer_alert_group_exists` with
   `related_alert_group` (`AlertGroupRef`: id and `#N`), so the UI shows a link to it in place of Unresolve (S-033)

@@ -372,6 +372,20 @@ var AlertContinued = newEvent("alert_continued", LevelInfo, "C-09",
 		"a new firing): group is the #N of its Alert Group and fingerprint the Alert's.",
 	"group", "fingerprint")
 
+// CommandExecuted is logged when a Command ran on an Alert Group.
+var CommandExecuted = newEvent("command_executed", LevelInfo, "C-10",
+	"A Command ran on an Alert Group: command is its name, group the public_id of the Alert Group, actor the "+
+		"public_id of the User or Service account, transport how it reached Muster and outcome done, or unchanged "+
+		"for an idempotent repeat such as Acknowledge by the current Owner.",
+	"command", "group", "actor", "transport", "outcome")
+
+// CommandRefused is logged when a Command was refused; a refusal writes nothing else.
+var CommandRefused = newEvent("command_refused", LevelInfo, "C-10",
+	"A Command was refused and changed nothing: command is its name, group the public_id of the Alert Group (empty "+
+		"for a bulk command refused as a whole), actor the public_id of the User or Service account, transport how "+
+		"it reached Muster and code forbidden for a missing Permission or the code of the command-refused problem.",
+	"command", "group", "actor", "transport", "code")
+
 // TimerFailed is logged when a timer worker could not fire a timer; it fires again once its lease runs out.
 var TimerFailed = newEvent("timer_failed", LevelWarn, "C-09",
 	"A timer could not fire: kind is the timer kind and error what failed. The timer fires again on any replica "+

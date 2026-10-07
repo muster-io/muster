@@ -212,8 +212,8 @@ func (s *Service) listBatch(ctx context.Context, q query, sort Sort, after *List
 	return out, nil
 }
 
-// views turns the rows of a page into Alert Groups, naming their Integrations and who resolved them in one read
-// each.
+// views turns the rows of a page into Alert Groups, naming their Integrations, and who resolved, owns or snoozed them,
+// in one read each.
 func (s *Service) views(ctx context.Context, rows []listRow, retentionDays int64, now time.Time,
 	columns []string) ([]View, error) {
 	out := make([]View, 0, len(rows))
@@ -223,8 +223,8 @@ func (s *Service) views(ctx context.Context, rows []listRow, retentionDays int64
 	var integrationIDs, userIDs, accountIDs []int64
 	for _, r := range rows {
 		integrationIDs = append(integrationIDs, r.IntegrationIds...)
-		userIDs = append(userIDs, r.ResolvedByUserID.Int64)
-		accountIDs = append(accountIDs, r.ResolvedByServiceAccountID.Int64)
+		userIDs = append(userIDs, r.ResolvedByUserID.Int64, r.OwnerUserID.Int64, r.SnoozedByUserID.Int64)
+		accountIDs = append(accountIDs, r.ResolvedByServiceAccountID.Int64, r.SnoozedByServiceAccountID.Int64)
 	}
 	slices.Sort(integrationIDs)
 	integrationIDs = slices.Compact(integrationIDs)
@@ -263,6 +263,9 @@ func (s *Service) views(ctx context.Context, rows []listRow, retentionDays int64
 				ReasonCode: textOf(r.ResolveReason),
 				Actor:      actors.actor(r.ResolvedByUserID, r.ResolvedByServiceAccountID)}
 		}
+		v.owned(actors, r.OwnerUserID, r.SnoozedByUserID, r.SnoozedByServiceAccountID, r.SnoozeUntil, r.NewerPublicID,
+			r.NewerNumber)
+		v.stillFiring, v.routeDeleted = r.FiringAlertCount, r.RouteDeleted
 		if len(columns) > 0 {
 			var common map[string]string
 			if err := json.Unmarshal(r.CommonLabels, &common); err != nil {

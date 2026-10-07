@@ -39,6 +39,7 @@ const (
 	typeForbidden            = "forbidden"
 	typeNotFound             = "not-found"
 	typeConflict             = "conflict"
+	typeCommandRefused       = "command-refused"
 	typeDefaultRoute         = "default-route-immutable"
 	typeRouteHasOpenGroups   = "route-has-open-alert-groups"
 	typeGone                 = "gone"
@@ -97,6 +98,7 @@ var titles = map[string]string{
 	typeForbidden:            "Forbidden",
 	typeNotFound:             "Not found",
 	typeConflict:             "Conflict",
+	typeCommandRefused:       "Command refused",
 	typeDefaultRoute:         "Default route immutable",
 	typeRouteHasOpenGroups:   "Route has open Alert Groups",
 	typeGone:                 "Gone",
@@ -118,6 +120,8 @@ type Problem struct {
 	RetryAfter int
 	// OpenAlertGroupCount is set on route-has-open-alert-groups.
 	OpenAlertGroupCount int64
+	// RelatedAlertGroup is set on a refusal that names another Alert Group.
+	RelatedAlertGroup *gen.AlertGroupRef
 }
 
 func (p *Problem) Error() string {
@@ -129,6 +133,15 @@ func (p *Problem) Error() string {
 
 func problem(status int, typ, code, detail string) *Problem {
 	return &Problem{Status: status, Type: typ, Code: code, Detail: detail}
+}
+
+// forbidden is the 403 of a missing Permission, from the middleware or from the dispatcher of a Command.
+func forbidden[P ~string](perms ...P) *Problem {
+	names := make([]string, len(perms))
+	for i, p := range perms {
+		names[i] = string(p)
+	}
+	return problem(http.StatusForbidden, typeForbidden, "", "This needs the Permission "+strings.Join(names, " or ")+".")
 }
 
 // fieldProblem is a validation-failed problem with one item: 400 for a malformed request, 422 for a field that is
@@ -185,6 +198,7 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 		count := int(p.OpenAlertGroupCount)
 		body.OpenAlertGroupCount = &count
 	}
+	body.RelatedAlertGroup = p.RelatedAlertGroup
 	if p.RetryAfter > 0 {
 		body.RetryAfterSeconds = &p.RetryAfter
 		w.Header().Set(retryAfterHeader, strconv.Itoa(p.RetryAfter))
@@ -226,6 +240,16 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	}
 	if f, ok := errors.AsType[*groups.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
+	if r, ok := errors.AsType[*groups.RefusedError](err); ok {
+		p := problem(http.StatusConflict, typeCommandRefused, r.Code, r.Detail())
+		if r.Related != nil {
+			p.RelatedAlertGroup = &gen.AlertGroupRef{Id: r.Related.PublicID, Number: int(r.Related.Number)}
+		}
+		return p
+	}
+	if f, ok := errors.AsType[*groups.ForbiddenError](err); ok {
+		return forbidden(f.Permission)
 	}
 	if o, ok := errors.AsType[*routing.OpenAlertGroupsError](err); ok {
 		p := problem(http.StatusConflict, typeRouteHasOpenGroups, "",
