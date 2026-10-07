@@ -7,7 +7,6 @@ layer: L1
 depends_on: [S-022, S-026]
 covers: [C-08.FR-1, C-08.FR-2, C-08.FR-3, C-08.FR-5, C-08.FR-7, C-08.FR-11, C-08.FR-13, C-08.AC-8, C-08.AC-9, C-06.FR-19]
 files_touched:
-  - web/package.json
   - web/src/routes/routes.index.tsx
   - web/src/routes/routes.new.tsx
   - web/src/routes/routes.$routeId.tsx
@@ -21,12 +20,17 @@ files_touched:
   - web/src/components/profile-picker.tsx
   - web/src/components/route-delete-dialog.tsx
   - web/src/components/integration-alerts.tsx
+  - web/src/components/integration-alerts.test.tsx
+  - web/src/components/app-shell.tsx
+  - web/src/components/audit-diff.tsx
+  - web/src/components/audit-diff.test.tsx
+  - web/src/lib/api.ts
   - web/src/lib/live.ts
   - web/src/locales/en.json
   - web/src/locales/ru.json
-  - NOTICE
   - web/e2e/routes.spec.ts
   - web/e2e/route-preview.spec.ts
+  - web/e2e/integration-page.spec.ts
 acceptance:
   - "[C-08.FR-3] The Routes page lists the Routes in evaluation order with their Matchers, urgent mark and Group key, the Default route pinned last as \"Default\"; dragging a Route saves the new order, the Default route cannot be dragged, and a save over a newer order shows \"Someone else changed the order. Reload to see it.\""
   - "[C-08.FR-7, C-08.FR-1] \"Create route\" first asks for a profile, On-call or Informational, and opens the editor pre-filled with its values; the editor takes the name, description, Matchers, urgent mark and Group key."
@@ -50,6 +54,8 @@ issue: 27
 - Creating a Route from a profile; the editor with the Matcher builder, the urgent mark and the Group key editor with
   its preview; deleting a Route that has no open Alert Groups.
 - The Route and Severity level columns of the Integration's Alerts view.
+- The navigation entry "Routes", and a name in English and Russian for every field of a Route that the Audit log
+  records, so that it shows no JSON pointers for Routes.
 
 **OUT**
 
@@ -70,9 +76,12 @@ issue: 27
   | `/routes/$routeId` | `routes:read` | the editor, read-only without `routes:write`; "Delete" except for the Default route |
 
 - **List** (C-08.FR-3): each row shows the name, the Matchers in Alertmanager syntax (none for the Default route), the
-  urgent mark, the Group key and the open Alert Group count. Dragging uses a drag-and-drop library under the shipped
-  licence list (listed in NOTICE) and saves the whole order with `If-Match` from the list ETag; the Default route has no
-  handle. A `412` shows "Someone else changed the order. Reload to see it." and restores the server's order.
+  urgent mark, the Group key and the open Alert Group count. Dragging uses the browser's own drag and drop, with no
+  library, since nothing it does adds a `<style>` element or attribute that the Content Security Policy refuses; "Move
+  up" and "Move down" on each row give the keyboard and touch screens the same moves. Every move saves the whole order
+  with `If-Match` from the list ETag (read from the `ETag` header, which `src/lib/api.ts` exposes for this list); the
+  Default route has no handle and no move buttons. A `412`, or a `422` `route_set_mismatch` (another set of Routes),
+  shows "Someone else changed the order. Reload to see it." and restores the order as it was read.
 - **Creating** (C-08.FR-7): `/routes/new` shows the two profiles from `listRouteProfiles` with a line each — On-call:
   "For alerts someone must act on: ack timeout and Reminders on." Informational: "For alerts to read later: no ack
   timeout, no Reminders, long Snooze durations." — and opens the editor with the chosen profile's values, of which this
@@ -114,8 +123,11 @@ k1 of S-026 and the Integration "lab" with the group r2 of S-025 from a terminal
 3. Open "disk" → add `cluster` to the Group key → Preview → "Current: 1 Alert Group" and "Proposed: 2 Alert Groups",
    with the rows `cluster` = "" and `cluster` = `a`, 2 Alerts each.
 4. Add a Matcher `pod` `=~` `api-(` → "Save" → under that row: the error text of `invalid_regex`.
-5. "Create route" → "Informational" → Name "info" → "Create" → drag "info" above "disk" → reload → "info" is first;
-   in a second context drag "disk" back; in the first, drag again → "Someone else changed the order. Reload to see it."
+5. "Create route" → "Informational" → Name "info", Matcher `severity` `=` `info` (a Route without Matchers would
+   take `MusterHeartbeatLost` too, and step 6 would have no suggestion) → "Create" → drag "info" above "disk" → reload
+   → "info" is first;
+   in a second context drag "disk" back; in the first, whose live updates are cut off (otherwise the `route` hint
+   refreshes its list first), drag again → "Someone else changed the order. Reload to see it."
 6. With the Integration "hb" of S-023 having its Heartbeat on → the top of the list shows "Muster raises
    MusterHeartbeatLost …" → "Create the route" → the first row is "Muster: Heartbeat lost" and the suggestion is gone.
 7. Integrations → "lab" → Alerts → the row `k="p5"` shows Route "Default" and "warning (P5)"; `k="none"` shows "info".

@@ -14,6 +14,11 @@ import {
   getListIntegrationsQueryKey,
 } from "../api/gen/endpoints/integrations/integrations";
 import { getGetOrganizationQueryKey } from "../api/gen/endpoints/organization/organization";
+import {
+  getGetRouteQueryKey,
+  getListRouteSuggestionsQueryKey,
+  getListRoutesQueryKey,
+} from "../api/gen/endpoints/routes/routes";
 import { getListSystemNoticesQueryKey } from "../api/gen/endpoints/system/system";
 import { HintEventType, type HintEvent } from "../api/gen/model";
 
@@ -42,15 +47,24 @@ export function registerHint(type: HintEventType, queries: HintQueries): () => v
 
 registerHint("system-notices", () => [getListSystemNoticesQueryKey()]);
 registerHint("organization", () => [getGetOrganizationQueryKey()]);
-// An Integration or its tokens changed: the list, and the Integration's page with its tokens.
+// An Integration or its tokens changed: the list, and the Integration's page with its tokens; a Heartbeat turned on
+// or off changes the Route suggestions.
 registerHint("integration", (id) =>
   id === null
-    ? [getListIntegrationsQueryKey()]
+    ? [getListIntegrationsQueryKey(), getListRouteSuggestionsQueryKey()]
     : [
         getListIntegrationsQueryKey(),
         getGetIntegrationQueryKey(id),
         getListIntegrationTokensQueryKey(id),
+        getListRouteSuggestionsQueryKey(),
       ],
+);
+// A Route changed, or the order of all of them: the list with its order, the suggestions it may answer, and an open
+// editor, which then says that the Route was changed elsewhere.
+registerHint("route", (id) =>
+  id === null
+    ? [getListRoutesQueryKey(), getListRouteSuggestionsQueryKey()]
+    : [getListRoutesQueryKey(), getListRouteSuggestionsQueryKey(), getGetRouteQueryKey(id)],
 );
 
 /** Invalidates the queries registered for a hint. */

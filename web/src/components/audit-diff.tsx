@@ -76,6 +76,60 @@ function integrationField(t: TFunction, pointer: string): string | undefined {
   }
 }
 
+/** The names of the changed fields of a Route, its policy fields included, and of the order of the Routes. */
+function routeField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/name":
+      return t("routes.fields.name");
+    case "/description":
+      return t("routes.fields.description");
+    case "/matchers":
+      return t("routes.fields.matchers");
+    case "/urgent":
+      return t("routes.fields.urgent");
+    case "/group_key":
+      return t("routes.fields.groupKey");
+    case "/policy/reopen_window_seconds":
+      return t("audit.fields.reopenWindowSeconds");
+    case "/policy/grace_period_seconds":
+      return t("audit.fields.gracePeriodSeconds");
+    case "/policy/urgent_rise_removes_ack":
+      return t("audit.fields.urgentRiseRemovesAck");
+    case "/policy/snooze_durations_seconds":
+      return t("audit.fields.snoozeDurationsSeconds");
+    case "/policy/thread_batching_window_seconds":
+      return t("audit.fields.threadBatchingWindowSeconds");
+    case "/policy/storm_threshold":
+      return t("audit.fields.stormThreshold");
+    case "/policy/language":
+      return t("audit.fields.messageLanguage");
+    case "/policy/templates/root_message":
+      return t("audit.fields.rootMessageTemplate");
+    case "/policy/templates/line":
+      return t("audit.fields.lineTemplate");
+    case "/policy/templates/ack_timeout_notice":
+      return t("audit.fields.ackTimeoutNoticeTemplate");
+    case "/policy/ack_timeout/enabled":
+      return t("audit.fields.ackTimeoutEnabled");
+    case "/policy/ack_timeout/first_interval_seconds":
+      return t("audit.fields.ackTimeoutFirstIntervalSeconds");
+    case "/policy/reminders/enabled":
+      return t("audit.fields.remindersEnabled");
+    case "/policy/reminders/first_interval_seconds":
+      return t("audit.fields.remindersFirstIntervalSeconds");
+    case "/policy/reminders/cap_seconds":
+      return t("audit.fields.remindersCapSeconds");
+    case "/policy/auto_unacknowledge":
+      return t("audit.fields.autoUnacknowledge");
+    case "/deleted_at":
+      return t("audit.fields.deletedAt");
+    case "/route_ids":
+      return t("audit.fields.routeOrder");
+    default:
+      return undefined;
+  }
+}
+
 /** The names of the changed fields of the OIDC settings. */
 function oidcField(t: TFunction, pointer: string): string | undefined {
   switch (pointer) {
@@ -140,6 +194,9 @@ export function fieldLabel(
       break;
     case "oidc_settings":
       label = oidcField(t, pointer);
+      break;
+    case "route":
+      label = routeField(t, pointer);
       break;
     case "organization":
       label = pointer === "/totp_required" ? t("audit.fields.totpRequired") : undefined;

@@ -2,11 +2,13 @@
 // Copyright The Muster Authors
 
 // The Alerts view of an Integration (C-06.FR-19): the Alerts Muster tracks for it, with their labels, the state
-// (firing, or resolved with its reason and time), startsAt, the time last seen, the Alertmanager groups listing them
-// and the Static label warning. State tabs, label Matchers, text search and the sort live in the URL of the page.
+// (firing, or resolved with its reason and time), the Route that took each, linked, and its Severity level with the
+// value as received when it has no mapping (C-08.FR-13), startsAt, the time last seen, the Alertmanager groups listing
+// them and the Static label warning. State tabs, label Matchers, text search and the sort live in the URL of the page.
 // Labels are what Alertmanager sent: they show as text only.
 
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
 import { TriangleAlertIcon } from "lucide-react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -22,6 +24,7 @@ import {
   type ListIntegrationAlertsParams,
   ListIntegrationAlertsSort,
   type NullableResolveReason,
+  type SeverityLevel,
 } from "../api/gen/model";
 import { useTimeFormat } from "../lib/time";
 import { type DataColumn, DataTable, useCursorList } from "./data-table";
@@ -155,6 +158,57 @@ function StateCell({ row }: { row: IntegrationAlert }) {
         </time>
       )}
     </div>
+  );
+}
+
+/** The name of a Severity level. */
+export function severityLabel(t: TFunction, level: SeverityLevel): string {
+  switch (level) {
+    case "critical":
+      return t("alerts.severity.critical");
+    case "warning":
+      return t("alerts.severity.warning");
+    default:
+      return t("alerts.severity.info");
+  }
+}
+
+/** The Severity level of an Alert, with the value as received when it has no mapping: "warning (P5)". */
+export function severityText(t: TFunction, alert: IntegrationAlert): string | null {
+  if (alert.severity_level === undefined) {
+    return null;
+  }
+  const level = severityLabel(t, alert.severity_level);
+  return alert.severity_raw
+    ? t("alerts.severity.withRaw", { level, raw: alert.severity_raw })
+    : level;
+}
+
+function RouteCell({ row }: { row: IntegrationAlert }) {
+  if (row.route === undefined) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <Link
+      to="/routes/$routeId"
+      params={{ routeId: row.route.id }}
+      className="wrap-anywhere text-primary underline-offset-4 hover:underline focus-visible:underline"
+      data-testid="alert-route"
+    >
+      {row.route.name}
+    </Link>
+  );
+}
+
+function SeverityCell({ row }: { row: IntegrationAlert }) {
+  const { t } = useTranslation();
+  const text = severityText(t, row);
+  return text === null ? (
+    <span className="text-muted-foreground">—</span>
+  ) : (
+    <span className="wrap-anywhere" data-testid="alert-severity">
+      {text}
+    </span>
   );
 }
 
@@ -376,6 +430,13 @@ export function IntegrationAlerts({
     (): DataColumn<IntegrationAlert>[] => [
       { id: "labels", header: t("alerts.columns.labels"), className: "min-w-56", Cell: LabelsCell },
       { id: "state", header: t("alerts.columns.state"), className: "min-w-32", Cell: StateCell },
+      { id: "route", header: t("alerts.columns.route"), className: "min-w-28", Cell: RouteCell },
+      {
+        id: "severity",
+        header: t("alerts.columns.severity"),
+        className: "min-w-24",
+        Cell: SeverityCell,
+      },
       { id: "starts_at", header: t("alerts.columns.startsAt"), Cell: StartsAtCell },
       { id: "last_seen", header: t("alerts.columns.lastSeen"), Cell: LastSeenCell },
       {

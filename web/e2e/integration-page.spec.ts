@@ -298,8 +298,9 @@ test("shows learned routes, warnings, the built-in Integration and the Alerts vi
   await expect(dbA.getByText("cluster=a", { exact: true })).toBeVisible();
   // startsAt and the time last seen, in the browser's time zone.
   const shown = /^[A-Z][a-z]{2} \d{1,2}, \d{4}, \d{2}:\d{2}$/;
-  await expect(dbA.getByRole("cell").nth(2)).toHaveText(shown);
-  await expect(dbA.getByRole("cell").nth(3)).toHaveText(shown);
+  // The columns: labels, state, Route, Severity, startsAt, last seen.
+  await expect(dbA.getByRole("cell").nth(4)).toHaveText(shown);
+  await expect(dbA.getByRole("cell").nth(5)).toHaveText(shown);
   await expect(dbA.getByTestId("static-label-warning")).toHaveText(
     "Static label cluster not applied: the alert has its own value.",
   );
