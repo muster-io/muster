@@ -337,6 +337,8 @@ func withStaticLabels(labels, static map[string]string) (map[string]string, []st
 type processedSnapshot struct {
 	Stats   Stats
 	Changes []AlertChange
+	// Routed are the Routes that took the Snapshot's newly firing Alerts.
+	Routed Routed
 	// Internal are the Internal alerts a synthetic Snapshot raised or resolved.
 	Internal []internalChange
 }
@@ -400,9 +402,11 @@ func (p *Processor) applySnapshot(ctx context.Context, q ProcessQueries, tx dbge
 		}
 	}
 	if p.sink != nil && len(out.Changes) > 0 {
-		if err := p.sink.AlertChanges(ctx, tx, out.Changes); err != nil {
+		routed, err := p.sink.AlertChanges(ctx, tx, out.Changes)
+		if err != nil {
 			return processedSnapshot{}, fmt.Errorf("hand over the alert changes: %w", err)
 		}
+		out.Routed = routed
 	}
 	return out, nil
 }

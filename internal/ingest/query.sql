@@ -121,14 +121,15 @@ WHERE s.org_id = @org_id AND s.integration_id = @integration_id AND s.state = 'p
 ORDER BY s.received_at, s.id
 LIMIT 1;
 
--- FinishSnapshot marks a pending Stored Snapshot processed or failed, with what processing read of its payload, and
--- returns whether it leaves pending for the first time: a replayed one was counted when it did. No row means it is
--- no longer pending.
+-- FinishSnapshot marks a pending Stored Snapshot processed or failed, with what processing read of its payload and
+-- the Routes that took its Alerts, added to those of an earlier processing, and returns whether it leaves pending for
+-- the first time: a replayed one was counted when it did. No row means it is no longer pending.
 -- name: FinishSnapshot :one
 UPDATE stored_snapshots
 SET state = @state, processed_at = @processed_at, processing_error = sqlc.narg('processing_error'),
     group_key = sqlc.narg('group_key'), alert_count = sqlc.narg('alert_count'),
-    truncated_alerts = sqlc.narg('truncated_alerts')
+    truncated_alerts = sqlc.narg('truncated_alerts'),
+    route_ids = ARRAY(SELECT DISTINCT unnest(route_ids || @route_ids::bigint[]) ORDER BY 1)
 WHERE org_id = @org_id AND id = @id AND received_at = @received_at::timestamptz AND state = 'pending'
 RETURNING (replayed_at IS NULL)::boolean AS first_time;
 
@@ -281,11 +282,14 @@ JOIN organizations o ON o.id = i.org_id
 WHERE i.org_id = @org_id AND i.public_id = @public_id;
 
 -- ListViewAlertsByLastSeen is a batch of the Alerts view, newest last seen first, after the cursor when given:
--- firing Alerts and those resolved since @resolved_since, in the state when given, whose labels contain @contains.
+-- firing Alerts and those resolved since @resolved_since, in the state when given, whose labels contain @contains,
+-- each with the Route that took it, deleted since or not, and its Severity level.
 -- name: ListViewAlertsByLastSeen :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
-       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text
+       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text, r.public_id AS route_public_id,
+       r.name AS route_name, a.severity_level, a.severity_raw
 FROM alerts a
+LEFT JOIN routes r ON r.org_id = @org_id AND r.id = a.route_id
 WHERE a.org_id = @org_id AND a.integration_id = @integration_id
   AND (a.status = 'firing' OR a.resolved_at >= @resolved_since::timestamptz)
   AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status')::text)
@@ -298,8 +302,10 @@ LIMIT @batch_size;
 -- ListViewAlertsByLastSeenAsc is ListViewAlertsByLastSeen, oldest last seen first.
 -- name: ListViewAlertsByLastSeenAsc :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
-       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text
+       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text, r.public_id AS route_public_id,
+       r.name AS route_name, a.severity_level, a.severity_raw
 FROM alerts a
+LEFT JOIN routes r ON r.org_id = @org_id AND r.id = a.route_id
 WHERE a.org_id = @org_id AND a.integration_id = @integration_id
   AND (a.status = 'firing' OR a.resolved_at >= @resolved_since::timestamptz)
   AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status')::text)
@@ -312,8 +318,10 @@ LIMIT @batch_size;
 -- ListViewAlertsByStartsAt is ListViewAlertsByLastSeen sorted by startsAt, newest first.
 -- name: ListViewAlertsByStartsAt :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
-       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text
+       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text, r.public_id AS route_public_id,
+       r.name AS route_name, a.severity_level, a.severity_raw
 FROM alerts a
+LEFT JOIN routes r ON r.org_id = @org_id AND r.id = a.route_id
 WHERE a.org_id = @org_id AND a.integration_id = @integration_id
   AND (a.status = 'firing' OR a.resolved_at >= @resolved_since::timestamptz)
   AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status')::text)
@@ -326,8 +334,10 @@ LIMIT @batch_size;
 -- ListViewAlertsByStartsAtAsc is ListViewAlertsByLastSeen sorted by startsAt, oldest first.
 -- name: ListViewAlertsByStartsAtAsc :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
-       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text
+       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text, r.public_id AS route_public_id,
+       r.name AS route_name, a.severity_level, a.severity_raw
 FROM alerts a
+LEFT JOIN routes r ON r.org_id = @org_id AND r.id = a.route_id
 WHERE a.org_id = @org_id AND a.integration_id = @integration_id
   AND (a.status = 'firing' OR a.resolved_at >= @resolved_since::timestamptz)
   AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status')::text)

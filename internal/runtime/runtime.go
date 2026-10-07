@@ -40,6 +40,7 @@ import (
 	oidcdb "github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/partitions"
+	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
@@ -48,9 +49,9 @@ import (
 	"github.com/muster-io/muster/web"
 )
 
-// IntegrationInfoInterval is how often muster_integration_info is read again from the database besides the hints of
-// changes, which repairs a refresh that failed.
-const IntegrationInfoInterval = time.Minute
+// InfoRefreshInterval is how often muster_integration_info and muster_route_info are read again from the database
+// besides the hints of changes, which repairs a refresh that failed.
+const InfoRefreshInterval = time.Minute
 
 // ShutdownGrace is process.shutdown_grace: from SIGTERM to exit, inside the chart's 30 s termination grace period.
 const ShutdownGrace = 20 * time.Second
@@ -94,6 +95,7 @@ type database interface {
 	OIDCStore() oidc.Store
 	TokensStore() tokens.Store
 	IntegrationsStore() integrations.Store
+	RoutingStore() routing.Store
 	// HeartbeatStore serves the Heartbeat endpoint and the Heartbeat check.
 	HeartbeatStore() heartbeat.Store
 	IngestStore() ingest.Store
@@ -146,6 +148,8 @@ func (d pgDatabase) OIDCStore() oidc.Store { return oidc.NewStore(d.Pool) }
 func (d pgDatabase) TokensStore() tokens.Store { return tokens.NewStore(d.Pool) }
 
 func (d pgDatabase) IntegrationsStore() integrations.Store { return integrations.NewStore(d.Pool) }
+
+func (d pgDatabase) RoutingStore() routing.Store { return routing.NewStore(d.Pool) }
 
 func (d pgDatabase) HeartbeatStore() heartbeat.Store { return heartbeat.NewStore(d.Pool) }
 
@@ -374,10 +378,13 @@ type process struct {
 	// integrations and snapshots serve ingestion on the ingest listener besides the API, and signals the Heartbeat
 	// endpoint; worker processes the Stored Snapshots, and scanner runs the Leader's Stale scan.
 	integrations *integrations.Service
-	snapshots    *ingest.Service
-	signals      *heartbeat.Service
-	worker       *ingest.Worker
-	scanner      *ingest.Processor
+	// routes holds the Routes, and router routes the newly firing Alerts of processing with them.
+	routes    *routing.Service
+	router    *routing.Router
+	snapshots *ingest.Service
+	signals   *heartbeat.Service
+	worker    *ingest.Worker
+	scanner   *ingest.Processor
 	// devClock is the development clock of `muster dev`, nil outside development mode; clockMoved wakes the
 	// Leader's Heartbeat check and Stale scan when it moves.
 	devClock   *devmode.Clock
@@ -629,6 +636,9 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.signals = heartbeat.New(heartbeat.Config{OrgID: orgID, Store: p.db.HeartbeatStore(), Business: p.clocks.Business,
 		Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String()})
 	alerts := ingest.NewAlertsView(orgID, p.db.ProcessStore(), p.clocks.Business)
+	p.routes = routing.New(routing.Config{OrgID: orgID, Store: p.db.RoutingStore(), Audit: w,
+		Business: p.clocks.Business})
+	p.router = routing.NewRouter(orgID)
 	if p.opts.Development {
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
 			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)
@@ -652,6 +662,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Integrations:   p.integrations,
 		Snapshots:      p.snapshots,
 		Alerts:         alerts,
+		Routes:         p.routes,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -719,7 +730,8 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	skewTicks, stopSkewTicks := every(SkewInterval)
 	sessionTicks, stopSessionTicks := every(live.CheckInterval)
 	noticeTicks, stopNoticeTicks := every(live.CheckInterval)
-	infoTicks, stopInfoTicks := every(IntegrationInfoInterval)
+	infoTicks, stopInfoTicks := every(InfoRefreshInterval)
+	routeInfoTicks, stopRouteInfoTicks := every(InfoRefreshInterval)
 	wg.Go(func() {
 		defer stopLeaderTicks()
 		p.keeper.Run(ctx, leaderTicks)
@@ -751,13 +763,19 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	wg.Go(func() {
 		p.listener.Run(ctx, func(h db.Hint) {
 			p.hub.Receive(h)
-			if h.Type == integrations.Hint {
+			switch h.Type {
+			case integrations.Hint:
 				p.integrations.InfoChanged()
+			case routing.Hint:
+				p.router.Invalidate()
+				p.routes.InfoChanged()
 			}
 		}, func(restored bool) {
 			p.hub.Listening(restored)
 			if restored {
 				p.integrations.InfoChanged()
+				p.router.Invalidate()
+				p.routes.InfoChanged()
 				p.loadDevClock(ctx)
 			}
 			p.worker.Wake()
@@ -769,6 +787,10 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	wg.Go(func() {
 		defer stopInfoTicks()
 		p.integrations.RunInfo(ctx, infoTicks)
+	})
+	wg.Go(func() {
+		defer stopRouteInfoTicks()
+		p.routes.RunInfo(ctx, routeInfoTicks)
 	})
 	return func(wait context.Context) {
 		cancel()
@@ -800,12 +822,12 @@ func (p *process) loadDevClock(ctx context.Context) {
 // by this replica's id, once both are known and before anything serves or runs that could wake it.
 func (p *process) configureWorker() {
 	processor := ingest.NewProcessor(ingest.ProcessorConfig{OrgID: p.orgID, Store: p.db.ProcessStore(),
-		Business: p.clocks.Business, Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String(),
+		Business: p.clocks.Business, Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String(), Sink: p.router,
 		Lease: db.Lease{Owner: p.replica.ID(), Duration: ingest.Lease, Clocks: p.clocks}})
 	// The Stale scan claims Integrations under a lease of its own, so that it never takes over one that this replica's
 	// worker processes.
 	p.scanner = ingest.NewProcessor(ingest.ProcessorConfig{OrgID: p.orgID, Store: p.db.ProcessStore(),
-		Business: p.clocks.Business, Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String(),
+		Business: p.clocks.Business, Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String(), Sink: p.router,
 		Lease: db.Lease{Owner: p.replica.ID() + "/stale-scan", Duration: ingest.Lease, Clocks: p.clocks}})
 	p.worker.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
 	p.worker.Processor = func(orgID int64) (*ingest.Processor, bool) { return processor, orgID == p.orgID }

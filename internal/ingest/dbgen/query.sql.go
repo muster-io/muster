@@ -347,8 +347,9 @@ const finishSnapshot = `-- name: FinishSnapshot :one
 UPDATE stored_snapshots
 SET state = $1, processed_at = $2, processing_error = $3,
     group_key = $4, alert_count = $5,
-    truncated_alerts = $6
-WHERE org_id = $7 AND id = $8 AND received_at = $9::timestamptz AND state = 'pending'
+    truncated_alerts = $6,
+    route_ids = ARRAY(SELECT DISTINCT unnest(route_ids || $7::bigint[]) ORDER BY 1)
+WHERE org_id = $8 AND id = $9 AND received_at = $10::timestamptz AND state = 'pending'
 RETURNING (replayed_at IS NULL)::boolean AS first_time
 `
 
@@ -359,14 +360,15 @@ type FinishSnapshotParams struct {
 	GroupKey        pgtype.Text
 	AlertCount      pgtype.Int8
 	TruncatedAlerts pgtype.Int8
+	RouteIds        []int64
 	OrgID           int64
 	ID              int64
 	ReceivedAt      time.Time
 }
 
-// FinishSnapshot marks a pending Stored Snapshot processed or failed, with what processing read of its payload, and
-// returns whether it leaves pending for the first time: a replayed one was counted when it did. No row means it is
-// no longer pending.
+// FinishSnapshot marks a pending Stored Snapshot processed or failed, with what processing read of its payload and
+// the Routes that took its Alerts, added to those of an earlier processing, and returns whether it leaves pending for
+// the first time: a replayed one was counted when it did. No row means it is no longer pending.
 func (q *Queries) FinishSnapshot(ctx context.Context, arg FinishSnapshotParams) (bool, error) {
 	row := q.db.QueryRow(ctx, finishSnapshot,
 		arg.State,
@@ -375,6 +377,7 @@ func (q *Queries) FinishSnapshot(ctx context.Context, arg FinishSnapshotParams) 
 		arg.GroupKey,
 		arg.AlertCount,
 		arg.TruncatedAlerts,
+		arg.RouteIds,
 		arg.OrgID,
 		arg.ID,
 		arg.ReceivedAt,
@@ -997,8 +1000,10 @@ func (q *Queries) ListStoredSnapshots(ctx context.Context, arg ListStoredSnapsho
 
 const listViewAlertsByLastSeen = `-- name: ListViewAlertsByLastSeen :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
-       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text
+       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text, r.public_id AS route_public_id,
+       r.name AS route_name, a.severity_level, a.severity_raw
 FROM alerts a
+LEFT JOIN routes r ON r.org_id = $1 AND r.id = a.route_id
 WHERE a.org_id = $1 AND a.integration_id = $2
   AND (a.status = 'firing' OR a.resolved_at >= $3::timestamptz)
   AND ($4::text IS NULL OR a.status = $4::text)
@@ -1033,10 +1038,15 @@ type ListViewAlertsByLastSeenRow struct {
 	ResolvedAt           pgtype.Timestamptz
 	ResolveReason        pgtype.Text
 	ResolveReasonText    pgtype.Text
+	RoutePublicID        pgtype.Text
+	RouteName            pgtype.Text
+	SeverityLevel        pgtype.Text
+	SeverityRaw          pgtype.Text
 }
 
 // ListViewAlertsByLastSeen is a batch of the Alerts view, newest last seen first, after the cursor when given:
-// firing Alerts and those resolved since @resolved_since, in the state when given, whose labels contain @contains.
+// firing Alerts and those resolved since @resolved_since, in the state when given, whose labels contain @contains,
+// each with the Route that took it, deleted since or not, and its Severity level.
 func (q *Queries) ListViewAlertsByLastSeen(ctx context.Context, arg ListViewAlertsByLastSeenParams) ([]ListViewAlertsByLastSeenRow, error) {
 	rows, err := q.db.Query(ctx, listViewAlertsByLastSeen,
 		arg.OrgID,
@@ -1068,6 +1078,10 @@ func (q *Queries) ListViewAlertsByLastSeen(ctx context.Context, arg ListViewAler
 			&i.ResolvedAt,
 			&i.ResolveReason,
 			&i.ResolveReasonText,
+			&i.RoutePublicID,
+			&i.RouteName,
+			&i.SeverityLevel,
+			&i.SeverityRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -1081,8 +1095,10 @@ func (q *Queries) ListViewAlertsByLastSeen(ctx context.Context, arg ListViewAler
 
 const listViewAlertsByLastSeenAsc = `-- name: ListViewAlertsByLastSeenAsc :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
-       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text
+       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text, r.public_id AS route_public_id,
+       r.name AS route_name, a.severity_level, a.severity_raw
 FROM alerts a
+LEFT JOIN routes r ON r.org_id = $1 AND r.id = a.route_id
 WHERE a.org_id = $1 AND a.integration_id = $2
   AND (a.status = 'firing' OR a.resolved_at >= $3::timestamptz)
   AND ($4::text IS NULL OR a.status = $4::text)
@@ -1117,6 +1133,10 @@ type ListViewAlertsByLastSeenAscRow struct {
 	ResolvedAt           pgtype.Timestamptz
 	ResolveReason        pgtype.Text
 	ResolveReasonText    pgtype.Text
+	RoutePublicID        pgtype.Text
+	RouteName            pgtype.Text
+	SeverityLevel        pgtype.Text
+	SeverityRaw          pgtype.Text
 }
 
 // ListViewAlertsByLastSeenAsc is ListViewAlertsByLastSeen, oldest last seen first.
@@ -1151,6 +1171,10 @@ func (q *Queries) ListViewAlertsByLastSeenAsc(ctx context.Context, arg ListViewA
 			&i.ResolvedAt,
 			&i.ResolveReason,
 			&i.ResolveReasonText,
+			&i.RoutePublicID,
+			&i.RouteName,
+			&i.SeverityLevel,
+			&i.SeverityRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -1164,8 +1188,10 @@ func (q *Queries) ListViewAlertsByLastSeenAsc(ctx context.Context, arg ListViewA
 
 const listViewAlertsByStartsAt = `-- name: ListViewAlertsByStartsAt :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
-       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text
+       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text, r.public_id AS route_public_id,
+       r.name AS route_name, a.severity_level, a.severity_raw
 FROM alerts a
+LEFT JOIN routes r ON r.org_id = $1 AND r.id = a.route_id
 WHERE a.org_id = $1 AND a.integration_id = $2
   AND (a.status = 'firing' OR a.resolved_at >= $3::timestamptz)
   AND ($4::text IS NULL OR a.status = $4::text)
@@ -1200,6 +1226,10 @@ type ListViewAlertsByStartsAtRow struct {
 	ResolvedAt           pgtype.Timestamptz
 	ResolveReason        pgtype.Text
 	ResolveReasonText    pgtype.Text
+	RoutePublicID        pgtype.Text
+	RouteName            pgtype.Text
+	SeverityLevel        pgtype.Text
+	SeverityRaw          pgtype.Text
 }
 
 // ListViewAlertsByStartsAt is ListViewAlertsByLastSeen sorted by startsAt, newest first.
@@ -1234,6 +1264,10 @@ func (q *Queries) ListViewAlertsByStartsAt(ctx context.Context, arg ListViewAler
 			&i.ResolvedAt,
 			&i.ResolveReason,
 			&i.ResolveReasonText,
+			&i.RoutePublicID,
+			&i.RouteName,
+			&i.SeverityLevel,
+			&i.SeverityRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -1247,8 +1281,10 @@ func (q *Queries) ListViewAlertsByStartsAt(ctx context.Context, arg ListViewAler
 
 const listViewAlertsByStartsAtAsc = `-- name: ListViewAlertsByStartsAtAsc :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
-       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text
+       a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text, r.public_id AS route_public_id,
+       r.name AS route_name, a.severity_level, a.severity_raw
 FROM alerts a
+LEFT JOIN routes r ON r.org_id = $1 AND r.id = a.route_id
 WHERE a.org_id = $1 AND a.integration_id = $2
   AND (a.status = 'firing' OR a.resolved_at >= $3::timestamptz)
   AND ($4::text IS NULL OR a.status = $4::text)
@@ -1283,6 +1319,10 @@ type ListViewAlertsByStartsAtAscRow struct {
 	ResolvedAt           pgtype.Timestamptz
 	ResolveReason        pgtype.Text
 	ResolveReasonText    pgtype.Text
+	RoutePublicID        pgtype.Text
+	RouteName            pgtype.Text
+	SeverityLevel        pgtype.Text
+	SeverityRaw          pgtype.Text
 }
 
 // ListViewAlertsByStartsAtAsc is ListViewAlertsByLastSeen sorted by startsAt, oldest first.
@@ -1317,6 +1357,10 @@ func (q *Queries) ListViewAlertsByStartsAtAsc(ctx context.Context, arg ListViewA
 			&i.ResolvedAt,
 			&i.ResolveReason,
 			&i.ResolveReasonText,
+			&i.RoutePublicID,
+			&i.RouteName,
+			&i.SeverityLevel,
+			&i.SeverityRaw,
 		); err != nil {
 			return nil, err
 		}

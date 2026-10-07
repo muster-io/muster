@@ -7,6 +7,7 @@ layer: L1
 depends_on: [S-023]
 covers: [C-08.FR-1, C-08.FR-2, C-08.FR-3, C-08.FR-4, C-08.FR-6, C-08.FR-7, C-08.FR-8, C-08.FR-9, C-08.FR-10, C-08.FR-12, C-08.FR-13, C-08.AC-1, C-08.AC-6, C-08.AC-7, C-08.AC-9, C-08.AC-10, C-08.AC-11, C-06.FR-19]
 files_touched:
+  - sqlc.yaml
   - internal/routing/routes.go
   - internal/routing/evaluate.go
   - internal/routing/severity.go
@@ -15,14 +16,26 @@ files_touched:
   - internal/routing/routes_test.go
   - internal/routing/evaluate_test.go
   - internal/routing/severity_test.go
-  - internal/matchers/matchers.go
+  - internal/routing/routing_integration_test.go
   - internal/api/routes.go
   - internal/api/routes_test.go
+  - internal/api/server.go
+  - internal/api/problem.go
+  - internal/api/integrations.go
   - internal/ingest/changes.go
   - internal/ingest/alertsview.go
+  - internal/ingest/alertsview_test.go
   - internal/ingest/query.sql
+  - internal/ingest/process.go
+  - internal/ingest/deletion.go
+  - internal/ingest/stale.go
+  - internal/ingest/worker.go
+  - internal/ingest/worker_test.go
+  - internal/ingest/worker_integration_test.go
+  - internal/ingest/internal_integration_test.go
   - internal/runtime/bootstrap.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
   - test/e2e/routing_test.go

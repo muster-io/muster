@@ -111,7 +111,7 @@ func (p *Processor) scan(ctx context.Context, c Claimed, horizon time.Time) erro
 			return err
 		}
 		if p.sink != nil && len(changes) > 0 {
-			if err := p.sink.AlertChanges(ctx, tx, changes); err != nil {
+			if _, err := p.sink.AlertChanges(ctx, tx, changes); err != nil {
 				return fmt.Errorf("hand over the alert changes: %w", err)
 			}
 		}

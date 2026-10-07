@@ -394,7 +394,11 @@ func snapshotOf(a *attempt, payload Payload, info dbgen.RenewIngestLeaseRow) (sn
 func (p *Processor) finish(ctx context.Context, q ProcessQueries, integrationID int64, a *attempt, state,
 	reason string) error {
 	params := dbgen.FinishSnapshotParams{OrgID: p.orgID, ID: a.id, ReceivedAt: a.receivedAt, State: state,
-		ProcessedAt: pgtype.Timestamptz{Time: p.clock.Now().UTC(), Valid: true}}
+		ProcessedAt: pgtype.Timestamptz{Time: p.clock.Now().UTC(), Valid: true}, RouteIds: []int64{}}
+	if state == StateProcessed && a.result.Routed.IDs != nil {
+		// A failed Snapshot rolled its routing back, so it names no Route.
+		params.RouteIds = a.result.Routed.IDs
+	}
 	if reason != "" {
 		params.ProcessingError = pgtype.Text{String: reason, Valid: true}
 	}
@@ -473,7 +477,8 @@ func (p *Processor) processed(ctx context.Context, a *attempt, took time.Duratio
 		logging.F("stored_snapshot", a.publicID), logging.F("group_key", a.payload.GroupKey),
 		logging.F("alerts", s.Alerts), logging.F("fired", s.Fired), logging.F("resolved", s.Resolved+s.Deleted),
 		logging.F("gone", s.Gone), logging.F("continued", s.Continued), logging.F("dropped", s.Dropped),
-		logging.F("truncated", s.Truncated), logging.F("duration_ms", took.Milliseconds()))
+		logging.F("truncated", s.Truncated), logging.F("routes", routesOf(a.result.Routed)),
+		logging.F("duration_ms", took.Milliseconds()))
 	for _, c := range a.result.Internal {
 		event := logging.InternalAlertRaised
 		if c.Resolved {
@@ -482,6 +487,14 @@ func (p *Processor) processed(ctx context.Context, a *attempt, took time.Duratio
 		p.log.Log(ctx, event, logging.F("alertname", c.Alertname), logging.F("fingerprint", c.Fingerprint),
 			logging.F("entity", c.Entity))
 	}
+}
+
+// routesOf are the public_ids of the Routes that took Alerts of a Snapshot, an empty list when none did.
+func routesOf(r Routed) []string {
+	if r.PublicIDs == nil {
+		return []string{}
+	}
+	return r.PublicIDs
 }
 
 // observeDelay observes the time from receipt to the end of processing on the business clock.

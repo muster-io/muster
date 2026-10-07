@@ -36,9 +36,16 @@ type AlertChange struct {
 	ReasonText string
 }
 
+// Routed names the Routes that took Alerts of the changes: their ids, which the Stored Snapshot keeps in route_ids,
+// and their public_ids, which its log line carries, in evaluation order.
+type Routed struct {
+	IDs       []int64
+	PublicIDs []string
+}
+
 // Sink takes the Alert changes of a Snapshot inside the Snapshot's transaction, tx, which it may write through; an
-// error rolls the Snapshot back. Routing (C-08) and grouping (C-09) attach here; until then the changes are recorded
-// on the Alerts only.
+// error rolls the Snapshot back. Routing (C-08) attaches here and says which Routes took the newly firing Alerts;
+// grouping (C-09) follows it.
 type Sink interface {
-	AlertChanges(ctx context.Context, tx dbgen.DBTX, changes []AlertChange) error
+	AlertChanges(ctx context.Context, tx dbgen.DBTX, changes []AlertChange) (Routed, error)
 }
