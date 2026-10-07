@@ -57,8 +57,6 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      PLAYWRIGHT_INSTALL_FLAGS: --with-deps
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -74,6 +72,9 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
+      - name: install Playwright dependencies
+        timeout-minutes: 9
+        run: ./scripts/ci/install-playwright-deps.sh
       - run: make ${{ github.event_name == 'pull_request' && 'test-race' || 'test' }}
 
   # The integration tests on PostgreSQL 14 and 17, started by testcontainers on the runner's Docker.
@@ -236,8 +237,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     if: github.event_name == 'pull_request'
-    env:
-      PLAYWRIGHT_INSTALL_FLAGS: --with-deps
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -253,6 +252,9 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
+      - name: install Playwright dependencies
+        timeout-minutes: 9
+        run: ./scripts/ci/install-playwright-deps.sh
       - run: make e2e
 
   helm-check:
