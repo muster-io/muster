@@ -15,7 +15,7 @@ import { render } from "vitest-browser-react";
 import type { IntegrationAlert } from "../api/gen/model";
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
-import { IntegrationAlerts, orderedLabels } from "./integration-alerts";
+import { IntegrationAlerts, orderedLabels, severityText } from "./integration-alerts";
 import type { AlertSearch } from "./integration-alerts-search";
 
 const GONE_TEXT =
@@ -147,6 +147,27 @@ describe("orderedLabels", () => {
       ["a", "1"],
       ["b", "2"],
     ]);
+  });
+});
+
+function withSeverity(
+  severity_level: IntegrationAlert["severity_level"],
+  severity_raw?: string | null,
+): IntegrationAlert {
+  return { ...FIRING, severity_level, severity_raw };
+}
+
+describe("severityText", () => {
+  const alert = withSeverity;
+
+  test("shows the Severity level, and the value as received when it has no mapping", async () => {
+    // severity="none" is info, severity="P5" has no mapping: warning shown with P5, no severity label is info.
+    expect(severityText(i18n.t, alert("info", null))).toBe("info");
+    expect(severityText(i18n.t, alert("warning", "P5"))).toBe("warning (P5)");
+    expect(severityText(i18n.t, alert("critical"))).toBe("critical");
+    expect(severityText(i18n.t, alert(undefined))).toBeNull();
+    await i18n.changeLanguage("ru");
+    expect(severityText(i18n.t, alert("warning", "P5"))).toBe("warning (P5)");
   });
 });
 

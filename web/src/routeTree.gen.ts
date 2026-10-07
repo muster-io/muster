@@ -18,6 +18,9 @@ import { Route as AdminAuditLogRouteImport } from './routes/admin.audit-log'
 import { Route as AdminOidcRouteImport } from './routes/admin.oidc'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
 import { Route as IntegrationsNewRouteImport } from './routes/integrations.new'
+import { Route as RoutesIndexRouteImport } from './routes/routes.index'
+import { Route as RoutesRouteIdRouteImport } from './routes/routes.$routeId'
+import { Route as RoutesNewRouteImport } from './routes/routes.new'
 import { Route as SignInTotpRouteImport } from './routes/sign-in.totp'
 import { Route as AdminOrganizationSecurityRouteImport } from './routes/admin.organization.security'
 import { Route as AdminServiceAccountsIndexRouteImport } from './routes/admin.service-accounts.index'
@@ -71,6 +74,21 @@ const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
 const IntegrationsNewRoute = IntegrationsNewRouteImport.update({
   id: '/integrations/new',
   path: '/integrations/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RoutesIndexRoute = RoutesIndexRouteImport.update({
+  id: '/routes/',
+  path: '/routes/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RoutesRouteIdRoute = RoutesRouteIdRouteImport.update({
+  id: '/routes/$routeId',
+  path: '/routes/$routeId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RoutesNewRoute = RoutesNewRouteImport.update({
+  id: '/routes/new',
+  path: '/routes/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SignInTotpRoute = SignInTotpRouteImport.update({
@@ -134,8 +152,11 @@ export interface FileRoutesByFullPath {
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
   '/integrations/new': typeof IntegrationsNewRoute
+  '/routes/$routeId': typeof RoutesRouteIdRoute
+  '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/integrations/': typeof IntegrationsIndexRoute
+  '/routes/': typeof RoutesIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
   '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
@@ -154,8 +175,11 @@ export interface FileRoutesByTo {
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
   '/integrations/new': typeof IntegrationsNewRoute
+  '/routes/$routeId': typeof RoutesRouteIdRoute
+  '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/integrations': typeof IntegrationsIndexRoute
+  '/routes': typeof RoutesIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
   '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
@@ -175,8 +199,11 @@ export interface FileRoutesById {
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
   '/integrations/new': typeof IntegrationsNewRoute
+  '/routes/$routeId': typeof RoutesRouteIdRoute
+  '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/integrations/': typeof IntegrationsIndexRoute
+  '/routes/': typeof RoutesIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
   '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
@@ -197,8 +224,11 @@ export interface FileRouteTypes {
     | '/admin/audit-log'
     | '/admin/oidc'
     | '/integrations/new'
+    | '/routes/$routeId'
+    | '/routes/new'
     | '/sign-in/totp'
     | '/integrations/'
+    | '/routes/'
     | '/admin/organization/security'
     | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
@@ -217,8 +247,11 @@ export interface FileRouteTypes {
     | '/admin/audit-log'
     | '/admin/oidc'
     | '/integrations/new'
+    | '/routes/$routeId'
+    | '/routes/new'
     | '/sign-in/totp'
     | '/integrations'
+    | '/routes'
     | '/admin/organization/security'
     | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
@@ -237,8 +270,11 @@ export interface FileRouteTypes {
     | '/admin/audit-log'
     | '/admin/oidc'
     | '/integrations/new'
+    | '/routes/$routeId'
+    | '/routes/new'
     | '/sign-in/totp'
     | '/integrations/'
+    | '/routes/'
     | '/admin/organization/security'
     | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
@@ -258,7 +294,10 @@ export interface RootRouteChildren {
   AdminAuditLogRoute: typeof AdminAuditLogRoute
   AdminOidcRoute: typeof AdminOidcRoute
   IntegrationsNewRoute: typeof IntegrationsNewRoute
+  RoutesRouteIdRoute: typeof RoutesRouteIdRoute
+  RoutesNewRoute: typeof RoutesNewRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
+  RoutesIndexRoute: typeof RoutesIndexRoute
   AdminOrganizationSecurityRoute: typeof AdminOrganizationSecurityRoute
   AdminServiceAccountsServiceAccountIdRoute: typeof AdminServiceAccountsServiceAccountIdRoute
   AdminUsersUserIdRoute: typeof AdminUsersUserIdRoute
@@ -332,6 +371,27 @@ declare module '@tanstack/react-router' {
       path: '/integrations/new'
       fullPath: '/integrations/new'
       preLoaderRoute: typeof IntegrationsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/routes/': {
+      id: '/routes/'
+      path: '/routes'
+      fullPath: '/routes/'
+      preLoaderRoute: typeof RoutesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/routes/$routeId': {
+      id: '/routes/$routeId'
+      path: '/routes/$routeId'
+      fullPath: '/routes/$routeId'
+      preLoaderRoute: typeof RoutesRouteIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/routes/new': {
+      id: '/routes/new'
+      path: '/routes/new'
+      fullPath: '/routes/new'
+      preLoaderRoute: typeof RoutesNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sign-in/totp': {
@@ -420,7 +480,10 @@ const rootRouteChildren: RootRouteChildren = {
   AdminAuditLogRoute: AdminAuditLogRoute,
   AdminOidcRoute: AdminOidcRoute,
   IntegrationsNewRoute: IntegrationsNewRoute,
+  RoutesRouteIdRoute: RoutesRouteIdRoute,
+  RoutesNewRoute: RoutesNewRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
+  RoutesIndexRoute: RoutesIndexRoute,
   AdminOrganizationSecurityRoute: AdminOrganizationSecurityRoute,
   AdminServiceAccountsServiceAccountIdRoute:
     AdminServiceAccountsServiceAccountIdRoute,

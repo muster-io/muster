@@ -17,6 +17,8 @@
       "groups": "Alertmanager groups",
       "labels": "Labels",
       "lastSeen": "Last seen",
+      "route": "Route",
+      "severity": "Severity",
       "startsAt": "Started",
       "state": "State"
     },
@@ -41,6 +43,12 @@
     },
     "reasonText": {
       "absent": "Alertmanager no longer reports this alert — it resolved without notice, was silenced or inhibited in Alertmanager, or the Alertmanager routing changed"
+    },
+    "severity": {
+      "critical": "critical",
+      "info": "info",
+      "warning": "warning",
+      "withRaw": "{{level}} ({{raw}})"
     },
     "sort": {
       "lastSeenAsc": "Last seen, oldest first",
@@ -84,12 +92,19 @@
     "emptyValue": "(empty)",
     "erased": "[erased]",
     "fields": {
+      "ackTimeoutEnabled": "Ack timeout",
+      "ackTimeoutFirstIntervalSeconds": "First ack timeout notice after (seconds)",
+      "ackTimeoutNoticeTemplate": "Ack timeout notice template",
+      "autoUnacknowledge": "Auto-unacknowledge",
       "deletedAt": "Deleted at",
       "duplicateWindowSeconds": "Duplicate window (seconds)",
       "email": "Email",
+      "gracePeriodSeconds": "Grace period (seconds)",
       "heartbeatEnabled": "Heartbeat",
       "heartbeatTimeoutSeconds": "Heartbeat timeout (seconds)",
+      "lineTemplate": "Line template",
       "login": "Login",
+      "messageLanguage": "Message language",
       "name": "Name",
       "oidcEnabled": "OIDC sign-in",
       "password": "Password",
@@ -98,10 +113,20 @@
       "proxyPassword": "Proxy password",
       "proxyType": "Proxy type",
       "proxyUsername": "Proxy username",
+      "remindersCapSeconds": "Longest interval between Reminders (seconds)",
+      "remindersEnabled": "Reminders",
+      "remindersFirstIntervalSeconds": "First Reminder after (seconds)",
+      "reopenWindowSeconds": "Reopen window (seconds)",
       "role": "Role",
+      "rootMessageTemplate": "Root message template",
+      "routeOrder": "Order of the routes",
       "signInMethod": "Sign-in method",
+      "snoozeDurationsSeconds": "Snooze durations (seconds)",
       "status": "Status",
-      "totpRequired": "TOTP required"
+      "stormThreshold": "Storm threshold (new Alert Groups per minute)",
+      "threadBatchingWindowSeconds": "Thread batching window (seconds)",
+      "totpRequired": "TOTP required",
+      "urgentRiseRemovesAck": "Rise to Urgent removes the acknowledgement"
     },
     "filters": {
       "action": "Action",
@@ -343,6 +368,7 @@
     "label": "Main",
     "oidc": "OIDC",
     "profile": "Profile",
+    "routes": "Routes",
     "security": "Security",
     "serviceAccounts": "Service accounts",
     "users": "Users"
@@ -496,6 +522,120 @@
     "none": "None",
     "responder": "Responder",
     "viewer": "Viewer"
+  },
+  "routes": {
+    "create": {
+      "changeProfile": "Choose another profile",
+      "profile": "Profile: {{profile}}",
+      "start": "Create route",
+      "submit": "Create",
+      "title": "Create route"
+    },
+    "delete": {
+      "action": "Delete",
+      "description": "Alerts it would take go to the next matching Route.",
+      "openAlertGroups": "This route still has open Alert Groups, so it cannot be deleted yet.",
+      "title": "Delete route {{name}}?"
+    },
+    "edit": {
+      "title": "Route"
+    },
+    "errors": {
+      "changedElsewhere": "This route was changed elsewhere.",
+      "nameTaken": "Another route has this name.",
+      "stale": "Someone else changed this route. Reload to see the changes."
+    },
+    "fields": {
+      "description": "Description",
+      "groupKey": "Group key",
+      "matchers": "Matchers",
+      "name": "Name",
+      "urgent": "Urgent"
+    },
+    "form": {
+      "back": "Back to the routes",
+      "defaultMatchers": "The Default route has no Matchers: it takes every alert no other route took.",
+      "readOnly": "You can view this route but not change it.",
+      "urgent": "Urgent: every Alert Group of this Route is urgent",
+      "urgentOff": "No",
+      "urgentOn": "Yes: every Alert Group of this Route is urgent"
+    },
+    "groupKey": {
+      "add": "Add label",
+      "duplicate": "This label is already in the Group key.",
+      "empty": "No labels: all alerts of the route share one Alert Group.",
+      "hint": "Alerts with the same values of these labels share an Alert Group; a missing label counts as an empty value.",
+      "invalid": "A label name cannot be empty.",
+      "placeholder": "label name",
+      "remove": "Remove {{label}} from the Group key"
+    },
+    "hint": "Muster checks the routes from the top: the first route whose Matchers all match takes the alert.",
+    "list": {
+      "defaultHint": "Takes every alert no other route took. Always last.",
+      "dragHint": "Drag to change the order",
+      "label": "Routes in evaluation order",
+      "moved": "{{name}} moved to position {{position}} of {{total}}.",
+      "moveDown": "Move {{name}} down",
+      "moveUp": "Move {{name}} up",
+      "noGroupKey": "none",
+      "noMatchers": "No Matchers: takes every alert",
+      "openAlertGroups_one": "{{count}} open Alert Group",
+      "openAlertGroups_other": "{{count}} open Alert Groups",
+      "stale": "Someone else changed the order. Reload to see it.",
+      "urgent": "Urgent"
+    },
+    "matchers": {
+      "hint": "An alert must match every Matcher. =~ and !~ take an RE2 regular expression that must match the whole value.",
+      "labelPlaceholder": "label",
+      "labelRequired": "Enter a label name.",
+      "labelRow": "Label of matcher {{row}}",
+      "none": "No Matchers: the route takes every alert that reaches it.",
+      "opRow": "Operator of matcher {{row}}",
+      "regexPlaceholder": "regular expression",
+      "remove": "Remove matcher {{label}}",
+      "removeRow": "Remove matcher {{row}}",
+      "valuePlaceholder": "value",
+      "valueRow": "Value of matcher {{row}}"
+    },
+    "preview": {
+      "alerts": "Alerts",
+      "allAlerts": "Group key values",
+      "current_one": "Current: {{count}} Alert Group",
+      "current_other": "Current: {{count}} Alert Groups",
+      "emptyValue": "empty",
+      "fixFields": "Fix the fields marked above to see the preview.",
+      "hint": "How the alerts of the period that this route would take group into Alert Groups.",
+      "oneGroup": "All alerts",
+      "outdated": "The Matchers, the Group key or the period changed since this preview.",
+      "period": "Period",
+      "periodOutOfRange": "Stored Snapshots are not kept that long. Choose a shorter period.",
+      "periods": {
+        "day": "24 hours",
+        "hour": "1 hour",
+        "twoWeeks": "14 days",
+        "week": "7 days"
+      },
+      "proposed_one": "Proposed: {{count}} Alert Group",
+      "proposed_other": "Proposed: {{count}} Alert Groups",
+      "run": "Preview",
+      "title": "Group key preview",
+      "truncated": "The preview reached its limit of alerts and covers only the most recent part of the period."
+    },
+    "profiles": {
+      "hint": "A profile only fills in the starting values; you can change them before you create the route.",
+      "informational": "Informational",
+      "informationalLine": "For alerts to read later: no ack timeout, no Reminders, long Snooze durations.",
+      "onCall": "On-call",
+      "onCallLine": "For alerts someone must act on: ack timeout and Reminders on.",
+      "title": "Choose a profile"
+    },
+    "suggestions": {
+      "accept": "Create the route",
+      "dismiss": "Dismiss",
+      "heartbeatLost": "Muster raises MusterHeartbeatLost when an Integration loses its Heartbeat, and only the Default route takes it now.",
+      "title": "Suggestions"
+    },
+    "title": "Routes"
   },
   "secondFactor": {
     "cancel": "Sign out",

@@ -201,8 +201,11 @@ function plainHeaders(
   return headers;
 }
 
-/** The fetch of the generated client (the orval mutator). Resolves with the parsed body of a 2xx answer. */
-export async function apiFetch<T>(url: string, options: RequestInit): Promise<T> {
+/** Sends a request of the client and resolves with the parsed body and the headers of a 2xx answer. */
+async function send(
+  url: string,
+  options: RequestInit,
+): Promise<{ body: unknown; headers: Headers }> {
   const method = (options.method ?? "GET").toUpperCase();
   const headers = plainHeaders(options.headers);
   headers.set("Accept", "application/json, application/problem+json");
@@ -222,8 +225,30 @@ export async function apiFetch<T>(url: string, options: RequestInit): Promise<T>
   if (isSession(body)) {
     rememberSession(body);
   }
+  return { body, headers: res.headers };
+}
+
+/** The fetch of the generated client (the orval mutator). Resolves with the parsed body of a 2xx answer. */
+export async function apiFetch<T>(url: string, options: RequestInit): Promise<T> {
+  const { body } = await send(url, options);
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the generated client names the body's type from the spec
   return body as T;
+}
+
+/** A 2xx answer with the version its ETag header names. */
+export interface Tagged<T> {
+  data: T;
+  etag: string;
+}
+
+/**
+ * apiFetch for a resource whose ETag is only in the header, such as the Routes list, whose ETag covers the order:
+ * resolves with the body and the ETag, for the If-Match of the next change.
+ */
+export async function apiFetchTagged<T>(url: string, options: RequestInit): Promise<Tagged<T>> {
+  const { body, headers } = await send(url, options);
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the caller names the body's type from the spec
+  return { data: body as T, etag: headers.get("ETag") ?? "" };
 }
 
 /** The current session, or null with whether it ended (rather than never existed); never leaves the page. */

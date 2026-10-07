@@ -72,6 +72,7 @@ export interface NavEntry {
 export type NavLabel =
   | "home"
   | "integrations"
+  | "routes"
   | "profile"
   | "users"
   | "serviceAccounts"
@@ -83,6 +84,7 @@ export type NavLabel =
 export const NAVIGATION: readonly NavEntry[] = [
   { to: "/", label: "home", exact: true },
   { to: "/integrations", label: "integrations", permission: "integrations:read" },
+  { to: "/routes", label: "routes", permission: "routes:read" },
   { to: "/profile", label: "profile" },
   { to: "/admin/users", label: "users", permission: "users:read" },
   { to: "/admin/service-accounts", label: "serviceAccounts", permission: "service-accounts:read" },
@@ -105,6 +107,8 @@ function navLabel(t: (key: string) => string, label: NavLabel): string {
       return t("nav.home");
     case "integrations":
       return t("nav.integrations");
+    case "routes":
+      return t("nav.routes");
     case "profile":
       return t("nav.profile");
     case "users":
