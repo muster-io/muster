@@ -11,6 +11,7 @@ import {
   ADMIN_PASSWORD,
   APP,
   adminApi,
+  devClockOffset,
   expectNoHorizontalScroll,
   freshCode,
   nextIdpUser,
@@ -44,7 +45,11 @@ test("opens the sign-in page, signs the Admin in and shows the recovery banner l
   await expect(page.getByTestId("user-menu-name")).toHaveText("admin");
 
   // The notice starts and ends through its data, without a reload; the hint arrives within the 5 s check interval.
-  await sql("UPDATE runtime_state SET recovery_until = now() + interval '1 minute'");
+  // The times follow the development clock, which earlier specs may have advanced.
+  const offset = await devClockOffset();
+  await sql("UPDATE runtime_state SET recovery_until = now() + make_interval(secs => $1)", [
+    offset + 60,
+  ]);
   const until = await scalar("SELECT recovery_until FROM runtime_state");
   if (!(until instanceof Date)) {
     throw new Error(`recovery_until is ${String(until)}`);
@@ -60,7 +65,9 @@ test("opens the sign-in page, signs the Admin in and shows the recovery banner l
   );
   await expect(banner).toBeVisible({ timeout: 15_000 });
   await shot(page, "home-recovery-banner");
-  await sql("UPDATE runtime_state SET recovery_until = now() - interval '1 second'");
+  await sql("UPDATE runtime_state SET recovery_until = now() + make_interval(secs => $1)", [
+    offset - 1,
+  ]);
   await expect(banner).toBeHidden({ timeout: 15_000 });
   expect(csp).toEqual([]);
 });

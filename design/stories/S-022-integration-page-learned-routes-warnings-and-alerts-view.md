@@ -8,16 +8,22 @@ depends_on: [S-019, S-021]
 covers: [C-06.FR-14, C-06.FR-18, C-06.FR-19, C-06.AC-3, C-06.AC-8, C-05.FR-7]
 files_touched:
   - web/src/routes/integrations.index.tsx
-  - web/src/routes/integrations.$integrationId.tsx
+  - web/src/routes/integrations.$integrationId.index.tsx
   - web/src/components/alertmanager-routes.tsx
   - web/src/components/integration-warnings.tsx
   - web/src/components/integration-alerts.tsx
   - web/src/components/integration-alerts.test.tsx
+  - web/src/components/integration-alerts-search.ts
+  - web/src/components/integration-form.tsx
+  - web/src/components/data-table.tsx
+  - web/src/lib/time.ts
   - web/src/components/label-matchers-input.tsx
   - web/src/components/label-matchers-input.test.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/e2e/integration-page.spec.ts
+  - web/e2e/support.ts
+  - web/e2e/sign-in.spec.ts
 acceptance:
   - "[C-06.FR-18, C-06.AC-3, C-05.FR-7] The Integration page lists the Alertmanager routes seen with their learned repeat interval (\"Not learned yet\" before one is) and the time to resolve by absence; a route that repeats every 5 minutes shows \"5 min\"."
   - "[C-06.FR-18] A route above `processing.long_repeat_warning` shows \"Alertmanager route {route} repeats every {interval}; Muster can resolve its alerts by absence only after {3 × interval}. Use a repeat interval of 5–15 minutes on the route to Muster.\" with the recommended snippet and a copy button; while a `groupKey` is truncated the page shows \"Alertmanager truncates Snapshots for N groups. Set `max_alerts: 0` on the Alertmanager receiver.\"; the Integrations list marks both warnings."
@@ -95,7 +101,9 @@ clock as in S-020 and S-021 for the Integration "lab". Then in Playwright:
    the alert has its own value."
 6. Resolved tab → the row of `instance="db-c"` shows "Resolved: Gone" and, on hover, "Alertmanager no longer reports
    this alert — …".
-7. Type `pod=~"[` → the field shows the server's error and the rows stay.
+7. Type `pod=~"[` → the field shows the syntax error as typed ("Close the quoted value with a quote.") → complete it
+   to `pod=~"["`, whose regular expression does not compile → "Add matcher" → the field shows the server's error and
+   the rows stay.
 
 `make e2e` runs these steps as `web/e2e/integration-page.spec.ts`.
 

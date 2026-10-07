@@ -15,6 +15,17 @@ export const ADMIN_LOGIN = "admin@example.org";
 // The published development password of `muster dev`.
 export const ADMIN_PASSWORD = "muster-dev-password";
 
+/**
+ * How far the development clock runs ahead of the real time, in seconds. The specs of a run share one `muster dev`,
+ * so a spec that compares a time it writes with the business clock adds this offset.
+ */
+export async function devClockOffset(): Promise<number> {
+  const res = await fetch("http://localhost:8082/_dev/clock");
+  expect(res.ok).toBe(true);
+  const body = parse<{ offset_seconds: number }>(await res.text());
+  return body.offset_seconds;
+}
+
 /** Runs SQL on the database of the run, which the global setup created. */
 export async function sql(query: string, values: unknown[] = []): Promise<QueryResult> {
   const url = process.env.MUSTER_E2E_WEB_DATABASE_URL;

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Integrations (C-05.FR-1): the list with the name, the Connection mode and the time of the last Snapshot, and "Create
+// Integrations (C-05.FR-1, C-06.FR-14, FR-18): the list with the name, the Connection mode and the time of the last
+// Snapshot, the built-in Integration "Muster" marked "Built-in", a mark on the Integrations with warnings, and "Create
 // integration" for integrations:write.
 
 import { Link, createFileRoute } from "@tanstack/react-router";
@@ -15,7 +16,8 @@ import {
 import type { Integration } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
-import { connectionModeLabel } from "../components/integration-form";
+import { BuiltinBadge, connectionModeLabel } from "../components/integration-form";
+import { WarningMark } from "../components/integration-warnings";
 import { buttonVariants } from "../components/ui/button";
 import { useTimeFormat } from "../lib/time";
 
@@ -26,13 +28,19 @@ export const Route = createFileRoute("/integrations/")({
 
 function NameCell({ row }: { row: Integration }) {
   return (
-    <Link
-      to="/integrations/$integrationId"
-      params={{ integrationId: row.id }}
-      className="font-medium break-words text-primary underline-offset-4 hover:underline focus-visible:underline"
-    >
-      {row.name}
-    </Link>
+    <div className="flex flex-col">
+      <div className="flex flex-wrap items-center gap-2">
+        <Link
+          to="/integrations/$integrationId"
+          params={{ integrationId: row.id }}
+          className="font-medium break-words text-primary underline-offset-4 hover:underline focus-visible:underline"
+        >
+          {row.name}
+        </Link>
+        {row.builtin && <BuiltinBadge />}
+      </div>
+      <WarningMark warnings={row.warnings} />
+    </div>
   );
 }
 

@@ -1,4 +1,67 @@
 {
+  "alertmanagerRoutes": {
+    "columns": {
+      "repeatInterval": "Repeat interval",
+      "resolvesAfter": "Resolves by absence after",
+      "route": "Route",
+      "truncatedGroups": "Truncated groups"
+    },
+    "empty": "No Snapshots with a route yet.",
+    "hint": "The routes Muster saw in the Snapshots of this integration, with the repeat interval it learned from them.",
+    "notLearned": "Not learned yet",
+    "snippet": "Recommended route configuration",
+    "title": "Alertmanager routes"
+  },
+  "alerts": {
+    "columns": {
+      "groups": "Alertmanager groups",
+      "labels": "Labels",
+      "lastSeen": "Last seen",
+      "startsAt": "Started",
+      "state": "State"
+    },
+    "empty": "No alerts yet.",
+    "emptyFiltered": "No alerts match these filters.",
+    "emptyFiring": "No firing alerts.",
+    "emptyResolved": "No resolved alerts.",
+    "filters": {
+      "label": "Alert filters",
+      "search": "Search",
+      "searchPlaceholder": "Label value",
+      "sort": "Sort by"
+    },
+    "groups_one": "{{count}} group",
+    "groups_other": "{{count}} groups",
+    "hint": "The alerts Muster tracks for this integration.",
+    "reason": {
+      "gone": "Gone",
+      "integrationDeleted": "Integration deleted",
+      "resolved": "Resolved by Alertmanager",
+      "stale": "Stale"
+    },
+    "reasonText": {
+      "absent": "Alertmanager no longer reports this alert — it resolved without notice, was silenced or inhibited in Alertmanager, or the Alertmanager routing changed"
+    },
+    "sort": {
+      "lastSeenAsc": "Last seen, oldest first",
+      "lastSeenDesc": "Last seen, newest first",
+      "startsAtAsc": "Started, oldest first",
+      "startsAtDesc": "Started, newest first"
+    },
+    "state": {
+      "firing": "Firing",
+      "resolved": "Resolved",
+      "resolvedWith": "Resolved: {{reason}}"
+    },
+    "staticLabelWarning": "Static label {{label}} not applied: the alert has its own value.",
+    "tabs": {
+      "all": "All",
+      "firing": "Firing",
+      "label": "Alerts to show",
+      "resolved": "Resolved"
+    },
+    "title": "Alerts"
+  },
   "audit": {
     "actor": {
       "bootstrap": "Bootstrap",
@@ -77,6 +140,12 @@
     "save": "Save",
     "saved": "Saved."
   },
+  "duration": {
+    "hours": "{{value}} h",
+    "hoursMinutes": "{{hours}} h {{minutes}} min",
+    "minutes": "{{value}} min",
+    "seconds": "{{value}} s"
+  },
   "errors": {
     "forbidden": "You do not have permission to do this.",
     "generic": "Something went wrong. Try again.",
@@ -115,6 +184,10 @@
     "title": "Welcome, {{name}}"
   },
   "integrations": {
+    "builtin": {
+      "badge": "Built-in",
+      "explanation": "Muster raises its Internal alerts through this Integration. It has no tokens and cannot be changed."
+    },
     "connectionMode": {
       "precision": "An Alert that Alertmanager resolves closes at once. An Alert that Alertmanager stops listing is Gone after up to two repeat intervals, never sooner than 5 minutes, and Stale after three learned repeat intervals.",
       "webhookOnly": "Webhook only"
@@ -187,6 +260,14 @@
       "unnamed": "Unnamed token"
     }
   },
+  "integrationWarnings": {
+    "label": "Warnings",
+    "longRepeatInterval": "Alertmanager route {{route}} repeats every {{interval}}; Muster can resolve its alerts by absence only after {{absence}}. Use a repeat interval of 5–15 minutes on the route to Muster.",
+    "mark_one": "{{count}} warning",
+    "mark_other": "{{count}} warnings",
+    "snapshotTruncated_one": "Alertmanager truncates Snapshots for {{count}} group. Set max_alerts: 0 on the Alertmanager receiver.",
+    "snapshotTruncated_other": "Alertmanager truncates Snapshots for {{count}} groups. Set max_alerts: 0 on the Alertmanager receiver."
+  },
   "labels": {
     "add": "Add label",
     "errors": {
@@ -199,6 +280,28 @@
     "removeEmpty": "Remove this label",
     "valuePlaceholder": "prod-eu",
     "valueRow": "Label value {{row}}"
+  },
+  "matchers": {
+    "add": "Add matcher",
+    "applied": "Applied matchers",
+    "errors": {
+      "applied": "Matcher {{matcher}}: {{error}}",
+      "invalidFormat": "A label filter is one Alertmanager matcher such as namespace=\"payments\" or pod=~\"api-.*\".",
+      "invalidRegex": "The regular expression is not valid.",
+      "invalidRegexDetail": "The regular expression is not valid: {{detail}}"
+    },
+    "hint": "Alertmanager matchers such as namespace=\"payments\" or pod=~\"api-.*\"; an alert must match all of them.",
+    "label": "Label filters",
+    "remove": "Remove matcher {{matcher}}",
+    "syntax": {
+      "afterValue": "Nothing may follow the quoted value.",
+      "duplicate": "This matcher is already applied.",
+      "name": "A matcher starts with a label name, such as namespace.",
+      "operator": "Follow the label name with =, !=, =~ or !~.",
+      "quoteInValue": "Quote the whole value, or leave quotes out of it.",
+      "unclosedName": "Close the quoted label name with a quote.",
+      "unclosedValue": "Close the quoted value with a quote."
+    }
   },
   "nav": {
     "auditLog": "Audit log",

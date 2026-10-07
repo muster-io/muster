@@ -34,11 +34,15 @@ export interface CursorList<T> {
   error: unknown;
 }
 
-/** Reads a cursor-paginated list page by page; a new key (other filters) starts again from the first page. */
+/**
+ * Reads a cursor-paginated list page by page; a new key (other filters) starts again from the first page. staleTime
+ * keeps pages that were just read, such as the first page a filter was checked with, from being read again.
+ */
 export function useCursorList<T>(
   queryKey: QueryKey,
   fetchPage: (cursor: string | undefined, signal: AbortSignal) => Promise<CursorPage<T>>,
   enabled = true,
+  staleTime = 0,
 ): CursorList<T> {
   const query = useInfiniteQuery<
     CursorPage<T>,
@@ -53,6 +57,7 @@ export function useCursorList<T>(
     getNextPageParam: (last) => last.next_cursor ?? undefined,
     placeholderData: keepPreviousData,
     enabled,
+    staleTime,
   });
   const items = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
   return {
