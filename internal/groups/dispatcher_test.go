@@ -350,6 +350,7 @@ func (f *fakeDB) SaveGroup(_ context.Context, a dbgen.SaveGroupParams) error {
 	g.PriorSnoozedByUserID, g.PriorSnoozedByServiceAccountID = a.PriorSnoozedByUserID,
 		a.PriorSnoozedByServiceAccountID
 	g.GraceDeadline, g.EventSeq, g.LastChangedAt = a.GraceDeadline, a.EventSeq, a.LastChangedAt
+	g.FirstAcknowledgedAt = a.FirstAcknowledgedAt
 	return nil
 }
 
@@ -609,7 +610,10 @@ func (f *fakeDB) GetGroup(_ context.Context, arg dbgen.GetGroupParams) (dbgen.Ge
 		ResolvedAt: g.ResolvedAt, ResolvedByKind: g.ResolvedByKind, ResolvedByUserID: g.ResolvedByUserID,
 		ResolvedByServiceAccountID: g.ResolvedByServiceAccountID, ResolveReason: g.ResolveReason,
 		ResolveReasonText: g.ResolveReasonText, CreatedAt: g.CreatedAt, LastChangedAt: g.LastChangedAt,
-		RoutePublicID: r.PublicID, RouteName: r.name, RetentionAlertDetailsDays: f.details}
+		RoutePublicID: r.PublicID, RouteName: r.name, RetentionAlertDetailsDays: f.details,
+		OwnerUserID: g.OwnerUserID, SnoozeUntil: g.SnoozeUntil, SnoozedByUserID: g.SnoozedByUserID,
+		SnoozedByServiceAccountID: g.SnoozedByServiceAccountID, RouteDeleted: r.deleted}
+	out.NewerPublicID, out.NewerNumber = f.newer(g)
 	if g.FiringAgainAfterID.Valid {
 		out.FiringAgainAfterNumber = f.groups[g.FiringAgainAfterID.Int64].Number
 	}

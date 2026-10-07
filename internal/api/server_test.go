@@ -35,7 +35,8 @@ import (
 var t0 = time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 
 var roles = auth.Roles{
-	auth.RoleAdmin: {"alert-groups:read", "integrations:read", "integrations:write", "organization:write",
+	auth.RoleAdmin: {"alert-groups:acknowledge", "alert-groups:read", "alert-groups:resolve", "alert-groups:snooze",
+		"integrations:read", "integrations:write", "organization:write",
 		"service-accounts:read", "service-accounts:write", "stored-snapshots:read", "system-status:read", "users:read",
 		"users:write"},
 	auth.RoleResponder: {"alert-groups:acknowledge", "alert-groups:read", "integrations:read"},
@@ -612,7 +613,7 @@ func TestPermissions(t *testing.T) {
 	}
 	_ = json.Unmarshal(a.body, &list)
 	if len(list.Items) != 3 || list.Items[0].Name != "admin" || list.Items[2].Name != "viewer" ||
-		len(list.Items[0].Permissions) != 10 || len(list.Items[2].Permissions) != 2 {
+		len(list.Items[0].Permissions) != 13 || len(list.Items[2].Permissions) != 2 {
 		t.Errorf("roles = %+v", list)
 	}
 	id := &auth.Identity{Permissions: []auth.Permission{"users:read"}}
@@ -645,6 +646,42 @@ func TestPermissions(t *testing.T) {
 		requestInfo{operation: op})))
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("no identity = %d", w.Code)
+	}
+}
+
+// TestDispatcherPermissionCheck is C-10.FR-3 and C-10.AC-4: exactly the Command operations, marked
+// x-permission-check: dispatcher, reach their handler without their Permission, so that the dispatcher checks it and
+// logs the refusal; every other operation that needs a Permission is refused by the middleware.
+func TestDispatcherPermissionCheck(t *testing.T) {
+	doc, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var marked []string
+	nobody := &auth.Identity{Permissions: []auth.Permission{}, Transport: audit.TransportUI}
+	srv := newTestAPI(t).srv
+	for _, op := range readOperations(doc) {
+		reached := false
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/x", nil)
+		ctx := auth.WithIdentity(context.WithValue(r.Context(), requestInfoKey{}, requestInfo{operation: op}), nobody)
+		w := httptest.NewRecorder()
+		srv.permit(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })).
+			ServeHTTP(w, r.WithContext(ctx))
+		if op.dispatcherChecks {
+			marked = append(marked, op.id)
+			if !reached {
+				t.Errorf("%s did not reach its handler", op.id)
+			}
+			continue
+		}
+		if reached != (op.public || slices.Contains(op.permissions, auth.PermissionAuthenticated)) {
+			t.Errorf("%s (%v) reached its handler: %v", op.id, op.permissions, reached)
+		}
+	}
+	slices.Sort(marked)
+	if want := []string{"acknowledgeAlertGroup", "resolveAlertGroup", "runBulkCommand", "snoozeAlertGroup",
+		"unacknowledgeAlertGroup", "unresolveAlertGroup", "unsnoozeAlertGroup"}; !slices.Equal(marked, want) {
+		t.Errorf("marked %v, want %v", marked, want)
 	}
 }
 

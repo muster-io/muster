@@ -66,6 +66,7 @@ const (
 	AlertsStillFiring             AlertGroupNoticeKind = "alerts_still_firing"
 	DetailsRemoved                AlertGroupNoticeKind = "details_removed"
 	FiringAgainAfterManualResolve AlertGroupNoticeKind = "firing_again_after_manual_resolve"
+	NewerAlertGroupExists         AlertGroupNoticeKind = "newer_alert_group_exists"
 	Replacement                   AlertGroupNoticeKind = "replacement"
 )
 
@@ -77,6 +78,8 @@ func (e AlertGroupNoticeKind) Valid() bool {
 	case DetailsRemoved:
 		return true
 	case FiringAgainAfterManualResolve:
+		return true
+	case NewerAlertGroupExists:
 		return true
 	case Replacement:
 		return true
@@ -2743,6 +2746,9 @@ type AlertGroupNotice struct {
 
 	// Label The Instance label that changed, for `replacement`.
 	Label nullable.Nullable[string] `json:"label,omitempty"`
+
+	// RelatedAlertGroup For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that takes part in grouping, shown as a link in place of Unresolve.
+	RelatedAlertGroup *AlertGroupRef `json:"related_alert_group,omitempty"`
 
 	// ResolvedNumber The `#N` of the manually resolved Alert Group, for `firing_again_after_manual_resolve`.
 	ResolvedNumber nullable.Nullable[int] `json:"resolved_number,omitempty"`
@@ -8183,7 +8189,7 @@ type ClientInterface interface {
 
 	// UnresolveAlertGroup Unresolve
 	//
-	// Only for an Alert Group a person resolved; messengers never offer it. Refused with the codes `not_resolved`, `all_alerts_resolved`, `resolved_automatically` and `newer_alert_group_exists` (see `related_alert_group`).
+	// Only for an Alert Group a person resolved; messengers never offer it. Refused, in this order, with the codes `not_resolved`, `resolved_automatically`, `route_deleted`, `newer_alert_group_exists` (see `related_alert_group`) and `all_alerts_resolved`.
 	//
 	// Corresponds with POST /alert-groups/{alert_group_id}/unresolve (the `UnresolveAlertGroup` operationId).
 	UnresolveAlertGroup(ctx context.Context, alertGroupId AlertGroupId, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -9888,7 +9894,7 @@ func (c *Client) UnacknowledgeAlertGroup(ctx context.Context, alertGroupId Alert
 
 // UnresolveAlertGroup Unresolve
 //
-// Only for an Alert Group a person resolved; messengers never offer it. Refused with the codes `not_resolved`, `all_alerts_resolved`, `resolved_automatically` and `newer_alert_group_exists` (see `related_alert_group`).
+// Only for an Alert Group a person resolved; messengers never offer it. Refused, in this order, with the codes `not_resolved`, `resolved_automatically`, `route_deleted`, `newer_alert_group_exists` (see `related_alert_group`) and `all_alerts_resolved`.
 //
 // Corresponds with POST /alert-groups/{alert_group_id}/unresolve (the `UnresolveAlertGroup` operationId).
 func (c *Client) UnresolveAlertGroup(ctx context.Context, alertGroupId AlertGroupId, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -20344,7 +20350,7 @@ type ClientWithResponsesInterface interface {
 
 	// UnresolveAlertGroupWithResponse Unresolve
 	//
-	// Only for an Alert Group a person resolved; messengers never offer it. Refused with the codes `not_resolved`, `all_alerts_resolved`, `resolved_automatically` and `newer_alert_group_exists` (see `related_alert_group`).
+	// Only for an Alert Group a person resolved; messengers never offer it. Refused, in this order, with the codes `not_resolved`, `resolved_automatically`, `route_deleted`, `newer_alert_group_exists` (see `related_alert_group`) and `all_alerts_resolved`.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -22804,6 +22810,8 @@ type ResolveAlertGroupResponse struct {
 	ApplicationproblemJSON404 *NotFound
 	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
 	ApplicationproblemJSON409 *Conflict
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
 	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
 	ApplicationproblemJSON429 *TooManyRequests
 	// Headers429 the parsed response headers for an HTTP 429 response
@@ -22838,6 +22846,11 @@ func (r ResolveAlertGroupResponse) GetApplicationproblemJSON404() *NotFound {
 // GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
 func (r ResolveAlertGroupResponse) GetApplicationproblemJSON409() *Conflict {
 	return r.ApplicationproblemJSON409
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r ResolveAlertGroupResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
 }
 
 // GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
@@ -34300,7 +34313,7 @@ func (c *ClientWithResponses) UnacknowledgeAlertGroupWithResponse(ctx context.Co
 
 // UnresolveAlertGroupWithResponse Unresolve
 //
-// Only for an Alert Group a person resolved; messengers never offer it. Refused with the codes `not_resolved`, `all_alerts_resolved`, `resolved_automatically` and `newer_alert_group_exists` (see `related_alert_group`).
+// Only for an Alert Group a person resolved; messengers never offer it. Refused, in this order, with the codes `not_resolved`, `resolved_automatically`, `route_deleted`, `newer_alert_group_exists` (see `related_alert_group`) and `all_alerts_resolved`.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -37751,6 +37764,13 @@ func ParseResolveAlertGroupResponse(rsp *http.Response) (*ResolveAlertGroupRespo
 			return nil, err
 		}
 		response.ApplicationproblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
 		var dest TooManyRequests

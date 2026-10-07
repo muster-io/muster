@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
@@ -857,6 +858,118 @@ func TestIntegrationListedAlertRace(t *testing.T) {
 		}
 		if e.count(t, `SELECT count(*) FROM stored_snapshots WHERE state <> 'processed'`) != 0 {
 			t.Error("a racing snapshot did not process")
+		}
+	})
+}
+
+// user inserts an active User and returns its id.
+func (e *env) user(t *testing.T, publicID, login string) int64 {
+	t.Helper()
+	var id int64
+	if err := e.d.Pool.QueryRow(t.Context(), `INSERT INTO users (org_id, public_id, login, name, role, source, status,
+		created_at, updated_at) VALUES ($1, $2, $3, $3, 'responder', 'local', 'active', $4, $4) RETURNING id`, e.orgID,
+		publicID, login, t0).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// TestIntegrationCommands is S-032 on PostgreSQL: Acknowledge records the first acknowledgement once and the reads
+// carry the Owner (C-09.FR-1); two users acknowledging at once leave one Owner and a single Takeover under the row lock
+// (C-10.AC-3); a person's Resolve starts the Grace period; a newer open Alert Group of the key shows as the notice in
+// the reads and refuses Unresolve (C-10.FR-7); once the Route is deleted Unresolve is refused with route_deleted.
+func TestIntegrationCommands(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		rt := e.route(t, "db", "db", "alertname")
+		perms := []auth.Permission{groups.PermissionAcknowledge, groups.PermissionResolve, groups.PermissionSnooze}
+		alice := groups.Caller{Actor: audit.User(e.user(t, "SRAAAAAAAAAAA1", "alice"), "SRAAAAAAAAAAA1"),
+			Transport: audit.TransportUI, Permissions: perms}
+		bob := groups.Caller{Actor: audit.User(e.user(t, "SRAAAAAAAAAAA2", "bob"), "SRAAAAAAAAAAA2"),
+			Transport: audit.TransportAPI, Permissions: perms}
+		const s1 = "2026-10-07T11:00:00Z"
+		e.process(t, gk, alert("firing", s1, "alertname", "DiskFull", "team", "db", "pod", "a"))
+		ga := e.groupOf(t, "a")
+		e.clock.Advance(5 * time.Minute)
+
+		// Two users at once: one acknowledgement and one Takeover, whatever the order.
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		for i, c := range []groups.Caller{alice, bob} {
+			wg.Go(func() { _, errs[i] = e.groups.Acknowledge(ctx, c, ga) })
+		}
+		wg.Wait()
+		if errs[0] != nil || errs[1] != nil {
+			t.Fatalf("acknowledges = %v", errs)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE event = 'takeover'`); n != 1 {
+			t.Errorf("%d takeovers", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE event = 'acknowledged'`); n != 1 {
+			t.Errorf("%d acknowledgements", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_groups WHERE public_id = $1
+			AND first_acknowledged_at = created_at + interval '5 minutes'
+			AND owner_user_id = (SELECT actor_user_id FROM timeline_entries WHERE event = 'takeover')`, ga); n != 1 {
+			t.Error("the first acknowledgement or the later Owner is wrong")
+		}
+		v, err := e.groups.Get(ctx, ga)
+		if err != nil || v.Owner == nil || len(v.Allowed(alice)) == 0 {
+			t.Fatalf("get = %v %+v", err, v)
+		}
+		page, err := e.groups.List(ctx, groups.ListRequest{Limit: 10})
+		if err != nil || len(page.Groups) != 1 || page.Groups[0].Owner == nil ||
+			page.Groups[0].Owner.Name != v.Owner.Name {
+			t.Errorf("list = %v %+v", err, page.Groups)
+		}
+
+		// A person's Resolve with the Alert still firing, then a new Alert of the same key within the Grace period.
+		if _, err := e.groups.Resolve(ctx, bob, ga, nil); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timers WHERE kind = 'grace_period_end'`); n != 1 {
+			t.Errorf("%d grace period timers", n)
+		}
+		e.process(t, gk, alert("firing", s1, "alertname", "DiskFull", "team", "db", "pod", "a"),
+			alert("firing", s1, "alertname", "DiskFull", "team", "db", "pod", "b"))
+		gb := e.groupOf(t, "b")
+		v, err = e.groups.Get(ctx, ga)
+		if err != nil || gb == ga || v.Newer == nil || v.Newer.PublicID != gb || slices.Contains(v.Allowed(alice),
+			groups.CommandUnresolve) || !slices.ContainsFunc(v.Notices, func(n groups.Notice) bool {
+			return n.Kind == groups.NoticeNewerAlertGroupExists && n.Related != nil && n.Related.Number == 2
+		}) {
+			t.Fatalf("get after the new alert = %v %+v", err, v)
+		}
+		page, err = e.groups.List(ctx, groups.ListRequest{Filter: groups.Filter{Statuses: []groups.Status{
+			groups.StatusResolved}}, Limit: 10})
+		if err != nil || len(page.Groups) != 1 || page.Groups[0].Newer == nil || page.Groups[0].Newer.PublicID != gb {
+			t.Errorf("list of resolved = %v %+v", err, page.Groups)
+		}
+		_, err = e.groups.Unresolve(ctx, alice, ga)
+		if r, ok := errors.AsType[*groups.RefusedError](err); !ok || r.Code != groups.CodeNewerGroupExists ||
+			r.Related == nil || r.Related.PublicID != gb {
+			t.Errorf("unresolve = %v", err)
+		}
+
+		// Without the newer one Unresolve works; once the Route is deleted it is refused.
+		if _, err := e.groups.Resolve(ctx, alice, gb, nil); err != nil {
+			t.Fatal(err)
+		}
+		if res, err := e.groups.Unresolve(ctx, alice, ga); err != nil || res.Group.Status != groups.StatusFiring {
+			t.Fatalf("unresolve = %v %+v", err, res.Group)
+		}
+		if _, err := e.groups.Resolve(ctx, alice, ga, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.routes.Delete(ctx, by, rt.PublicID, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.groups.Unresolve(ctx, alice, ga); err == nil || !strings.Contains(err.Error(), "route_deleted") {
+			t.Errorf("unresolve on a deleted route = %v", err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM audit_log WHERE action LIKE 'alert_group.%'`); n != 6 {
+			t.Errorf("%d audit entries", n)
 		}
 	})
 }

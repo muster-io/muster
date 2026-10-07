@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"slices"
 	"time"
 
@@ -100,6 +101,7 @@ type Queries interface {
 	LockRouteForMove(ctx context.Context, arg dbgen.LockRouteForMoveParams) (dbgen.LockRouteForMoveRow, error)
 	GetDefaultRouteID(ctx context.Context, orgID int64) (int64, error)
 	ListOpenGroupsOfRoute(ctx context.Context, arg dbgen.ListOpenGroupsOfRouteParams) ([]int64, error)
+	GetGroupRef(ctx context.Context, arg dbgen.GetGroupRefParams) (dbgen.GetGroupRefRow, error)
 	// Notify sends a live-update hint once the transaction commits.
 	Notify(ctx context.Context, h db.Hint) error
 	readQueries
@@ -169,10 +171,13 @@ func (c customPlans) QueryRow(ctx context.Context, sql string, args ...any) pgx.
 }
 
 // Actor is who changes an Alert Group and through which Transport. System transitions are made by Muster itself
-// with the Transport system; S-032 adds the people and automation of Commands.
+// with the Transport system; a Command by a User or a Service account, named in Person with the token it used, from
+// the client Address.
 type Actor struct {
 	Kind      audit.ActorKind
 	Transport audit.Transport
+	Person    audit.Actor
+	Address   netip.Addr
 }
 
 // System is Muster as the actor of a system transition.
@@ -212,6 +217,7 @@ type Group struct {
 
 	OwnerUserID             *int64
 	AcknowledgedAt          *time.Time
+	FirstAcknowledgedAt     *time.Time
 	SnoozeUntil             *time.Time
 	SnoozeNoEnd             bool
 	SnoozedWhileUrgent      bool
@@ -253,6 +259,7 @@ func groupOf(r dbgen.LockGroupsRow) (*Group, error) {
 		ResolveReasonText: textOf(r.ResolveReasonText), ReopenDeadline: timeOf(r.ReopenDeadline),
 		GraceDeadline: timeOf(r.GraceDeadline), FiringAgainAfterID: int8Of(r.FiringAgainAfterID),
 		EventSeq: r.EventSeq, CreatedAt: r.CreatedAt, LastChangedAt: r.LastChangedAt,
+		FirstAcknowledgedAt: timeOf(r.FirstAcknowledgedAt),
 	}
 	if r.PriorStatus.Valid {
 		g.Prior = &Prior{Status: Status(r.PriorStatus.String), OwnerUserID: int8Of(r.PriorOwnerUserID),
@@ -286,6 +293,7 @@ func (g *Group) saveParams(orgID int64) dbgen.SaveGroupParams {
 		ResolvedByServiceAccountID: nullInt(g.ResolvedByServiceAccount), ResolveReason: text(g.ResolveReason),
 		ResolveReasonText: text(g.ResolveReasonText), ReopenDeadline: timestamptz(g.ReopenDeadline),
 		GraceDeadline: timestamptz(g.GraceDeadline), EventSeq: g.EventSeq, LastChangedAt: g.LastChangedAt,
+		FirstAcknowledgedAt: timestamptz(g.FirstAcknowledgedAt),
 	}
 	if g.Prior != nil {
 		p.PriorStatus = pgtype.Text{String: string(g.Prior.Status), Valid: true}
@@ -318,11 +326,14 @@ type entry struct {
 
 // change is what one transition does to a locked Alert Group: the entries it records and, for a status change, the
 // reason it logs. A change without entries that still writes the row — the end of a Reopen window or of a Grace
-// period — sets written; it records nothing and leaves the time of the last change.
+// period — sets written; it records nothing and leaves the time of the last change. A Command names its Audit log
+// action and details.
 type change struct {
 	entries []entry
 	reason  string
 	written bool
+	action  string
+	details map[string]any
 }
 
 func (c *change) add(e entry) { c.entries = append(c.entries, e) }
@@ -350,11 +361,12 @@ func (c committed) run(ctx context.Context) {
 // dispatcher is the one way an Alert Group changes (ADR-0004, ADR-0016): permission → precondition → transition →
 // Audit log → Timeline → re-render, inside the caller's transaction, on a row the caller locked FOR UPDATE, and the
 // live-update hints of the change once the transaction commits. System transitions need no Permission and write no
-// Audit log entry; S-032 adds both steps for Commands.
+// Audit log entry; a Command passes permit first and names its Audit log action in its change.
 type dispatcher struct {
 	orgID int64
 	clock clock.Clock
 	log   *logging.Logger
+	audit *audit.Writer
 	// rerender is the re-render hook that delivery fills from S-034; nil until then.
 	rerender func(ctx context.Context, q Queries, g *Group) error
 	// routeIDs names Routes by public_id for the metrics and the log lines.
@@ -376,6 +388,13 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	}
 	if len(c.entries) == 0 && !c.written {
 		return nil
+	}
+	if c.action != "" {
+		if err := d.audit.Record(ctx, q, audit.Entry{OrgID: d.orgID, Actor: actor.Person, Transport: actor.Transport,
+			Action: c.action, Resource: audit.Resource{Type: ResourceAlertGroup, PublicID: g.PublicID,
+				Name: fmt.Sprintf("#%d", g.Number)}, Details: c.details, SourceAddress: actor.Address}); err != nil {
+			return err
+		}
 	}
 	if len(c.entries) > 0 {
 		if err := d.record(ctx, q, g, actor, now, c.entries); err != nil {
@@ -413,6 +432,17 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 			SnoozeUntil: timestamptz(e.SnoozeUntil), Fingerprints: e.Fingerprints,
 			ReplacedLabel: nonEmpty(e.ReplacedLabel), LabelConflicts: e.Conflicts,
 			PeriodFrom: timestamptz(e.PeriodFrom), PeriodTo: timestamptz(e.PeriodTo),
+		}
+		switch person := actor.Person; person.Kind {
+		case audit.ActorUser:
+			p.ActorUserID = pgtype.Int8{Int64: person.ID, Valid: true}
+		case audit.ActorServiceAccount:
+			p.ActorServiceAccountID = pgtype.Int8{Int64: person.ID, Valid: true}
+		case audit.ActorSystem, audit.ActorBootstrap, audit.ActorCLI:
+		}
+		if actor.Person.TokenID != 0 {
+			p.ApiTokenID = pgtype.Int8{Int64: actor.Person.TokenID, Valid: true}
+			p.TokenName = nonEmpty(actor.Person.TokenName)
 		}
 		if e.Event != "" {
 			row := rowOf(e.Event, e.Variant)
@@ -455,7 +485,10 @@ func (d *dispatcher) statusChanged(ctx context.Context, q Queries, g *Group, fro
 		case from == "":
 			metrics.AlertGroupsCreated.With(route).Inc()
 		case from == StatusResolved:
-			metrics.AlertGroupsReopened.With(route).Inc()
+			// An Unresolve is not a Reopen within the Reopen window.
+			if reason == string(EventReopened) {
+				metrics.AlertGroupsReopened.With(route).Inc()
+			}
 		case to == StatusResolved:
 			metrics.AlertGroupsResolved.With(route, by).Inc()
 			metrics.AlertGroupTimeToResolve.With(route).Update(max(resolvedAt.Sub(started).Seconds(), 0))

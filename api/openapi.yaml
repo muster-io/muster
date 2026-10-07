@@ -3509,6 +3509,7 @@ paths:
         Owner. A Personal access token acts as its User and may; a Service account token cannot become an Owner and is refused
         with `409` `command-refused` and the code `owner_must_be_user`. Other refusals: `already_resolved`.'
       x-permission: alert-groups:acknowledge
+      x-permission-check: dispatcher
       x-listener: app
       security:
       - sessionCookie: []
@@ -3542,6 +3543,7 @@ paths:
       description: Allowed to every user with the Permission, not only the Owner. The Alert Group becomes firing without an
         Owner. Refused with the code `not_acknowledged`.
       x-permission: alert-groups:acknowledge
+      x-permission-check: dispatcher
       x-listener: app
       security:
       - sessionCookie: []
@@ -3574,6 +3576,7 @@ paths:
       summary: Resolve
       description: Resolves by the user, with an optional Note recorded in the same request. Refused with the code `already_resolved`.
       x-permission: alert-groups:resolve
+      x-permission-check: dispatcher
       x-listener: app
       security:
       - sessionCookie: []
@@ -3604,6 +3607,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
         '429':
           $ref: '#/components/responses/TooManyRequests'
   /alert-groups/{alert_group_id}/unresolve:
@@ -3612,9 +3617,11 @@ paths:
       tags:
       - Alert groups
       summary: Unresolve
-      description: Only for an Alert Group a person resolved; messengers never offer it. Refused with the codes `not_resolved`,
-        `all_alerts_resolved`, `resolved_automatically` and `newer_alert_group_exists` (see `related_alert_group`).
+      description: Only for an Alert Group a person resolved; messengers never offer it. Refused, in this order, with the
+        codes `not_resolved`, `resolved_automatically`, `route_deleted`, `newer_alert_group_exists` (see `related_alert_group`)
+        and `all_alerts_resolved`.
       x-permission: alert-groups:resolve
+      x-permission-check: dispatcher
       x-listener: app
       security:
       - sessionCookie: []
@@ -3648,6 +3655,7 @@ paths:
       description: 'A Snooze until a future time (`until`) or with no end (`no_end: true`), chosen explicitly. Allowed from
         firing, acknowledged and snoozed.'
       x-permission: alert-groups:snooze
+      x-permission-check: dispatcher
       x-listener: app
       security:
       - sessionCookie: []
@@ -3697,6 +3705,7 @@ paths:
       summary: Unsnooze
       description: The Alert Group becomes firing without an Owner. Refused with the code `not_snoozed`.
       x-permission: alert-groups:snooze
+      x-permission-check: dispatcher
       x-listener: app
       security:
       - sessionCookie: []
@@ -3843,6 +3852,7 @@ paths:
       - alert-groups:acknowledge
       - alert-groups:resolve
       - alert-groups:snooze
+      x-permission-check: dispatcher
       x-listener: app
       security:
       - sessionCookie: []
@@ -7514,6 +7524,9 @@ components:
           description: Unresolve when every Alert has resolved.
         - code: resolved_automatically
           description: Unresolve of an Alert Group the system resolved; it reopens by itself.
+        - code: route_deleted
+          description: Unresolve of an Alert Group whose Route was deleted meanwhile; its Alerts still firing are grouped
+            on the Default route when its Grace period ends.
         - code: newer_alert_group_exists
           description: Unresolve while a newer open Alert Group with the same key exists; `related_alert_group` names it.
         - code: not_owner
@@ -9997,6 +10010,7 @@ components:
           - replacement
           - details_removed
           - firing_again_after_manual_resolve
+          - newer_alert_group_exists
         count:
           type:
           - integer
@@ -10015,6 +10029,10 @@ components:
           - integer
           - 'null'
           description: The `#N` of the manually resolved Alert Group, for `firing_again_after_manual_resolve`.
+        related_alert_group:
+          description: 'For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that
+            takes part in grouping, shown as a link in place of Unresolve.'
+          $ref: '#/components/schemas/AlertGroupRef'
     AlertGroupLink:
       type: object
       required:
@@ -10794,8 +10812,6 @@ components:
       type: object
       description: Exactly one of `until` and `no_end`; neither, both or a past `until` is `422`. A Snooze with no end is
         chosen explicitly, never by leaving a field out. The UI shows a warning before sending `no_end`.
-      minProperties: 1
-      maxProperties: 1
       properties:
         until:
           type: string

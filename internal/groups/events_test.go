@@ -181,7 +181,7 @@ func TestLifecycleEventTable(t *testing.T) {
 		want want
 	}{
 		{rowOf(EventSnoozeEnded, VariantAny), want{EventSnoozeEnded, KindStatus, Loud, []string{"snooze_ended"}}},
-		{rowOf(EventUnacknowledged, VariantAny), want{EventUnacknowledged, KindStatus, Loud, nil}},
+		{rowOf(EventUnacknowledged, VariantOwnerReleased), want{EventUnacknowledged, KindStatus, Loud, nil}},
 	} {
 		var mentions []string
 		for _, m := range r.row.Mentions {
@@ -192,11 +192,204 @@ func TestLifecycleEventTable(t *testing.T) {
 		}
 		produced[r.row.Event] = true
 	}
+	// TestCommandEventTable covers the rows of the Commands (C-10.FR-15).
+	for _, e := range []Event{EventAcknowledged, EventTakeover, EventUnresolved, EventSnoozed, EventUnsnoozed} {
+		produced[e] = true
+	}
 	for _, r := range Table {
 		if !produced[r.Event] {
 			t.Errorf("no case covers %s", r.Event)
 		}
 	}
+}
+
+// TestCommandEventTable is C-10.AC-16, C-10.FR-15 and C-09.FR-11: every row of the lifecycle event table of the
+// Commands but note_added (S-063) records exactly one Timeline entry with the row's event, kind, loudness and Mentions
+// and the actor and Transport of the Command, and an Acknowledge by the current Owner records none. The expected
+// values are the PRD table's, written out here.
+func TestCommandEventTable(t *testing.T) {
+	type want struct {
+		event    Event
+		loudness Loudness
+		mentions []string
+	}
+	cases := []struct {
+		name string
+		want *want
+		// set prepares the Alert Group, run is the Command.
+		set func(h *harness, g *dbgen.LockGroupsRow)
+		run func(h *harness, g *dbgen.LockGroupsRow) (Result, error)
+	}{
+		{"acknowledged", &want{EventAcknowledged, Quiet, nil}, nil,
+			func(h *harness, g *dbgen.LockGroupsRow) (Result, error) { return h.do(bob, CommandAcknowledge, g) }},
+		{"takeover", &want{EventTakeover, Loud, []string{"previous_owner"}},
+			func(h *harness, g *dbgen.LockGroupsRow) { h.acknowledge(g) },
+			func(h *harness, g *dbgen.LockGroupsRow) (Result, error) { return h.do(bob, CommandAcknowledge, g) }},
+		{"acknowledge by the current owner", nil,
+			func(h *harness, g *dbgen.LockGroupsRow) { h.acknowledge(g) },
+			func(h *harness, g *dbgen.LockGroupsRow) (Result, error) { return h.do(alice, CommandAcknowledge, g) }},
+		{"unacknowledged", &want{EventUnacknowledged, Quiet, nil},
+			func(h *harness, g *dbgen.LockGroupsRow) { h.acknowledge(g) },
+			func(h *harness, g *dbgen.LockGroupsRow) (Result, error) { return h.do(bob, CommandUnacknowledge, g) }},
+		{"resolved by a person", &want{EventResolved, Quiet, nil}, nil,
+			func(h *harness, g *dbgen.LockGroupsRow) (Result, error) { return h.do(bob, CommandResolve, g) }},
+		{"unresolved", &want{EventUnresolved, Quiet, nil},
+			func(h *harness, g *dbgen.LockGroupsRow) { h.personResolve(g, time.Minute) },
+			func(h *harness, g *dbgen.LockGroupsRow) (Result, error) { return h.do(bob, CommandUnresolve, g) }},
+		{"snoozed", &want{EventSnoozed, Quiet, nil}, nil,
+			func(h *harness, g *dbgen.LockGroupsRow) (Result, error) { return h.do(bob, CommandSnooze, g) }},
+		{"snoozed, only the end changes", &want{EventSnoozed, Quiet, nil},
+			func(h *harness, g *dbgen.LockGroupsRow) { h.snooze(g, t0.Add(time.Hour), false) },
+			func(h *harness, g *dbgen.LockGroupsRow) (Result, error) { return h.do(bob, CommandSnooze, g) }},
+		{"unsnoozed", &want{EventUnsnoozed, Quiet, nil},
+			func(h *harness, g *dbgen.LockGroupsRow) { h.snooze(g, t0.Add(time.Hour), false) },
+			func(h *harness, g *dbgen.LockGroupsRow) (Result, error) { return h.do(bob, CommandUnsnooze, g) }},
+	}
+	produced := map[Event]bool{}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.people()
+			g := h.firing(t, "x")
+			if c.set != nil {
+				c.set(h, g)
+			}
+			h.clock.Advance(time.Minute)
+			before := len(h.entriesOf(g))
+			if _, err := c.run(h, g); err != nil {
+				t.Fatal(err)
+			}
+			entries := h.entriesOf(g)[before:]
+			if c.want == nil {
+				if len(entries) != 0 {
+					t.Errorf("recorded %v", h.events(g))
+				}
+				return
+			}
+			if len(entries) != 1 {
+				t.Fatalf("%d entries: %v", len(entries), h.events(g))
+			}
+			e := entries[0]
+			mentions := c.want.mentions
+			if mentions == nil {
+				mentions = []string{}
+			}
+			if e.Event.String != string(c.want.event) || e.Kind != string(KindStatus) ||
+				e.Loudness.String != string(c.want.loudness) || !slices.Equal(e.Mentions, mentions) ||
+				e.ActorKind != "user" || e.ActorUserID != i8(bobID) || e.Transport != "ui" ||
+				e.EventSeq.Int64 != g.EventSeq {
+				t.Errorf("entry %+v, want %+v", e.InsertTimelineEntryParams, *c.want)
+			}
+			produced[c.want.event] = true
+		})
+	}
+	for _, r := range Table {
+		if r.Kind == KindStatus && (r.Variant == VariantCommand || slices.Contains([]Event{EventAcknowledged,
+			EventTakeover, EventUnresolved, EventSnoozed, EventUnsnoozed}, r.Event)) && !produced[r.Event] {
+			t.Errorf("no case covers %s", r.Event)
+		}
+	}
+}
+
+// TestCommandPaths is C-10.AC-6, AC-7, AC-9, AC-12, AC-13 and AC-8 through the Commands: the acknowledged and
+// snoozed paths of the lifecycle that Acknowledge, Snooze and Resolve now reach.
+func TestCommandPaths(t *testing.T) {
+	t.Run("reopen into acknowledged", func(t *testing.T) {
+		h := newHarness(t)
+		h.people()
+		a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+		h.changes(t, ingest.ChangeFired, a)
+		g := h.groupOf(t, a)
+		if _, err := h.svc.Acknowledge(t.Context(), bob, g.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+		h.changes(t, ingest.ChangeFired, b)
+		if e := h.last(t, g); e.Event.String != "alerts_added" || e.Loudness.String != "quiet" || g.Status != "acknowledged" {
+			t.Errorf("alerts added = %+v", e)
+		}
+		h.db.alerts[a].StartsAt = t0.Add(time.Hour)
+		h.changes(t, ingest.ChangeContinued, a)
+		if e := h.last(t, g); e.Event.String != "alert_continued" || e.Loudness.String != "quiet" ||
+			g.Status != "acknowledged" {
+			t.Errorf("continued = %+v", e)
+		}
+		h.resolve(t, a, b)
+		h.clock.Advance(5 * time.Minute)
+		c := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "3"})
+		h.changes(t, ingest.ChangeFired, c)
+		e := h.last(t, g)
+		if g.Status != "acknowledged" || g.OwnerUserID != i8(bobID) || g.ReopenCount != 1 ||
+			e.Event.String != "reopened" || e.Loudness.String != "loud" || !slices.Equal(e.Mentions, []string{"owner"}) {
+			t.Errorf("reopen = %+v, %+v", g, e)
+		}
+	})
+	t.Run("rise to urgent", func(t *testing.T) {
+		for _, removes := range []bool{true, false} {
+			h := newHarness(t)
+			h.people()
+			h.db.routes[2].UrgentRiseRemovesAck = removes
+			g := h.rise(t, func(g *dbgen.LockGroupsRow) {
+				if _, err := h.svc.Acknowledge(t.Context(), bob, g.PublicID); err != nil {
+					t.Fatal(err)
+				}
+			})
+			e := h.last(t, g)
+			if removes && (g.Status != "firing" || g.OwnerUserID.Valid || e.Loudness.String != "loud" ||
+				!slices.Equal(e.Mentions, []string{"owner", "rise_to_urgent"}) || e.PreviousOwnerUserID != i8(bobID)) {
+				t.Errorf("removes: %+v %+v", g, e)
+			}
+			if !removes && (g.Status != "acknowledged" || e.Loudness.String != "quiet") {
+				t.Errorf("keeps: %+v %+v", g, e)
+			}
+		}
+	})
+	t.Run("snoozed while not urgent and while urgent", func(t *testing.T) {
+		h := newHarness(t)
+		h.people()
+		g := h.rise(t, func(g *dbgen.LockGroupsRow) {
+			if _, err := h.svc.Snooze(t.Context(), bob, g.PublicID, SnoozeEnd{NoEnd: true}); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if e := h.last(t, g); g.Status != "firing" || e.Event.String != "urgency_raised" || e.Loudness.String != "loud" {
+			t.Errorf("the rise kept the snooze: %+v", e)
+		}
+		if _, err := h.svc.Snooze(t.Context(), bob, g.PublicID, SnoozeEnd{NoEnd: true}); err != nil ||
+			!g.SnoozedWhileUrgent {
+			t.Fatalf("snooze while urgent = %v", err)
+		}
+		critical := h.db.members[len(h.db.members)-1].alert
+		h.resolve(t, critical)
+		h.refire(t, critical)
+		if g.Status != "snoozed" {
+			t.Errorf("status %s", g.Status)
+		}
+	})
+	t.Run("grace period after a person's resolve", func(t *testing.T) {
+		h := newHarness(t)
+		h.people()
+		g := h.firing(t, "x")
+		if _, err := h.svc.Resolve(t.Context(), bob, g.PublicID, nil); err != nil {
+			t.Fatal(err)
+		}
+		h.clock.Advance(14 * time.Minute)
+		if out, err := h.svc.EndGracePeriod(t.Context(), nil, g.ID); err != nil || len(out.AlertGroups) != 0 {
+			t.Fatalf("early %v %+v", err, out)
+		}
+		h.clock.Advance(2 * time.Minute)
+		out, err := h.svc.EndGracePeriod(t.Context(), nil, g.ID)
+		if err != nil || len(out.AlertGroups) != 1 {
+			t.Fatalf("end %v %+v", err, out)
+		}
+		n := h.groupOf(t, h.db.members[0].alert)
+		v, err := h.svc.Get(t.Context(), n.PublicID)
+		if err != nil || n == g || !slices.ContainsFunc(v.Notices, func(x Notice) bool {
+			return x.Kind == NoticeFiringAgainAfterManualResolve && *x.ResolvedNumber == g.Number
+		}) {
+			t.Errorf("new alert group %v %+v", err, v.Notices)
+		}
+	})
 }
 
 // join starts an Alert Group of two Alerts (1 and 2), sets it up with set, and has a third Alert join it.
@@ -253,7 +446,7 @@ func TestRowOf(t *testing.T) {
 			t.Errorf("recovered %v", r)
 		}
 	}()
-	rowOf("takeover", VariantAny)
+	rowOf("note_added", VariantAny)
 }
 
 // TestStatusVariant: alerts_added and reopened take the variant of the status.

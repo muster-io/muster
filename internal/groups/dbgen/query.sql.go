@@ -345,10 +345,19 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        (SELECT count(*)
         FROM alert_group_alerts m
         WHERE m.org_id = g.org_id AND m.alert_group_id = g.id AND m.state = 'firing')::bigint AS still_firing,
-       o.retention_alert_details_days
+       o.retention_alert_details_days, g.owner_user_id, g.snooze_until, g.snoozed_by_user_id,
+       g.snoozed_by_service_account_id,
+       coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
+LEFT JOIN LATERAL (SELECT n.public_id, n.number
+                   FROM alert_groups n
+                   WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
+                     AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
+                     AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
+                   LIMIT 1) nw ON true
 WHERE g.org_id = $1 AND g.public_id = $2
 `
 
@@ -387,10 +396,19 @@ type GetGroupRow struct {
 	ReplacedLabel              string
 	StillFiring                int64
 	RetentionAlertDetailsDays  int64
+	OwnerUserID                pgtype.Int8
+	SnoozeUntil                pgtype.Timestamptz
+	SnoozedByUserID            pgtype.Int8
+	SnoozedByServiceAccountID  pgtype.Int8
+	NewerPublicID              string
+	NewerNumber                int64
+	RouteDeleted               bool
 }
 
 // GetGroup reads an Alert Group by public_id with its Route, the #N of the Alert Group it fires again after, the
-// label of its latest Replacement, the Alerts still firing in it and retention.alert_details. Urgency is derived from
+// label of its latest Replacement, the Alerts still firing in it, retention.alert_details, its Owner and Snooze, and,
+// when a person resolved it, the open Alert Group of the same Route and key that takes part in grouping (C-10.FR-7),
+// and whether its Route was deleted, which Unresolve needs. Urgency is derived from
 // the Route and organization.critical_is_urgent as they are now (C-08.FR-6), so that marking a Route urgent or
 // changing the setting shows on open Alert Groups at once without changing them.
 func (q *Queries) GetGroup(ctx context.Context, arg GetGroupParams) (GetGroupRow, error) {
@@ -426,6 +444,13 @@ func (q *Queries) GetGroup(ctx context.Context, arg GetGroupParams) (GetGroupRow
 		&i.ReplacedLabel,
 		&i.StillFiring,
 		&i.RetentionAlertDetailsDays,
+		&i.OwnerUserID,
+		&i.SnoozeUntil,
+		&i.SnoozedByUserID,
+		&i.SnoozedByServiceAccountID,
+		&i.NewerPublicID,
+		&i.NewerNumber,
+		&i.RouteDeleted,
 	)
 	return i, err
 }
@@ -479,6 +504,30 @@ func (q *Queries) GetGroupKey(ctx context.Context, arg GetGroupKeyParams) (GetGr
 	row := q.db.QueryRow(ctx, getGroupKey, arg.OrgID, arg.PublicID)
 	var i GetGroupKeyRow
 	err := row.Scan(&i.ID, &i.RouteID, &i.GroupKeySha256)
+	return i, err
+}
+
+const getGroupRef = `-- name: GetGroupRef :one
+SELECT public_id, number
+FROM alert_groups
+WHERE org_id = $1 AND id = $2
+`
+
+type GetGroupRefParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type GetGroupRefRow struct {
+	PublicID string
+	Number   int64
+}
+
+// GetGroupRef names an Alert Group by id: its public_id and #N.
+func (q *Queries) GetGroupRef(ctx context.Context, arg GetGroupRefParams) (GetGroupRefRow, error) {
+	row := q.db.QueryRow(ctx, getGroupRef, arg.OrgID, arg.ID)
+	var i GetGroupRefRow
+	err := row.Scan(&i.PublicID, &i.Number)
 	return i, err
 }
 
@@ -1199,10 +1248,19 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
        g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
        g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
-       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
+       g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
+       coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
+LEFT JOIN LATERAL (SELECT n.public_id, n.number
+                   FROM alert_groups n
+                   WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
+                     AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
+                     AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
+                   LIMIT 1) nw ON true
 WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -1269,6 +1327,13 @@ type ListGroupsChangedAscRow struct {
 	LastChangedAt              time.Time
 	RoutePublicID              string
 	RouteName                  string
+	OwnerUserID                pgtype.Int8
+	SnoozeUntil                pgtype.Timestamptz
+	SnoozedByUserID            pgtype.Int8
+	SnoozedByServiceAccountID  pgtype.Int8
+	NewerPublicID              string
+	NewerNumber                int64
+	RouteDeleted               bool
 }
 
 // ListGroupsChangedAsc reads a batch of the Alert Group list, earliest change first, after the cursor when given.
@@ -1323,6 +1388,13 @@ func (q *Queries) ListGroupsChangedAsc(ctx context.Context, arg ListGroupsChange
 			&i.LastChangedAt,
 			&i.RoutePublicID,
 			&i.RouteName,
+			&i.OwnerUserID,
+			&i.SnoozeUntil,
+			&i.SnoozedByUserID,
+			&i.SnoozedByServiceAccountID,
+			&i.NewerPublicID,
+			&i.NewerNumber,
+			&i.RouteDeleted,
 		); err != nil {
 			return nil, err
 		}
@@ -1339,10 +1411,19 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
        g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
        g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
-       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
+       g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
+       coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
+LEFT JOIN LATERAL (SELECT n.public_id, n.number
+                   FROM alert_groups n
+                   WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
+                     AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
+                     AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
+                   LIMIT 1) nw ON true
 WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -1409,6 +1490,13 @@ type ListGroupsChangedDescRow struct {
 	LastChangedAt              time.Time
 	RoutePublicID              string
 	RouteName                  string
+	OwnerUserID                pgtype.Int8
+	SnoozeUntil                pgtype.Timestamptz
+	SnoozedByUserID            pgtype.Int8
+	SnoozedByServiceAccountID  pgtype.Int8
+	NewerPublicID              string
+	NewerNumber                int64
+	RouteDeleted               bool
 }
 
 // ListGroupsChangedDesc reads a batch of the Alert Group list, latest change first, after the cursor when given.
@@ -1463,6 +1551,13 @@ func (q *Queries) ListGroupsChangedDesc(ctx context.Context, arg ListGroupsChang
 			&i.LastChangedAt,
 			&i.RoutePublicID,
 			&i.RouteName,
+			&i.OwnerUserID,
+			&i.SnoozeUntil,
+			&i.SnoozedByUserID,
+			&i.SnoozedByServiceAccountID,
+			&i.NewerPublicID,
+			&i.NewerNumber,
+			&i.RouteDeleted,
 		); err != nil {
 			return nil, err
 		}
@@ -1479,10 +1574,19 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
        g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
        g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
-       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
+       g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
+       coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
+LEFT JOIN LATERAL (SELECT n.public_id, n.number
+                   FROM alert_groups n
+                   WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
+                     AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
+                     AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
+                   LIMIT 1) nw ON true
 WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -1549,6 +1653,13 @@ type ListGroupsStartedAscRow struct {
 	LastChangedAt              time.Time
 	RoutePublicID              string
 	RouteName                  string
+	OwnerUserID                pgtype.Int8
+	SnoozeUntil                pgtype.Timestamptz
+	SnoozedByUserID            pgtype.Int8
+	SnoozedByServiceAccountID  pgtype.Int8
+	NewerPublicID              string
+	NewerNumber                int64
+	RouteDeleted               bool
 }
 
 // ListGroupsStartedAsc reads a batch of the Alert Group list, oldest start first, after the cursor when given.
@@ -1603,6 +1714,13 @@ func (q *Queries) ListGroupsStartedAsc(ctx context.Context, arg ListGroupsStarte
 			&i.LastChangedAt,
 			&i.RoutePublicID,
 			&i.RouteName,
+			&i.OwnerUserID,
+			&i.SnoozeUntil,
+			&i.SnoozedByUserID,
+			&i.SnoozedByServiceAccountID,
+			&i.NewerPublicID,
+			&i.NewerNumber,
+			&i.RouteDeleted,
 		); err != nil {
 			return nil, err
 		}
@@ -1620,10 +1738,19 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
        g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
        g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
-       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name
+       g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
+       g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
+       coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
+LEFT JOIN LATERAL (SELECT n.public_id, n.number
+                   FROM alert_groups n
+                   WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
+                     AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
+                     AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
+                   LIMIT 1) nw ON true
 WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -1690,6 +1817,13 @@ type ListGroupsStartedDescRow struct {
 	LastChangedAt              time.Time
 	RoutePublicID              string
 	RouteName                  string
+	OwnerUserID                pgtype.Int8
+	SnoozeUntil                pgtype.Timestamptz
+	SnoozedByUserID            pgtype.Int8
+	SnoozedByServiceAccountID  pgtype.Int8
+	NewerPublicID              string
+	NewerNumber                int64
+	RouteDeleted               bool
 }
 
 // The Alert Group list (C-09.FR-13) reads the summary rows in one of four orders. Every query runs with the plan of its
@@ -1699,7 +1833,7 @@ type ListGroupsStartedDescRow struct {
 // range selects lifetimes that overlap it — created_at < to AND (resolved_at IS NULL OR resolved_at >= from), written
 // with the status that the CHECK ties to resolved_at, so that the open index and alert_groups_resolved_idx serve it —
 // and is ignored for a number. Label Matchers other than = with a value are matched in Go on common_labels, after
-// these conditions; urgency is derived as in GetGroup.
+// these conditions; urgency and the newer open Alert Group are derived as in GetGroup.
 // ListGroupsStartedDesc reads a batch of the Alert Group list, newest start first, after the cursor when given.
 func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStartedDescParams) ([]ListGroupsStartedDescRow, error) {
 	rows, err := q.db.Query(ctx, listGroupsStartedDesc,
@@ -1752,6 +1886,13 @@ func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStart
 			&i.LastChangedAt,
 			&i.RoutePublicID,
 			&i.RouteName,
+			&i.OwnerUserID,
+			&i.SnoozeUntil,
+			&i.SnoozedByUserID,
+			&i.SnoozedByServiceAccountID,
+			&i.NewerPublicID,
+			&i.NewerNumber,
+			&i.RouteDeleted,
 		); err != nil {
 			return nil, err
 		}
@@ -2662,7 +2803,7 @@ SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, g
        resolve_reason_text, reopen_deadline, prior_status, prior_owner_user_id, prior_snooze_until,
        prior_snooze_no_end, prior_snoozed_while_urgent, prior_snoozed_by_user_id,
        prior_snoozed_by_service_account_id, grace_deadline, firing_again_after_id, event_seq, created_at,
-       last_changed_at
+       last_changed_at, first_acknowledged_at
 FROM alert_groups
 WHERE org_id = $1 AND id = ANY($2::bigint[])
 ORDER BY id
@@ -2721,6 +2862,7 @@ type LockGroupsRow struct {
 	EventSeq                       int64
 	CreatedAt                      time.Time
 	LastChangedAt                  time.Time
+	FirstAcknowledgedAt            pgtype.Timestamptz
 }
 
 // LockGroups locks Alert Groups for a change, in id order, so that two transactions never wait for each other.
@@ -2780,6 +2922,7 @@ func (q *Queries) LockGroups(ctx context.Context, arg LockGroupsParams) ([]LockG
 			&i.EventSeq,
 			&i.CreatedAt,
 			&i.LastChangedAt,
+			&i.FirstAcknowledgedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -3087,8 +3230,9 @@ SET route_id = $1, moved_from_route_id = $2, title = $3,
     prior_snoozed_while_urgent = $33,
     prior_snoozed_by_user_id = $34,
     prior_snoozed_by_service_account_id = $35,
-    grace_deadline = $36, event_seq = $37, last_changed_at = $38
-WHERE org_id = $39 AND id = $40
+    grace_deadline = $36, event_seq = $37, last_changed_at = $38,
+    first_acknowledged_at = $39
+WHERE org_id = $40 AND id = $41
 `
 
 type SaveGroupParams struct {
@@ -3130,6 +3274,7 @@ type SaveGroupParams struct {
 	GraceDeadline                  pgtype.Timestamptz
 	EventSeq                       int64
 	LastChangedAt                  time.Time
+	FirstAcknowledgedAt            pgtype.Timestamptz
 	OrgID                          int64
 	ID                             int64
 }
@@ -3175,6 +3320,7 @@ func (q *Queries) SaveGroup(ctx context.Context, arg SaveGroupParams) error {
 		arg.GraceDeadline,
 		arg.EventSeq,
 		arg.LastChangedAt,
+		arg.FirstAcknowledgedAt,
 		arg.OrgID,
 		arg.ID,
 	)

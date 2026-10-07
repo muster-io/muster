@@ -41,10 +41,11 @@ records a lifecycle event of FR-15 with its loudness and Mentions; Destinations 
   `owner_must_be_user` (C-04.FR-2); it may Resolve, Snooze and add Notes. A Personal access token acts as its User.
 
 - **C-10.FR-2** Refusals carry a stable code and a message: "already resolved" (Acknowledge, Resolve, Snooze on
-  resolved); "not acknowledged"; "not snoozed"; "not resolved", "all alerts have already resolved", "resolved
-  automatically — it reopens by itself when an alert returns" and "a newer open Alert Group #N exists" (Unresolve); "a Service account cannot be an
-  Owner" (Acknowledge and "Still on it" from a Service account); "not permitted". The API returns them as `Problem`
-  documents with `409` for preconditions and `403` for permissions.
+  resolved); "not acknowledged"; "not snoozed"; "not resolved", "resolved automatically — it reopens by itself when an
+  alert returns", "its Route was deleted" (`route_deleted`), "a newer open Alert Group #N exists" and "all alerts have
+  already resolved" (Unresolve, checked in this order); "a Service account cannot be an Owner" (Acknowledge and "Still
+  on it" from a Service account); "not permitted". The API returns them as `Problem` documents with `409` for
+  preconditions and `403` for permissions.
 - **C-10.FR-3** Every command passes through one dispatcher: permission → precondition → transition → Audit log →
   Timeline → re-render. The Transport (`ui`, `api`, `mattermost`, `telegram`) is recorded; transitions Muster starts
   itself use the Transport `system` and appear in the Timeline only (ADR-0016).

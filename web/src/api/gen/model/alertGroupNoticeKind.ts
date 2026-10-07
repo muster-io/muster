@@ -26,4 +26,5 @@ export const AlertGroupNoticeKind = {
   replacement: 'replacement',
   details_removed: 'details_removed',
   firing_again_after_manual_resolve: 'firing_again_after_manual_resolve',
+  newer_alert_group_exists: 'newer_alert_group_exists',
 } as const;

@@ -540,16 +540,17 @@ func (p *process) serve(ctx context.Context) error {
 	watching := true
 	select {
 	case <-ctx.Done():
-		p.log.Log(ctx, logging.ShutdownRequested, logging.F("grace_seconds", grace.Seconds()))
 	case stopped = <-srv.Errors():
 		p.log.Log(ctx, logging.ListenerFailed, logging.F("listener", listenerOf(stopped)),
 			logging.F("error", stopped.Error()))
 	case stopped = <-keys:
 		// The watch logged active_key_not_held; it ends without an error only when ctx ended.
 		watching = false
-		if stopped == nil {
-			p.log.Log(ctx, logging.ShutdownRequested, logging.F("grace_seconds", grace.Seconds()))
-		}
+	}
+	// When ctx ends, the select takes either its Done or the key watch that ended with it; both are a requested
+	// shutdown.
+	if stopped == nil {
+		p.log.Log(ctx, logging.ShutdownRequested, logging.F("grace_seconds", grace.Seconds()))
 	}
 	stopWatch()
 	// The grace period counts from here: stopping the Leader work, the replica record and the drain all fit in it.
@@ -685,6 +686,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Alerts:         alerts,
 		Routes:         p.routes,
 		AlertGroups:    p.groups,
+		Commands:       p.groups,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,

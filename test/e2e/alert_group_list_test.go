@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -244,20 +245,24 @@ func TestAlertGroupList(t *testing.T) {
 	for _, n := range []string{"1", "2", "3"} {
 		put("/groups/s1/alerts/x"+n, stat(n, ""))
 	}
+	// The business clock follows the real one between the moves, so each duration is the moves plus the real time
+	// that processing took, at most elapsed.
+	began := time.Now()
 	notify("s1", "first notification")
 	for _, n := range []string{"1", "2", "3"} {
 		advance(t, r, 600)
 		put("/groups/s1/alerts/x"+n, stat(n, `,"status":"resolved"`))
 		notify("s1", "some alerts resolved")
 	}
+	elapsed := math.Ceil(time.Since(began).Seconds())
 	st := read("/api/v1/alert-group-statistics?group_by=route&route=" + rs + "&time_zone=Europe/Berlin")
 	item := st["items"].([]any)[0].(map[string]any)
 	var perDay float64
 	for _, d := range item["per_day"].([]any) {
 		perDay += d.(map[string]any)["alert_group_count"].(float64)
 	}
-	if item["alert_group_count"] != 3.0 || item["time_to_resolve"].(map[string]any)["median_seconds"] != 1200.0 ||
-		perDay != 3 {
+	median, _ := item["time_to_resolve"].(map[string]any)["median_seconds"].(float64)
+	if item["alert_group_count"] != 3.0 || median < 1200 || median > 1200+elapsed || perDay != 3 {
 		t.Errorf("statistics = %v", item)
 	}
 	if n := read("/api/v1/alert-group-statistics?group_by=integration&integration=" + intID)["items"].([]any)[0].(map[string]any)["alert_group_count"]; n != 5.0 {

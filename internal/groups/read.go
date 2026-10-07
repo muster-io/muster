@@ -48,6 +48,7 @@ const (
 	NoticeReplacement                   = "replacement"
 	NoticeFiringAgainAfterManualResolve = "firing_again_after_manual_resolve"
 	NoticeDetailsRemoved                = "details_removed"
+	NoticeNewerAlertGroupExists         = "newer_alert_group_exists"
 )
 
 // Ref names an entity by its public_id and name.
@@ -82,6 +83,8 @@ type Notice struct {
 	Label          *string
 	ResolvedNumber *int64
 	RetentionDays  *int64
+	// Related is the newer open Alert Group of newer_alert_group_exists.
+	Related *GroupRef
 }
 
 // View is an Alert Group as getAlertGroup reads it.
@@ -111,6 +114,33 @@ type View struct {
 	DetailsRemoved bool
 	// LabelValues are the values of the labels the list asked for that the Alerts share.
 	LabelValues map[string]string
+	// Owner is the Owner while acknowledged; SnoozeUntil, nil for no end, and SnoozedBy the Snooze while snoozed.
+	Owner       *ActorRef
+	SnoozeUntil *time.Time
+	SnoozedBy   *ActorRef
+	// Newer is, for an Alert Group a person resolved, the open Alert Group of its Route and key that takes part in
+	// grouping (C-10.FR-7).
+	Newer *GroupRef
+	// ownerID is the Owner's id, stillFiring the Alerts still firing in it and routeDeleted whether its Route was
+	// deleted, which allowed_commands needs.
+	ownerID      int64
+	stillFiring  int64
+	routeDeleted bool
+}
+
+// owned sets the Owner, the Snooze and the newer open Alert Group of a View from its row and the Users and Service
+// accounts that refs read.
+func (v *View) owned(r refs, owner, snoozedByUser, snoozedByAccount pgtype.Int8, snoozeUntil pgtype.Timestamptz,
+	newerID string, newerNumber int64) {
+	v.Owner = r.actor(owner, pgtype.Int8{})
+	v.ownerID = owner.Int64
+	if v.Status == StatusSnoozed {
+		v.SnoozeUntil = timeOf(snoozeUntil)
+		v.SnoozedBy = r.actor(snoozedByUser, snoozedByAccount)
+	}
+	if newerID != "" {
+		v.Newer = &GroupRef{PublicID: newerID, Number: newerNumber}
+	}
 }
 
 // detailsRemoved reports whether retention.alert_details, in days, passed at now since an Alert Group was resolved:
@@ -138,8 +168,9 @@ func (s *Service) groupID(ctx context.Context, publicID string) (int64, bool, er
 
 // Get reads the Alert Group publicID (C-09.FR-1, FR-10, FR-14): its status, Route, Integrations, title and summary,
 // Severity level, urgency as its Route and organization.critical_is_urgent give it now, counts, the resolution, its
-// labels and the notices of its page; once its details are removed, the notice details_removed with the period
-// (C-09.FR-16).
+// Owner and Snooze, its labels and the notices of its page — newer_alert_group_exists for a person-resolved one whose
+// key another open Alert Group took (C-10.FR-7); once its details are removed, the notice details_removed with the
+// period (C-09.FR-16).
 func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
 	id, err := publicid.Parse(publicid.AlertGroup, publicID)
 	if err != nil {
@@ -177,16 +208,18 @@ func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
 			v.Integrations = append(v.Integrations, Ref{PublicID: ref.PublicID, Name: ref.Name})
 		}
 	}
-	if r.ResolvedByKind.Valid {
-		res := &Resolution{By: r.ResolvedByKind.String, Reason: textOf(r.ResolveReasonText),
-			ReasonCode: textOf(r.ResolveReason)}
-		refs, err := s.refs(ctx, []int64{r.ResolvedByUserID.Int64}, []int64{r.ResolvedByServiceAccountID.Int64})
-		if err != nil {
-			return View{}, err
-		}
-		res.Actor = refs.actor(r.ResolvedByUserID, r.ResolvedByServiceAccountID)
-		v.Resolution = res
+	refs, err := s.refs(ctx, []int64{r.ResolvedByUserID.Int64, r.OwnerUserID.Int64, r.SnoozedByUserID.Int64},
+		[]int64{r.ResolvedByServiceAccountID.Int64, r.SnoozedByServiceAccountID.Int64})
+	if err != nil {
+		return View{}, err
 	}
+	if r.ResolvedByKind.Valid {
+		v.Resolution = &Resolution{By: r.ResolvedByKind.String, Reason: textOf(r.ResolveReasonText),
+			ReasonCode: textOf(r.ResolveReason), Actor: refs.actor(r.ResolvedByUserID, r.ResolvedByServiceAccountID)}
+	}
+	v.owned(refs, r.OwnerUserID, r.SnoozedByUserID, r.SnoozedByServiceAccountID, r.SnoozeUntil, r.NewerPublicID,
+		r.NewerNumber)
+	v.stillFiring, v.routeDeleted = r.FiringAlertCount, r.RouteDeleted
 	if r.ResolvedByKind.String == ResolvedByUser && r.StillFiring > 0 {
 		v.Notices = append(v.Notices, Notice{Kind: NoticeAlertsStillFiring, Count: &r.StillFiring})
 	}
@@ -196,6 +229,9 @@ func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
 	if r.FiringAgainAfterNumber > 0 {
 		v.Notices = append(v.Notices, Notice{Kind: NoticeFiringAgainAfterManualResolve,
 			ResolvedNumber: &r.FiringAgainAfterNumber})
+	}
+	if v.Newer != nil {
+		v.Notices = append(v.Notices, Notice{Kind: NoticeNewerAlertGroupExists, Related: v.Newer})
 	}
 	if detailsRemoved(r.ResolvedAt, r.RetentionAlertDetailsDays, s.clock.Now()) {
 		v.DetailsRemoved = true

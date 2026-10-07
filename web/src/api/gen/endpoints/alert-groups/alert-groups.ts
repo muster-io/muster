@@ -1187,7 +1187,7 @@ return apiFetch<CommandResult>(getResolveAlertGroupUrl(alertGroupId),
 
 export const getResolveAlertGroupMutationKey = () => ['resolveAlertGroup'] as const;
 
-export const getResolveAlertGroupMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
+export const getResolveAlertGroupMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveAlertGroup>>, TError,ResolveAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof resolveAlertGroup>>, TError,ResolveAlertGroupMutationVariables, TContext> => {
 
@@ -1216,13 +1216,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ResolveAlertGroupMutationResult = NonNullable<Awaited<ReturnType<typeof resolveAlertGroup>>>
     export type ResolveAlertGroupMutationBody = ResolveRequest | undefined
-    export type ResolveAlertGroupMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse
+    export type ResolveAlertGroupMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse
     export type ResolveAlertGroupMutationVariables = {alertGroupId: string;data?: ResolveRequest}
 
     /**
  * @summary Resolve
  */
-export const useResolveAlertGroup = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse,
+export const useResolveAlertGroup = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveAlertGroup>>, TError,ResolveAlertGroupMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof resolveAlertGroup>>,
@@ -1241,7 +1241,7 @@ export const useResolveAlertGroup = <TError = BadRequestResponse | UnauthorizedR
 }
 
 /**
- * Only for an Alert Group a person resolved; messengers never offer it. Refused with the codes `not_resolved`, `all_alerts_resolved`, `resolved_automatically` and `newer_alert_group_exists` (see `related_alert_group`).
+ * Only for an Alert Group a person resolved; messengers never offer it. Refused, in this order, with the codes `not_resolved`, `resolved_automatically`, `route_deleted`, `newer_alert_group_exists` (see `related_alert_group`) and `all_alerts_resolved`.
  * @summary Unresolve
  */
 export const unresolveAlertGroup = async (alertGroupId: string, options?: Parameters<typeof apiFetch>[1]): Promise<CommandResult> => {
