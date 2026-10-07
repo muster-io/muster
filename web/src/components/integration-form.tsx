@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The create and edit form of an Integration (C-05.FR-1): the name, the description, the Static labels and the
-// duplicate window, pre-filled with integration.duplicate_window. The Connection mode is shown, not chosen: L1 has
-// only "Webhook only", with the precision it gives. The Heartbeat is sent switched off until its own section exists.
+// The create and edit form of an Integration (C-05.FR-1, C-07.FR-2): the name, the description, the Static labels,
+// the duplicate window, pre-filled with integration.duplicate_window, and the Heartbeat: on or off, its timeout in
+// minutes, pre-filled with integration.heartbeat_timeout, and the Heartbeat URL with how to pass the token. The
+// Connection mode is shown, not chosen: L1 has only "Webhook only", with the precision it gives.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import { useEffect, useState } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, type UseFormReturn, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
@@ -23,6 +24,9 @@ import { Label } from "./ui/label";
 
 /** integration.duplicate_window, in seconds. */
 export const DEFAULT_DUPLICATE_WINDOW_SECONDS = 45;
+
+/** integration.heartbeat_timeout, in seconds. */
+export const DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 300;
 
 /** The longest name of an Integration, in characters, as the API checks it. */
 const NAME_MAX = 200;
@@ -59,12 +63,27 @@ export function BuiltinBadge() {
   );
 }
 
+/** The Heartbeat timeout in seconds from the minutes entered, or undefined when it is not a positive number. */
+function timeoutSeconds(minutes: string): number | undefined {
+  const text = minutes.trim();
+  const value = Number(text);
+  const seconds = Math.round(value * 60);
+  return text === "" || !Number.isFinite(value) || seconds < 1 ? undefined : seconds;
+}
+
+/** The stored timeout in minutes, as the form shows it: a whole number, or up to two decimals for odd seconds. */
+function timeoutMinutes(seconds: number): string {
+  return String(Math.round((seconds / 60) * 100) / 100);
+}
+
 const formSchema = z
   .object({
     name: z.string().trim().min(1, "required").max(NAME_MAX, "too_long"),
     description: z.string(),
     labels: z.array(z.object({ key: z.number(), name: z.string(), value: z.string() })),
     duplicate_window_seconds: z.string(),
+    heartbeat_enabled: z.boolean(),
+    heartbeat_timeout_minutes: z.string(),
   })
   .superRefine((v, ctx) => {
     const seen = new Set<string>();
@@ -87,6 +106,13 @@ const formSchema = z
     if (!Number.isInteger(seconds) || seconds < 1) {
       ctx.addIssue({ code: "custom", path: ["duplicate_window_seconds"], message: "out_of_range" });
     }
+    if (v.heartbeat_enabled && timeoutSeconds(v.heartbeat_timeout_minutes) === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["heartbeat_timeout_minutes"],
+        message: "heartbeat_timeout",
+      });
+    }
   });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -100,17 +126,26 @@ function formValues(integration: Integration | undefined): FormValues {
     duplicate_window_seconds: String(
       integration?.duplicate_window_seconds ?? DEFAULT_DUPLICATE_WINDOW_SECONDS,
     ),
+    heartbeat_enabled: integration?.heartbeat.enabled ?? false,
+    heartbeat_timeout_minutes: timeoutMinutes(
+      integration?.heartbeat.timeout_seconds ?? DEFAULT_HEARTBEAT_TIMEOUT_SECONDS,
+    ),
   };
 }
 
-function inputOf(v: FormValues, heartbeat: boolean): IntegrationInput {
+/** The input of the form. With the Heartbeat off its timeout is left out, so the stored one stays. */
+function inputOf(v: FormValues): IntegrationInput {
+  const timeout = v.heartbeat_enabled ? timeoutSeconds(v.heartbeat_timeout_minutes) : undefined;
   return {
     name: v.name.trim(),
     description: v.description.trim(),
     connection_mode: "webhook_only",
     static_labels: labelsOf(v.labels),
     duplicate_window_seconds: Number(v.duplicate_window_seconds),
-    heartbeat: { enabled: heartbeat },
+    heartbeat:
+      timeout === undefined
+        ? { enabled: v.heartbeat_enabled }
+        : { enabled: v.heartbeat_enabled, timeout_seconds: timeout },
   };
 }
 
@@ -122,6 +157,8 @@ function errorText(t: TFunction, code: string | undefined): string {
       return t("labels.errors.duplicate");
     case "out_of_range":
       return t("integrations.errors.duplicateWindow");
+    case "heartbeat_timeout":
+      return t("heartbeat.errors.timeout");
     case "name_taken":
       return t("integrations.errors.nameTaken");
     case "invalid_format":
@@ -135,6 +172,100 @@ function errorText(t: TFunction, code: string | undefined): string {
 function labelIndex(rows: readonly LabelRow[], pointer: string): number {
   const name = pointer.slice("/static_labels/".length).replaceAll("~1", "/").replaceAll("~0", "~");
   return name === "" ? -1 : rows.findIndex((r) => r.name.trim() === name);
+}
+
+/**
+ * The Heartbeat section: the switch, and while it is on the timeout in minutes and the Heartbeat URL, which a new
+ * Integration gets when it is created.
+ */
+function HeartbeatSection({
+  form,
+  url,
+  error,
+}: {
+  form: UseFormReturn<FormValues>;
+  url: string | undefined;
+  error: string | undefined;
+}) {
+  const { t } = useTranslation();
+  const enabled = useWatch({ control: form.control, name: "heartbeat_enabled" });
+  return (
+    <fieldset className="flex flex-col gap-3" aria-describedby="integration-heartbeat-hint">
+      <legend className="mb-2 text-sm font-medium">{t("heartbeat.title")}</legend>
+      <p id="integration-heartbeat-hint" className="text-sm text-muted-foreground">
+        {t("heartbeat.form.hint")}
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          id="integration-heartbeat-enabled"
+          type="checkbox"
+          role="switch"
+          className="size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          {...form.register("heartbeat_enabled")}
+        />
+        <Label htmlFor="integration-heartbeat-enabled">{t("heartbeat.form.enabled")}</Label>
+      </div>
+      {enabled && (
+        <>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="integration-heartbeat-timeout">{t("heartbeat.form.timeout")}</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="integration-heartbeat-timeout"
+                type="number"
+                inputMode="decimal"
+                step="any"
+                className="w-28"
+                aria-invalid={error !== undefined}
+                aria-describedby={
+                  error
+                    ? "integration-heartbeat-timeout-unit integration-heartbeat-timeout-error integration-heartbeat-timeout-hint"
+                    : "integration-heartbeat-timeout-unit integration-heartbeat-timeout-hint"
+                }
+                {...form.register("heartbeat_timeout_minutes")}
+              />
+              <span
+                id="integration-heartbeat-timeout-unit"
+                className="text-sm text-muted-foreground"
+              >
+                {t("heartbeat.form.minutesUnit")}
+              </span>
+            </div>
+            {error && (
+              <p id="integration-heartbeat-timeout-error" className="text-sm text-destructive">
+                {error}
+              </p>
+            )}
+            <p id="integration-heartbeat-timeout-hint" className="text-sm text-muted-foreground">
+              {t("heartbeat.form.timeoutHint")}
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            {url ? (
+              <Label htmlFor="integration-heartbeat-url">{t("heartbeat.form.url")}</Label>
+            ) : (
+              <span className="text-sm font-medium">{t("heartbeat.form.url")}</span>
+            )}
+            {url ? (
+              <Input
+                id="integration-heartbeat-url"
+                readOnly
+                value={url}
+                spellCheck={false}
+                className="max-w-md font-mono text-xs"
+                aria-describedby="integration-heartbeat-url-hint"
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">{t("heartbeat.form.urlAfterCreate")}</p>
+            )}
+            <p id="integration-heartbeat-url-hint" className="text-sm text-muted-foreground">
+              {t("heartbeat.form.urlHint")}
+            </p>
+          </div>
+        </>
+      )}
+    </fieldset>
+  );
 }
 
 /**
@@ -186,6 +317,11 @@ export function IntegrationForm({
           form.setError("description", { type: item.code, message: item.code });
         } else if (pointer === "/duplicate_window_seconds") {
           form.setError("duplicate_window_seconds", { type: item.code, message: item.code });
+        } else if (pointer === "/heartbeat/timeout_seconds") {
+          form.setError("heartbeat_timeout_minutes", {
+            type: item.code,
+            message: item.code === "out_of_range" ? "heartbeat_timeout" : item.code,
+          });
         } else if (pointer.startsWith("/static_labels/")) {
           const index = labelIndex(form.getValues("labels"), pointer);
           if (index >= 0) {
@@ -217,10 +353,7 @@ export function IntegrationForm({
     <form
       noValidate
       className="flex flex-col gap-6"
-      onSubmit={form.handleSubmit((v) =>
-        // The Heartbeat keeps its setting; its own section comes with the Heartbeat.
-        submit.mutate(inputOf(v, integration?.heartbeat.enabled ?? false)),
-      )}
+      onSubmit={form.handleSubmit((v) => submit.mutate(inputOf(v)))}
     >
       <div className="flex flex-col gap-2">
         <Label htmlFor="integration-name">{t("integrations.fields.name")}</Label>
@@ -322,6 +455,15 @@ export function IntegrationForm({
           {t("integrations.form.duplicateWindowHint")}
         </p>
       </div>
+      <HeartbeatSection
+        form={form}
+        url={integration?.heartbeat.url}
+        error={
+          errors.heartbeat_timeout_minutes
+            ? errorText(t, errors.heartbeat_timeout_minutes.message)
+            : undefined
+        }
+      />
       <div className="flex flex-col gap-2">
         <span className="text-sm font-medium">{t("integrations.fields.connectionMode")}</span>
         <ConnectionMode testId="integration-connection-mode" />

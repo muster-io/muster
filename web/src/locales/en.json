@@ -179,6 +179,39 @@
     "tooShort": "This value is too short.",
     "unsupported": "This setting cannot be changed yet."
   },
+  "heartbeat": {
+    "badgeLabel": "Heartbeat:",
+    "banner": {
+      "lost": "No contact with Alertmanager since {{time}}. Nothing is resolved as Stale until contact returns.",
+      "lostNoTime": "No contact with Alertmanager. Nothing is resolved as Stale until contact returns.",
+      "notConfigured": "No Heartbeat: Muster will not notice when Alertmanager goes quiet, and Stale resolution is off.",
+      "waiting": "Waiting for the first Heartbeat signal. Stale resolution is off until it arrives."
+    },
+    "errors": {
+      "timeout": "Enter a number of minutes greater than 0."
+    },
+    "form": {
+      "enabled": "Watch for Heartbeat signals",
+      "hint": "Alertmanager signals Muster regularly, so that Muster notices when it goes quiet. Stale resolution works only while the Heartbeat is live.",
+      "minutesUnit": "minutes",
+      "timeout": "Timeout",
+      "timeoutHint": "The Heartbeat is lost when no signal arrives for this long.",
+      "url": "Heartbeat URL",
+      "urlAfterCreate": "The integration gets its Heartbeat URL when it is created.",
+      "urlHint": "Send one of this integration's tokens as Authorization: Bearer, or append it as /<token>."
+    },
+    "snippet": {
+      "off": "Turn the Heartbeat on and create a token to get its configuration.",
+      "title": "Heartbeat configuration"
+    },
+    "state": {
+      "live": "Live",
+      "lost": "Lost",
+      "notConfigured": "Not configured",
+      "waiting": "Waiting"
+    },
+    "title": "Heartbeat"
+  },
   "home": {
     "placeholder": "Alert Groups will appear here.",
     "title": "Welcome, {{name}}"

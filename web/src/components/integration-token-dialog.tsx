@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Creating an Integration token (C-05.FR-2, FR-5): the dialog takes an optional name, then shows the value and the
-// Alertmanager configuration that contains it once, each with a copy button. Both live only in this dialog's state:
-// the request's result keeps neither, closing the dialog drops them, and the token list never shows a value.
+// Creating an Integration token (C-05.FR-2, FR-5, C-07.FR-6): the dialog takes an optional name, then shows the value,
+// the Alertmanager configuration that contains it and, with the Heartbeat on, the Heartbeat configuration once, each
+// with a copy button; with the Heartbeat off it says how to get the latter. They live only in this dialog's state: the
+// request's result keeps none, closing the dialog drops them, and the token list never shows a value.
 
 import { useMutation } from "@tanstack/react-query";
 import { CheckIcon, CopyIcon, TriangleAlertIcon } from "lucide-react";
@@ -127,8 +128,16 @@ export function CopyBlock({
   );
 }
 
-/** The value and the snippet of a created token, and the warning that they are shown once. */
-function CreatedToken({ value, snippet }: { value: string; snippet: string }) {
+/** What the dialog shows of a created token. heartbeat is the Heartbeat snippet, null while the Heartbeat is off. */
+interface Created {
+  value: string;
+  snippet: string;
+  heartbeat: string | null;
+  name: string;
+}
+
+/** The value and the snippets of a created token, and the warning that they are shown once. */
+function CreatedToken({ value, snippet, heartbeat }: Omit<Created, "name">) {
   const { t } = useTranslation();
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -146,6 +155,23 @@ function CreatedToken({ value, snippet }: { value: string; snippet: string }) {
         wrap={false}
         className="max-h-72"
       />
+      {heartbeat === null ? (
+        <p
+          className="text-sm text-muted-foreground"
+          data-testid="integration-heartbeat-snippet-off"
+        >
+          {t("heartbeat.snippet.off")}
+        </p>
+      ) : (
+        <CopyBlock
+          id="integration-heartbeat-snippet"
+          label={t("heartbeat.snippet.title")}
+          text={heartbeat}
+          testId="integration-heartbeat-snippet"
+          wrap={false}
+          className="max-h-72"
+        />
+      )}
       <p className="flex items-start gap-1.5 text-sm font-medium">
         <TriangleAlertIcon
           aria-hidden="true"
@@ -162,17 +188,18 @@ function TokenForm({
   onCreated,
 }: {
   create: (name: string) => Promise<IntegrationTokenCreated>;
-  onCreated: (created: { value: string; snippet: string; name: string }) => void;
+  onCreated: (created: Created) => void;
 }) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
-  // The request's result keeps nothing: the value and the snippet go straight to the dialog's state.
+  // The request's result keeps nothing: the value and the snippets go straight to the dialog's state.
   const submit = useMutation({
     mutationFn: async (tokenName: string) => {
       const created = await create(tokenName);
       onCreated({
         value: created.value,
         snippet: created.alertmanager_snippet,
+        heartbeat: created.heartbeat_snippet ?? null,
         name: created.token.name ?? "",
       });
     },
@@ -243,9 +270,7 @@ export function IntegrationTokenDialog({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [created, setCreated] = useState<{ value: string; snippet: string; name: string } | null>(
-    null,
-  );
+  const [created, setCreated] = useState<Created | null>(null);
   // Each opening and closing starts a new round. A token that arrives in a later round than the form that asked for it
   // (the dialog was closed while the request was on its way) is dropped; the list still shows it to revoke.
   const round = useRef(0);
@@ -299,7 +324,11 @@ export function IntegrationTokenDialog({
                 <DialogTitle>{t("tokens.created.title")}</DialogTitle>
                 <DialogDescription>{t("integrations.tokens.created.hint")}</DialogDescription>
               </DialogHeader>
-              <CreatedToken value={created.value} snippet={created.snippet} />
+              <CreatedToken
+                value={created.value}
+                snippet={created.snippet}
+                heartbeat={created.heartbeat}
+              />
               <DialogFooter>
                 <DialogClose render={<Button />}>{t("common.done")}</DialogClose>
               </DialogFooter>
