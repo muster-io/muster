@@ -27,12 +27,14 @@ import (
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/heartbeat"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/leader"
+	leaderdb "github.com/muster-io/muster/internal/leader/dbgen"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
@@ -42,6 +44,8 @@ import (
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/timers"
+	timersdb "github.com/muster-io/muster/internal/timers/dbgen"
 	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
@@ -104,6 +108,9 @@ type database interface {
 	// ReplayStore serves muster ingest replay.
 	ReplayStore() ingest.ReplayStore
 	ClockStore() devmode.ClockStore
+	// GroupsStore serves the Alert Group lifecycle; TimersStore the timer worker.
+	GroupsStore() groups.Store
+	TimersStore() timers.Store
 	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
 	SessionListenConn(ctx context.Context) (db.ListenConn, error)
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
@@ -160,6 +167,10 @@ func (d pgDatabase) ProcessStore() ingest.ProcessStore { return ingest.NewProces
 func (d pgDatabase) ReplayStore() ingest.ReplayStore { return ingest.NewReplayStore(d.Pool) }
 
 func (d pgDatabase) ClockStore() devmode.ClockStore { return devmode.NewClockStore(d.Pool) }
+
+func (d pgDatabase) GroupsStore() groups.Store { return groups.NewStore(d.Pool) }
+
+func (d pgDatabase) TimersStore() timers.Store { return timers.NewStore(d.Pool) }
 
 func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
 	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
@@ -385,6 +396,9 @@ type process struct {
 	signals   *heartbeat.Service
 	worker    *ingest.Worker
 	scanner   *ingest.Processor
+	// groups is the Alert Group lifecycle, which groups the Alerts after routing, and timers fires its timers.
+	groups *groups.Service
+	timers *timers.Worker
 	// devClock is the development clock of `muster dev`, nil outside development mode; clockMoved wakes the
 	// Leader's Heartbeat check and Stale scan when it moves.
 	devClock   *devmode.Clock
@@ -454,11 +468,13 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 	p := &process{opts: opts, cfg: cfg, log: log, db: d, clocks: clocks, keyring: k}
 	p.partitions = partitions.New(d.PartitionSession, clocks.Business, log)
 	p.worker = &ingest.Worker{Log: log, Real: clocks.Real}
+	p.timers = &timers.Worker{Log: log}
 	if opts.Development {
-		// The development clock comes before anything reads the business clock, the partitions among them.
+		// The development clock comes before anything reads the business clock, the partitions among them. A move
+		// wakes the processing worker and the timer worker, which re-read their deadlines at the new time.
 		p.devClock = devmode.NewClock(d.ClockStore(), business, func(ctx context.Context, at time.Time) error {
 			return partitions.New(d.PartitionSession, clock.NewManual(at), log).Maintain(ctx)
-		}, p.worker.Wake)
+		}, p.worker.Wake, p.timers.Wake)
 		if err := p.devClock.Load(ctx); err != nil {
 			d.Close()
 			return nil, failed(ctx, log, err)
@@ -639,6 +655,11 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.router = routing.NewRouter(orgID)
 	p.routes = routing.New(routing.Config{OrgID: orgID, Store: p.db.RoutingStore(), Audit: w,
 		Business: p.clocks.Business, Real: p.clocks.Real, Router: p.router, Snapshots: p.snapshots, Log: p.log})
+	p.groups = groups.New(groups.Config{OrgID: orgID, Store: p.db.GroupsStore(), Audit: w,
+		Business: p.clocks.Business, Log: p.log,
+		Restamp: func(ctx context.Context, tx groups.DBTX, alertIDs []int64, routeID int64) error {
+			return routing.RestampAlerts(ctx, tx, orgID, alertIDs, routeID)
+		}})
 	if p.opts.Development {
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
 			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)
@@ -663,6 +684,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Snapshots:      p.snapshots,
 		Alerts:         alerts,
 		Routes:         p.routes,
+		AlertGroups:    p.groups,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -674,7 +696,13 @@ func (p *process) newKeeper() *leader.Keeper {
 	id := p.replica.ID()
 	authPruner := auth.NewPruner(p.db.AuthPruner())
 	return leader.NewKeeper(p.db.LeaderSession, p.clocks.Real, p.log, id, leader.Tasks(leader.Work{
-		Alive:              leader.NewAlive(p.db.LeaderStore(), p.clocks, p.log, id),
+		Alive: leader.NewAlive(p.db.LeaderStore(), p.clocks, p.log, id).OnDowntime(
+			func(ctx context.Context, tx leaderdb.DBTX, orgID int64, d leader.Downtime) error {
+				if orgID != p.orgID {
+					return nil
+				}
+				return p.groups.RecordDowntime(ctx, tx, d.Start, d.End)
+			}),
 		MaintainPartitions: p.partitions.Maintain,
 		PruneReplicas: func(ctx context.Context) error {
 			return keyring.PruneReplicas(ctx, p.db.ReplicaPruner(), p.log, p.clocks.Real.Now())
@@ -697,6 +725,12 @@ func (p *process) newKeeper() *leader.Keeper {
 				return nil
 			}
 			return p.scanner.StaleScan(ctx)
+		},
+		AlertGroupGauges: func(ctx context.Context, orgID int64) error {
+			if orgID != p.orgID {
+				return nil
+			}
+			return p.groups.ExportGauges(ctx)
 		},
 		ClockMoved: p.clockMoved,
 		PruneAuth: []leader.PruneTable{
@@ -754,6 +788,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	// and in development mode a change of the development clock reloads it; each LISTEN in place does both, in case
 	// a notification was missed.
 	p.listener.Listen(ingest.SnapshotChannel, func(string) { p.worker.Wake() })
+	p.listener.Listen(groups.TimersChannel, func(string) { p.timers.Wake() })
 	if p.devClock != nil {
 		p.listener.Listen(devmode.ClockChannel, func(string) {
 			p.loadDevClock(ctx)
@@ -779,9 +814,11 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 				p.loadDevClock(ctx)
 			}
 			p.worker.Wake()
+			p.timers.Wake()
 		})
 	})
 	wg.Go(func() { p.worker.Run(ctx) })
+	wg.Go(func() { p.timers.Run(ctx) })
 	wg.Go(func() { p.rechecker().Run(ctx) })
 	wg.Go(func() { p.integrations.RunTouches(ctx) })
 	wg.Go(func() {
@@ -819,18 +856,41 @@ func (p *process) loadDevClock(ctx context.Context) {
 }
 
 // configureWorker completes the processing worker of this replica (C-06.FR-1) over the Organization, with leases held
-// by this replica's id, once both are known and before anything serves or runs that could wake it.
+// by this replica's id, once both are known and before anything serves or runs that could wake it. Its Sink routes
+// the newly firing Alerts, then groups them, in each Snapshot's transaction; the timer worker fires the timers of
+// the Alert Groups.
 func (p *process) configureWorker() {
+	sink := ingest.Chain(p.router, p.groups)
 	processor := ingest.NewProcessor(ingest.ProcessorConfig{OrgID: p.orgID, Store: p.db.ProcessStore(),
-		Business: p.clocks.Business, Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String(), Sink: p.router,
+		Business: p.clocks.Business, Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String(), Sink: sink,
 		Lease: db.Lease{Owner: p.replica.ID(), Duration: ingest.Lease, Clocks: p.clocks}})
 	// The Stale scan claims Integrations under a lease of its own, so that it never takes over one that this replica's
 	// worker processes.
 	p.scanner = ingest.NewProcessor(ingest.ProcessorConfig{OrgID: p.orgID, Store: p.db.ProcessStore(),
-		Business: p.clocks.Business, Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String(), Sink: p.router,
+		Business: p.clocks.Business, Log: p.log, RunbookBase: p.cfg.RunbookBaseURL.String(), Sink: sink,
 		Lease: db.Lease{Owner: p.replica.ID() + "/stale-scan", Duration: ingest.Lease, Clocks: p.clocks}})
 	p.worker.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
 	p.worker.Processor = func(orgID int64) (*ingest.Processor, bool) { return processor, orgID == p.orgID }
+	p.timers.Store = p.db.TimersStore()
+	p.timers.Lease = db.Lease{Owner: p.replica.ID(), Duration: timers.Lease, Clocks: p.clocks}
+	p.timers.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
+	p.timers.Handlers = map[string]timers.Handler{
+		groups.TimerReopenWindowEnd: func(ctx context.Context, tx timersdb.DBTX, orgID int64, t timers.Timer) (
+			func(context.Context), error) {
+			if orgID != p.orgID || t.AlertGroupID == nil {
+				return nil, nil
+			}
+			return nil, p.groups.EndReopenWindow(ctx, tx, *t.AlertGroupID)
+		},
+		groups.TimerGracePeriodEnd: func(ctx context.Context, tx timersdb.DBTX, orgID int64, t timers.Timer) (
+			func(context.Context), error) {
+			if orgID != p.orgID || t.AlertGroupID == nil {
+				return nil, nil
+			}
+			r, err := p.groups.EndGracePeriod(ctx, tx, *t.AlertGroupID)
+			return r.Committed, err
+		},
+	}
 }
 
 // rechecker is the worker of the background re-checks of OIDC users on this replica (C-03.FR-30): it claims the due

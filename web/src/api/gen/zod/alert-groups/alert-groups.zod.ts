@@ -438,7 +438,9 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
 }).optional().describe('The Owner who lost the Alert Group (Takeover, urgency rise, auto-unacknowledge, an Owner disabled or deleted).'),
-  "snooze_until": zod.iso.datetime({"offset":true}).nullish()
+  "snooze_until": zod.iso.datetime({"offset":true}).nullish(),
+  "fingerprints": zod.array(zod.string()).optional().describe('The Alerts that started the Alert Group (`created`), reopened it (`reopened`) or whose resolution resolved it (`resolved`): Alerts of one Snapshot are one entry.'),
+  "label_conflicts": zod.array(zod.string()).optional().describe('Static labels the Alerts of `created` or `reopened` already carried.')
 })).and(zod.object({
   "kind": zod.enum(['status'])
 })),zod.object({

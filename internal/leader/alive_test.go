@@ -43,6 +43,8 @@ func (s *fakeStore) err(name string) error {
 	return nil
 }
 
+func (*fakeStore) DBTX() dbgen.DBTX { return nil }
+
 func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error {
 	s.tx.Lock()
 	defer s.tx.Unlock()
@@ -260,7 +262,15 @@ func TestTenMinuteOutage(t *testing.T) {
 		t.Errorf("notices during the outage: %+v", got)
 	}
 
-	b := w.alive("b")
+	// The takeover records the downtime on the Alert Groups of every Organization in its transaction.
+	var recorded []Downtime
+	b := w.alive("b").OnDowntime(func(_ context.Context, _ dbgen.DBTX, org int64, d Downtime) error {
+		if org != 1 {
+			t.Errorf("downtime recorded in organization %d", org)
+		}
+		recorded = append(recorded, d)
+		return nil
+	})
 	if err := b.TakeOver(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -268,6 +278,9 @@ func TestTenMinuteOutage(t *testing.T) {
 	want := []dbgen.RecordDowntimeParams{{StartedAt: lastMark, EndedAt: now, RecordedAt: now}}
 	if !slices.Equal(w.store.downtime, want) {
 		t.Fatalf("downtime %+v, want %+v", w.store.downtime, want)
+	}
+	if len(recorded) != 1 || !recorded[0].Start.Equal(lastMark) || !recorded[0].End.Equal(now) {
+		t.Errorf("recorded on the alert groups: %+v", recorded)
 	}
 	if got := w.store.state.RecoveryUntil.Time; !got.Equal(now.Add(RecoveryUnlearned)) {
 		t.Errorf("recovery until %v, want %v", got, now.Add(RecoveryUnlearned))
@@ -438,7 +451,24 @@ func TestAliveFailures(t *testing.T) {
 			}
 		})
 	}
+	// The Alert Groups of the downtime are recorded in the takeover's transaction: a failure rolls it back.
 	w := newWorld(0)
+	if err := w.alive("a").TakeOver(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	w.advance(time.Hour)
+	failing := w.alive("b").OnDowntime(func(context.Context, dbgen.DBTX, int64, Downtime) error {
+		return errors.New("no partition")
+	})
+	if err := failing.TakeOver(t.Context()); err == nil || len(w.store.downtime) != 0 {
+		t.Errorf("a failed record on the alert groups = %v, downtime %v", err, w.store.downtime)
+	}
+	w.store.fail = "ListOrganizationIDs"
+	w.store.downtime = nil
+	if err := failing.TakeOver(t.Context()); err == nil || len(w.store.downtime) != 0 {
+		t.Errorf("the organizations failed = %v, downtime %v", err, w.store.downtime)
+	}
+	w = newWorld(0)
 	w.store.fail = "MarkAlive"
 	if err := w.alive("a").Mark(t.Context()); err == nil {
 		t.Error("the mark succeeded")

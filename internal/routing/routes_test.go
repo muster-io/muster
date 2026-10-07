@@ -66,6 +66,9 @@ type fakeStore struct {
 	// The Integrations with a Heartbeat, and the Route suggestions each User dismissed.
 	heartbeats []dbgen.ListHeartbeatIntegrationsRow
 	dismissals map[int64][]string
+
+	// open are the open Alert Groups of each Route by id.
+	open map[int64]int64
 }
 
 func newStore() *fakeStore {
@@ -73,7 +76,8 @@ func newStore() *fakeStore {
 		calls: map[string]int{}, severityLabel: "severity",
 		mapping: []byte(`[{"value":"critical","level":"critical"},{"value":"warning","level":"warning"},` +
 			`{"value":"info","level":"info"},{"value":"none","level":"info"}]`),
-		alerts: map[int64][]byte{}, routed: map[int64]dbgen.SetAlertRoutesParams{}, dismissals: map[int64][]string{}}
+		alerts: map[int64][]byte{}, routed: map[int64]dbgen.SetAlertRoutesParams{}, dismissals: map[int64][]string{},
+		open: map[int64]int64{}}
 }
 
 func (s *fakeStore) call(name string) error {
@@ -290,6 +294,24 @@ func (s *fakeStore) DeleteRoute(_ context.Context, arg dbgen.DeleteRouteParams) 
 		}
 	}
 	return nil
+}
+
+func (s *fakeStore) CountOpenAlertGroups(_ context.Context, arg dbgen.CountOpenAlertGroupsParams) (int64, error) {
+	if err := s.call("CountOpenAlertGroups"); err != nil {
+		return 0, err
+	}
+	return s.open[arg.RouteID], nil
+}
+
+func (s *fakeStore) ListOpenAlertGroupCounts(context.Context, int64) ([]dbgen.ListOpenAlertGroupCountsRow, error) {
+	if err := s.call("ListOpenAlertGroupCounts"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListOpenAlertGroupCountsRow
+	for id, n := range s.open {
+		out = append(out, dbgen.ListOpenAlertGroupCountsRow{RouteID: id, Count: n})
+	}
+	return out, nil
 }
 
 func (s *fakeStore) SetRoutePositions(_ context.Context, arg dbgen.SetRoutePositionsParams) error {
@@ -670,6 +692,23 @@ func TestDelete(t *testing.T) {
 	if err := svc.Delete(t.Context(), by, "RTAAAAAAAAAAAA", nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown = %v", err)
 	}
+	// C-09.FR-19: a Route with open Alert Groups is refused with their count, counted after the lock, and shows it.
+	store.open[a.ID] = 2
+	var open *OpenAlertGroupsError
+	if err := svc.Delete(t.Context(), by, a.PublicID, nil); !errors.As(err, &open) || open.Count != 2 ||
+		err.Error() != "the route has 2 open alert groups" {
+		t.Errorf("open alert groups = %v", err)
+	}
+	if store.calls["LockRoute"] == 0 {
+		t.Error("counted without the lock")
+	}
+	if got, _ := svc.Get(t.Context(), a.PublicID); got.OpenAlertGroupCount != 2 {
+		t.Errorf("get: %d open alert groups", got.OpenAlertGroupCount)
+	}
+	if got, _ := svc.List(t.Context()); got.Routes[0].OpenAlertGroupCount != 2 || got.Routes[1].OpenAlertGroupCount != 0 {
+		t.Errorf("list: %+v", got.Routes)
+	}
+	delete(store.open, a.ID)
 	if after, _ := svc.List(t.Context()); after.Version != list.Version {
 		t.Errorf("refused deletions moved the version to %d", after.Version)
 	}
@@ -781,7 +820,7 @@ func TestFailures(t *testing.T) {
 	}
 	queries := []string{"GetRouteOrderVersion", "ListRoutes", "ListRouteMatchers", "GetRoute", "LockRoute",
 		"BumpRouteOrder", "InsertRoute", "InsertRouteMatcher", "UpdateRoute", "DeleteRouteMatchers", "DeleteRoute",
-		"SetRoutePositions", "InsertAuditEntry", "Notify"}
+		"SetRoutePositions", "InsertAuditEntry", "Notify", "CountOpenAlertGroups", "ListOpenAlertGroupCounts"}
 	for name, op := range ops {
 		for _, query := range queries {
 			svc, store, _ := newService(t)
@@ -889,4 +928,32 @@ func TestRefreshInfo(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// execRecorder is a connection that records the statements it runs; it answers nothing else.
+type execRecorder struct {
+	dbgen.DBTX
+	args [][]any
+	err  error
+}
+
+func (r *execRecorder) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+	r.args = append(r.args, args)
+	return pgconn.CommandTag{}, r.err
+}
+
+// TestRestampAlerts: grouping records the Default route on Alerts whose Route was deleted while their Snapshot waited
+// for it, in the Snapshot's transaction.
+func TestRestampAlerts(t *testing.T) {
+	tx := &execRecorder{}
+	if err := RestampAlerts(t.Context(), tx, orgID, []int64{3, 4}, 9); err != nil {
+		t.Fatal(err)
+	}
+	if len(tx.args) != 1 || tx.args[0][1] != int64(orgID) || !slices.Equal(tx.args[0][2].([]int64), []int64{3, 4}) {
+		t.Errorf("restamped %v", tx.args)
+	}
+	tx.err = errBoom
+	if err := RestampAlerts(t.Context(), tx, orgID, []int64{3}, 9); !errors.Is(err, errBoom) {
+		t.Errorf("a failed restamp = %v", err)
+	}
 }

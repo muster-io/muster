@@ -276,7 +276,11 @@ func TestRouting(t *testing.T) {
 		eventually(t, "three muster_route_info series", func() bool { return series(rr) == 3 })
 	}
 
-	// C-08.FR-9: a deleted Route leaves the evaluation order at once and its series goes.
+	// C-08.FR-9: a deleted Route leaves the evaluation order at once and its series goes. Its open Alert Group moves
+	// to the Default route first (C-09.FR-19).
+	if a := admin.do(http.MethodPost, "/api/v1/routes/"+rb.ID+"/move-open-alert-groups", ""); a.status != http.StatusOK {
+		t.Fatalf("move = %d %s", a.status, a.body)
+	}
 	if a := admin.do(http.MethodDelete, "/api/v1/routes/"+rb.ID, ""); a.status != http.StatusNoContent {
 		t.Fatalf("delete = %d %s", a.status, a.body)
 	}

@@ -346,15 +346,16 @@ type Clock struct {
 	// maintain runs partition maintenance as at the given time, so that rows written at the new time have their
 	// partitions.
 	maintain func(ctx context.Context, at time.Time) error
-	// changed is told once this replica runs on a new offset, to wake what waits on the clock.
-	changed func()
+	// changed are told once this replica runs on a new offset, to wake what waits on the clock: the processing
+	// worker and the timer worker, each re-reading its earliest deadline on the business clock.
+	changed []func()
 	mu      sync.Mutex
 }
 
 // NewClock returns the development clock that moves business; maintain runs partition maintenance as at a time, and
-// changed, which may be nil, is called after each change of the offset.
+// each of changed that is not nil is called after each change of the offset, on every replica.
 func NewClock(s ClockStore, business *clock.Business, maintain func(ctx context.Context, at time.Time) error,
-	changed func()) *Clock {
+	changed ...func()) *Clock {
 	return &Clock{store: s, business: business, maintain: maintain, changed: changed}
 }
 
@@ -379,8 +380,10 @@ func (c *Clock) set(offset int64) {
 		return
 	}
 	c.business.SetOffset(time.Duration(offset) * time.Second)
-	if c.changed != nil {
-		c.changed()
+	for _, f := range c.changed {
+		if f != nil {
+			f()
+		}
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/routing"
 )
 
@@ -102,6 +103,22 @@ func (s *Server) DeleteRoute(ctx context.Context, req gen.DeleteRouteRequestObje
 		return nil, err
 	}
 	return gen.DeleteRoute204Response{}, nil
+}
+
+// MoveOpenAlertGroups is moveOpenAlertGroups: the open Alert Groups of the Route move to the Default route, after
+// which the Route can be deleted.
+func (s *Server) MoveOpenAlertGroups(ctx context.Context, req gen.MoveOpenAlertGroupsRequestObject) (
+	gen.MoveOpenAlertGroupsResponseObject, error) {
+	r, err := routeRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	moved, err := s.alertGroups.MoveOpenAlertGroups(ctx, groups.Requester{Actor: r.Actor, Transport: r.Transport,
+		Address: r.Address}, req.RouteId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.MoveOpenAlertGroups200JSONResponse{Moved: moved}, nil
 }
 
 // ReorderRoutes is reorderRoutes: If-Match carries the list ETag of listRoutes.
@@ -280,7 +297,7 @@ func routeOf(rt routing.Route) gen.Route {
 		Id: rt.PublicID, Name: rt.Name, Description: &description, Position: rt.Position, IsDefault: rt.IsDefault,
 		Urgent: rt.Urgent, GroupKey: key, Matchers: make([]gen.Matcher, 0, len(rt.Matchers)),
 		DestinationIds: []gen.PublicId{}, Destinations: []gen.DestinationRef{}, Policy: routePolicyOf(rt.Policy),
-		StormActive: false, OpenAlertGroupCount: 0, CreatedAt: rt.CreatedAt.UTC(), Etag: &tag,
+		StormActive: false, OpenAlertGroupCount: int(rt.OpenAlertGroupCount), CreatedAt: rt.CreatedAt.UTC(), Etag: &tag,
 	}
 	for _, m := range rt.Matchers {
 		out.Matchers = append(out.Matchers, gen.Matcher{Label: m.Label, Op: gen.MatcherOp(m.Op), Value: m.Value})

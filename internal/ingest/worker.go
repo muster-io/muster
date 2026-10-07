@@ -478,7 +478,8 @@ func (p *Processor) processed(ctx context.Context, a *attempt, took time.Duratio
 		logging.F("alerts", s.Alerts), logging.F("fired", s.Fired), logging.F("resolved", s.Resolved+s.Deleted),
 		logging.F("gone", s.Gone), logging.F("continued", s.Continued), logging.F("dropped", s.Dropped),
 		logging.F("truncated", s.Truncated), logging.F("routes", routesOf(a.result.Routed)),
-		logging.F("duration_ms", took.Milliseconds()))
+		logging.F("alert_groups", alertGroupsOf(a.result.Routed)), logging.F("duration_ms", took.Milliseconds()))
+	a.result.Routed.committed(ctx)
 	for _, c := range a.result.Internal {
 		event := logging.InternalAlertRaised
 		if c.Resolved {
@@ -495,6 +496,14 @@ func routesOf(r Routed) []string {
 		return []string{}
 	}
 	return r.PublicIDs
+}
+
+// alertGroupsOf are the #N of the Alert Groups a Snapshot created or changed, an empty list when none.
+func alertGroupsOf(r Routed) []int64 {
+	if r.AlertGroups == nil {
+		return []int64{}
+	}
+	return r.AlertGroups
 }
 
 // observeDelay observes the time from receipt to the end of processing on the business clock.

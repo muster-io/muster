@@ -5366,14 +5366,20 @@ type TimelineStatusEntry struct {
 
 	// Event Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row's kind, loudness and Mentions).
 	// The Timeline kind of each event is given in `x-event-kinds`.
-	Event      LifecycleEvent                              `json:"event"`
-	FromStatus nullable.Nullable[NullableAlertGroupStatus] `json:"from_status,omitempty"`
+	Event LifecycleEvent `json:"event"`
+
+	// Fingerprints The Alerts that started the Alert Group (`created`), reopened it (`reopened`) or whose resolution resolved it (`resolved`): Alerts of one Snapshot are one entry.
+	Fingerprints *[]string                                   `json:"fingerprints,omitempty"`
+	FromStatus   nullable.Nullable[NullableAlertGroupStatus] `json:"from_status,omitempty"`
 
 	// Id `TE` for lifecycle and system entries, `NE` for a Note (the same id as its `note`), `DE` for a delivery event.
-	Id       PublicId                `json:"id"`
-	Kind     TimelineStatusEntryKind `json:"kind"`
-	Loudness Loudness                `json:"loudness"`
-	Mentions []MentionName           `json:"mentions"`
+	Id   PublicId                `json:"id"`
+	Kind TimelineStatusEntryKind `json:"kind"`
+
+	// LabelConflicts Static labels the Alerts of `created` or `reopened` already carried.
+	LabelConflicts *[]string     `json:"label_conflicts,omitempty"`
+	Loudness       Loudness      `json:"loudness"`
+	Mentions       []MentionName `json:"mentions"`
 
 	// Owner The Owner after the entry, if any.
 	Owner *UserRef `json:"owner,omitempty"`

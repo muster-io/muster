@@ -28,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/heartbeat"
 	"github.com/muster-io/muster/internal/ingest"
 	ingestdb "github.com/muster-io/muster/internal/ingest/dbgen"
@@ -46,6 +47,7 @@ import (
 	"github.com/muster-io/muster/internal/routing"
 	rdb "github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/timers"
 	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
 	tdb "github.com/muster-io/muster/internal/totp/dbgen"
@@ -399,6 +401,28 @@ func (fakeProcessStore) GetRetention(context.Context, int64) (int64, error) { re
 func (fakeProcessStore) ListPendingIntegrations(context.Context, ingestdb.ListPendingIntegrationsParams) ([]int64,
 	error) {
 	return nil, nil
+}
+
+// GroupsStore is the Alert Group lifecycle without Alert Groups; nothing groups in these tests.
+func (f *fakeDB) GroupsStore() groups.Store { return nil }
+
+// TimersStore has no timers.
+func (f *fakeDB) TimersStore() timers.Store { return fakeTimersStore{} }
+
+type fakeTimersStore struct{}
+
+func (fakeTimersStore) Claim(context.Context, db.Lease, int64, []string, int32) ([]timers.Timer, error) {
+	return nil, nil
+}
+
+func (fakeTimersStore) Fire(context.Context, db.Lease, int64, timers.Timer, timers.Handler) (func(context.Context),
+	error) {
+	return nil, nil
+}
+
+func (fakeTimersStore) Next(_ context.Context, _ db.Lease, _ int64, _ []string, limit time.Duration) (time.Duration,
+	error) {
+	return limit, nil
 }
 
 // ClockStore reads the development clock of devOffset.

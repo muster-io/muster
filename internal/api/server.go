@@ -191,6 +191,7 @@ type Config struct {
 	Snapshots    StoredSnapshots
 	Alerts       Alerts
 	Routes       Routes
+	AlertGroups  AlertGroups
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -216,6 +217,7 @@ type Server struct {
 	snapshots      StoredSnapshots
 	alerts         Alerts
 	routes         Routes
+	alertGroups    AlertGroups
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -250,6 +252,7 @@ var implemented = map[string]bool{
 	"ListRoutes": true, "CreateRoute": true, "GetRoute": true, "UpdateRoute": true, "DeleteRoute": true,
 	"ReorderRoutes": true, "ListRouteProfiles": true, "PreviewGroupKey": true, "ListRouteSuggestions": true,
 	"AcceptRouteSuggestion": true, "DismissRouteSuggestion": true,
+	"GetAlertGroup": true, "ListAlertGroupAlerts": true, "GetAlertGroupTimeline": true, "MoveOpenAlertGroups": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -278,7 +281,7 @@ func New(cfg Config) (*Server, error) {
 		sessions: cfg.Sessions, users: cfg.Users, admin: cfg.Admin, auditLog: cfg.AuditLog, totp: cfg.TOTP,
 		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, oidc: cfg.OIDC, tokens: cfg.Tokens,
 		integrations: cfg.Integrations, snapshots: cfg.Snapshots, alerts: cfg.Alerts, routes: cfg.Routes,
-		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
+		alertGroups: cfg.AlertGroups, trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}
 	mux := http.NewServeMux()

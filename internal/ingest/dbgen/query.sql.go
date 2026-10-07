@@ -1147,6 +1147,47 @@ func (q *Queries) ListStoredSnapshots(ctx context.Context, arg ListStoredSnapsho
 	return items, nil
 }
 
+const listViewAlertGroups = `-- name: ListViewAlertGroups :many
+SELECT DISTINCT ON (m.alert_id) m.alert_id, g.public_id, g.number
+FROM alert_group_alerts m
+JOIN alert_groups g ON g.org_id = m.org_id AND g.id = m.alert_group_id
+WHERE m.org_id = $1 AND m.alert_id = ANY($2::bigint[])
+ORDER BY m.alert_id, m.id DESC
+`
+
+type ListViewAlertGroupsParams struct {
+	OrgID    int64
+	AlertIds []int64
+}
+
+type ListViewAlertGroupsRow struct {
+	AlertID  int64
+	PublicID string
+	Number   int64
+}
+
+// ListViewAlertGroups names, for each Alert, the Alert Group of its latest membership: the one it fires in, or the
+// last one it fired in (read-only: only groups writes the Alert Group tables).
+func (q *Queries) ListViewAlertGroups(ctx context.Context, arg ListViewAlertGroupsParams) ([]ListViewAlertGroupsRow, error) {
+	rows, err := q.db.Query(ctx, listViewAlertGroups, arg.OrgID, arg.AlertIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListViewAlertGroupsRow{}
+	for rows.Next() {
+		var i ListViewAlertGroupsRow
+		if err := rows.Scan(&i.AlertID, &i.PublicID, &i.Number); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listViewAlertsByLastSeen = `-- name: ListViewAlertsByLastSeen :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
        a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text, r.public_id AS route_public_id,

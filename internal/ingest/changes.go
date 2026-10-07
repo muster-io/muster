@@ -5,6 +5,7 @@ package ingest
 
 import (
 	"context"
+	"slices"
 
 	"github.com/muster-io/muster/internal/ingest/dbgen"
 )
@@ -37,10 +38,21 @@ type AlertChange struct {
 }
 
 // Routed names the Routes that took Alerts of the changes: their ids, which the Stored Snapshot keeps in route_ids,
-// and their public_ids, which its log line carries, in evaluation order.
+// and their public_ids, which its log line carries, in evaluation order. AlertGroups are the #N of the Alert Groups
+// that grouping created or changed, and Committed, when set, counts and logs what the changes did once the
+// transaction committed.
 type Routed struct {
-	IDs       []int64
-	PublicIDs []string
+	IDs         []int64
+	PublicIDs   []string
+	AlertGroups []int64
+	Committed   func(ctx context.Context)
+}
+
+// committed runs Committed when it is set.
+func (r Routed) committed(ctx context.Context) {
+	if r.Committed != nil {
+		r.Committed(ctx)
+	}
 }
 
 // Sink takes the Alert changes of a Snapshot inside the Snapshot's transaction, tx, which it may write through; an
@@ -48,4 +60,45 @@ type Routed struct {
 // grouping (C-09) follows it.
 type Sink interface {
 	AlertChanges(ctx context.Context, tx dbgen.DBTX, changes []AlertChange) (Routed, error)
+}
+
+// Chain is the Sink that hands the changes to each of sinks in order, in the same transaction — routing, then
+// grouping — and merges what they return: the Routes once each in the order they came, the Alert Groups sorted.
+func Chain(sinks ...Sink) Sink {
+	return chain(sinks)
+}
+
+type chain []Sink
+
+func (c chain) AlertChanges(ctx context.Context, tx dbgen.DBTX, changes []AlertChange) (Routed, error) {
+	var out Routed
+	var after []func(context.Context)
+	for _, s := range c {
+		r, err := s.AlertChanges(ctx, tx, changes)
+		if err != nil {
+			return Routed{}, err
+		}
+		for i, id := range r.IDs {
+			if !slices.Contains(out.IDs, id) {
+				out.IDs = append(out.IDs, id)
+				out.PublicIDs = append(out.PublicIDs, r.PublicIDs[i])
+			}
+		}
+		out.AlertGroups = append(out.AlertGroups, r.AlertGroups...)
+		if r.Committed != nil {
+			after = append(after, r.Committed)
+		}
+	}
+	if out.AlertGroups != nil {
+		slices.Sort(out.AlertGroups)
+		out.AlertGroups = slices.Compact(out.AlertGroups)
+	}
+	if len(after) > 0 {
+		out.Committed = func(ctx context.Context) {
+			for _, f := range after {
+				f(ctx)
+			}
+		}
+	}
+	return out, nil
 }

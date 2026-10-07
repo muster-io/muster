@@ -317,6 +317,9 @@ func integrationAlertOf(a ingest.ViewAlert) gen.IntegrationAlert {
 		out.SeverityLevel = &level
 		out.SeverityRaw = nullableString(a.SeverityRaw)
 	}
+	if a.AlertGroup != nil {
+		out.AlertGroup = &gen.AlertGroupRef{Id: a.AlertGroup.PublicID, Number: int(a.AlertGroup.Number)}
+	}
 	return out
 }
 

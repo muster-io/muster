@@ -10535,6 +10535,17 @@ components:
             - string
             - 'null'
             format: date-time
+          fingerprints:
+            type: array
+            description: 'The Alerts that started the Alert Group (`created`), reopened it (`reopened`) or whose resolution
+              resolved it (`resolved`): Alerts of one Snapshot are one entry.'
+            items:
+              type: string
+          label_conflicts:
+            type: array
+            description: Static labels the Alerts of `created` or `reopened` already carried.
+            items:
+              type: string
     TimelineAlertsEntry:
       allOf:
       - $ref: '#/components/schemas/TimelineEntryBase'

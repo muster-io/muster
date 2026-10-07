@@ -294,9 +294,10 @@ var SnapshotProcessed = newEvent("snapshot_processed", LevelInfo, "C-06",
 		"firings, resolutions from Alertmanager or by the deletion of the Integration, Alerts resolved as Gone and "+
 		"Continuations it made, dropped the "+
 		"resolves of fingerprints that fire nowhere, truncated its truncatedAlerts, routes the public_ids of the "+
-		"Routes that took its newly firing Alerts, and duration_ms how long processing took.",
+		"Routes that took its newly firing Alerts, alert_groups the #N of the Alert Groups it created or changed, "+
+		"and duration_ms how long processing took.",
 	"integration", "stored_snapshot", "group_key", "alerts", "fired", "resolved", "gone", "continued", "dropped",
-	"truncated", "routes", "duration_ms")
+	"truncated", "routes", "alert_groups", "duration_ms")
 
 // SnapshotFailed is logged when a Stored Snapshot could not be processed and was marked failed.
 var SnapshotFailed = newEvent("snapshot_failed", LevelWarn, "C-06",
@@ -357,6 +358,25 @@ var GroupKeyPreviewed = newEvent("group_key_previewed", LevelInfo, "C-08",
 		"distinct bodies it read, truncated whether routing.group_key_preview_max_alerts stopped it with Stored "+
 		"Snapshots of the period, or Alerts the Route takes, left unread, and duration_ms how long it took.",
 	"route", "period_seconds", "snapshots_read", "truncated", "duration_ms")
+
+// AlertGroupStatusChanged is logged when an Alert Group changed status, by a system transition or a Command.
+var AlertGroupStatusChanged = newEvent("alert_group_status_changed", LevelInfo, "C-09",
+	"An Alert Group changed status: group is its #N, route the public_id of its Route, from and to the statuses "+
+		"(from is empty for a new Alert Group), reason the reason of an automatic change and transport how the "+
+		"change reached Muster.",
+	"group", "route", "from", "to", "reason", "transport")
+
+// AlertContinued is logged for each Continuation of an Alert that fires in an Alert Group.
+var AlertContinued = newEvent("alert_continued", LevelInfo, "C-09",
+	"An Alert firing in an Alert Group got a new startsAt without being resolved in between (a Continuation, never "+
+		"a new firing): group is the #N of its Alert Group and fingerprint the Alert's.",
+	"group", "fingerprint")
+
+// TimerFailed is logged when a timer worker could not fire a timer; it fires again once its lease runs out.
+var TimerFailed = newEvent("timer_failed", LevelWarn, "C-09",
+	"A timer could not fire: kind is the timer kind and error what failed. The timer fires again on any replica "+
+		"once its lease runs out.",
+	"kind", "error")
 
 // IngestReplayed is logged when muster ingest replay set Stored Snapshots back to pending.
 var IngestReplayed = newEvent("ingest_replayed", LevelInfo, "C-06",

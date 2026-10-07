@@ -275,3 +275,52 @@ var RouteInfo = newGauge(Definition{
 	},
 	Capability: "C-08",
 })
+
+// AlertGroups is the number of open Alert Groups per Route and status, exported by the Leader.
+var AlertGroups = newGauge(Definition{
+	Name: "muster_alert_groups",
+	Help: "Open Alert Groups by Route and status, counted by the Leader; an Alert Group moved to the Default route " +
+		"counts there.",
+	Labels: []Label{
+		entity("route"),
+		closed("status", "the status of the open Alert Groups", "firing", "acknowledged", "snoozed"),
+	},
+	Capability: "C-09",
+	LeaderOnly: true,
+})
+
+// AlertGroupsCreated counts the Alert Groups that started, by Route.
+var AlertGroupsCreated = newCounter(Definition{
+	Name:       "muster_alert_groups_created_total",
+	Help:       "Alert Groups that started, by Route.",
+	Labels:     []Label{entity("route")},
+	Capability: "C-09",
+})
+
+// AlertGroupsReopened counts the Reopens of Alert Groups, by Route.
+var AlertGroupsReopened = newCounter(Definition{
+	Name:       "muster_alert_groups_reopened_total",
+	Help:       "Alert Groups that reopened within their Route's Reopen window, by Route.",
+	Labels:     []Label{entity("route")},
+	Capability: "C-09",
+})
+
+// AlertGroupsResolved counts the resolutions of Alert Groups, by Route and by who resolved them.
+var AlertGroupsResolved = newCounter(Definition{
+	Name: "muster_alert_groups_resolved_total",
+	Help: "Alert Groups that were resolved, by Route and by who resolved them.",
+	Labels: []Label{
+		entity("route"),
+		closed("by", "user is a person's resolve, system the resolve when the last Alert resolved", "user", "system"),
+	},
+	Capability: "C-09",
+})
+
+// AlertGroupTimeToResolve observes, at each resolution, the time from the start of the Alert Group.
+var AlertGroupTimeToResolve = newHistogram(Definition{
+	Name:       "muster_alert_group_time_to_resolve_seconds",
+	Help:       "Time from the start of an Alert Group to its resolution, observed at each resolution, by Route.",
+	Labels:     []Label{entity("route")},
+	Buckets:    []float64{60, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400},
+	Capability: "C-09",
+})
