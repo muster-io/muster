@@ -55,25 +55,37 @@ const (
 // A Route's root_message template replaces the sections from Environment to Alerts with its Body; Lines are the text
 // of a Thread reply, a Storm summary or the Fallback template. Each adapter lays a Message out for its messenger and
 // escapes its neutral text (C-13.FR-8, C-14.FR-13); a Body and the template lines of Alerts are already written in
-// their Markup. Language and TimeZone are those it was rendered in, for the notes delivery adds at call time.
+// their Markup, where a trusted Mention token of the `mention` function stands for the adapter to render
+// (C-12.FR-8). Footers are the footer per identity space whose username names the user (C-12.FR-12). Language and
+// TimeZone are those it was rendered in, for the notes delivery adds at call time.
 type Message struct {
-	Kind              Kind       `json:"kind"`
-	Language          string     `json:"language"`
-	TimeZone          string     `json:"time_zone"`
-	Colour            string     `json:"colour"`
-	Heading           *Heading   `json:"heading,omitempty"`
-	Environment       string     `json:"environment,omitempty"`
-	GroupLabels       []Label    `json:"group_labels,omitempty"`
-	CommonLabels      []Label    `json:"common_labels,omitempty"`
-	CommonAnnotations []Label    `json:"common_annotations,omitempty"`
-	Summary           string     `json:"summary,omitempty"`
-	Body              *Body      `json:"body,omitempty"`
-	Alerts            *AlertList `json:"alerts,omitempty"`
-	Lines             []string   `json:"lines,omitempty"`
-	Links             []Link     `json:"links,omitempty"`
-	Notices           []string   `json:"notices,omitempty"`
-	Footer            string     `json:"footer,omitempty"`
-	Buttons           []Button   `json:"buttons"`
+	Kind              Kind              `json:"kind"`
+	Language          string            `json:"language"`
+	TimeZone          string            `json:"time_zone"`
+	Colour            string            `json:"colour"`
+	Heading           *Heading          `json:"heading,omitempty"`
+	Environment       string            `json:"environment,omitempty"`
+	GroupLabels       []Label           `json:"group_labels,omitempty"`
+	CommonLabels      []Label           `json:"common_labels,omitempty"`
+	CommonAnnotations []Label           `json:"common_annotations,omitempty"`
+	Summary           string            `json:"summary,omitempty"`
+	Body              *Body             `json:"body,omitempty"`
+	Alerts            *AlertList        `json:"alerts,omitempty"`
+	Lines             []string          `json:"lines,omitempty"`
+	Links             []Link            `json:"links,omitempty"`
+	Notices           []string          `json:"notices,omitempty"`
+	Footer            string            `json:"footer,omitempty"`
+	Footers           map[string]string `json:"footers,omitempty"`
+	Buttons           []Button          `json:"buttons"`
+}
+
+// FooterIn is the footer in an identity space — "telegram" or "mattermost:<connection>" — naming the user by the
+// username of their Account link there, otherwise by the Muster display name (C-12.FR-12).
+func (m Message) FooterIn(space string) string {
+	if f, ok := m.Footers[space]; ok {
+		return f
+	}
+	return m.Footer
 }
 
 // Heading is #N and the title of the Alert Group, linked to its page.
@@ -146,10 +158,12 @@ var statusEmoji = map[string]string{
 }
 
 // Layout lays m out as text in a markup, as the preview shows it: one section per line, neutral text escaped for the
-// markup, template output as written, and the buttons as a last line of bracketed labels. The adapters of S-061 and
+// markup and without Mention tokens, template output as written with its tokens shown as `@` names, and the buttons as a last line of bracketed labels. The adapters of S-061 and
 // S-042 lay messages out for their messengers.
 func Layout(m Message, markup Markup) string {
-	esc := Escaper(markup)
+	escape := Escaper(markup)
+	// Only template output may carry a Mention token; neutral text never shows one.
+	esc := func(s string) string { return escape(templates.StripTokens(s)) }
 	var out []string
 	add := func(s string) {
 		if s != "" {
@@ -170,13 +184,13 @@ func Layout(m Message, markup Markup) string {
 		add(italic(markup, esc(m.Summary)))
 	}
 	if m.Body != nil {
-		add(strings.TrimRight(m.Body.Text, "\n"))
+		add(templates.ReplaceTokens(strings.TrimRight(m.Body.Text, "\n"), tokenText))
 	}
 	if a := m.Alerts; a != nil {
 		for _, l := range a.Lines {
-			text := l.Text
+			text := templates.ReplaceTokens(l.Text, tokenText)
 			if l.Markup == "" {
-				text = esc(text)
+				text = esc(l.Text)
 			}
 			if l.Resolved {
 				text = struck(markup, text)
@@ -221,6 +235,18 @@ func Layout(m Message, markup Markup) string {
 	return strings.Join(out, "\n")
 }
 
+// tokenText is a trusted Mention token as the preview and the plain text show it: `@` and its word or group, the
+// Owner as @owner; each adapter writes its own syntax instead (S-061, S-042).
+func tokenText(tk templates.Token) string {
+	if tk.Name == templates.MentionGroup {
+		return "@" + tk.Group
+	}
+	return "@" + tk.Name
+}
+
+// markdownURL escapes the characters that end or break the target of a Markdown link.
+var markdownURL = strings.NewReplacer("(", "%28", ")", "%29", "<", "%3C", ">", "%3E", "\\", "%5C")
+
 func link(markup Markup, text, url string) string {
 	esc := Escaper(markup)
 	if url == "" {
@@ -228,7 +254,7 @@ func link(markup Markup, text, url string) string {
 	}
 	switch markup {
 	case MarkupMarkdown:
-		return "[" + esc(text) + "](" + url + ")"
+		return "[" + esc(text) + "](" + markdownURL.Replace(url) + ")"
 	case MarkupHTML:
 		return `<a href="` + esc(url) + `">` + esc(text) + "</a>"
 	case MarkupPlain:

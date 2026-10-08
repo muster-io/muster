@@ -8,12 +8,15 @@
 // `repeat` and a range over an integer are capped at LoopCap items, every range and every template call counts
 // against a budget per execution, a function result longer than OutputCap characters or ResultItems items is an
 // error, output stops at OutputCap characters, and the range and template guards stop an execution that ran for
-// longer than ExecutionLimit on the real clock. One sandbox serves messages, Link rules and outgoing webhooks.
+// longer than ExecutionLimit on the real clock. One sandbox serves messages, Link rules and outgoing webhooks: `lookup`
+// reads one cell of a Lookup table through the Env of an execution, and `mention` writes a trusted Mention token that
+// only an adapter turns into a Mention (C-12.FR-8, FR-9).
 package templates
 
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
 	"regexp"
 	"slices"
@@ -22,6 +25,7 @@ import (
 	"text/template"
 	"text/template/parse"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/go-sprout/sprout"
@@ -121,6 +125,9 @@ func baseFuncs() template.FuncMap {
 	for name, f := range boundedFuncs(fm) {
 		fm[name] = f
 	}
+	// lookup stands for the one of each execution, which reads through its Env.
+	fm["lookup"] = func(string, string, string) (string, error) { return "", nil }
+	fm["mention"] = mention
 	for name, f := range fm {
 		fm[name] = bounded(name, f)
 	}
@@ -746,9 +753,20 @@ func (w *capWriter) Write(p []byte) (int, error) {
 	return w.b.Write(p)
 }
 
+// Env is what one execution reads besides its data: Lookup reads one cell of a Lookup table, the empty string for a
+// missing table, key or column (C-12.FR-9); nil reads nothing.
+type Env struct {
+	Lookup func(table, key, column string) (string, error)
+}
+
 // Execute runs the template on data with a fresh budget and returns its output. Any failure is an Error with the
 // code CodeSyntax and the position text/template reports.
-func (t *Template) Execute(data any) (out string, err error) {
+func (t *Template) Execute(data any) (string, error) {
+	return t.ExecuteIn(Env{}, data)
+}
+
+// ExecuteIn runs the template on data with a fresh budget and the Env env, as Execute does.
+func (t *Template) ExecuteIn(env Env, data any) (out string, err error) {
 	s := t.sandbox
 	b := &budget{ranges: RangeBudget, calls: CallBudget, deadline: s.real.Now().Add(ExecutionLimit), real: s.real}
 	tmpl, err := t.tmpl.Clone()
@@ -756,10 +774,14 @@ func (t *Template) Execute(data any) (out string, err error) {
 		return "", &Error{Code: CodeSyntax, Detail: err.Error()}
 	}
 	now := s.business.Now()
-	tmpl.Funcs(execFuncs(b)).Funcs(template.FuncMap{
+	fm := template.FuncMap{
 		"now":   func() time.Time { return now },
 		"since": now.Sub,
-	})
+	}
+	if env.Lookup != nil {
+		fm["lookup"] = bounded("lookup", env.Lookup)
+	}
+	tmpl.Funcs(execFuncs(b)).Funcs(fm)
 	var w capWriter
 	defer func() {
 		if r := recover(); r != nil {
@@ -773,4 +795,162 @@ func (t *Template) Execute(data any) (out string, err error) {
 		return "", positioned(CodeSyntax, err)
 	}
 	return w.b.String(), nil
+}
+
+// LookupTables are the Lookup tables the template reads by a literal name, `lookup "grafana" …`, sorted and without
+// duplicates.
+func (t *Template) LookupTables() []string {
+	var out []string
+	for _, tmpl := range t.tmpl.Templates() {
+		if tmpl.Tree == nil {
+			continue
+		}
+		walk(tmpl.Root, func(n parse.Node) {
+			c, ok := n.(*parse.CommandNode)
+			if !ok || len(c.Args) < 2 {
+				return
+			}
+			if id, ok := c.Args[0].(*parse.IdentifierNode); !ok || id.Ident != "lookup" {
+				return
+			}
+			if name, ok := c.Args[1].(*parse.StringNode); ok {
+				out = append(out, name.Text)
+			}
+		})
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// The trusted Mention tokens of `mention` (C-12.FR-8, ADR-0012): a name, and the group of a group Mention, between
+// characters of the Unicode private use area. Messages strip these characters from alert data, so a token in a
+// message always comes from a template; it survives the escaping of every markup, and an adapter replaces it with
+// its messenger's syntax, while every other `@` of a template's output is neutralized like alert data.
+const (
+	tokenStart = '\uE000'
+	tokenSep   = '\uE001'
+	tokenEnd   = '\uE002'
+)
+
+// The Mentions a template may write with `mention`: everyone in the chat as all, channel or here, the Owner, or a
+// messenger group by its name.
+const (
+	MentionAll     = "all"
+	MentionChannel = "channel"
+	MentionHere    = "here"
+	MentionOwner   = "owner"
+	MentionGroup   = "group"
+)
+
+// groupName is the form of a messenger group name that `mention "group"` takes.
+var groupName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// mention is `{{ mention "all" }}`, `{{ mention "owner" }}` or `{{ mention "group" "oncall" }}`: the trusted token of
+// the Mention.
+func mention(name string, args ...string) (string, error) {
+	switch name {
+	case MentionAll, MentionChannel, MentionHere, MentionOwner:
+		if len(args) > 0 {
+			return "", fmt.Errorf("mention %q takes no group", name)
+		}
+		return MentionToken(Token{Name: name}), nil
+	case MentionGroup:
+		if len(args) != 1 || !groupName.MatchString(args[0]) {
+			return "", errors.New(`mention "group" takes one group name of letters, digits, ".", "_" and "-"`)
+		}
+		return MentionToken(Token{Name: name, Group: args[0]}), nil
+	}
+	return "", fmt.Errorf("%q is not one of all, channel, here, owner and group", name)
+}
+
+// Token is a trusted Mention in a text: its name and, for a group, the group's name.
+type Token struct {
+	Name  string
+	Group string
+}
+
+// MentionToken is the token of tk.
+func MentionToken(tk Token) string {
+	if tk.Group != "" {
+		return string(tokenStart) + tk.Name + string(tokenSep) + tk.Group + string(tokenEnd)
+	}
+	return string(tokenStart) + tk.Name + string(tokenEnd)
+}
+
+// ReplaceTokens replaces every Mention token of s with what f returns for it; the token characters that form no
+// token are dropped.
+func ReplaceTokens(s string, f func(Token) string) string {
+	if !strings.ContainsRune(s, tokenStart) {
+		return StripTokens(s)
+	}
+	var b strings.Builder
+	for {
+		i := strings.IndexRune(s, tokenStart)
+		if i < 0 {
+			break
+		}
+		b.WriteString(StripTokens(s[:i]))
+		rest := s[i+utf8.RuneLen(tokenStart):]
+		j := strings.IndexRune(rest, tokenEnd)
+		if j < 0 {
+			s = rest
+			continue
+		}
+		body := rest[:j]
+		s = rest[j+utf8.RuneLen(tokenEnd):]
+		name, group, _ := strings.Cut(body, string(tokenSep))
+		if strings.ContainsRune(name, tokenStart) {
+			b.WriteString(StripTokens(body))
+			continue
+		}
+		b.WriteString(f(Token{Name: name, Group: group}))
+	}
+	b.WriteString(StripTokens(s))
+	return b.String()
+}
+
+// Tokens are the Mention tokens of s in order.
+func Tokens(s string) []Token {
+	var out []Token
+	ReplaceTokens(s, func(tk Token) string {
+		out = append(out, tk)
+		return ""
+	})
+	return out
+}
+
+// StripTokens removes the characters of Mention tokens from s: alert data never carry a token.
+func StripTokens(s string) string {
+	if !strings.ContainsFunc(s, isTokenRune) {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isTokenRune(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func isTokenRune(r rune) bool {
+	return r == tokenStart || r == tokenSep || r == tokenEnd
+}
+
+// SafeURL is u, trimmed, when it is an absolute http or https link without user information, spaces, control or
+// format characters or the characters of Mention tokens, and empty otherwise (C-12.FR-7): links are http(s) only.
+func SafeURL(u string) string {
+	u = strings.TrimSpace(u)
+	if u == "" || strings.ContainsFunc(u, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || isTokenRune(r)
+	}) {
+		return ""
+	}
+	p, err := url.Parse(u)
+	if err != nil || p.Host == "" || p.Opaque != "" || p.User != nil {
+		return ""
+	}
+	if s := strings.ToLower(p.Scheme); s != "http" && s != "https" {
+		return ""
+	}
+	return u
 }

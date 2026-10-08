@@ -5,7 +5,6 @@ package messages
 
 import (
 	"html"
-	"net/url"
 	"strings"
 	"unicode/utf8"
 
@@ -25,9 +24,21 @@ const zeroWidthSpace = "\u200b"
 // ellipsis ends a value cut at ValueCap.
 const ellipsis = "…"
 
-// Neutralize puts a zero-width space after every `@` of s.
+// Neutralize puts a zero-width space after every `@` of s that has none yet, so that neutralizing twice changes
+// nothing.
 func Neutralize(s string) string {
-	return strings.ReplaceAll(s, "@", "@"+zeroWidthSpace)
+	if !strings.Contains(s, "@") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	for i := range len(s) {
+		b.WriteByte(s[i])
+		if s[i] == '@' && !strings.HasPrefix(s[i+1:], zeroWidthSpace) {
+			b.WriteString(zeroWidthSpace)
+		}
+	}
+	return b.String()
 }
 
 // Cap cuts s to at most ValueCap bytes at a character boundary, ending it with "…".
@@ -42,21 +53,15 @@ func Cap(s string) string {
 	return s[:cut] + ellipsis
 }
 
-// Value is an alert value made safe and neutral: cut to ValueCap with its `@` neutralized.
+// Value is an alert value made safe and neutral: without the characters of Mention tokens, cut to ValueCap, with its
+// `@` neutralized.
 func Value(s string) string {
-	return Neutralize(Cap(s))
+	return Neutralize(Cap(templates.StripTokens(s)))
 }
 
 // SafeURL is u when it is an absolute http or https link, and empty otherwise.
 func SafeURL(u string) string {
-	p, err := url.Parse(strings.TrimSpace(u))
-	if err != nil || p.Host == "" {
-		return ""
-	}
-	if s := strings.ToLower(p.Scheme); s != "http" && s != "https" {
-		return ""
-	}
-	return strings.TrimSpace(u)
+	return templates.SafeURL(u)
 }
 
 // markdownSpecial are the characters Mattermost Markdown gives a meaning to inside a line.
@@ -114,6 +119,7 @@ func safeAlert(a templates.Alert, safe func(string) string) templates.Alert {
 	a.Labels = safeKV(a.Labels, safe)
 	a.Annotations = safeKV(a.Annotations, safe)
 	a.GeneratorURL = SafeURL(a.GeneratorURL)
+	a.Fingerprint, a.Status = templates.StripTokens(a.Fingerprint), templates.StripTokens(a.Status)
 	return a
 }
 
@@ -122,10 +128,12 @@ func safeGroup(g templates.AlertGroup, safe func(string) string) templates.Alert
 	return g
 }
 
+// safeKV makes the values safe; a name keeps its spelling, so that a template reads `.Labels.pod`, without the
+// characters of Mention tokens.
 func safeKV(kv templates.KV, safe func(string) string) templates.KV {
 	out := make(templates.KV, len(kv))
 	for k, v := range kv {
-		out[k] = safe(v)
+		out[templates.StripTokens(k)] = safe(v)
 	}
 	return out
 }

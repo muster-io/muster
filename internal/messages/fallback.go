@@ -24,7 +24,7 @@ func (r *Renderer) fallback(m Message, src *Source, lang string) Message {
 	maps.Copy(labels, src.CommonLabels)
 	for _, name := range slices.Sorted(maps.Keys(labels)) {
 		if labels[name] != "" {
-			m.CommonLabels = append(m.CommonLabels, Label{Name: name, Value: Value(labels[name])})
+			m.CommonLabels = append(m.CommonLabels, Label{Name: Value(name), Value: Value(labels[name])})
 		}
 	}
 	if len(src.Alerts) == 0 {
@@ -37,7 +37,7 @@ func (r *Renderer) fallback(m Message, src *Source, lang string) Message {
 		parts := make([]string, 0, len(a.Labels))
 		for _, name := range slices.Sorted(maps.Keys(a.Labels)) {
 			names[name] = true
-			parts = append(parts, name+"="+Value(a.Labels[name]))
+			parts = append(parts, Value(name)+"="+Value(a.Labels[name]))
 		}
 		list.Lines = append(list.Lines, AlertLine{Text: strings.Join(parts, ", "), Resolved: !a.Firing})
 	}

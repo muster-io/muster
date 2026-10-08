@@ -14,6 +14,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 )
 
@@ -290,3 +291,73 @@ func TestReplyRenderer(t *testing.T) {
 		t.Errorf("replies %+v, log %s", r, e.log)
 	}
 }
+
+// fakeMentioner resolves each symbolic Mention into everyone with its name, and records the requests.
+type fakeMentioner struct {
+	reqs []mentions.Request
+	fail error
+}
+
+func (m *fakeMentioner) Resolve(_ context.Context, _ mentions.DBTX, org int64, r mentions.Request) (
+	[]mentions.Target, error) {
+	if org != orgID {
+		return nil, fmt.Errorf("org %d", org)
+	}
+	m.reqs = append(m.reqs, r)
+	out := make([]mentions.Target, len(r.Mentions))
+	for i, name := range r.Mentions {
+		out[i] = mentions.Target{Kind: mentions.TargetEveryone, Everyone: name}
+	}
+	return out, m.fail
+}
+
+// TestMentionTargets (C-12.FR-8): delivery passes the targets of a Loud message to the adapter — a Loud Publication
+// without a lifecycle event, a Loud Thread reply with its event — and a Quiet message gets none; a Mention that cannot
+// be resolved leaves the call for later.
+func TestMentionTargets(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].limit = 600
+	m := &fakeMentioner{}
+	e.w.Mentions = m
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	e.round(t)
+	calls := e.rec.Calls()
+	if len(calls) != 1 || len(calls[0].Targets) != 1 || calls[0].Targets[0].Everyone != "new_alert_group" {
+		t.Fatalf("publication %+v", calls)
+	}
+	if r := m.reqs[0]; r.DestinationID != destMM || r.DestinationType != delivery.TypeMattermost ||
+		r.ConnectionID == nil || *r.ConnectionID != connID || r.AlertGroupID != groupID || r.Seq != 0 {
+		t.Errorf("request %+v", r)
+	}
+	e.rec.Reset()
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System, alertsAdded(2, groups.StatusAcknowledged, "f1"))
+	e.round(t)
+	if r := e.replies(); len(r) != 1 || r[0].Loudness != groups.Quiet || r[0].Targets != nil || len(m.reqs) != 1 {
+		t.Fatalf("quiet reply %+v", r)
+	}
+	e.business.Advance(5 * time.Minute)
+	e.rec.Reset()
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, alertsAdded(3, groups.StatusFiring, "f2"))
+	e.round(t)
+	if r := e.replies(); len(r) != 1 || len(r[0].Targets) != 1 || r[0].Targets[0].Everyone != "new_alerts" ||
+		m.reqs[1].Seq != 3 {
+		t.Fatalf("loud reply %+v %+v", r, m.reqs)
+	}
+	e.business.Advance(5 * time.Minute)
+	e.rec.Reset()
+	m.fail = errBoomMention
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, alertsAdded(4, groups.StatusFiring, "f3"))
+	e.round(t)
+	if r := e.replies(); len(r) != 0 || !strings.Contains(e.log.String(), "resolve the mentions") {
+		t.Errorf("a failing resolution sends nothing: %+v", r)
+	}
+	f := newEnv(t)
+	f.w.Mentions = &fakeMentioner{fail: errBoomMention}
+	f.enqueue(t, f.group(groups.StatusFiring, "a"), groups.System, created())
+	f.round(t)
+	if calls := f.rec.Calls(); len(calls) != 0 || !strings.Contains(f.log.String(), "resolve the mentions") {
+		t.Errorf("a failing resolution publishes nothing: %+v", calls)
+	}
+}
+
+var errBoomMention = fmt.Errorf("no users")

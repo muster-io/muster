@@ -35,8 +35,8 @@ const (
 	SampleExample        = "example"
 )
 
-// The kinds a preview takes until Link rules (S-037) and outgoing webhooks (S-045) bring theirs.
-var previewKinds = []string{TemplateRootMessage, TemplateLine, TemplateAckTimeoutNotice}
+// The kinds a preview takes until outgoing webhooks (S-045) bring theirs; link_rule needs the links of the Renderer.
+var previewKinds = []string{TemplateRootMessage, TemplateLine, TemplateAckTimeoutNotice, TemplateLinkRule}
 
 // ErrUnsupportedKind is a preview of a kind of template this build does not render.
 var ErrUnsupportedKind = errors.New("the kind of template has no preview yet")
@@ -82,7 +82,7 @@ type settings struct {
 // with Valid false, never an error.
 func (r *Renderer) Preview(ctx context.Context, req PreviewRequest) (PreviewResult, error) {
 	db := r.db
-	if !slices.Contains(previewKinds, req.Kind) {
+	if !slices.Contains(previewKinds, req.Kind) || (req.Kind == TemplateLinkRule && r.links == nil) {
 		return PreviewResult{}, ErrUnsupportedKind
 	}
 	format := cmp.Or(req.Format, MarkupMarkdown)
@@ -134,11 +134,19 @@ func (r *Renderer) Preview(ctx context.Context, req PreviewRequest) (PreviewResu
 			samples, res.Sample = []*Source{r.example(set)}, SampleExample
 		}
 	}
+	if req.Kind == TemplateLinkRule {
+		return r.previewLink(ctx, res, samples), nil
+	}
 	tmpl := &res.Source
 	if builtin {
 		tmpl = nil
 	}
 	for i, s := range samples {
+		if i == 0 && req.Kind == TemplateRootMessage && group == nil {
+			if err := r.withLinks(ctx, db, s); err != nil {
+				return PreviewResult{}, err
+			}
+		}
 		s.Route.Language = lang
 		m, err := r.previewMessage(s, req.Kind, tmpl, format)
 		if err != nil {
@@ -153,6 +161,24 @@ func (r *Renderer) Preview(ctx context.Context, req PreviewRequest) (PreviewResu
 	}
 	res.Valid = true
 	return res, nil
+}
+
+// previewLink renders the URL template of a Link rule against the samples, as the scope alert_group renders it, with
+// the Lookup tables of the Organization: the output against the first, which has no markup.
+func (r *Renderer) previewLink(ctx context.Context, res PreviewResult, samples []*Source) PreviewResult {
+	res.Format = ""
+	for i, s := range samples {
+		out, err := r.links.RenderURL(ctx, r.db, res.Source, r.linkInput(s))
+		if err != nil {
+			res.Errors, res.Output = []*templates.Error{sandboxError(err)}, ""
+			return res
+		}
+		if i == 0 {
+			res.Output = out
+		}
+	}
+	res.Valid = true
+	return res
 }
 
 // previewMessage renders one sample: the whole Root message for root_message, the Alert lines for line and the notice
@@ -185,7 +211,7 @@ func (r *Renderer) previewMessage(src *Source, kind string, tmpl *string, format
 	if err != nil {
 		return Message{}, err
 	}
-	return Message{Language: src.Route.Language, Body: &Body{Text: out, Markup: format}}, nil
+	return Message{Language: src.Route.Language, Body: &Body{Text: Neutralize(out), Markup: format}}, nil
 }
 
 func deref(s *string) string {

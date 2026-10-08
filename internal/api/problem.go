@@ -22,6 +22,7 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
+	"github.com/muster-io/muster/internal/links"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/oidc"
@@ -81,6 +82,7 @@ const (
 	codeOIDCRecheckRequired   = "oidc_recheck_required"
 	codeBuiltinImmutable      = "builtin_immutable"
 	codeSuggestionObsolete    = "suggestion_obsolete"
+	codeInUse                 = "in_use"
 
 	fieldRequired      = "required"
 	fieldInvalidFormat = "invalid_format"
@@ -259,6 +261,11 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		p.Errors[0].Line, p.Errors[0].Column = positive(f.Line), positive(f.Column)
 		return p
 	}
+	if f, ok := errors.AsType[*links.FieldError](err); ok {
+		p := fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+		p.Errors[0].Line, p.Errors[0].Column = positive(f.Line), positive(f.Column)
+		return p
+	}
 	if f, ok := errors.AsType[*groups.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
@@ -320,6 +327,23 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		return problem(http.StatusConflict, typeConflict, codeBuiltinImmutable,
 			"The built-in Muster Integration cannot be changed, deleted or given a token.")
 	case errors.Is(err, integrations.ErrVersionMismatch):
+		return errPreconditionFailed
+	case errors.Is(err, links.ErrTableNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Lookup table.")
+	case errors.Is(err, links.ErrRuleNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Link rule.")
+	case errors.Is(err, links.ErrTableNameTaken):
+		return problem(http.StatusConflict, typeConflict, codeNameTaken, "Another Lookup table has this name.")
+	case errors.Is(err, links.ErrRuleNameTaken):
+		return problem(http.StatusConflict, typeConflict, codeNameTaken, "Another Link rule has this name.")
+	case errors.Is(err, links.ErrInUse):
+		return problem(http.StatusConflict, typeConflict, codeInUse,
+			"A Link rule reads this Lookup table; change the rule before deleting the table.")
+	case errors.Is(err, links.ErrBuiltinImmutable):
+		return problem(http.StatusConflict, typeConflict, codeBuiltinImmutable,
+			"The built-in Explore rule cannot be deleted, renamed or given another scope; its Matchers and URL "+
+				"template can be edited.")
+	case errors.Is(err, links.ErrVersionMismatch):
 		return errPreconditionFailed
 	case errors.Is(err, destinations.ErrNotFound):
 		return errDestinationNotFound

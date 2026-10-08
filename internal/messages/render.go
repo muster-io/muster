@@ -18,7 +18,9 @@ import (
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/internalalerts"
+	"github.com/muster-io/muster/internal/links"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages/dbgen"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/templates"
@@ -27,7 +29,8 @@ import (
 // Config is what a Renderer needs: the Organization, the main pool that previews and dry runs read, MUSTER_PUBLIC_URL
 // for the links to Muster, the business clock of `now` and of the template error state, the real clock of the
 // sandbox's execution limit and of the render durations, the Keyring that signs the buttons (nil leaves them
-// unsigned), the logger and MUSTER_RUNBOOK_BASE_URL.
+// unsigned), the logger, MUSTER_RUNBOOK_BASE_URL, the links of Alert Groups and the usernames of the users a footer
+// names (nil for none).
 type Config struct {
 	OrgID       int64
 	DB          DBTX
@@ -37,6 +40,21 @@ type Config struct {
 	Keys        buttons.Keys
 	Log         *logging.Logger
 	RunbookBase string
+	Links       Links
+	Names       Names
+}
+
+// Links are the links of an Alert Group and the preview of a Link rule's URL template (C-12.FR-9), declared by their
+// consumer; *links.Service implements them.
+type Links interface {
+	Evaluate(ctx context.Context, db links.DBTX, in links.Input) ([]links.Link, error)
+	RenderURL(ctx context.Context, db links.DBTX, source string, in links.Input) (string, error)
+}
+
+// Names are the messenger usernames, by identity space, of the user the footer of an Alert Group names
+// (C-12.FR-12), declared by their consumer; *mentions.Service implements them.
+type Names interface {
+	FooterNames(ctx context.Context, db mentions.DBTX, groupID int64) (map[string]string, error)
 }
 
 // Renderer renders the messages of an Organization (C-12): Root messages, with a Route's templates or the default
@@ -51,6 +69,8 @@ type Renderer struct {
 	log       *logging.Logger
 	internal  *internalalerts.Raiser
 	sandbox   *templates.Sandbox
+	links     Links
+	names     Names
 
 	mu    sync.Mutex
 	cache map[string]*templates.Template
@@ -92,6 +112,7 @@ func New(cfg Config) *Renderer {
 	return &Renderer{orgID: cfg.OrgID, db: cfg.DB, publicURL: strings.TrimSuffix(cfg.PublicURL, "/"), business: cfg.Business,
 		real: cfg.Real, keys: cfg.Keys, log: cfg.Log, internal: internalalerts.NewRaiser(cfg.OrgID, cfg.RunbookBase),
 		sandbox: templates.New(cfg.Business, cfg.Real), cache: map[string]*templates.Template{},
+		links: cfg.Links, names: cfg.Names,
 		queries: func(db DBTX) queries {
 			return pgQueries{Queries: dbgen.New(db), Store: internalalerts.NewStore(db)}
 		}}
@@ -140,6 +161,10 @@ type Source struct {
 	ResolvedBy        string
 	Alerts            []SourceAlert
 	TotalAlerts       int64
+	// Links are its links after "Open in Muster"; FooterNames the messenger usernames, by identity space, of the
+	// user its footer names.
+	Links       []links.Link
+	FooterNames map[string]string
 }
 
 // RouteRef is the Route of an Alert Group as its messages use it: its templates — nil for the built-in one — and the
@@ -187,7 +212,30 @@ func (r *Renderer) Load(ctx context.Context, db DBTX, groupID int64) (*Source, e
 		}
 		src.Alerts = append(src.Alerts, sa)
 	}
+	if err := r.withLinks(ctx, db, src); err != nil {
+		return nil, err
+	}
+	if r.names != nil {
+		if src.FooterNames, err = r.names.FooterNames(ctx, db, groupID); err != nil {
+			return nil, err
+		}
+	}
 	return src, nil
+}
+
+// withLinks computes the links of src through db (C-12.FR-9).
+func (r *Renderer) withLinks(ctx context.Context, db DBTX, src *Source) error {
+	if r.links == nil {
+		return nil
+	}
+	var err error
+	src.Links, err = r.links.Evaluate(ctx, db, r.linkInput(src))
+	return err
+}
+
+// linkInput is src as its links are computed from: the values as received.
+func (r *Renderer) linkInput(src *Source) links.Input {
+	return links.Input{Group: src.PublicID, Route: src.Route.PublicID, Data: r.data(src)}
 }
 
 // loadGroup reads the Alert Group groupID without its Alerts.
@@ -275,7 +323,7 @@ func (r *Renderer) root(src *Source, markup Markup, sign bool) Rendered {
 			out.Message = r.fallback(m, src, lang)
 			return out
 		}
-		m.Body = &Body{Text: body, Markup: markup}
+		m.Body = &Body{Text: Neutralize(body), Markup: markup}
 		out.Rendered = append(out.Rendered, TemplateRootMessage)
 		out.Message = m
 		return out

@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/groups/dbgen"
+	"github.com/muster-io/muster/internal/links"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/publicid"
@@ -121,11 +122,25 @@ type View struct {
 	// Newer is, for an Alert Group a person resolved, the open Alert Group of its Route and key that takes part in
 	// grouping (C-10.FR-7).
 	Newer *GroupRef
+	// Links are its links, computed on read (C-09.FR-14, C-12.FR-9).
+	Links []Link
 	// ownerID is the Owner's id, stillFiring the Alerts still firing in it and routeDeleted whether its Route was
 	// deleted, which allowed_commands needs.
 	ownerID      int64
 	stillFiring  int64
 	routeDeleted bool
+}
+
+// Link is a link of an Alert Group: its kind, its name and its http(s) URL.
+type Link = links.Link
+
+// Linker computes the links of the Alert Group id on read (C-12.FR-9): its Link rules, runbook_url, dashboard_url and
+// generatorURL; (*links.Service).ForGroup is the one of the runtime.
+type Linker func(ctx context.Context, id int64) ([]Link, error)
+
+// SetLinks fills the links of Get.
+func (s *Service) SetLinks(l Linker) {
+	s.links = l
 }
 
 // owned sets the Owner, the Snooze and the newer open Alert Group of a View from its row and the Users and Service
@@ -168,7 +183,7 @@ func (s *Service) groupID(ctx context.Context, publicID string) (int64, bool, er
 
 // Get reads the Alert Group publicID (C-09.FR-1, FR-10, FR-14): its status, Route, Integrations, title and summary,
 // Severity level, urgency as its Route and organization.critical_is_urgent give it now, counts, the resolution, its
-// Owner and Snooze, its labels and the notices of its page — newer_alert_group_exists for a person-resolved one whose
+// Owner and Snooze, its labels, its links and the notices of its page — newer_alert_group_exists for a person-resolved one whose
 // key another open Alert Group took (C-10.FR-7); once its details are removed, the notice details_removed with the
 // period (C-09.FR-16).
 func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
@@ -188,7 +203,7 @@ func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
 		Route: Ref{PublicID: r.RoutePublicID, Name: r.RouteName}, StartedAt: r.CreatedAt.UTC(),
 		LastChangedAt: r.LastChangedAt.UTC(), ResolvedAt: timeOf(r.ResolvedAt), ReopenCount: r.ReopenCount,
 		FiringCount: r.FiringAlertCount, ResolvedCount: r.ResolvedAlertCount, Integrations: []Ref{},
-		Notices: []Notice{}}
+		Notices: []Notice{}, Links: []Link{}}
 	for _, f := range []struct {
 		raw  []byte
 		into *map[string]string
@@ -236,6 +251,13 @@ func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
 	if detailsRemoved(r.ResolvedAt, r.RetentionAlertDetailsDays, s.clock.Now()) {
 		v.DetailsRemoved = true
 		v.Notices = append(v.Notices, Notice{Kind: NoticeDetailsRemoved, RetentionDays: &r.RetentionAlertDetailsDays})
+	}
+	if s.links != nil {
+		links, err := s.links(ctx, r.ID)
+		if err != nil {
+			return View{}, fmt.Errorf("compute the links of alert group %s: %w", id, err)
+		}
+		v.Links = append(v.Links, links...)
 	}
 	return v, nil
 }

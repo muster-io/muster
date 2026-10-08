@@ -1388,6 +1388,24 @@ func TestGet(t *testing.T) {
 		}
 	}
 	h.db.fail = map[string]error{}
+	// The links are computed on read by the Linker (C-09.FR-14, C-12.FR-9).
+	if v, _ := h.svc.Get(t.Context(), gc.PublicID); v.Links == nil || len(v.Links) != 0 {
+		t.Errorf("no linker, no links %+v", v.Links)
+	}
+	var asked int64
+	h.svc.SetLinks(func(_ context.Context, id int64) ([]Link, error) {
+		asked = id
+		return []Link{{Name: "Runbook", URL: "https://r.example.org"}}, nil
+	})
+	if v, err := h.svc.Get(t.Context(), gc.PublicID); err != nil || asked != gc.ID ||
+		!slices.Equal(v.Links, []Link{{Name: "Runbook", URL: "https://r.example.org"}}) {
+		t.Errorf("links %+v %v", v.Links, err)
+	}
+	h.svc.SetLinks(func(context.Context, int64) ([]Link, error) { return nil, errBoom })
+	if _, err := h.svc.Get(t.Context(), gc.PublicID); !errors.Is(err, errBoom) {
+		t.Errorf("failing links = %v", err)
+	}
+	h.svc.SetLinks(nil)
 	gc.CommonLabels = []byte("[")
 	if _, err := h.svc.Get(t.Context(), gc.PublicID); err == nil {
 		t.Error("a bad row")

@@ -300,7 +300,7 @@ func (s *Server) GetAlertGroup(ctx context.Context, req gen.GetAlertGroupRequest
 }
 
 // alertGroupOf is the API form of an Alert Group for the caller c, of its page or of a list item; a list item leaves
-// out the labels and the notices. The links, Unclaimed and the delivery problem arrive with their capabilities.
+// out the labels, the notices and the links. Unclaimed and the delivery problem arrive with their capabilities.
 func alertGroupOf(v groups.View, c groups.Caller) gen.AlertGroup {
 	out := gen.AlertGroup{
 		Id: v.PublicID, Number: int(v.Number), Title: v.Title, Summary: nullableString(v.Summary),
@@ -309,7 +309,7 @@ func alertGroupOf(v groups.View, c groups.Caller) gen.AlertGroup {
 		StartedAt: v.StartedAt, LastChangedAt: v.LastChangedAt, ResolvedAt: nullableTime(v.ResolvedAt),
 		ReopenCount: int(v.ReopenCount), FiringAlertCount: int(v.FiringCount),
 		ResolvedAlertCount: int(v.ResolvedCount), AllowedCommands: []gen.CommandName{},
-		Links: &[]gen.AlertGroupLink{}, DetailsRemoved: &v.DetailsRemoved, Resolution: resolvedByOf(v.Resolution),
+		Links: linksOf(v.Links), DetailsRemoved: &v.DetailsRemoved, Resolution: resolvedByOf(v.Resolution),
 		Owner: userRefOf(v.Owner),
 	}
 	for _, cmd := range v.Allowed(c) {
@@ -690,4 +690,13 @@ func (s *Server) ListAlertGroupDeliveries(ctx context.Context, req gen.ListAlert
 		out.Items = append(out.Items, item)
 	}
 	return out, nil
+}
+
+// linksOf are the links of an Alert Group as the API shows them.
+func linksOf(ls []groups.Link) *[]gen.AlertGroupLink {
+	out := make([]gen.AlertGroupLink, len(ls))
+	for i, l := range ls {
+		out[i] = gen.AlertGroupLink{Name: l.Name, Url: l.URL}
+	}
+	return &out
 }

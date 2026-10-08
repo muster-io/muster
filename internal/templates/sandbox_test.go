@@ -5,6 +5,7 @@ package templates
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -304,5 +305,107 @@ func TestFromWebhook(t *testing.T) {
 	var kv KV
 	if kv.Remove([]string{"a"}) == nil {
 		t.Error("Remove of nil")
+	}
+}
+
+// TestLookupAndLookupTables: lookup reads through the Env of an execution, reads nothing without one, and its errors
+// fail the template; LookupTables names the tables read by a literal name, in every template of the source.
+func TestLookupAndLookupTables(t *testing.T) {
+	src := `{{ define "x" }}{{ lookup "dc" "a" "b" }}{{ end }}{{ lookup "grafana" .K "address" }}|{{ lookup $.T "k" "c" }}` +
+		`|{{ template "x" }}|{{ lookup "grafana" "k" "uid" }}`
+	tmpl, err := sandbox().Parse("t", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tmpl.LookupTables(); !slices.Equal(got, []string{"dc", "grafana"}) {
+		t.Errorf("LookupTables = %v", got)
+	}
+	data := map[string]string{"K": "prod", "T": "other"}
+	out, err := tmpl.Execute(data)
+	if err != nil || out != "|||" {
+		t.Errorf("without an env: %q %v", out, err)
+	}
+	var calls []string
+	env := Env{Lookup: func(table, key, column string) (string, error) {
+		calls = append(calls, table+"/"+key+"/"+column)
+		return strings.ToUpper(column), nil
+	}}
+	out, err = tmpl.ExecuteIn(env, data)
+	if err != nil || out != "ADDRESS|C|B|UID" {
+		t.Errorf("with an env: %q %v", out, err)
+	}
+	if !slices.Equal(calls, []string{"grafana/prod/address", "other/k/c", "dc/a/b", "grafana/k/uid"}) {
+		t.Errorf("calls %v", calls)
+	}
+	failing := Env{Lookup: func(string, string, string) (string, error) { return "", errors.New("no database") }}
+	if _, err := tmpl.ExecuteIn(failing, data); err == nil || !strings.Contains(err.Error(), "no database") {
+		t.Errorf("a failing lookup: %v", err)
+	}
+}
+
+// TestMentionTokens: mention writes a token for all, channel, here, owner and a group, refuses anything else, and the
+// token survives until ReplaceTokens renders it; StripTokens and ReplaceTokens drop stray token characters.
+func TestMentionTokens(t *testing.T) {
+	out, err := render(t, `{{ mention "all" }} {{ mention "channel" }} {{ mention "here" }} {{ mention "owner" }} `+
+		`{{ mention "group" "on-call.db" }} @all`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Tokens(out); !slices.Equal(got, []Token{{Name: "all"}, {Name: "channel"}, {Name: "here"},
+		{Name: "owner"}, {Name: "group", Group: "on-call.db"}}) {
+		t.Errorf("tokens %v", got)
+	}
+	shown := ReplaceTokens(out, func(tk Token) string { return "<" + tk.Name + tk.Group + ">" })
+	if shown != "<all> <channel> <here> <owner> <groupon-call.db> @all" {
+		t.Errorf("replaced %q", shown)
+	}
+	for _, src := range []string{`{{ mention "everyone" }}`, `{{ mention "all" "x" }}`, `{{ mention "group" }}`,
+		`{{ mention "group" "a b" }}`, `{{ mention "group" "a" "b" }}`} {
+		if _, err := render(t, src, nil); err == nil {
+			t.Errorf("%s: no error", src)
+		}
+	}
+	stray := "a" + string(tokenStart) + "b" + string(tokenEnd) + string(tokenSep) + "c" + string(tokenStart) + "d"
+	if got := StripTokens(stray); got != "abcd" {
+		t.Errorf("StripTokens %q", got)
+	}
+	if got := ReplaceTokens(stray, func(Token) string { return "@" }); got != "a@cd" {
+		t.Errorf("ReplaceTokens %q", got)
+	}
+	nested := string(tokenStart) + "x" + MentionToken(Token{Name: "all"})
+	if got := ReplaceTokens(nested, func(tk Token) string { return "@" + tk.Name }); got != "xall" {
+		t.Errorf("nested %q", got)
+	}
+	if got := ReplaceTokens("plain", func(Token) string { return "@" }); got != "plain" {
+		t.Errorf("plain %q", got)
+	}
+	if !slices.Contains(sandbox().Names(), "mention") || !slices.Contains(sandbox().Names(), "lookup") {
+		t.Error("mention and lookup are registered")
+	}
+}
+
+// TestSafeURL: only absolute http and https links without spaces, control or token characters are kept.
+func TestSafeURL(t *testing.T) {
+	for in, want := range map[string]string{
+		" https://grafana.example.org/d/x?a=b ": "https://grafana.example.org/d/x?a=b",
+		"HTTP://h.example.org":                  "HTTP://h.example.org",
+		"javascript:alert(1)":                   "",
+		"data:text/html,x":                      "",
+		"//h.example.org/x":                     "",
+		"/relative":                             "",
+		"https://h.example.org/a b":             "",
+		"https://h.example.org/\x00":            "",
+		"https://h.example.org/" + MentionToken(Token{Name: "all"}): "",
+		"https:opaque":                         "",
+		"https://google.com@evil.example.org/": "",
+		"https://h.example.org/\u202egpj":      "",
+		"https://h.example.org/\u200b":         "",
+		"https://[::1":                         "",
+		"":                                     "",
+		"ftp://h.example.org":                  "",
+	} {
+		if got := SafeURL(in); got != want {
+			t.Errorf("SafeURL(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

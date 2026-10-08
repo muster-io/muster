@@ -158,3 +158,17 @@ sql:
       go:
         <<: *go
         out: internal/messages/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/links/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/links/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
+    queries: internal/mentions/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/mentions/dbgen

@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/muster-io/muster/internal/buttons"
+	"github.com/muster-io/muster/internal/links"
 )
 
 // The default Root message (C-12.FR-1): its exclusions and the limits of its Alerts section.
@@ -37,8 +38,16 @@ func (r *Renderer) frame(src *Source, lang string, sign bool) (Message, string) 
 	url := r.GroupURL(src.PublicID)
 	m := Message{Kind: KindRoot, Language: lang, TimeZone: src.TimeZone, Colour: src.Status,
 		Heading: &Heading{Number: src.Number, Title: Value(src.Title), URL: url},
-		Links:   []Link{{Text: T(lang, "link.open", nil), URL: url}},
-		Notices: notices(src, lang), Footer: footer(src, lang), Buttons: []Button{}}
+		Links:   append([]Link{{Text: T(lang, "link.open", nil), URL: url}}, linksOf(src.Links, lang)...),
+		Notices: notices(src, lang), Footer: footer(src, lang, ""), Buttons: []Button{}}
+	for space, name := range src.FooterNames {
+		if f := footer(src, lang, name); f != "" && f != m.Footer {
+			if m.Footers == nil {
+				m.Footers = map[string]string{}
+			}
+			m.Footers[space] = f
+		}
+	}
 	keyID := ""
 	for _, b := range buttons.ForStatus(src.Status, len(src.Route.SnoozeDurations)) {
 		btn := Button{Command: b.Command, Argument: b.Argument, Label: buttonLabel(lang, b, src.Route.SnoozeDurations)}
@@ -52,6 +61,20 @@ func (r *Renderer) frame(src *Source, lang string, sign bool) (Message, string) 
 		m.Buttons = append(m.Buttons, btn)
 	}
 	return m, keyID
+}
+
+// linksOf are the links of an Alert Group as a message shows them (C-12.FR-1 item 9): a Link rule's by its name, the
+// annotations and the generatorURL by their built-in names in the message's language.
+func linksOf(ls []links.Link, lang string) []Link {
+	out := make([]Link, 0, len(ls))
+	for _, l := range ls {
+		text := Value(l.Name)
+		if l.Kind != links.KindRule {
+			text = T(lang, "link."+l.Kind, nil)
+		}
+		out = append(out, Link{Text: text, URL: l.URL})
+	}
+	return out
 }
 
 // buttonLabel is the label of a button: "Ack", "Resolve", "Snooze 1 h" …
@@ -80,20 +103,23 @@ func notices(src *Source, lang string) []string {
 	return out
 }
 
-// footer is item 11: who acknowledged, resolved or snoozed the Alert Group, or why the system resolved it.
-func footer(src *Source, lang string) string {
+// footer is item 11: who acknowledged, resolved or snoozed the Alert Group, or why the system resolved it. The user
+// is named by username when it is set — the messenger username of their Account link — and by the Muster display
+// name otherwise, which mentions nobody (C-12.FR-12).
+func footer(src *Source, lang, username string) string {
+	user := func(name string) string { return Value(cmp.Or(username, name)) }
 	switch src.Status {
 	case ColourAcknowledged:
-		return T(lang, "footer.acknowledged", Args{"user": Value(src.Owner)})
+		return T(lang, "footer.acknowledged", Args{"user": user(src.Owner)})
 	case ColourSnoozed:
 		if src.SnoozeUntil == nil {
-			return T(lang, "footer.snoozedNoEnd", Args{"user": Value(src.SnoozedBy)})
+			return T(lang, "footer.snoozedNoEnd", Args{"user": user(src.SnoozedBy)})
 		}
-		return T(lang, "footer.snoozed", Args{"user": Value(src.SnoozedBy),
+		return T(lang, "footer.snoozed", Args{"user": user(src.SnoozedBy),
 			"time": FullTime(*src.SnoozeUntil, src.TimeZone)})
 	case ColourResolved:
 		if src.ResolvedByKind == "user" {
-			return T(lang, "footer.resolvedBy", Args{"user": Value(src.ResolvedBy)})
+			return T(lang, "footer.resolvedBy", Args{"user": user(src.ResolvedBy)})
 		}
 		return T(lang, "footer.resolvedAutomatically", Args{"reason": reason(lang, src.ResolveReason)})
 	}
@@ -115,17 +141,17 @@ func (r *Renderer) defaultBody(m *Message, src *Source, lang string) {
 	m.Environment = environment(src, lang)
 	for _, name := range src.KeyLabels {
 		if v := src.KeyValues[name]; name != "alertname" && v != "" {
-			m.GroupLabels = append(m.GroupLabels, Label{Name: name, Value: Value(v)})
+			m.GroupLabels = append(m.GroupLabels, Label{Name: Value(name), Value: Value(v)})
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(src.CommonLabels)) {
 		if !slices.Contains(excludedLabels, name) && !slices.Contains(src.KeyLabels, name) {
-			m.CommonLabels = append(m.CommonLabels, Label{Name: name, Value: Value(src.CommonLabels[name])})
+			m.CommonLabels = append(m.CommonLabels, Label{Name: Value(name), Value: Value(src.CommonLabels[name])})
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(src.CommonAnnotations)) {
 		if !excludedAnnotation(name) {
-			m.CommonAnnotations = append(m.CommonAnnotations, Label{Name: name,
+			m.CommonAnnotations = append(m.CommonAnnotations, Label{Name: Value(name),
 				Value: Value(src.CommonAnnotations[name])})
 		}
 	}
@@ -168,7 +194,7 @@ func (r *Renderer) alertList(src *Source, lang string, markup Markup) (*AlertLis
 			if err != nil {
 				return nil, &Failure{Template: TemplateLine, Error: sandboxError(err)}
 			}
-			line.Text, line.Markup = out, markup
+			line.Text, line.Markup = Neutralize(out), markup
 		} else {
 			line.Text = defaultLine(a, differing)
 		}
@@ -183,7 +209,7 @@ func defaultLine(a SourceAlert, differing []string) string {
 	var parts []string
 	for _, name := range differing {
 		if v, ok := a.Labels[name]; ok {
-			parts = append(parts, name+": "+Value(v))
+			parts = append(parts, Value(name)+": "+Value(v))
 		}
 	}
 	if len(parts) == 0 {
@@ -231,7 +257,7 @@ func distinct(alerts []SourceAlert, labels []string) []Distinct {
 			}
 		}
 		values := slices.SortedFunc(maps.Keys(seen), naturalCompare)
-		d := Distinct{Label: n}
+		d := Distinct{Label: Value(n)}
 		if len(values) > AlertsListed {
 			d.More, values = len(values)-AlertsListed, values[:AlertsListed]
 		}
