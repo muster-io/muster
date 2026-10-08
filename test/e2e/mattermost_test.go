@@ -22,6 +22,7 @@ import (
 	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
+	"github.com/muster-io/muster/internal/mattermost"
 )
 
 // mm drives one Muster replica and the fake Alertmanager and Mattermost servers of a harness: an Admin's Personal
@@ -425,14 +426,21 @@ func (e *mm) press(postID, actionID, userID string) fakemattermost.PressResult {
 }
 
 // callback sends a button press to the callback handler directly, as Mattermost does, and checks the answer that
-// every callback gets: 200 with {}.
-func (e *mm) callback(method, connection, body string) {
+// every callback gets: 200 with want, the JSON answer.
+func (e *mm) callback(method, connection, body, want string) {
 	e.t.Helper()
 	a := call(e.t, method, e.r.Ingest+"/api/v1/callbacks/mattermost/"+connection, body)
-	if a.status != http.StatusOK || strings.TrimSpace(string(a.body)) != "{}" ||
+	if a.status != http.StatusOK || strings.TrimSpace(string(a.body)) != want ||
 		!strings.HasPrefix(a.header.Get("Content-Type"), "application/json") {
-		e.t.Errorf("%s callback %s = %d %q %s", method, body, a.status, a.header.Get("Content-Type"), a.body)
+		e.t.Errorf("%s callback %s = %d %q %s, want %s", method, body, a.status, a.header.Get("Content-Type"), a.body,
+			want)
 	}
+}
+
+// pressAnswer is the JSON answer to a press that shows text to the person who pressed.
+func pressAnswer(text string) string {
+	b, _ := json.Marshal(map[string]any{"ephemeral_text": text, "skip_slack_parsing": true})
+	return string(b)
 }
 
 func actionNames(a mmAttachment) []string {
@@ -548,19 +556,37 @@ func TestMattermost(t *testing.T) {
 	}
 	notified := len(e.notifications())
 
-	// C-13.AC-4, AC-14: a press from an account without an Account link.
+	// C-13.AC-4, AC-14 (D284): a press from an account without an Account link. The bot, which has the role Member,
+	// first tries an ephemeral post, which the server refuses with 403 (F-063), then answers with ephemeral_text, which
+	// the server shows to that person alone, from System, in the Thread of the post (F-025, F-062).
+	notLinked := "Your Mattermost account is not linked to Muster. Link it in your profile: " + devmode.PublicURL +
+		"/profile"
 	if res := e.press(root.ID, "ack", fakemattermost.AliceUserID); res.Status != http.StatusOK ||
-		string(res.Answer) != "{}" || res.PersonStatus != http.StatusOK {
+		string(res.Answer) != pressAnswer(notLinked) || res.PersonStatus != http.StatusOK {
 		t.Errorf("unlinked press = %+v %s", res, res.Answer)
 	}
 	eph := e.ephemeral()
-	if len(eph) != 1 || eph[0].UserID != fakemattermost.AliceUserID || eph[0].RootID != "" ||
-		eph[0].ChannelID != fakemattermost.ChannelAlerts || eph[0].Message != "Your Mattermost account is not linked to "+
-		"Muster. Link it in your profile: "+devmode.PublicURL+"/profile" {
+	if len(eph) != 1 || eph[0].UserID != fakemattermost.AliceUserID || eph[0].RootID != root.ID ||
+		eph[0].From != "System" || eph[0].ChannelID != fakemattermost.ChannelAlerts || eph[0].Message != notLinked {
 		t.Errorf("ephemeral posts %+v", eph)
 	}
+	if calls := e.calls(http.MethodPost, "/api/v4/posts/ephemeral"); len(calls) != 1 ||
+		calls[0].Status != http.StatusForbidden {
+		t.Errorf("ephemeral post calls %+v", calls)
+	}
+	// With the system admin role, the ephemeral post is made, shows in the channel view, and the answer is empty.
+	e.fake(http.MethodPut, e.fmm+"/config", `{"bot_system_admin":true}`)
+	if res := e.press(root.ID, "ack", fakemattermost.AliceUserID); string(res.Answer) != "{}" {
+		t.Errorf("unlinked press with an admin bot = %+v %s", res, res.Answer)
+	}
+	if eph := e.ephemeral(); len(eph) != 2 || eph[1].UserID != fakemattermost.AliceUserID || eph[1].RootID != "" ||
+		eph[1].From != fakemattermost.BotUsername || eph[1].ShownIn != fakemattermost.ShownInChannel ||
+		eph[1].Message != notLinked {
+		t.Errorf("ephemeral posts with an admin bot %+v", eph)
+	}
+	e.fake(http.MethodPut, e.fmm+"/config", `{"bot_system_admin":false}`)
 	if s := e.alertGroup(g)["status"]; s != "firing" {
-		t.Errorf("status after the unlinked press = %v", s)
+		t.Errorf("status after the unlinked presses = %v", s)
 	}
 
 	// C-13.FR-4, C-10.FR-3, FR-6: a press from Bob, a linked Responder, as Bob with the Transport mattermost; the
@@ -581,7 +607,7 @@ func TestMattermost(t *testing.T) {
 		t.Errorf("acknowledged by %+v", first.Actor)
 	}
 	eventually(t, "the edit after the press", func() bool { return len(e.calls(http.MethodPut, patch)) > patches })
-	if len(e.ephemeral()) != 1 {
+	if len(e.ephemeral()) != 2 {
 		t.Errorf("a successful press got an ephemeral answer: %+v", e.ephemeral())
 	}
 	before := time.Now()
@@ -600,9 +626,12 @@ func TestMattermost(t *testing.T) {
 	if s := e.alertGroup(g)["status"]; s != "acknowledged" {
 		e.command(g, "acknowledge")
 	}
-	if presses := call(t, http.MethodGet, e.fmm+"/presses", ""); !strings.Contains(string(presses.body), `"answer":{}`) ||
-		strings.Contains(string(presses.body), "ephemeral_text") || strings.Contains(string(presses.body), `"update"`) {
-		t.Errorf("press answers %s", presses.body)
+	var presses []fakemattermost.Press
+	decode(t, call(t, http.MethodGet, e.fmm+"/presses", ""), &presses)
+	for i, p := range presses {
+		if want := map[bool]string{true: pressAnswer(notLinked), false: "{}"}[i == 0]; string(p.Answer) != want {
+			t.Errorf("press %d answer %s, want %s", i, p.Answer, want)
+		}
 	}
 
 	// C-13.AC-2: a changed action id, an unknown Connection, a body that is not JSON, a GET.
@@ -618,19 +647,14 @@ func TestMattermost(t *testing.T) {
 		return string(b)
 	}
 	status := e.alertGroup(g)["status"]
-	e.callback(http.MethodPost, conn, press(root.ID, map[string]string{"action": tampered, "key_id": ctx["key_id"]}))
 	notVerified := "This button could not be verified; nothing was changed."
-	if eph := e.ephemeral(); len(eph) != 2 || eph[1].Message != notVerified || eph[1].UserID != fakemattermost.BobUserID {
-		t.Errorf("ephemeral posts after a changed action id %+v", eph)
-	}
+	e.callback(http.MethodPost, conn, press(root.ID, map[string]string{"action": tampered, "key_id": ctx["key_id"]}),
+		pressAnswer(notVerified))
 	e.callback(http.MethodPost, "CN000000000000", `{"user_id":"u-bob","channel_id":"x","post_id":"y",
-		"context":{"action":"z","key_id":"k"}}`)
-	e.callback(http.MethodPost, conn, "not json")
-	e.callback(http.MethodPost, conn, `{"user_id":"u-bob"}`)
-	e.callback(http.MethodGet, conn, "")
-	if eph := e.ephemeral(); len(eph) != 2 {
-		t.Errorf("%d ephemeral posts after the callbacks that name nothing", len(eph))
-	}
+		"context":{"action":"z","key_id":"k"}}`, "{}")
+	e.callback(http.MethodPost, conn, "not json", "{}")
+	e.callback(http.MethodPost, conn, `{"user_id":"u-bob"}`, "{}")
+	e.callback(http.MethodGet, conn, "", "{}")
 
 	// C-13.AC-11: the signed action id of the first Alert Group with the post_id of a second one.
 	e.alert("d1", "c2", `{"team":"db","cluster":"c2"}`, "")
@@ -638,9 +662,14 @@ func TestMattermost(t *testing.T) {
 	g2 := e.groupOf("c2")
 	root2 := e.root(e.number(g2))
 	entries, entries2 := len(e.timeline(g, "")), len(e.timeline(g2, ""))
-	e.callback(http.MethodPost, conn, press(root2.ID, ctx))
-	if eph := e.ephemeral(); len(eph) != 3 || eph[2].Message != notVerified {
-		t.Errorf("ephemeral posts after a press on another post %+v", eph)
+	e.callback(http.MethodPost, conn, press(root2.ID, ctx), pressAnswer(notVerified))
+	var statuses []int
+	for _, c := range e.calls(http.MethodPost, "/api/v4/posts/ephemeral") {
+		statuses = append(statuses, c.Status)
+	}
+	if !slices.Equal(statuses, []int{http.StatusForbidden, http.StatusCreated, http.StatusForbidden,
+		http.StatusForbidden}) {
+		t.Errorf("ephemeral post calls %v", statuses)
 	}
 	if e.alertGroup(g)["status"] != status || e.alertGroup(g2)["status"] != "firing" ||
 		len(e.timeline(g, "")) != entries || len(e.timeline(g2, "")) != entries2 {
@@ -795,9 +824,11 @@ func TestMattermost(t *testing.T) {
 		t.Errorf("first route %v", first)
 	}
 
-	// C-02.FR-14: one line per Mattermost Connection and Destination.
+	// C-02.FR-14: one line per Mattermost Connection and Destination; a bot that may not make ephemeral posts is a
+	// WARN with the hint that press answers show in the Thread (D284).
 	code, out := h.runCLIStdout(t, "doctor")
-	for _, want := range []string{"OK   connection " + devmode.ConnectionName + ": ok", "OK   connection mm: ok",
+	hint := "WARN connection %s: " + mattermost.HintPressAnswersInThread
+	for _, want := range []string{fmt.Sprintf(hint, devmode.ConnectionName), fmt.Sprintf(hint, "mm"),
 		"OK   destination alerts: ok"} {
 		if !strings.Contains(out, want+"\n") {
 			t.Errorf("doctor (exit %d) has no line %q:\n%s", code, want, out)

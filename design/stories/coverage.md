@@ -490,7 +490,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-13.FR-1 | S-039 (part), S-040 (part) | complete |  |
-| C-13.FR-2 | S-039 (part), S-040 (part), S-064 (part) | complete |  |
+| C-13.FR-2 | S-039 (part), S-040 (part), S-061 (part), S-064 (part) | complete | the warning `press_answers_in_thread` in S-061, shown on the Connection page in S-040 |
 | C-13.FR-3 | S-039 (part), S-061 (part) | complete |  |
 | C-13.FR-4 | S-061 (part), S-049 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminders of S-049 |
 | C-13.FR-5 | S-061 | complete |  |
@@ -517,6 +517,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-13.AC-13 | S-061 | complete |  |
 | C-13.AC-14 | S-061 | complete |  |
 | C-13.AC-15 | S-061 | complete |  |
+| C-13.AC-16 | S-061 (part), S-040 (part) | complete | the warning in the API and `muster doctor` in S-061; on the Connection page in S-040 |
 
 ## C-14
 

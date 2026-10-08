@@ -166,14 +166,18 @@ func (s *Server) DeleteConnection(ctx context.Context, req gen.DeleteConnectionR
 }
 
 // CheckConnection is checkConnection (C-13.FR-2) on the interactive path: the token step with its latency and path,
-// and the bot's name once the token works.
+// the bot's name once the token works, and the warnings that do not fail the check.
 func (s *Server) CheckConnection(ctx context.Context, req gen.CheckConnectionRequestObject) (
 	gen.CheckConnectionResponseObject, error) {
 	res, err := s.connections.Check(ctx, req.ConnectionId)
 	if err != nil {
 		return nil, err
 	}
-	out := gen.CheckConnection200JSONResponse{Ok: res.OK, Steps: make([]gen.ConnectionCheckStep, 0, len(res.Steps))}
+	out := gen.CheckConnection200JSONResponse{Ok: res.OK, Steps: make([]gen.ConnectionCheckStep, 0, len(res.Steps)),
+		Warnings: make([]gen.ConnectionCheckResultWarnings, 0, len(res.Warnings))}
+	for _, w := range res.Warnings {
+		out.Warnings = append(out.Warnings, gen.ConnectionCheckResultWarnings(w))
+	}
 	for _, st := range res.Steps {
 		via := gen.ConnectionPath(st.Via)
 		step := gen.ConnectionCheckStep{Name: gen.ConnectionCheckStepName(st.Name), Ok: st.OK, Via: &via}

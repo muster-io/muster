@@ -5,7 +5,7 @@ capability: C-13
 kind: fe
 layer: L1
 depends_on: [S-038, S-061]
-covers: [C-13.FR-1, C-13.FR-2, C-13.FR-13]
+covers: [C-13.FR-1, C-13.FR-2, C-13.FR-13, C-13.AC-16]
 files_touched:
   - web/src/routes/connections.index.tsx
   - web/src/routes/connections.new.tsx
@@ -26,6 +26,7 @@ files_touched:
 acceptance:
   - "[C-13.FR-1, C-13.FR-13] Connections lists the Connections with type, name and the number of Destinations; the Mattermost form takes the name, server URL, bot token (write-only: \"Set\" with the time of the last change, \"Replace\"), the proxy form and the limiter, and the page shows the callback address with the hint \"Mattermost calls {callback address} when someone presses a button. If that address is internal, add its host to AllowedUntrustedInternalConnections in the Mattermost server settings; otherwise presses fail with 'Action integration error'. A test message to a Destination checks it.\""
   - "[C-13.FR-2] \"Check connection\" shows \"Connected as muster-dev-bot\" with the latency and the path (direct or through the proxy), or the failing step's message; deleting a Connection that one Destination uses shows \"This Connection is used by 1 Destination. Delete it first.\""
+  - "[C-13.AC-16, C-13.FR-2] When the check returns the warning `press_answers_in_thread` (the fake's bot is not a system admin by default), \"Check connection\" shows, besides the result, the hint \"The bot may not make ephemeral posts, so answers to button presses show in the post's Thread. Give the bot the create_post_ephemeral permission, for example the system admin role, to show them in the channel.\"; with `bot_system_admin` on the fake there is no hint."
   - "[C-13.FR-1] The navigation lists \"Connections\" with `connections:read`; the Audit log names the changed fields of a Connection and shows a replaced bot token as a changed secret, never its value."
   - "[C-13.FR-1] Without `connections:write` the Connection pages are read-only: no \"Create connection\", \"Save\", \"Check connection\" or \"Delete\"."
 verify: "make ci e2e"

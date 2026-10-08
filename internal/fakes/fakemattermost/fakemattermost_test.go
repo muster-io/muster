@@ -417,8 +417,42 @@ func TestFacts(t *testing.T) {
 		}
 	})
 
+	t.Run("F-064", func(t *testing.T) {
+		fx := start(t)
+		got := decode[[]fakemattermost.Role](t, fx.api(http.MethodPost, "/api/v4/roles/names",
+			`["system_user","system_admin","nobody"]`))
+		if len(got) != 2 || got[0].Name != "system_user" || slices.Contains(got[0].Permissions, "create_post_ephemeral") ||
+			got[1].Name != "system_admin" || !slices.Contains(got[1].Permissions, "create_post_ephemeral") {
+			t.Errorf("roles %+v", got)
+		}
+		wantAppError(t, fx.api(http.MethodPost, "/api/v4/roles/names", `[]`), http.StatusBadRequest,
+			"api.context.invalid_body_param.app_error")
+	})
+
+	t.Run("F-063", func(t *testing.T) {
+		fx := start(t)
+		if me := decode[fakemattermost.User](t, fx.api(http.MethodGet, "/api/v4/users/me", "")); me.Roles !=
+			"system_user" {
+			t.Errorf("the bot's roles %q", me.Roles)
+		}
+		wantAppError(t, fx.api(http.MethodPost, "/api/v4/posts/ephemeral",
+			`{"user_id":"u-alice","post":{"channel_id":"ch-alerts","message":"Only you"}}`),
+			http.StatusForbidden, "api.context.permissions.app_error")
+		wantAppError(t, fx.api(http.MethodPost, "/api/v4/posts/ephemeral",
+			`{"user_id":"u-alice","post":{"channel_id":"ch-gone","message":"x"}}`),
+			http.StatusForbidden, "api.context.permissions.app_error")
+		if e := fx.fake.Ephemeral(); len(e) != 0 {
+			t.Errorf("ephemeral posts %+v", e)
+		}
+	})
+
 	t.Run("F-026", func(t *testing.T) {
 		fx := start(t)
+		fx.control(http.MethodPut, "/_fake/config", `{"bot_system_admin":true}`)
+		if me := decode[fakemattermost.User](t, fx.api(http.MethodGet, "/api/v4/users/me", "")); me.Roles !=
+			"system_admin system_user" {
+			t.Errorf("the admin bot's roles %q", me.Roles)
+		}
 		root := fx.post(fakemattermost.ChannelAlerts, "root", "", "")
 		r := fx.api(http.MethodPost, "/api/v4/posts/ephemeral",
 			`{"user_id":"u-alice","post":{"channel_id":"ch-alerts","message":"Only you"}}`)

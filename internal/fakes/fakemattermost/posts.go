@@ -369,7 +369,8 @@ func (f *Fake) handleGetPost(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleEphemeral shows a post to one person: in the channel view without a root_id (F-026), only in the Thread with
-// one (F-025).
+// one (F-025). It needs the create_post_ephemeral permission, which only the system admin role has by default: a bot
+// with the role Member gets 403, after the body is read and before the channel is (F-063).
 func (f *Fake) handleEphemeral(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		UserID string `json:"user_id"`
@@ -389,6 +390,10 @@ func (f *Fake) handleEphemeral(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if !f.st.config.BotSystemAdmin {
+		forbidden(w)
+		return
+	}
 	c, ok := f.st.channels[in.Post.ChannelID]
 	if !ok || c.DeleteAt != 0 {
 		unknownChannel(w, in.Post.ChannelID)

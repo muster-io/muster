@@ -12,7 +12,8 @@ In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org`, `MUSTER_IN
 1. In the System Console, under **Integrations → Bot Accounts**, turn on **Enable Bot Account Creation**.
 2. In **Integrations → Bot Accounts**, add a bot, for example `muster`. Give it the role **Member**: Muster needs no
    system admin role and no **post:all** or **post:channels** permission, because it posts only to channels the bot
-   is a member of.
+   is a member of. With the role Member, the answers to button presses show in the Thread of the post; see
+   [Where answers to presses show](#where-answers-to-presses-show).
 3. Copy the bot's access token. Mattermost shows it once.
 4. Add the bot to the team, and to every channel a Destination posts to. A public channel is enough; a private channel
    works the same once the bot is a member.
@@ -55,10 +56,24 @@ Without it, a person who presses a button sees only a generic **Action integrati
 log says why ("address forbidden … in a reserved range and not in AllowedUntrustedInternalConnections"). The test
 message of a Destination presses its own button through the bot and tells you whether the press reached Muster.
 
-Every press is answered `200` with an empty JSON object. Whatever the person must read — that the press was refused,
-that their Mattermost account is not linked to Muster yet, or that the button could not be verified — arrives as a
-message only they can see, in the channel. A press from an account without an Account link changes nothing. A request
-that does not come from a button of a Muster post in one of the Connection's channels gets no answer at all.
+Whatever the person who pressed must read — that the press was refused, that their Mattermost account is not linked
+to Muster yet, or that the button could not be verified — arrives as a message only they can see. A press from an
+account without an Account link changes nothing. A request that does not come from a button of a Muster post in one of
+the Connection's channels gets no answer at all.
+
+### Where answers to presses show
+
+Muster first sends the answer as an ephemeral post, which shows in the channel, marked "(Only visible to you)".
+Mattermost allows that only with the **create_post_ephemeral** permission, which by default only the system admin
+role has. Without it, Mattermost refuses the post, and Muster returns the same text in its answer to the press:
+Mattermost then shows it from **System** in the **Thread** of the post. With collapsed reply threads, Mattermost's
+default, it is not shown in the channel view; the person opens the Thread to read it. Either way the answer is never
+lost.
+
+**Check connection** tells you which applies: when the bot's roles do not grant **create_post_ephemeral**, the check
+passes with a warning that answers will show in the Thread, and `muster doctor` prints the Connection as a `WARN` line.
+To show answers in the channel, give the bot that permission, for example the system admin role. Otherwise keep the
+role Member and let people read the answers in the Thread.
 
 ## Rate limit
 

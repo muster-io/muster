@@ -41,7 +41,9 @@ transaction, through the outbound HTTP client (ADR-0015).
 **Who calls messenger APIs.** Only the delivery worker sends or edits Root messages and Thread replies. Everything else
 a person waits for — answers to button presses (Telegram `answerCallbackQuery`, Mattermost ephemeral messages), the
 bot's messages during account linking (ADR-0013) and Destination test messages — goes through one named interactive
-path that calls the messenger at once, outside the delivery queue, and never touches a Root message or a Thread. A test
+path that calls the messenger at once, outside the delivery queue, and never touches a Root message or a Thread. A
+Mattermost answer whose ephemeral message is refused or fails goes back in the press callback's own answer instead,
+which calls nothing (ADR-0013). A test
 message is a single create request to the chosen Destination; reconciliation never sees it. An architecture lint allows
 messenger send and edit calls only from these two places (ADR-0016).
 

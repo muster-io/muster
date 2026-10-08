@@ -2552,11 +2552,15 @@ paths:
       description: 'Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action
         id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id`
         to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`.
-        Every request is answered with `200` and an empty JSON object, refusals, an unknown or deleted Connection, a bad
-        signature and a body that is not JSON or does not match `MattermostActionRequest` included, so the endpoint tells
-        a caller nothing about which Connection ids exist; request validation does not answer `400` here. The answer never
-        carries `update` (only the delivery worker edits the Root message) or `ephemeral_text` (Mattermost would show it
-        only inside the Thread); whatever the person who pressed must read is sent as a separate ephemeral post.'
+        Every request is answered with `200` and a JSON object, an unknown or deleted Connection, a bad signature and a
+        body that is not JSON or does not match `MattermostActionRequest` included; request validation does not answer
+        `400` here. Whatever the person who pressed must read — a refusal, a failure, "not linked", or "not verified" for
+        a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel
+        view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot
+        with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as
+        `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the pressed post and which needs
+        no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which
+        Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.'
       x-permission: none
       x-listener: ingest
       servers:
@@ -2577,7 +2581,8 @@ paths:
               $ref: '#/components/schemas/MattermostActionRequest'
       responses:
         '200':
-          description: Handled; the body is always an empty JSON object.
+          description: Handled; the body is an empty JSON object, or carries `ephemeral_text` when the ephemeral post of
+            the answer was not made.
           content:
             application/json:
               schema:
@@ -11284,6 +11289,7 @@ components:
       required:
       - ok
       - steps
+      - warnings
       properties:
         ok:
           type: boolean
@@ -11291,6 +11297,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ConnectionCheckStep'
+        warnings:
+          type: array
+          description: 'Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot''s roles do not
+            grant `create_post_ephemeral`, so the answers to button presses show in the Thread of the post instead of
+            the channel view; granting that permission, for example with the system admin role, shows them in the
+            channel.'
+          items:
+            type: string
+            enum:
+            - press_answers_in_thread
         bot_name:
           type:
           - string
@@ -12666,9 +12682,17 @@ components:
       additionalProperties: true
     MattermostActionAnswer:
       type: object
-      description: Always empty. Refusals and failures reach the person who pressed as a separate ephemeral post, not
-        through this answer.
-      maxProperties: 0
+      description: Empty, or the text for the person who pressed when its ephemeral post was refused or failed. Never
+        `update`.
+      properties:
+        ephemeral_text:
+          type: string
+          description: Shown by Mattermost to the person who pressed alone, from System, in the Thread of the pressed
+            post.
+        skip_slack_parsing:
+          type: boolean
+          description: Always `true` with `ephemeral_text`, so that the text is shown as it is.
+      additionalProperties: false
     TelegramUpdate:
       type: object
       description: A Bot API Update. Muster requests only the update types it needs and ignores unknown fields.

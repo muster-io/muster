@@ -79,8 +79,8 @@ issue: 47
   notification did not come → `error` "The button press did not reach Muster. Add the host of {MUSTER_INGEST_URL} to
   ServiceSettings.AllowedUntrustedInternalConnections on the Mattermost server." with the class `unknown`.
 - **Presses by people** (C-16.FR-3): a test action id pressed by anyone else gets "This is a test message; nothing was
-  changed" — an ephemeral post in Mattermost (S-061's path), the `answerCallbackQuery` text in Telegram (S-042's path) —
-  and changes nothing.
+  changed" — an ephemeral post in Mattermost, or the answer's `ephemeral_text` when that post is refused (S-061's
+  path), the `answerCallbackQuery` text in Telegram (S-042's path) — and changes nothing.
 - **Outgoing webhook test** (C-16.FR-1, C-15.FR-2; `internal/webhooks/testevent.go`): events mode — one `test` event
   (`version` 1, `event` `test`, `test: true`, `sequence` 0, `notify` false, `mentions` `[]`, the source as
   `alert_group` and `alerts`), signed like every request, with a new `webhook-id`, never queued; template mode — the

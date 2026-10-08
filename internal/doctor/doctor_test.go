@@ -473,16 +473,16 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 
 const doctorToken = "doctor-bot-token-0123456789"
 
-// TestMessengerChecks is C-02.FR-14: one line per Mattermost Connection and per Mattermost Destination, ok or the
-// message of the step that failed, made in the background class; a failure fails the doctor, and the bot token is
-// never printed.
+// TestMessengerChecks is C-02.FR-14: one line per Mattermost Connection and per Mattermost Destination, ok, the
+// message of the step that failed or, as a WARN that fails nothing, the hint that the bot may not make ephemeral posts
+// (D284), made in the background class; a failure fails the doctor, and the bot token is never printed.
 func TestMessengerChecks(t *testing.T) {
 	key, _ := keys('a')
 	d := messengerDB(t, key)
 	background := metrics.ClientRequests.With(string(outbound.ClassBackground), string(outbound.OutcomeOK))
 	before := background.Get()
 	out, ok := run(t, d, environ(key))
-	want := "OK   connection Dev Mattermost: ok\n" +
+	want := "WARN connection Dev Mattermost: " + mattermost.HintPressAnswersInThread + "\n" +
 		"OK   destination alerts: ok\n" +
 		"FAIL destination no-bot: " + mattermost.MessageNotMember + "\n"
 	if ok || !strings.HasSuffix(out, want) || strings.Count(out, "\n") != 11 || strings.Contains(out, doctorToken) {

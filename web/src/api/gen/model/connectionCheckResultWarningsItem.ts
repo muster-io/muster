@@ -17,24 +17,10 @@
  * During 0.x breaking changes are allowed; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
  * OpenAPI spec version: 0.1.0
  */
-import type { ConnectionCheckResultWarningsItem } from './connectionCheckResultWarningsItem';
-import type { ConnectionCheckStep } from './connectionCheckStep';
 
-export interface ConnectionCheckResult {
-  ok: boolean;
-  steps: ConnectionCheckStep[];
-  /** Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the answers to button presses show in the Thread of the post instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel. */
-  warnings: ConnectionCheckResultWarningsItem[];
-  /**
-     * The bot's name or username.
-     * @nullable
-     */
-  bot_name?: string | null;
-  /**
-     * Telegram only. A set webhook makes long polling fail with 409.
-     * @nullable
-     */
-  webhook_set?: boolean | null;
-  /** @nullable */
-  pending_updates?: number | null;
-}
+export type ConnectionCheckResultWarningsItem = typeof ConnectionCheckResultWarningsItem[keyof typeof ConnectionCheckResultWarningsItem];
+
+
+export const ConnectionCheckResultWarningsItem = {
+  press_answers_in_thread: 'press_answers_in_thread',
+} as const;

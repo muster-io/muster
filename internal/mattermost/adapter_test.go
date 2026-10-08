@@ -455,10 +455,17 @@ func TestTargetErrors(t *testing.T) {
 }
 
 // TestEphemeralPost is the private answer of a press (C-13.FR-4, F-026): a post shown to one person in the channel
-// view without a root_id, and in the Thread with one.
+// view without a root_id, and in the Thread with one, for a bot with the system admin role; a bot with the role Member
+// is refused with 403 (F-063).
 func TestEphemeralPost(t *testing.T) {
 	e := newAdapter(t)
 	ctx := t.Context()
+	if r := e.client.EphemeralPost(ctx, outbound.ClassInteractive, fakemattermost.AliceUserID,
+		fakemattermost.ChannelAlerts, "", "Not linked"); r.Status != http.StatusForbidden ||
+		r.ErrorID != "api.context.permissions.app_error" || r.Outcome.Kind != delivery.OutcomeFatal {
+		t.Fatalf("ephemeral from a Member bot = %+v", r)
+	}
+	e.fake.SetBotSystemAdmin(true)
 	if r := e.client.EphemeralPost(ctx, outbound.ClassInteractive, fakemattermost.AliceUserID,
 		fakemattermost.ChannelAlerts, "", "Not linked"); !r.OK() {
 		t.Fatalf("ephemeral = %+v", r)

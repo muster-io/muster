@@ -55,7 +55,7 @@ acceptance:
   - "[C-17.FR-5, C-17.AC-5] With auto-unacknowledge on and no answer to the Reminders at hours 4 and 12, there is no Reminder at hour 28; the Alert Group is firing without an Owner, the Timeline has `auto_unacknowledged` with the reason \"No answer to the last two Reminders\", `loudness` `loud` and `mentions` `[owner]`, the Destinations get a Thread reply mentioning the previous Owner, and the next ack timeout notice comes 15 minutes later; with a Note by the Owner at hour 5 the Reminder at hour 28 is sent."
   - "[C-17.FR-5] A Reminder that reached no Destination does not count as unanswered."
   - "[C-17.FR-10, C-10.FR-16, C-04.FR-2] `answerReminder` by the Owner while a Reminder waits records `reminder_answered` (Quiet) and does not move the next Reminder; it is refused with `409` `not_owner` for another user, `no_reminder_pending` without a waiting Reminder and `owner_must_be_user` for a Service account token, and `allowed_commands` offers `still_on_it` only to the Owner while a Reminder waits."
-  - "[C-17.AC-7, C-13.FR-4, C-14.FR-4] Reminder Thread replies carry \"Still on it\" and \"Unack\" in the fake Mattermost and Telegram servers; a press on them runs the command as the linked User, and in Mattermost every private answer to it — a refusal, or \"Done: Still on it\" — is an ephemeral post whose `root_id` is the Root message."
+  - "[C-17.AC-7, C-13.FR-4, C-14.FR-4] Reminder Thread replies carry \"Still on it\" and \"Unack\" in the fake Mattermost and Telegram servers; a press on them runs the command as the linked User, and in Mattermost every private answer to it — a refusal, or \"Done: Still on it\" — is an ephemeral post whose `root_id` is the Root message, made by the bot when it may and otherwise from the answer's `ephemeral_text` (S-061, D284)."
   - "[C-17.FR-6] A press on a Reminder button whose key is not in the Keyring is answered privately with \"This button has expired; use the buttons on the Alert Group's message\" and changes nothing."
   - "[C-17.AC-8] An Unclaimed Alert Group stops being Unclaimed — `unclaimed: false` and the mark gone from the Root message — when it is acknowledged, snoozed or resolved; after Unacknowledge it is not Unclaimed again until the third notice of the new ack timeout."
   - "[C-17.FR-7, C-02.FR-12] Overdue notices of one Alert Group, such as after downtime, collapse into one Loud Thread reply and one `notices_missed` entry with `missed_count`."
@@ -178,9 +178,10 @@ issue: 49
   holding the text and the two buttons (same `integration` URL and `context` as on Root messages; the Owner's Mention
   stays in `message`). A press on a reply is bound to it: `post_id` must be the `message_id` of a `reminder` reply of
   that Alert Group to a Destination of this Connection, and `channel_id` that Destination's channel. Every private
-  answer to a press on a reply goes as an ephemeral post with the Root message as `root_id` (F-055); a successful
-  "Still on it" gets "Done: Still on it", since nothing else shows the answer; other successful presses get nothing,
-  as in S-061.
+  answer to a press on a reply goes as an ephemeral post with the Root message as `root_id` (F-055), or as the
+  answer's `ephemeral_text`, which the server shows in the same Thread, when that post is refused or fails (S-061,
+  D284); a successful "Still on it" gets "Done: Still on it", since nothing else shows the answer; other successful
+  presses get nothing, as in S-061.
 - **Telegram** (C-14.FR-4; `layout.go`, `presses.go`): a Reminder reply in the discussion group carries an inline
   keyboard with "Still on it" and "Unack" on one row; a press on it must come from that reply's chat and
   `message_id`; `answerCallbackQuery` answers "Done: Still on it", "Done: Unack", the refusal or the expiry text.

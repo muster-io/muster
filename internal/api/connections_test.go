@@ -365,13 +365,14 @@ func TestCheckConnectionAPI(t *testing.T) {
 	x, fc := newConnectionsAPI(t)
 	path := "/api/v1/connections/" + connectionID + "/checks"
 	fc.check = connections.CheckResult{OK: true, BotName: "muster-dev-bot", Steps: []connections.Step{{
-		Name: connections.StepToken, OK: true, Latency: 7 * time.Millisecond, Via: mattermost.ViaDirect}}}
+		Name: connections.StepToken, OK: true, Latency: 7 * time.Millisecond, Via: mattermost.ViaDirect}},
+		Warnings: []string{connections.WarningPressAnswersInThread}}
 	a := x.as(t, connectionsWriter, http.MethodPost, path, "")
 	var res gen.ConnectionCheckResult
 	decodeInto(t, a, &res)
 	if a.status != http.StatusOK || !res.Ok || res.BotName.MustGet() != "muster-dev-bot" || len(res.Steps) != 1 ||
 		res.Steps[0].Name != "token" || res.Steps[0].LatencyMs.MustGet() != 7 || *res.Steps[0].Via != "direct" ||
-		!res.Steps[0].Message.IsNull() {
+		!res.Steps[0].Message.IsNull() || len(res.Warnings) != 1 || res.Warnings[0] != gen.PressAnswersInThread {
 		t.Errorf("check = %d %s", a.status, a.body)
 	}
 	fc.check = connections.CheckResult{Steps: []connections.Step{{Name: connections.StepToken,
@@ -379,7 +380,8 @@ func TestCheckConnectionAPI(t *testing.T) {
 	a = x.as(t, connectionsWriter, http.MethodPost, path, "")
 	decodeInto(t, a, &res)
 	if a.status != http.StatusOK || res.Ok || !res.BotName.IsNull() || *res.Steps[0].Via != "proxy" ||
-		res.Steps[0].Message.MustGet() != "The bot token is not valid." {
+		res.Steps[0].Message.MustGet() != "The bot token is not valid." || !strings.Contains(string(a.body),
+		`"warnings":[]`) {
 		t.Errorf("revoked = %d %s", a.status, a.body)
 	}
 	fc.err = &delivery.LimitedError{RetryAfter: 1500 * time.Millisecond}

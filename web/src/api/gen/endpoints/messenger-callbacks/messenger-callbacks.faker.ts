@@ -17,10 +17,14 @@
  * During 0.x breaking changes are allowed; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
  * OpenAPI spec version: 0.1.0
  */
+import {
+  faker
+} from '@faker-js/faker';
+
 import type {
   MattermostActionAnswer
 } from '../../model';
 
 
-export const getMattermostActionResponseMock = (): MattermostActionAnswer => ({})
+export const getMattermostActionResponseMock = (overrideResponse: Partial<Extract<MattermostActionAnswer, object>> = {}): MattermostActionAnswer => ({ephemeral_text: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), skip_slack_parsing: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), ...overrideResponse})
 
