@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The Route editor (C-08.FR-1, FR-2, FR-4, FR-5): the name, the description, the Matchers (none for the Default
-// route), the urgent mark, the Group key with its preview, the Lifecycle section (C-09.FR-4, FR-5, FR-9) and the
-// Snooze durations (C-10.FR-6). The other
-// fields of a Route — its Destinations and the policy fields of later capabilities — are not shown yet: they travel
-// unchanged from the profile of a new Route, or from the stored Route, with every save. Without routes:write the
-// editor only shows the Route.
+// The Route editor (C-08.FR-1, FR-2, FR-4, FR-5): the name, the description, the Matchers (none for the Default route),
+// the urgent mark, the Group key with its preview, the Lifecycle section (C-09.FR-4, FR-5, FR-9), the Snooze durations
+// (C-10.FR-6) and the Message section (C-12.FR-2, FR-3, FR-5), with the banner of a template that keeps failing
+// (C-12.FR-6). The other fields of a Route — its Destinations and the policy fields of later capabilities — are not
+// shown yet: they travel unchanged from the profile of a new Route, or from the stored Route, with every save. Without
+// routes:write the editor only shows the Route.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
@@ -16,7 +16,7 @@ import { Controller, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import type { Route, RouteInput } from "../api/gen/model";
+import type { ProblemError, Route, RouteInput } from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
 import { GroupKeyEditor } from "./group-key-editor";
 import { GroupKeyPreviewPanel, type PreviewQuery } from "./group-key-preview";
@@ -39,11 +39,21 @@ import {
   withLifecycle,
 } from "./route-policy-lifecycle";
 import {
+  LANGUAGE_POINTER,
+  MESSAGE_TEMPLATES,
+  type MessageTemplate,
+  RoutePolicyMessage,
+  messageValues,
+  templateOfPointer,
+  withMessage,
+} from "./route-policy-message";
+import {
   RoutePolicySnooze,
   RoutePolicySnoozeReadOnly,
   SNOOZE_POINTER,
   sortedDurations,
 } from "./route-policy-snooze";
+import { TemplateErrorBanner } from "./template-error-banner";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -69,6 +79,14 @@ const formSchema = z
     ),
     group_key: z.array(z.string()),
     snooze_durations: z.array(z.number().int().min(1)),
+    message: z.object({
+      language: z.enum(["en", "ru"]),
+      templates: z.object({
+        root_message: z.string().nullable(),
+        line: z.string().nullable(),
+        ack_timeout_notice: z.string().nullable(),
+      }),
+    }),
     ...lifecycleSchema,
   })
   .superRefine((v, ctx) => {
@@ -89,6 +107,7 @@ function formValues(base: RouteInput): FormValues {
     matchers: matcherRows(base.matchers),
     group_key: [...base.group_key],
     snooze_durations: sortedDurations(base.policy.snooze_durations_seconds),
+    message: messageValues(base.policy),
     ...lifecycleValues(base.policy),
   };
 }
@@ -111,7 +130,10 @@ function inputOf(base: RouteInput, v: FormValues, draft: string, isDefault: bool
     matchers: isDefault ? [] : matchersOf(v.matchers),
     group_key: withDraft(v.group_key, draft),
     destination_ids: [...base.destination_ids],
-    policy: { ...withLifecycle(base.policy, v), snooze_durations_seconds: v.snooze_durations },
+    policy: withMessage(
+      { ...withLifecycle(base.policy, v), snooze_durations_seconds: v.snooze_durations },
+      v.message,
+    ),
   };
 }
 
@@ -193,6 +215,10 @@ export function RouteForm({
   );
   const [serverGroupKeyError, setServerGroupKeyError] = useState<string>();
   const [snoozeError, setSnoozeError] = useState<string>();
+  const [templateErrors, setTemplateErrors] = useState<
+    Partial<Record<MessageTemplate, ProblemError[]>>
+  >({});
+  const [languageError, setLanguageError] = useState<string>();
   const [unmatched, setUnmatched] = useState<string[]>([]);
   // A label name typed in the Group key field: Save and Preview take it as if it had been added.
   const [keyDraft, setKeyDraft] = useState("");
@@ -230,6 +256,8 @@ export function RouteForm({
     onMutate: () => {
       setUnmatched([]);
       setSnoozeError(undefined);
+      setTemplateErrors({});
+      setLanguageError(undefined);
       setServerMatcherErrors(new Map());
       setServerGroupKeyError(undefined);
     },
@@ -243,9 +271,15 @@ export function RouteForm({
       }
       applyFieldProblem(err, sent);
       const rest: string[] = [];
+      const byTemplate: Partial<Record<MessageTemplate, ProblemError[]>> = {};
       for (const item of err.errors ?? []) {
         const lifecycleField = LIFECYCLE_POINTERS[item.pointer];
-        if (item.pointer === "/name") {
+        const template = templateOfPointer(item.pointer);
+        if (template !== undefined) {
+          byTemplate[template] = [...(byTemplate[template] ?? []), item];
+        } else if (item.pointer === LANGUAGE_POINTER) {
+          setLanguageError(item.code);
+        } else if (item.pointer === "/name") {
           form.setError("name", { type: item.code, message: item.code }, { shouldFocus: true });
         } else if (lifecycleField !== undefined) {
           form.setError(
@@ -265,6 +299,11 @@ export function RouteForm({
         }
       }
       setUnmatched(rest);
+      setTemplateErrors(byTemplate);
+      const failed = MESSAGE_TEMPLATES.find((name) => byTemplate[name] !== undefined);
+      if (failed !== undefined && err.errors?.[0]?.pointer.startsWith("/policy/templates/")) {
+        document.getElementById(`${ID}-message-${failed}-editor`)?.focus();
+      }
     },
   });
 
@@ -301,6 +340,7 @@ export function RouteForm({
   if (readOnly) {
     return (
       <div className="flex flex-col gap-6" data-testid="route-read-only">
+        {route?.template_error && <TemplateErrorBanner state={route.template_error} />}
         <p className="text-sm text-muted-foreground">{t("routes.form.readOnly")}</p>
         <ReadOnlyField label={t("routes.fields.name")}>
           <span className="break-words" data-testid="route-name">
@@ -344,6 +384,12 @@ export function RouteForm({
         </div>
         <RoutePolicyLifecycleReadOnly policy={base.policy} />
         <RoutePolicySnoozeReadOnly durations={base.policy.snooze_durations_seconds} />
+        <RoutePolicyMessage
+          id={`${ID}-message`}
+          routeId={route?.id}
+          value={messageValues(base.policy)}
+          readOnly
+        />
         <div>
           <Button type="button" variant="outline" onClick={onCancel}>
             {t("routes.form.back")}
@@ -361,6 +407,7 @@ export function RouteForm({
         submit.mutate({ input: inputOf(base, v, keyDraft, isDefault), sent: sentRows(v.matchers) }),
       )}
     >
+      {route?.template_error && <TemplateErrorBanner state={route.template_error} />}
       <div className="flex flex-col gap-2">
         <Label htmlFor={`${ID}-name`}>{t("routes.fields.name")}</Label>
         <Input
@@ -505,6 +552,35 @@ export function RouteForm({
               field.onChange(next);
             }}
             error={snoozeError}
+          />
+        )}
+      />
+      <Controller
+        control={form.control}
+        name="message"
+        render={({ field }) => (
+          <RoutePolicyMessage
+            id={`${ID}-message`}
+            routeId={route?.id}
+            value={field.value}
+            errors={templateErrors}
+            languageError={languageError}
+            onChange={(next) => {
+              // A template that changes loses the error of the save, which was about its old text.
+              setTemplateErrors((prev) => {
+                const kept = { ...prev };
+                for (const name of MESSAGE_TEMPLATES) {
+                  if (next.templates[name] !== field.value.templates[name]) {
+                    delete kept[name];
+                  }
+                }
+                return kept;
+              });
+              if (next.language !== field.value.language) {
+                setLanguageError(undefined);
+              }
+              field.onChange(next);
+            }}
           />
         )}
       />

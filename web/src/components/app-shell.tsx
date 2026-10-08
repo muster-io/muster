@@ -79,6 +79,8 @@ export type NavLabel =
   | "serviceAccounts"
   | "oidc"
   | "security"
+  | "lookupTables"
+  | "linkRules"
   | "auditLog";
 
 /** The pages register their entries here, in the order of the navigation. */
@@ -92,6 +94,12 @@ export const NAVIGATION: readonly NavEntry[] = [
   { to: "/admin/service-accounts", label: "serviceAccounts", permission: "service-accounts:read" },
   { to: "/admin/oidc", label: "oidc", permission: "oidc:read" },
   { to: "/admin/organization/security", label: "security", permission: "organization:write" },
+  {
+    to: "/admin/organization/lookup-tables",
+    label: "lookupTables",
+    permission: "lookup-tables:read",
+  },
+  { to: "/admin/organization/link-rules", label: "linkRules", permission: "link-rules:read" },
   { to: "/admin/audit-log", label: "auditLog", permission: "audit-log:read" },
 ];
 
@@ -123,6 +131,10 @@ function navLabel(t: (key: string) => string, label: NavLabel): string {
       return t("nav.oidc");
     case "security":
       return t("nav.security");
+    case "lookupTables":
+      return t("nav.lookupTables");
+    case "linkRules":
+      return t("nav.linkRules");
     default:
       return t("nav.auditLog");
   }

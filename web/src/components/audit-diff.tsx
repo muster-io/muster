@@ -130,6 +130,40 @@ function routeField(t: TFunction, pointer: string): string | undefined {
   }
 }
 
+/** The names of the changed fields of a Lookup table. */
+function lookupTableField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/name":
+      return t("lookupTables.fields.name");
+    case "/description":
+      return t("lookupTables.fields.description");
+    case "/columns":
+      return t("lookupTables.fields.columns");
+    case "/entries":
+      return t("lookupTables.fields.rows");
+    default:
+      return undefined;
+  }
+}
+
+/** The names of the changed fields of a Link rule. */
+function linkRuleField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/name":
+      return t("linkRules.fields.name");
+    case "/matchers":
+      return t("linkRules.fields.matchers");
+    case "/scope/type":
+      return t("linkRules.fields.scope");
+    case "/scope/label":
+      return t("linkRules.fields.scopeLabel");
+    case "/url_template":
+      return t("linkRules.fields.urlTemplate");
+    default:
+      return undefined;
+  }
+}
+
 /** The names of the changed fields of the OIDC settings. */
 function oidcField(t: TFunction, pointer: string): string | undefined {
   switch (pointer) {
@@ -200,6 +234,12 @@ export function fieldLabel(
       break;
     case "organization":
       label = pointer === "/totp_required" ? t("audit.fields.totpRequired") : undefined;
+      break;
+    case "lookup_table":
+      label = lookupTableField(t, pointer);
+      break;
+    case "link_rule":
+      label = linkRuleField(t, pointer);
       break;
     default:
       break;

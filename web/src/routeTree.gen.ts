@@ -32,6 +32,12 @@ import { Route as AdminUsersIndexRouteImport } from './routes/admin.users.index'
 import { Route as AdminUsersUserIdRouteImport } from './routes/admin.users.$userId'
 import { Route as IntegrationsIntegrationIdIndexRouteImport } from './routes/integrations.$integrationId.index'
 import { Route as IntegrationsIntegrationIdEditRouteImport } from './routes/integrations.$integrationId.edit'
+import { Route as AdminOrganizationLinkRulesIndexRouteImport } from './routes/admin.organization.link-rules.index'
+import { Route as AdminOrganizationLinkRulesLinkRuleIdRouteImport } from './routes/admin.organization.link-rules.$linkRuleId'
+import { Route as AdminOrganizationLinkRulesNewRouteImport } from './routes/admin.organization.link-rules.new'
+import { Route as AdminOrganizationLookupTablesIndexRouteImport } from './routes/admin.organization.lookup-tables.index'
+import { Route as AdminOrganizationLookupTablesLookupTableIdRouteImport } from './routes/admin.organization.lookup-tables.$lookupTableId'
+import { Route as AdminOrganizationLookupTablesNewRouteImport } from './routes/admin.organization.lookup-tables.new'
 import { Route as IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRouteImport } from './routes/integrations.$integrationId.snapshots.$storedSnapshotId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -154,6 +160,42 @@ const IntegrationsIntegrationIdEditRoute =
     path: '/integrations/$integrationId/edit',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AdminOrganizationLinkRulesIndexRoute =
+  AdminOrganizationLinkRulesIndexRouteImport.update({
+    id: '/admin/organization/link-rules/',
+    path: '/admin/organization/link-rules/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AdminOrganizationLinkRulesLinkRuleIdRoute =
+  AdminOrganizationLinkRulesLinkRuleIdRouteImport.update({
+    id: '/admin/organization/link-rules/$linkRuleId',
+    path: '/admin/organization/link-rules/$linkRuleId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AdminOrganizationLinkRulesNewRoute =
+  AdminOrganizationLinkRulesNewRouteImport.update({
+    id: '/admin/organization/link-rules/new',
+    path: '/admin/organization/link-rules/new',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AdminOrganizationLookupTablesIndexRoute =
+  AdminOrganizationLookupTablesIndexRouteImport.update({
+    id: '/admin/organization/lookup-tables/',
+    path: '/admin/organization/lookup-tables/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AdminOrganizationLookupTablesLookupTableIdRoute =
+  AdminOrganizationLookupTablesLookupTableIdRouteImport.update({
+    id: '/admin/organization/lookup-tables/$lookupTableId',
+    path: '/admin/organization/lookup-tables/$lookupTableId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AdminOrganizationLookupTablesNewRoute =
+  AdminOrganizationLookupTablesNewRouteImport.update({
+    id: '/admin/organization/lookup-tables/new',
+    path: '/admin/organization/lookup-tables/new',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute =
   IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRouteImport.update({
     id: '/integrations/$integrationId/snapshots/$storedSnapshotId',
@@ -185,7 +227,13 @@ export interface FileRoutesByFullPath {
   '/admin/service-accounts/': typeof AdminServiceAccountsIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/integrations/$integrationId/': typeof IntegrationsIntegrationIdIndexRoute
+  '/admin/organization/link-rules/$linkRuleId': typeof AdminOrganizationLinkRulesLinkRuleIdRoute
+  '/admin/organization/link-rules/new': typeof AdminOrganizationLinkRulesNewRoute
+  '/admin/organization/lookup-tables/$lookupTableId': typeof AdminOrganizationLookupTablesLookupTableIdRoute
+  '/admin/organization/lookup-tables/new': typeof AdminOrganizationLookupTablesNewRoute
   '/integrations/$integrationId/snapshots/$storedSnapshotId': typeof IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute
+  '/admin/organization/link-rules/': typeof AdminOrganizationLinkRulesIndexRoute
+  '/admin/organization/lookup-tables/': typeof AdminOrganizationLookupTablesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -211,7 +259,13 @@ export interface FileRoutesByTo {
   '/admin/service-accounts': typeof AdminServiceAccountsIndexRoute
   '/admin/users': typeof AdminUsersIndexRoute
   '/integrations/$integrationId': typeof IntegrationsIntegrationIdIndexRoute
+  '/admin/organization/link-rules/$linkRuleId': typeof AdminOrganizationLinkRulesLinkRuleIdRoute
+  '/admin/organization/link-rules/new': typeof AdminOrganizationLinkRulesNewRoute
+  '/admin/organization/lookup-tables/$lookupTableId': typeof AdminOrganizationLookupTablesLookupTableIdRoute
+  '/admin/organization/lookup-tables/new': typeof AdminOrganizationLookupTablesNewRoute
   '/integrations/$integrationId/snapshots/$storedSnapshotId': typeof IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute
+  '/admin/organization/link-rules': typeof AdminOrganizationLinkRulesIndexRoute
+  '/admin/organization/lookup-tables': typeof AdminOrganizationLookupTablesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -238,7 +292,13 @@ export interface FileRoutesById {
   '/admin/service-accounts/': typeof AdminServiceAccountsIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/integrations/$integrationId/': typeof IntegrationsIntegrationIdIndexRoute
+  '/admin/organization/link-rules/$linkRuleId': typeof AdminOrganizationLinkRulesLinkRuleIdRoute
+  '/admin/organization/link-rules/new': typeof AdminOrganizationLinkRulesNewRoute
+  '/admin/organization/lookup-tables/$lookupTableId': typeof AdminOrganizationLookupTablesLookupTableIdRoute
+  '/admin/organization/lookup-tables/new': typeof AdminOrganizationLookupTablesNewRoute
   '/integrations/$integrationId/snapshots/$storedSnapshotId': typeof IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute
+  '/admin/organization/link-rules/': typeof AdminOrganizationLinkRulesIndexRoute
+  '/admin/organization/lookup-tables/': typeof AdminOrganizationLookupTablesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -266,7 +326,13 @@ export interface FileRouteTypes {
     | '/admin/service-accounts/'
     | '/admin/users/'
     | '/integrations/$integrationId/'
+    | '/admin/organization/link-rules/$linkRuleId'
+    | '/admin/organization/link-rules/new'
+    | '/admin/organization/lookup-tables/$lookupTableId'
+    | '/admin/organization/lookup-tables/new'
     | '/integrations/$integrationId/snapshots/$storedSnapshotId'
+    | '/admin/organization/link-rules/'
+    | '/admin/organization/lookup-tables/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -292,7 +358,13 @@ export interface FileRouteTypes {
     | '/admin/service-accounts'
     | '/admin/users'
     | '/integrations/$integrationId'
+    | '/admin/organization/link-rules/$linkRuleId'
+    | '/admin/organization/link-rules/new'
+    | '/admin/organization/lookup-tables/$lookupTableId'
+    | '/admin/organization/lookup-tables/new'
     | '/integrations/$integrationId/snapshots/$storedSnapshotId'
+    | '/admin/organization/link-rules'
+    | '/admin/organization/lookup-tables'
   id:
     | '__root__'
     | '/'
@@ -318,7 +390,13 @@ export interface FileRouteTypes {
     | '/admin/service-accounts/'
     | '/admin/users/'
     | '/integrations/$integrationId/'
+    | '/admin/organization/link-rules/$linkRuleId'
+    | '/admin/organization/link-rules/new'
+    | '/admin/organization/lookup-tables/$lookupTableId'
+    | '/admin/organization/lookup-tables/new'
     | '/integrations/$integrationId/snapshots/$storedSnapshotId'
+    | '/admin/organization/link-rules/'
+    | '/admin/organization/lookup-tables/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -344,7 +422,13 @@ export interface RootRouteChildren {
   AdminServiceAccountsIndexRoute: typeof AdminServiceAccountsIndexRoute
   AdminUsersIndexRoute: typeof AdminUsersIndexRoute
   IntegrationsIntegrationIdIndexRoute: typeof IntegrationsIntegrationIdIndexRoute
+  AdminOrganizationLinkRulesLinkRuleIdRoute: typeof AdminOrganizationLinkRulesLinkRuleIdRoute
+  AdminOrganizationLinkRulesNewRoute: typeof AdminOrganizationLinkRulesNewRoute
+  AdminOrganizationLookupTablesLookupTableIdRoute: typeof AdminOrganizationLookupTablesLookupTableIdRoute
+  AdminOrganizationLookupTablesNewRoute: typeof AdminOrganizationLookupTablesNewRoute
   IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute: typeof IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute
+  AdminOrganizationLinkRulesIndexRoute: typeof AdminOrganizationLinkRulesIndexRoute
+  AdminOrganizationLookupTablesIndexRoute: typeof AdminOrganizationLookupTablesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -510,6 +594,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IntegrationsIntegrationIdEditRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/organization/link-rules/': {
+      id: '/admin/organization/link-rules/'
+      path: '/admin/organization/link-rules'
+      fullPath: '/admin/organization/link-rules/'
+      preLoaderRoute: typeof AdminOrganizationLinkRulesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/organization/link-rules/$linkRuleId': {
+      id: '/admin/organization/link-rules/$linkRuleId'
+      path: '/admin/organization/link-rules/$linkRuleId'
+      fullPath: '/admin/organization/link-rules/$linkRuleId'
+      preLoaderRoute: typeof AdminOrganizationLinkRulesLinkRuleIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/organization/link-rules/new': {
+      id: '/admin/organization/link-rules/new'
+      path: '/admin/organization/link-rules/new'
+      fullPath: '/admin/organization/link-rules/new'
+      preLoaderRoute: typeof AdminOrganizationLinkRulesNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/organization/lookup-tables/': {
+      id: '/admin/organization/lookup-tables/'
+      path: '/admin/organization/lookup-tables'
+      fullPath: '/admin/organization/lookup-tables/'
+      preLoaderRoute: typeof AdminOrganizationLookupTablesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/organization/lookup-tables/$lookupTableId': {
+      id: '/admin/organization/lookup-tables/$lookupTableId'
+      path: '/admin/organization/lookup-tables/$lookupTableId'
+      fullPath: '/admin/organization/lookup-tables/$lookupTableId'
+      preLoaderRoute: typeof AdminOrganizationLookupTablesLookupTableIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/organization/lookup-tables/new': {
+      id: '/admin/organization/lookup-tables/new'
+      path: '/admin/organization/lookup-tables/new'
+      fullPath: '/admin/organization/lookup-tables/new'
+      preLoaderRoute: typeof AdminOrganizationLookupTablesNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/integrations/$integrationId/snapshots/$storedSnapshotId': {
       id: '/integrations/$integrationId/snapshots/$storedSnapshotId'
       path: '/integrations/$integrationId/snapshots/$storedSnapshotId'
@@ -555,8 +681,17 @@ const rootRouteChildren: RootRouteChildren = {
   AdminServiceAccountsIndexRoute: AdminServiceAccountsIndexRoute,
   AdminUsersIndexRoute: AdminUsersIndexRoute,
   IntegrationsIntegrationIdIndexRoute: IntegrationsIntegrationIdIndexRoute,
+  AdminOrganizationLinkRulesLinkRuleIdRoute:
+    AdminOrganizationLinkRulesLinkRuleIdRoute,
+  AdminOrganizationLinkRulesNewRoute: AdminOrganizationLinkRulesNewRoute,
+  AdminOrganizationLookupTablesLookupTableIdRoute:
+    AdminOrganizationLookupTablesLookupTableIdRoute,
+  AdminOrganizationLookupTablesNewRoute: AdminOrganizationLookupTablesNewRoute,
   IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute:
     IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute,
+  AdminOrganizationLinkRulesIndexRoute: AdminOrganizationLinkRulesIndexRoute,
+  AdminOrganizationLookupTablesIndexRoute:
+    AdminOrganizationLookupTablesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

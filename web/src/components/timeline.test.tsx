@@ -217,6 +217,20 @@ describe("entryText", () => {
       "Moved to the Default route",
     );
     expect(text(system("fallback_template_used"))).toBe("Messages used the fallback template");
+    expect(
+      text(
+        system("fallback_template_used", {
+          detail: 'line template failed: map has no entry for key "pod"',
+        }),
+      ),
+    ).toBe('Fallback template used: Alert line failed — map has no entry for key "pod"');
+    expect(
+      text(
+        system("fallback_template_used", {
+          detail: "root_message template failed: line 4, column 7: <b>x</b>",
+        }),
+      ),
+    ).toBe("Fallback template used: Root message failed — line 4, column 7: <b>x</b>");
     expect(text(system("template_value_missing"))).toBe("A template value was missing");
     expect(text(delivery("publication"))).toBe("Published in ops");
     expect(text(delivery("not_delivered"))).toBe("Not delivered to ops");
@@ -240,6 +254,15 @@ describe("entryText", () => {
     expect(added(5)).toBe("Добавлено 5 алертов");
     expect(added(21)).toBe("Добавлен 21 алерт");
     expect(text(status("reopened"))).toBe("Переоткрыта");
+    expect(
+      text(
+        system("fallback_template_used", {
+          detail: "ack_timeout_notice template failed: boom",
+        }),
+      ),
+    ).toBe(
+      "Использован запасной шаблон: ошибка в шаблоне «Уведомление о тайм-ауте подтверждения» — boom",
+    );
   });
 });
 

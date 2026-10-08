@@ -7,11 +7,11 @@ layer: L1
 depends_on: [S-027, S-030, S-033, S-037]
 covers: [C-12.FR-2, C-12.FR-3, C-12.FR-5, C-12.FR-6, C-12.FR-9, C-12.AC-2, C-12.AC-6, C-09.FR-14, C-08.FR-1]
 files_touched:
-  - web/package.json
   - web/src/components/route-policy-message.tsx
   - web/src/components/template-editor.tsx
   - web/src/components/template-editor.test.tsx
   - web/src/components/template-preview.tsx
+  - web/src/components/template-preview.test.tsx
   - web/src/components/sample-picker.tsx
   - web/src/components/route-form.tsx
   - web/src/components/template-error-banner.tsx
@@ -24,16 +24,17 @@ files_touched:
   - web/src/components/audit-diff.test.tsx
   - web/src/routes/admin.organization.lookup-tables.index.tsx
   - web/src/routes/admin.organization.lookup-tables.$lookupTableId.tsx
+  - web/src/routes/admin.organization.lookup-tables.new.tsx
   - web/src/components/lookup-table-editor.tsx
   - web/src/components/lookup-table-editor.test.tsx
   - web/src/routes/admin.organization.link-rules.index.tsx
   - web/src/routes/admin.organization.link-rules.$linkRuleId.tsx
+  - web/src/routes/admin.organization.link-rules.new.tsx
   - web/src/components/link-rule-form.tsx
   - web/src/components/alert-group-links.tsx
   - web/src/routes/alert-groups.$alertGroupId.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
-  - NOTICE
   - web/e2e/route-message.spec.ts
   - web/e2e/link-rules.spec.ts
   - web/e2e/alert-group-links.spec.ts
@@ -69,7 +70,8 @@ issue: 38
 
 ## Contracts
 
-- **API used**: `getRoute`, `updateRoute`, `createRoute`, `previewTemplate`, `listStoredSnapshots`, `listAlertGroups`,
+- **API used**: `getRoute`, `updateRoute`, `createRoute`, `previewTemplate`, `listIntegrations` (a Stored Snapshot
+  belongs to an Integration, and `listStoredSnapshots` requires one), `listStoredSnapshots`, `listAlertGroups`,
   `listLookupTables`, `createLookupTable`, `getLookupTable`, `updateLookupTable`, `deleteLookupTable`, `listLinkRules`,
   `createLinkRule`, `getLinkRule`, `updateLinkRule`, `deleteLinkRule`, `getAlertGroup`.
 - **Message section** (`route-policy-message.tsx`, in `route-form.tsx`): "Language" (`policy.language`: English,
@@ -77,16 +79,21 @@ issue: 38
   "Custom" switch (`null` / a string). "Custom" pre-fills the editor with the built-in template's source — `source` of
   `previewTemplate` with an empty `template` in the Route's language. The ack timeout notice is stored now and used
   from S-050 on.
-- **Template editor** (`template-editor.tsx`): a code editor component under the shipped licence list (listed in NOTICE)
-  with Go-template highlighting, which works under the Content Security Policy of the app listener, `style-src 'self'`
-  (`internal/server/spa.go`): it injects no `<style>` element and sets no `style` attribute from markup, or it is not
-  used; `route-message.spec.ts` collects violations with `watchCsp` (`web/e2e/support.ts`) and expects none; it marks `errors[]` of `previewTemplate` and of a `422` at their `line` and `column`
-  with the error text (`unknown_function` → "Unknown function: {name}", `template_syntax` → the `detail`).
+- **Template editor** (`template-editor.tsx`): no third-party code editor — a plain `<textarea>` over a layer that draws
+  the same text with Go-template highlighting and line numbers, so that it works under the Content Security Policy of
+  the app listener, `style-src 'self'` (`internal/server/spa.go`): it injects no `<style>` element and sets no `style`
+  attribute (the textarea and the layer scroll together through `scrollTop` and `scrollLeft`), and adds no dependency;
+  `route-message.spec.ts` collects violations with `watchCsp` (`web/e2e/support.ts`) and expects none; it marks
+  `errors[]` of `previewTemplate` and of a `422` at their `line` and `column` with the error text (`unknown_function` →
+  "Unknown function: {name}", the name read from the template at that position; `template_syntax` → the `detail`).
 - **Preview** (`template-preview.tsx`, `sample-picker.tsx`): debounced `previewTemplate` with the editor's kind,
-  `route_id`, `language` and the chosen sample, picked in a native `<select>` (D250) — "Recent snapshots of this route" (default), one Stored Snapshot by its
-  time (with `stored-snapshots:read`), or one Alert Group by `#N` — and the "Mattermost" / "Telegram" switch as
-  `format` (`markdown`, `html`); a Mattermost result is shown as rendered Markdown inside a frame and a Telegram result
-  as its HTML text, untrusted text never interpreted as HTML; "Shortened to fit" appears when `truncated`.
+  `route_id`, `language` and the chosen sample, picked in a native `<select>` (D250) — "Recent snapshots of this route"
+  (default; a Link rule, which has no Route, starts from "Built-in example"), one Stored Snapshot by its time (with
+  `stored-snapshots:read`), or one Alert Group by `#N` — and the "Mattermost" / "Telegram" switch as `format`
+  (`markdown`, `html`); a Mattermost result is shown as rendered Markdown inside a frame — the subset Muster lays out
+  (lines, `- ` lists, bold, italics, strike-through, code and links) drawn into elements by the page itself, with no
+  dependency — and a Telegram result as its HTML text, untrusted text never interpreted as HTML; links open only when
+  they are `http(s)`, in a new tab with `rel="noopener noreferrer"`; "Shortened to fit" appears when `truncated`.
 - **Lookup tables** (navigation entry "Lookup tables" under Organization with `lookup-tables:read`):
 
   | Route | Permission | Content |
@@ -94,8 +101,11 @@ issue: 38
   | `/admin/organization/lookup-tables` (`admin.organization.lookup-tables.index.tsx`) | `lookup-tables:read` | list: name, description, columns, rows; "Create table" with `:write` |
   | `/admin/organization/lookup-tables/$lookupTableId` | `lookup-tables:read` | name, description, columns, the grid of rows; save with `If-Match` |
 
-  A `422 column_mismatch` marks the row; `409 in_use` shows "This table is used by a Link rule and cannot be deleted.";
-  `412` shows the conflict message of S-015.
+  "Create table" opens `/admin/organization/lookup-tables/new` (`admin.organization.lookup-tables.new.tsx`) with the same
+  editor. A `422 column_mismatch` marks the row; `409 in_use` shows "This table is used by a Link rule and cannot be
+  deleted." (or "… cannot be renamed." for a new name) followed by the Link rules that read it — the Problem names them
+  only in its `detail`, which clients never parse, so the page reads `listLinkRules` and names the rules whose URL
+  templates call `lookup` with the table's name; `412` and `428` show the conflict message of S-015 with "Reload".
 - **Link rules** (navigation entry "Link rules" under Organization with `link-rules:read`):
 
   | Route | Permission | Content |
@@ -103,8 +113,11 @@ issue: 38
   | `/admin/organization/link-rules` (`admin.organization.link-rules.index.tsx`) | `link-rules:read` | list: name, scope, Matchers, "Built-in" badge; "Create rule" with `:write` |
   | `/admin/organization/link-rules/$linkRuleId` | `link-rules:read` | the form; "Delete" except for the built-in rule |
 
+  "Create rule" opens `/admin/organization/link-rules/new` (`admin.organization.link-rules.new.tsx`) with the same form.
   The form reuses the Matcher builder of S-027; the scope is "Alert Group" or "Each value of label" with a label field;
-  the URL template editor previews the link through `previewTemplate` (kind `link_rule`).
+  the URL template editor previews the link through `previewTemplate` (kind `link_rule`, with `templates:preview`)
+  against the built-in example or a chosen Stored Snapshot or Alert Group. The built-in rule keeps its name and scope
+  (read-only fields), as `builtin_immutable` requires.
 - **List routes as `index` files**: the list pages are `….index.tsx`, so that TanStack Router makes the detail routes
   `$lookupTableId` and `$linkRuleId` siblings of the list, not children rendered inside a list layout without an
   `<Outlet>`.

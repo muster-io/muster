@@ -78,6 +78,8 @@ const AUDITED: Record<string, readonly string[]> = {
     "/deleted_at",
     "/route_ids",
   ],
+  lookup_table: ["/name", "/description", "/columns", "/entries"],
+  link_rule: ["/name", "/matchers", "/scope/type", "/scope/label", "/url_template"],
 };
 
 afterEach(async () => {
@@ -100,6 +102,14 @@ describe("fieldLabel", () => {
     expect(fieldLabel(i18n.t, "service_account", "/role")).toBe("Role");
     await i18n.changeLanguage("ru");
     expect(fieldLabel(i18n.t, "service_account", "/role")).toBe("Роль");
+  });
+
+  test("names the rows of a Lookup table and the URL template of a Link rule", async () => {
+    expect(fieldLabel(i18n.t, "lookup_table", "/entries")).toBe("Rows");
+    expect(fieldLabel(i18n.t, "link_rule", "/url_template")).toBe("URL template");
+    await i18n.changeLanguage("ru");
+    expect(fieldLabel(i18n.t, "lookup_table", "/entries")).toBe("Строки");
+    expect(fieldLabel(i18n.t, "link_rule", "/url_template")).toBe("Шаблон URL");
   });
 
   test("shows the pointer of a field without a name", () => {
