@@ -406,7 +406,11 @@ func (f *fakeStore) EnsureExploreRule(_ context.Context, arg dbgen.EnsureExplore
 	}
 	for _, r := range f.rules {
 		if r.Builtin {
-			return "", pgx.ErrNoRows
+			if !slices.Contains(arg.PreviousTemplates, r.UrlTemplate) {
+				return "", pgx.ErrNoRows
+			}
+			r.UrlTemplate, r.Version = arg.UrlTemplate, r.Version+1
+			return r.PublicID, nil
 		}
 		if r.Name == arg.Name {
 			return "", unique(ruleNameKey)
