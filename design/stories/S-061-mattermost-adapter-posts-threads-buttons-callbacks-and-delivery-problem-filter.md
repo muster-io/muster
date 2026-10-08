@@ -29,6 +29,7 @@ files_touched:
   - internal/runtime/runtime.go
   - internal/logging/events.go
   - internal/archlint/secretleak.go
+  - internal/archlint/archlint.go
   - docs/messengers/mattermost.md
   - test/e2e/harness.go
   - test/e2e/mattermost_test.go
@@ -383,6 +384,10 @@ shown (F-056); and that after the Root message is deleted in the client, the nex
   epsilon stand — a root post and a reply whose footer carries the bare username of a user mentioned nowhere else,
   watched in that user's client — records the result as a new `F-NNN` under Mattermost in `design/facts.md`, and, if a
   bare username does notify, changes the footer so that it no longer does (`internal/mattermost/layout.go`).
+- Lint 3 stays strict (journal D282). `delivery.PublishOp`, `UpdateOp` and `ReplyOp` are exported, so any package can
+  send, but only through `Interactive.Do`, which always takes a limiter token. The Mattermost client's post and patch
+  methods therefore stay unexported, or `DefaultConfig` in `internal/archlint/archlint.go` adds them to lint 3's
+  method list, so that nothing outside the delivery worker and the interactive path can call them.
 
 ## Coverage
 
