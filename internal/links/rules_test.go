@@ -194,6 +194,35 @@ func TestLinkRuleDryRun(t *testing.T) {
 	}
 }
 
+// TestExploreRuleUpgrade: the ensure step gives a built-in rule that still has a previous built-in template the
+// current one, as a new version with its public_id, Matchers and name kept, once; an edited template is kept.
+func TestExploreRuleUpgrade(t *testing.T) {
+	ctx := t.Context()
+	f := newFake()
+	builtin := dbgenRule(1, "KRAAAAAAAAAAAA", ExploreName)
+	builtin.Builtin, builtin.UrlTemplate, builtin.Version = true, previousExploreTemplates[0], 3
+	f.rules = []*ruleRow{{GetLinkRuleRow: builtin,
+		matchers: []dbgen.ListLinkRuleMatchersRow{{Label: "env", Op: "!=", Value: "dev"}}}}
+	for range 2 {
+		if err := EnsureExplore(ctx, f, orgID, t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := f.rules[0]
+	if len(f.rules) != 1 || r.UrlTemplate != ExploreTemplate || r.Version != 4 || r.PublicID != "KRAAAAAAAAAAAA" ||
+		r.Name != ExploreName || len(r.matchers) != 1 {
+		t.Fatalf("upgraded %+v", f.rules)
+	}
+	r.UrlTemplate = previousExploreTemplates[0] + " "
+	if err := EnsureExplore(ctx, f, orgID, t0); err != nil || r.UrlTemplate != previousExploreTemplates[0]+" " ||
+		r.Version != 4 {
+		t.Errorf("an edited template is kept: %v %+v", err, r)
+	}
+	if ExploreTemplate == previousExploreTemplates[0] {
+		t.Error("the current template is not a previous one")
+	}
+}
+
 // TestExploreRule: the ensure step creates the built-in rule once, run twice changes nothing, a rule of its name
 // stops the start; the built-in rule cannot be deleted, renamed or given another scope, but its URL template and
 // Matchers can be edited.

@@ -134,9 +134,12 @@ issue: 37
   `datasource_uid` from the Lookup table `grafana` by the `environment` label, else the `cluster` label, and the PromQL
   expression from the `g0.expr` parameter of the first firing Alert's `generatorURL`, and builds Grafana's documented
   Explore URL `<address>/explore?schemaVersion=1&orgId=1&panes=<JSON>` with that data source and expression and the
-  range `now-1h` to `now`; it yields nothing when the table, the key, a cell or the expression is missing. Its URL
-  template and Matchers can be edited; it cannot be deleted, renamed or given another scope (`409 builtin_immutable`),
-  and `builtin` is read-only. A table the built-in rule reads — `grafana` — is therefore `in_use` while the rule is
+  range `now-1h` to `now`; it yields nothing when the table, the key, a cell or the expression is missing. An Alert
+  Group with neither label is the common case: the template checks for the key before it calls `lookup` and yields no
+  link, so no error is counted or logged. Its URL template and Matchers can be edited; it cannot be deleted, renamed or
+  given another scope (`409 builtin_immutable`), and `builtin` is read-only. When the rule exists and its URL template
+  is still one that an earlier release created, the ensure step replaces it with the current built-in template, as a
+  new version of the rule; an edited template is kept, and a second run changes nothing. A table the built-in rule reads — `grafana` — is therefore `in_use` while the rule is
   unchanged.
 - **Links in messages and on the page** (C-12.FR-1 item 9, C-09.FR-14): `messages` places the links after "Open in
   Muster" in one line (`Message.Links`), a rule's link by its name made neutral like alert data and the others by the

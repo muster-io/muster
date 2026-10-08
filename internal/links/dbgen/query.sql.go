@@ -79,20 +79,24 @@ func (q *Queries) DeleteLookupTable(ctx context.Context, arg DeleteLookupTablePa
 const ensureExploreRule = `-- name: EnsureExploreRule :one
 INSERT INTO link_rules (org_id, public_id, name, builtin, scope_type, url_template, created_at, updated_at)
 VALUES ($1, $2, $3, true, 'alert_group', $4, $5, $5)
-ON CONFLICT (org_id) WHERE builtin DO NOTHING
+ON CONFLICT (org_id) WHERE builtin DO UPDATE
+SET url_template = excluded.url_template, updated_at = excluded.updated_at, version = link_rules.version + 1
+WHERE link_rules.org_id = $1 AND link_rules.url_template = ANY ($6::text[])
 RETURNING public_id
 `
 
 type EnsureExploreRuleParams struct {
-	OrgID       int64
-	PublicID    string
-	Name        string
-	UrlTemplate string
-	Now         time.Time
+	OrgID             int64
+	PublicID          string
+	Name              string
+	UrlTemplate       string
+	Now               time.Time
+	PreviousTemplates []string
 }
 
-// EnsureExploreRule creates the built-in "Explore" rule of the Organization unless it has one; it returns no row
-// when the rule exists.
+// EnsureExploreRule creates the built-in "Explore" rule of the Organization unless it has one, and gives an existing
+// one the URL template while it still has one of the previous built-in templates; it returns no row when the rule
+// exists and keeps its template.
 func (q *Queries) EnsureExploreRule(ctx context.Context, arg EnsureExploreRuleParams) (string, error) {
 	row := q.db.QueryRow(ctx, ensureExploreRule,
 		arg.OrgID,
@@ -100,6 +104,7 @@ func (q *Queries) EnsureExploreRule(ctx context.Context, arg EnsureExploreRulePa
 		arg.Name,
 		arg.UrlTemplate,
 		arg.Now,
+		arg.PreviousTemplates,
 	)
 	var public_id string
 	err := row.Scan(&public_id)

@@ -130,12 +130,15 @@ VALUES (@link_rule_id, @org_id, @position, @label, @op, @value);
 DELETE FROM link_rules
 WHERE org_id = @org_id AND id = @id AND NOT builtin;
 
--- EnsureExploreRule creates the built-in "Explore" rule of the Organization unless it has one; it returns no row
--- when the rule exists.
+-- EnsureExploreRule creates the built-in "Explore" rule of the Organization unless it has one, and gives an existing
+-- one the URL template while it still has one of the previous built-in templates; it returns no row when the rule
+-- exists and keeps its template.
 -- name: EnsureExploreRule :one
 INSERT INTO link_rules (org_id, public_id, name, builtin, scope_type, url_template, created_at, updated_at)
 VALUES (@org_id, @public_id, @name, true, 'alert_group', @url_template, @now, @now)
-ON CONFLICT (org_id) WHERE builtin DO NOTHING
+ON CONFLICT (org_id) WHERE builtin DO UPDATE
+SET url_template = excluded.url_template, updated_at = excluded.updated_at, version = link_rules.version + 1
+WHERE link_rules.org_id = @org_id AND link_rules.url_template = ANY (@previous_templates::text[])
 RETURNING public_id;
 
 -- GetLinkSnapshotRetention reads retention.stored_snapshots in days.
