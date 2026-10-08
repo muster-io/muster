@@ -31,7 +31,7 @@ export const previewTemplateBodyAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Z
 
 export const PreviewTemplateBody = zod.object({
   "kind": zod.enum(['root_message', 'line', 'ack_timeout_notice', 'link_rule', 'webhook_request']),
-  "template": zod.string().describe('The template to render; empty renders the built-in template of the kind, whose source the result returns.'),
+  "template": zod.string().describe('The template to render; empty renders what a Route without a template of the kind shows, and the result returns the source of the built-in template.'),
   "format": zod.union([zod.literal('markdown'),zod.literal('html'),zod.literal(null)]).nullish().describe('The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram. Ignored for `link_rule` and `webhook_request`, which have no markup.'),
   "route_id": zod.string().regex(previewTemplateBodyRouteIdRegExp).nullish().describe('A `public_id` in the format of `PublicId`, or null.'),
   "stored_snapshot_id": zod.string().nullish().describe('A recent Stored Snapshot as the sample. Without a sample the most recent ones the Route took are used (`template.dry_run_sample`), or a built-in example.'),

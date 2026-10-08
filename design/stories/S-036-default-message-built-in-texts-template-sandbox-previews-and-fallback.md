@@ -149,8 +149,13 @@ issue: 36
   `template_ack_timeout_notice`): a `root_message` template renders the body of the Root message — the sections from
   `Environment` to `Alerts` — while the colour, heading, links, notices, footer and buttons always come from Muster
   (C-12.FR-2); a `line` template replaces the default line of each Alert; an `ack_timeout_notice` template is stored
-  and dry-run here and rendered from S-049. `null` uses the built-in template of the kind, which is itself a sandbox
-  template per language, embedded in `default.go`, so that its source can be read.
+  and dry-run here and rendered from S-049. A `null` `root_message` or `line` does not execute a template: Muster lays
+  the default content out itself, section by section, so that shortening can trim the Alert lines and the label
+  sections in turn, and the default line of an Alert shows the labels that differ between the Alerts. A `null`
+  `ack_timeout_notice` renders the built-in template. Every kind has a built-in template, a sandbox template per
+  language embedded in `default.go`, whose source an editor starts from: the `root_message` one renders the same
+  sections as the default content, and the `line` one, which sees a single Alert, the Alert's labels without the
+  excluded ones.
 - **Absent and `null` templates** (`api/openapi.yaml` `RouteTemplates`, `internal/api/routes.go`,
   `internal/routing/routes.go`): today `templateOf` in `internal/api/routes.go` maps an absent key and `null` alike to
   nil, and `Update` writes NULL for nil, so an edit that leaves a template out silently resets it to the built-in. From
@@ -172,9 +177,9 @@ issue: 36
 - **Previews** (`previewTemplate`): the kind's template rendered against `stored_snapshot_id`, `alert_group_id` or, by
   default, the Route's recent Stored Snapshots or the example, in `language` (default: the Route's), shortened to
   `length_limit` when given (`truncated`); errors return `200` with `valid: false` and `errors[]` carrying `line` and
-  `column`, never as a Problem. An empty `template` previews the built-in template of the kind. `source` returns the
-  rendered template's source — for an empty `template` the built-in one in the preview's language, for an editor to
-  start from; null for `link_rule` and `webhook_request`. The output is laid out in the requested `format` — Mattermost
+  `column`, never as a Problem. An empty `template` previews what a `null` template of the kind shows (above). `source`
+  returns the request's `template` — for an empty one the source of the built-in template in the preview's language,
+  for an editor to start from; null for `link_rule` and `webhook_request`. The output is laid out in the requested `format` — Mattermost
   Markdown (the default) or Telegram HTML, with alert data escaped for it — with the buttons as a last line of
   bracketed labels, and `format` is echoed in the result.
 - **Fallback template** (C-12.FR-6, ADR-0012; `fallback.go`): built in, always valid (a test renders it against every

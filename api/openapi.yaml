@@ -9552,8 +9552,10 @@ components:
           description: Intervals double up to this cap.
     RouteTemplates:
       type: object
-      description: Go templates rendered in the template sandbox. Null uses the built-in template, whose source
-        `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and
+      description: Go templates rendered in the template sandbox. Null uses Muster's default — the default content, which
+        Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`;
+        `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to
+        start from. In `updateRoute` a key left out keeps the stored template and
         null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails
         its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with
         `template_syntax` or `unknown_function`, its `line` and `column`.
@@ -12158,8 +12160,8 @@ components:
           $ref: '#/components/schemas/TemplateKind'
         template:
           type: string
-          description: The template to render; empty renders the built-in template of the kind, whose source the result
-            returns.
+          description: The template to render; empty renders what a Route without a template of the kind shows, and the
+            result returns the source of the built-in template.
         format:
           type:
           - string

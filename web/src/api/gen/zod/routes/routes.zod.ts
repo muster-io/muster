@@ -66,7 +66,7 @@ export const ListRoutesResponse = zod.object({
   "root_message": zod.string().nullish().describe('Renders only the body of the Root message — from the environment and start time to the Alerts; the status colour, heading, links, notices, footer and buttons always come from Muster.'),
   "line": zod.string().nullish(),
   "ack_timeout_notice": zod.string().nullish()
-}).describe('Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
+}).describe('Go templates rendered in the template sandbox. Null uses Muster\'s default — the default content, which Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`; `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to start from. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
   "ack_timeout": zod.object({
   "enabled": zod.boolean(),
   "first_interval_seconds": zod.int().min(1).describe('Notices come at F, 3F and 7F after the start (intervals double, at most three).')
@@ -151,7 +151,7 @@ export const CreateRouteBody = zod.object({
   "root_message": zod.string().nullish().describe('Renders only the body of the Root message — from the environment and start time to the Alerts; the status colour, heading, links, notices, footer and buttons always come from Muster.'),
   "line": zod.string().nullish(),
   "ack_timeout_notice": zod.string().nullish()
-}).describe('Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
+}).describe('Go templates rendered in the template sandbox. Null uses Muster\'s default — the default content, which Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`; `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to start from. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
   "ack_timeout": zod.object({
   "enabled": zod.boolean(),
   "first_interval_seconds": zod.int().min(1).describe('Notices come at F, 3F and 7F after the start (intervals double, at most three).')
@@ -206,7 +206,7 @@ export const CreateRouteResponse = zod.object({
   "root_message": zod.string().nullish().describe('Renders only the body of the Root message — from the environment and start time to the Alerts; the status colour, heading, links, notices, footer and buttons always come from Muster.'),
   "line": zod.string().nullish(),
   "ack_timeout_notice": zod.string().nullish()
-}).describe('Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
+}).describe('Go templates rendered in the template sandbox. Null uses Muster\'s default — the default content, which Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`; `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to start from. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
   "ack_timeout": zod.object({
   "enabled": zod.boolean(),
   "first_interval_seconds": zod.int().min(1).describe('Notices come at F, 3F and 7F after the start (intervals double, at most three).')
@@ -298,7 +298,7 @@ export const GetRouteResponse = zod.object({
   "root_message": zod.string().nullish().describe('Renders only the body of the Root message — from the environment and start time to the Alerts; the status colour, heading, links, notices, footer and buttons always come from Muster.'),
   "line": zod.string().nullish(),
   "ack_timeout_notice": zod.string().nullish()
-}).describe('Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
+}).describe('Go templates rendered in the template sandbox. Null uses Muster\'s default — the default content, which Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`; `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to start from. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
   "ack_timeout": zod.object({
   "enabled": zod.boolean(),
   "first_interval_seconds": zod.int().min(1).describe('Notices come at F, 3F and 7F after the start (intervals double, at most three).')
@@ -393,7 +393,7 @@ export const UpdateRouteBody = zod.object({
   "root_message": zod.string().nullish().describe('Renders only the body of the Root message — from the environment and start time to the Alerts; the status colour, heading, links, notices, footer and buttons always come from Muster.'),
   "line": zod.string().nullish(),
   "ack_timeout_notice": zod.string().nullish()
-}).describe('Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
+}).describe('Go templates rendered in the template sandbox. Null uses Muster\'s default — the default content, which Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`; `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to start from. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
   "ack_timeout": zod.object({
   "enabled": zod.boolean(),
   "first_interval_seconds": zod.int().min(1).describe('Notices come at F, 3F and 7F after the start (intervals double, at most three).')
@@ -448,7 +448,7 @@ export const UpdateRouteResponse = zod.object({
   "root_message": zod.string().nullish().describe('Renders only the body of the Root message — from the environment and start time to the Alerts; the status colour, heading, links, notices, footer and buttons always come from Muster.'),
   "line": zod.string().nullish(),
   "ack_timeout_notice": zod.string().nullish()
-}).describe('Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
+}).describe('Go templates rendered in the template sandbox. Null uses Muster\'s default — the default content, which Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`; `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to start from. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
   "ack_timeout": zod.object({
   "enabled": zod.boolean(),
   "first_interval_seconds": zod.int().min(1).describe('Notices come at F, 3F and 7F after the start (intervals double, at most three).')
@@ -563,7 +563,7 @@ export const ReorderRoutesResponse = zod.object({
   "root_message": zod.string().nullish().describe('Renders only the body of the Root message — from the environment and start time to the Alerts; the status colour, heading, links, notices, footer and buttons always come from Muster.'),
   "line": zod.string().nullish(),
   "ack_timeout_notice": zod.string().nullish()
-}).describe('Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
+}).describe('Go templates rendered in the template sandbox. Null uses Muster\'s default — the default content, which Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`; `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to start from. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
   "ack_timeout": zod.object({
   "enabled": zod.boolean(),
   "first_interval_seconds": zod.int().min(1).describe('Notices come at F, 3F and 7F after the start (intervals double, at most three).')
@@ -655,7 +655,7 @@ export const ListRouteProfilesResponse = zod.object({
   "root_message": zod.string().nullish().describe('Renders only the body of the Root message — from the environment and start time to the Alerts; the status colour, heading, links, notices, footer and buttons always come from Muster.'),
   "line": zod.string().nullish(),
   "ack_timeout_notice": zod.string().nullish()
-}).describe('Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
+}).describe('Go templates rendered in the template sandbox. Null uses Muster\'s default — the default content, which Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`; `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to start from. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
   "ack_timeout": zod.object({
   "enabled": zod.boolean(),
   "first_interval_seconds": zod.int().min(1).describe('Notices come at F, 3F and 7F after the start (intervals double, at most three).')
@@ -755,7 +755,7 @@ export const ListRouteSuggestionsResponse = zod.object({
   "root_message": zod.string().nullish().describe('Renders only the body of the Root message — from the environment and start time to the Alerts; the status colour, heading, links, notices, footer and buttons always come from Muster.'),
   "line": zod.string().nullish(),
   "ack_timeout_notice": zod.string().nullish()
-}).describe('Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
+}).describe('Go templates rendered in the template sandbox. Null uses Muster\'s default — the default content, which Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`; `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to start from. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
   "ack_timeout": zod.object({
   "enabled": zod.boolean(),
   "first_interval_seconds": zod.int().min(1).describe('Notices come at F, 3F and 7F after the start (intervals double, at most three).')
@@ -827,7 +827,7 @@ export const AcceptRouteSuggestionResponse = zod.object({
   "root_message": zod.string().nullish().describe('Renders only the body of the Root message — from the environment and start time to the Alerts; the status colour, heading, links, notices, footer and buttons always come from Muster.'),
   "line": zod.string().nullish(),
   "ack_timeout_notice": zod.string().nullish()
-}).describe('Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
+}).describe('Go templates rendered in the template sandbox. Null uses Muster\'s default — the default content, which Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`; `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to start from. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.'),
   "ack_timeout": zod.object({
   "enabled": zod.boolean(),
   "first_interval_seconds": zod.int().min(1).describe('Notices come at F, 3F and 7F after the start (intervals double, at most three).')

@@ -24,7 +24,7 @@ import type { TemplatePreviewRequestFormat } from './templatePreviewRequestForma
 
 export interface TemplatePreviewRequest {
   kind: TemplateKind;
-  /** The template to render; empty renders the built-in template of the kind, whose source the result returns. */
+  /** The template to render; empty renders what a Route without a template of the kind shows, and the result returns the source of the built-in template. */
   template: string;
   /**
      * The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram. Ignored for `link_rule` and `webhook_request`, which have no markup.

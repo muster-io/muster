@@ -4595,7 +4595,7 @@ type RoutePolicy struct {
 	// StormThreshold New Alert Groups per minute above which a Storm starts.
 	StormThreshold int `json:"storm_threshold"`
 
-	// Templates Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.
+	// Templates Go templates rendered in the template sandbox. Null uses Muster's default — the default content, which Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`; `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to start from. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.
 	Templates                   RouteTemplates `json:"templates"`
 	ThreadBatchingWindowSeconds int            `json:"thread_batching_window_seconds"`
 	UrgentRiseRemovesAck        bool           `json:"urgent_rise_removes_ack"`
@@ -4650,7 +4650,7 @@ type RouteSuggestionList struct {
 	Items []RouteSuggestion `json:"items"`
 }
 
-// RouteTemplates Go templates rendered in the template sandbox. Null uses the built-in template, whose source `previewTemplate` returns for an empty `template`. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.
+// RouteTemplates Go templates rendered in the template sandbox. Null uses Muster's default — the default content, which Muster lays out itself, for `root_message` and `line`, and the built-in template for `ack_timeout_notice`; `previewTemplate` returns the source of the built-in template of a kind for an empty `template`, for an editor to start from. In `updateRoute` a key left out keeps the stored template and null resets it to the built-in one; in `createRoute` a key left out is the built-in one. A template that fails its dry run against recent Stored Snapshots is refused with `422` at `/policy/templates/<name>`, with `template_syntax` or `unknown_function`, its `line` and `column`.
 type RouteTemplates struct {
 	AckTimeoutNotice nullable.Nullable[string] `json:"ack_timeout_notice,omitempty"`
 	Line             nullable.Nullable[string] `json:"line,omitempty"`
@@ -5176,7 +5176,7 @@ type TemplatePreviewRequest struct {
 	// StoredSnapshotId A recent Stored Snapshot as the sample. Without a sample the most recent ones the Route took are used (`template.dry_run_sample`), or a built-in example.
 	StoredSnapshotId nullable.Nullable[string] `json:"stored_snapshot_id,omitempty"`
 
-	// Template The template to render; empty renders the built-in template of the kind, whose source the result returns.
+	// Template The template to render; empty renders what a Route without a template of the kind shows, and the result returns the source of the built-in template.
 	Template string `json:"template"`
 }
 
