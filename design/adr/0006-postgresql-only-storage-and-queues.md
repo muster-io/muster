@@ -4,6 +4,7 @@
 - Date: 2026-10-02
 - Amended: 2026-10-03 — a trigram index over the `summary` annotation of Alert Groups, next to the one over titles;
   Notes are kept with the summary rows of Alert Groups, not with the details
+- Amended: 2026-10-08 — ingestion keeps order per Alertmanager group rather than per Integration (ADR-0002, D285)
 
 ## Context
 
@@ -16,7 +17,7 @@ minute, 10,000 active Alerts and 1,000 open Alert Groups.
 
 The usual answer adds Redis and a job-queue library. The established PostgreSQL job queue for Go, River (MPL-2.0,
 actively developed), was evaluated: ordering per key and concurrency limits per key — exactly what ingestion (order per
-Integration) and delivery (limit per Destination) need — exist only in its commercial Pro edition, distributed as a
+Alertmanager group) and delivery (limit per Destination) need — exist only in its commercial Pro edition, distributed as a
 private Go module, which a self-built AGPL product cannot depend on.
 
 ## Decision
@@ -68,7 +69,7 @@ PostgreSQL; docker-compose runs PostgreSQL as a separate container.
 
 - One stateful component to run, back up and monitor. Backups cover everything except the master keys, which are kept
   separately (ADR-0011).
-- Queue semantics — order per Integration, limits per Destination and Connection, leases — are Muster's own code and
+- Queue semantics — order per Alertmanager group, limits per Destination and Connection, leases — are Muster's own code and
   need thorough tests, including tests with a virtual clock and with two replicas.
 - Throughput is bounded by PostgreSQL; the L1 objectives fit well within it. An external queue for very large
   installations remains possible behind the ingestion interface.

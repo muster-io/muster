@@ -125,25 +125,28 @@ func (q *Queries) BreakDestination(ctx context.Context, arg BreakDestinationPara
 }
 
 const claimBrokenProbes = `-- name: ClaimBrokenProbes :many
+WITH due AS MATERIALIZED (
+    SELECT x.id
+    FROM destinations x
+    WHERE x.org_id = $2 AND x.health = 'broken'
+      AND (x.deleted_at IS NULL
+           OR EXISTS (SELECT 1
+                      FROM deliveries p
+                      WHERE p.org_id = x.org_id AND p.destination_id = x.id AND p.state = 'pending'))
+      AND (x.next_probe_at <= $3::timestamptz
+           OR (x.next_probe_at = 'infinity'
+               AND EXISTS (SELECT 1
+                           FROM deliveries w
+                           WHERE w.org_id = x.org_id AND w.destination_id = x.id AND w.state = 'pending'
+                             AND w.held_by_storm_id IS NULL AND w.next_attempt_at <= $3::timestamptz
+                             AND (w.lease_until IS NULL OR w.lease_until <= $4::timestamptz))))
+    ORDER BY x.next_probe_at, x.id
+    LIMIT $5
+    FOR UPDATE OF x SKIP LOCKED
+)
 UPDATE destinations ds
 SET next_probe_at = $1::timestamptz
-FROM (SELECT x.id
-      FROM destinations x
-      WHERE x.org_id = $2 AND x.health = 'broken'
-        AND (x.deleted_at IS NULL
-             OR EXISTS (SELECT 1
-                        FROM deliveries p
-                        WHERE p.org_id = x.org_id AND p.destination_id = x.id AND p.state = 'pending'))
-        AND (x.next_probe_at <= $3::timestamptz
-             OR (x.next_probe_at = 'infinity'
-                 AND EXISTS (SELECT 1
-                             FROM deliveries w
-                             WHERE w.org_id = x.org_id AND w.destination_id = x.id AND w.state = 'pending'
-                               AND w.held_by_storm_id IS NULL AND w.next_attempt_at <= $3::timestamptz
-                               AND (w.lease_until IS NULL OR w.lease_until <= $4::timestamptz))))
-      ORDER BY x.next_probe_at, x.id
-      LIMIT $5
-      FOR UPDATE OF x SKIP LOCKED) AS due
+FROM due
 WHERE ds.org_id = $2 AND ds.id = due.id
 RETURNING ds.id, ds.public_id, ds.name, ds.type, ds.connection_id
 `
@@ -201,17 +204,20 @@ func (q *Queries) ClaimBrokenProbes(ctx context.Context, arg ClaimBrokenProbesPa
 }
 
 const claimDueDeliveries = `-- name: ClaimDueDeliveries :many
+WITH due AS MATERIALIZED (
+    SELECT x.id
+    FROM deliveries x
+    JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
+    WHERE x.org_id = $3 AND x.state = 'pending' AND x.next_attempt_at <= $4::timestamptz
+      AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND ds.health = 'healthy'
+      AND x.held_by_storm_id IS NULL AND (ds.deleted_at IS NULL OR x.desired_retire)
+    ORDER BY x.urgent DESC, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
+    LIMIT $6
+    FOR UPDATE OF x SKIP LOCKED
+)
 UPDATE deliveries d
 SET lease_owner = $1::text, lease_until = $2::timestamptz
-FROM (SELECT x.id
-      FROM deliveries x
-      JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
-      WHERE x.org_id = $3 AND x.state = 'pending' AND x.next_attempt_at <= $4::timestamptz
-        AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND ds.health = 'healthy'
-        AND x.held_by_storm_id IS NULL AND (ds.deleted_at IS NULL OR x.desired_retire)
-      ORDER BY x.urgent DESC, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
-      LIMIT $6
-      FOR UPDATE OF x SKIP LOCKED) AS due
+FROM due
 WHERE d.org_id = $3 AND d.id = due.id
 RETURNING d.id, d.urgent, d.next_attempt_at, d.last_delivered_at
 `
@@ -235,7 +241,8 @@ type ClaimDueDeliveriesRow struct {
 // ClaimDueDeliveries leases the due pending deliveries of healthy Destinations whose lease is free or ran out, Urgent
 // first, then the earliest, then the one delivered longest ago, so that deliveries waiting for the same token take
 // turns; another claimer skips the rows this one locked. A delivery a Storm holds waits for its Storm, and one of a
-// deleted Destination is claimed only for its final edit.
+// deleted Destination is claimed only for its final edit. The choice is a materialized CTE, run once: as a subquery in
+// FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row.
 func (q *Queries) ClaimDueDeliveries(ctx context.Context, arg ClaimDueDeliveriesParams) ([]ClaimDueDeliveriesRow, error) {
 	rows, err := q.db.Query(ctx, claimDueDeliveries,
 		arg.Owner,
@@ -269,22 +276,25 @@ func (q *Queries) ClaimDueDeliveries(ctx context.Context, arg ClaimDueDeliveries
 }
 
 const claimDueReplies = `-- name: ClaimDueReplies :many
+WITH due AS MATERIALIZED (
+    SELECT x.id
+    FROM thread_replies x
+    JOIN deliveries d ON d.org_id = x.org_id AND d.id = x.delivery_id
+    JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
+    WHERE x.org_id = $3 AND x.state IN ('collecting', 'pending') AND x.next_attempt_at <= $4::timestamptz
+      AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND d.message_id IS NOT NULL
+      AND ds.health = 'healthy'
+      AND NOT EXISTS (SELECT 1
+                      FROM thread_replies p
+                      WHERE p.org_id = x.org_id AND p.delivery_id = x.delivery_id AND p.state = 'pending'
+                        AND p.id < x.id)
+    ORDER BY x.next_attempt_at, x.id
+    LIMIT $6
+    FOR UPDATE OF x SKIP LOCKED
+)
 UPDATE thread_replies r
 SET lease_owner = $1::text, lease_until = $2::timestamptz, state = 'pending'
-FROM (SELECT x.id
-      FROM thread_replies x
-      JOIN deliveries d ON d.org_id = x.org_id AND d.id = x.delivery_id
-      JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
-      WHERE x.org_id = $3 AND x.state IN ('collecting', 'pending') AND x.next_attempt_at <= $4::timestamptz
-        AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND d.message_id IS NOT NULL
-        AND ds.health = 'healthy'
-        AND NOT EXISTS (SELECT 1
-                        FROM thread_replies p
-                        WHERE p.org_id = x.org_id AND p.delivery_id = x.delivery_id AND p.state = 'pending'
-                          AND p.id < x.id)
-      ORDER BY x.next_attempt_at, x.id
-      LIMIT $6
-      FOR UPDATE OF x SKIP LOCKED) AS due
+FROM due
 WHERE r.org_id = $3 AND r.id = due.id
 RETURNING r.id, r.next_attempt_at
 `
@@ -305,7 +315,9 @@ type ClaimDueRepliesRow struct {
 
 // ClaimDueReplies leases the due Thread replies whose delivery has a Root message, of healthy Destinations, one
 // delivery's replies in id order: a reply waits while an earlier one of its delivery is pending. A collecting batch
-// that comes due closes: it becomes pending, and new Alerts start the next batch.
+// that comes due closes: it becomes pending, and new Alerts start the next batch. The choice is a materialized CTE,
+// run once, as in ClaimDueDeliveries: planned as the inner side of a nested loop over every reply, it ran once per row
+// and took seconds once replies had piled up.
 func (q *Queries) ClaimDueReplies(ctx context.Context, arg ClaimDueRepliesParams) ([]ClaimDueRepliesRow, error) {
 	rows, err := q.db.Query(ctx, claimDueReplies,
 		arg.Owner,

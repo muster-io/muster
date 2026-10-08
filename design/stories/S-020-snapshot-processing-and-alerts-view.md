@@ -54,7 +54,7 @@ files_touched:
   - web/e2e/integrations.spec.ts
   - web/e2e/stored-snapshots.spec.ts
 acceptance:
-  - "[C-06.FR-1] Stored Snapshots of one Integration are processed in arrival order and never two at a time, also with two replicas; a Snapshot of another Integration is not held up by them."
+  - "[C-06.FR-1] Stored Snapshots of one Integration are processed in arrival order and never two at a time, also with two replicas; a Snapshot of another Integration is not held up by them. (Since S-065, D285: in arrival order per Alertmanager group, several Alertmanager groups of an Integration at the same time.)"
   - "[C-06.FR-2, C-06.FR-13] A Snapshot is split into Alerts by fingerprint, and the identical copy of an HA pair, or the same Snapshot sent again, changes nothing (`fingerprint + status + startsAt`)."
   - "[C-06.FR-3, C-05.FR-6, C-06.AC-8] Static labels are added to every Alert; an Alert carrying `cluster=\"a\"` on an Integration with the Static label `cluster=b` keeps `a` and lists `cluster` in `static_label_warnings` of the Alerts view."
   - "[C-06.FR-5, C-06.FR-10, C-06.AC-1, C-06.AC-2] An Alert missing from one Snapshot stays firing; Snapshots of one `groupKey` within the duplicate window count as one, so a copy 20 seconds later without the Alert proves nothing; missing from a later window too, received at least `processing.gone_min_absence` after the first miss, it resolves as `gone` with the reason text of C-06.FR-10."

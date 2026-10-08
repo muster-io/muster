@@ -4,17 +4,21 @@
 -- The claim of the timer rows (schema.md §5): due on the business clock, leased on the real clock.
 
 -- ClaimDueTimers leases the due timers of the kinds this replica fires whose lease is free or ran out, earliest
--- first; another claimer skips the rows this one locked.
+-- first; another claimer skips the rows this one locked. The choice is a materialized CTE, run once: as a subquery in
+-- FROM, PostgreSQL may plan it as the inner side of a nested loop over every timer, run once per row.
 -- name: ClaimDueTimers :many
+WITH due AS MATERIALIZED (
+    SELECT d.id
+    FROM timers d
+    WHERE d.org_id = @org_id AND d.deadline <= @due AND d.kind = ANY(@kinds::text[])
+      AND (d.lease_until IS NULL OR d.lease_until <= @now::timestamptz)
+    ORDER BY d.deadline, d.id
+    LIMIT @lim
+    FOR UPDATE SKIP LOCKED
+)
 UPDATE timers t
 SET lease_owner = @owner::text, lease_until = @lease_until::timestamptz, attempts = t.attempts + 1
-FROM (SELECT d.id
-      FROM timers d
-      WHERE d.org_id = @org_id AND d.deadline <= @due AND d.kind = ANY(@kinds::text[])
-        AND (d.lease_until IS NULL OR d.lease_until <= @now::timestamptz)
-      ORDER BY d.deadline, d.id
-      LIMIT @lim
-      FOR UPDATE SKIP LOCKED) AS due
+FROM due
 WHERE t.org_id = @org_id AND t.id = due.id
 RETURNING t.id, t.alert_group_id, t.storm_id, t.kind, t.deadline, t.attempts;
 

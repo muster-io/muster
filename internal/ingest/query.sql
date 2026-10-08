@@ -116,23 +116,27 @@ WHERE i.org_id = @org_id AND i.id = ANY(@integration_ids::bigint[])
 ON CONFLICT (integration_id) DO NOTHING;
 
 -- ClaimIntegrations leases at most @batch_size of the Integrations whose lease is free or ran out at @now (real
--- clock); a claim row another transaction holds is skipped.
+-- clock); a claim row another transaction holds is skipped. The choice is a materialized CTE, run once, as in the
+-- other claims.
 -- name: ClaimIntegrations :many
-UPDATE ingest_claims c
-SET lease_owner = @owner, lease_until = @lease_until
-FROM integrations i
-WHERE c.org_id = @org_id AND i.org_id = @org_id AND i.id = c.integration_id AND c.integration_id IN (
+WITH free AS MATERIALIZED (
     SELECT f.integration_id
     FROM ingest_claims f
     WHERE f.org_id = @org_id AND f.integration_id = ANY(@integration_ids::bigint[])
       AND (f.lease_until IS NULL OR f.lease_until <= @now::timestamptz)
     LIMIT @batch_size
-    FOR UPDATE SKIP LOCKED)
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE ingest_claims c
+SET lease_owner = @owner, lease_until = @lease_until
+FROM integrations i
+WHERE c.org_id = @org_id AND i.org_id = @org_id AND i.id = c.integration_id
+  AND c.integration_id IN (SELECT free.integration_id FROM free)
 RETURNING c.integration_id, i.public_id;
 
--- RenewIngestLease extends the lease this replica holds and locks the claim row until the Snapshot's transaction
--- ends, so that no other replica processes the Integration meanwhile; it returns what processing needs of the
--- Integration. No row means the lease went to another replica.
+-- RenewIngestLease extends the lease this replica holds and returns what processing needs of the Integration; the
+-- processing worker renews it while it holds the Integration, and the Stale scan in its transaction. No row means the
+-- lease went to another replica.
 -- name: RenewIngestLease :one
 UPDATE ingest_claims c
 SET lease_until = @lease_until
@@ -142,21 +146,36 @@ WHERE c.org_id = @org_id AND c.integration_id = @integration_id AND c.lease_owne
 RETURNING i.public_id, i.name, i.builtin, i.static_labels, i.duplicate_window_seconds, i.liveness_clock_ms,
     i.heartbeat_state, i.heartbeat_last_signal_at, i.heartbeat_timeout_seconds, i.deleted_at;
 
+-- CheckIngestLease checks, in a Snapshot's transaction, that this replica still holds the lease, and returns what
+-- processing needs of the Integration; a lease that ran out at @now (real clock) is not held, even by this replica's
+-- own Stale scan. FOR KEY SHARE keeps the claim row until the transaction ends without blocking
+-- the holder's renewal, and another replica's claim (FOR UPDATE SKIP LOCKED) skips the row meanwhile. No row means
+-- the lease went to another replica.
+-- name: CheckIngestLease :one
+SELECT i.public_id, i.name, i.builtin, i.static_labels, i.duplicate_window_seconds, i.liveness_clock_ms,
+    i.heartbeat_state, i.heartbeat_last_signal_at, i.heartbeat_timeout_seconds, i.deleted_at
+FROM ingest_claims c
+JOIN integrations i ON i.org_id = @org_id AND i.id = c.integration_id
+WHERE c.org_id = @org_id AND c.integration_id = @integration_id AND c.lease_owner = @owner
+  AND c.lease_until > @now::timestamptz
+FOR KEY SHARE OF c;
+
 -- ReleaseIngestClaim frees the lease this replica holds.
 -- name: ReleaseIngestClaim :exec
 UPDATE ingest_claims
 SET lease_owner = NULL, lease_until = NULL
 WHERE org_id = @org_id AND integration_id = @integration_id AND lease_owner = @owner;
 
--- NextPendingSnapshot reads the oldest pending Stored Snapshot of an Integration with its body and its source.
--- name: NextPendingSnapshot :one
-SELECT s.id, s.public_id, s.received_at, s.source, b.body
+-- ListPendingSnapshots reads the oldest pending Stored Snapshots of an Integration with their bodies and sources,
+-- apart from those the worker already holds, at most @page_size of them, and whether a replay set each back to pending.
+-- name: ListPendingSnapshots :many
+SELECT s.id, s.public_id, s.received_at, s.source, b.body, (s.replayed_at IS NOT NULL)::boolean AS replayed
 FROM stored_snapshots s
 JOIN snapshot_bodies b ON b.org_id = @org_id AND b.body_sha256 = s.body_sha256 AND b.body_day = s.body_day
 WHERE s.org_id = @org_id AND s.integration_id = @integration_id AND s.state = 'pending'
-  AND s.received_at >= @horizon::timestamptz
+  AND s.received_at >= @horizon::timestamptz AND NOT (s.id = ANY(@held_ids::bigint[]))
 ORDER BY s.received_at, s.id
-LIMIT 1;
+LIMIT @page_size;
 
 -- FinishSnapshot marks a pending Stored Snapshot processed or failed, with what processing read of its payload and
 -- the Routes that took its Alerts, added to those of an earlier processing, and returns whether it leaves pending for
@@ -170,20 +189,46 @@ SET state = @state, processed_at = @processed_at, processing_error = sqlc.narg('
 WHERE org_id = @org_id AND id = @id AND received_at = @received_at::timestamptz AND state = 'pending'
 RETURNING (replayed_at IS NULL)::boolean AS first_time;
 
--- CountSnapshot counts a Stored Snapshot on its Integration when it leaves pending for the first time; processing
--- is serialized per Integration, so the ingestion path never updates the Integration row.
+-- CountSnapshot counts a Stored Snapshot on its Integration when it leaves pending for the first time; it is the last
+-- statement of the Snapshot's transaction, so that the lanes of an Integration hold the row only through the commit,
+-- and the ingestion path never updates the Integration row.
 -- name: CountSnapshot :exec
 UPDATE integrations
 SET snapshot_count = snapshot_count + 1, last_snapshot_at = greatest(last_snapshot_at, @received_at::timestamptz)
 WHERE org_id = @org_id AND id = @integration_id;
 
--- UpsertAlertmanagerRoute finds or creates the Alertmanager route of a groupKey and refreshes when it was seen.
+-- UpsertAlertmanagerRoute finds or creates the Alertmanager route of a groupKey without locking it, since every
+-- Alertmanager group of the route shares the row; TouchAlertmanagerRoute and LockAlertmanagerRoute write it at the end
+-- of the transaction. No row means another transaction created it at the same time; a second call finds it.
 -- name: UpsertAlertmanagerRoute :one
-INSERT INTO alertmanager_routes (org_id, integration_id, route_path, route_path_sha256, first_seen_at, last_seen_at)
-VALUES (@org_id, @integration_id, @route_path, @route_path_sha256, @seen_at, @seen_at)
-ON CONFLICT (integration_id, route_path_sha256) DO UPDATE
-SET last_seen_at = greatest(alertmanager_routes.last_seen_at, excluded.last_seen_at)
-RETURNING id, learned_repeat_interval_ms, repeat_observations, recent_repeat_gaps_ms;
+WITH found AS (
+    SELECT r.id
+    FROM alertmanager_routes r
+    WHERE r.org_id = @org_id AND r.integration_id = @integration_id AND r.route_path_sha256 = @route_path_sha256
+), created AS (
+    INSERT INTO alertmanager_routes (org_id, integration_id, route_path, route_path_sha256, first_seen_at, last_seen_at)
+    SELECT @org_id, @integration_id, @route_path, @route_path_sha256, @seen_at, @seen_at
+    WHERE NOT EXISTS (SELECT 1 FROM found)
+    ON CONFLICT (integration_id, route_path_sha256) DO NOTHING
+    RETURNING id
+)
+SELECT id FROM found
+UNION ALL
+SELECT id FROM created;
+
+-- TouchAlertmanagerRoute refreshes when the Alertmanager route was last seen.
+-- name: TouchAlertmanagerRoute :exec
+UPDATE alertmanager_routes
+SET last_seen_at = @seen_at
+WHERE org_id = @org_id AND id = @id AND last_seen_at < @seen_at;
+
+-- LockAlertmanagerRoute locks the Alertmanager route and reads its repeat-interval ring, so that a learned gap is
+-- added to what other transactions added meanwhile.
+-- name: LockAlertmanagerRoute :one
+SELECT learned_repeat_interval_ms, repeat_observations, recent_repeat_gaps_ms
+FROM alertmanager_routes
+WHERE org_id = @org_id AND id = @id
+FOR NO KEY UPDATE;
 
 -- UpsertAlertmanagerGroup finds or creates the Alertmanager group of a groupKey and locks its row.
 -- name: UpsertAlertmanagerGroup :one
@@ -210,11 +255,12 @@ SET last_snapshot_at = @last_snapshot_at, last_snapshot_clock_ms = @last_snapsho
     last_content_at = sqlc.narg('last_content_at')
 WHERE org_id = @org_id AND id = @id;
 
--- UpdateRepeatInterval stores a learned repeat interval and the ring of gaps it is the median of.
+-- UpdateRepeatInterval stores a learned repeat interval and the ring of gaps it is the median of, and when the
+-- Alertmanager route was last seen.
 -- name: UpdateRepeatInterval :exec
 UPDATE alertmanager_routes
 SET learned_repeat_interval_ms = @learned_repeat_interval_ms, repeat_observations = @repeat_observations,
-    recent_repeat_gaps_ms = @recent_repeat_gaps_ms::bigint[]
+    recent_repeat_gaps_ms = @recent_repeat_gaps_ms::bigint[], last_seen_at = greatest(last_seen_at, @seen_at)
 WHERE org_id = @org_id AND id = @id;
 
 -- ListSnapshotAlerts reads the Alerts a Snapshot touches, and locks them until the Snapshot's transaction ends so that
@@ -231,6 +277,7 @@ WHERE a.org_id = @org_id AND a.integration_id = @integration_id
                    FROM alert_presences p
                    WHERE p.org_id = @org_id AND p.alertmanager_group_id = @alertmanager_group_id
                      AND p.state IN ('listed', 'missed')))
+ORDER BY a.id
 FOR NO KEY UPDATE OF a;
 
 -- ListActivePresences reads the active presences of a groupKey, and whether each Alert has an active presence in
@@ -473,13 +520,15 @@ WHERE a.org_id = @org_id AND a.id IN (
     LIMIT @batch_size
     FOR UPDATE SKIP LOCKED);
 
--- LockIntegrationName reads the current name of an Integration for an Internal alert about it, after a rename that is
--- in progress commits; a rename that starts later waits for the Snapshot's transaction and then sees its raise.
+-- LockIntegrationName locks the Integration's row and reads its current name, before a Snapshot that changed the
+-- truncation of a groupKey counts the truncated groupKeys: the lanes of the Integration decide MusterSnapshotTruncated
+-- one after the other, each seeing what the earlier ones committed. A rename in progress commits first; one that starts
+-- later waits for the Snapshot's transaction and then sees its raise.
 -- name: LockIntegrationName :one
 SELECT name
 FROM integrations
 WHERE org_id = @org_id AND id = @integration_id
-FOR KEY SHARE;
+FOR NO KEY UPDATE;
 
 -- ListLiveIntegrations lists the Integrations whose Heartbeat is live, for the Stale scan; the built-in one never has a
 -- Heartbeat.

@@ -309,6 +309,20 @@ func (f *fakeDB) EnsureCounter(context.Context, int64) error {
 	return nil
 }
 
+// SavepointGrouping and RollbackGrouping are counted; the fake writes nothing grouping would roll back, since a join
+// without the counter row only reads and locks before it falls back.
+func (f *fakeDB) SavepointGrouping(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.call("SavepointGrouping")
+}
+
+func (f *fakeDB) RollbackGrouping(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.call("RollbackGrouping")
+}
+
 func (f *fakeDB) LockCounter(context.Context, int64) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

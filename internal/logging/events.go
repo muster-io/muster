@@ -295,9 +295,10 @@ var SnapshotProcessed = newEvent("snapshot_processed", LevelInfo, "C-06",
 		"Continuations it made, dropped the "+
 		"resolves of fingerprints that fire nowhere, truncated its truncatedAlerts, routes the public_ids of the "+
 		"Routes that took its newly firing Alerts, alert_groups the #N of the Alert Groups it created or changed, "+
-		"and duration_ms how long processing took.",
+		"duration_ms how long processing took, and lane which of the Integration's processing.parallel_groups lanes "+
+		"processed it, from 0.",
 	"integration", "stored_snapshot", "group_key", "alerts", "fired", "resolved", "gone", "continued", "dropped",
-	"truncated", "routes", "alert_groups", "duration_ms")
+	"truncated", "routes", "alert_groups", "duration_ms", "lane")
 
 // SnapshotFailed is logged when a Stored Snapshot could not be processed and was marked failed.
 var SnapshotFailed = newEvent("snapshot_failed", LevelWarn, "C-06",

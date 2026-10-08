@@ -31,11 +31,23 @@ import (
 const (
 	// Poll is how often the worker looks for pending Stored Snapshots when no notification woke it.
 	Poll = 5 * time.Second
-	// Lease is how long a claim holds an Integration on the real clock; processing renews it with every Snapshot.
+	// Lease is how long a claim holds an Integration on the real clock; the worker that holds it renews it every
+	// renewEvery while it processes.
 	Lease = 30 * time.Second
 	// Concurrency is how many Integrations one replica processes at the same time, so that a backlog of one never
 	// holds up the others.
 	Concurrency = 4
+	// ParallelGroups is processing.parallel_groups (P-49): how many Alertmanager groups of one Integration are
+	// processed at the same time, each in arrival order (C-06.FR-1).
+	ParallelGroups = 2
+	// renewEvery is how often the worker renews the lease of an Integration it processes.
+	renewEvery = Lease / 3
+	// windowPerLane bounds the pending Stored Snapshots the worker holds in memory per lane: those in processing and
+	// those waiting for an earlier one.
+	windowPerLane = 4
+	// laneRetries bounds how often a lane retries a Snapshot after a deadlock, a serialization failure or a
+	// fingerprint another lane inserted, before the Integration's processing stops and pauses.
+	laneRetries = 5
 	// maxBackoff bounds the wait after failed rounds.
 	maxBackoff = time.Minute
 	// releaseTimeout bounds the release of a lease at shutdown.
@@ -56,11 +68,15 @@ type ProcessQueries interface {
 	EnsureIngestClaims(ctx context.Context, arg dbgen.EnsureIngestClaimsParams) error
 	ReleaseIngestClaim(ctx context.Context, arg dbgen.ReleaseIngestClaimParams) error
 	RenewIngestLease(ctx context.Context, arg dbgen.RenewIngestLeaseParams) (dbgen.RenewIngestLeaseRow, error)
-	NextPendingSnapshot(ctx context.Context, arg dbgen.NextPendingSnapshotParams) (dbgen.NextPendingSnapshotRow, error)
+	CheckIngestLease(ctx context.Context, arg dbgen.CheckIngestLeaseParams) (dbgen.CheckIngestLeaseRow, error)
+	ListPendingSnapshots(ctx context.Context, arg dbgen.ListPendingSnapshotsParams) ([]dbgen.ListPendingSnapshotsRow,
+		error)
 	FinishSnapshot(ctx context.Context, arg dbgen.FinishSnapshotParams) (bool, error)
 	CountSnapshot(ctx context.Context, arg dbgen.CountSnapshotParams) error
-	UpsertAlertmanagerRoute(ctx context.Context, arg dbgen.UpsertAlertmanagerRouteParams) (
-		dbgen.UpsertAlertmanagerRouteRow, error)
+	UpsertAlertmanagerRoute(ctx context.Context, arg dbgen.UpsertAlertmanagerRouteParams) (int64, error)
+	TouchAlertmanagerRoute(ctx context.Context, arg dbgen.TouchAlertmanagerRouteParams) error
+	LockAlertmanagerRoute(ctx context.Context, arg dbgen.LockAlertmanagerRouteParams) (dbgen.LockAlertmanagerRouteRow,
+		error)
 	UpsertAlertmanagerGroup(ctx context.Context, arg dbgen.UpsertAlertmanagerGroupParams) (
 		dbgen.UpsertAlertmanagerGroupRow, error)
 	UpdateAlertmanagerGroup(ctx context.Context, arg dbgen.UpdateAlertmanagerGroupParams) error
@@ -128,6 +144,9 @@ type pgProcessStore struct {
 	pool *pgxpool.Pool
 }
 
+// PoolSize is the most connections the main pool opens; processing takes at most half of them (lanesFor).
+func (s pgProcessStore) PoolSize() int { return int(s.pool.Config().MaxConns) }
+
 func (s pgProcessStore) InTx(ctx context.Context, f func(ProcessQueries, dbgen.DBTX) error) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		return f(newProcessQueries(tx), tx)
@@ -161,10 +180,13 @@ type ProcessorConfig struct {
 	Sink Sink
 	// RunbookBase is MUSTER_RUNBOOK_BASE_URL, the base of the runbook_url of the Internal alerts processing raises.
 	RunbookBase string
+	// Lanes is how many Alertmanager groups of one Integration are processed at the same time; 0 is ParallelGroups.
+	Lanes int
 }
 
 // Processor processes the Stored Snapshots of one Organization (C-06.FR-1): per Integration under a lease, in
-// arrival order, one transaction per Snapshot.
+// arrival order per Alertmanager group, up to lanes Alertmanager groups at the same time, one transaction per
+// Snapshot.
 type Processor struct {
 	orgID int64
 	store ProcessStore
@@ -172,14 +194,49 @@ type Processor struct {
 	lease db.Lease
 	log   *logging.Logger
 	sink  Sink
+	lanes int
+	// pause is the wait before a lane retries a Snapshot for the attempt-th time; renewEvery how often a run renews
+	// the lease.
+	pause      func(attempt int) time.Duration
+	renewEvery time.Duration
+	// gate bounds the lanes in flight across every Integration this Processor works on at the same time by half the
+	// main pool; nil when the pool is unknown.
+	gate chan struct{}
 	// internal raises and resolves the Internal alerts of processing.
 	internal *internalalerts.Raiser
 }
 
 // NewProcessor returns the Processor of an Organization.
 func NewProcessor(cfg ProcessorConfig) *Processor {
+	lanes := cfg.Lanes
+	if lanes <= 0 {
+		lanes = ParallelGroups
+	}
+	var gate chan struct{}
+	if s, ok := cfg.Store.(interface{ PoolSize() int }); ok {
+		lanes = lanesFor(lanes, s.PoolSize())
+		gate = make(chan struct{}, lanesFor(s.PoolSize(), s.PoolSize()))
+	}
 	return &Processor{orgID: cfg.OrgID, store: cfg.Store, clock: cfg.Business, lease: cfg.Lease, log: cfg.Log,
-		sink: cfg.Sink, internal: internalalerts.NewRaiser(cfg.OrgID, cfg.RunbookBase)}
+		sink: cfg.Sink, lanes: lanes, pause: lanePause, renewEvery: renewEvery, gate: gate,
+		internal: internalalerts.NewRaiser(cfg.OrgID, cfg.RunbookBase)}
+}
+
+// lanesFor bounds lanes by half of a main pool of pool connections, at least one, so that processing leaves
+// connections to ingestion, delivery and the API: lanes that hold the whole pool starve delivery, whose latency is what
+// NFR-2 measures. It bounds the lanes of one Integration, and the gate those of every Integration together.
+func lanesFor(lanes, pool int) int {
+	if pool <= 0 {
+		return lanes
+	}
+	return max(1, min(lanes, pool/2))
+}
+
+// lanePause is a short, growing, jittered wait before a lane retries a Snapshot, so that two lanes that deadlocked do
+// not meet again at once.
+func lanePause(attempt int) time.Duration {
+	base := time.Duration(attempt+1) * 10 * time.Millisecond
+	return base + time.Duration(rand.Int64N(int64(base))) //nolint:gosec // G404: spreads retries, guards nothing
 }
 
 // horizon is the oldest receipt time that can still be pending: retention.stored_snapshots before now.
@@ -253,29 +310,21 @@ func (p *Processor) Drain(ctx context.Context) (int, error) {
 	return total, errors.Join(errs...)
 }
 
-// ProcessPending processes the pending Stored Snapshots of an Integration whose lease this replica holds, oldest
-// first, until none is left, the lease is lost or ctx ends, and returns how many it processed or marked failed. A
-// Snapshot that cannot be processed is marked failed and does not stop the ones behind it (C-06.FR-20); a lost
-// connection leaves it pending.
+// ProcessPending processes the pending Stored Snapshots of an Integration whose lease this replica holds until none
+// is left, the lease is lost or ctx ends, and returns how many it processed or marked failed. Snapshots of one
+// Alertmanager group are processed oldest first and one at a time, up to p.lanes Alertmanager groups at the same time
+// (C-06.FR-1); a Snapshot that cannot be processed is marked failed and does not stop the ones behind it
+// (C-06.FR-20); a lost connection leaves it pending. It renews the lease while it runs.
 func (p *Processor) ProcessPending(ctx context.Context, integrationID int64) (int, error) {
 	horizon, err := p.horizon(ctx)
 	if err != nil {
 		return 0, err
 	}
-	n := 0
-	for ctx.Err() == nil {
-		done, err := p.processNext(ctx, integrationID, horizon)
-		switch {
-		case errors.Is(err, errLeaseLost):
-			return n, nil
-		case err != nil:
-			return n, err
-		case !done:
-			return n, nil
-		}
-		n++
+	r := &run{p: p, integrationID: integrationID, horizon: horizon, results: make(chan laneResult, p.lanes)}
+	if err := r.renew(ctx); err != nil || r.lost {
+		return 0, err
 	}
-	return n, ctx.Err()
+	return r.loop(ctx)
 }
 
 // attempt is one Stored Snapshot in processing; internal marks a synthetic one (source internal).
@@ -289,40 +338,32 @@ type attempt struct {
 	result      processedSnapshot
 }
 
-// processNext processes the oldest pending Stored Snapshot of the Integration in one transaction that holds the
-// claim row, and reports whether there was one.
-func (p *Processor) processNext(ctx context.Context, integrationID int64, horizon time.Time) (bool, error) {
+// processOne processes a pending Stored Snapshot in one transaction that holds the claim row FOR KEY SHARE. It returns
+// an error that leaves the Snapshot pending — a lost lease, a transient error or one a lane retries — and marks it
+// failed otherwise.
+func (p *Processor) processOne(ctx context.Context, integrationID int64, it *item, lane int) error {
 	start := p.lease.Clocks.Real.Now()
-	var a *attempt
+	a := &attempt{id: it.row.ID, publicID: it.row.PublicID, receivedAt: it.row.ReceivedAt.UTC(),
+		internal: it.row.Source == SourceInternal}
 	err := p.store.InTx(ctx, func(q ProcessQueries, tx dbgen.DBTX) error {
-		a = nil
-		info, err := p.renew(ctx, q, integrationID)
+		a.result, a.payload = processedSnapshot{}, nil
+		info, err := p.check(ctx, q, integrationID)
 		if err != nil {
 			return err
 		}
-		row, err := q.NextPendingSnapshot(ctx, dbgen.NextPendingSnapshotParams{OrgID: p.orgID,
-			IntegrationID: integrationID, Horizon: horizon})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
+		a.integration = info.PublicID
+		if it.parseErr != nil {
+			return it.parseErr
 		}
-		if err != nil {
-			return fmt.Errorf("read the next pending snapshot: %w", err)
-		}
-		a = &attempt{integration: info.PublicID, id: row.ID, publicID: row.PublicID, receivedAt: row.ReceivedAt.UTC(),
-			internal: row.Source == SourceInternal}
-		payload, err := ParsePayload(row.Body)
+		a.payload = it.payload
+		in, err := snapshotOf(a, *it.payload, info)
 		if err != nil {
 			return err
 		}
-		a.payload = &payload
-		in, err := snapshotOf(a, payload, info)
-		if err != nil {
-			return err
-		}
-		d, marker := internalalerts.DeletionOf(row.Body)
+		in.Replayed = it.row.Replayed
 		switch {
-		case marker && a.internal:
-			a.result, err = p.applyDeletion(ctx, q, tx, integrationID, in, d)
+		case it.barrier:
+			a.result, err = p.applyDeletion(ctx, q, tx, integrationID, in, it.deletion)
 		case !a.internal && info.DeletedAt.Valid && !a.receivedAt.Before(info.DeletedAt.Time):
 			// A request that authenticated before the deletion and was stored after it: the marker may already have
 			// resolved the Integration's Alerts, so nothing fires again.
@@ -333,7 +374,9 @@ func (p *Processor) processNext(ctx context.Context, integrationID int64, horizo
 					return err
 				}
 			}
-			a.result, err = p.applySnapshot(ctx, q, tx, integrationID, in)
+			if a.result, err = p.applySnapshot(ctx, q, tx, integrationID, in); err == nil {
+				err = p.tail(ctx, q, integrationID, in, a.result)
+			}
 		}
 		if err != nil {
 			return err
@@ -341,15 +384,13 @@ func (p *Processor) processNext(ctx context.Context, integrationID int64, horizo
 		return p.finish(ctx, q, integrationID, a, StateProcessed, "")
 	})
 	switch {
-	case err == nil && a == nil:
-		return false, nil
 	case err == nil:
-		p.processed(ctx, a, p.lease.Clocks.Real.Now().Sub(start))
-		return true, nil
-	case a == nil || transient(ctx, err):
-		return false, err
+		p.processed(ctx, a, lane, p.lease.Clocks.Real.Now().Sub(start))
+		return nil
+	case errors.Is(err, errLeaseLost) || retryable(err) || transient(ctx, err):
+		return err
 	}
-	return true, p.fail(ctx, integrationID, a, err)
+	return p.fail(ctx, integrationID, a, err)
 }
 
 // alertsSince is the oldest startsAt an Internal alert can have and still be in the Alerts view:
@@ -360,6 +401,21 @@ func (p *Processor) alertsSince(ctx context.Context, q ProcessQueries) (time.Tim
 		return time.Time{}, fmt.Errorf("read the retention of alert details: %w", err)
 	}
 	return p.clock.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour), nil
+}
+
+// check reads, in a Snapshot's transaction, what processing needs of the Integration, provided this replica still
+// holds its lease; the claim row stays shared-locked until the transaction ends.
+func (p *Processor) check(ctx context.Context, q ProcessQueries, integrationID int64) (dbgen.RenewIngestLeaseRow,
+	error) {
+	info, err := q.CheckIngestLease(ctx, dbgen.CheckIngestLeaseParams{OrgID: p.orgID, IntegrationID: integrationID,
+		Owner: pgtype.Text{String: p.lease.Owner, Valid: true}, Now: p.lease.Clocks.Real.Now()})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return dbgen.RenewIngestLeaseRow{}, errLeaseLost
+	}
+	if err != nil {
+		return dbgen.RenewIngestLeaseRow{}, fmt.Errorf("check the lease: %w", err)
+	}
+	return dbgen.RenewIngestLeaseRow(info), nil
 }
 
 // renew extends the lease and reads what processing needs of the Integration.
@@ -430,9 +486,11 @@ func (p *Processor) fail(ctx context.Context, integrationID int64, a *attempt, c
 	reason := errorText(cause)
 	mark := func() error {
 		return p.store.InTx(ctx, func(q ProcessQueries, _ dbgen.DBTX) error {
-			if _, err := p.renew(ctx, q, integrationID); err != nil {
+			info, err := p.check(ctx, q, integrationID)
+			if err != nil {
 				return err
 			}
+			a.integration = info.PublicID
 			return p.finish(ctx, q, integrationID, a, StateFailed, reason)
 		})
 	}
@@ -455,7 +513,7 @@ func (p *Processor) fail(ctx context.Context, integrationID int64, a *attempt, c
 
 // processed counts and logs a processed Stored Snapshot once its transaction committed: one line per Snapshot,
 // never one per Alert (C-06.FR-15).
-func (p *Processor) processed(ctx context.Context, a *attempt, took time.Duration) {
+func (p *Processor) processed(ctx context.Context, a *attempt, lane int, took time.Duration) {
 	s := a.result.Stats
 	p.observeDelay(a)
 	if s.Resolved > 0 {
@@ -478,7 +536,8 @@ func (p *Processor) processed(ctx context.Context, a *attempt, took time.Duratio
 		logging.F("alerts", s.Alerts), logging.F("fired", s.Fired), logging.F("resolved", s.Resolved+s.Deleted),
 		logging.F("gone", s.Gone), logging.F("continued", s.Continued), logging.F("dropped", s.Dropped),
 		logging.F("truncated", s.Truncated), logging.F("routes", routesOf(a.result.Routed)),
-		logging.F("alert_groups", alertGroupsOf(a.result.Routed)), logging.F("duration_ms", took.Milliseconds()))
+		logging.F("alert_groups", alertGroupsOf(a.result.Routed)), logging.F("duration_ms", took.Milliseconds()),
+		logging.F("lane", lane))
 	a.result.Routed.committed(ctx)
 	for _, c := range a.result.Internal {
 		event := logging.InternalAlertRaised

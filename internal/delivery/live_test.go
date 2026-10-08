@@ -26,6 +26,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/delivery"
+	deliverydb "github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/destinations"
 	destinationsdb "github.com/muster-io/muster/internal/destinations/dbgen"
@@ -922,10 +923,60 @@ func TestLive(t *testing.T) {
 			{"mentions", l.mentionTargets},
 			// S-061.
 			{"press_binding", l.pressBinding},
+			// S-065.
+			{"claims_choose_once", l.claimsChooseOnce},
 		} {
 			t.Run(sub.name, sub.run)
 		}
 	})
+}
+
+// claimsChooseOnce: each claim of the delivery worker and the timer worker runs its LIMIT … FOR UPDATE SKIP LOCKED
+// choice once per call, also planned as a nested loop over the table it updates; as a subquery in FROM it ran once
+// per row of that table, which took seconds once Thread replies piled up (S-065).
+func (l *live) claimsChooseOnce(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.fire(t, "claims", "ClaimA/1", "ClaimB/1")
+	l.round(t, l.a)
+	l.fire(t, "claims", "ClaimA/1", "ClaimB/1", "ClaimA/2", "ClaimB/2")
+	l.exec(t, `INSERT INTO timers (org_id, alert_group_id, kind, deadline, created_at, updated_at)
+		SELECT org_id, id, 'reopen_window_end', $1, $1, $1 FROM alert_groups WHERE title IN ('ClaimA', 'ClaimB')
+		ON CONFLICT DO NOTHING`, l.business.Now().Add(48*time.Hour))
+	for _, table := range []string{"deliveries", "thread_replies", "destinations", "timers"} {
+		if n := l.count(t, `SELECT count(*) FROM `+table); n < 2 {
+			t.Fatalf("%d rows in %s: a choice run once per row would not show", n, table)
+		}
+	}
+	now := l.business.Now()
+	loops := dbtest.LockRowsLoops(t, l.d.Pool.Config().ConnString(), func(ctx context.Context, conn *pgx.Conn) {
+		tx, err := conn.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		q, tq := deliverydb.New(tx), timersdb.New(tx)
+		if _, err := q.ClaimDueDeliveries(ctx, deliverydb.ClaimDueDeliveriesParams{Owner: "probe",
+			LeaseUntil: now.Add(time.Minute), OrgID: l.orgID, Due: now.Add(time.Hour), Now: now, Lim: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.ClaimDueReplies(ctx, deliverydb.ClaimDueRepliesParams{Owner: "probe",
+			LeaseUntil: now.Add(time.Minute), OrgID: l.orgID, Due: now.Add(time.Hour), Now: now, Lim: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.ClaimBrokenProbes(ctx, deliverydb.ClaimBrokenProbesParams{NextProbe: now.Add(time.Minute),
+			OrgID: l.orgID, Due: now.Add(time.Hour), Now: now, Lim: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tq.ClaimDueTimers(ctx, timersdb.ClaimDueTimersParams{Owner: "probe",
+			LeaseUntil: now.Add(time.Minute), OrgID: l.orgID, Due: now.Add(24 * time.Hour), Now: now, Lim: 1,
+			Kinds: []string{"ack_timeout", "reminder", "snooze_end", "reopen_window_end", "grace_period_end",
+				delivery.TimerStormCalmCheck}}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if loops != 1 {
+		t.Errorf("a claim ran its choice %d times in one call", loops)
+	}
 }
 
 // interactive is the interactive path whose sleeps advance both clocks.

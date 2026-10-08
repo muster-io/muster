@@ -7,11 +7,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/ingest/dbgen"
@@ -73,6 +75,8 @@ type snapshotIn struct {
 	// deletion resolved them. AlertsSince bounds the startsAt of a raise that fires an Internal alert anew.
 	Deleted     bool
 	AlertsSince time.Time
+	// Replayed is a Snapshot that a replay set back to pending.
+	Replayed bool
 }
 
 // Stats count what one Snapshot did, for its log line and the metrics; Deleted are the Alerts the deletion of their
@@ -341,6 +345,10 @@ type processedSnapshot struct {
 	Routed Routed
 	// Internal are the Internal alerts a synthetic Snapshot raised or resolved.
 	Internal []internalChange
+	// route is the Snapshot's Alertmanager route with the gaps it learned, written at the end of the transaction;
+	// truncated is the new truncation of its groupKey when the Snapshot changed it, nil otherwise.
+	route     *route
+	truncated *bool
 }
 
 // internalChange is an Internal alert that fired or resolved, for its log line.
@@ -386,12 +394,11 @@ func (p *Processor) applySnapshot(ctx context.Context, q ProcessQueries, tx dbge
 	if err := p.write(ctx, q, integrationID, e); err != nil {
 		return processedSnapshot{}, err
 	}
+	out := processedSnapshot{Stats: e.stats, Changes: make([]AlertChange, len(e.changes)), route: r}
 	if e.group.Truncated != e.wasTruncated && !in.Deleted {
-		if err := p.truncationChanged(ctx, q, integrationID, in, e.group.Truncated); err != nil {
-			return processedSnapshot{}, err
-		}
+		truncated := e.group.Truncated
+		out.truncated = &truncated
 	}
-	out := processedSnapshot{Stats: e.stats, Changes: make([]AlertChange, len(e.changes))}
 	for i, c := range e.changes {
 		out.Changes[i] = AlertChange{Kind: c.kind, AlertID: c.alert.ID, Fingerprint: c.alert.Fingerprint,
 			Episode: c.alert.Episode, StoredSnapshotID: in.StoredSnapshotID, Reason: c.reason,
@@ -432,23 +439,25 @@ func (e *engine) listed(storedSnapshotID int64) []AlertChange {
 }
 
 // readGroup finds or creates the Alertmanager route and group of the Snapshot's groupKey; the group's row stays
-// locked until the transaction ends.
+// locked until the transaction ends, the route's row, which the route's other groupKeys share, is not locked here.
 func (p *Processor) readGroup(ctx context.Context, q ProcessQueries, integrationID int64, in snapshotIn) (*group,
 	*route, error) {
 	t := in.ReceivedAt
 	path := AlertmanagerRoutePath(in.Payload.GroupKey)
 	pathSum, keySum := sha256.Sum256([]byte(path)), sha256.Sum256([]byte(in.Payload.GroupKey))
-	rr, err := q.UpsertAlertmanagerRoute(ctx, dbgen.UpsertAlertmanagerRouteParams{OrgID: p.orgID,
-		IntegrationID: integrationID, RoutePath: path, RoutePathSha256: pathSum[:], SeenAt: t})
+	params := dbgen.UpsertAlertmanagerRouteParams{OrgID: p.orgID, IntegrationID: integrationID, RoutePath: path,
+		RoutePathSha256: pathSum[:], SeenAt: t}
+	routeID, err := q.UpsertAlertmanagerRoute(ctx, params)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Another lane created the route at the same time and committed; it is visible now.
+		routeID, err = q.UpsertAlertmanagerRoute(ctx, params)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("record the alertmanager route: %w", err)
 	}
-	r := &route{ID: rr.ID, Gaps: rr.RecentRepeatGapsMs, Observations: rr.RepeatObservations}
-	if rr.LearnedRepeatIntervalMs.Valid {
-		r.Learned = &rr.LearnedRepeatIntervalMs.Int64
-	}
+	r := &route{ID: routeID}
 	gr, err := q.UpsertAlertmanagerGroup(ctx, dbgen.UpsertAlertmanagerGroupParams{OrgID: p.orgID,
-		IntegrationID: integrationID, AlertmanagerRouteID: rr.ID, GroupKey: in.Payload.GroupKey,
+		IntegrationID: integrationID, AlertmanagerRouteID: routeID, GroupKey: in.Payload.GroupKey,
 		GroupKeySha256: keySum[:], SeenAt: t, ClockMs: in.ClockMs})
 	if err != nil {
 		return nil, nil, fmt.Errorf("record the alertmanager group: %w", err)
@@ -619,7 +628,7 @@ func (p *Processor) writeGroup(ctx context.Context, q ProcessQueries, e *engine)
 	if e.late || e.in.Internal {
 		return nil
 	}
-	g, r := e.group, e.route
+	g := e.group
 	if err := q.UpdateAlertmanagerGroup(ctx, dbgen.UpdateAlertmanagerGroupParams{OrgID: p.orgID, ID: g.ID,
 		LastSnapshotAt: g.LastSnapshotAt, LastSnapshotClockMs: g.LastClockMs, WindowSeq: g.WindowSeq,
 		WindowStartedAt: timestamptz(g.WindowStartedAt), WindowTruncated: g.WindowTruncated, Truncated: g.Truncated,
@@ -627,12 +636,47 @@ func (p *Processor) writeGroup(ctx context.Context, q ProcessQueries, e *engine)
 		LastContentSha256: g.LastContent, LastContentAt: timestamptz(g.LastContentAt)}); err != nil {
 		return fmt.Errorf("update the alertmanager group: %w", err)
 	}
-	if !r.changed {
+	return nil
+}
+
+// tail writes what a Snapshot changed on rows the lanes of its Integration share, as the last statements before the
+// Snapshot is marked, in the lock order of every lane: the Alertmanager route — when it was seen, and the gaps it
+// learned added to the ring as it is now — and then the Integration, when the Snapshot changed the truncation of its
+// groupKey. Each row is held only until the commit.
+func (p *Processor) tail(ctx context.Context, q ProcessQueries, integrationID int64, in snapshotIn,
+	out processedSnapshot) error {
+	if r := out.route; r != nil {
+		if err := p.writeRoute(ctx, q, r, in.ReceivedAt); err != nil {
+			return err
+		}
+	}
+	if out.truncated != nil {
+		return p.truncationChanged(ctx, q, integrationID, in, *out.truncated)
+	}
+	return nil
+}
+
+// writeRoute refreshes when the Alertmanager route was seen and, when the Snapshot learned gaps, locks the route and
+// adds them to its ring as other transactions left it.
+func (p *Processor) writeRoute(ctx context.Context, q ProcessQueries, r *route, seen time.Time) error {
+	if len(r.observed) == 0 {
+		if err := q.TouchAlertmanagerRoute(ctx, dbgen.TouchAlertmanagerRouteParams{OrgID: p.orgID, ID: r.ID,
+			SeenAt: seen}); err != nil {
+			return fmt.Errorf("record when the alertmanager route was seen: %w", err)
+		}
 		return nil
 	}
+	row, err := q.LockAlertmanagerRoute(ctx, dbgen.LockAlertmanagerRouteParams{OrgID: p.orgID, ID: r.ID})
+	if err != nil {
+		return fmt.Errorf("lock the alertmanager route: %w", err)
+	}
+	ring := &route{ID: r.ID, Gaps: row.RecentRepeatGapsMs, Observations: row.RepeatObservations}
+	for _, gap := range r.observed {
+		ring.add(gap)
+	}
 	if err := q.UpdateRepeatInterval(ctx, dbgen.UpdateRepeatIntervalParams{OrgID: p.orgID, ID: r.ID,
-		LearnedRepeatIntervalMs: pgtype.Int8{Int64: *r.Learned, Valid: true}, RepeatObservations: r.Observations,
-		RecentRepeatGapsMs: r.Gaps}); err != nil {
+		LearnedRepeatIntervalMs: pgtype.Int8{Int64: *ring.Learned, Valid: true}, RepeatObservations: ring.Observations,
+		RecentRepeatGapsMs: ring.Gaps, SeenAt: seen}); err != nil {
 		return fmt.Errorf("update the learned repeat interval: %w", err)
 	}
 	return nil

@@ -15,15 +15,18 @@ import (
 const claimDueTimers = `-- name: ClaimDueTimers :many
 
 
+WITH due AS MATERIALIZED (
+    SELECT d.id
+    FROM timers d
+    WHERE d.org_id = $3 AND d.deadline <= $4 AND d.kind = ANY($5::text[])
+      AND (d.lease_until IS NULL OR d.lease_until <= $6::timestamptz)
+    ORDER BY d.deadline, d.id
+    LIMIT $7
+    FOR UPDATE SKIP LOCKED
+)
 UPDATE timers t
 SET lease_owner = $1::text, lease_until = $2::timestamptz, attempts = t.attempts + 1
-FROM (SELECT d.id
-      FROM timers d
-      WHERE d.org_id = $3 AND d.deadline <= $4 AND d.kind = ANY($5::text[])
-        AND (d.lease_until IS NULL OR d.lease_until <= $6::timestamptz)
-      ORDER BY d.deadline, d.id
-      LIMIT $7
-      FOR UPDATE SKIP LOCKED) AS due
+FROM due
 WHERE t.org_id = $3 AND t.id = due.id
 RETURNING t.id, t.alert_group_id, t.storm_id, t.kind, t.deadline, t.attempts
 `
@@ -51,7 +54,8 @@ type ClaimDueTimersRow struct {
 // Copyright The Muster Authors
 // The claim of the timer rows (schema.md §5): due on the business clock, leased on the real clock.
 // ClaimDueTimers leases the due timers of the kinds this replica fires whose lease is free or ran out, earliest
-// first; another claimer skips the rows this one locked.
+// first; another claimer skips the rows this one locked. The choice is a materialized CTE, run once: as a subquery in
+// FROM, PostgreSQL may plan it as the inner side of a nested loop over every timer, run once per row.
 func (q *Queries) ClaimDueTimers(ctx context.Context, arg ClaimDueTimersParams) ([]ClaimDueTimersRow, error) {
 	rows, err := q.db.Query(ctx, claimDueTimers,
 		arg.Owner,

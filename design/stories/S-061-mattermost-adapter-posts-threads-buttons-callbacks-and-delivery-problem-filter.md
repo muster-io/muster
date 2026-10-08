@@ -474,6 +474,9 @@ shown (F-056); and that after the Root message is deleted in the client, the nex
   delivery latency, counted from receipt, reaches about 58 s at p95 while delivery itself adds about 6 ms. The
   maintainer decides how NFR-2 is met (faster processing, the profile over several Integrations, or a narrower NFR-2)
   before the nightly job relies on it.
+  _Resolved by [S-065](S-065-parallel-snapshot-processing-per-alertmanager-group-and-a-shorter-grouping-lock.md)
+  (D283):_ faster processing, by processing the Alertmanager groups of an Integration in parallel and taking the
+  grouping lock only to create or reopen an Alert Group; S-065 has the profile.
 - Lint 3 stays strict (journal D282). `delivery.PublishOp`, `UpdateOp` and `ReplyOp` are exported, so any package can
   send, but only through `Interactive.Do`, which always takes a limiter token. The Mattermost client's post and patch
   methods therefore stay unexported, or `DefaultConfig` in `internal/archlint/archlint.go` adds them to lint 3's

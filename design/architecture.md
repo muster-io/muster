@@ -168,7 +168,7 @@ Telegram, a reverse proxy or a self-hosted Bot API server set as the Connection'
 | Every replica | The Leader only |
 |---|---|
 | the three listeners, the API and the SSE stream | Telegram `getUpdates` long polling (in the default update mode) |
-| Snapshot processing, at most one Stored Snapshot per Integration at a time | the Heartbeat lost and Stale checks |
+| Snapshot processing, at most one Stored Snapshot per Alertmanager group at a time | the Heartbeat lost and Stale checks |
 | the delivery worker, the Broken probes and the interactive path | partition maintenance and retention |
 | timer rows: ack timeouts, Reminders, Snooze ends, Reopen window ends, Grace period ends; background re-checks of OIDC users | database gauges (`muster_alert_groups`, queue depths, Broken) |
 | the key record of the replica, refreshed every 30 s | the "alive" mark and the downtime record after an outage |
@@ -234,7 +234,8 @@ flowchart TB
     adapters --> outbound
 ```
 
-- **Snapshot processing** reads Stored Snapshots in arrival order per Integration, splits them into Alerts by
+- **Snapshot processing** reads Stored Snapshots in arrival order per Alertmanager group, several Alertmanager groups
+  of an Integration at the same time, splits them into Alerts by
   fingerprint, adds Static labels, applies the Snapshot semantics — duplicate window, Gone, truncation, staleness
   bookkeeping, learned repeat intervals, Continuations — and emits Alert changes ([ADR-0002], [C-06]). Internal alerts
   enter here as Alerts of the built-in "Muster" Integration ([C-06].FR-14).
@@ -416,7 +417,7 @@ sequenceDiagram
     participant GR as groups
     participant DL as delivery
 
-    PW->>DB: claim the oldest unprocessed Stored Snapshot of an Integration<br/>one per Integration at a time, SKIP LOCKED, lease
+    PW->>DB: claim an Integration, SKIP LOCKED, lease; read its oldest unprocessed Stored Snapshots<br/>one per Alertmanager group at a time, up to processing.parallel_groups
     PW->>PW: split into Alerts by fingerprint, add Static labels
     loop each Alert listed in the Snapshot
         alt status resolved, the Alert already resolved or this an earlier firing of it

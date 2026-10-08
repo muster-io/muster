@@ -12,17 +12,78 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const checkIngestLease = `-- name: CheckIngestLease :one
+SELECT i.public_id, i.name, i.builtin, i.static_labels, i.duplicate_window_seconds, i.liveness_clock_ms,
+    i.heartbeat_state, i.heartbeat_last_signal_at, i.heartbeat_timeout_seconds, i.deleted_at
+FROM ingest_claims c
+JOIN integrations i ON i.org_id = $1 AND i.id = c.integration_id
+WHERE c.org_id = $1 AND c.integration_id = $2 AND c.lease_owner = $3
+  AND c.lease_until > $4::timestamptz
+FOR KEY SHARE OF c
+`
+
+type CheckIngestLeaseParams struct {
+	OrgID         int64
+	IntegrationID int64
+	Owner         pgtype.Text
+	Now           time.Time
+}
+
+type CheckIngestLeaseRow struct {
+	PublicID                string
+	Name                    string
+	Builtin                 bool
+	StaticLabels            []byte
+	DuplicateWindowSeconds  int64
+	LivenessClockMs         int64
+	HeartbeatState          string
+	HeartbeatLastSignalAt   pgtype.Timestamptz
+	HeartbeatTimeoutSeconds int64
+	DeletedAt               pgtype.Timestamptz
+}
+
+// CheckIngestLease checks, in a Snapshot's transaction, that this replica still holds the lease, and returns what
+// processing needs of the Integration; a lease that ran out at @now (real clock) is not held, even by this replica's
+// own Stale scan. FOR KEY SHARE keeps the claim row until the transaction ends without blocking
+// the holder's renewal, and another replica's claim (FOR UPDATE SKIP LOCKED) skips the row meanwhile. No row means
+// the lease went to another replica.
+func (q *Queries) CheckIngestLease(ctx context.Context, arg CheckIngestLeaseParams) (CheckIngestLeaseRow, error) {
+	row := q.db.QueryRow(ctx, checkIngestLease,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.Owner,
+		arg.Now,
+	)
+	var i CheckIngestLeaseRow
+	err := row.Scan(
+		&i.PublicID,
+		&i.Name,
+		&i.Builtin,
+		&i.StaticLabels,
+		&i.DuplicateWindowSeconds,
+		&i.LivenessClockMs,
+		&i.HeartbeatState,
+		&i.HeartbeatLastSignalAt,
+		&i.HeartbeatTimeoutSeconds,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const claimIntegrations = `-- name: ClaimIntegrations :many
-UPDATE ingest_claims c
-SET lease_owner = $1, lease_until = $2
-FROM integrations i
-WHERE c.org_id = $3 AND i.org_id = $3 AND i.id = c.integration_id AND c.integration_id IN (
+WITH free AS MATERIALIZED (
     SELECT f.integration_id
     FROM ingest_claims f
     WHERE f.org_id = $3 AND f.integration_id = ANY($4::bigint[])
       AND (f.lease_until IS NULL OR f.lease_until <= $5::timestamptz)
     LIMIT $6
-    FOR UPDATE SKIP LOCKED)
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE ingest_claims c
+SET lease_owner = $1, lease_until = $2
+FROM integrations i
+WHERE c.org_id = $3 AND i.org_id = $3 AND i.id = c.integration_id
+  AND c.integration_id IN (SELECT free.integration_id FROM free)
 RETURNING c.integration_id, i.public_id
 `
 
@@ -41,7 +102,8 @@ type ClaimIntegrationsRow struct {
 }
 
 // ClaimIntegrations leases at most @batch_size of the Integrations whose lease is free or ran out at @now (real
-// clock); a claim row another transaction holds is skipped.
+// clock); a claim row another transaction holds is skipped. The choice is a materialized CTE, run once, as in the
+// other claims.
 func (q *Queries) ClaimIntegrations(ctx context.Context, arg ClaimIntegrationsParams) ([]ClaimIntegrationsRow, error) {
 	rows, err := q.db.Query(ctx, claimIntegrations,
 		arg.Owner,
@@ -115,8 +177,9 @@ type CountSnapshotParams struct {
 	IntegrationID int64
 }
 
-// CountSnapshot counts a Stored Snapshot on its Integration when it leaves pending for the first time; processing
-// is serialized per Integration, so the ingestion path never updates the Integration row.
+// CountSnapshot counts a Stored Snapshot on its Integration when it leaves pending for the first time; it is the last
+// statement of the Snapshot's transaction, so that the lanes of an Integration hold the row only through the commit,
+// and the ingestion path never updates the Integration row.
 func (q *Queries) CountSnapshot(ctx context.Context, arg CountSnapshotParams) error {
 	_, err := q.db.Exec(ctx, countSnapshot, arg.ReceivedAt, arg.OrgID, arg.IntegrationID)
 	return err
@@ -776,6 +839,68 @@ func (q *Queries) ListPendingIntegrations(ctx context.Context, arg ListPendingIn
 	return items, nil
 }
 
+const listPendingSnapshots = `-- name: ListPendingSnapshots :many
+SELECT s.id, s.public_id, s.received_at, s.source, b.body, (s.replayed_at IS NOT NULL)::boolean AS replayed
+FROM stored_snapshots s
+JOIN snapshot_bodies b ON b.org_id = $1 AND b.body_sha256 = s.body_sha256 AND b.body_day = s.body_day
+WHERE s.org_id = $1 AND s.integration_id = $2 AND s.state = 'pending'
+  AND s.received_at >= $3::timestamptz AND NOT (s.id = ANY($4::bigint[]))
+ORDER BY s.received_at, s.id
+LIMIT $5
+`
+
+type ListPendingSnapshotsParams struct {
+	OrgID         int64
+	IntegrationID int64
+	Horizon       time.Time
+	HeldIds       []int64
+	PageSize      int32
+}
+
+type ListPendingSnapshotsRow struct {
+	ID         int64
+	PublicID   string
+	ReceivedAt time.Time
+	Source     string
+	Body       []byte
+	Replayed   bool
+}
+
+// ListPendingSnapshots reads the oldest pending Stored Snapshots of an Integration with their bodies and sources,
+// apart from those the worker already holds, at most @page_size of them, and whether a replay set each back to pending.
+func (q *Queries) ListPendingSnapshots(ctx context.Context, arg ListPendingSnapshotsParams) ([]ListPendingSnapshotsRow, error) {
+	rows, err := q.db.Query(ctx, listPendingSnapshots,
+		arg.OrgID,
+		arg.IntegrationID,
+		arg.Horizon,
+		arg.HeldIds,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingSnapshotsRow{}
+	for rows.Next() {
+		var i ListPendingSnapshotsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.ReceivedAt,
+			&i.Source,
+			&i.Body,
+			&i.Replayed,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPreviewBodies = `-- name: ListPreviewBodies :many
 SELECT s.integration_id, s.body_sha256, max(s.received_at)::timestamptz AS received_at,
        max(s.size_bytes)::bigint AS size_bytes
@@ -936,6 +1061,7 @@ WHERE a.org_id = $1 AND a.integration_id = $2
                    FROM alert_presences p
                    WHERE p.org_id = $1 AND p.alertmanager_group_id = $4
                      AND p.state IN ('listed', 'missed')))
+ORDER BY a.id
 FOR NO KEY UPDATE OF a
 `
 
@@ -1602,11 +1728,38 @@ func (q *Queries) ListViewGroupKeys(ctx context.Context, arg ListViewGroupKeysPa
 	return items, nil
 }
 
+const lockAlertmanagerRoute = `-- name: LockAlertmanagerRoute :one
+SELECT learned_repeat_interval_ms, repeat_observations, recent_repeat_gaps_ms
+FROM alertmanager_routes
+WHERE org_id = $1 AND id = $2
+FOR NO KEY UPDATE
+`
+
+type LockAlertmanagerRouteParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type LockAlertmanagerRouteRow struct {
+	LearnedRepeatIntervalMs pgtype.Int8
+	RepeatObservations      int64
+	RecentRepeatGapsMs      []int64
+}
+
+// LockAlertmanagerRoute locks the Alertmanager route and reads its repeat-interval ring, so that a learned gap is
+// added to what other transactions added meanwhile.
+func (q *Queries) LockAlertmanagerRoute(ctx context.Context, arg LockAlertmanagerRouteParams) (LockAlertmanagerRouteRow, error) {
+	row := q.db.QueryRow(ctx, lockAlertmanagerRoute, arg.OrgID, arg.ID)
+	var i LockAlertmanagerRouteRow
+	err := row.Scan(&i.LearnedRepeatIntervalMs, &i.RepeatObservations, &i.RecentRepeatGapsMs)
+	return i, err
+}
+
 const lockIntegrationName = `-- name: LockIntegrationName :one
 SELECT name
 FROM integrations
 WHERE org_id = $1 AND id = $2
-FOR KEY SHARE
+FOR NO KEY UPDATE
 `
 
 type LockIntegrationNameParams struct {
@@ -1614,8 +1767,10 @@ type LockIntegrationNameParams struct {
 	IntegrationID int64
 }
 
-// LockIntegrationName reads the current name of an Integration for an Internal alert about it, after a rename that is
-// in progress commits; a rename that starts later waits for the Snapshot's transaction and then sees its raise.
+// LockIntegrationName locks the Integration's row and reads its current name, before a Snapshot that changed the
+// truncation of a groupKey counts the truncated groupKeys: the lanes of the Integration decide MusterSnapshotTruncated
+// one after the other, each seeing what the earlier ones committed. A rename in progress commits first; one that starts
+// later waits for the Snapshot's transaction and then sees its raise.
 func (q *Queries) LockIntegrationName(ctx context.Context, arg LockIntegrationNameParams) (string, error) {
 	row := q.db.QueryRow(ctx, lockIntegrationName, arg.OrgID, arg.IntegrationID)
 	var name string
@@ -1666,44 +1821,6 @@ type MarkPresencesStaleParams struct {
 func (q *Queries) MarkPresencesStale(ctx context.Context, arg MarkPresencesStaleParams) error {
 	_, err := q.db.Exec(ctx, markPresencesStale, arg.OrgID, arg.AlertIds, arg.AlertmanagerGroupIds)
 	return err
-}
-
-const nextPendingSnapshot = `-- name: NextPendingSnapshot :one
-SELECT s.id, s.public_id, s.received_at, s.source, b.body
-FROM stored_snapshots s
-JOIN snapshot_bodies b ON b.org_id = $1 AND b.body_sha256 = s.body_sha256 AND b.body_day = s.body_day
-WHERE s.org_id = $1 AND s.integration_id = $2 AND s.state = 'pending'
-  AND s.received_at >= $3::timestamptz
-ORDER BY s.received_at, s.id
-LIMIT 1
-`
-
-type NextPendingSnapshotParams struct {
-	OrgID         int64
-	IntegrationID int64
-	Horizon       time.Time
-}
-
-type NextPendingSnapshotRow struct {
-	ID         int64
-	PublicID   string
-	ReceivedAt time.Time
-	Source     string
-	Body       []byte
-}
-
-// NextPendingSnapshot reads the oldest pending Stored Snapshot of an Integration with its body and its source.
-func (q *Queries) NextPendingSnapshot(ctx context.Context, arg NextPendingSnapshotParams) (NextPendingSnapshotRow, error) {
-	row := q.db.QueryRow(ctx, nextPendingSnapshot, arg.OrgID, arg.IntegrationID, arg.Horizon)
-	var i NextPendingSnapshotRow
-	err := row.Scan(
-		&i.ID,
-		&i.PublicID,
-		&i.ReceivedAt,
-		&i.Source,
-		&i.Body,
-	)
-	return i, err
 }
 
 const notifySnapshot = `-- name: NotifySnapshot :exec
@@ -1769,9 +1886,9 @@ type RenewIngestLeaseRow struct {
 	DeletedAt               pgtype.Timestamptz
 }
 
-// RenewIngestLease extends the lease this replica holds and locks the claim row until the Snapshot's transaction
-// ends, so that no other replica processes the Integration meanwhile; it returns what processing needs of the
-// Integration. No row means the lease went to another replica.
+// RenewIngestLease extends the lease this replica holds and returns what processing needs of the Integration; the
+// processing worker renews it while it holds the Integration, and the Stale scan in its transaction. No row means the
+// lease went to another replica.
 func (q *Queries) RenewIngestLease(ctx context.Context, arg RenewIngestLeaseParams) (RenewIngestLeaseRow, error) {
 	row := q.db.QueryRow(ctx, renewIngestLease,
 		arg.LeaseUntil,
@@ -1943,6 +2060,24 @@ func (q *Queries) ResolveStaleAlerts(ctx context.Context, arg ResolveStaleAlerts
 	return items, nil
 }
 
+const touchAlertmanagerRoute = `-- name: TouchAlertmanagerRoute :exec
+UPDATE alertmanager_routes
+SET last_seen_at = $1
+WHERE org_id = $2 AND id = $3 AND last_seen_at < $1
+`
+
+type TouchAlertmanagerRouteParams struct {
+	SeenAt time.Time
+	OrgID  int64
+	ID     int64
+}
+
+// TouchAlertmanagerRoute refreshes when the Alertmanager route was last seen.
+func (q *Queries) TouchAlertmanagerRoute(ctx context.Context, arg TouchAlertmanagerRouteParams) error {
+	_, err := q.db.Exec(ctx, touchAlertmanagerRoute, arg.SeenAt, arg.OrgID, arg.ID)
+	return err
+}
+
 const updateAlertmanagerGroup = `-- name: UpdateAlertmanagerGroup :exec
 UPDATE alertmanager_groups
 SET last_snapshot_at = $1, last_snapshot_clock_ms = $2, window_seq = $3,
@@ -2017,24 +2152,27 @@ func (q *Queries) UpdateAlerts(ctx context.Context, arg UpdateAlertsParams) erro
 const updateRepeatInterval = `-- name: UpdateRepeatInterval :exec
 UPDATE alertmanager_routes
 SET learned_repeat_interval_ms = $1, repeat_observations = $2,
-    recent_repeat_gaps_ms = $3::bigint[]
-WHERE org_id = $4 AND id = $5
+    recent_repeat_gaps_ms = $3::bigint[], last_seen_at = greatest(last_seen_at, $4)
+WHERE org_id = $5 AND id = $6
 `
 
 type UpdateRepeatIntervalParams struct {
 	LearnedRepeatIntervalMs pgtype.Int8
 	RepeatObservations      int64
 	RecentRepeatGapsMs      []int64
+	SeenAt                  time.Time
 	OrgID                   int64
 	ID                      int64
 }
 
-// UpdateRepeatInterval stores a learned repeat interval and the ring of gaps it is the median of.
+// UpdateRepeatInterval stores a learned repeat interval and the ring of gaps it is the median of, and when the
+// Alertmanager route was last seen.
 func (q *Queries) UpdateRepeatInterval(ctx context.Context, arg UpdateRepeatIntervalParams) error {
 	_, err := q.db.Exec(ctx, updateRepeatInterval,
 		arg.LearnedRepeatIntervalMs,
 		arg.RepeatObservations,
 		arg.RecentRepeatGapsMs,
+		arg.SeenAt,
 		arg.OrgID,
 		arg.ID,
 	)
@@ -2109,45 +2247,44 @@ func (q *Queries) UpsertAlertmanagerGroup(ctx context.Context, arg UpsertAlertma
 }
 
 const upsertAlertmanagerRoute = `-- name: UpsertAlertmanagerRoute :one
-INSERT INTO alertmanager_routes (org_id, integration_id, route_path, route_path_sha256, first_seen_at, last_seen_at)
-VALUES ($1, $2, $3, $4, $5, $5)
-ON CONFLICT (integration_id, route_path_sha256) DO UPDATE
-SET last_seen_at = greatest(alertmanager_routes.last_seen_at, excluded.last_seen_at)
-RETURNING id, learned_repeat_interval_ms, repeat_observations, recent_repeat_gaps_ms
+WITH found AS (
+    SELECT r.id
+    FROM alertmanager_routes r
+    WHERE r.org_id = $1 AND r.integration_id = $2 AND r.route_path_sha256 = $3
+), created AS (
+    INSERT INTO alertmanager_routes (org_id, integration_id, route_path, route_path_sha256, first_seen_at, last_seen_at)
+    SELECT $1, $2, $4, $3, $5, $5
+    WHERE NOT EXISTS (SELECT 1 FROM found)
+    ON CONFLICT (integration_id, route_path_sha256) DO NOTHING
+    RETURNING id
+)
+SELECT id FROM found
+UNION ALL
+SELECT id FROM created
 `
 
 type UpsertAlertmanagerRouteParams struct {
 	OrgID           int64
 	IntegrationID   int64
-	RoutePath       string
 	RoutePathSha256 []byte
+	RoutePath       string
 	SeenAt          time.Time
 }
 
-type UpsertAlertmanagerRouteRow struct {
-	ID                      int64
-	LearnedRepeatIntervalMs pgtype.Int8
-	RepeatObservations      int64
-	RecentRepeatGapsMs      []int64
-}
-
-// UpsertAlertmanagerRoute finds or creates the Alertmanager route of a groupKey and refreshes when it was seen.
-func (q *Queries) UpsertAlertmanagerRoute(ctx context.Context, arg UpsertAlertmanagerRouteParams) (UpsertAlertmanagerRouteRow, error) {
+// UpsertAlertmanagerRoute finds or creates the Alertmanager route of a groupKey without locking it, since every
+// Alertmanager group of the route shares the row; TouchAlertmanagerRoute and LockAlertmanagerRoute write it at the end
+// of the transaction. No row means another transaction created it at the same time; a second call finds it.
+func (q *Queries) UpsertAlertmanagerRoute(ctx context.Context, arg UpsertAlertmanagerRouteParams) (int64, error) {
 	row := q.db.QueryRow(ctx, upsertAlertmanagerRoute,
 		arg.OrgID,
 		arg.IntegrationID,
-		arg.RoutePath,
 		arg.RoutePathSha256,
+		arg.RoutePath,
 		arg.SeenAt,
 	)
-	var i UpsertAlertmanagerRouteRow
-	err := row.Scan(
-		&i.ID,
-		&i.LearnedRepeatIntervalMs,
-		&i.RepeatObservations,
-		&i.RecentRepeatGapsMs,
-	)
-	return i, err
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const upsertListedPresences = `-- name: UpsertListedPresences :exec

@@ -190,12 +190,17 @@ test("creates an Integration with a token, receives webhooks, edits, revokes and
   );
   await expect(page.getByTestId("integration-last-snapshot")).toHaveText(/^Last Snapshot: .+/);
   await expect(tokenRow(page, "rotation-1")).toContainText("Last used");
-  // Processing takes both: the webhook is processed, the body that is not JSON fails (C-06.FR-20).
+  // Processing takes both: the webhook is processed, the body that is not JSON fails (C-06.FR-20). The two are of
+  // different Alertmanager groups, so they are processed at the same time and the failure may be counted first; the
+  // table is read once per load, so it is reloaded until both are done.
   const snapshots = page.getByRole("table", { name: "Stored Snapshots" });
-  await expect(snapshots.getByTestId("snapshot-state")).toHaveText([
-    /^Failed: the body is not valid JSON: /,
-    "Processed",
-  ]);
+  await expect(async () => {
+    await page.reload();
+    await expect(snapshots.getByTestId("snapshot-state")).toHaveText(
+      [/^Failed: the body is not valid JSON: /, "Processed"],
+      { timeout: 1000 },
+    );
+  }).toPass();
   await page.reload();
   await expect(page.getByTestId("integration-snapshot-count")).toHaveText("Snapshots received: 2");
   await shot(page, "integration-page");

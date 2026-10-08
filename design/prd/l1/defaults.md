@@ -18,6 +18,7 @@ table in the same pull request.
 | `MUSTER_DATABASE_PORT` | `5432` | environment | C-02 | decided |
 | `MUSTER_DATABASE_SSLMODE` | `prefer`; `muster doctor` and the startup log report whether each connection is encrypted | environment | C-02 | decided |
 | `MUSTER_DATABASE_SESSION_URL`, or `MUSTER_DATABASE_SESSION_HOST` and `_PORT` | the main connection; other fields inherited | environment | C-02 | decided |
+| `pool_max_conns` of `MUSTER_DATABASE_URL` | max(10, CPUs) connections in a replica's main pool when the URL sets none, also with the `MUSTER_DATABASE_*` fields; the session connections (the LISTEN connection, the Leader's and partition maintenance's) come on top, about 3 per replica | environment | C-02 | P-50 |
 | `MUSTER_SECRET_KEYS` / `_FILE` | none (required) | environment | C-02 | decided |
 | `MUSTER_PUBLIC_URL` | none (required) | environment | C-02 | decided |
 | `MUSTER_INGEST_URL` | `MUSTER_PUBLIC_URL` | environment | C-02 | decided |
@@ -83,6 +84,7 @@ table in the same pull request.
 | `processing.stale_after_unlearned` | 25 h | built in | C-06 | decided |
 | `processing.repeat_samples` | the last 9 observed gaps of an Alertmanager route; the learned repeat interval is their median | built in | C-06 | decided |
 | `processing.long_repeat_warning` | learned repeat interval above 1 h | built in | C-06 | decided |
+| `processing.parallel_groups` | 2 Alertmanager groups of one Integration processed at the same time, each in arrival order (C-06.FR-1); the lanes of all the Integrations a replica processes together never take more than half its main pool (`pool_max_conns` of `MUSTER_DATABASE_URL`), 5 of the default 10; a replica processes up to 4 Integrations at a time | built in | C-06 | P-49 |
 | `integration.heartbeat` | off (the UI warns) | Integration | C-07 | decided |
 | `integration.heartbeat_timeout` | 5 min | Integration | C-07 | decided |
 | `snippet.heartbeat_repeat_interval` | 1 min | snippet | C-07 | decided |

@@ -30,24 +30,34 @@ import (
 // write. It does not roll back; tests read the calls.
 type fakeProcess struct {
 	ProcessQueries
-	mu        sync.Mutex
-	pending   []dbgen.NextPendingSnapshotRow
-	finished  []dbgen.FinishSnapshotParams
-	counted   int
-	alerts    map[string]*dbgen.ListSnapshotAlertsRow
-	nextID    int64
-	inserted  [][]insertRow
-	updated   [][]updateRow
-	listed    []dbgen.UpsertListedPresencesParams
-	missed    []dbgen.MarkPresencesMissedParams
-	ended     []dbgen.EndPresencesParams
-	groups    []dbgen.UpdateAlertmanagerGroupParams
-	learned   []dbgen.UpdateRepeatIntervalParams
-	released  []int64
-	claimable []int64
-	lost      bool
-	fail      map[string]error
-	static    string
+	mu       sync.Mutex
+	pending  []dbgen.ListPendingSnapshotsRow
+	finished []dbgen.FinishSnapshotParams
+	counted  int
+	alerts   map[string]*dbgen.ListSnapshotAlertsRow
+	nextID   int64
+	inserted [][]insertRow
+	updated  [][]updateRow
+	listed   []dbgen.UpsertListedPresencesParams
+	missed   []dbgen.MarkPresencesMissedParams
+	ended    []dbgen.EndPresencesParams
+	groups   []dbgen.UpdateAlertmanagerGroupParams
+	learned  []dbgen.UpdateRepeatIntervalParams
+	touched  []dbgen.TouchAlertmanagerRouteParams
+	// checks counts the lease checks; after loseAfter of them the lease is lost. routeRace makes the next route
+	// lookup find nothing, as when another lane creates the route at the same time.
+	checks, loseAfter int
+	routeRace         bool
+	// failOnce are errors a query answers once each, in order, before it answers fail or succeeds.
+	failMu   sync.Mutex
+	failOnce map[string][]error
+	// renewals counts the lease renewals; after loseRenewal of them the renewal finds the lease lost.
+	renewals, loseRenewal int
+	released              []int64
+	claimable             []int64
+	lost                  bool
+	fail                  map[string]error
+	static                string
 	// refusePayload refuses to mark a Snapshot with what processing read of its payload, like a value PostgreSQL
 	// cannot store.
 	refusePayload bool
@@ -57,10 +67,19 @@ type fakeProcess struct {
 
 func newFakeProcess() *fakeProcess {
 	return &fakeProcess{alerts: map[string]*dbgen.ListSnapshotAlertsRow{}, fail: map[string]error{},
-		static: `{"cluster":"b"}`, claimable: []int64{5}}
+		failOnce: map[string][]error{},
+		static:   `{"cluster":"b"}`, claimable: []int64{5}}
 }
 
-func (f *fakeProcess) err(name string) error { return f.fail[name] }
+func (f *fakeProcess) err(name string) error {
+	f.failMu.Lock()
+	defer f.failMu.Unlock()
+	if errs := f.failOnce[name]; len(errs) > 0 {
+		f.failOnce[name] = errs[1:]
+		return errs[0]
+	}
+	return f.fail[name]
+}
 
 func (f *fakeProcess) InTx(_ context.Context, fn func(ProcessQueries, dbgen.DBTX) error) error {
 	return fn(f, nil)
@@ -106,7 +125,10 @@ func (f *fakeProcess) ReleaseIngestClaim(_ context.Context, arg dbgen.ReleaseIng
 
 func (f *fakeProcess) RenewIngestLease(_ context.Context, arg dbgen.RenewIngestLeaseParams) (
 	dbgen.RenewIngestLeaseRow, error) {
-	if f.lost {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.renewals++
+	if f.lost || (f.loseRenewal > 0 && f.renewals > f.loseRenewal) {
 		return dbgen.RenewIngestLeaseRow{}, pgx.ErrNoRows
 	}
 	if !arg.Owner.Valid || !arg.LeaseUntil.Valid {
@@ -116,17 +138,35 @@ func (f *fakeProcess) RenewIngestLease(_ context.Context, arg dbgen.RenewIngestL
 		DuplicateWindowSeconds: 45, LivenessClockMs: 9}, f.err("RenewIngestLease")
 }
 
-func (f *fakeProcess) NextPendingSnapshot(context.Context, dbgen.NextPendingSnapshotParams) (
-	dbgen.NextPendingSnapshotRow, error) {
+func (f *fakeProcess) CheckIngestLease(_ context.Context, arg dbgen.CheckIngestLeaseParams) (
+	dbgen.CheckIngestLeaseRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.err("NextPendingSnapshot"); err != nil {
-		return dbgen.NextPendingSnapshotRow{}, err
+	f.checks++
+	if f.lost || (f.loseAfter > 0 && f.checks > f.loseAfter) {
+		return dbgen.CheckIngestLeaseRow{}, pgx.ErrNoRows
 	}
-	if len(f.pending) == 0 {
-		return dbgen.NextPendingSnapshotRow{}, pgx.ErrNoRows
+	if !arg.Owner.Valid {
+		return dbgen.CheckIngestLeaseRow{}, errors.New("no owner")
 	}
-	return f.pending[0], nil
+	return dbgen.CheckIngestLeaseRow{PublicID: "NTAAAAAAAAAAAA", StaticLabels: []byte(f.static),
+		DuplicateWindowSeconds: 45, LivenessClockMs: 9}, f.err("CheckIngestLease")
+}
+
+func (f *fakeProcess) ListPendingSnapshots(_ context.Context, arg dbgen.ListPendingSnapshotsParams) (
+	[]dbgen.ListPendingSnapshotsRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.err("ListPendingSnapshots"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListPendingSnapshotsRow
+	for _, row := range f.pending {
+		if len(out) < int(arg.PageSize) && !slices.Contains(arg.HeldIds, row.ID) {
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeProcess) FinishSnapshot(_ context.Context, arg dbgen.FinishSnapshotParams) (bool, error) {
@@ -138,27 +178,50 @@ func (f *fakeProcess) FinishSnapshot(_ context.Context, arg dbgen.FinishSnapshot
 	if f.refusePayload && arg.GroupKey.Valid {
 		return false, &pgconn.PgError{Code: "22021", Message: "invalid byte sequence"}
 	}
-	if len(f.pending) == 0 || f.pending[0].ID != arg.ID {
+	i := slices.IndexFunc(f.pending, func(r dbgen.ListPendingSnapshotsRow) bool { return r.ID == arg.ID })
+	if i < 0 {
 		return false, pgx.ErrNoRows
 	}
-	f.pending = f.pending[1:]
+	f.pending = slices.Delete(f.pending, i, i+1)
 	f.finished = append(f.finished, arg)
 	return !f.replayed, nil
 }
 
 func (f *fakeProcess) CountSnapshot(context.Context, dbgen.CountSnapshotParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.counted++
 	return f.err("CountSnapshot")
 }
 
-func (f *fakeProcess) UpsertAlertmanagerRoute(context.Context, dbgen.UpsertAlertmanagerRouteParams) (
-	dbgen.UpsertAlertmanagerRouteRow, error) {
-	return dbgen.UpsertAlertmanagerRouteRow{ID: 3, LearnedRepeatIntervalMs: pgtype.Int8{Int64: 300000, Valid: true},
-		RecentRepeatGapsMs: []int64{300000}, RepeatObservations: 1}, f.err("UpsertAlertmanagerRoute")
+func (f *fakeProcess) UpsertAlertmanagerRoute(context.Context, dbgen.UpsertAlertmanagerRouteParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.routeRace {
+		// Another lane created the route at the same time: the first call finds nothing.
+		f.routeRace = false
+		return 0, pgx.ErrNoRows
+	}
+	return 3, f.err("UpsertAlertmanagerRoute")
+}
+
+func (f *fakeProcess) TouchAlertmanagerRoute(_ context.Context, arg dbgen.TouchAlertmanagerRouteParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.touched = append(f.touched, arg)
+	return f.err("TouchAlertmanagerRoute")
+}
+
+func (f *fakeProcess) LockAlertmanagerRoute(context.Context, dbgen.LockAlertmanagerRouteParams) (
+	dbgen.LockAlertmanagerRouteRow, error) {
+	return dbgen.LockAlertmanagerRouteRow{LearnedRepeatIntervalMs: pgtype.Int8{Int64: 300000, Valid: true},
+		RecentRepeatGapsMs: []int64{300000}, RepeatObservations: 1}, f.err("LockAlertmanagerRoute")
 }
 
 func (f *fakeProcess) UpsertAlertmanagerGroup(context.Context, dbgen.UpsertAlertmanagerGroupParams) (
 	dbgen.UpsertAlertmanagerGroupRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	row := dbgen.UpsertAlertmanagerGroupRow{ID: 4}
 	if n := len(f.groups); n > 0 {
 		last := f.groups[n-1]
@@ -169,17 +232,23 @@ func (f *fakeProcess) UpsertAlertmanagerGroup(context.Context, dbgen.UpsertAlert
 }
 
 func (f *fakeProcess) UpdateAlertmanagerGroup(_ context.Context, arg dbgen.UpdateAlertmanagerGroupParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.groups = append(f.groups, arg)
 	return f.err("UpdateAlertmanagerGroup")
 }
 
 func (f *fakeProcess) UpdateRepeatInterval(_ context.Context, arg dbgen.UpdateRepeatIntervalParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.learned = append(f.learned, arg)
 	return f.err("UpdateRepeatInterval")
 }
 
 func (f *fakeProcess) ListSnapshotAlerts(_ context.Context, arg dbgen.ListSnapshotAlertsParams) (
 	[]dbgen.ListSnapshotAlertsRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	var out []dbgen.ListSnapshotAlertsRow
 	for _, fp := range arg.Fingerprints {
 		if a := f.alerts[fp]; a != nil {
@@ -195,6 +264,8 @@ func (f *fakeProcess) ListActivePresences(context.Context, dbgen.ListActivePrese
 }
 
 func (f *fakeProcess) InsertAlerts(_ context.Context, arg dbgen.InsertAlertsParams) ([]dbgen.InsertAlertsRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if err := f.err("InsertAlerts"); err != nil {
 		return nil, err
 	}
@@ -217,6 +288,8 @@ func (f *fakeProcess) InsertAlerts(_ context.Context, arg dbgen.InsertAlertsPara
 }
 
 func (f *fakeProcess) UpdateAlerts(_ context.Context, arg dbgen.UpdateAlertsParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if err := f.err("UpdateAlerts"); err != nil {
 		return err
 	}
@@ -241,16 +314,22 @@ func (f *fakeProcess) UpdateAlerts(_ context.Context, arg dbgen.UpdateAlertsPara
 }
 
 func (f *fakeProcess) UpsertListedPresences(_ context.Context, arg dbgen.UpsertListedPresencesParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.listed = append(f.listed, arg)
 	return f.err("UpsertListedPresences")
 }
 
 func (f *fakeProcess) MarkPresencesMissed(_ context.Context, arg dbgen.MarkPresencesMissedParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.missed = append(f.missed, arg)
 	return f.err("MarkPresencesMissed")
 }
 
 func (f *fakeProcess) EndPresences(_ context.Context, arg dbgen.EndPresencesParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.ended = append(f.ended, arg)
 	return f.err("EndPresences")
 }
@@ -262,7 +341,7 @@ func (f *fakeProcess) CountPendingSnapshots(_ context.Context, orgID int64) (int
 func (f *fakeProcess) add(id int64, at time.Time, body string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.pending = append(f.pending, dbgen.NextPendingSnapshotRow{ID: id, PublicID: fmt.Sprintf("SS%012d", id),
+	f.pending = append(f.pending, dbgen.ListPendingSnapshotsRow{ID: id, PublicID: fmt.Sprintf("SS%012d", id),
 		ReceivedAt: at, Body: []byte(body)})
 }
 
@@ -280,7 +359,7 @@ func (s *recordingSink) AlertChanges(_ context.Context, _ dbgen.DBTX, changes []
 func newTestProcessor(store ProcessStore, business clock.Clock, log *bytes.Buffer, sink Sink) *Processor {
 	clocks := clock.Clocks{Business: business, Real: clock.Real{}}
 	return NewProcessor(ProcessorConfig{OrgID: 1, Store: store, Business: business, Log: logging.New(log, logging.LevelInfo),
-		Lease: db.Lease{Owner: "replica-a", Duration: Lease, Clocks: clocks}, Sink: sink})
+		Lease: db.Lease{Owner: "replica-a", Duration: Lease, Clocks: clocks}, Sink: sink, Lanes: 1})
 }
 
 func body(alerts ...string) string {
@@ -434,7 +513,7 @@ func TestProcessErrors(t *testing.T) {
 		{"bad static labels", func(f *fakeProcess, _ *recordingSink) { f.static = `[]` }, false, StateFailed, false},
 		{"lost lease", func(f *fakeProcess, _ *recordingSink) { f.lost = true }, true, "", false},
 		{"pending read fails", func(f *fakeProcess, _ *recordingSink) {
-			f.fail["NextPendingSnapshot"] = errors.New("conn closed")
+			f.fail["ListPendingSnapshots"] = errors.New("conn closed")
 		}, true, "", true},
 		{"retention read fails", func(f *fakeProcess, _ *recordingSink) {
 			f.fail["GetRetention"] = errors.New("conn closed")
