@@ -160,12 +160,12 @@ func TestInteractiveAheadOfQueue(t *testing.T) {
 	conn := int64(connID)
 	dest.Connection = &conn
 	out, err := e.interactive().Do(t.Context(), delivery.Subject{Destination: &dest},
-		func(ctx context.Context, c delivery.Call) delivery.Outcome {
+		delivery.ReadOp(func(ctx context.Context, c delivery.Call) delivery.Outcome {
 			if c.Class != "interactive" || c.Destination.PublicID != dest.PublicID {
 				t.Errorf("call %+v", c)
 			}
 			return e.rec.Check(ctx, c)
-		})
+		}))
 	if err != nil || out.Kind != delivery.OutcomeOK || !e.business.Now().Equal(business0.Add(5*time.Second)) {
 		t.Fatalf("interactive = %+v, %v at %v", out, err, e.business.Now())
 	}
@@ -184,16 +184,18 @@ func TestInteractiveLimited(t *testing.T) {
 	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 12
 	dest := delivery.Destination{ID: destMM, PublicID: "DSAAAAAAAAAA11", Type: delivery.TypeMattermost}
 	in := e.interactive()
-	if _, err := in.Do(t.Context(), delivery.Subject{Destination: &dest}, func(context.Context, delivery.Call) delivery.Outcome {
+	if _, err := in.Do(t.Context(), delivery.Subject{Destination: &dest}, delivery.ReadOp(func(context.Context,
+		delivery.Call) delivery.Outcome {
 		return delivery.Outcome{Kind: delivery.OutcomeOK}
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	called := false
-	_, err := in.Do(t.Context(), delivery.Subject{Destination: &dest}, func(context.Context, delivery.Call) delivery.Outcome {
+	_, err := in.Do(t.Context(), delivery.Subject{Destination: &dest}, delivery.ReadOp(func(context.Context,
+		delivery.Call) delivery.Outcome {
 		called = true
 		return delivery.Outcome{}
-	})
+	}))
 	var limited *delivery.LimitedError
 	if !errors.As(err, &limited) || called || limited.RetryAfter != 7*time.Second || limited.Seconds() != 7 ||
 		!strings.Contains(limited.Error(), "retry after 7s") {
@@ -212,10 +214,10 @@ func TestInteractiveRetryAfter(t *testing.T) {
 	dest := delivery.Destination{ID: destMM, PublicID: "DSAAAAAAAAAA11", Type: delivery.TypeMattermost,
 		Connection: &conn}
 	in := e.interactive()
-	retry := func(scope delivery.Scope) func(context.Context, delivery.Call) delivery.Outcome {
-		return func(context.Context, delivery.Call) delivery.Outcome {
+	retry := func(scope delivery.Scope) delivery.Op {
+		return delivery.ReadOp(func(context.Context, delivery.Call) delivery.Outcome {
 			return delivery.Outcome{Kind: delivery.OutcomeRetryAfter, RetryAfter: 5 * time.Second, Scope: scope}
-		}
+		})
 	}
 	if _, err := in.Do(t.Context(), delivery.Subject{Destination: &dest}, retry(delivery.ScopeDestination)); err != nil {
 		t.Fatal(err)
@@ -252,9 +254,9 @@ func TestInteractiveRetryAfter(t *testing.T) {
 	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 60
 	e.db.buckets = map[bucketKey]*fakeBucket{}
 	in.Sleep = func(context.Context, time.Duration) bool { return false }
-	ok := func(context.Context, delivery.Call) delivery.Outcome {
+	ok := delivery.ReadOp(func(context.Context, delivery.Call) delivery.Outcome {
 		return delivery.Outcome{Kind: delivery.OutcomeOK}
-	}
+	})
 	_, _ = in.Do(t.Context(), delivery.Subject{Destination: &dest}, ok)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -274,5 +276,37 @@ func TestInteractiveRetryAfter(t *testing.T) {
 	}
 	if !delivery.SleepReal(t.Context(), time.Millisecond) || delivery.SleepReal(ctx, time.Hour) {
 		t.Error("real sleep")
+	}
+}
+
+// TestInteractiveAdapterOps: a send, an edit, a Thread reply and a Destination check on the interactive path each take
+// a token and call the adapter in the interactive client class.
+func TestInteractiveAdapterOps(t *testing.T) {
+	e := newEnv(t)
+	conn := int64(connID)
+	dest := delivery.Destination{ID: destMM, PublicID: "DSAAAAAAAAAA11", Type: delivery.TypeMattermost,
+		Connection: &conn}
+	in := e.interactive()
+	m := delivery.Message{Language: "en"}
+	for _, op := range []delivery.Op{delivery.PublishOp(e.rec, m), delivery.UpdateOp(e.rec, "m1", m),
+		delivery.ReplyOp(e.rec, delivery.Root{MessageID: "m1"}, m), delivery.CheckOp(e.rec)} {
+		if out, err := in.Do(t.Context(), delivery.Subject{Destination: &dest}, op); err != nil ||
+			out.Kind != delivery.OutcomeOK {
+			t.Fatalf("op = %+v, %v", out, err)
+		}
+	}
+	calls := e.rec.Calls()
+	want := []string{deliverytest.MethodPublish, deliverytest.MethodUpdate, deliverytest.MethodReply,
+		deliverytest.MethodCheck}
+	if len(calls) != len(want) {
+		t.Fatalf("calls %+v", calls)
+	}
+	for i, c := range calls {
+		if c.Method != want[i] || c.Class != "interactive" || c.Destination.PublicID != dest.PublicID {
+			t.Errorf("call %d = %+v", i, c)
+		}
+	}
+	if calls[1].MessageID != "m1" || calls[2].MessageID != "m1" {
+		t.Errorf("the edit and the reply name m1: %+v %+v", calls[1], calls[2])
 	}
 }

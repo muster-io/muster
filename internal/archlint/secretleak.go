@@ -31,7 +31,11 @@ import (
 	"github.com/muster-io/muster/internal/auth"
 	authdb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/connections"
+	cdb "github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/delivery/deliverytest"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/doctor"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
 	"github.com/muster-io/muster/internal/heartbeat"
@@ -41,6 +45,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/oidc"
 	odb "github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/outbound"
@@ -83,6 +88,7 @@ var registry = []Probe{
 	{Name: "api_tokens", Run: probeTokens},
 	{Name: "ingestion", Run: probeIngestion},
 	{Name: "heartbeat", Run: probeHeartbeat},
+	{Name: "mattermost_connections", Run: probeMattermost},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -1164,6 +1170,143 @@ func (s *probeSnapshots) Store(context.Context, ingest.Received) (ingest.Stored,
 	s.stored++
 	return ingest.Stored{PublicID: "SSAAAAAAAAAAAA"}, nil
 }
+
+// probeMattermost pushes the bot token (secret 0) and the proxy password (secret 1) of a Mattermost Connection through
+// its creation, the Connection check, the channel list and the Destination check, against a stand-in server that
+// answers every call with the token and the Authorization header in its error, directly and through a SOCKS5 proxy
+// that refuses the password; and builds a client whose proxy, with a password (secret 2), is refused.
+func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	clocks := clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}}
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = fmt.Fprintf(w, `{"id":"api.context.session_expired.app_error","message":%q,"status_code":401}`, //nolint:gosec // G705: a stand-in server that echoes the token on purpose
+				"invalid token "+secrets[0]+" "+r.Header.Get("Authorization"))
+		})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	socks, err := fakeproxy.Start(ctx, fakeproxy.SOCKS5, "127.0.0.1:0", fakeproxy.Options{Username: "muster",
+		Password: "other"})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = socks.Close() }()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	network := mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}}
+	svc := connections.New(connections.Config{OrgID: 1, Store: &probeConnections{}, Keyring: k,
+		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks, Network: network,
+		Interactive: deliverytest.Unlimited(1, clocks), IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081"},
+		Log: logger})
+	by := connections.Requester{Actor: audit.System, Transport: audit.TransportUI}
+	in := connections.Input{Type: connections.TypeMattermost, Name: "probe", ServerURL: "http://" + ln.Addr().String(),
+		BotToken: keyring.Replace(logging.Secret(secrets[0])), Limiter: connections.Limiter{Limit: 5, PerSeconds: 1},
+		Proxy: proxyconf.Input{Enabled: true, Type: new("socks5"), Address: new(socks.Addr()), UsernameSet: true,
+			Username: new("muster"), Password: keyring.Replace(logging.Secret(secrets[1]))}}
+	var errs []error
+	texts := func(c connections.CheckResult) error {
+		var b strings.Builder
+		for _, st := range c.Steps {
+			b.WriteString(st.Message + "\n")
+		}
+		return errors.New(b.String())
+	}
+	c, err := svc.Create(ctx, by, in)
+	errs = append(errs, err)
+	res, err := svc.Check(ctx, c.PublicID)
+	errs = append(errs, err, texts(res))
+	in.Proxy = proxyconf.Input{Enabled: false}
+	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
+	errs = append(errs, err)
+	res, err = svc.Check(ctx, c.PublicID)
+	errs = append(errs, err, texts(res))
+	_, err = svc.Channels(ctx, c.PublicID, "", "")
+	errs = append(errs, err)
+	checked, err := svc.CheckChannel(ctx, destinations.ChannelCheck{Connection: c.PublicID, TeamID: "t",
+		ChannelID: "c"})
+	errs = append(errs, err)
+	for _, st := range checked.Check.Steps {
+		errs = append(errs, errors.New(st.Message), errors.New(string(st.Outcome.Error)))
+	}
+	_, err = mattermost.NewClient(network, mattermost.Settings{ServerURL: "http://" + ln.Addr().String(),
+		Token: logging.Secret(secrets[0]), Proxy: &outbound.Proxy{Type: "ftp", Address: "proxy:1", Username: "muster",
+			Password: logging.Secret(secrets[2])}})
+	return errors.Join(append(errs, err)...)
+}
+
+// probeConnections is the one Connection of probeMattermost in memory.
+type probeConnections struct {
+	connections.Queries
+	row *cdb.GetConnectionRow
+}
+
+func (s *probeConnections) InTx(_ context.Context, f func(connections.Queries) error) error {
+	return f(s)
+}
+
+func (s *probeConnections) InsertConnection(_ context.Context, a cdb.InsertConnectionParams) (int64, error) {
+	s.row = &cdb.GetConnectionRow{ID: 1, PublicID: a.PublicID, Type: connections.TypeMattermost, Name: a.Name,
+		MattermostServerUrl: a.ServerUrl, BotTokenCiphertext: a.BotTokenCiphertext, BotTokenKeyID: a.BotTokenKeyID,
+		BotTokenUpdatedAt: a.BotTokenUpdatedAt, Proxy: a.Proxy, ProxyPasswordCiphertext: a.ProxyPasswordCiphertext,
+		ProxyPasswordKeyID: a.ProxyPasswordKeyID, ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt,
+		LimiterLimit: a.LimiterLimit, LimiterPerSeconds: a.LimiterPerSeconds, CreatedAt: a.Now, Version: 1}
+	return 1, nil
+}
+
+func (s *probeConnections) GetConnection(context.Context, cdb.GetConnectionParams) (cdb.GetConnectionRow, error) {
+	if s.row == nil {
+		return cdb.GetConnectionRow{}, pgx.ErrNoRows
+	}
+	return *s.row, nil
+}
+
+func (s *probeConnections) LockConnection(context.Context, cdb.LockConnectionParams) (cdb.LockConnectionRow, error) {
+	if s.row == nil {
+		return cdb.LockConnectionRow{}, pgx.ErrNoRows
+	}
+	return cdb.LockConnectionRow{ID: s.row.ID, PublicID: s.row.PublicID, Type: s.row.Type, Version: s.row.Version},
+		nil
+}
+
+func (s *probeConnections) UpdateConnection(_ context.Context, a cdb.UpdateConnectionParams) error {
+	s.row.Name, s.row.MattermostServerUrl, s.row.Proxy = a.Name, a.ServerUrl, a.Proxy
+	s.row.BotTokenCiphertext, s.row.BotTokenKeyID = a.BotTokenCiphertext, a.BotTokenKeyID
+	s.row.ProxyPasswordCiphertext, s.row.ProxyPasswordKeyID = a.ProxyPasswordCiphertext, a.ProxyPasswordKeyID
+	s.row.Version++
+	return nil
+}
+
+func (s *probeConnections) SetBotIdentity(context.Context, cdb.SetBotIdentityParams) error {
+	return nil
+}
+
+func (s *probeConnections) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
+	return nil
+}
+
+func (s *probeConnections) Notify(context.Context, db.Hint) error { return nil }
 
 func Probes() []Probe {
 	return slices.Clone(registry)

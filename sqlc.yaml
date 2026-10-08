@@ -90,6 +90,13 @@ sql:
         out: internal/integrations/dbgen
   - engine: postgresql
     schema: internal/db/migrations
+    queries: internal/connections/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/connections/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
     queries: internal/ingest/query.sql
     gen:
       go:

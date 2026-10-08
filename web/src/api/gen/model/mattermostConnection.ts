@@ -23,10 +23,15 @@ import type { ProxyConfig } from './proxyConfig';
 import type { PublicId } from './publicId';
 import type { SecretStatus } from './secretStatus';
 
-export type MattermostConnection = MattermostConnectionBase & {
+export type MattermostConnection = MattermostConnectionBase & ({
   type: MattermostConnectionType;
   id: PublicId;
   bot_token_status: SecretStatus;
+  /**
+     * The bot's username, as the last successful Connection check found it; null before one and after the server URL or the bot token changed.
+     * @nullable
+     */
+  readonly bot_username?: string | null;
   proxy: ProxyConfig;
   /** A Connection used by Destinations cannot be deleted. */
   destination_count: number;
@@ -35,4 +40,4 @@ export type MattermostConnection = MattermostConnectionBase & {
   created_at: string;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */
   readonly etag: string;
-};
+});

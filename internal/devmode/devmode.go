@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/connections"
 	"github.com/muster-io/muster/internal/devmode/dbgen"
 	"github.com/muster-io/muster/internal/fakes/fakealertmanager"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
@@ -33,6 +34,7 @@ import (
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/keyring"
+	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/oidc"
 )
 
@@ -176,6 +178,25 @@ func OIDCDemo() oidc.Demo {
 	}
 }
 
+// The demo Connection that `muster dev` ensures at start: "Dev Mattermost" on the fake Mattermost server, with a
+// published bot token that the fake accepts like any other.
+//
+//nolint:gosec // G101: a published development token, never used outside development mode
+const (
+	ConnectionName     = "Dev Mattermost"
+	ConnectionBotToken = "muster-dev-mattermost-token"
+)
+
+// ConnectionDemo is the demo Connection "Dev Mattermost", to the fake Mattermost server, without Destinations.
+func ConnectionDemo() connections.Demo {
+	return connections.Demo{Name: ConnectionName, ServerURL: "http://" + MattermostAddr,
+		BotToken: logging.Secret(ConnectionBotToken)}
+}
+
+// AllowedInternalConnections is what `muster dev` sets as the fake Mattermost's AllowedUntrustedInternalConnections,
+// so that it calls the button presses back at MUSTER_INGEST_URL on loopback (F-022).
+const AllowedInternalConnections = "localhost 127.0.0.1"
+
 // IntegrationDemo is the demo Integration that `muster dev` ensures at start: dev-alertmanager with the Static label
 // cluster=dev, its Heartbeat on, and the published token that the fake Alertmanager's receiver muster and its
 // Heartbeat sender send with.
@@ -216,7 +237,8 @@ func (f *Fakes) servers() []*fakeserver.Server {
 	return []*fakeserver.Server{f.Alertmanager.Server, f.Mattermost.Server, f.Telegram.Server, f.OIDC.Server}
 }
 
-// StartFakes starts the fake servers and the fake proxies; when one cannot listen, it closes those already started.
+// StartFakes starts the fake servers and the fake proxies, the fake Mattermost allowing presses to call back on
+// loopback; when one cannot listen, it closes those already started.
 func StartFakes(ctx context.Context, addrs Addresses) (*Fakes, error) {
 	f := &Fakes{
 		Alertmanager: fakealertmanager.New(),
@@ -224,6 +246,7 @@ func StartFakes(ctx context.Context, addrs Addresses) (*Fakes, error) {
 		Telegram:     faketelegram.New(),
 		OIDC:         fakeoidc.New(),
 	}
+	f.Mattermost.SetAllowedUntrustedInternalConnections(AllowedInternalConnections)
 	listen := []string{addrs.Alertmanager, addrs.Mattermost, addrs.Telegram, addrs.OIDC}
 	for i, s := range f.servers() {
 		if err := s.Start(ctx, listen[i]); err != nil {

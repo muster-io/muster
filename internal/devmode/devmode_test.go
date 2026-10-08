@@ -250,11 +250,14 @@ func waitFor(t *testing.T, out *syncBuffer, lines int, done <-chan error) string
 	return out.String()
 }
 
-func get(t *testing.T, url string) int {
+func get(t *testing.T, url string, headers ...string) int {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -311,7 +314,8 @@ func TestRun(t *testing.T) {
 	if status := get(t, m[3]+"/bot1:x/getMe"); status != http.StatusOK {
 		t.Errorf("Telegram getMe = %d", status)
 	}
-	if status := get(t, m[2]+"/api/v4/users/me"); status != http.StatusOK {
+	if status := get(t, m[2]+"/api/v4/users/me", "Authorization", "Bearer "+devmode.ConnectionBotToken); status !=
+		http.StatusOK {
 		t.Errorf("Mattermost users/me = %d", status)
 	}
 
@@ -598,5 +602,29 @@ func TestClock(t *testing.T) {
 	if code, _ := clockAnswer(t, failing.Handler(), http.MethodPost, `{"advance_seconds": 1}`); code !=
 		http.StatusInternalServerError {
 		t.Errorf("failed maintenance = %d", code)
+	}
+}
+
+// TestConnectionDemo is C-01.FR-13: the demo Connection "Dev Mattermost" on the fake Mattermost server, with the
+// published bot token.
+func TestConnectionDemo(t *testing.T) {
+	d := devmode.ConnectionDemo()
+	if d.Name != "Dev Mattermost" || d.ServerURL != "http://127.0.0.1:18065" ||
+		string(d.BotToken) != devmode.ConnectionBotToken || devmode.ConnectionBotToken == "" {
+		t.Errorf("ConnectionDemo() = %+v", d)
+	}
+}
+
+// TestStartFakesAllowsLoopback is F-022: `muster dev` lets the fake Mattermost call button presses back on loopback.
+func TestStartFakesAllowsLoopback(t *testing.T) {
+	f, err := devmode.StartFakes(t.Context(), anyPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close(context.WithoutCancel(t.Context())) }()
+	want := "localhost 127.0.0.1"
+	if got := f.Mattermost.Config().AllowedUntrustedInternalConnections; got != want ||
+		devmode.AllowedInternalConnections != want {
+		t.Errorf("AllowedUntrustedInternalConnections = %q", got)
 	}
 }

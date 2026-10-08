@@ -123,6 +123,55 @@ func (q *Queries) GetDestination(ctx context.Context, arg GetDestinationParams) 
 	return i, err
 }
 
+const insertMattermostDestination = `-- name: InsertMattermostDestination :one
+INSERT INTO destinations (
+    org_id, public_id, type, name, connection_id, mattermost_team_id, mattermost_channel_id, mattermost_team_name,
+    mattermost_channel_name, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at
+)
+VALUES (
+    $1, $2, 'mattermost', $3, $4, $5, $6, $7, $8,
+    $9, $10, $11, 'healthy', $12::timestamptz, $12::timestamptz
+)
+RETURNING id
+`
+
+type InsertMattermostDestinationParams struct {
+	OrgID             int64
+	PublicID          string
+	Name              string
+	ConnectionID      pgtype.Int8
+	TeamID            pgtype.Text
+	ChannelID         pgtype.Text
+	TeamName          pgtype.Text
+	ChannelName       pgtype.Text
+	Mentions          []byte
+	LimiterLimit      int64
+	LimiterPerSeconds int64
+	Now               time.Time
+}
+
+// InsertMattermostDestination creates a healthy Mattermost Destination with the team and channel names its
+// Destination check read.
+func (q *Queries) InsertMattermostDestination(ctx context.Context, arg InsertMattermostDestinationParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertMattermostDestination,
+		arg.OrgID,
+		arg.PublicID,
+		arg.Name,
+		arg.ConnectionID,
+		arg.TeamID,
+		arg.ChannelID,
+		arg.TeamName,
+		arg.ChannelName,
+		arg.Mentions,
+		arg.LimiterLimit,
+		arg.LimiterPerSeconds,
+		arg.Now,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const listDestinationInfo = `-- name: ListDestinationInfo :many
 SELECT public_id, name
 FROM destinations
@@ -415,6 +464,27 @@ func (q *Queries) LockDestination(ctx context.Context, arg LockDestinationParams
 	return i, err
 }
 
+const lockMattermostConnection = `-- name: LockMattermostConnection :one
+SELECT id
+FROM connections
+WHERE org_id = $1 AND id = $2 AND type = 'mattermost' AND deleted_at IS NULL
+FOR SHARE
+`
+
+type LockMattermostConnectionParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// LockMattermostConnection takes the Mattermost Connection that is not deleted in share mode for the save of one of
+// its Destinations, so that the Connection's deletion, which locks it for update, sees the saved Destination.
+func (q *Queries) LockMattermostConnection(ctx context.Context, arg LockMattermostConnectionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockMattermostConnection, arg.OrgID, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const markDestinationDeleted = `-- name: MarkDestinationDeleted :exec
 UPDATE destinations
 SET deleted_at = $1, updated_at = $1, version = version + 1
@@ -430,5 +500,49 @@ type MarkDestinationDeletedParams struct {
 // MarkDestinationDeleted soft-deletes a Destination: it leaves every list and reads as missing, the row stays.
 func (q *Queries) MarkDestinationDeleted(ctx context.Context, arg MarkDestinationDeletedParams) error {
 	_, err := q.db.Exec(ctx, markDestinationDeleted, arg.Now, arg.OrgID, arg.ID)
+	return err
+}
+
+const updateMattermostDestination = `-- name: UpdateMattermostDestination :exec
+UPDATE destinations
+SET name = $1, connection_id = $2, mattermost_team_id = $3,
+    mattermost_channel_id = $4, mattermost_team_name = $5, mattermost_channel_name = $6,
+    mentions = $7, limiter_limit = $8, limiter_per_seconds = $9,
+    updated_at = $10::timestamptz, version = version + 1
+WHERE org_id = $11 AND id = $12
+`
+
+type UpdateMattermostDestinationParams struct {
+	Name              string
+	ConnectionID      pgtype.Int8
+	TeamID            pgtype.Text
+	ChannelID         pgtype.Text
+	TeamName          pgtype.Text
+	ChannelName       pgtype.Text
+	Mentions          []byte
+	LimiterLimit      int64
+	LimiterPerSeconds int64
+	Now               time.Time
+	OrgID             int64
+	ID                int64
+}
+
+// UpdateMattermostDestination replaces the configured fields of a Mattermost Destination and the team and channel
+// names its Destination check read; its health is left alone.
+func (q *Queries) UpdateMattermostDestination(ctx context.Context, arg UpdateMattermostDestinationParams) error {
+	_, err := q.db.Exec(ctx, updateMattermostDestination,
+		arg.Name,
+		arg.ConnectionID,
+		arg.TeamID,
+		arg.ChannelID,
+		arg.TeamName,
+		arg.ChannelName,
+		arg.Mentions,
+		arg.LimiterLimit,
+		arg.LimiterPerSeconds,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
 	return err
 }
