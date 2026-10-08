@@ -147,6 +147,12 @@ func TestSandboxCaps(t *testing.T) {
 	if want := "bb 1,2 ab\ncd ab|cd bc $1b ac  x"; err != nil || out != want {
 		t.Errorf("guarded functions = %q, %v; want %q", out, err, want)
 	}
+	// sprout's regex registry, not the deprecated regexp one: the string to work on is the last argument.
+	out, err = render(t, `{{ regexFindAll "a." 2 "abacad" }} {{ "a,b,c" | regexSplit "," -1 }} `+
+		`{{ "x1" | regexMatch "[0-9]" }} {{ "abac" | regexReplaceAll "a" "o" }}`, nil)
+	if want := "[ab ac] [a b c] true oboc"; err != nil || out != want {
+		t.Errorf("regular expressions = %q, %v; want %q", out, err, want)
+	}
 	if _, err := render(t, `{{ range $k, $v := . }}{{ $k }}{{ end }}`,
 		map[string]int{"a": 1}); err != nil {
 		t.Errorf("range over a map: %v", err)
