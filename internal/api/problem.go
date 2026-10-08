@@ -142,6 +142,21 @@ func problem(status int, typ, code, detail string) *Problem {
 	return &Problem{Status: status, Type: typ, Code: code, Detail: detail}
 }
 
+// inUseDetail is the detail of the in_use problem of a Lookup table: the Link rules that read it, when the error
+// names them.
+func inUseDetail(err error) string {
+	var e *links.InUseError
+	if !errors.As(err, &e) || len(e.Rules) == 0 {
+		return "A Link rule reads this Lookup table; change the rule before deleting or renaming the table."
+	}
+	names := make([]string, len(e.Rules))
+	for i, n := range e.Rules {
+		names[i] = strconv.Quote(n)
+	}
+	return "These Link rules read this Lookup table: " + strings.Join(names, ", ") +
+		"; change them before deleting or renaming the table."
+}
+
 // forbidden is the 403 of a missing Permission, from the middleware or from the dispatcher of a Command.
 func forbidden[P ~string](perms ...P) *Problem {
 	names := make([]string, len(perms))
@@ -337,8 +352,7 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	case errors.Is(err, links.ErrRuleNameTaken):
 		return problem(http.StatusConflict, typeConflict, codeNameTaken, "Another Link rule has this name.")
 	case errors.Is(err, links.ErrInUse):
-		return problem(http.StatusConflict, typeConflict, codeInUse,
-			"A Link rule reads this Lookup table; change the rule before deleting the table.")
+		return problem(http.StatusConflict, typeConflict, codeInUse, inUseDetail(err))
 	case errors.Is(err, links.ErrBuiltinImmutable):
 		return problem(http.StatusConflict, typeConflict, codeBuiltinImmutable,
 			"The built-in Explore rule cannot be deleted, renamed or given another scope; its Matchers and URL "+

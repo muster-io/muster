@@ -436,8 +436,8 @@ var TemplateKinds = []string{"root_message", "line", "ack_timeout_notice", "link
 var TemplateErrors = newCounter(Definition{
 	Name: "muster_template_errors_total",
 	Help: "Templates that failed while rendering, by the Route or the Destination that owns the template (the other " +
-		"label empty) and the kind of template; a message falls back to the Fallback template, an outgoing webhook " +
-		"request is not sent.",
+		"label empty) and the kind of template; a message falls back to the Fallback template, a Link rule yields no " +
+		"link and is left out of the links, an outgoing webhook request is not sent.",
 	Labels: []Label{
 		entity("route"),
 		entity("destination"),

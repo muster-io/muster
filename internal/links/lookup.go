@@ -50,7 +50,8 @@ const (
 )
 
 // The limits of a Lookup table and of the lookups of one render: names and column names in characters, the
-// description, a key or a value, the columns and rows of a table, and the rows one render reads.
+// description, a key or a value, the columns and rows of a table (`lookup_table.size_max`), and the rows one render
+// reads (`template.lookups_per_render`).
 const (
 	MaxNameLength        = 200
 	MaxDescriptionLength = 2000
@@ -58,7 +59,8 @@ const (
 	MaxColumns           = 50
 	MaxEntries           = 10_000
 	MaxLookups           = 100
-	// MaxTablesPage bounds a page of Lookup tables, which carry their rows; the list continues with its cursor.
+	// MaxTablesPage bounds a page of Lookup tables, which carry their rows; the list continues with its cursor
+	// (`lookup_table.page_max`).
 	MaxTablesPage = 50
 )
 
@@ -81,7 +83,8 @@ var (
 	ErrRuleNameTaken = errors.New("another link rule has this name")
 	// ErrVersionMismatch is an If-Match that names another version of the table or the rule.
 	ErrVersionMismatch = errors.New("the lookup table or link rule changed since it was read")
-	// ErrInUse is the deletion of a Lookup table that the URL template of a Link rule reads.
+	// ErrInUse is the deletion or the renaming of a Lookup table that the URL template of a Link rule reads; the
+	// error is an InUseError that names the rules.
 	ErrInUse = errors.New("a link rule reads the lookup table")
 	// ErrBuiltinImmutable is the deletion of the built-in "Explore" rule, or a change of its name or scope.
 	ErrBuiltinImmutable = errors.New("the built-in link rule cannot be deleted, renamed or given another scope")
@@ -111,6 +114,21 @@ type FieldError struct {
 
 func (e *FieldError) Error() string {
 	return e.Pointer + ": " + e.Detail
+}
+
+// InUseError is the deletion or the renaming of a Lookup table that the URL templates of Link rules read by its
+// name, with the names of those rules in the order they were created. It is ErrInUse.
+type InUseError struct {
+	Rules []string
+}
+
+func (e *InUseError) Error() string {
+	return ErrInUse.Error() + ": " + strings.Join(e.Rules, ", ")
+}
+
+// Is makes an InUseError match ErrInUse.
+func (e *InUseError) Is(target error) bool {
+	return target == ErrInUse
 }
 
 // Requester is who asks for a change and how: the actor and the Transport of the Audit log entry, and the client
@@ -578,7 +596,8 @@ func (s *Service) writeEntries(ctx context.Context, q Queries, tableID int64, en
 }
 
 // UpdateTable replaces the fields and the rows of the Lookup table publicID; a non-nil version must be its current
-// one (If-Match).
+// one (If-Match). A new name for a table that the URL template of a Link rule reads by its name is an InUseError,
+// since the rule would then read nothing.
 func (s *Service) UpdateTable(ctx context.Context, r Requester, publicID string, version *int64, in TableInput) (Table,
 	error) {
 	if err := checkTable(in); err != nil {
@@ -593,6 +612,11 @@ func (s *Service) UpdateTable(ctx context.Context, r Requester, publicID string,
 		}
 		if version != nil && *version != before.Version {
 			return ErrVersionMismatch
+		}
+		if in.Name != before.Name {
+			if err := s.refuseInUse(ctx, q, before.Name); err != nil {
+				return err
+			}
 		}
 		next := before
 		next.Name, next.Columns, next.Entries = in.Name, in.Columns, in.Entries
@@ -630,7 +654,7 @@ func (s *Service) UpdateTable(ctx context.Context, r Requester, publicID string,
 }
 
 // DeleteTable deletes the Lookup table publicID with its rows; a non-nil version must be its current one. A table
-// that the URL template of a Link rule reads by its name is ErrInUse.
+// that the URL template of a Link rule reads by its name is an InUseError.
 func (s *Service) DeleteTable(ctx context.Context, r Requester, publicID string, version *int64) error {
 	return s.store.InTx(ctx, func(q Queries) error {
 		before, err := s.lockTable(ctx, q, publicID)
@@ -640,12 +664,8 @@ func (s *Service) DeleteTable(ctx context.Context, r Requester, publicID string,
 		if version != nil && *version != before.Version {
 			return ErrVersionMismatch
 		}
-		used, err := s.tableUsed(ctx, q, before.Name)
-		if err != nil {
+		if err := s.refuseInUse(ctx, q, before.Name); err != nil {
 			return err
-		}
-		if used {
-			return ErrInUse
 		}
 		if err := q.DeleteLookupTable(ctx, dbgen.DeleteLookupTableParams{OrgID: s.orgID, ID: before.ID}); err != nil {
 			return fmt.Errorf("delete the lookup table %s: %w", before.PublicID, err)
@@ -656,22 +676,27 @@ func (s *Service) DeleteTable(ctx context.Context, r Requester, publicID string,
 	})
 }
 
-// tableUsed reports whether the URL template of a Link rule calls `lookup` with the table's name.
-func (s *Service) tableUsed(ctx context.Context, q Queries, name string) (bool, error) {
+// refuseInUse is an InUseError naming the Link rules whose URL templates call `lookup` with the table's name, or nil
+// when no rule does.
+func (s *Service) refuseInUse(ctx context.Context, q Queries, name string) error {
 	rows, err := q.ListLinkRuleTemplates(ctx, s.orgID)
 	if err != nil {
-		return false, fmt.Errorf("read the link rules: %w", err)
+		return fmt.Errorf("read the link rules: %w", err)
 	}
+	var readers []string
 	for _, r := range rows {
 		t, err := s.parse(r.UrlTemplate)
 		if err != nil {
 			continue // saved templates parse; one that does not reads nothing
 		}
 		if slices.Contains(t.LookupTables(), name) {
-			return true, nil
+			readers = append(readers, r.Name)
 		}
 	}
-	return false, nil
+	if len(readers) > 0 {
+		return &InUseError{Rules: readers}
+	}
+	return nil
 }
 
 // lookups is the `lookup` of one render: the cells it read, by table and key, and how many rows it may still read.

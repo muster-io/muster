@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/muster-io/muster/internal/audit"
@@ -50,6 +51,8 @@ func (f *fakeLinks) refuse(name string) error {
 		return links.ErrTableNameTaken
 	case "rule-taken":
 		return links.ErrRuleNameTaken
+	case "in-use":
+		return &links.InUseError{Rules: []string{"Explore", "Dashboard"}}
 	case "mismatch":
 		return &links.FieldError{Pointer: "/entries/0/values", Code: links.CodeColumnMismatch, Detail: "x"}
 	case "template":
@@ -93,7 +96,7 @@ func (f *fakeLinks) DeleteTable(_ context.Context, r links.Requester, id string,
 		return links.ErrTableNotFound
 	}
 	if version == nil {
-		return links.ErrInUse
+		return &links.InUseError{Rules: []string{"Explore"}}
 	}
 	return f.err
 }
@@ -218,8 +221,13 @@ func TestLookupTablesAPI(t *testing.T) {
 		a.header.Get("ETag") != `"4"` {
 		t.Errorf("update = %d %s", a.status, a.body)
 	}
+	if a = x.as(t, linksWriter, http.MethodPut, path, `{"name":"in-use","columns":["a"],"entries":[]}`,
+		"If-Match", `"3"`); a.status != http.StatusConflict || a.code(t) != "in_use" ||
+		!strings.Contains(a.json(t)["detail"].(string), `"Explore", "Dashboard"`) {
+		t.Errorf("rename in use = %d %s", a.status, a.body)
+	}
 	if a = x.as(t, linksWriter, http.MethodDelete, path, ""); a.status != http.StatusConflict ||
-		a.code(t) != "in_use" {
+		a.code(t) != "in_use" || !strings.Contains(a.json(t)["detail"].(string), `"Explore"`) {
 		t.Errorf("delete in use = %d %s", a.status, a.body)
 	}
 	if a = x.as(t, linksWriter, http.MethodDelete, path, "", "If-Match", `"3"`); a.status != http.StatusNoContent ||

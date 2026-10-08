@@ -495,7 +495,7 @@ func (q *Queries) ListLinkRuleMatchers(ctx context.Context, arg ListLinkRuleMatc
 }
 
 const listLinkRuleTemplates = `-- name: ListLinkRuleTemplates :many
-SELECT public_id, url_template
+SELECT public_id, name, url_template
 FROM link_rules
 WHERE org_id = $1
 ORDER BY id
@@ -503,10 +503,11 @@ ORDER BY id
 
 type ListLinkRuleTemplatesRow struct {
 	PublicID    string
+	Name        string
 	UrlTemplate string
 }
 
-// ListLinkRuleTemplates lists the URL templates of every Link rule, for the use of a Lookup table.
+// ListLinkRuleTemplates lists the names and URL templates of every Link rule, for the use of a Lookup table.
 func (q *Queries) ListLinkRuleTemplates(ctx context.Context, orgID int64) ([]ListLinkRuleTemplatesRow, error) {
 	rows, err := q.db.Query(ctx, listLinkRuleTemplates, orgID)
 	if err != nil {
@@ -516,7 +517,7 @@ func (q *Queries) ListLinkRuleTemplates(ctx context.Context, orgID int64) ([]Lis
 	items := []ListLinkRuleTemplatesRow{}
 	for rows.Next() {
 		var i ListLinkRuleTemplatesRow
-		if err := rows.Scan(&i.PublicID, &i.UrlTemplate); err != nil {
+		if err := rows.Scan(&i.PublicID, &i.Name, &i.UrlTemplate); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
