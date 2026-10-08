@@ -1248,3 +1248,103 @@ func TestIntegrationNotesSnoozeEndsAndRelease(t *testing.T) {
 		}
 	})
 }
+
+// TestIntegrationDeliveryProblem is C-13.FR-12, C-13.AC-10 and C-09.FR-13 on PostgreSQL: an Alert Group has a
+// Delivery problem while a delivery of it is Not delivered or deleted in the messenger, waits for a Broken
+// Destination, or has a Thread not attached; the list, the counts and the Alert Group agree, and a later successful
+// delivery ends it.
+func TestIntegrationDeliveryProblem(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		e.route(t, "db", "db", "alertname")
+		const s1 = "2026-10-07T11:00:00Z"
+		ids := map[string]string{}
+		for _, name := range []string{"a", "b", "c", "d"} {
+			e.process(t, `{}:{alertname=\"`+name+`\"}`, alert("firing", s1, "alertname", name, "team", "db", "pod", name))
+			ids[name] = e.groupOf(t, name)
+		}
+		exec := func(sql string, args ...any) {
+			t.Helper()
+			if _, err := e.d.Pool.Exec(ctx, sql, args...); err != nil {
+				t.Fatalf("%s: %v", sql, err)
+			}
+		}
+		var conn, dest int64
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
+			mattermost_server_url, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit,
+			limiter_per_seconds, created_at, updated_at) VALUES ($1, 'CNAAAAAAAAAAA1', 'mattermost', 'bot',
+			'https://mm.example.org', '\x00', 'k1', $2, 1000, 1, $2, $2) RETURNING id`, e.orgID, t0).Scan(
+			&conn); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO destinations (org_id, public_id, type, name, connection_id,
+			mattermost_team_id, mattermost_channel_id, mentions, limiter_limit, limiter_per_seconds, health, created_at,
+			updated_at) VALUES ($1, 'DSAAAAAAAAAAA1', 'mattermost', 'ops', $2, 'team', 'chan', '{}', 1000, 1,
+			'healthy', $3, $3) RETURNING id`, e.orgID, conn, t0).Scan(&dest); err != nil {
+			t.Fatal(err)
+		}
+		for name, state := range map[string]string{"a": "not_delivered", "b": "pending", "c": "delivered",
+			"d": "deleted_in_messenger"} {
+			exec(`INSERT INTO deliveries (org_id, destination_id, alert_group_id, state, last_error, next_attempt_at,
+				created_at, updated_at) SELECT $1, $2, id, $3, 'x', $4, $4, $4 FROM alert_groups WHERE public_id = $5`,
+				e.orgID, dest, state, t0, ids[name])
+		}
+		check := func(step string, want ...string) {
+			t.Helper()
+			yes, no := true, false
+			for _, f := range []*bool{&yes, &no} {
+				page, err := e.groups.List(ctx, groups.ListRequest{Filter: groups.Filter{DeliveryProblem: f},
+					Limit: 10})
+				if err != nil {
+					t.Fatal(err)
+				}
+				counts, err := e.groups.Counts(ctx, groups.Filter{DeliveryProblem: f})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var got []string
+				for _, v := range page.Groups {
+					if v.DeliveryProblem != *f {
+						t.Errorf("%s: %s delivery_problem %v in the list", step, v.PublicID, v.DeliveryProblem)
+					}
+					if *f {
+						got = append(got, v.PublicID)
+					}
+				}
+				if n := int64(len(page.Groups)); counts.All != n {
+					t.Errorf("%s: counts %+v for %d listed", step, counts, n)
+				}
+				if !*f {
+					continue
+				}
+				var wanted []string
+				for _, name := range want {
+					wanted = append(wanted, ids[name])
+				}
+				slices.Sort(got)
+				slices.Sort(wanted)
+				if !slices.Equal(got, wanted) {
+					t.Errorf("%s: with a problem %v, want %v", step, got, want)
+				}
+			}
+			for name, id := range ids {
+				v, err := e.groups.Get(ctx, id)
+				if err != nil || v.DeliveryProblem != slices.Contains(want, name) {
+					t.Errorf("%s: get %s = %v %v", step, name, v.DeliveryProblem, err)
+				}
+			}
+		}
+		check("not delivered, deleted", "a", "d")
+		exec(`UPDATE destinations SET health = 'broken', broken_since = $2, broken_cause = 'fatal', next_probe_at = $2
+			WHERE id = $1`, dest, t0)
+		check("waiting for a broken destination", "a", "b", "d")
+		exec(`UPDATE deliveries SET thread_state = 'unattached' WHERE alert_group_id = (SELECT id FROM alert_groups
+			WHERE public_id = $1)`, ids["c"])
+		check("a thread not attached", "a", "b", "c", "d")
+		exec(`UPDATE destinations SET health = 'healthy', broken_since = NULL, broken_cause = NULL,
+			next_probe_at = NULL WHERE id = $1`, dest)
+		exec(`UPDATE deliveries SET state = 'delivered', last_error = NULL, thread_state = 'none'`)
+		check("delivered")
+	})
+}

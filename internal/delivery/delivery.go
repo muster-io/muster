@@ -256,6 +256,8 @@ type queries interface {
 		error)
 	GetRetentionDetailsDays(ctx context.Context, orgID int64) (int64, error)
 	DeleteExpiredReplies(ctx context.Context, arg dbgen.DeleteExpiredRepliesParams) (int64, error)
+	GetPressBinding(ctx context.Context, arg dbgen.GetPressBindingParams) (dbgen.GetPressBindingRow, error)
+	GetPostDestination(ctx context.Context, arg dbgen.GetPostDestinationParams) (dbgen.GetPostDestinationRow, error)
 	outcomeQueries
 	brokenQueries
 	stormQueries

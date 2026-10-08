@@ -66,9 +66,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
 - **C-08.FR-11** The Routes page suggests, at the top of the list, a Route for `alertname="MusterHeartbeatLost"` when an
   Integration has a Heartbeat and no Route other than the Default route matches that alert; and, from C-13 on, a Route
   for Internal alerts `alertname=~"Muster.*"` to a chosen Destination when no Route other than the Default route matches
-  them (C-13.FR-11). Accepting a suggestion creates the Route at the top of the list; dismissing it is remembered per
-  user. Both are operations on the suggestion (`accept`, `dismiss`); either gets `409` (`suggestion_obsolete`) when the
-  suggestion no longer applies, for example when a matching Route exists by now.
+  them (C-13.FR-11). Accepting a suggestion creates the Route at the top of the list — except the Internal alerts
+  Route when a Route other than the Default route already takes an Internal alert, such as the Route for
+  `MusterHeartbeatLost`: it goes directly below the last such Route, so that the broader Route does not take that alert
+  first; dismissing a suggestion is remembered per user. Both are operations on the suggestion (`accept`, `dismiss`);
+  either gets `409` (`suggestion_obsolete`) when the suggestion no longer applies, for example when a matching Route
+  exists by now.
 - **C-08.FR-12** Each Route exports `muster_route_info{route,name}`.
 - **C-08.FR-13** Routing records which Route took each newly firing Alert and its Severity level; both are shown in the
   Integration's Alerts view (C-06.FR-19). An Alert that already lives in an open Alert Group is not routed again (C-09).

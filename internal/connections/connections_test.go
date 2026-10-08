@@ -70,10 +70,19 @@ type memStore struct {
 	fail      map[string]error
 	tx        int
 	committed int
+	// targets are the Mattermost Destinations by id, as GetDestinationTarget reads them.
+	targets map[int64]memTarget
+}
+
+// memTarget is a Mattermost Destination: its Connection, team and channel.
+type memTarget struct {
+	connection                  int64
+	teamID, teamName, channelID string
 }
 
 func newMemStore() *memStore {
-	return &memStore{rows: map[int64]*memRow{}, dests: map[int64]int64{}, fail: map[string]error{}}
+	return &memStore{rows: map[int64]*memRow{}, dests: map[int64]int64{}, fail: map[string]error{},
+		targets: map[int64]memTarget{}}
 }
 
 // txHandle stands for the transaction that the Abandon hook writes through.
@@ -256,6 +265,26 @@ func (s *memStore) MarkConnectionDeleted(_ context.Context, a dbgen.MarkConnecti
 }
 
 func (s *memStore) LockDemo(context.Context, int64) error { return s.fail["LockDemo"] }
+
+func (s *memStore) GetDestinationTarget(_ context.Context, a dbgen.GetDestinationTargetParams) (
+	dbgen.GetDestinationTargetRow, error) {
+	if err := s.fail["GetDestinationTarget"]; err != nil {
+		return dbgen.GetDestinationTargetRow{}, err
+	}
+	d, ok := s.targets[a.DestinationID]
+	r := s.rows[d.connection]
+	if !ok || r == nil || r.deleted || a.OrgID != 1 {
+		return dbgen.GetDestinationTargetRow{}, pgx.ErrNoRows
+	}
+	c := r.row
+	return dbgen.GetDestinationTargetRow{MattermostTeamID: pgtype.Text{String: d.teamID, Valid: true},
+		MattermostTeamName:  pgtype.Text{String: d.teamName, Valid: d.teamName != ""},
+		MattermostChannelID: pgtype.Text{String: d.channelID, Valid: true}, ID: c.ID, PublicID: c.PublicID,
+		Type: c.Type, Name: c.Name, MattermostServerUrl: c.MattermostServerUrl, BotTokenCiphertext: c.BotTokenCiphertext,
+		BotTokenKeyID: c.BotTokenKeyID, BotTokenUpdatedAt: c.BotTokenUpdatedAt, Proxy: c.Proxy,
+		ProxyPasswordCiphertext: c.ProxyPasswordCiphertext, ProxyPasswordKeyID: c.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: c.ProxyPasswordUpdatedAt, Version: c.Version}, nil
+}
 
 func (s *memStore) InsertAuditEntry(_ context.Context, a auditdb.InsertAuditEntryParams) error {
 	if err := s.fail["InsertAuditEntry"]; err != nil {
@@ -1150,5 +1179,98 @@ func TestNotifyFailure(t *testing.T) {
 	}
 	if _, err := e.svc.Create(t.Context(), by, input("mm2", e.fake.URL())); err == nil {
 		t.Error("a failed hint on create")
+	}
+}
+
+// TestTarget is where a Mattermost Destination posts for the adapter: its team and channel and the client of its
+// Connection, kept until the Connection changes; without a Connection that is not deleted, or for a Telegram one, it
+// is mattermost.ErrNoTarget.
+func TestTarget(t *testing.T) {
+	e := newEnv(t)
+	c := e.create(t, "mm")
+	ctx := t.Context()
+	e.store.targets[7] = memTarget{connection: c.ID, teamID: fakemattermost.TeamID, teamName: fakemattermost.TeamName,
+		channelID: fakemattermost.ChannelAlerts}
+	first, err := e.svc.Target(ctx, 7)
+	if err != nil || first.Client == nil || first.ConnectionID != c.ID || first.ConnectionPublicID != c.PublicID ||
+		first.TeamID != fakemattermost.TeamID || first.TeamName != "dev" ||
+		first.ChannelID != fakemattermost.ChannelAlerts {
+		t.Fatalf("target = %+v, %v", first, err)
+	}
+	if u, r := first.Client.Me(ctx, outbound.ClassDelivery); !r.OK() || u.ID != fakemattermost.BotUserID {
+		t.Errorf("the target's client = %+v, %+v", u, r)
+	}
+	if again, err := e.svc.Target(ctx, 7); err != nil || again.Client != first.Client {
+		t.Errorf("the client is not kept: %+v, %v", again, err)
+	}
+	in := input("mm", e.fake.URL())
+	in.Limiter.Limit = 9
+	if _, err := e.svc.Update(ctx, by, c.PublicID, nil, in); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := e.svc.Target(ctx, 7); err != nil || changed.Client == first.Client {
+		t.Errorf("the client is not built again for a changed connection: %+v, %v", changed, err)
+	}
+	if _, err := e.svc.Target(ctx, 8); !errors.Is(err, mattermost.ErrNoTarget) {
+		t.Errorf("an unknown destination = %v", err)
+	}
+	e.store.addTelegram()
+	e.store.targets[9] = memTarget{connection: e.store.next, teamID: "t", channelID: "c"}
+	if _, err := e.svc.Target(ctx, 9); !errors.Is(err, mattermost.ErrNoTarget) {
+		t.Errorf("a telegram connection = %v", err)
+	}
+	e.store.rows[c.ID].row.Proxy = []byte("{")
+	e.store.rows[c.ID].row.Version++
+	if _, err := e.svc.Target(ctx, 7); err == nil || errors.Is(err, mattermost.ErrNoTarget) {
+		t.Errorf("an unreadable proxy = %v", err)
+	}
+	e.store.fail["GetDestinationTarget"] = errors.New("down")
+	if _, err := e.svc.Target(ctx, 7); err == nil || errors.Is(err, mattermost.ErrNoTarget) {
+		t.Errorf("a failed read = %v", err)
+	}
+	delete(e.store.fail, "GetDestinationTarget")
+	e.store.rows[c.ID].deleted = true
+	if _, err := e.svc.Target(ctx, 7); !errors.Is(err, mattermost.ErrNoTarget) {
+		t.Errorf("a deleted connection = %v", err)
+	}
+}
+
+// TestCallbackConnection: the callback of button presses finds a Mattermost Connection by public_id with the client
+// the adapter posts through; an unknown, deleted or Telegram Connection is mattermost.ErrNoConnection.
+func TestCallbackConnection(t *testing.T) {
+	e := newEnv(t)
+	c := e.create(t, "mm")
+	ctx := t.Context()
+	e.store.targets[7] = memTarget{connection: c.ID, teamID: fakemattermost.TeamID, channelID: fakemattermost.ChannelAlerts}
+	target, err := e.svc.Target(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := e.svc.Connection(ctx, c.PublicID)
+	if err != nil || conn.ID != c.ID || conn.PublicID != c.PublicID || conn.Client != target.Client {
+		t.Fatalf("Connection = %+v, %v; the target's client %p", conn, err, target.Client)
+	}
+	for _, id := range []string{"CN000000000000", "not-an-id"} {
+		if _, err := e.svc.Connection(ctx, id); !errors.Is(err, mattermost.ErrNoConnection) {
+			t.Errorf("Connection(%q) = %v", id, err)
+		}
+	}
+	e.store.addTelegram()
+	if _, err := e.svc.Connection(ctx, telegramID); !errors.Is(err, mattermost.ErrNoConnection) {
+		t.Errorf("a telegram connection = %v", err)
+	}
+	e.store.rows[c.ID].row.Proxy = []byte("{")
+	e.store.rows[c.ID].row.Version++
+	if _, err := e.svc.Connection(ctx, c.PublicID); err == nil || errors.Is(err, mattermost.ErrNoConnection) {
+		t.Errorf("an unreadable proxy = %v", err)
+	}
+	e.store.fail["GetConnection"] = errors.New("down")
+	if _, err := e.svc.Connection(ctx, c.PublicID); err == nil || errors.Is(err, mattermost.ErrNoConnection) {
+		t.Errorf("a failed read = %v", err)
+	}
+	delete(e.store.fail, "GetConnection")
+	e.store.rows[c.ID].deleted = true
+	if _, err := e.svc.Connection(ctx, c.PublicID); !errors.Is(err, mattermost.ErrNoConnection) {
+		t.Errorf("a deleted connection = %v", err)
 	}
 }

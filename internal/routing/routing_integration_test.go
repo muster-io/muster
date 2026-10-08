@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -418,6 +419,50 @@ func TestIntegrationPreviewAndSuggestions(t *testing.T) {
 		if err := e.d.Pool.QueryRow(ctx, `SELECT details::text FROM audit_log WHERE resource_public_id = $1`,
 			rt.PublicID).Scan(&details); err != nil || details != `{"suggestion": "heartbeat_lost"}` {
 			t.Errorf("audit details %s, %v", details, err)
+		}
+
+		// internal_alerts, with a Destination, accepted directly below the Route that takes MusterHeartbeatLost.
+		var conn int64
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
+			mattermost_server_url, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit,
+			limiter_per_seconds, created_at, updated_at) VALUES ($1, 'CNAAAAAAAAAAA1', 'mattermost', 'bot',
+			'https://mm.example.org', '\x00', 'k1', $2, 1000, 1, $2, $2) RETURNING id`, e.orgID, t0).Scan(
+			&conn); err != nil {
+			t.Fatal(err)
+		}
+		destination := func(publicID string, deleted bool) {
+			t.Helper()
+			var at *time.Time
+			if deleted {
+				at = &t0
+			}
+			if _, err := e.d.Pool.Exec(ctx, `INSERT INTO destinations (org_id, public_id, type, name, connection_id,
+				mattermost_team_id, mattermost_channel_id, mentions, limiter_limit, limiter_per_seconds, health,
+				deleted_at, created_at, updated_at) VALUES ($1, $2, 'mattermost', $2, $3, 'team', 'chan', '{}', 1000, 1,
+				'healthy', $4, $5, $5)`, e.orgID, publicID, conn, at, t0); err != nil {
+				t.Fatal(err)
+			}
+		}
+		destination("DSAAAAAAAAAAA1", true)
+		if list, err := svc.Suggestions(ctx, nil); err != nil || len(list) != 0 {
+			t.Fatalf("with a deleted destination %+v, %v", list, err)
+		}
+		destination("DSAAAAAAAAAAA2", false)
+		if list, err := svc.Suggestions(ctx, nil); err != nil || len(list) != 1 ||
+			list[0].ID != routing.SuggestionInternalAlerts {
+			t.Fatalf("with a destination %+v, %v", list, err)
+		}
+		rt, err = svc.AcceptSuggestion(ctx, by, routing.SuggestionInternalAlerts, []string{"DSAAAAAAAAAAA2"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		list, err = svc.List(ctx)
+		if err != nil || names(list) != "Muster: Heartbeat lost,Muster internal alerts,other,Default" ||
+			rt.Position != 1 || !slices.Equal(rt.DestinationIDs, []string{"DSAAAAAAAAAAA2"}) {
+			t.Errorf("after accepting internal_alerts %s %+v %v", names(list), rt, err)
+		}
+		if list, err := svc.Suggestions(ctx, nil); err != nil || len(list) != 0 {
+			t.Errorf("after accepting both %+v, %v", list, err)
 		}
 	})
 }

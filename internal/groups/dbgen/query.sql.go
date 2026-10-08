@@ -18,6 +18,13 @@ SELECT g.status, (CASE WHEN $1::boolean THEN g.common_labels END)::jsonb AS comm
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
+JOIN LATERAL (SELECT EXISTS (SELECT 1
+                             FROM deliveries d
+                             JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+                             WHERE d.org_id = g.org_id AND d.alert_group_id = g.id
+                               AND (d.state IN ('not_delivered', 'deleted_in_messenger')
+                                    OR (d.state = 'pending' AND ds.health = 'broken')
+                                    OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
 WHERE g.org_id = $2
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -34,30 +41,33 @@ WHERE g.org_id = $2
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
   AND ($15::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
-  AND ($16::jsonb IS NULL OR g.common_labels @> $16::jsonb)
-  AND ($17::text IS NULL OR g.title ILIKE $17::text
-       OR g.summary ILIKE $17::text)
+  AND ($16::boolean IS NULL
+       OR dp.delivery_problem = $16::boolean)
+  AND ($17::jsonb IS NULL OR g.common_labels @> $17::jsonb)
+  AND ($18::text IS NULL OR g.title ILIKE $18::text
+       OR g.summary ILIKE $18::text)
 GROUP BY g.status, (CASE WHEN $1::boolean THEN g.common_labels END)
 `
 
 type CountGroupsParams struct {
-	WithLabels     bool
-	OrgID          int64
-	Number         pgtype.Int8
-	RangeTo        time.Time
-	RangeFrom      time.Time
-	RouteIds       []int64
-	IntegrationIds []int64
-	Severities     []string
-	Urgent         pgtype.Bool
-	ResolvedBy     pgtype.Text
-	ResolveReason  pgtype.Text
-	Reopened       pgtype.Bool
-	OwnerSet       bool
-	OwnerID        pgtype.Int8
-	SnoozedNoEnd   pgtype.Bool
-	Contains       []byte
-	Pattern        pgtype.Text
+	WithLabels      bool
+	OrgID           int64
+	Number          pgtype.Int8
+	RangeTo         time.Time
+	RangeFrom       time.Time
+	RouteIds        []int64
+	IntegrationIds  []int64
+	Severities      []string
+	Urgent          pgtype.Bool
+	ResolvedBy      pgtype.Text
+	ResolveReason   pgtype.Text
+	Reopened        pgtype.Bool
+	OwnerSet        bool
+	OwnerID         pgtype.Int8
+	SnoozedNoEnd    pgtype.Bool
+	DeliveryProblem pgtype.Bool
+	Contains        []byte
+	Pattern         pgtype.Text
 }
 
 type CountGroupsRow struct {
@@ -85,6 +95,7 @@ func (q *Queries) CountGroups(ctx context.Context, arg CountGroupsParams) ([]Cou
 		arg.OwnerSet,
 		arg.OwnerID,
 		arg.SnoozedNoEnd,
+		arg.DeliveryProblem,
 		arg.Contains,
 		arg.Pattern,
 	)
@@ -357,7 +368,7 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        o.retention_alert_details_days, g.owner_user_id, g.snooze_until, g.snoozed_by_user_id,
        g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -367,6 +378,13 @@ LEFT JOIN LATERAL (SELECT n.public_id, n.number
                      AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
                      AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
                    LIMIT 1) nw ON true
+JOIN LATERAL (SELECT EXISTS (SELECT 1
+                             FROM deliveries d
+                             JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+                             WHERE d.org_id = g.org_id AND d.alert_group_id = g.id
+                               AND (d.state IN ('not_delivered', 'deleted_in_messenger')
+                                    OR (d.state = 'pending' AND ds.health = 'broken')
+                                    OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
 WHERE g.org_id = $1 AND g.public_id = $2
 `
 
@@ -412,6 +430,7 @@ type GetGroupRow struct {
 	NewerPublicID              string
 	NewerNumber                int64
 	RouteDeleted               bool
+	DeliveryProblem            bool
 }
 
 // GetGroup reads an Alert Group by public_id with its Route, the #N of the Alert Group it fires again after, the
@@ -419,7 +438,9 @@ type GetGroupRow struct {
 // when a person resolved it, the open Alert Group of the same Route and key that takes part in grouping (C-10.FR-7),
 // and whether its Route was deleted, which Unresolve needs. Urgency is derived from
 // the Route and organization.critical_is_urgent as they are now (C-08.FR-6), so that marking a Route urgent or
-// changing the setting shows on open Alert Groups at once without changing them.
+// changing the setting shows on open Alert Groups at once without changing them. It has a Delivery problem
+// (C-13.FR-12) when a delivery of it is Not delivered or deleted in the messenger, waits for a Broken Destination, or
+// has a Thread not attached.
 func (q *Queries) GetGroup(ctx context.Context, arg GetGroupParams) (GetGroupRow, error) {
 	row := q.db.QueryRow(ctx, getGroup, arg.OrgID, arg.PublicID)
 	var i GetGroupRow
@@ -460,6 +481,7 @@ func (q *Queries) GetGroup(ctx context.Context, arg GetGroupParams) (GetGroupRow
 		&i.NewerPublicID,
 		&i.NewerNumber,
 		&i.RouteDeleted,
+		&i.DeliveryProblem,
 	)
 	return i, err
 }
@@ -1325,7 +1347,7 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -1335,6 +1357,13 @@ LEFT JOIN LATERAL (SELECT n.public_id, n.number
                      AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
                      AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
                    LIMIT 1) nw ON true
+JOIN LATERAL (SELECT EXISTS (SELECT 1
+                             FROM deliveries d
+                             JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+                             WHERE d.org_id = g.org_id AND d.alert_group_id = g.id
+                               AND (d.state IN ('not_delivered', 'deleted_in_messenger')
+                                    OR (d.state = 'pending' AND ds.health = 'broken')
+                                    OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
 WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -1351,36 +1380,39 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
   AND ($15::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
-  AND ($16::jsonb IS NULL OR g.common_labels @> $16::jsonb)
-  AND ($17::text IS NULL OR g.title ILIKE $17::text
-       OR g.summary ILIKE $17::text)
-  AND ($18::timestamptz IS NULL
-       OR (g.last_changed_at, g.id) > ($18::timestamptz, $19::bigint))
+  AND ($16::boolean IS NULL
+       OR dp.delivery_problem = $16::boolean)
+  AND ($17::jsonb IS NULL OR g.common_labels @> $17::jsonb)
+  AND ($18::text IS NULL OR g.title ILIKE $18::text
+       OR g.summary ILIKE $18::text)
+  AND ($19::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) > ($19::timestamptz, $20::bigint))
 ORDER BY g.last_changed_at, g.id
-LIMIT $20
+LIMIT $21
 `
 
 type ListGroupsChangedAscParams struct {
-	OrgID          int64
-	Statuses       []string
-	Number         pgtype.Int8
-	RangeTo        time.Time
-	RangeFrom      time.Time
-	RouteIds       []int64
-	IntegrationIds []int64
-	Severities     []string
-	Urgent         pgtype.Bool
-	ResolvedBy     pgtype.Text
-	ResolveReason  pgtype.Text
-	Reopened       pgtype.Bool
-	OwnerSet       bool
-	OwnerID        pgtype.Int8
-	SnoozedNoEnd   pgtype.Bool
-	Contains       []byte
-	Pattern        pgtype.Text
-	AfterAt        pgtype.Timestamptz
-	AfterID        pgtype.Int8
-	Lim            int32
+	OrgID           int64
+	Statuses        []string
+	Number          pgtype.Int8
+	RangeTo         time.Time
+	RangeFrom       time.Time
+	RouteIds        []int64
+	IntegrationIds  []int64
+	Severities      []string
+	Urgent          pgtype.Bool
+	ResolvedBy      pgtype.Text
+	ResolveReason   pgtype.Text
+	Reopened        pgtype.Bool
+	OwnerSet        bool
+	OwnerID         pgtype.Int8
+	SnoozedNoEnd    pgtype.Bool
+	DeliveryProblem pgtype.Bool
+	Contains        []byte
+	Pattern         pgtype.Text
+	AfterAt         pgtype.Timestamptz
+	AfterID         pgtype.Int8
+	Lim             int32
 }
 
 type ListGroupsChangedAscRow struct {
@@ -1414,6 +1446,7 @@ type ListGroupsChangedAscRow struct {
 	NewerPublicID              string
 	NewerNumber                int64
 	RouteDeleted               bool
+	DeliveryProblem            bool
 }
 
 // ListGroupsChangedAsc reads a batch of the Alert Group list, earliest change first, after the cursor when given.
@@ -1434,6 +1467,7 @@ func (q *Queries) ListGroupsChangedAsc(ctx context.Context, arg ListGroupsChange
 		arg.OwnerSet,
 		arg.OwnerID,
 		arg.SnoozedNoEnd,
+		arg.DeliveryProblem,
 		arg.Contains,
 		arg.Pattern,
 		arg.AfterAt,
@@ -1478,6 +1512,7 @@ func (q *Queries) ListGroupsChangedAsc(ctx context.Context, arg ListGroupsChange
 			&i.NewerPublicID,
 			&i.NewerNumber,
 			&i.RouteDeleted,
+			&i.DeliveryProblem,
 		); err != nil {
 			return nil, err
 		}
@@ -1497,7 +1532,7 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -1507,6 +1542,13 @@ LEFT JOIN LATERAL (SELECT n.public_id, n.number
                      AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
                      AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
                    LIMIT 1) nw ON true
+JOIN LATERAL (SELECT EXISTS (SELECT 1
+                             FROM deliveries d
+                             JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+                             WHERE d.org_id = g.org_id AND d.alert_group_id = g.id
+                               AND (d.state IN ('not_delivered', 'deleted_in_messenger')
+                                    OR (d.state = 'pending' AND ds.health = 'broken')
+                                    OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
 WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -1523,36 +1565,39 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
   AND ($15::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
-  AND ($16::jsonb IS NULL OR g.common_labels @> $16::jsonb)
-  AND ($17::text IS NULL OR g.title ILIKE $17::text
-       OR g.summary ILIKE $17::text)
-  AND ($18::timestamptz IS NULL
-       OR (g.last_changed_at, g.id) < ($18::timestamptz, $19::bigint))
+  AND ($16::boolean IS NULL
+       OR dp.delivery_problem = $16::boolean)
+  AND ($17::jsonb IS NULL OR g.common_labels @> $17::jsonb)
+  AND ($18::text IS NULL OR g.title ILIKE $18::text
+       OR g.summary ILIKE $18::text)
+  AND ($19::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) < ($19::timestamptz, $20::bigint))
 ORDER BY g.last_changed_at DESC, g.id DESC
-LIMIT $20
+LIMIT $21
 `
 
 type ListGroupsChangedDescParams struct {
-	OrgID          int64
-	Statuses       []string
-	Number         pgtype.Int8
-	RangeTo        time.Time
-	RangeFrom      time.Time
-	RouteIds       []int64
-	IntegrationIds []int64
-	Severities     []string
-	Urgent         pgtype.Bool
-	ResolvedBy     pgtype.Text
-	ResolveReason  pgtype.Text
-	Reopened       pgtype.Bool
-	OwnerSet       bool
-	OwnerID        pgtype.Int8
-	SnoozedNoEnd   pgtype.Bool
-	Contains       []byte
-	Pattern        pgtype.Text
-	AfterAt        pgtype.Timestamptz
-	AfterID        pgtype.Int8
-	Lim            int32
+	OrgID           int64
+	Statuses        []string
+	Number          pgtype.Int8
+	RangeTo         time.Time
+	RangeFrom       time.Time
+	RouteIds        []int64
+	IntegrationIds  []int64
+	Severities      []string
+	Urgent          pgtype.Bool
+	ResolvedBy      pgtype.Text
+	ResolveReason   pgtype.Text
+	Reopened        pgtype.Bool
+	OwnerSet        bool
+	OwnerID         pgtype.Int8
+	SnoozedNoEnd    pgtype.Bool
+	DeliveryProblem pgtype.Bool
+	Contains        []byte
+	Pattern         pgtype.Text
+	AfterAt         pgtype.Timestamptz
+	AfterID         pgtype.Int8
+	Lim             int32
 }
 
 type ListGroupsChangedDescRow struct {
@@ -1586,6 +1631,7 @@ type ListGroupsChangedDescRow struct {
 	NewerPublicID              string
 	NewerNumber                int64
 	RouteDeleted               bool
+	DeliveryProblem            bool
 }
 
 // ListGroupsChangedDesc reads a batch of the Alert Group list, latest change first, after the cursor when given.
@@ -1606,6 +1652,7 @@ func (q *Queries) ListGroupsChangedDesc(ctx context.Context, arg ListGroupsChang
 		arg.OwnerSet,
 		arg.OwnerID,
 		arg.SnoozedNoEnd,
+		arg.DeliveryProblem,
 		arg.Contains,
 		arg.Pattern,
 		arg.AfterAt,
@@ -1650,6 +1697,7 @@ func (q *Queries) ListGroupsChangedDesc(ctx context.Context, arg ListGroupsChang
 			&i.NewerPublicID,
 			&i.NewerNumber,
 			&i.RouteDeleted,
+			&i.DeliveryProblem,
 		); err != nil {
 			return nil, err
 		}
@@ -1669,7 +1717,7 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -1679,6 +1727,13 @@ LEFT JOIN LATERAL (SELECT n.public_id, n.number
                      AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
                      AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
                    LIMIT 1) nw ON true
+JOIN LATERAL (SELECT EXISTS (SELECT 1
+                             FROM deliveries d
+                             JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+                             WHERE d.org_id = g.org_id AND d.alert_group_id = g.id
+                               AND (d.state IN ('not_delivered', 'deleted_in_messenger')
+                                    OR (d.state = 'pending' AND ds.health = 'broken')
+                                    OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
 WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -1695,36 +1750,39 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
   AND ($15::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
-  AND ($16::jsonb IS NULL OR g.common_labels @> $16::jsonb)
-  AND ($17::text IS NULL OR g.title ILIKE $17::text
-       OR g.summary ILIKE $17::text)
-  AND ($18::timestamptz IS NULL
-       OR (g.created_at, g.id) > ($18::timestamptz, $19::bigint))
+  AND ($16::boolean IS NULL
+       OR dp.delivery_problem = $16::boolean)
+  AND ($17::jsonb IS NULL OR g.common_labels @> $17::jsonb)
+  AND ($18::text IS NULL OR g.title ILIKE $18::text
+       OR g.summary ILIKE $18::text)
+  AND ($19::timestamptz IS NULL
+       OR (g.created_at, g.id) > ($19::timestamptz, $20::bigint))
 ORDER BY g.created_at, g.id
-LIMIT $20
+LIMIT $21
 `
 
 type ListGroupsStartedAscParams struct {
-	OrgID          int64
-	Statuses       []string
-	Number         pgtype.Int8
-	RangeTo        time.Time
-	RangeFrom      time.Time
-	RouteIds       []int64
-	IntegrationIds []int64
-	Severities     []string
-	Urgent         pgtype.Bool
-	ResolvedBy     pgtype.Text
-	ResolveReason  pgtype.Text
-	Reopened       pgtype.Bool
-	OwnerSet       bool
-	OwnerID        pgtype.Int8
-	SnoozedNoEnd   pgtype.Bool
-	Contains       []byte
-	Pattern        pgtype.Text
-	AfterAt        pgtype.Timestamptz
-	AfterID        pgtype.Int8
-	Lim            int32
+	OrgID           int64
+	Statuses        []string
+	Number          pgtype.Int8
+	RangeTo         time.Time
+	RangeFrom       time.Time
+	RouteIds        []int64
+	IntegrationIds  []int64
+	Severities      []string
+	Urgent          pgtype.Bool
+	ResolvedBy      pgtype.Text
+	ResolveReason   pgtype.Text
+	Reopened        pgtype.Bool
+	OwnerSet        bool
+	OwnerID         pgtype.Int8
+	SnoozedNoEnd    pgtype.Bool
+	DeliveryProblem pgtype.Bool
+	Contains        []byte
+	Pattern         pgtype.Text
+	AfterAt         pgtype.Timestamptz
+	AfterID         pgtype.Int8
+	Lim             int32
 }
 
 type ListGroupsStartedAscRow struct {
@@ -1758,6 +1816,7 @@ type ListGroupsStartedAscRow struct {
 	NewerPublicID              string
 	NewerNumber                int64
 	RouteDeleted               bool
+	DeliveryProblem            bool
 }
 
 // ListGroupsStartedAsc reads a batch of the Alert Group list, oldest start first, after the cursor when given.
@@ -1778,6 +1837,7 @@ func (q *Queries) ListGroupsStartedAsc(ctx context.Context, arg ListGroupsStarte
 		arg.OwnerSet,
 		arg.OwnerID,
 		arg.SnoozedNoEnd,
+		arg.DeliveryProblem,
 		arg.Contains,
 		arg.Pattern,
 		arg.AfterAt,
@@ -1822,6 +1882,7 @@ func (q *Queries) ListGroupsStartedAsc(ctx context.Context, arg ListGroupsStarte
 			&i.NewerPublicID,
 			&i.NewerNumber,
 			&i.RouteDeleted,
+			&i.DeliveryProblem,
 		); err != nil {
 			return nil, err
 		}
@@ -1842,7 +1903,7 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -1852,6 +1913,13 @@ LEFT JOIN LATERAL (SELECT n.public_id, n.number
                      AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
                      AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
                    LIMIT 1) nw ON true
+JOIN LATERAL (SELECT EXISTS (SELECT 1
+                             FROM deliveries d
+                             JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+                             WHERE d.org_id = g.org_id AND d.alert_group_id = g.id
+                               AND (d.state IN ('not_delivered', 'deleted_in_messenger')
+                                    OR (d.state = 'pending' AND ds.health = 'broken')
+                                    OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
 WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -1868,36 +1936,39 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
   AND ($15::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
-  AND ($16::jsonb IS NULL OR g.common_labels @> $16::jsonb)
-  AND ($17::text IS NULL OR g.title ILIKE $17::text
-       OR g.summary ILIKE $17::text)
-  AND ($18::timestamptz IS NULL
-       OR (g.created_at, g.id) < ($18::timestamptz, $19::bigint))
+  AND ($16::boolean IS NULL
+       OR dp.delivery_problem = $16::boolean)
+  AND ($17::jsonb IS NULL OR g.common_labels @> $17::jsonb)
+  AND ($18::text IS NULL OR g.title ILIKE $18::text
+       OR g.summary ILIKE $18::text)
+  AND ($19::timestamptz IS NULL
+       OR (g.created_at, g.id) < ($19::timestamptz, $20::bigint))
 ORDER BY g.created_at DESC, g.id DESC
-LIMIT $20
+LIMIT $21
 `
 
 type ListGroupsStartedDescParams struct {
-	OrgID          int64
-	Statuses       []string
-	Number         pgtype.Int8
-	RangeTo        time.Time
-	RangeFrom      time.Time
-	RouteIds       []int64
-	IntegrationIds []int64
-	Severities     []string
-	Urgent         pgtype.Bool
-	ResolvedBy     pgtype.Text
-	ResolveReason  pgtype.Text
-	Reopened       pgtype.Bool
-	OwnerSet       bool
-	OwnerID        pgtype.Int8
-	SnoozedNoEnd   pgtype.Bool
-	Contains       []byte
-	Pattern        pgtype.Text
-	AfterAt        pgtype.Timestamptz
-	AfterID        pgtype.Int8
-	Lim            int32
+	OrgID           int64
+	Statuses        []string
+	Number          pgtype.Int8
+	RangeTo         time.Time
+	RangeFrom       time.Time
+	RouteIds        []int64
+	IntegrationIds  []int64
+	Severities      []string
+	Urgent          pgtype.Bool
+	ResolvedBy      pgtype.Text
+	ResolveReason   pgtype.Text
+	Reopened        pgtype.Bool
+	OwnerSet        bool
+	OwnerID         pgtype.Int8
+	SnoozedNoEnd    pgtype.Bool
+	DeliveryProblem pgtype.Bool
+	Contains        []byte
+	Pattern         pgtype.Text
+	AfterAt         pgtype.Timestamptz
+	AfterID         pgtype.Int8
+	Lim             int32
 }
 
 type ListGroupsStartedDescRow struct {
@@ -1931,6 +2002,7 @@ type ListGroupsStartedDescRow struct {
 	NewerPublicID              string
 	NewerNumber                int64
 	RouteDeleted               bool
+	DeliveryProblem            bool
 }
 
 // The Alert Group list (C-09.FR-13) reads the summary rows in one of four orders. Every query runs with the plan of its
@@ -1941,7 +2013,8 @@ type ListGroupsStartedDescRow struct {
 // with the status that the CHECK ties to resolved_at, so that the open index and alert_groups_resolved_idx serve it —
 // and is ignored for a number. Label Matchers other than = with a value are matched in Go on common_labels, after
 // these conditions; urgency and the newer open Alert Group are derived as in GetGroup. The Owner filter, with
-// @owner_set, selects the Alert Groups the User @owner_id owns, or nobody owns when it is null.
+// @owner_set, selects the Alert Groups the User @owner_id owns, or nobody owns when it is null. The Delivery problem
+// (C-13.FR-12) is derived as in GetGroup.
 // ListGroupsStartedDesc reads a batch of the Alert Group list, newest start first, after the cursor when given.
 func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStartedDescParams) ([]ListGroupsStartedDescRow, error) {
 	rows, err := q.db.Query(ctx, listGroupsStartedDesc,
@@ -1960,6 +2033,7 @@ func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStart
 		arg.OwnerSet,
 		arg.OwnerID,
 		arg.SnoozedNoEnd,
+		arg.DeliveryProblem,
 		arg.Contains,
 		arg.Pattern,
 		arg.AfterAt,
@@ -2004,6 +2078,7 @@ func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStart
 			&i.NewerPublicID,
 			&i.NewerNumber,
 			&i.RouteDeleted,
+			&i.DeliveryProblem,
 		); err != nil {
 			return nil, err
 		}

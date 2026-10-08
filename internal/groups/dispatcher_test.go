@@ -94,6 +94,8 @@ type fakeDB struct {
 	stats []dbgen.RouteStatisticsRow
 	// received are the receipt times of the Stored Snapshots, by id.
 	received map[int64]time.Time
+	// problems are the Alert Groups with a Delivery problem, by id.
+	problems map[int64]bool
 }
 
 func newDB() *fakeDB {
@@ -632,7 +634,8 @@ func (f *fakeDB) GetGroup(_ context.Context, arg dbgen.GetGroupParams) (dbgen.Ge
 		ResolveReasonText: g.ResolveReasonText, CreatedAt: g.CreatedAt, LastChangedAt: g.LastChangedAt,
 		RoutePublicID: r.PublicID, RouteName: r.name, RetentionAlertDetailsDays: f.details,
 		OwnerUserID: g.OwnerUserID, SnoozeUntil: g.SnoozeUntil, SnoozedByUserID: g.SnoozedByUserID,
-		SnoozedByServiceAccountID: g.SnoozedByServiceAccountID, RouteDeleted: r.deleted}
+		SnoozedByServiceAccountID: g.SnoozedByServiceAccountID, RouteDeleted: r.deleted,
+		DeliveryProblem: f.problems[g.ID]}
 	out.NewerPublicID, out.NewerNumber = f.newer(g)
 	if g.FiringAgainAfterID.Valid {
 		out.FiringAgainAfterNumber = f.groups[g.FiringAgainAfterID.Int64].Number

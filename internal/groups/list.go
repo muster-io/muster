@@ -179,7 +179,7 @@ func (s *Service) listBatch(ctx context.Context, q query, sort Sort, after *List
 		RangeFrom: q.from, RouteIds: q.routes, IntegrationIds: q.integrations, Severities: q.severities,
 		Urgent: q.urgent, ResolvedBy: q.resolvedBy, ResolveReason: q.reason, Reopened: q.reopened,
 		Contains: q.contains, Pattern: q.pattern, OwnerSet: q.ownerSet, OwnerID: q.owner, SnoozedNoEnd: q.snoozedNoEnd,
-		Lim: int32(size)} //nolint:gosec // G115: size is at most maxBatch
+		DeliveryProblem: q.problem, Lim: int32(size)} //nolint:gosec // G115: size is at most maxBatch
 	if after != nil {
 		p.AfterAt = pgtype.Timestamptz{Time: after.At, Valid: true}
 		p.AfterID = pgtype.Int8{Int64: after.ID, Valid: true}
@@ -268,7 +268,7 @@ func (s *Service) views(ctx context.Context, rows []listRow, retentionDays int64
 		}
 		v.owned(actors, r.OwnerUserID, r.SnoozedByUserID, r.SnoozedByServiceAccountID, r.SnoozeUntil, r.NewerPublicID,
 			r.NewerNumber)
-		v.stillFiring, v.routeDeleted = r.FiringAlertCount, r.RouteDeleted
+		v.stillFiring, v.routeDeleted, v.DeliveryProblem = r.FiringAlertCount, r.RouteDeleted, r.DeliveryProblem
 		if len(columns) > 0 {
 			var common map[string]string
 			if err := json.Unmarshal(r.CommonLabels, &common); err != nil {

@@ -121,6 +121,66 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (G
 	return i, err
 }
 
+const getDestinationTarget = `-- name: GetDestinationTarget :one
+SELECT d.mattermost_team_id, d.mattermost_team_name, d.mattermost_channel_id, c.id, c.public_id, c.type, c.name,
+       c.mattermost_server_url, c.bot_token_ciphertext, c.bot_token_key_id, c.bot_token_updated_at, c.proxy,
+       c.proxy_password_ciphertext, c.proxy_password_key_id, c.proxy_password_updated_at, c.version
+FROM destinations d
+JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+WHERE d.org_id = $1 AND d.id = $2 AND d.type = 'mattermost' AND c.deleted_at IS NULL
+`
+
+type GetDestinationTargetParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+type GetDestinationTargetRow struct {
+	MattermostTeamID        pgtype.Text
+	MattermostTeamName      pgtype.Text
+	MattermostChannelID     pgtype.Text
+	ID                      int64
+	PublicID                string
+	Type                    string
+	Name                    string
+	MattermostServerUrl     pgtype.Text
+	BotTokenCiphertext      []byte
+	BotTokenKeyID           pgtype.Text
+	BotTokenUpdatedAt       time.Time
+	Proxy                   []byte
+	ProxyPasswordCiphertext []byte
+	ProxyPasswordKeyID      pgtype.Text
+	ProxyPasswordUpdatedAt  pgtype.Timestamptz
+	Version                 int64
+}
+
+// GetDestinationTarget reads where a Mattermost Destination posts — its team and channel — with the Connection it
+// posts through and that Connection's secrets as stored. A deleted Destination is read too, since its final edit still
+// runs; its Connection must not be deleted.
+func (q *Queries) GetDestinationTarget(ctx context.Context, arg GetDestinationTargetParams) (GetDestinationTargetRow, error) {
+	row := q.db.QueryRow(ctx, getDestinationTarget, arg.OrgID, arg.DestinationID)
+	var i GetDestinationTargetRow
+	err := row.Scan(
+		&i.MattermostTeamID,
+		&i.MattermostTeamName,
+		&i.MattermostChannelID,
+		&i.ID,
+		&i.PublicID,
+		&i.Type,
+		&i.Name,
+		&i.MattermostServerUrl,
+		&i.BotTokenCiphertext,
+		&i.BotTokenKeyID,
+		&i.BotTokenUpdatedAt,
+		&i.Proxy,
+		&i.ProxyPasswordCiphertext,
+		&i.ProxyPasswordKeyID,
+		&i.ProxyPasswordUpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
 const insertConnection = `-- name: InsertConnection :one
 INSERT INTO connections (
     org_id, public_id, type, name, mattermost_server_url, bot_token_ciphertext, bot_token_key_id,
@@ -263,6 +323,51 @@ func (q *Queries) ListConnections(ctx context.Context, arg ListConnectionsParams
 			&i.CreatedAt,
 			&i.Version,
 			&i.DestinationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMattermostDestinations = `-- name: ListMattermostDestinations :many
+SELECT id, public_id, name, connection_id, mattermost_team_id, mattermost_channel_id
+FROM destinations
+WHERE org_id = $1 AND type = 'mattermost' AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListMattermostDestinationsRow struct {
+	ID                  int64
+	PublicID            string
+	Name                string
+	ConnectionID        pgtype.Int8
+	MattermostTeamID    pgtype.Text
+	MattermostChannelID pgtype.Text
+}
+
+// ListMattermostDestinations lists the Mattermost Destinations that are not deleted, in id order, with their
+// Connection, team and channel, for muster doctor.
+func (q *Queries) ListMattermostDestinations(ctx context.Context, orgID int64) ([]ListMattermostDestinationsRow, error) {
+	rows, err := q.db.Query(ctx, listMattermostDestinations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMattermostDestinationsRow{}
+	for rows.Next() {
+		var i ListMattermostDestinationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.ConnectionID,
+			&i.MattermostTeamID,
+			&i.MattermostChannelID,
 		); err != nil {
 			return nil, err
 		}

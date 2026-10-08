@@ -136,9 +136,12 @@ func TestClientReads(t *testing.T) {
 		r.ErrorID != "app.channel.get_member.missing.app_error" {
 		t.Errorf("Member of no-bot = %+v", r)
 	}
-	if _, r := c.Me(ctx, outbound.ClassBackground); r.Outcome.Kind != delivery.OutcomeFatal ||
-		!strings.Contains(string(r.Outcome.Error), "no background class") {
-		t.Errorf("Me in the background class = %+v", r)
+	if u, r := c.Me(ctx, outbound.ClassBackground); !r.OK() || u.ID != fakemattermost.BotUserID {
+		t.Errorf("Me in the background class = %+v, %+v", u, r)
+	}
+	if _, r := c.Me(ctx, outbound.ClassHeartbeat); r.Outcome.Kind != delivery.OutcomeFatal ||
+		!strings.Contains(string(r.Outcome.Error), "no heartbeat class") {
+		t.Errorf("Me in the heartbeat class = %+v", r)
 	}
 	for _, req := range f.Requests() {
 		if got := req.Headers["Authorization"]; len(got) != 1 || got[0] != "Bearer "+token {

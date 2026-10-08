@@ -3,8 +3,9 @@
 
 // Package doctor is `muster doctor` (C-02.FR-14, FR-15): it checks the database, its connections, the Keyring and the
 // clock, prints one line per check as `OK|WARN|FAIL <check>: <detail>` and reports whether any check failed. It only
-// reads: both connections it opens run every statement in a read-only transaction, and it takes no --actor.
-// Connection and Destination checks arrive with C-13 and C-14.
+// reads: both connections it opens run every statement in a read-only transaction, and it takes no --actor. It checks
+// every Mattermost Connection and Destination as their checks do, in the background client class (C-13.FR-10);
+// Telegram ones arrive with C-14.
 package doctor
 
 import (
@@ -23,10 +24,14 @@ import (
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
+	"github.com/muster-io/muster/internal/connections"
+	cdb "github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mattermost"
+	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/runtime"
 )
 
@@ -49,12 +54,17 @@ const (
 	CheckKeyCanary         = "key_canary"
 	CheckKeyring           = "keyring"
 	CheckClockSkew         = "clock_skew"
+	// CheckConnections fails when the Connections and Destinations cannot be read; each one checked prints its own
+	// line, "connection <name>" or "destination <name>".
+	CheckConnections = "connections"
 )
 
 const (
 	// checkTimeout bounds the whole run, so that an unreachable database cannot hang it.
 	checkTimeout = 30 * time.Second
 	closeTimeout = 5 * time.Second
+	// messengerTimeout bounds the retries of the background class in each Connection and Destination check.
+	messengerTimeout = 10 * time.Second
 )
 
 // Result is one printed line.
@@ -104,6 +114,7 @@ type Options struct {
 	// open and real are replaced by tests.
 	open Opener
 	real clock.Clock
+	each time.Duration
 }
 
 // Run runs every check and prints its line. It returns false when a check failed, and an error when the settings
@@ -115,7 +126,8 @@ func Run(ctx context.Context, opts Options) (bool, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
-	c := &checks{cfg: cfg, out: opts.Out, real: cmp.Or[clock.Clock](opts.real, clock.Real{}), ok: true}
+	c := &checks{cfg: cfg, out: opts.Out, real: cmp.Or[clock.Clock](opts.real, clock.Real{}), ok: true,
+		each: cmp.Or(opts.each, messengerTimeout)}
 	c.keys, c.keysErr = keyring.Load(ctx, keyring.Env{Keys: cfg.SecretKeys, Source: cfg.SecretKeysSource},
 		opts.Development)
 	open := opts.open
@@ -139,6 +151,7 @@ func Run(ctx context.Context, opts Options) (bool, error) {
 	state, read := c.canary(ctx)
 	c.keyring(ctx, state, read)
 	c.clockSkew(ctx)
+	c.messengers(ctx)
 	return c.ok, nil
 }
 
@@ -187,6 +200,7 @@ type checks struct {
 	cfg     config.Config
 	out     io.Writer
 	real    clock.Clock
+	each    time.Duration
 	conns   Connections
 	keys    *keyring.Keyring
 	keysErr error
@@ -341,5 +355,38 @@ func (c *checks) clockSkew(ctx context.Context) {
 			runtime.ClockSkewWarning))
 	default:
 		c.print(OK, CheckClockSkew, fmt.Sprintf("%.3fs", skew.Seconds()))
+	}
+}
+
+// messengers checks the Mattermost Connections and Destinations of every Organization, one line each, through the
+// Organization's outbound address policy; the outbound log lines are for the server, not for the doctor.
+func (c *checks) messengers(ctx context.Context) {
+	orgs, err := kdb.New(c.conns.Main).ListOrganizationIDs(ctx)
+	if err != nil {
+		c.print(Fail, CheckConnections, fmt.Sprintf("list the organizations: %v", err))
+		return
+	}
+	keys := c.keys
+	if c.keysErr != nil {
+		keys = nil
+	}
+	quiet := logging.New(io.Discard, logging.LevelError)
+	for _, org := range orgs {
+		svc := connections.New(connections.Config{OrgID: org, Keyring: keys, Log: quiet,
+			Clocks: clock.Clocks{Business: c.real, Real: c.real},
+			Network: mattermost.Network{Policy: organization.NewOutboundPolicies(organization.NewStore(c.conns.Main),
+				org, c.real), Log: quiet, Real: c.real}})
+		found, err := svc.Doctor(ctx, cdb.New(c.conns.Main), c.each)
+		if err != nil {
+			c.print(Fail, CheckConnections, err.Error())
+			continue
+		}
+		for _, f := range found {
+			if f.OK() {
+				c.print(OK, f.Kind+" "+f.Name, "ok")
+			} else {
+				c.print(Fail, f.Kind+" "+f.Name, f.Message)
+			}
+		}
 	}
 }

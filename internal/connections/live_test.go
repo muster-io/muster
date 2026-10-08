@@ -216,6 +216,16 @@ func (e *liveEnv) deleteConnection(t *testing.T) {
 	if n := e.count(t, `SELECT count(*) FROM destinations WHERE connection_id = $1`, c.ID); n != 1 {
 		t.Fatalf("%d destinations saved", n)
 	}
+	target, err := e.conns.Target(ctx, d.ID)
+	if err != nil || target.ConnectionID != c.ID || target.ConnectionPublicID != c.PublicID ||
+		target.TeamID != fakemattermost.TeamID || target.TeamName != "dev" ||
+		target.ChannelID != fakemattermost.ChannelAlertsProd {
+		t.Fatalf("target = %+v, %v", target, err)
+	}
+	if out := (&mattermost.Adapter{Targets: e.conns}).Check(ctx, delivery.Call{Class: outbound.ClassDelivery,
+		Destination: delivery.Destination{ID: d.ID}}); out.Kind != delivery.OutcomeOK {
+		t.Errorf("the adapter's check = %+v", out)
+	}
 	if err := e.conns.Delete(ctx, by, c.PublicID, nil); !errors.Is(err, connections.ErrInUse) {
 		t.Fatalf("delete a used connection = %v", err)
 	}
@@ -236,6 +246,10 @@ func (e *liveEnv) deleteConnection(t *testing.T) {
 	}
 	if err := e.dests.Delete(ctx, dby, d.PublicID, nil); err != nil {
 		t.Fatal(err)
+	}
+	// A deleted Destination still posts its final edit through its Connection.
+	if again, err := e.conns.Target(ctx, d.ID); err != nil || again.Client != target.Client {
+		t.Errorf("the target of a deleted destination = %+v, %v", again, err)
 	}
 	e.fake.ResetRequests()
 	e.log.Reset()
@@ -271,6 +285,9 @@ func (e *liveEnv) deleteConnection(t *testing.T) {
 	}
 	if _, err := e.conns.Get(ctx, c.PublicID); !errors.Is(err, connections.ErrNotFound) {
 		t.Errorf("read a deleted connection = %v", err)
+	}
+	if _, err := e.conns.Target(ctx, d.ID); !errors.Is(err, mattermost.ErrNoTarget) {
+		t.Errorf("the target of a deleted connection = %v", err)
 	}
 	t.Logf("deleted connection %s: delivery %d not_delivered (%q), no request to the server", c.PublicID, deliveryID,
 		lastError)

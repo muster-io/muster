@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright The Muster Authors
+
+package mattermost
+
+import (
+	"context"
+
+	"github.com/muster-io/muster/internal/outbound"
+)
+
+// EphemeralPost lets the tests of the package make the ephemeral post of a press's answer.
+func (c *Client) EphemeralPost(ctx context.Context, class outbound.Class, userID, channelID, rootID,
+	message string) Result {
+	return c.ephemeralPost(ctx, class, userID, channelID, rootID, message)
+}

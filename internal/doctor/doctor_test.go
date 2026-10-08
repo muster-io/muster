@@ -5,10 +5,12 @@ package doctor
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,9 +22,13 @@ import (
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
+	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mattermost"
+	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/outbound"
 )
 
 // rows are query results; Scan assigns each value to its destination as it is.
@@ -78,13 +84,15 @@ type conn struct {
 
 func newFakeDB(ssl bool) *fakeDB {
 	return &fakeDB{answers: map[string]*rows{
-		"SHOW server_version_num": {values: [][]any{{"170011"}}},
-		"SHOW server_version":     {values: [][]any{{"17.11 (Debian 17.11-1)"}}},
-		"pg_stat_ssl":             {values: [][]any{{ssl}}},
-		"pg_advisory_unlock":      {values: [][]any{{true}}},
-		"clock_timestamp":         {values: [][]any{{time.Now()}}},
-		"FROM organizations":      {values: [][]any{{int64(1)}}},
-		"FROM encrypted_values":   {values: [][]any{}},
+		"SHOW server_version_num":    {values: [][]any{{"170011"}}},
+		"SHOW server_version":        {values: [][]any{{"17.11 (Debian 17.11-1)"}}},
+		"pg_stat_ssl":                {values: [][]any{{ssl}}},
+		"pg_advisory_unlock":         {values: [][]any{{true}}},
+		"clock_timestamp":            {values: [][]any{{time.Now()}}},
+		"FROM organizations":         {values: [][]any{{int64(1)}}},
+		"FROM encrypted_values":      {values: [][]any{}},
+		"ListConnections":            {values: [][]any{}},
+		"ListMattermostDestinations": {values: [][]any{}},
 	}}
 }
 
@@ -293,6 +301,7 @@ func TestFailingChecks(t *testing.T) {
 		setup func(*fakeDB)
 		env   []string
 		want  string
+		lines int
 	}{
 		{name: "PostgreSQL 13", setup: func(d *fakeDB) {
 			d.answers["SHOW server_version_num"] = &rows{values: [][]any{{"130012"}}}
@@ -319,7 +328,13 @@ func TestFailingChecks(t *testing.T) {
 		{name: "organizations unreadable", setup: func(d *fakeDB) {
 			d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
 			d.answers["FROM organizations"] = &rows{err: errors.New("boom")}
-		}, want: "FAIL keyring: list the organizations: boom\n"},
+		}, want: "FAIL keyring: list the organizations: boom\n", lines: 9},
+		{name: "connections unreadable", setup: func(d *fakeDB) {
+			d.answers["ListConnections"] = &rows{err: errors.New("boom")}
+		}, want: "FAIL connections: list the connections: boom\n", lines: 9},
+		{name: "destinations unreadable", setup: func(d *fakeDB) {
+			d.answers["ListMattermostDestinations"] = &rows{err: errors.New("boom")}
+		}, want: "FAIL connections: list the destinations: boom\n", lines: 9},
 		{name: "encrypted values unreadable", setup: func(d *fakeDB) {
 			d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
 			d.answers["FROM encrypted_values"] = &rows{err: errors.New("boom")}
@@ -337,8 +352,8 @@ func TestFailingChecks(t *testing.T) {
 			if ok || !strings.Contains(out, tt.want) {
 				t.Errorf("ok %v, output:\n%s\nwant %q", ok, out, tt.want)
 			}
-			if strings.Count(out, "\n") != 8 {
-				t.Errorf("%d lines, want one per check", strings.Count(out, "\n"))
+			if want := cmp.Or(tt.lines, 8); strings.Count(out, "\n") != want {
+				t.Errorf("%d lines, want %d", strings.Count(out, "\n"), want)
 			}
 		})
 	}
@@ -411,5 +426,81 @@ func TestReadOnly(t *testing.T) {
 	d.answers["exec:SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY"] = &rows{err: errors.New("boom")}
 	if err := readOnly(t.Context(), conns); err == nil {
 		t.Error("readOnly succeeded")
+	}
+}
+
+// messengerDB is a fake database with the Mattermost Connection "Dev Mattermost" of the fake server, its bot token
+// sealed with key, and its Destinations "alerts" and "no-bot", under an outbound policy that allows the loopback
+// network.
+func messengerDB(t *testing.T, key string) *fakeDB {
+	t.Helper()
+	f := fakemattermost.New()
+	if err := f.Start(t.Context(), "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close(context.WithoutCancel(t.Context())) })
+	k, err := keyring.Load(t.Context(), keyring.Env{Keys: logging.Secret(key), Source: keyring.SecretKeysVar}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &stateStore{}
+	st, err := k.Establish(t.Context(), s, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Open(t.Context(), logging.New(io.Discard, logging.LevelError), st); err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, keyID, err := k.Encrypt("connections.bot_token", []byte(doctorToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := newFakeDB(true)
+	d.answers["FROM keyring_state"] = &rows{values: [][]any{s.row}}
+	text := func(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
+	d.answers["ListConnections"] = &rows{values: [][]any{{int64(1), "CNAAAAAAAAAAA1", "mattermost", "Dev Mattermost",
+		text(f.URL()), ciphertext, text(keyID), time.Now(), pgtype.Text{}, pgtype.Text{}, []byte(`{"enabled":false}`),
+		[]byte(nil), pgtype.Text{}, pgtype.Timestamptz{}, int64(5), int64(1), time.Now(), int64(1), int64(2)}}}
+	d.answers["ListMattermostDestinations"] = &rows{values: [][]any{
+		{int64(7), "DSAAAAAAAAAAA1", "alerts", pgtype.Int8{Int64: 1, Valid: true}, text(fakemattermost.TeamID),
+			text(fakemattermost.ChannelAlerts)},
+		{int64(8), "DSAAAAAAAAAAA2", "no-bot", pgtype.Int8{Int64: 1, Valid: true}, text(fakemattermost.TeamID),
+			text(fakemattermost.ChannelNoBot)},
+	}}
+	d.answers["GetOutboundPolicy"] = &rows{values: [][]any{{"standard", []string{"127.0.0.0/8"}, []string(nil)}}}
+	return d
+}
+
+const doctorToken = "doctor-bot-token-0123456789"
+
+// TestMessengerChecks is C-02.FR-14: one line per Mattermost Connection and per Mattermost Destination, ok or the
+// message of the step that failed, made in the background class; a failure fails the doctor, and the bot token is
+// never printed.
+func TestMessengerChecks(t *testing.T) {
+	key, _ := keys('a')
+	d := messengerDB(t, key)
+	background := metrics.ClientRequests.With(string(outbound.ClassBackground), string(outbound.OutcomeOK))
+	before := background.Get()
+	out, ok := run(t, d, environ(key))
+	want := "OK   connection Dev Mattermost: ok\n" +
+		"OK   destination alerts: ok\n" +
+		"FAIL destination no-bot: " + mattermost.MessageNotMember + "\n"
+	if ok || !strings.HasSuffix(out, want) || strings.Count(out, "\n") != 11 || strings.Contains(out, doctorToken) {
+		t.Errorf("ok %v, output:\n%s\nwant the end:\n%s", ok, out, want)
+	}
+	if n := background.Get() - before; n < 5 {
+		t.Errorf("%d requests in the background class", n)
+	}
+	for _, e := range d.execs {
+		if !strings.Contains(e, "READ ONLY") && !strings.Contains(e, "pg_advisory") && !strings.Contains(e,
+			"LISTEN") && !strings.Contains(e, "pg_notify") {
+			t.Errorf("the doctor wrote %s", e)
+		}
+	}
+
+	out, ok = run(t, d, environ(""))
+	if ok || !strings.Contains(out, "FAIL connection Dev Mattermost: the bot token cannot be opened: the master keys "+
+		"could not be loaded\n") || !strings.Contains(out, "FAIL destination alerts: its Connection failed its check") {
+		t.Errorf("without the master keys, ok %v, output:\n%s", ok, out)
 	}
 }

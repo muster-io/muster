@@ -57,6 +57,8 @@ type (
 		probeOnNext bool
 		// secrets are the encrypted secret columns that are set, and named its destination_secrets rows.
 		secrets, named int
+		// channel is the Mattermost channel.
+		channel string
 	}
 	fakeRoute struct {
 		language  string
@@ -64,6 +66,7 @@ type (
 		publicID  string
 		name      string
 		threshold int64
+		snooze    []int64
 	}
 	fakeGroup struct {
 		id         int64

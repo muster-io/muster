@@ -562,6 +562,75 @@ func (q *Queries) ListAlertLabels(ctx context.Context, arg ListAlertLabelsParams
 	return items, nil
 }
 
+const listAlertingDestinations = `-- name: ListAlertingDestinations :many
+SELECT public_id, name
+FROM destinations
+WHERE org_id = $1 AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListAlertingDestinationsRow struct {
+	PublicID string
+	Name     string
+}
+
+// ListAlertingDestinations lists the Destinations that are not deleted, of every type, with what the Internal alerts
+// about a Destination carry of them: the public_id and the name.
+func (q *Queries) ListAlertingDestinations(ctx context.Context, orgID int64) ([]ListAlertingDestinationsRow, error) {
+	rows, err := q.db.Query(ctx, listAlertingDestinations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlertingDestinationsRow{}
+	for rows.Next() {
+		var i ListAlertingDestinationsRow
+		if err := rows.Scan(&i.PublicID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertingIntegrations = `-- name: ListAlertingIntegrations :many
+SELECT public_id, name, static_labels
+FROM integrations
+WHERE org_id = $1 AND deleted_at IS NULL AND NOT builtin
+ORDER BY id
+`
+
+type ListAlertingIntegrationsRow struct {
+	PublicID     string
+	Name         string
+	StaticLabels []byte
+}
+
+// ListAlertingIntegrations lists the Integrations that are not deleted, the built-in one aside, with what the Internal
+// alerts about an Integration carry of them: the public_id, the name and the Static labels.
+func (q *Queries) ListAlertingIntegrations(ctx context.Context, orgID int64) ([]ListAlertingIntegrationsRow, error) {
+	rows, err := q.db.Query(ctx, listAlertingIntegrations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlertingIntegrationsRow{}
+	for rows.Next() {
+		var i ListAlertingIntegrationsRow
+		if err := rows.Scan(&i.PublicID, &i.Name, &i.StaticLabels); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listHeartbeatIntegrations = `-- name: ListHeartbeatIntegrations :many
 SELECT public_id, name, static_labels
 FROM integrations

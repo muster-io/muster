@@ -76,9 +76,10 @@ jobs:
         run: ./scripts/ci/install-playwright-deps.sh
       - run: make e2e E2E_REPLICAS=2
 
-  # The load test runs against muster dev with the fake servers, then against the compose example started with the
-  # build under test. The job summary shows both reports and the peak memory working set of the example's Muster and
-  # PostgreSQL containers; the memory is reported, never checked.
+  # The load test runs its full profile against muster dev, delivering to the fake Mattermost server, then without a
+  # Destination against the compose example started with the build under test, whose internal listener is published on
+  # loopback for /metrics. Either run fails on a breach of its thresholds. The job summary shows both reports and the
+  # peak memory working set of the example's Muster and PostgreSQL containers; the memory is reported, never checked.
   load-test:
     name: load-test
     runs-on: ubuntu-latest
@@ -137,7 +138,8 @@ jobs:
           rm "$RUNNER_TEMP/muster-dev.pid"
           cat "$RUNNER_TEMP/muster-dev.log"
       # bin/muster is the linux/amd64 build of this runner. Compose uses the image built here, because its pull policy
-      # pulls only a missing image. A bootstrap Admin is written into .env for the load test to sign in with.
+      # pulls only a missing image. A bootstrap Admin is written into .env for the load test to sign in with, and an
+      # override publishes the internal listener on loopback for the load test's /metrics.
       - name: start the compose example with the build under test
         run: |
           set -euo pipefail
@@ -152,7 +154,8 @@ jobs:
             -e "s|^MUSTER_BOOTSTRAP_ADMIN_EMAIL=.*|MUSTER_BOOTSTRAP_ADMIN_EMAIL=admin@example.org|" \
             -e "s|^MUSTER_BOOTSTRAP_ADMIN_PASSWORD=.*|MUSTER_BOOTSTRAP_ADMIN_PASSWORD=$admin_password|" \
             deploy/compose/.env.example >deploy/compose/.env
-          compose=(docker compose -f deploy/compose/docker-compose.yml)
+          printf 'services:\n  muster:\n    ports:\n      - "127.0.0.1:8082:8082"\n' >"$RUNNER_TEMP/compose-metrics.yml"
+          compose=(docker compose -f deploy/compose/docker-compose.yml -f "$RUNNER_TEMP/compose-metrics.yml")
           image=$("${compose[@]}" config --images | grep -m1 '^ghcr\.io/muster-io/muster:' || true)
           if [ -z "$image" ]; then
             echo "the compose example references no ghcr.io/muster-io/muster image"
@@ -179,8 +182,9 @@ jobs:
           admin_email=$(sed -n 's/^MUSTER_BOOTSTRAP_ADMIN_EMAIL=//p' deploy/compose/.env)
           admin_password=$(sed -n 's/^MUSTER_BOOTSTRAP_ADMIN_PASSWORD=//p' deploy/compose/.env)
           MUSTER_PUBLIC_URL=http://localhost:8080 MUSTER_INGEST_URL=http://localhost:8080 \
+            MUSTER_LOAD_METRICS_URL=http://localhost:8082/metrics \
             MUSTER_LOAD_ADMIN_EMAIL="$admin_email" MUSTER_LOAD_ADMIN_PASSWORD="$admin_password" \
-            make load-test 2>&1 | tee "$RUNNER_TEMP/load-compose.txt"
+            make load-test LOAD_TEST_FLAGS=-destination=none 2>&1 | tee "$RUNNER_TEMP/load-compose.txt"
           kill "$sampler" 2>/dev/null || true
           sample
       - name: write the job summary

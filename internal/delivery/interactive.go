@@ -118,6 +118,14 @@ func (o replyOp) call(ctx context.Context, c Call) Outcome {
 // ReplyOp sends m into the Thread of root through a.
 func ReplyOp(a Adapter, root Root, m Message) Op { return replyOp{adapter: a, root: root, message: m} }
 
+type answerOp func(ctx context.Context, c Call) Outcome
+
+func (f answerOp) call(ctx context.Context, c Call) Outcome { return f(ctx, c) }
+
+// AnswerOp is a private answer to the person who pressed a button, such as a Mattermost ephemeral post (C-11.FR-2): it
+// changes no Root message and no Thread reply, and send is the adapter's own call.
+func AnswerOp(send func(ctx context.Context, c Call) Outcome) Op { return answerOp(send) }
+
 // Do makes op once a token of s is taken, in the interactive client class. When no token frees within the budget it
 // returns a *LimitedError and calls nothing. A RetryAfter the call answers holds the bucket of its scope, as for the
 // worker.

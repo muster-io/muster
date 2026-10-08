@@ -324,7 +324,9 @@ ORDER BY id;
 -- when a person resolved it, the open Alert Group of the same Route and key that takes part in grouping (C-10.FR-7),
 -- and whether its Route was deleted, which Unresolve needs. Urgency is derived from
 -- the Route and organization.critical_is_urgent as they are now (C-08.FR-6), so that marking a Route urgent or
--- changing the setting shows on open Alert Groups at once without changing them.
+-- changing the setting shows on open Alert Groups at once without changing them. It has a Delivery problem
+-- (C-13.FR-12) when a delivery of it is Not delivered or deleted in the messenger, waits for a Broken Destination, or
+-- has a Thread not attached.
 -- name: GetGroup :one
 SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
        (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.group_key_values,
@@ -346,7 +348,7 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        o.retention_alert_details_days, g.owner_user_id, g.snooze_until, g.snoozed_by_user_id,
        g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -356,6 +358,13 @@ LEFT JOIN LATERAL (SELECT n.public_id, n.number
                      AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
                      AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
                    LIMIT 1) nw ON true
+JOIN LATERAL (SELECT EXISTS (SELECT 1
+                             FROM deliveries d
+                             JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+                             WHERE d.org_id = g.org_id AND d.alert_group_id = g.id
+                               AND (d.state IN ('not_delivered', 'deleted_in_messenger')
+                                    OR (d.state = 'pending' AND ds.health = 'broken')
+                                    OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
 WHERE g.org_id = @org_id AND g.public_id = @public_id;
 
 -- GetGroupID reads the id of an Alert Group by public_id, with when it was resolved and retention.alert_details, which
@@ -500,7 +509,8 @@ WHERE org_id = @org_id AND deleted_at IS NULL;
 -- with the status that the CHECK ties to resolved_at, so that the open index and alert_groups_resolved_idx serve it —
 -- and is ignored for a number. Label Matchers other than = with a value are matched in Go on common_labels, after
 -- these conditions; urgency and the newer open Alert Group are derived as in GetGroup. The Owner filter, with
--- @owner_set, selects the Alert Groups the User @owner_id owns, or nobody owns when it is null.
+-- @owner_set, selects the Alert Groups the User @owner_id owns, or nobody owns when it is null. The Delivery problem
+-- (C-13.FR-12) is derived as in GetGroup.
 
 -- ListGroupsStartedDesc reads a batch of the Alert Group list, newest start first, after the cursor when given.
 -- name: ListGroupsStartedDesc :many
@@ -511,7 +521,7 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -521,6 +531,13 @@ LEFT JOIN LATERAL (SELECT n.public_id, n.number
                      AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
                      AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
                    LIMIT 1) nw ON true
+JOIN LATERAL (SELECT EXISTS (SELECT 1
+                             FROM deliveries d
+                             JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+                             WHERE d.org_id = g.org_id AND d.alert_group_id = g.id
+                               AND (d.state IN ('not_delivered', 'deleted_in_messenger')
+                                    OR (d.state = 'pending' AND ds.health = 'broken')
+                                    OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
 WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL
@@ -537,6 +554,8 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
   AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
+  AND (sqlc.narg('delivery_problem')::boolean IS NULL
+       OR dp.delivery_problem = sqlc.narg('delivery_problem')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -554,7 +573,7 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -564,6 +583,13 @@ LEFT JOIN LATERAL (SELECT n.public_id, n.number
                      AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
                      AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
                    LIMIT 1) nw ON true
+JOIN LATERAL (SELECT EXISTS (SELECT 1
+                             FROM deliveries d
+                             JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+                             WHERE d.org_id = g.org_id AND d.alert_group_id = g.id
+                               AND (d.state IN ('not_delivered', 'deleted_in_messenger')
+                                    OR (d.state = 'pending' AND ds.health = 'broken')
+                                    OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
 WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL
@@ -580,6 +606,8 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
   AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
+  AND (sqlc.narg('delivery_problem')::boolean IS NULL
+       OR dp.delivery_problem = sqlc.narg('delivery_problem')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -597,7 +625,7 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -607,6 +635,13 @@ LEFT JOIN LATERAL (SELECT n.public_id, n.number
                      AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
                      AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
                    LIMIT 1) nw ON true
+JOIN LATERAL (SELECT EXISTS (SELECT 1
+                             FROM deliveries d
+                             JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+                             WHERE d.org_id = g.org_id AND d.alert_group_id = g.id
+                               AND (d.state IN ('not_delivered', 'deleted_in_messenger')
+                                    OR (d.state = 'pending' AND ds.health = 'broken')
+                                    OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
 WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL
@@ -623,6 +658,8 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
   AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
+  AND (sqlc.narg('delivery_problem')::boolean IS NULL
+       OR dp.delivery_problem = sqlc.narg('delivery_problem')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -640,7 +677,7 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -650,6 +687,13 @@ LEFT JOIN LATERAL (SELECT n.public_id, n.number
                      AND n.route_id = g.route_id AND n.group_key_sha256 = g.group_key_sha256
                      AND n.status <> 'resolved' AND n.moved_from_route_id IS NULL
                    LIMIT 1) nw ON true
+JOIN LATERAL (SELECT EXISTS (SELECT 1
+                             FROM deliveries d
+                             JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+                             WHERE d.org_id = g.org_id AND d.alert_group_id = g.id
+                               AND (d.state IN ('not_delivered', 'deleted_in_messenger')
+                                    OR (d.state = 'pending' AND ds.health = 'broken')
+                                    OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
 WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL
@@ -666,6 +710,8 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
   AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
+  AND (sqlc.narg('delivery_problem')::boolean IS NULL
+       OR dp.delivery_problem = sqlc.narg('delivery_problem')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -682,6 +728,13 @@ SELECT g.status, (CASE WHEN @with_labels::boolean THEN g.common_labels END)::jso
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
+JOIN LATERAL (SELECT EXISTS (SELECT 1
+                             FROM deliveries d
+                             JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+                             WHERE d.org_id = g.org_id AND d.alert_group_id = g.id
+                               AND (d.state IN ('not_delivered', 'deleted_in_messenger')
+                                    OR (d.state = 'pending' AND ds.health = 'broken')
+                                    OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
 WHERE g.org_id = @org_id
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL
@@ -698,6 +751,8 @@ WHERE g.org_id = @org_id
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
   AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
+  AND (sqlc.narg('delivery_problem')::boolean IS NULL
+       OR dp.delivery_problem = sqlc.narg('delivery_problem')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)

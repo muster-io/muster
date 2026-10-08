@@ -32,9 +32,9 @@ type stamp struct {
 
 // compiled is a Route in evaluation order with its Matchers compiled once.
 type compiled struct {
-	id       int64
-	publicID string
-	matchers []matchers.Matcher
+	id             int64
+	publicID, name string
+	matchers       []matchers.Matcher
 }
 
 // order is the evaluation order of the Routes that are not deleted, the Default route last, as of a stamp.
@@ -183,7 +183,7 @@ func (r *Router) load(ctx context.Context, q evalQueries, st stamp) (*order, err
 	ids := make([]int64, len(rows))
 	index := make(map[int64]int, len(rows))
 	for i, row := range rows {
-		o.routes[i] = compiled{id: row.ID, publicID: row.PublicID}
+		o.routes[i] = compiled{id: row.ID, publicID: row.PublicID, name: row.Name}
 		ids[i], index[row.ID] = row.ID, i
 	}
 	ms, err := q.ListRouteMatchers(ctx, dbgen.ListRouteMatchersParams{OrgID: r.orgID, RouteIds: ids})
