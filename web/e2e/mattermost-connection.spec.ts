@@ -27,9 +27,9 @@ const FMM = "http://127.0.0.1:18065/_fake";
 const SERVER_URL = "http://127.0.0.1:18065";
 const CALLBACK = /^http:\/\/localhost:8081\/api\/v1\/callbacks\/mattermost\/CN[0-9A-Z]+$/;
 const WARNING =
-  "The bot may not make ephemeral posts, so answers to button presses show in the post's Thread. Give the bot the create_post_ephemeral permission, for example the system admin role, to show them in the channel.";
+  "The bot may not make ephemeral messages, so answers to button presses show in the Thread of the Root message. Give the bot the create_post_ephemeral permission, for example the system admin role, to show them in the channel.";
 const WARNING_RU =
-  "Боту нельзя создавать эфемерные сообщения, поэтому ответы на нажатия кнопок появляются в треде сообщения. Чтобы они показывались в канале, дайте боту право create_post_ephemeral, например роль системного администратора.";
+  "Боту нельзя создавать эфемерные сообщения, поэтому ответы на нажатия кнопок появляются в треде корневого сообщения. Чтобы они показывались в канале, дайте боту право create_post_ephemeral, например роль системного администратора.";
 const IN_USE = "This Connection is used by 1 Destination. Delete it first.";
 const IN_USE_RU = "Это подключение используется в 1 месте доставки. Сначала удалите его.";
 

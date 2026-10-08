@@ -440,7 +440,7 @@
       "unsaved": "The check uses the saved settings: save your changes first.",
       "viaProxy": "through the proxy",
       "warnings": {
-        "pressAnswersInThread": "The bot may not make ephemeral posts, so answers to button presses show in the post's Thread. Give the bot the create_post_ephemeral permission, for example the system admin role, to show them in the channel."
+        "pressAnswersInThread": "The bot may not make ephemeral messages, so answers to button presses show in the Thread of the Root message. Give the bot the <code>create_post_ephemeral</code> permission, for example the system admin role, to show them in the channel."
       }
     },
     "create": {

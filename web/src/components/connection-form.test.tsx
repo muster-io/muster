@@ -61,7 +61,7 @@ const CONNECTION: MattermostConnection = {
 };
 
 const WARNING =
-  "The bot may not make ephemeral posts, so answers to button presses show in the post's Thread. Give the bot the create_post_ephemeral permission, for example the system admin role, to show them in the channel.";
+  "The bot may not make ephemeral messages, so answers to button presses show in the Thread of the Root message. Give the bot the create_post_ephemeral permission, for example the system admin role, to show them in the channel.";
 
 function refusal(status: number, problem: Record<string, unknown>, retryAfter?: number): ApiError {
   return new ApiError(
@@ -415,6 +415,10 @@ describe("ConnectionCheck", () => {
       .element(page.getByTestId("connection-check-step"))
       .toHaveTextContent("Token: ok · 12 ms · direct");
     await expect.element(page.getByTestId("connection-check-warning")).toHaveTextContent(WARNING);
+    // The permission is Mattermost's identifier and shows as code.
+    expect(
+      page.getByTestId("connection-check-warning").element().querySelector("code")?.textContent,
+    ).toBe("create_post_ephemeral");
     expect(fetch.mock.calls[0]?.[0]).toBe("/api/v1/connections/CN0000000000AA/checks");
   });
 
@@ -482,7 +486,7 @@ describe("ConnectionCheck", () => {
     await expect
       .element(page.getByTestId("connection-check-warning"))
       .toHaveTextContent(
-        "Боту нельзя создавать эфемерные сообщения, поэтому ответы на нажатия кнопок появляются в треде сообщения. Чтобы они показывались в канале, дайте боту право create_post_ephemeral, например роль системного администратора.",
+        "Боту нельзя создавать эфемерные сообщения, поэтому ответы на нажатия кнопок появляются в треде корневого сообщения. Чтобы они показывались в канале, дайте боту право create_post_ephemeral, например роль системного администратора.",
       );
     expect(checkErrorText(i18n.t, refusal(503, {}, 3))).toBe(
       "Мессенджер занят, повторите через 3 с.",

@@ -9,7 +9,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import { CircleCheckIcon, CircleXIcon, TriangleAlertIcon } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 
 import {
   getGetConnectionQueryKey,
@@ -39,10 +39,16 @@ function stepName(t: TFunction, name: ConnectionCheckStepName): string {
   }
 }
 
-function warningText(t: TFunction, warning: ConnectionCheckResultWarningsItem): string {
+/** The hint of a warning; the permission is Mattermost's identifier and shows as code. */
+function WarningText({ warning }: { warning: ConnectionCheckResultWarningsItem }) {
   switch (warning) {
     case "press_answers_in_thread":
-      return t("connections.check.warnings.pressAnswersInThread");
+      return (
+        <Trans
+          i18nKey="connections.check.warnings.pressAnswersInThread"
+          components={{ code: <code className="rounded bg-muted px-1 font-mono text-xs" /> }}
+        />
+      );
     default:
       return warning;
   }
@@ -135,7 +141,9 @@ function Result({ result }: { result: ConnectionCheckResult }) {
             aria-hidden="true"
             className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-warning"
           />
-          <p className="min-w-0 wrap-anywhere">{warningText(t, warning)}</p>
+          <p className="min-w-0 wrap-anywhere">
+            <WarningText warning={warning} />
+          </p>
         </div>
       ))}
     </div>
