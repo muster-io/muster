@@ -25,10 +25,10 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-03 Sign-in and access | Foundation | 58 | S-010, S-011, S-012, S-013, S-062, S-014, S-015 | yes | 58 of 58 |
 | C-04 API tokens | Foundation | 17 | S-016, S-017 | yes | 17 of 17 |
 | C-05 Integrations | Observation | 18 | S-018, S-019 | yes | 18 of 18 |
-| C-06 Snapshot processing | Observation | 36 | S-020, S-021, S-022 | yes | 36 of 36 |
+| C-06 Snapshot processing | Observation | 36 | S-020, S-021, S-022, S-065 | yes | 36 of 36 |
 | C-07 Heartbeat | Observation | 12 | S-023, S-024 | yes | 12 of 12 |
 | C-08 Routing | Observation | 22 | S-025, S-026, S-027 | yes | 22 of 22 |
-| C-09 Alert Group lifecycle | Observation | 49 | S-028, S-029, S-030, S-031 | yes | 49 of 49 |
+| C-09 Alert Group lifecycle | Observation | 49 | S-028, S-029, S-030, S-031, S-065 | yes | 49 of 49 |
 | C-10 Commands | Observation | 35 | S-032, S-063, S-033 | yes | 35 of 35 |
 | C-11 Delivery engine | Shadow | 35 | S-034, S-035 | yes | 35 of 35 |
 | C-12 Messages | Shadow | 19 | S-036, S-037, S-038 | yes | 19 of 19 |
@@ -228,11 +228,11 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-06
 
-[Snapshot processing](../prd/l1/C-06-snapshot-processing.md) · Observation · stories: S-020, S-021, S-022
+[Snapshot processing](../prd/l1/C-06-snapshot-processing.md) · Observation · stories: S-020, S-021, S-022, S-065
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-06.FR-1 | S-020 | complete |  |
+| C-06.FR-1 | S-020, S-065 (part) | complete | S-065 changes the order from per Integration to per Alertmanager group |
 | C-06.FR-2 | S-020 | complete |  |
 | C-06.FR-3 | S-020 (part), S-028 | complete | the warning in the Timeline needs Alert Groups (C-09, S-028) |
 | C-06.FR-4 | S-020 (part), S-028 | complete | resolving in the latest Alert Group needs Alert Groups (C-09, S-028) |
@@ -319,14 +319,14 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-09
 
-[Alert Group lifecycle](../prd/l1/C-09-alert-group-lifecycle.md) · Observation · stories: S-028, S-029, S-030, S-031
+[Alert Group lifecycle](../prd/l1/C-09-alert-group-lifecycle.md) · Observation · stories: S-028, S-029, S-030, S-031, S-065
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-09.FR-1 | S-028 (part), S-032, S-049 (part) | complete | Unclaimed is added by C-17 (S-049) |
 | C-09.FR-2 | S-028 | complete |  |
 | C-09.FR-23 | S-028 (part), S-029 | complete |  |
-| C-09.FR-3 | S-028 | complete |  |
+| C-09.FR-3 | S-028, S-065 (part) | complete | S-065 takes the counter row only for creations and reopens |
 | C-09.FR-4 | S-028 (part), S-031 (part), S-032 | complete | the acknowledged and snoozed cases need Acknowledge and Snooze (C-10, S-032) |
 | C-09.FR-5 | S-028 (part), S-031 (part), S-032 | complete | the Grace period follows a person's Resolve (C-10, S-032) |
 | C-09.FR-6 | S-028 (part), S-032 | complete | the acknowledged and snoozed cases need Acknowledge and Snooze (C-10, S-032) |
@@ -730,8 +730,8 @@ the stories that implement and check its parts. A story that proves an NFR says 
 
 | NFR | Owned by | What each story contributes |
 |---|---|---|
-| NFR-1 Throughput and scale | S-004, S-018, S-061 | the load-test harness and its nightly job (S-004); accepting webhooks and storing Snapshots at the burst rate (S-018); the full profile — 50 webhooks per second for a minute, 10,000 Alerts in 1,000 open Alert Groups — that fails the nightly job on a breach (S-061) |
-| NFR-2 Latency | S-018, S-034, S-059, S-061 | `muster_ingest_request_duration_seconds` (S-018); `muster_delivery_latency_seconds` (S-034); the chart rule `MusterDeliverySlow` (S-059); the thresholds of P-44 and of the 95th percentile in the load test (S-061) |
+| NFR-1 Throughput and scale | S-004, S-018, S-061, S-065 | the load-test harness and its nightly job (S-004); accepting webhooks and storing Snapshots at the burst rate (S-018); the full profile — 50 webhooks per second for a minute, 10,000 Alerts in 1,000 open Alert Groups — that fails the nightly job on a breach (S-061); processing the burst of one Integration without a backlog, Alertmanager groups in parallel (S-065) |
+| NFR-2 Latency | S-018, S-034, S-059, S-061, S-065 | `muster_ingest_request_duration_seconds` (S-018); `muster_delivery_latency_seconds` (S-034); the chart rule `MusterDeliverySlow` (S-059); the thresholds of P-44 and of the 95th percentile in the load test (S-061); the delivery latency under the full profile (S-065) |
 | NFR-3 Footprint | S-003, S-004 | the compose example with PostgreSQL's memory capped (S-003); the nightly measurement of the peak working sets (S-004) |
 | NFR-4 Availability | S-004, S-006, S-008, S-018, S-020, S-028, S-034, S-035 | the nightly two-replica end-to-end run with `muster dev --replica` (S-004); readiness on the database only (S-006); the Leader replaced within a minute and the recovery notice (S-008); `202` only after the Snapshot is stored (S-018); ingestion, timers and delivery on every replica (S-020, S-028, S-034); Broken Destinations that recover to the current state (S-035) |
 | NFR-5 Durability and backup | S-008, S-060 | `muster doctor` with the key canary check (S-008); the backup and restore page with the restore order (S-060) |

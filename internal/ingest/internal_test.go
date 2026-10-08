@@ -209,6 +209,13 @@ func (f *fakeInternal) RenewIngestLease(ctx context.Context, arg dbgen.RenewInge
 	return row, err
 }
 
+func (f *fakeInternal) CheckIngestLease(ctx context.Context, arg dbgen.CheckIngestLeaseParams) (
+	dbgen.CheckIngestLeaseRow, error) {
+	row, err := f.fakeProcess.CheckIngestLease(ctx, arg)
+	row.Name, row.DeletedAt = "lab", f.deletedAt
+	return row, err
+}
+
 // UpsertAlertmanagerGroup keeps the truncation the previous Snapshot wrote.
 func (f *fakeInternal) UpsertAlertmanagerGroup(ctx context.Context, arg dbgen.UpsertAlertmanagerGroupParams) (
 	dbgen.UpsertAlertmanagerGroupRow, error) {
@@ -275,13 +282,36 @@ func (f *fakeInternal) ListPendingInternalRaises(context.Context, int64) ([][]by
 func (f *fakeInternal) addSource(id int64, at time.Time, source string, body []byte) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.pending = append(f.pending, dbgen.NextPendingSnapshotRow{ID: id, PublicID: fmt.Sprintf("SS%012d", id),
+	f.pending = append(f.pending, dbgen.ListPendingSnapshotsRow{ID: id, PublicID: fmt.Sprintf("SS%012d", id),
 		ReceivedAt: at, Source: source, Body: body})
 }
 
 func truncatedBody(truncated int) string {
 	return strings.Replace(body(wireAlertOf("db-a", "firing")), `"status":"firing",`,
 		`"status":"firing","truncatedAlerts":`+strconv.Itoa(truncated)+`,`, 1)
+}
+
+// TestTruncationStamps: a raise is dated with the business time of the decision, under the Integration's row, so that
+// lanes that commit out of receipt order reach the built-in Integration in the order they decided; a replayed Snapshot
+// keeps its receipt, so that a replay changes nothing it did not before.
+func TestTruncationStamps(t *testing.T) {
+	for _, replayed := range []bool{false, true} {
+		store := newFakeInternal()
+		p := newTestProcessor(store, clock.NewManual(t0.Add(time.Hour)), &bytes.Buffer{}, nil)
+		store.truncatedCount = 1
+		store.add(1, t0, truncatedBody(2))
+		store.pending[0].Replayed = replayed
+		if n, err := p.ProcessPending(t.Context(), 5); err != nil || n != 1 || len(store.inserted) != 1 {
+			t.Fatalf("replayed %v: %d, %v, %d", replayed, n, err, len(store.inserted))
+		}
+		want := t0.Add(time.Hour)
+		if replayed {
+			want = t0
+		}
+		if at := store.inserted[0].ReceivedAt; !at.Equal(want) {
+			t.Errorf("replayed %v: raised at %v, want %v", replayed, at, want)
+		}
+	}
 }
 
 // TestTruncationRaisesAndResolves is C-06.FR-6 in processing: the first truncated groupKey of an Integration raises

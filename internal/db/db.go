@@ -9,8 +9,11 @@ package db
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/url"
+	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +31,11 @@ const (
 	connectTimeout = 10 * time.Second
 	// pingTimeout bounds the readiness check (C-02.FR-4).
 	pingTimeout = time.Second
+	// MinPoolConns is the smallest default of the main pool (pool_max_conns of MUSTER_DATABASE_URL, P-50): the
+	// pool opens max(MinPoolConns, CPUs) connections unless the main connection's URL sets pool_max_conns. pgx's own
+	// default of max(4, CPUs) left four connections on a 4-CPU node, too few for processing, delivery and ingestion
+	// together under the NFR-1 load.
+	MinPoolConns = 10
 )
 
 // The names of the two connections in log lines.
@@ -69,6 +77,9 @@ func Open(ctx context.Context, main, session config.Database) (*DB, error) {
 		return nil, fmt.Errorf("the main database connection: %w", err)
 	}
 	onlyFromURL(poolConfig.ConnConfig, main.URL)
+	if !strings.Contains(string(main.URL), "pool_max_conns") {
+		poolConfig.MaxConns = defaultMaxConns(runtime.NumCPU())
+	}
 	sessionConfig, err := pgx.ParseConfig(string(session.URL))
 	if err != nil {
 		return nil, fmt.Errorf("the session database connection: %w", err)
@@ -82,6 +93,11 @@ func Open(ctx context.Context, main, session config.Database) (*DB, error) {
 	d.connect = func(ctx context.Context) (conn, error) { return d.ConnectSession(ctx) }
 	d.newMigrator = newMigrate
 	return d, nil
+}
+
+// defaultMaxConns is the size of the main pool when the URL sets none: max(MinPoolConns, cpus).
+func defaultMaxConns(cpus int) int32 {
+	return int32(max(MinPoolConns, min(cpus, math.MaxInt32)))
 }
 
 // onlyFromURL undoes what pgx took from the PG* variables and the password file rather than from the URL: the

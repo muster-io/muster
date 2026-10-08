@@ -20,13 +20,15 @@ const (
 	StaleAfterUnlearned = 25 * time.Hour
 )
 
-// route is an alertmanager_routes row as processing reads and writes it.
+// route is an alertmanager_routes row as processing reads and writes it; observed are the gaps a Snapshot learned,
+// which the end of its transaction adds to the ring as the row is then.
 type route struct {
 	ID           int64
 	Gaps         []int64
 	Learned      *int64
 	Observations int64
 	changed      bool
+	observed     []int64
 }
 
 // AlertmanagerRoutePath is the Alertmanager route of a groupKey: the part before the group labels, `{}/{team="db"}` of
@@ -96,6 +98,7 @@ func (e *engine) learn(opened bool, previous *time.Time) {
 
 // add puts a gap into the ring of the last RepeatSamples gaps and learns their median.
 func (r *route) add(gapMs int64) {
+	r.observed = append(r.observed, gapMs)
 	r.Gaps = append(r.Gaps, gapMs)
 	if len(r.Gaps) > RepeatSamples {
 		r.Gaps = slices.Clone(r.Gaps[len(r.Gaps)-RepeatSamples:])

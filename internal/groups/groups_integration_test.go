@@ -397,6 +397,103 @@ func TestIntegrationNumbers(t *testing.T) {
 	})
 }
 
+// lockedWriter is a log destination that concurrent lanes share.
+type lockedWriter struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.b.Write(p)
+}
+
+// TestIntegrationParallelGroups is C-06.FR-1 and C-09.FR-3 with two replicas and their lanes: the Snapshots of eight
+// Alertmanager groups whose Alerts all join one Alert Group, processed at the same time, first creating it and then
+// joining it, give one Alert Group with one number, every Alert a member once, one created entry, and no failed or
+// pending Snapshot under the race detector.
+func TestIntegrationParallelGroups(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		e.route(t, "db", "db", "alertname")
+		const s1 = "2026-10-07T11:00:00Z"
+		var log lockedWriter
+		drain := func() {
+			var wg sync.WaitGroup
+			for _, owner := range []string{"r1", "r2"} {
+				p := ingest.NewProcessor(ingest.ProcessorConfig{OrgID: e.orgID,
+					Store: ingest.NewProcessStore(e.d.Pool), Business: e.clock,
+					Log: logging.New(&log, logging.LevelInfo), Sink: e.sink, Lease: db.Lease{Owner: owner,
+						Duration: ingest.Lease, Clocks: clock.Clocks{Business: e.clock, Real: clock.Real{}}}})
+				wg.Go(func() {
+					for e.count(t, `SELECT count(*) FROM stored_snapshots WHERE state = 'pending'`) > 0 {
+						if _, err := p.Drain(t.Context()); err != nil {
+							t.Errorf("%s: %v", owner, err)
+							return
+						}
+					}
+				})
+			}
+			wg.Wait()
+		}
+		store := func(group, pods int) {
+			var alerts []string
+			for n := range pods {
+				alerts = append(alerts, alert("firing", s1, "alertname", "Fan", "team", "db", "pod",
+					fmt.Sprintf("p%d-%d", group, n)))
+			}
+			body := `{"groupKey":"{}:{pod_group=\"` + fmt.Sprint(group) + `\"}","status":"firing","alerts":[` +
+				strings.Join(alerts, ",") + `]}`
+			if _, err := e.snaps.Store(t.Context(), ingest.Received{IntegrationID: e.intID,
+				Body: []byte(body)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for pods := 1; pods <= 3; pods++ {
+			for group := range 8 {
+				store(group, pods)
+			}
+		}
+		drain()
+		for group := range 8 {
+			store(group, 4)
+		}
+		drain()
+		if n := e.count(t, `SELECT count(*) FROM alert_groups`); n != 1 {
+			t.Errorf("%d alert groups", n)
+		}
+		if n := e.count(t, `SELECT last_number FROM alert_group_counters`); n != 1 {
+			t.Errorf("last number %d", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_group_alerts`); n != 32 {
+			t.Errorf("%d memberships", n)
+		}
+		if n := e.count(t, `SELECT count(DISTINCT alert_id) FROM alert_group_alerts`); n != 32 {
+			t.Errorf("%d alerts", n)
+		}
+		if n := e.count(t, `SELECT firing_alert_count FROM alert_groups`); n != 32 {
+			t.Errorf("firing %d", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM stored_snapshots WHERE state <> 'processed'`); n != 0 {
+			t.Errorf("%d snapshots not processed", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE event = 'created'`); n != 1 {
+			t.Errorf("%d created entries", n)
+		}
+		lanes := map[string]bool{}
+		for line := range strings.SplitSeq(log.b.String(), "\n") {
+			if _, rest, ok := strings.Cut(line, `"event":"snapshot_processed"`); ok {
+				_, lane, _ := strings.Cut(rest, `"lane":`)
+				lanes[lane] = true
+			}
+		}
+		if len(lanes) < 2 {
+			t.Errorf("lanes %v", lanes)
+		}
+	})
+}
+
 // TestIntegrationRouteDeletionRace is C-09.FR-19 and C-08.FR-9 with two connections: a Snapshot that groups on a
 // Route holds it FOR SHARE, so a deletion waits and then answers that the Route has an open Alert Group; a deletion
 // that commits first sends the Snapshot's Alert to the Default route. No open Alert Group is left on a deleted Route.

@@ -83,6 +83,8 @@ type Queries interface {
 	LockGroups(ctx context.Context, arg dbgen.LockGroupsParams) ([]dbgen.LockGroupsRow, error)
 	EnsureCounter(ctx context.Context, orgID int64) error
 	LockCounter(ctx context.Context, orgID int64) (int64, error)
+	SavepointGrouping(ctx context.Context) error
+	RollbackGrouping(ctx context.Context) error
 	NextNumber(ctx context.Context, orgID int64) (int64, error)
 	InsertGroup(ctx context.Context, arg dbgen.InsertGroupParams) (int64, error)
 	SaveGroup(ctx context.Context, arg dbgen.SaveGroupParams) error

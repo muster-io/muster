@@ -8,6 +8,9 @@
   `status: resolved` resolves every Alert still firing in its Alertmanager group, listed or not; a repeated `resolved`
   changes nothing; Gone also needs a minimum absence, `processing.gone_min_absence`; `--dispatch.start-delay` of at
   least about 2.5 minutes; the context states the measured repeat, duplicate, restart and truncation behaviour
+- Amended: 2026-10-08 — Stored Snapshots are processed in arrival order per Alertmanager group, not per Integration:
+  up to `processing.parallel_groups` Alertmanager groups of one Integration at the same time, so that one
+  Integration's burst meets NFR-2 (D285)
 
 ## Context
 
@@ -106,7 +109,13 @@ like an Alertmanager payload, fails later in processing — the Stored Snapshot 
 and `muster_ingest_failed_snapshots_total` counts it — and `muster ingest replay` reprocesses it after a fix. The only
 `5xx` is a failed write, which Alertmanager retries. A worker woken by `LISTEN/NOTIFY` splits the
 Snapshot into Alerts by fingerprint, routes and groups them (ADR-0003) and updates Alert Groups (ADR-0004). At most one
-Stored Snapshot per Integration is processed at a time, which preserves order within an Integration. Processing is
+Stored Snapshot per Alertmanager group is processed at a time, which preserves order within an Alertmanager group;
+different Alertmanager groups of one Integration are processed at the same time, up to `processing.parallel_groups`,
+except that two Snapshots that list a common fingerprint keep their arrival order and the deletion marker of an
+Integration waits for every earlier Snapshot of it. The Snapshot semantics below are per pair of Alert and `groupKey`,
+the copies of an HA pair share their `groupKey`, and Alert Groups are serialized by their row locks, so only the
+relative order of Alertmanager groups that share no listed fingerprint is given up; strict order per Integration made
+one Integration's burst wait on about 50 database round trips per Snapshot in sequence. Processing is
 idempotent per Alert on `fingerprint + status + startsAt`, never on a hash of the whole body, so duplicate Snapshots from
 an HA pair are harmless. Bodies above about 16 MB are rejected with `413` and counted; the chart rule
 `MusterIngestRejected` (ADR-0014) reports them. Ingestion has no rate limit: a `429` would make Alertmanager retry at

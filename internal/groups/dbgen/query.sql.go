@@ -3467,6 +3467,16 @@ func (q *Queries) ResolveMemberships(ctx context.Context, arg ResolveMemberships
 	return err
 }
 
+const rollbackGrouping = `-- name: RollbackGrouping :exec
+ROLLBACK TO SAVEPOINT grouping
+`
+
+// RollbackGrouping undoes grouping back to SavepointGrouping, releasing the Alert Group locks it took since.
+func (q *Queries) RollbackGrouping(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, rollbackGrouping)
+	return err
+}
+
 const routeStatistics = `-- name: RouteStatistics :many
 
 SELECT s.subject_id, s.day, (GROUPING(s.day) = 1)::boolean AS total, count(*)::bigint AS alert_group_count,
@@ -3664,6 +3674,17 @@ func (q *Queries) SaveGroup(ctx context.Context, arg SaveGroupParams) error {
 		arg.OrgID,
 		arg.ID,
 	)
+	return err
+}
+
+const savepointGrouping = `-- name: SavepointGrouping :exec
+SAVEPOINT grouping
+`
+
+// SavepointGrouping marks where grouping that joins open Alert Groups without the counter row starts, so that it can
+// start again under the counter row when an Alert Group it found turns out to need a creation or a Reopen.
+func (q *Queries) SavepointGrouping(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, savepointGrouping)
 	return err
 }
 

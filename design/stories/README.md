@@ -233,10 +233,10 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 |---|---|---|---|
 | Foundation | C-01 – C-04 | S-001 – S-017, S-062 | 18 |
 | Observation | C-05 – C-10 | S-018 – S-033, S-063 | 17 |
-| Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 | 17 |
+| Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064, S-065 | 18 |
 | Actions | C-17, C-18 | S-049 – S-052 | 4 |
 | Operations | C-19 – C-21 | S-053 – S-060 | 8 |
-| **L1** | 21 | | **64** |
+| **L1** | 21 | | **65** |
 
 ### Foundation
 
@@ -294,6 +294,7 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-038](S-038-route-message-editors-lookup-tables-and-link-rules-pages-links-block.md) | C-12 | Route message editors, Lookup tables and Link rules pages, links block (FE) | fe | S-027, S-030, S-033, S-037 |
 | [S-039](S-039-mattermost-connections-destinations-check-and-fake-server.md) | C-13 | Mattermost Connections and Destinations, the Destination check and the fake Mattermost server (BE) | be | S-037 |
 | [S-061](S-061-mattermost-adapter-posts-threads-buttons-callbacks-and-delivery-problem-filter.md) | C-13 | Mattermost adapter: posts, Threads, buttons, callbacks, the Delivery problem filter and the Internal alerts suggestion (BE) | be | S-039 |
+| [S-065](S-065-parallel-snapshot-processing-per-alertmanager-group-and-a-shorter-grouping-lock.md) | C-06 | Parallel Snapshot processing per Alertmanager group and a shorter grouping lock (BE) | be | S-061 |
 | [S-040](S-040-mattermost-connection-pages-shared-destination-pages-delivery-state-and-delivery-problem-filter.md) | C-13 | Mattermost Connection pages with the check, the callback address and its hint (FE) | fe | S-038, S-061 |
 | [S-064](S-064-destination-pages-route-destinations-delivery-state-and-delivery-problem-filter.md) | C-13 | Destination pages, the Route's Destinations and delivery sections, delivery state and the Delivery problem filter (FE) | fe | S-040 |
 | [S-041](S-041-telegram-connection-bot-api-base-url-dry-probe-long-polling-and-webhook-modes.md) | C-14 | Telegram Connection: Bot API base URL, dry probe, long polling and webhook modes (BE) | be | S-061 |
@@ -341,7 +342,9 @@ the Owner filters and the release of disabled and deleted Owners; it follows S-0
 S-033, and the delivery engine (S-034) follows it. S-040 keeps the Connection pages, and S-064 takes the Destination
 pages, the Route editor's Destinations and delivery sections, the delivery state and the "Delivery problem" filter; it
 follows S-040 in the Shadow phase, and the Telegram and outgoing webhook pages and the timer fields (S-043, S-046,
-S-050) follow it. Both keep their file names.
+S-050) follow it. Both keep their file names. S-065 was added after S-061's load test showed that one Integration's
+burst misses NFR-2 (D283): it belongs to C-06 but follows S-061 in the Shadow phase, before S-040, because only the full
+load profile of S-061 measures it.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

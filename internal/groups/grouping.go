@@ -31,6 +31,11 @@ import (
 // resolved or reopened the one it found before taking the lock.
 const maxRediscoveries = 5
 
+// errNeedsCounter stops grouping that joins open Alert Groups without the counter row when, after their locks, an
+// Alert Group it found needs a creation or a Reopen, or an Alert it places fires somewhere already: grouping starts
+// again from its savepoint under the counter row.
+var errNeedsCounter = errors.New("grouping needs the counter row")
+
 // DBTX is the connection or transaction the lifecycle runs on: the Snapshot's, a timer's or the Leader's.
 type DBTX = dbgen.DBTX
 
@@ -87,13 +92,35 @@ func (s *Service) routePublicID(ctx context.Context, q Queries, id int64) (strin
 // fires in. Every firing, routed Alert belongs to an Alert Group: a listed Alert that fires in none — it fired before
 // grouping existed, or a failure or a configuration change left it out — is grouped as if it had just fired. It
 // returns the #N of the Alert Groups it created or changed, and what to count and log once the Snapshot committed.
+//
+// The counter row is taken only when an Alert Group must be created or reopened (schema.md): Alerts that join open
+// Alert Groups lock those alone, so that the Snapshots of an Integration's lanes do not wait for each other on the
+// Organization's one row. Such a join that finds, after its locks, that it needs the counter row after all rolls back
+// to a savepoint and groups again with the counter row first, as a creation does, so that no lookup after an Alert
+// Group lock ever waits for it.
 func (s *Service) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []ingest.AlertChange) (ingest.Routed,
 	error) {
-	e := s.newEngine(s.queries(tx), tx)
 	if len(changes) > 0 {
 		ctx = withSnapshot(ctx, changes[0].StoredSnapshotID)
 	}
-	if err := e.changes(ctx, changes); err != nil {
+	q := s.queries(tx)
+	e := s.newEngine(q, tx)
+	e.tryJoin = true
+	err := e.changes(ctx, changes)
+	if errors.Is(err, errNeedsCounter) {
+		if err := q.RollbackGrouping(ctx); err != nil {
+			return ingest.Routed{}, fmt.Errorf("roll grouping back: %w", err)
+		}
+		first := e
+		e = s.newEngine(q, tx)
+		err = e.changes(ctx, changes)
+		// The restamp before the savepoint stays: the Alerts it moved are now on the Default route, which the redo
+		// finds without moving them, so the Default route is still reported as having taken Alerts.
+		if first.restamps && !e.restamps {
+			e.restamps, e.defaultRoute = true, first.defaultRoute
+		}
+	}
+	if err != nil {
 		return ingest.Routed{}, err
 	}
 	return e.routed(), nil
@@ -179,6 +206,9 @@ type engine struct {
 	counterLocked bool
 	// recheck reads again, under the counter row, where the Alerts to group fire.
 	recheck bool
+	// tryJoin lets placement find open Alert Groups without the counter row, and joining marks that it did: the
+	// Alert Groups are locked without it, after a savepoint, and anything that turns out to need it is errNeedsCounter.
+	tryJoin, joining bool
 
 	alerts map[int64]*alertRow
 	firing map[int64]*membership
@@ -230,6 +260,17 @@ func (e *engine) changes(ctx context.Context, changes []ingest.AlertChange) erro
 	}
 	if err := e.lockAll(ctx); err != nil {
 		return err
+	}
+	if e.joining {
+		// An Alert that fires in an Alert Group after all was grouped by another transaction after this one read
+		// where it fires; under the counter row, unplace takes it out.
+		for _, s := range e.slots {
+			for _, a := range s.joins {
+				if e.firing[a.ID] != nil {
+					return errNeedsCounter
+				}
+			}
+		}
 	}
 	for _, c := range changes {
 		e.member(c)
@@ -339,7 +380,20 @@ func (e *engine) place(ctx context.Context, fired []*alertRow) error {
 	}
 	// Grouping may start or reopen an Alert Group, which makes it open: the counter row comes before any Alert
 	// Group lock, so that the lookups below see what another transaction made open, and no lookup after a lock has
-	// to take it out of order.
+	// to take it out of order. When every slot finds an open Alert Group without it, grouping joins them without the
+	// counter row from a savepoint, and lockAll checks them once locked.
+	if !e.counterLocked && e.tryJoin {
+		if err := e.discover(ctx); err != nil {
+			return err
+		}
+		if !slices.ContainsFunc(e.slots, func(s *slot) bool { return s.target == 0 || s.reopen }) {
+			if err := e.q.SavepointGrouping(ctx); err != nil {
+				return fmt.Errorf("mark the start of grouping: %w", err)
+			}
+			e.joining = true
+			return nil
+		}
+	}
 	if !e.counterLocked {
 		if err := e.lockCounter(ctx); err != nil {
 			return err
@@ -531,6 +585,9 @@ func (e *engine) lockAll(ctx context.Context) error {
 			prev := s.target
 			if err := e.find(ctx, s); err != nil {
 				return err
+			}
+			if e.joining && (s.target == 0 || s.reopen) {
+				return errNeedsCounter
 			}
 			if s.target != prev || (s.target != 0 && !e.valid(s)) {
 				stable = false

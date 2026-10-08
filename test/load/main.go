@@ -22,12 +22,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -170,18 +172,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "load test: %d/s to %s for %v: %d Alerts in %d Alert Groups, %d Snapshots each; %s\n",
 		o.rate, endpoint, o.duration, o.alerts, o.groups, p.passes, target)
+	stopProgress := progress(ctx, stdout, o.metricsURL, before, 5*time.Second)
 	report, err := p.send(ctx, fake, o.rate)
 	if err != nil {
+		stopProgress()
 		return fail(err)
 	}
 	counts, latencies, _ := strings.Cut(report.String(), "\n")
 	fmt.Fprintf(stdout, "load test: %s\nload test: webhook %s\n", counts, latencies)
 
 	state := s.settle(ctx, o, before)
+	stopProgress()
 	after, err := scrape(ctx, o.metricsURL)
 	if err != nil {
 		return fail(err)
 	}
+	breakdown(stdout, before, after)
 	return verdict(stdout, o, report, state, before, after, s.destination)
 }
 
@@ -730,6 +736,110 @@ func verdict(w io.Writer, o options, report fakealertmanager.LoadReport, st outc
 	}
 	fmt.Fprintln(w, "load test: PASS")
 	return 0
+}
+
+// The series of the breakdown: how long Snapshots waited for processing, the delivery worker's calls and the main
+// database pool of the replica.
+const (
+	processingHistogram = "muster_ingest_processing_delay_seconds"
+	deliveryAttempts    = "muster_delivery_attempts_total"
+	poolAcquireWait     = "muster_db_pool_acquire_wait_seconds_total"
+	poolAcquires        = "muster_db_pool_acquires_total"
+	poolMax             = "muster_db_pool_max_connections"
+	poolAcquired        = `muster_db_pool_connections{state="acquired"}`
+)
+
+// sum is the total of the series of name, whatever their labels.
+func (m metrics) sum(name string) float64 {
+	total := 0.0
+	for series, v := range m {
+		if series == name || strings.HasPrefix(series, name+"{") {
+			total += v
+		}
+	}
+	return total
+}
+
+// allBuckets is the histogram name summed over every label but le.
+func (m metrics) allBuckets(name string) histogram {
+	h := histogram{}
+	for series, v := range m {
+		labels, ok := strings.CutPrefix(series, name+"_bucket{")
+		if !ok {
+			continue
+		}
+		le, _ := cutLabel(strings.TrimSuffix(labels, "}"), "le")
+		bound := math.Inf(1)
+		if le != "+Inf" {
+			var err error
+			if bound, err = strconv.ParseFloat(le, 64); err != nil {
+				continue
+			}
+		}
+		h[bound] += v
+	}
+	return h
+}
+
+// progress prints, every interval until stop is called, how far processing and delivery are since before, so that a
+// slow run shows which of them falls behind and when.
+func progress(ctx context.Context, w io.Writer, target string, before metrics, interval time.Duration) (stop func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		defer close(done)
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+			m, err := scrape(ctx, target)
+			if err != nil {
+				continue
+			}
+			processed := deltaOf(before.allBuckets(processingHistogram), m.allBuckets(processingHistogram))
+			delivered := deltaOf(before.allBuckets(deliveryHistogram), m.allBuckets(deliveryHistogram))
+			fmt.Fprintf(w, "load test: +%.0fs processed %.0f (lag p95 %s), root message changes delivered %.0f, "+
+				"attempts %.0f, pool %.0f/%.0f in use, acquire wait +%.1fs\n", time.Since(start).Seconds(),
+				processed.count(), seconds(processed.quantile(0.95)), delivered.count(),
+				m.sum(deliveryAttempts)-before.sum(deliveryAttempts), m.value(poolAcquired), m.value(poolMax),
+				m.value(poolAcquireWait)-before.value(poolAcquireWait))
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// breakdown prints where the time of the run went: processing lag, the delivery worker's calls by kind, the waits for
+// the main pool, and the CPUs of the host the load test runs on, which in development and CI is Muster's too.
+func breakdown(w io.Writer, before, after metrics) {
+	processed := deltaOf(before.allBuckets(processingHistogram), after.allBuckets(processingHistogram))
+	kinds := map[string]float64{}
+	for series, v := range after {
+		labels, ok := strings.CutPrefix(series, deliveryAttempts+"{")
+		if !ok {
+			continue
+		}
+		kind, _ := cutLabel(strings.TrimSuffix(labels, "}"), "kind")
+		kinds[kind] += v - before[series]
+	}
+	var parts []string
+	for _, k := range slices.Sorted(maps.Keys(kinds)) {
+		parts = append(parts, fmt.Sprintf("%s %.0f", k, kinds[k]))
+	}
+	acquires := after.value(poolAcquires) - before.value(poolAcquires)
+	wait := after.value(poolAcquireWait) - before.value(poolAcquireWait)
+	fmt.Fprintf(w, "load test: processing lag p95 %s, p99 %s (%.0f Snapshots); delivery attempts: %s\n",
+		seconds(processed.quantile(0.95)), seconds(processed.quantile(0.99)), processed.count(),
+		strings.Join(parts, ", "))
+	fmt.Fprintf(w, "load test: pool of %.0f connections, %.0f acquires waited %.1fs in all; host CPUs %d, GOMAXPROCS %d\n",
+		after.value(poolMax), acquires, wait, runtime.NumCPU(), runtime.GOMAXPROCS(0))
 }
 
 func seconds(v float64) string {

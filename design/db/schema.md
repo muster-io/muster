@@ -7,7 +7,9 @@
   [`0002_stored_snapshots_replayed_at`](../../internal/db/migrations/0002_stored_snapshots_replayed_at.up.sql)
   (`stored_snapshots.replayed_at`, S-021) and
   [`0003_alert_groups_firing_again_after_on_delete`](../../internal/db/migrations/0003_alert_groups_firing_again_after_on_delete.up.sql)
-  (`alert_groups.firing_again_after_id` `ON DELETE SET NULL`, S-029), in `internal/db/migrations/` — golang-migrate
+  (`alert_groups.firing_again_after_id` `ON DELETE SET NULL`, S-029) and
+  [`0004_thread_replies_pending_index`](../../internal/db/migrations/0004_thread_replies_pending_index.up.sql)
+  (`thread_replies_pending_idx`, S-065), in `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
   ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md))
@@ -575,8 +577,11 @@ Serves C-02.FR-21–23, C-03.FR-20, C-19.FR-7, C-20; [ADR-0003](../adr/0003-rout
   row on first use, then
   `UPDATE alert_group_counters SET last_number = last_number + 1 WHERE org_id = $1 RETURNING last_number`. Both
   statements are in `internal/groups`, the table's only writer (lint 2); no start-up step creates the row.
-  The row lock serializes creations per Organization (a Storm of 300 Alert Groups per minute is far below what one row
-  lock sustains), and a rollback returns the number, so no gap appears. A sequence would leave gaps.
+  The row lock serializes creations and Reopens per Organization (a Storm of 300 Alert Groups per minute is far below
+  what one row lock sustains), and a rollback returns the number, so no gap appears. A sequence would leave gaps.
+  Grouping takes the row only when a Snapshot's Alerts need a new or a reopened Alert Group; Alerts that join open
+  Alert Groups lock those rows alone, and a join that finds its Alert Group resolved after the lock rolls back to a
+  savepoint and groups again under the counter row, so that no lookup after an Alert Group lock needs it.
 
 ### 4.3 Users, sign-in and sessions
 
@@ -698,13 +703,17 @@ Serves C-05, C-06.FR-1, C-06.FR-17, C-06.FR-20, C-07; [ADR-0002](../adr/0002-web
   duplicate window, the Heartbeat settings and state (`not_configured`, `waiting`, `live`, `lost` with
   `heartbeat_lost_since`), and `builtin` for the "Muster" Integration (exactly one per Organization, never deleted,
   never with a Heartbeat). `liveness_clock_ms` is explained in 4.7. `snapshot_count` and `last_snapshot_at` are
-  maintained by processing, which is serialized per Integration, so the ingestion handler never updates the Integration
-  row and stays insert-only.
+  maintained by processing, as the last statement of each Snapshot's transaction, so the ingestion handler never
+  updates the Integration row and stays insert-only; a Snapshot that changes the truncation of a `groupKey` locks the
+  row just before, so that the Integration's `MusterSnapshotTruncated` is decided in one order.
 - **`integration_tokens`** — `mstr_int_` tokens as hashes; ingestion and Heartbeat look them up by hash alone.
   `last_used_at` is refreshed at most once a minute, never on every webhook (50 webhooks per second would otherwise
   serialize on one row).
-- **`ingest_claims`** — one row per Integration holding the processing lease (`lease_owner`, `lease_until`): at most one
-  Stored Snapshot per Integration is processed at a time (C-06.FR-1). See [section 5](#5-queues-and-claims).
+- **`ingest_claims`** — one row per Integration holding the processing lease (`lease_owner`, `lease_until`): one
+  replica processes an Integration at a time, at most one Stored Snapshot per Alertmanager group and up to
+  `processing.parallel_groups` of them (C-06.FR-1). The holder renews the lease; each Snapshot's transaction checks it
+  with `FOR KEY SHARE`, which leaves the renewal free and makes another replica's claim skip the row. See
+  [section 5](#5-queues-and-claims).
 - **`stored_snapshots`** (partitioned by day on `received_at`) — the ingestion queue itself: one row per accepted
   request with its processing state (`pending`, `processed`, `failed` with `processing_error`; the `CHECK` keeps
   `processed_at` and the error consistent, and replay resets both and sets `replayed_at`, so that processing counts a
@@ -963,7 +972,9 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7; [ADR-0005](../adr/0005-delivery-
   Reopens, Snooze ended, resolution by the system, the release of a disabled or deleted Owner) are `pending` at once. `event_seqs` lists the lifecycle events a
   reply carries; Reminders keep `message_id` and `button_key_id` so that a press on "Still on it" or "Unack" can be
   checked against its message. Replies that came due while the Destination was Broken become `dropped` (C-11.FR-19).
-  Within one delivery, replies are sent in `id` order (head-of-line, as below).
+  Within one delivery, replies are sent in `id` order (head-of-line, as below); `thread_replies_pending_idx`
+  `(delivery_id, id) WHERE state = 'pending'` (migration 0004) answers "an earlier reply of this delivery is pending"
+  for every candidate of a claim, so that a backlog of replies does not make each claim scan all pending ones.
 - **`webhook_events`** — the events-mode queue of outgoing webhooks: one row per lifecycle event and Destination, with
   `sequence` (the Alert Group's `event_seq`: it grows with every lifecycle event, may have gaps on one Destination and
   does not start at 1 for a Destination added to the Route later), `webhook_id` (unique, kept across retries), `notify`,
@@ -1031,7 +1042,7 @@ any transaction; record the outcome in another short transaction. A row whose le
 replica. `$business_now` (due times; shifted by the development clock in `muster dev`) and `$real_now` (leases) always come from Go. Workers are woken by `LISTEN/NOTIFY` and fall back to polling at the earliest
 `next_attempt_at` or `deadline`.
 
-**Ingestion** (per Integration, in order):
+**Ingestion** (per Integration; in order per Alertmanager group):
 
 ```sql
 -- Integrations with work: the partial index holds only pending rows.
@@ -1041,11 +1052,21 @@ SELECT DISTINCT integration_id FROM stored_snapshots
 UPDATE ingest_claims SET lease_owner = $replica, lease_until = $real_now + $lease
  WHERE org_id = $1 AND integration_id = $2 AND (lease_until IS NULL OR lease_until <= $real_now)
 RETURNING integration_id;
--- Then, one transaction per Snapshot, oldest first: apply it, mark it processed or failed, renew the lease.
+-- Then the oldest pending Snapshots, a page at a time; the holder renews the lease meanwhile.
 SELECT id, received_at FROM stored_snapshots
  WHERE org_id = $1 AND integration_id = $2 AND state = 'pending' AND received_at >= $horizon
- ORDER BY received_at, id LIMIT 1;
+   AND NOT (id = ANY($in_hand))
+ ORDER BY received_at, id LIMIT $page;
+-- One transaction per Snapshot, up to processing.parallel_groups at a time: none starts before an earlier one of its
+-- groupKey, or one listing a common fingerprint, has finished; it checks the lease, applies, marks it processed or
+-- failed.
+SELECT 1 FROM ingest_claims WHERE org_id = $1 AND integration_id = $2 AND lease_owner = $replica FOR KEY SHARE;
 ```
+
+The rows that several Snapshots of one Integration share are locked in one order — the Alertmanager group, the Alerts
+by id, the Routes `FOR SHARE`, the counter row when an Alert Group is created or reopened, the Alert Groups by id,
+Storms, then the Alertmanager route row and the Integration row at the end — and a deadlock or serialization failure
+retries the Snapshot.
 
 A failed Snapshot leaves `pending`, so it never blocks the ones behind it (C-06.FR-20). Two requests of the same
 Integration that commit within milliseconds can become visible slightly out of `received_at` order; both fall into one

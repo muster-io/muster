@@ -123,19 +123,23 @@ SELECT pg_notify(@channel::text, '');
 -- ClaimDueDeliveries leases the due pending deliveries of healthy Destinations whose lease is free or ran out, Urgent
 -- first, then the earliest, then the one delivered longest ago, so that deliveries waiting for the same token take
 -- turns; another claimer skips the rows this one locked. A delivery a Storm holds waits for its Storm, and one of a
--- deleted Destination is claimed only for its final edit.
+-- deleted Destination is claimed only for its final edit. The choice is a materialized CTE, run once: as a subquery in
+-- FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row.
 -- name: ClaimDueDeliveries :many
+WITH due AS MATERIALIZED (
+    SELECT x.id
+    FROM deliveries x
+    JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
+    WHERE x.org_id = @org_id AND x.state = 'pending' AND x.next_attempt_at <= @due::timestamptz
+      AND (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AND ds.health = 'healthy'
+      AND x.held_by_storm_id IS NULL AND (ds.deleted_at IS NULL OR x.desired_retire)
+    ORDER BY x.urgent DESC, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
+    LIMIT @lim
+    FOR UPDATE OF x SKIP LOCKED
+)
 UPDATE deliveries d
 SET lease_owner = @owner::text, lease_until = @lease_until::timestamptz
-FROM (SELECT x.id
-      FROM deliveries x
-      JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
-      WHERE x.org_id = @org_id AND x.state = 'pending' AND x.next_attempt_at <= @due::timestamptz
-        AND (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AND ds.health = 'healthy'
-        AND x.held_by_storm_id IS NULL AND (ds.deleted_at IS NULL OR x.desired_retire)
-      ORDER BY x.urgent DESC, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
-      LIMIT @lim
-      FOR UPDATE OF x SKIP LOCKED) AS due
+FROM due
 WHERE d.org_id = @org_id AND d.id = due.id
 RETURNING d.id, d.urgent, d.next_attempt_at, d.last_delivered_at;
 
@@ -413,24 +417,29 @@ WHERE org_id = @org_id AND subject_kind = @subject_kind AND subject_id = @subjec
 
 -- ClaimDueReplies leases the due Thread replies whose delivery has a Root message, of healthy Destinations, one
 -- delivery's replies in id order: a reply waits while an earlier one of its delivery is pending. A collecting batch
--- that comes due closes: it becomes pending, and new Alerts start the next batch.
+-- that comes due closes: it becomes pending, and new Alerts start the next batch. The choice is a materialized CTE,
+-- run once, as in ClaimDueDeliveries: planned as the inner side of a nested loop over every reply, it ran once per row
+-- and took seconds once replies had piled up.
 -- name: ClaimDueReplies :many
+WITH due AS MATERIALIZED (
+    SELECT x.id
+    FROM thread_replies x
+    JOIN deliveries d ON d.org_id = x.org_id AND d.id = x.delivery_id
+    JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
+    WHERE x.org_id = @org_id AND x.state IN ('collecting', 'pending') AND x.next_attempt_at <= @due::timestamptz
+      AND (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AND d.message_id IS NOT NULL
+      AND ds.health = 'healthy'
+      AND NOT EXISTS (SELECT 1
+                      FROM thread_replies p
+                      WHERE p.org_id = x.org_id AND p.delivery_id = x.delivery_id AND p.state = 'pending'
+                        AND p.id < x.id)
+    ORDER BY x.next_attempt_at, x.id
+    LIMIT @lim
+    FOR UPDATE OF x SKIP LOCKED
+)
 UPDATE thread_replies r
 SET lease_owner = @owner::text, lease_until = @lease_until::timestamptz, state = 'pending'
-FROM (SELECT x.id
-      FROM thread_replies x
-      JOIN deliveries d ON d.org_id = x.org_id AND d.id = x.delivery_id
-      JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
-      WHERE x.org_id = @org_id AND x.state IN ('collecting', 'pending') AND x.next_attempt_at <= @due::timestamptz
-        AND (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AND d.message_id IS NOT NULL
-        AND ds.health = 'healthy'
-        AND NOT EXISTS (SELECT 1
-                        FROM thread_replies p
-                        WHERE p.org_id = x.org_id AND p.delivery_id = x.delivery_id AND p.state = 'pending'
-                          AND p.id < x.id)
-      ORDER BY x.next_attempt_at, x.id
-      LIMIT @lim
-      FOR UPDATE OF x SKIP LOCKED) AS due
+FROM due
 WHERE r.org_id = @org_id AND r.id = due.id
 RETURNING r.id, r.next_attempt_at;
 
@@ -559,25 +568,28 @@ ORDER BY ds.name, ds.id;
 -- lease; another claimer skips the rows this one locked. A deleted Destination is probed only while a final edit of
 -- it waits.
 -- name: ClaimBrokenProbes :many
+WITH due AS MATERIALIZED (
+    SELECT x.id
+    FROM destinations x
+    WHERE x.org_id = @org_id AND x.health = 'broken'
+      AND (x.deleted_at IS NULL
+           OR EXISTS (SELECT 1
+                      FROM deliveries p
+                      WHERE p.org_id = x.org_id AND p.destination_id = x.id AND p.state = 'pending'))
+      AND (x.next_probe_at <= @due::timestamptz
+           OR (x.next_probe_at = 'infinity'
+               AND EXISTS (SELECT 1
+                           FROM deliveries w
+                           WHERE w.org_id = x.org_id AND w.destination_id = x.id AND w.state = 'pending'
+                             AND w.held_by_storm_id IS NULL AND w.next_attempt_at <= @due::timestamptz
+                             AND (w.lease_until IS NULL OR w.lease_until <= @now::timestamptz))))
+    ORDER BY x.next_probe_at, x.id
+    LIMIT @lim
+    FOR UPDATE OF x SKIP LOCKED
+)
 UPDATE destinations ds
 SET next_probe_at = @next_probe::timestamptz
-FROM (SELECT x.id
-      FROM destinations x
-      WHERE x.org_id = @org_id AND x.health = 'broken'
-        AND (x.deleted_at IS NULL
-             OR EXISTS (SELECT 1
-                        FROM deliveries p
-                        WHERE p.org_id = x.org_id AND p.destination_id = x.id AND p.state = 'pending'))
-        AND (x.next_probe_at <= @due::timestamptz
-             OR (x.next_probe_at = 'infinity'
-                 AND EXISTS (SELECT 1
-                             FROM deliveries w
-                             WHERE w.org_id = x.org_id AND w.destination_id = x.id AND w.state = 'pending'
-                               AND w.held_by_storm_id IS NULL AND w.next_attempt_at <= @due::timestamptz
-                               AND (w.lease_until IS NULL OR w.lease_until <= @now::timestamptz))))
-      ORDER BY x.next_probe_at, x.id
-      LIMIT @lim
-      FOR UPDATE OF x SKIP LOCKED) AS due
+FROM due
 WHERE ds.org_id = @org_id AND ds.id = due.id
 RETURNING ds.id, ds.public_id, ds.name, ds.type, ds.connection_id;
 

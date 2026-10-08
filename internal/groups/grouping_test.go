@@ -171,8 +171,8 @@ func TestDeletedRoute(t *testing.T) {
 	}
 }
 
-// TestLockOrder: the Routes, then the counter row when an Alert Group may become open, then the Alert Groups in id
-// order, so that two transactions never wait for each other.
+// TestLockOrder: the Routes, then the counter row when an Alert Group is created or reopened, then the Alert Groups in
+// id order, so that two transactions never wait for each other; a join of open Alert Groups takes no counter row.
 func TestLockOrder(t *testing.T) {
 	h := newHarness(t)
 	var ids []int64
@@ -200,11 +200,12 @@ func TestLockOrder(t *testing.T) {
 	if !slices.IsSorted(last) || len(last) != 2 {
 		t.Errorf("locked %v", last)
 	}
-	// Grouping takes the counter row also to join an open Alert Group; a Snapshot that only resolves does not.
+	// Joining an open Alert Group takes no counter row, from a savepoint; a Snapshot that only resolves takes neither.
 	h.db.calls = map[string]int{}
 	w := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "a", "n": "3"})
 	h.changes(t, ingest.ChangeFired, w)
-	if h.db.calls["LockCounter"] != 1 || h.db.calls["NextNumber"] != 0 {
+	if h.db.calls["LockCounter"] != 0 || h.db.calls["SavepointGrouping"] != 1 || h.db.calls["NextNumber"] != 0 ||
+		h.db.calls["RollbackGrouping"] != 0 {
 		t.Errorf("calls %v", h.db.calls)
 	}
 	h.db.calls = map[string]int{}
@@ -228,8 +229,9 @@ func TestConcurrentChanges(t *testing.T) {
 	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
 	h.db.calls = map[string]int{}
 	h.changes(t, ingest.ChangeFired, b)
-	if n := h.groupOf(t, b); n == g || n.Number != 2 || h.db.calls["LockCounter"] != 1 {
-		t.Errorf("joined a resolved alert group: #%d, counter locks %d", n.Number, h.db.calls["LockCounter"])
+	if n := h.groupOf(t, b); n == g || n.Number != 2 || h.db.calls["LockCounter"] != 1 ||
+		h.db.calls["SavepointGrouping"] != 1 || h.db.calls["RollbackGrouping"] != 1 {
+		t.Errorf("joined a resolved alert group: #%d, calls %v", n.Number, h.db.calls)
 	}
 	// Another transaction creates the Alert Group of the key while this one waits for the counter: it joins it.
 	var other *dbgen.LockGroupsRow
@@ -260,6 +262,63 @@ func TestConcurrentChanges(t *testing.T) {
 	h.resolve(t, d)
 	if gd.Status != "firing" || h.last(t, other).Event.String != "alert_resolved" {
 		t.Errorf("resolved where it no longer fired: %s, %v", gd.Status, h.events(other))
+	}
+}
+
+// TestJoinWithoutCounter: an Alert that joins an open Alert Group takes no counter row; when another transaction
+// grouped it before this one's locks, grouping rolls back to its savepoint and groups again under the counter row,
+// which leaves it where it went; a failing savepoint or rollback fails the Snapshot.
+func TestJoinWithoutCounter(t *testing.T) {
+	h := newHarness(t)
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+	h.db.before["LockGroups"] = func() { h.changes(t, ingest.ChangeFired, b) }
+	h.db.calls = map[string]int{}
+	h.changes(t, ingest.ChangeListed, b)
+	count := 0
+	for _, m := range h.db.members {
+		if m.alert == b {
+			count++
+		}
+	}
+	if count != 1 || h.groupOf(t, b) != g || h.db.calls["RollbackGrouping"] != 1 || len(h.db.groups) != 1 {
+		t.Errorf("memberships of b %d, calls %v, %d alert groups", count, h.db.calls, len(h.db.groups))
+	}
+	c := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "3"})
+	h.db.fail["SavepointGrouping"] = errBoom
+	if _, err := h.apply(ingest.ChangeFired, c); !errors.Is(err, errBoom) {
+		t.Errorf("a failing savepoint = %v", err)
+	}
+	delete(h.db.fail, "SavepointGrouping")
+	h.db.fail["RollbackGrouping"] = errBoom
+	h.db.before["LockGroups"] = func() {
+		g.Status, g.ResolvedAt, g.ResolvedByKind, g.ResolvedByUserID = "resolved", ts(t0), txt("user"), i8(9)
+	}
+	if _, err := h.apply(ingest.ChangeFired, c); !errors.Is(err, errBoom) {
+		t.Errorf("a failing rollback = %v", err)
+	}
+}
+
+// TestJoinFallbackKeepsRestamp: Alerts of a deleted Route that join an open Alert Group of the Default route, when the
+// join falls back to the counter row, still report the Default route as having taken them, though the restamp before
+// the savepoint already moved them there.
+func TestJoinFallbackKeepsRestamp(t *testing.T) {
+	h := newHarness(t)
+	a := h.alert(1, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+	h.db.routes[2].deleted = true
+	h.db.before["SavepointGrouping"] = func() { h.db.alerts[b].RouteID = i8(1) }
+	h.db.before["LockGroups"] = func() {
+		g.Status, g.ResolvedAt, g.ResolvedByKind, g.ResolvedByUserID = "resolved", ts(t0), txt("user"), i8(9)
+	}
+	out := h.changes(t, ingest.ChangeFired, b)
+	if h.db.calls["RollbackGrouping"] != 1 || h.groupOf(t, b) == g || !slices.Equal(out.IDs, []int64{1}) ||
+		!slices.Equal(out.PublicIDs, []string{"RTDEFAAAAAAAAA"}) {
+		t.Errorf("calls %v, routed %+v", h.db.calls, out)
 	}
 }
 

@@ -118,13 +118,29 @@ jobs:
             done
           done
           cat "$RUNNER_TEMP/muster-dev.log"
+      # What the load test's figures depend on: the runner's CPUs and memory, the development PostgreSQL's settings and
+      # the latency of its WAL flushes, and the size of Muster's main pool.
+      - name: describe the runner
+        run: |
+          set -euo pipefail
+          echo "CPUs: $(nproc)"
+          free -m
+          pg=(docker compose -f deploy/dev/docker-compose.yml exec -T postgres)
+          "${pg[@]}" psql -U muster -d muster -Atc "SELECT name || ' = ' || setting FROM pg_settings WHERE name IN
+            ('fsync', 'synchronous_commit', 'wal_sync_method', 'shared_buffers', 'max_connections', 'commit_delay')"
+          "${pg[@]}" sh -c 'pg_test_fsync -s 1 -f /var/lib/postgresql/data/fsync.test | sed -n 4,10p;
+            rm -f /var/lib/postgresql/data/fsync.test'
+          curl -fs http://127.0.0.1:8082/metrics | grep '^muster_db_pool_max_connections'
       - name: load test against muster dev
         run: |
           set -euo pipefail
           make load-test 2>&1 | tee "$RUNNER_TEMP/load-dev.txt"
+      # Runs after a failed load test too, so that its log shows how long each Snapshot and each delivery attempt took.
       - name: stop muster dev
+        if: always()
         run: |
           set -euo pipefail
+          if [ ! -f "$RUNNER_TEMP/muster-dev.pid" ]; then exit 0; fi
           pid=$(cat "$RUNNER_TEMP/muster-dev.pid")
           kill -INT "$pid"
           for _ in $(seq 20); do
@@ -137,6 +153,12 @@ jobs:
           fi
           rm "$RUNNER_TEMP/muster-dev.pid"
           cat "$RUNNER_TEMP/muster-dev.log"
+          # Durations of processing and of the adapter calls, in ms: count, mean, p50, p95, max.
+          for event in snapshot_processed delivery_attempt; do
+            grep -F "\"event\":\"$event\"" "$RUNNER_TEMP/muster-dev.log" | jq -r .duration_ms | sort -n |
+              awk -v e="$event" '{ v[NR] = $1; s += $1 } END { if (NR) printf "%s: %d, mean %.1f, p50 %d, p95 %d, max %d\n",
+                e, NR, s / NR, v[int(NR / 2) + 1], v[int(NR * 0.95)], v[NR] }'
+          done
       # bin/muster is the linux/amd64 build of this runner. Compose uses the image built here, because its pull policy
       # pulls only a missing image. A bootstrap Admin is written into .env for the load test to sign in with, and an
       # override publishes the internal listener on loopback for the load test's /metrics.

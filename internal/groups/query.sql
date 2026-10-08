@@ -96,6 +96,15 @@ INSERT INTO alert_group_counters (org_id)
 VALUES (@org_id)
 ON CONFLICT (org_id) DO NOTHING;
 
+-- SavepointGrouping marks where grouping that joins open Alert Groups without the counter row starts, so that it can
+-- start again under the counter row when an Alert Group it found turns out to need a creation or a Reopen.
+-- name: SavepointGrouping :exec
+SAVEPOINT grouping;
+
+-- RollbackGrouping undoes grouping back to SavepointGrouping, releasing the Alert Group locks it took since.
+-- name: RollbackGrouping :exec
+ROLLBACK TO SAVEPOINT grouping;
+
 -- LockCounter locks the Organization's counter row: every change that makes an Alert Group open — a creation or a
 -- Reopen — takes it first, so that two of them never race for one Route and Group key.
 -- name: LockCounter :one

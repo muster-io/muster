@@ -32,8 +32,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
 
 ## Functional requirements
 
-- **C-06.FR-1** A worker woken by `LISTEN/NOTIFY` processes Stored Snapshots in arrival order per Integration, at most
-  one per Integration at a time.
+- **C-06.FR-1** A worker woken by `LISTEN/NOTIFY` processes the Stored Snapshots of each Alertmanager group of an
+  Integration in arrival order, at most one per Alertmanager group at a time, and up to `processing.parallel_groups`
+  Alertmanager groups of an Integration at the same time (D285). Two Snapshots that list a common fingerprint keep
+  their arrival order, and the deletion marker of an Integration waits for every earlier Snapshot of it and holds back
+  every later one.
 - **C-06.FR-2** Each Snapshot is split into Alerts by fingerprint. Processing is idempotent per Alert on
   `fingerprint + status + startsAt`; a duplicate Snapshot, such as the identical copy from the other instance of an HA
   pair (F-037), changes nothing.

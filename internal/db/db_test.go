@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -297,8 +298,8 @@ func TestCheckSchema(t *testing.T) {
 
 func TestKnownVersion(t *testing.T) {
 	v, err := KnownVersion()
-	if err != nil || v != 3 {
-		t.Errorf("KnownVersion = %d, %v; want 3", v, err)
+	if err != nil || v != 4 {
+		t.Errorf("KnownVersion = %d, %v; want 4", v, err)
 	}
 	fsys := fstest.MapFS{
 		"m/0001_init.up.sql":   {Data: []byte("SELECT 1;")},
@@ -329,6 +330,26 @@ func TestOpenErrors(t *testing.T) {
 	if _, err := Open(t.Context(), unreachable, config.Database{URL: "postgres://h:notaport/db"}); err == nil ||
 		!strings.Contains(err.Error(), "the session database connection") {
 		t.Errorf("a bad session URL: %v", err)
+	}
+}
+
+// TestPoolSize: the main pool opens max(MinPoolConns, CPUs) connections unless its URL sets pool_max_conns.
+func TestPoolSize(t *testing.T) {
+	if defaultMaxConns(4) != 10 || defaultMaxConns(16) != 16 || defaultMaxConns(0) != 10 {
+		t.Errorf("defaults %d %d %d", defaultMaxConns(4), defaultMaxConns(16), defaultMaxConns(0))
+	}
+	for url, want := range map[string]int32{
+		"postgres://muster@127.0.0.1:5432/muster?sslmode=disable":                  defaultMaxConns(runtime.NumCPU()),
+		"postgres://muster@127.0.0.1:5432/muster?sslmode=disable&pool_max_conns=3": 3,
+	} {
+		d, err := Open(t.Context(), config.Database{URL: logging.Secret(url)}, unreachable)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := d.Pool.Config().MaxConns; got != want {
+			t.Errorf("%s: %d connections, want %d", url, got, want)
+		}
+		d.Close()
 	}
 }
 
@@ -578,7 +599,7 @@ func TestSchemaVersion(t *testing.T) {
 	pool.rows["SELECT version, dirty"] = stubRow{values: []any{int64(7), false}}
 	var out bytes.Buffer
 	err := d.CheckSchema(t.Context(), logging.New(&out, logging.LevelInfo))
-	if err == nil || !strings.Contains(err.Error(), "database schema version 7 is newer than this binary knows (3)") ||
+	if err == nil || !strings.Contains(err.Error(), "database schema version 7 is newer than this binary knows (4)") ||
 		!strings.Contains(out.String(), `"event":"schema_too_new"`) {
 		t.Errorf("CheckSchema on version 7: %v, logged %s", err, out.String())
 	}
@@ -629,7 +650,7 @@ func TestMigrate(t *testing.T) {
 		{name: "current", m: &fakeMigrator{versions: []uint{2, 2}, upErr: migrate.ErrNoChange}, wantUps: 1,
 			wantLine: `"event":"migrations_current","version":2`},
 		{name: "newer", m: &fakeMigrator{versions: []uint{999}},
-			wantErr: "database schema version 999 is newer than this binary knows (3)", wantLine: `"event":"schema_too_new"`},
+			wantErr: "database schema version 999 is newer than this binary knows (4)", wantLine: `"event":"schema_too_new"`},
 		{name: "dirty", m: &fakeMigrator{versions: []uint{1}, dirty: true},
 			wantErr: "the database schema is dirty at version 1", wantLine: `"event":"schema_dirty"`},
 		{name: "up fails", m: &fakeMigrator{versions: []uint{0}, upErr: errors.New("syntax error")}, wantUps: 1,
@@ -699,7 +720,7 @@ func TestDriver(t *testing.T) {
 		t.Fatalf("Up: %v", err)
 	}
 	_, _ = m.Close()
-	if len(c.execs) != 10 || !strings.HasPrefix(c.execs[0], "CREATE TABLE IF NOT EXISTS schema_migrations") ||
+	if len(c.execs) != 13 || !strings.HasPrefix(c.execs[0], "CREATE TABLE IF NOT EXISTS schema_migrations") ||
 		c.execs[1] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (1, true)" ||
 		!strings.Contains(c.execs[2], "CREATE EXTENSION IF NOT EXISTS pg_trgm") ||
 		c.execs[3] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (1, false)" ||
@@ -708,7 +729,10 @@ func TestDriver(t *testing.T) {
 		c.execs[6] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (2, false)" ||
 		c.execs[7] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (3, true)" ||
 		!strings.Contains(c.execs[8], "ON DELETE SET NULL") ||
-		c.execs[9] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (3, false)" {
+		c.execs[9] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (3, false)" ||
+		c.execs[10] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (4, true)" ||
+		!strings.Contains(c.execs[11], "CREATE INDEX thread_replies_pending_idx") ||
+		c.execs[12] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (4, false)" {
 		t.Errorf("statements %q", c.execs)
 	}
 
