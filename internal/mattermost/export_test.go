@@ -14,3 +14,6 @@ func (c *Client) EphemeralPost(ctx context.Context, class outbound.Class, userID
 	message string) Result {
 	return c.ephemeralPost(ctx, class, userID, channelID, rootID, message)
 }
+
+// PressAnswer lets the tests of the package decode the answer to a press as the callback encodes it.
+type PressAnswer = pressAnswer

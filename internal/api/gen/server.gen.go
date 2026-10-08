@@ -302,6 +302,21 @@ func (e CommandOutcome) Valid() bool {
 	}
 }
 
+// Defines values for ConnectionCheckResultWarnings.
+const (
+	PressAnswersInThread ConnectionCheckResultWarnings = "press_answers_in_thread"
+)
+
+// Valid indicates whether the value is a known member of the ConnectionCheckResultWarnings enum.
+func (e ConnectionCheckResultWarnings) Valid() bool {
+	switch e {
+	case PressAnswersInThread:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConnectionCheckStepName.
 const (
 	ConnectionCheckStepNameDryProbe       ConnectionCheckStepName = "dry_probe"
@@ -3022,9 +3037,15 @@ type ConnectionCheckResult struct {
 	PendingUpdates nullable.Nullable[int]    `json:"pending_updates,omitempty"`
 	Steps          []ConnectionCheckStep     `json:"steps"`
 
+	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the answers to button presses show in the Thread of the post instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.
+	Warnings []ConnectionCheckResultWarnings `json:"warnings"`
+
 	// WebhookSet Telegram only. A set webhook makes long polling fail with 409.
 	WebhookSet nullable.Nullable[bool] `json:"webhook_set,omitempty"`
 }
+
+// ConnectionCheckResultWarnings defines model for ConnectionCheckResult.Warnings.
+type ConnectionCheckResultWarnings string
 
 // ConnectionCheckStep defines model for ConnectionCheckStep.
 type ConnectionCheckStep struct {
@@ -3676,8 +3697,14 @@ type Matcher struct {
 // MatcherOp defines model for Matcher.Op.
 type MatcherOp string
 
-// MattermostActionAnswer Always empty. Refusals and failures reach the person who pressed as a separate ephemeral post, not through this answer.
-type MattermostActionAnswer = map[string]interface{}
+// MattermostActionAnswer Empty, or the text for the person who pressed when its ephemeral post was refused or failed. Never `update`.
+type MattermostActionAnswer struct {
+	// EphemeralText Shown by Mattermost to the person who pressed alone, from System, in the Thread of the pressed post.
+	EphemeralText *string `json:"ephemeral_text,omitempty"`
+
+	// SkipSlackParsing Always `true` with `ephemeral_text`, so that the text is shown as it is.
+	SkipSlackParsing *bool `json:"skip_slack_parsing,omitempty"`
+}
 
 // MattermostActionContext The integration data Muster put on the button. Mattermost does not sign the request, so authenticity rests on the signed action id.
 type MattermostActionContext struct {

@@ -74,8 +74,11 @@ type CallbackConfig struct {
 	Roles auth.Roles
 	// Keys verify the signed action ids: the Keyring.
 	Keys buttons.Keys
-	// Path is the interactive path the ephemeral answers go through.
+	// Path is the interactive path the ephemeral posts of the answers go through.
 	Path Path
+	// Budget bounds the ephemeral post of an answer, its limiter tokens included: delivery.interactive_budget; zero
+	// takes delivery.InteractiveBudget.
+	Budget time.Duration
 	// Business is the business clock, from which a Snooze lasts its duration.
 	Business clock.Clock
 	// PublicURL is MUSTER_PUBLIC_URL, the base of the profile link.
@@ -84,6 +87,17 @@ type CallbackConfig struct {
 	BodyLimit int64
 	Log       *logging.Logger
 }
+
+// How the person who pressed was answered, as mattermost_press logs it (D284): an ephemeral post in the channel, or
+// the ephemeral_text of the callback's answer.
+const (
+	answerPost = "ephemeral_post"
+	answerText = "ephemeral_text"
+)
+
+// errorPermissions is the error id of a call the bot lacks the permission for, such as an ephemeral post by a bot
+// without the system admin role (F-063).
+const errorPermissions = "api.context.permissions.app_error"
 
 // The outcomes of a press, as mattermost_press logs them.
 const (
@@ -107,11 +121,17 @@ type pressHandler struct {
 // NewCallback is the callback of the button presses of Mattermost Connections, mattermostAction (C-13.FR-4): it
 // verifies the signed action id, binds the press to the Root message it was issued for, maps the Mattermost user to
 // a User through its Account link, and runs the Command as that User with the Transport mattermost. Every request is
-// answered 200 with an empty JSON object; whatever the person must read goes as an ephemeral post through the
-// interactive path, never in the answer.
+// answered 200 with a JSON object, never with update. Whatever the person who pressed must read goes first as an
+// ephemeral post through the interactive path, which shows in the channel view (F-026), and the answer is empty; when
+// that post is not made — refused with 403 to a bot without the create_post_ephemeral permission (F-063), or failed
+// any other way — the text is the answer's ephemeral_text, which needs no permission and shows in the Thread (F-025,
+// F-062), so that it is never lost (D284).
 func NewCallback(cfg CallbackConfig) http.Handler {
 	if cfg.BodyLimit <= 0 {
 		cfg.BodyLimit = ingest.BodyLimit
+	}
+	if cfg.Budget <= 0 {
+		cfg.Budget = delivery.InteractiveBudget
 	}
 	cfg.PublicURL = strings.TrimSuffix(cfg.PublicURL, "/")
 	return &pressHandler{cfg: cfg}
@@ -125,9 +145,18 @@ type pressRequest struct {
 	Context   actionContext `json:"context"`
 }
 
-// press is what a request led to, as mattermost_press logs it.
+// press is what a request led to, as mattermost_press logs it: answer is how the person was answered, and text the
+// ephemeral_text of the callback's answer when the ephemeral post was not made.
 type press struct {
 	connection, group, command, outcome, err string
+	answer, text                             string
+}
+
+// pressAnswer is the answer to a press, MattermostActionAnswer: never update, which only the delivery worker makes
+// (ADR-0005); ephemeral_text is taken as it is, without Mattermost's Slack link parsing, as a post's message is.
+type pressAnswer struct {
+	EphemeralText    string `json:"ephemeral_text,omitempty"`
+	SkipSlackParsing bool   `json:"skip_slack_parsing,omitempty"`
 }
 
 func (h *pressHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -135,13 +164,24 @@ func (h *pressHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := h.recovered(ctx, w, r)
 	fields := []logging.Field{logging.F("connection", p.connection), logging.F("group", p.group),
 		logging.F("command", p.command), logging.F("outcome", p.outcome)}
+	if p.answer != "" {
+		fields = append(fields, logging.F("answer", p.answer))
+	}
 	if p.err != "" {
 		fields = append(fields, logging.F("error", p.err))
 	}
 	h.cfg.Log.Log(ctx, logging.MattermostPress, fields...)
+	a := pressAnswer{}
+	if p.text != "" {
+		a = pressAnswer{EphemeralText: p.text, SkipSlackParsing: true}
+	}
+	body, err := json.Marshal(a)
+	if err != nil {
+		body = []byte("{}")
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, "{}")
+	_, _ = w.Write(body)
 }
 
 // recovered handles one press; a panic is a failed press, logged without its value, which may carry anything.
@@ -191,10 +231,7 @@ func (h *pressHandler) handle(ctx context.Context, w http.ResponseWriter, r *htt
 	}
 	answer := func(outcome, text string, cause error) press {
 		p.outcome = outcome
-		if err := errors.Join(cause, h.answer(ctx, conn, b.Destination, req, text)); err != nil {
-			p.err = err.Error()
-		}
-		return p
+		return h.answer(ctx, p, conn, b.Destination, req, text, cause)
 	}
 	u, err := h.cfg.Links.Lookup(ctx, accountlinks.SpaceMattermost(conn.ID), req.UserID)
 	switch {
@@ -249,7 +286,8 @@ func (h *pressHandler) dispatch(ctx context.Context, c groups.Caller, a buttons.
 
 // notVerified refuses a press whose action id or binding does not hold. It is answered only on a post that Muster
 // delivered to a Destination of the Connection in the channel of the press, so that a forged callback can neither
-// make the bot post anywhere else nor spend a Destination's limiter tokens with made-up posts.
+// make the bot post anywhere else nor spend a Destination's limiter tokens with made-up posts, and its empty answer
+// tells it nothing about which Connections and posts exist.
 func (h *pressHandler) notVerified(ctx context.Context, p press, conn Connection, req pressRequest) press {
 	p.outcome = outcomeNotVerified
 	d, ok, err := h.cfg.Bindings.PostDestination(ctx, conn.ID, req.PostID, req.ChannelID)
@@ -257,28 +295,40 @@ func (h *pressHandler) notVerified(ctx context.Context, p press, conn Connection
 		p.err = err.Error()
 		return p
 	}
-	if ok {
-		if err := h.answer(ctx, conn, d, req, messages.T(messages.LanguageEnglish, "press.notVerified", nil)); err != nil {
-			p.err = err.Error()
-		}
+	if !ok {
+		return p
 	}
-	return p
+	return h.answer(ctx, p, conn, d, req, messages.T(messages.LanguageEnglish, "press.notVerified", nil), nil)
 }
 
-// answer shows text to the person who pressed, as one ephemeral post in the channel of the press through the
-// interactive path, limited by the Destination d. A press on a Root message is answered without root_id, in the
-// channel view (F-026).
-func (h *pressHandler) answer(ctx context.Context, conn Connection, d delivery.Destination, req pressRequest,
-	text string) error {
+// answer shows text to the person who pressed (D284): first as one ephemeral post in the channel of the press through
+// the interactive path, limited by the Destination d and bounded by the budget, without root_id so that it shows in
+// the channel view (F-026). When the post is not made, text becomes the ephemeral_text of the callback's answer (F-062):
+// after a 403 for the missing permission, which a bot with the role Member always gets (F-063) and which is therefore
+// not an error, and after any other failure, which is logged with cause.
+func (h *pressHandler) answer(ctx context.Context, p press, conn Connection, d delivery.Destination, req pressRequest,
+	text string, cause error) press {
+	ctx, cancel := context.WithTimeout(ctx, h.cfg.Budget)
+	defer cancel()
+	var r Result
 	out, err := h.cfg.Path.Do(ctx, delivery.Subject{Destination: &d}, delivery.AnswerOp(
 		func(ctx context.Context, c delivery.Call) delivery.Outcome {
-			return conn.Client.ephemeralPost(ctx, c.Class, req.UserID, req.ChannelID, "", text).Outcome
+			r = conn.Client.ephemeralPost(ctx, c.Class, req.UserID, req.ChannelID, "", text)
+			return r.Outcome
 		}))
-	if err != nil {
-		return fmt.Errorf("the ephemeral answer was not sent: %w", err)
+	switch {
+	case err != nil:
+		cause = errors.Join(cause, fmt.Errorf("the ephemeral post was not sent: %w", err))
+	case out.Kind == delivery.OutcomeOK:
+		p.answer = answerPost
+	case r.Status != http.StatusForbidden || r.ErrorID != errorPermissions:
+		cause = errors.Join(cause, fmt.Errorf("the ephemeral post was not sent: %s", out.Error))
 	}
-	if out.Kind != delivery.OutcomeOK {
-		return fmt.Errorf("the ephemeral answer was not sent: %s", out.Error)
+	if p.answer == "" {
+		p.answer, p.text = answerText, text
 	}
-	return nil
+	if cause != nil {
+		p.err = cause.Error()
+	}
+	return p
 }

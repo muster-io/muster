@@ -160,7 +160,39 @@ answered with `ephemeral_text`; the server source · Mattermost 11.2.2_ · Used 
 **F-026. A separate ephemeral post shows in the channel.** `POST /api/v4/posts/ephemeral` for the person, without
 `root_id`, appears at once in the channel view, marked "(Only visible to you)". Ephemeral posts in a thread stay in the
 client until the page is reloaded: a thread opened later still showed them. — _2026-10-04 · ephemeral posts with and
-without `root_id` · Mattermost 11.2.2_ · Used in C-13.FR-4.
+without `root_id` · Mattermost 11.2.2_ · Used in C-13.FR-4. The test bot had the system admin role; a bot without it
+is refused (F-063), so Muster then answers with `ephemeral_text` (F-062).
+
+**F-062. `ephemeral_text` needs no permission of the bot.** An integration may answer a press with `ephemeral_text`,
+which Mattermost shows only to the person who pressed ("the integration can choose to update the original post, and/or
+respond with an ephemeral message"; `skip_slack_parsing: true` keeps the text from the Slack-compatibility parsing).
+The server posts it as an ephemeral post of that person in the channel of the press, with the pressed post as `root_id`
+— or that post's `root_id` for a Thread reply — through its internal `SendEphemeralPost`, after the integration
+answered and without any permission check, so it works for a bot with the role Member; where it shows is F-025. —
+_2026-10-08 · Mattermost's
+[interactive messages documentation](https://docs.mattermost.com/developers/integrate/plugins/interactive-messages)
+("Integration response to button press"); `DoPostActionWithCookie` in `server/channels/app/integration_action.go` of
+the v11.2.2 source · Mattermost 11.2.2_ · Used in C-13.FR-4.
+
+**F-063. A bot without the system admin role cannot make ephemeral posts.** `POST /api/v4/posts/ephemeral` needs the
+`create_post_ephemeral` permission, which by default only the system admin role holds. The test stand's bot, which
+has only the system user role as in F-060, asked for an ephemeral post in a channel it is a member of, targeted at its own user id, and
+got `403` `api.context.permissions.app_error` "You do not have the appropriate permissions."; the server checks the
+permission after reading the body and before it looks at the channel. A press answered only with a separate ephemeral
+post therefore never reaches the person. — _2026-10-08 · one request with the bot token on the test stand; the check in
+`createEphemeralPost` of `server/channels/api4/post.go`, and in `server/public/model` of the v11.2.2 source the
+permission among those only `system_admin` gets · Mattermost 11.2.2_ · Used in C-13.FR-2, C-13.FR-4, C-13.FR-7.
+
+**F-064. A bot can read whether its roles grant a permission.** The server decides `create_post_ephemeral` for a
+request with `SessionHasPermissionTo`, which asks `RolesGrantPermission` whether any of the session's system roles that
+is not deleted lists the permission; a bot token's session carries the bot's roles, which `GET /api/v4/users/me`
+returns in `roles` (`system_user` for the test stand's bot, read on 2026-10-08). `POST /api/v4/roles/names` with those
+names reads the same roles through the same `GetRolesByNames`, and needs only a session, no permission, so the bot can
+make the server's decision itself without trying an ephemeral post. — _2026-10-08 · `SessionHasPermissionTo` and
+`RolesGrantPermission` in `server/channels/app/authorization.go` and `getRolesByNames` in
+`server/channels/api4/role.go` of the v11.2.2 source; the bot's `roles` from `GET /api/v4/users/me` on the test stand.
+The read of the roles itself was not made against the test stand (see [Pending](#pending)) · Mattermost 11.2.2_ · Used
+in C-13.FR-2.
 
 **F-054. A bot can press its own button.** `POST /api/v4/posts/{post_id}/actions/{action_id}` with the bot's token
 answers `200` with `status` `OK` and a `trigger_id`, and the server then calls the button's URL as for any press, with
@@ -385,6 +417,8 @@ snippet with and without the catch-all; Alertmanager routing documentation_ · U
   without the system admin role gets the same answers about a deleted root post as in F-058 — its plain read answered
   `404` on 2026-10-08 (F-061); `403` to an edit and `400` to a reply are still to be seen — and whether it may read the
   post with `?include_deleted=true`, which probably needs that role (not verified; Muster does not use that read).
+  `POST /api/v4/roles/names` with the roles of a bot without the system admin role, read from the source only (F-064):
+  that it answers `200` and that `system_user` lacks `create_post_ephemeral` on a server with default permissions.
 - **Alertmanager.** A restart of an HA instance without a persistent volume, and `--dispatch.start-delay` on an HA pair
   (tested on the single instance only); `externalURL` of instances without `--web.external-url`; a resolve during a mute
   with vmalert as the source; how often tick races of an HA pair cause duplicates over hours of operation — none in

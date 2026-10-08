@@ -737,12 +737,19 @@ type CheckResult struct {
 	OK      bool
 	Steps   []Step
 	BotName string
+	// Warnings are hints that do not fail the check, such as WarningPressAnswersInThread.
+	Warnings []string
 }
+
+// WarningPressAnswersInThread is the warning of a Connection whose bot may not make ephemeral posts: answers to
+// button presses then show in the Thread of the post, not in the channel view (D284, F-063).
+const WarningPressAnswersInThread = "press_answers_in_thread"
 
 // Check runs the Connection check of the Mattermost Connection publicID (C-13.FR-2) on the interactive path, limited
 // by the Connection: GET /api/v4/users/me with the bot token. A token that works records the bot's username and user
 // id on the Connection; a 401 fails with "The bot token is not valid.". No limiter token within the budget is a
-// *delivery.LimitedError.
+// *delivery.LimitedError. Once the token works, a read of the bot's roles tells whether it may make ephemeral posts;
+// when it may not, the check passes with WarningPressAnswersInThread (D284, F-064); a failed read adds nothing.
 func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, error) {
 	row, err := s.row(ctx, s.cfg.Store, publicID)
 	if err != nil {
@@ -782,7 +789,16 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 	}); err != nil {
 		return CheckResult{}, err
 	}
-	return CheckResult{OK: true, Steps: []Step{step}, BotName: user.Username}, nil
+	res := CheckResult{OK: true, Steps: []Step{step}, BotName: user.Username}
+	var granted bool
+	if _, err := s.cfg.Interactive.Do(ctx, delivery.Subject{Connection: &id}, delivery.ReadOp(
+		func(ctx context.Context, call delivery.Call) delivery.Outcome {
+			granted, r = c.Grants(ctx, call.Class, user, mattermost.PermissionEphemeralPosts)
+			return r.Outcome
+		})); err == nil && r.OK() && !granted {
+		res.Warnings = []string{WarningPressAnswersInThread}
+	}
+	return res, nil
 }
 
 // Channel is a channel the bot of a Mattermost Connection is a member of, with its team.

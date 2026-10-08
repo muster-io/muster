@@ -304,6 +304,21 @@ func (e CommandOutcome) Valid() bool {
 	}
 }
 
+// Defines values for ConnectionCheckResultWarnings.
+const (
+	PressAnswersInThread ConnectionCheckResultWarnings = "press_answers_in_thread"
+)
+
+// Valid indicates whether the value is a known member of the ConnectionCheckResultWarnings enum.
+func (e ConnectionCheckResultWarnings) Valid() bool {
+	switch e {
+	case PressAnswersInThread:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConnectionCheckStepName.
 const (
 	ConnectionCheckStepNameDryProbe       ConnectionCheckStepName = "dry_probe"
@@ -3024,9 +3039,15 @@ type ConnectionCheckResult struct {
 	PendingUpdates nullable.Nullable[int]    `json:"pending_updates,omitempty"`
 	Steps          []ConnectionCheckStep     `json:"steps"`
 
+	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the answers to button presses show in the Thread of the post instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.
+	Warnings []ConnectionCheckResultWarnings `json:"warnings"`
+
 	// WebhookSet Telegram only. A set webhook makes long polling fail with 409.
 	WebhookSet nullable.Nullable[bool] `json:"webhook_set,omitempty"`
 }
+
+// ConnectionCheckResultWarnings defines model for ConnectionCheckResult.Warnings.
+type ConnectionCheckResultWarnings string
 
 // ConnectionCheckStep defines model for ConnectionCheckStep.
 type ConnectionCheckStep struct {
@@ -3678,8 +3699,14 @@ type Matcher struct {
 // MatcherOp defines model for Matcher.Op.
 type MatcherOp string
 
-// MattermostActionAnswer Always empty. Refusals and failures reach the person who pressed as a separate ephemeral post, not through this answer.
-type MattermostActionAnswer = map[string]interface{}
+// MattermostActionAnswer Empty, or the text for the person who pressed when its ephemeral post was refused or failed. Never `update`.
+type MattermostActionAnswer struct {
+	// EphemeralText Shown by Mattermost to the person who pressed alone, from System, in the Thread of the pressed post.
+	EphemeralText *string `json:"ephemeral_text,omitempty"`
+
+	// SkipSlackParsing Always `true` with `ephemeral_text`, so that the text is shown as it is.
+	SkipSlackParsing *bool `json:"skip_slack_parsing,omitempty"`
+}
 
 // MattermostActionContext The integration data Muster put on the button. Mattermost does not sign the request, so authenticity rests on the signed action id.
 type MattermostActionContext struct {
@@ -8250,7 +8277,7 @@ type ClientInterface interface {
 
 	// MattermostActionWithBody Receive a Mattermost button press
 	//
-	// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and an empty JSON object, refusals, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included, so the endpoint tells a caller nothing about which Connection ids exist; request validation does not answer `400` here. The answer never carries `update` (only the delivery worker edits the Root message) or `ephemeral_text` (Mattermost would show it only inside the Thread); whatever the person who pressed must read is sent as a separate ephemeral post.
+	// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and a JSON object, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included; request validation does not answer `400` here. Whatever the person who pressed must read — a refusal, a failure, "not linked", or "not verified" for a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the pressed post and which needs no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -8259,7 +8286,7 @@ type ClientInterface interface {
 
 	// MattermostAction Receive a Mattermost button press
 	//
-	// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and an empty JSON object, refusals, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included, so the endpoint tells a caller nothing about which Connection ids exist; request validation does not answer `400` here. The answer never carries `update` (only the delivery worker edits the Root message) or `ephemeral_text` (Mattermost would show it only inside the Thread); whatever the person who pressed must read is sent as a separate ephemeral post.
+	// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and a JSON object, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included; request validation does not answer `400` here. Whatever the person who pressed must read — a refusal, a failure, "not linked", or "not verified" for a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the pressed post and which needs no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -9985,7 +10012,7 @@ func (c *Client) ListAuditLog(ctx context.Context, params *ListAuditLogParams, r
 
 // MattermostActionWithBody Receive a Mattermost button press
 //
-// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and an empty JSON object, refusals, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included, so the endpoint tells a caller nothing about which Connection ids exist; request validation does not answer `400` here. The answer never carries `update` (only the delivery worker edits the Root message) or `ephemeral_text` (Mattermost would show it only inside the Thread); whatever the person who pressed must read is sent as a separate ephemeral post.
+// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and a JSON object, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included; request validation does not answer `400` here. Whatever the person who pressed must read — a refusal, a failure, "not linked", or "not verified" for a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the pressed post and which needs no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.
 //
 // Takes any type of body and a specified content type.
 //
@@ -10004,7 +10031,7 @@ func (c *Client) MattermostActionWithBody(ctx context.Context, connectionId Conn
 
 // MattermostAction Receive a Mattermost button press
 //
-// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and an empty JSON object, refusals, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included, so the endpoint tells a caller nothing about which Connection ids exist; request validation does not answer `400` here. The answer never carries `update` (only the delivery worker edits the Root message) or `ephemeral_text` (Mattermost would show it only inside the Thread); whatever the person who pressed must read is sent as a separate ephemeral post.
+// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and a JSON object, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included; request validation does not answer `400` here. Whatever the person who pressed must read — a refusal, a failure, "not linked", or "not verified" for a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the pressed post and which needs no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -20417,7 +20444,7 @@ type ClientWithResponsesInterface interface {
 
 	// MattermostActionWithBodyWithResponse Receive a Mattermost button press
 	//
-	// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and an empty JSON object, refusals, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included, so the endpoint tells a caller nothing about which Connection ids exist; request validation does not answer `400` here. The answer never carries `update` (only the delivery worker edits the Root message) or `ephemeral_text` (Mattermost would show it only inside the Thread); whatever the person who pressed must read is sent as a separate ephemeral post.
+	// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and a JSON object, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included; request validation does not answer `400` here. Whatever the person who pressed must read — a refusal, a failure, "not linked", or "not verified" for a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the pressed post and which needs no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -20426,7 +20453,7 @@ type ClientWithResponsesInterface interface {
 
 	// MattermostActionWithResponse Receive a Mattermost button press
 	//
-	// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and an empty JSON object, refusals, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included, so the endpoint tells a caller nothing about which Connection ids exist; request validation does not answer `400` here. The answer never carries `update` (only the delivery worker edits the Root message) or `ephemeral_text` (Mattermost would show it only inside the Thread); whatever the person who pressed must read is sent as a separate ephemeral post.
+	// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and a JSON object, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included; request validation does not answer `400` here. Whatever the person who pressed must read — a refusal, a failure, "not linked", or "not verified" for a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the pressed post and which needs no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -34426,7 +34453,7 @@ func (c *ClientWithResponses) ListAuditLogWithResponse(ctx context.Context, para
 
 // MattermostActionWithBodyWithResponse Receive a Mattermost button press
 //
-// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and an empty JSON object, refusals, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included, so the endpoint tells a caller nothing about which Connection ids exist; request validation does not answer `400` here. The answer never carries `update` (only the delivery worker edits the Root message) or `ephemeral_text` (Mattermost would show it only inside the Thread); whatever the person who pressed must read is sent as a separate ephemeral post.
+// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and a JSON object, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included; request validation does not answer `400` here. Whatever the person who pressed must read — a refusal, a failure, "not linked", or "not verified" for a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the pressed post and which needs no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -34441,7 +34468,7 @@ func (c *ClientWithResponses) MattermostActionWithBodyWithResponse(ctx context.C
 
 // MattermostActionWithResponse Receive a Mattermost button press
 //
-// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and an empty JSON object, refusals, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included, so the endpoint tells a caller nothing about which Connection ids exist; request validation does not answer `400` here. The answer never carries `update` (only the delivery worker edits the Root message) or `ephemeral_text` (Mattermost would show it only inside the Thread); whatever the person who pressed must read is sent as a separate ephemeral post.
+// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and a JSON object, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included; request validation does not answer `400` here. Whatever the person who pressed must read — a refusal, a failure, "not linked", or "not verified" for a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the pressed post and which needs no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

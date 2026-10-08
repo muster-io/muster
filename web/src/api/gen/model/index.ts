@@ -84,6 +84,7 @@ export * from './conflictResponse';
 export * from './connection';
 export * from './connectionCheckRequest';
 export * from './connectionCheckResult';
+export * from './connectionCheckResultWarningsItem';
 export * from './connectionCheckStep';
 export * from './connectionCheckStepName';
 export * from './connectionInput';

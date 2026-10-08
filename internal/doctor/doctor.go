@@ -382,9 +382,12 @@ func (c *checks) messengers(ctx context.Context) {
 			continue
 		}
 		for _, f := range found {
-			if f.OK() {
+			switch {
+			case f.OK() && f.Warning != "":
+				c.print(Warn, f.Kind+" "+f.Name, f.Warning)
+			case f.OK():
 				c.print(OK, f.Kind+" "+f.Name, "ok")
-			} else {
+			default:
 				c.print(Fail, f.Kind+" "+f.Name, f.Message)
 			}
 		}

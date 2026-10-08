@@ -50,6 +50,9 @@ func findings(t *testing.T, svc *connections.Service, q connections.DoctorQuerie
 	var out []string
 	for _, f := range found {
 		line := f.Kind + " " + f.Name + ": ok"
+		if f.OK() && f.Warning != "" {
+			line = f.Kind + " " + f.Name + ": warning: " + f.Warning
+		}
 		if !f.OK() {
 			line = f.Kind + " " + f.Name + ": " + f.Message
 		}
@@ -59,7 +62,8 @@ func findings(t *testing.T, svc *connections.Service, q connections.DoctorQuerie
 }
 
 // TestDoctor is C-02.FR-14: muster doctor checks every Mattermost Connection and Destination that is not deleted, a
-// Telegram one aside, in the background class, and records nothing; a failing step gives its message.
+// Telegram one aside, in the background class, and records nothing; a failing step gives its message, and a bot that
+// may not make ephemeral posts the hint that press answers show in the Thread (D284).
 func TestDoctor(t *testing.T) {
 	e := newEnv(t)
 	mm := e.create(t, "mm")
@@ -80,7 +84,7 @@ func TestDoctor(t *testing.T) {
 
 	got := findings(t, e.svc, e.store)
 	open := "open the bot token of the connection " + broken.PublicID + ": cannot decrypt"
-	want := []string{"connection mm: ok", "connection broken: " + open, "destination dest-7: ok",
+	want := []string{"connection mm: warning: " + mattermost.HintPressAnswersInThread, "connection broken: " + open, "destination dest-7: ok",
 		"destination dest-8: " + mattermost.MessageNotMember, "destination dest-9: its Connection failed its check: " + open,
 		"destination dest-10: its Connection is deleted", "destination dest-11: " + mattermost.MessageOtherTeam}
 	lines := strings.Split(got, "\n")
@@ -100,6 +104,18 @@ func TestDoctor(t *testing.T) {
 			e.store.tx-txs, len(e.store.bots), len(e.path.subjects))
 	}
 
+	e.configure(t, `{"bot_system_admin":true}`)
+	if got := findings(t, e.svc, e.store); !strings.HasPrefix(got, "connection mm: ok\n") {
+		t.Errorf("an admin bot:\n%s", got)
+	}
+	e.configure(t, `{"bot_system_admin":false}`)
+	if err := e.fake.SetFault(fakeserver.Fault{Path: "/api/v4/roles/names", Status: 503, Times: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if got := findings(t, e.svc, e.store); !strings.HasPrefix(got, "connection mm: ok\n") {
+		t.Errorf("roles unreadable:\n%s", got)
+	}
+	e.fake.ResetFaults()
 	e.configure(t, `{"revoked_tokens":["`+botToken+`"]}`)
 	if got := findings(t, e.svc, e.store); !strings.HasPrefix(got, "connection mm: "+mattermost.MessageTokenInvalid) ||
 		!strings.Contains(got, "destination dest-7: its Connection failed its check: "+

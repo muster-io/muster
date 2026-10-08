@@ -2,11 +2,12 @@
 // Copyright The Muster Authors
 
 // Package fakemattermost is the fake Mattermost server. It answers the REST API v4 calls Muster makes for its bot user
-// as Mattermost 11.2.2 does in the verified facts (F-022 to F-032, F-054 to F-058): a team with three channels and two
-// people, posts, Thread replies, edits, ephemeral posts, direct messages, notifications, button presses sent to the
-// integration URL and the rate limit. Every other call is recorded and answered 501. The control endpoints under
-// /_fake/ list what happened and change the fixtures: posts, notifications, ephemeral posts, presses, the server log,
-// channel members, archived channels and the server configuration.
+// as Mattermost 11.2.2 does in the verified facts (F-022 to F-032, F-054 to F-058, F-062 to F-064): a team with three
+// channels and two people, posts, Thread replies, edits, ephemeral posts — refused with 403 unless the bot is a system
+// admin — the system roles with their permissions, direct messages, notifications, button presses sent to the
+// integration URL with the ephemeral_text of their answers, and the rate limit. Every other call is recorded and
+// answered 501. The control endpoints under /_fake/ list what happened and change the fixtures: posts, notifications,
+// ephemeral posts, presses, the server log, channel members, archived channels and the server configuration.
 package fakemattermost
 
 import (
@@ -99,6 +100,9 @@ type Config struct {
 	RateLimit                           RateLimitConfig `json:"rate_limit"`
 	// RevokedTokens are refused with 401; every other non-empty token is the bot's.
 	RevokedTokens []string `json:"revoked_tokens"`
+	// BotSystemAdmin gives the bot the system admin role. Off by default, as for a bot with the role Member, which
+	// gets 403 from POST /api/v4/posts/ephemeral (F-063).
+	BotSystemAdmin bool `json:"bot_system_admin"`
 }
 
 type RateLimitConfig struct {
@@ -110,7 +114,8 @@ type configPatch struct {
 	RateLimit                           *struct {
 		Enabled *bool `json:"enabled"`
 	} `json:"rate_limit"`
-	RevokedTokens *[]string `json:"revoked_tokens"`
+	RevokedTokens  *[]string `json:"revoked_tokens"`
+	BotSystemAdmin *bool     `json:"bot_system_admin"`
 }
 
 // User is a Mattermost user as the API shows it.
@@ -226,6 +231,7 @@ func New() *Fake {
 	f.api.HandleFunc("GET /api/v4/channels/{channel_id}/members/me", f.handleMyMembership)
 	f.api.HandleFunc("POST /api/v4/channels/direct", f.handleDirect)
 	f.api.HandleFunc("GET /api/v4/config/client", f.handleClientConfig)
+	f.api.HandleFunc("POST /api/v4/roles/names", f.handleRolesByNames)
 	f.api.HandleFunc("POST /api/v4/posts", f.handleCreatePost)
 	f.api.HandleFunc("POST /api/v4/posts/ephemeral", f.handleEphemeral)
 	f.api.HandleFunc("GET /api/v4/posts/{post_id}", f.handleGetPost)
@@ -301,6 +307,13 @@ func (f *Fake) SetAllowedUntrustedInternalConnections(v string) {
 	f.st.config.AllowedUntrustedInternalConnections = v
 }
 
+// SetBotSystemAdmin gives the bot the system admin role, with which it may make ephemeral posts (F-063), or takes it.
+func (f *Fake) SetBotSystemAdmin(admin bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.st.config.BotSystemAdmin = admin
+}
+
 // ServerLog returns the server log lines in order.
 func (f *Fake) ServerLog() []LogEntry {
 	f.mu.Lock()
@@ -343,6 +356,9 @@ func (f *Fake) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.RevokedTokens != nil {
 		c.RevokedTokens = append([]string{}, *p.RevokedTokens...)
+	}
+	if p.BotSystemAdmin != nil {
+		c.BotSystemAdmin = *p.BotSystemAdmin
 	}
 	f.mu.Unlock()
 	fakeserver.WriteJSON(w, http.StatusOK, f.Config())
@@ -502,7 +518,44 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) error {
 
 func (f *Fake) handleMe(w http.ResponseWriter, _ *http.Request) {
 	bot, _ := userByID(BotUserID)
+	if f.Config().BotSystemAdmin {
+		bot.Roles = "system_admin system_user"
+	}
 	fakeserver.WriteJSON(w, http.StatusOK, bot)
+}
+
+// Role is a Mattermost role as POST /api/v4/roles/names answers it.
+type Role struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Permissions []string `json:"permissions"`
+	DeleteAt    int64    `json:"delete_at"`
+}
+
+// roles are the system roles the fake knows, with a few of their default permissions: only system_admin has
+// create_post_ephemeral (F-063).
+var roles = []Role{
+	{ID: "role-system-user", Name: "system_user", Permissions: []string{"create_direct_channel", "create_team",
+		"list_public_teams", "view_members"}},
+	{ID: "role-system-admin", Name: "system_admin", Permissions: []string{"create_direct_channel", "create_post",
+		"create_post_ephemeral", "manage_system", "read_deleted_posts"}},
+}
+
+// handleRolesByNames reads the roles named in the body, as any user with a session may (F-064); unknown names are left
+// out.
+func (f *Fake) handleRolesByNames(w http.ResponseWriter, r *http.Request) {
+	var names []string
+	if err := decodeBody(w, r, &names); err != nil || len(names) == 0 {
+		invalidBody(w, "rolenames")
+		return
+	}
+	out := []Role{}
+	for _, role := range roles {
+		if slices.Contains(names, role.Name) {
+			out = append(out, role)
+		}
+	}
+	fakeserver.WriteJSON(w, http.StatusOK, out)
 }
 
 func (f *Fake) handleMyTeams(w http.ResponseWriter, _ *http.Request) {

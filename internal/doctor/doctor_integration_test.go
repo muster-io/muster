@@ -20,6 +20,7 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/organization"
 )
 
@@ -180,7 +181,7 @@ func TestIntegrationDoctor(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("muster doctor with a Mattermost Connection:\n%s", out.String())
-		want := "OK   connection Dev Mattermost: ok\n" +
+		want := "WARN connection Dev Mattermost: " + mattermost.HintPressAnswersInThread + "\n" +
 			"OK   destination alerts: ok\n" +
 			"FAIL destination no-bot: The bot is not a member of this channel.\n"
 		if ok || !strings.HasSuffix(out.String(), want) || strings.Count(out.String(), "\n") != 11 {

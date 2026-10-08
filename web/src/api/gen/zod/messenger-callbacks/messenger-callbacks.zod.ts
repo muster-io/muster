@@ -21,7 +21,7 @@ import * as zod from 'zod';
 
 
 /**
- * Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and an empty JSON object, refusals, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included, so the endpoint tells a caller nothing about which Connection ids exist; request validation does not answer `400` here. The answer never carries `update` (only the delivery worker edits the Root message) or `ephemeral_text` (Mattermost would show it only inside the Thread); whatever the person who pressed must read is sent as a separate ephemeral post.
+ * Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and a JSON object, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included; request validation does not answer `400` here. Whatever the person who pressed must read — a refusal, a failure, "not linked", or "not verified" for a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the pressed post and which needs no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.
  * @summary Receive a Mattermost button press
  */
 export const mattermostActionPathConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -46,9 +46,10 @@ export const MattermostActionBody = zod.object({
 }).describe('The integration data Muster put on the button. Mattermost does not sign the request, so authenticity rests on the signed action id.')
 }).describe('Button press sent by the Mattermost server.')
 
-export const MattermostActionResponse = zod.looseObject({
-
-}).describe('Always empty. Refusals and failures reach the person who pressed as a separate ephemeral post, not through this answer.')
+export const MattermostActionResponse = zod.object({
+  "ephemeral_text": zod.string().optional().describe('Shown by Mattermost to the person who pressed alone, from System, in the Thread of the pressed post.'),
+  "skip_slack_parsing": zod.boolean().optional().describe('Always `true` with `ephemeral_text`, so that the text is shown as it is.')
+}).describe('Empty, or the text for the person who pressed when its ephemeral post was refused or failed. Never `update`.')
 
 /**
  * Used only when the Connection's update mode is `webhook`. A request without the right secret token header, or for a Connection that does not exist or is not in webhook mode, is answered `401` and changes nothing.

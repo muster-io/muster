@@ -159,8 +159,12 @@ issue: 39
     other field of the answer is ignored (F-024); when the URL's host is a private or loopback address not listed in
     `AllowedUntrustedInternalConnections` (`PUT /_fake/config`), the press fails with `400` "Action integration error"
     for the person and a server log line (`GET /_fake/server-log`) saying the address is forbidden (F-022);
-  - `POST /api/v4/posts/ephemeral` records an ephemeral post for the user, shown in the channel view when it has no
-    `root_id` and only in the Thread when it has one (F-025, F-026; `GET /_fake/ephemeral`);
+  - `POST /api/v4/posts/ephemeral` answers `403` `api.context.permissions.app_error` to the bot, which has the system
+    user role, as a real server does (F-063); with `PUT /_fake/config {"bot_system_admin": true}` it records an
+    ephemeral post for the user, shown in the channel view when it has no `root_id` and only in the Thread when it has
+    one (F-025, F-026); `GET /_fake/ephemeral` lists these and the `ephemeral_text` of press answers; `POST
+    /api/v4/roles/names` answers the system roles with their permissions, of which only `system_admin` has
+    `create_post_ephemeral` (F-064);
   - the rate limit, off by default (F-030); `PUT /_fake/config {"rate_limit": {"enabled": true}}` allows 10 requests per
     second with a burst of 100 per client address, answering `429` `text/plain` "limit exceeded" with `Retry-After: 1`
     and `X-Ratelimit-Limit`, `-Remaining`, `-Reset` (F-031);

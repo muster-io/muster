@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -118,7 +120,25 @@ type User struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
 	IsBot    bool   `json:"is_bot"`
+	// Roles are the user's system roles, separated by spaces, such as "system_user".
+	Roles string `json:"roles"`
 }
+
+// Role is a Mattermost role with its permissions; a DeleteAt other than 0 grants nothing.
+type Role struct {
+	Name        string   `json:"name"`
+	Permissions []string `json:"permissions"`
+	DeleteAt    int64    `json:"delete_at"`
+}
+
+// PermissionEphemeralPosts is the permission of POST /api/v4/posts/ephemeral, which only the system admin role holds by
+// default (F-063).
+const PermissionEphemeralPosts = "create_post_ephemeral"
+
+// HintPressAnswersInThread is the hint of a Connection whose bot lacks PermissionEphemeralPosts (D284).
+const HintPressAnswersInThread = "the bot may not make ephemeral posts (create_post_ephemeral), so answers to " +
+	"button presses show in the post's Thread; give it that permission, for example the system admin role, to show " +
+	"them in the channel"
 
 // Team is a Mattermost team: Name is its URL name, the team_domain of a press.
 type Team struct {
@@ -149,6 +169,21 @@ type Channel struct {
 func (c *Client) Me(ctx context.Context, class outbound.Class) (User, Result) {
 	var u User
 	return u, c.get(ctx, class, "/api/v4/users/me", &u)
+}
+
+// Grants reports whether the system roles of u grant permission, as the server decides it for u's requests (F-064):
+// one read of the roles, POST /api/v4/roles/names, of which any role that is not deleted holds permission. A user
+// without roles is granted nothing and needs no read.
+func (c *Client) Grants(ctx context.Context, class outbound.Class, u User, permission string) (bool, Result) {
+	names := strings.Fields(u.Roles)
+	if len(names) == 0 {
+		return false, Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}
+	}
+	var roles []Role
+	r := c.send(ctx, class, http.MethodPost, "/api/v4/roles/names", names, &roles)
+	return slices.ContainsFunc(roles, func(role Role) bool {
+		return role.DeleteAt == 0 && slices.Contains(role.Permissions, permission)
+	}), r
 }
 
 // Teams reads the teams the bot belongs to.

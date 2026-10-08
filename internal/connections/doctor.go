@@ -32,12 +32,13 @@ var errNoKeyring = errors.New("the bot token cannot be opened: the master keys c
 // checkFailed is the message of a failed check whose answer said nothing.
 const checkFailed = "the check failed"
 
-// Finding is the outcome of muster doctor's check of a Connection or a Destination: its kind, its name and, when the
-// check failed, the message of the step that failed.
+// Finding is the outcome of muster doctor's check of a Connection or a Destination: its kind, its name, when the
+// check failed, the message of the step that failed, and when it passed with a hint, the hint.
 type Finding struct {
 	Kind    string
 	Name    string
 	Message string
+	Warning string
 }
 
 // OK reports whether the check passed.
@@ -68,7 +69,7 @@ func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duratio
 			f := Finding{Kind: FindingConnection, Name: r.Name}
 			c, err := s.doctorClient(dbgen.GetConnectionRow(r))
 			if err == nil {
-				f.Message = connectionCheck(ctx, c, each)
+				f.Message, f.Warning = connectionCheck(ctx, c, each)
 			} else {
 				f.Message = err.Error()
 			}
@@ -118,18 +119,23 @@ func (s *Service) doctorClient(row dbgen.GetConnectionRow) (*mattermost.Client, 
 	return s.client(row)
 }
 
-// connectionCheck is the Connection check in the background class, bounded by each: empty when the bot token works,
-// otherwise the message of the failure.
-func connectionCheck(ctx context.Context, c *mattermost.Client, each time.Duration) string {
+// connectionCheck is the Connection check in the background class, bounded by each: an empty message when the bot
+// token works, otherwise the message of the failure; and the hint mattermost.HintPressAnswersInThread when the token
+// works but the bot's roles do not let it make ephemeral posts (D284).
+func connectionCheck(ctx context.Context, c *mattermost.Client, each time.Duration) (message, warning string) {
 	ctx, cancel := context.WithTimeout(ctx, each)
 	defer cancel()
-	_, r := c.Me(ctx, outbound.ClassBackground)
+	u, r := c.Me(ctx, outbound.ClassBackground)
 	switch {
 	case r.OK():
-		return ""
+		if granted, r := c.Grants(ctx, outbound.ClassBackground, u, mattermost.PermissionEphemeralPosts); r.OK() &&
+			!granted {
+			return "", mattermost.HintPressAnswersInThread
+		}
+		return "", ""
 	case r.Status == http.StatusUnauthorized:
-		return mattermost.MessageTokenInvalid
+		return mattermost.MessageTokenInvalid, ""
 	default:
-		return cmp.Or(string(r.Outcome.Error), checkFailed)
+		return cmp.Or(string(r.Outcome.Error), checkFailed), ""
 	}
 }

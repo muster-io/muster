@@ -845,8 +845,9 @@ func TestDeleteWithoutAbandon(t *testing.T) {
 }
 
 // TestCheck is C-13.FR-2: the Connection check on the interactive path, limited by the Connection, returns the bot's
-// name and records the bot; a revoked token fails with "The bot token is not valid."; no limiter token in time is a
-// *delivery.LimitedError.
+// name and records the bot, with the warning press_answers_in_thread while the bot's roles do not grant
+// create_post_ephemeral (D284) and without it once they do; a revoked token fails with "The bot token is not
+// valid."; no limiter token in time is a *delivery.LimitedError.
 func TestCheck(t *testing.T) {
 	e := newEnv(t)
 	c := e.create(t, "mm")
@@ -854,7 +855,8 @@ func TestCheck(t *testing.T) {
 	res, err := e.svc.Check(ctx, c.PublicID)
 	if err != nil || !res.OK || res.BotName != fakemattermost.BotUsername || len(res.Steps) != 1 ||
 		res.Steps[0].Name != connections.StepToken || !res.Steps[0].OK || res.Steps[0].Via != mattermost.ViaDirect ||
-		res.Steps[0].Latency != 7*time.Millisecond || res.Steps[0].Message != "" {
+		res.Steps[0].Latency != 7*time.Millisecond || res.Steps[0].Message != "" ||
+		!slices.Equal(res.Warnings, []string{connections.WarningPressAnswersInThread}) {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
 	got, _ := e.svc.Get(ctx, c.PublicID)
@@ -862,13 +864,25 @@ func TestCheck(t *testing.T) {
 		*got.BotUserID != fakemattermost.BotUserID || got.Version != 1 {
 		t.Errorf("bot = %+v", got)
 	}
-	if len(e.path.subjects) != 1 || e.path.subjects[0].Connection == nil || *e.path.subjects[0].Connection != c.ID ||
-		e.path.subjects[0].Destination != nil {
+	if len(e.path.subjects) != 2 || e.path.subjects[1].Connection == nil || *e.path.subjects[1].Connection != c.ID ||
+		e.path.subjects[1].Destination != nil {
 		t.Errorf("subjects %+v", e.path.subjects)
 	}
 	reqs := e.fake.Requests()
-	if len(reqs) != 1 || reqs[0].Path != "/api/v4/users/me" || reqs[0].Headers["Authorization"][0] != "Bearer "+botToken {
+	if len(reqs) != 2 || reqs[0].Path != "/api/v4/users/me" || reqs[0].Headers["Authorization"][0] != "Bearer "+botToken ||
+		reqs[1].Path != "/api/v4/roles/names" || reqs[1].Body != `["system_user"]` {
 		t.Errorf("requests %+v", reqs)
+	}
+	e.configure(t, `{"bot_system_admin":true}`)
+	if res, err := e.svc.Check(ctx, c.PublicID); err != nil || !res.OK || len(res.Warnings) != 0 {
+		t.Errorf("an admin bot = %+v, %v", res, err)
+	}
+	e.configure(t, `{"bot_system_admin":false}`)
+	if err := e.fake.SetFault(fakeserver.Fault{Path: "/api/v4/roles/names", Status: 503, Times: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := e.svc.Check(ctx, c.PublicID); err != nil || !res.OK || len(res.Warnings) != 0 {
+		t.Errorf("roles unreadable = %+v, %v", res, err)
 	}
 	e.configure(t, `{"revoked_tokens":["`+botToken+`"]}`)
 	nBots := len(e.store.bots)
@@ -943,7 +957,7 @@ func TestCheckThroughProxy(t *testing.T) {
 		t.Fatalf("destination check = %+v, %v", checked, err)
 	}
 	reqs, targets := e.fake.Requests(), p.Targets()
-	if len(reqs) != 7 || len(targets) != len(reqs) || p.Refused() != 0 {
+	if len(reqs) != 8 || len(targets) != len(reqs) || p.Refused() != 0 {
 		t.Errorf("%d requests reached the fake, %d through the proxy, %d refused", len(reqs), len(targets),
 			p.Refused())
 	}

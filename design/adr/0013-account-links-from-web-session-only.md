@@ -60,7 +60,8 @@ the owner of the messenger account — never the other way round.
 Telegram with `answerCallbackQuery` — that the account is not linked, with a link to the Muster profile. The link
 carries no secret. A Viewer is told that the action is not permitted. Telegram presses older than one hour, for example
 queued while Muster was down, are dropped. These answers and the bot's messages during linking are sent through the
-interactive path, not the delivery queue (ADR-0005).
+interactive path, not the delivery queue (ADR-0005); a Mattermost answer that its ephemeral post cannot carry goes back
+in the press's own answer instead (below).
 
 **Mattermost only through its REST API with a bot account.** Each Mattermost Connection uses the bot account's token for
 posting, editing, direct messages and ephemeral replies. Muster does not use Mattermost incoming webhooks and does not
@@ -70,7 +71,12 @@ signed action id (ADR-0011). If Muster has an internal address, it must be liste
 press shows the person only a generic "Action integration error", and only the Mattermost server log says why. The
 documentation says so, and the Connection page reminds the admin. Muster answers a press with an empty JSON object and
 sends anything the person must read as a separate ephemeral post: an ephemeral text in the answer itself would appear
-only inside the Thread of the Root message, out of sight in the channel.
+only inside the Thread of the Root message, out of sight in the channel. That post needs the `create_post_ephemeral`
+permission, which only system admins hold by default, and the bot is meant to have the role Member. When the post is
+refused for it, or fails in any other way, the answer to the press carries the same text as `ephemeral_text` instead,
+which needs no permission: out of sight in the channel, but never lost (F-062, F-063, journal D284). The Connection
+check warns when the bot's roles lack the permission, so the admin can grant it — for example with the system admin
+role — or accept answers in the Thread.
 
 **Not in the first release:** linking through Mattermost OAuth or Telegram Login.
 

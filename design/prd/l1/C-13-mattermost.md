@@ -30,7 +30,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   (C-03.FR-19) and its limiter (`connection.mattermost.limiter`). Muster uses only the REST API with the bot account —
   no incoming webhooks, no plugin.
 - **C-13.FR-2** The connection check (interactive) verifies the token and shows the bot's name; saving a Destination
-  verifies that the bot is a member of the channel and refuses otherwise, naming the failing check.
+  verifies that the bot is a member of the channel and refuses otherwise, naming the failing check. When the bot's
+  roles do not grant `create_post_ephemeral` — read with `POST /api/v4/roles/names`, as the server decides it (F-064)
+  — the check still passes, with the warning `press_answers_in_thread`: answers to button presses will show in the
+  Thread of the post, and granting the bot that permission, for example the system admin role, shows them in the
+  channel (FR-4, F-063). `muster doctor` prints the same hint as a WARN line.
 - **C-13.FR-3** A Mattermost Destination has a Connection, a team and channel, its Mention settings (C-12.FR-8) and its
   limiter (`destination.mattermost.limiter`). The Root message is a post whose `message` is a short summary line — the
   status emoji, `#N` and the Alert Group's title — with one attachment, coloured by status, that holds the details of
@@ -54,16 +58,23 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   that the action id was issued for (a mismatch is refused like a bad signature), maps the Mattermost `user_id` to a
   User through its Account link for this Connection (C-18), and dispatches the command with the Transport `mattermost`.
   The callback is `POST /api/v1/callbacks/mattermost/{connection_id}` on the ingest listener; every request is answered
-  `200` with an empty JSON object — also one whose body is not JSON and one for a Connection that does not exist, so the
-  endpoint reveals nothing about which Connections do. The answer never carries `update`, because only the delivery
-  worker edits the Root message (C-11.FR-2), nor `ephemeral_text`, which Mattermost shows only inside the Root
-  message's Thread, from "System" (F-025). Muster answers once the command is dispatched, well within the 30 s that Mattermost waits by default (F-032).
-  What the person who pressed must read — a refusal, a failure, or for an account without an Account link "Your
-  Mattermost account is not linked to Muster. Link it in your profile: {link}" — is a separate ephemeral post to that
-  person (`POST /api/v4/posts/ephemeral`) through the interactive path: without `root_id` for a press on a Root message,
-  so that it shows at once in the channel view (F-026), and with the Root message as `root_id` for a press on a Thread
-  reply, such as a Reminder (C-17.FR-4), whose buttons the server accepts like those of a Root message (F-055). A press
-  from an account without an Account link changes nothing.
+  `200` with a JSON object — also one whose body is not JSON and one for a Connection that does not exist, which get an
+  empty object, so the endpoint reveals nothing about which Connections do. The answer never carries `update`, because
+  only the delivery worker edits the Root message (C-11.FR-2). Muster answers once the command is dispatched, well
+  within the 30 s that Mattermost waits by default (F-032). What the person who pressed must read — a refusal, a
+  failure, or for an account without an Account link "Your Mattermost account is not linked to Muster. Link it in your
+  profile: {link}" — reaches that person alone in one of two ways (D284). First Muster sends a separate ephemeral post
+  (`POST /api/v4/posts/ephemeral`) through the interactive path, within `delivery.interactive_budget`: without
+  `root_id` for a press on a Root message, so that it shows at once in the channel view (F-026), and with the Root
+  message as `root_id` for a press on a Thread reply, such as a Reminder (C-17.FR-4), whose buttons the server accepts
+  like those of a Root message (F-055); the answer is then empty. That call needs the `create_post_ephemeral`
+  permission, which a bot with the role Member lacks (F-063). When it is refused with `403` for that permission —
+  expected, so not logged as an error — or fails in any other way (a timeout, a `5xx`, no limiter token within the
+  budget), the same text goes into the answer's `ephemeral_text`, with `skip_slack_parsing`, which needs no permission
+  and which Mattermost shows to that person, from "System", in the Thread of the Root message (F-025, F-062): with
+  collapsed reply threads, the default, it is seen only once the Thread is open. So the answer is never lost, and a
+  bot with the permission shows it in the channel. A successful press gets an empty answer: the edited Root message
+  shows its result. A press from an account without an Account link changes nothing.
 - **C-13.FR-5** Response mapping: `429` → RetryAfter for the whole Connection, for the seconds in `Retry-After`, because
   Mattermost counts requests per client address, not per channel (F-030); the body of that `429` is plain text, not
   JSON, so it is classified by its status and headers alone (F-031); `5xx` and timeouts → Transient; `401` and `403`
@@ -78,7 +89,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
 - **C-13.FR-6** A Connection used by Destinations cannot be deleted; a deleted Destination does not count as using it
   (C-11.FR-14). Deleting the Connection abandons the final edits still pending for its deleted Destinations, which end
   as Not delivered.
-- **C-13.FR-7** The documentation covers: creating the bot account and its permissions; allowing the bot to send direct
+- **C-13.FR-7** The documentation covers: creating the bot account and its permissions — the role Member is enough,
+  and answers to presses then show in the Thread; `create_post_ephemeral`, for example through the system admin role,
+  shows them in the channel instead (FR-4, F-063); allowing the bot to send direct
   messages, which Account links need (F-028); adding the host of `MUSTER_INGEST_URL` to
   `ServiceSettings.AllowedUntrustedInternalConnections` when it is an internal address — otherwise a press shows the
   person only a generic "Action integration error", and only the Mattermost server log says why (F-022) — and that a
@@ -163,11 +176,16 @@ Checked against the fake Mattermost server.
 - **C-13.AC-13** A new Alert Group creates a post whose `message` is the summary line and which has one attachment
   whose title links to the Alert Group page, whose text has a line of links under the Alerts that starts with "Open in
   Muster", and whose `footer` is "Muster v<version>"; every link is in the attachment, none is a button.
-- **C-13.AC-14** A press on a Root message is answered `200` with an empty JSON object, without `update` or
-  `ephemeral_text`; when the press is refused, the person gets a separate ephemeral post in the channel, without
-  `root_id`.
+- **C-13.AC-14** A press on a Root message is answered `200` with a JSON object that never carries `update`. When the
+  press is refused and the bot has the system admin role in the fake server, the person gets a separate ephemeral post
+  in the channel, without `root_id`, and the answer is empty; with the role Member, the fake server refuses that post
+  with `403`, like a real one, and the answer carries the same text in `ephemeral_text`. A failed ephemeral post of an
+  admin bot falls back to `ephemeral_text` too. A press that ran its command gets an empty answer.
 - **C-13.AC-15** A `429` from the fake server with a plain-text body and `Retry-After: 1` delays the next request
   through that Connection, to any of its Destinations, by 1 to 2 seconds and is not counted as an attempt.
+- **C-13.AC-16** The connection check of a bot whose roles do not grant `create_post_ephemeral` passes with the warning
+  `press_answers_in_thread`, and `muster doctor` prints it as a WARN line; with the system admin role there is no
+  warning.
 
 ## Related ADRs
 
@@ -179,7 +197,7 @@ C-11 — delivery; C-12 — rendering and Mention settings.
 
 ## Suggested story split
 
-- **BE** — Connection, adapter (posts, threads, buttons, callbacks, ephemeral posts, error mapping, escaping,
+- **BE** — Connection, adapter (posts, threads, buttons, callbacks, ephemeral answers, error mapping, escaping,
   Destination check), channel listing, the "Delivery problem" filter, fake server extension.
 - **FE** — Connection pages with the callback address and its hint, the shared Destination pages with "Check", the
   Mattermost Destination form, the delivery state section, the "Delivery problem" filter, the Internal alerts Route

@@ -1180,9 +1180,10 @@ func (s *probeSnapshots) Store(context.Context, ingest.Received) (ingest.Stored,
 // probeMattermost pushes the bot token (secret 0) and the proxy password (secret 1) of a Mattermost Connection through
 // its creation, the Connection check, the channel list and the Destination check, against a stand-in server that
 // answers every call with the token and the Authorization header in its error, directly and through a SOCKS5 proxy
-// that refuses the password; sends button presses to the callback of the Connection, whose ephemeral answers the
-// server refuses; publishes, edits, replies and checks through the adapter and runs the checks of muster doctor
-// against the same server; and builds a client whose proxy, with a password (secret 2), is refused.
+// that refuses the password; sends button presses to the callback of the Connection, whose ephemeral posts the
+// server refuses and whose answers carry their text instead; publishes, edits, replies and checks through the adapter
+// and runs the checks of muster doctor against the same server; and builds a client whose proxy, with a password
+// (secret 2), is refused.
 func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
@@ -1268,7 +1269,8 @@ func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error
 
 // probePresses sends button presses to the callback of the Connection publicID: one that cannot be verified, one from
 // an account without an Account link and one whose Command is refused, each answered with an ephemeral post that the
-// stand-in server refuses with the bot token in its error, and each logged.
+// stand-in server refuses with the bot token in its error, each logged, and returns the answers, whose ephemeral_text
+// must carry no secret.
 func probePresses(ctx context.Context, svc *connections.Service, k *keyring.Keyring, clocks clock.Clocks,
 	logger *logging.Logger, publicID string) error {
 	action, keyID, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectRoot, PublicID: "AGAAAAAAAAAAA1",

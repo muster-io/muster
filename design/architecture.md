@@ -472,23 +472,24 @@ sequenceDiagram
     MM->>IN: POST to the action callback at MUSTER_INGEST_URL<br/>signed action id, key id, user_id, post_id, channel_id
     IN->>IN: verify the signature with the key it names (must be in the Keyring)<br/>and that post_id and channel_id belong to the action id
     alt signature or message does not match
-        IN-->>MM: 200 with an empty JSON object, nothing changes
         IN->>IP: ephemeral error for the person who pressed
         IP->>MM: ephemeral post without root_id, shown in the channel
+        IN-->>MM: 200 with an empty JSON object, nothing changes
     else valid
         IN->>AL: Mattermost user_id to User, through the link for this Connection
         alt no Account link
-            IN-->>MM: 200 with an empty JSON object, nothing changes
             IN->>IP: "Your Mattermost account is not linked to Muster" with the profile link
             IP->>MM: ephemeral post without root_id
+            IN-->>MM: 200 with an empty JSON object, nothing changes
         else linked User
             IN->>GR: Acknowledge, Transport mattermost
             GR->>GR: permission, precondition, transition,<br/>Audit log, Timeline, re-render
             alt refused (Viewer, disabled User, precondition)
                 GR-->>IN: refusal code
-                IN-->>MM: 200 with an empty JSON object
                 IN->>IP: refusal text
                 IP->>MM: ephemeral post, limiter token first, fails within the interactive budget
+                IN-->>MM: 200 with an empty JSON object
+                Note over IN,MM: when the ephemeral post is refused (403 for a bot<br/>without create_post_ephemeral) or fails,<br/>the 200 carries the text as ephemeral_text instead
             else done
                 GR-->>IN: acknowledged, a Quiet lifecycle event
                 IN-->>MM: 200 with an empty JSON object, never update or ephemeral_text
@@ -501,10 +502,13 @@ sequenceDiagram
 ```
 
 Commands on one Alert Group are serialized, so two simultaneous presses give one acknowledgement and one Takeover
-([C-10].FR-10). The answer to a press never edits the post: only the delivery worker edits the Root message. Nor does it
-carry text for the person, because Mattermost would show that text only inside the Root message's Thread; the
-interactive path sends it as a separate ephemeral post instead — without `root_id` for a press on a Root message, in the
-Thread for a press on a Thread reply ([C-13].FR-4, [verified facts](facts.md#button-presses-and-answers)). Mattermost
+([C-10].FR-10). The answer to a press never edits the post: only the delivery worker edits the Root message. Text for
+the person goes first as a separate ephemeral post through the interactive path — without `root_id` for a press on a
+Root message, so that it shows in the channel view, in the Thread for a press on a Thread reply. That post needs the
+`create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other
+way, the callback's answer carries the text as `ephemeral_text`, which Mattermost shows only inside the Root message's
+Thread but which needs no permission, so the person always reads it ([C-13].FR-4,
+[verified facts](facts.md#button-presses-and-answers)). The Connection check warns when the bot lacks the permission. Mattermost
 reaches `MUSTER_INGEST_URL` with its untrusted HTTP client, so an internal address must be listed in its
 `AllowedUntrustedInternalConnections`; otherwise a press shows only a generic "Action integration error" ([ADR-0013]).
 
