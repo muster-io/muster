@@ -195,6 +195,15 @@ describe("search parameters", () => {
       from: "2026-10-07T11:00:00.000Z",
     });
   });
+
+  test("keep the Delivery problem filter in the URL and send it to the list and the counts", () => {
+    const search = alertGroupSearchSchema.parse(defaultParseSearch("?delivery_problem=true"));
+    expect(search).toEqual({ delivery_problem: true });
+    expect(defaultStringifySearch(search)).toBe("?delivery_problem=true");
+    expect(compact(countParams(search, 0))).toEqual({ delivery_problem: true });
+    expect(compact(listParams(search, 0))).toEqual({ delivery_problem: true });
+    expect(alertGroupSearchSchema.parse(defaultParseSearch("?delivery_problem=no"))).toEqual({});
+  });
 });
 
 describe("AlertGroupFilters", () => {

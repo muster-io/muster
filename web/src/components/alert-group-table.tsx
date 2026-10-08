@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The rows of the Alert Group list (C-09.FR-13, FR-24; C-10.FR-13, FR-14, FR-16). On a desktop a table: status, #N,
-// title, Severity level, Urgent, Route, Integrations, firing and total Alerts, Owner, Snooze end, start, duration, last
-// change, Reopen count, the label columns the user picked and the "…" menu of Commands. On a phone compact rows —
-// status, #N, title, Urgent mark, duration and Owner, a link to the page, with the menu beside it — so that nothing
-// scrolls sideways. While the user selects, each row has a checkbox. Titles, summaries and label values come from
-// alerts: text only.
+// The rows of the Alert Group list (C-09.FR-13, FR-24; C-10.FR-13, FR-14, FR-16; C-13.FR-12). On a desktop a
+// table: status with the Delivery problem mark, #N, title, Severity level, Urgent, Route, Integrations, firing and
+// total Alerts, Owner, Snooze end, start, duration, last change, Reopen count, the label columns the user picked and
+// the "…" menu of Commands. On a phone compact rows — status, #N, title, Urgent mark, duration, Owner and the
+// Delivery problem in words, a link to the page, with the menu beside it — so that nothing scrolls sideways. While
+// the user selects, each row has a checkbox. Titles, summaries and label values come from alerts: text only.
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
+import { MailWarningIcon } from "lucide-react";
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -65,6 +66,32 @@ function SelectBox({ row }: { row: AlertGroup }) {
       onChange={() => toggle(row.id)}
       data-testid="select-row"
     />
+  );
+}
+
+/** The mark of a row with a Delivery problem; its tooltip says where to look. */
+export function DeliveryProblemMark() {
+  const { t } = useTranslation();
+  const text = t("alertGroups.deliveryProblem");
+  return (
+    <span
+      role="img"
+      aria-label={text}
+      title={text}
+      className="inline-flex shrink-0 text-destructive"
+      data-testid="delivery-problem-mark"
+    >
+      <MailWarningIcon aria-hidden="true" className="size-4" />
+    </span>
+  );
+}
+
+function StatusCell({ row }: { row: AlertGroup }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <StatusBadge status={row.status} />
+      {row.delivery_problem && <DeliveryProblemMark />}
+    </span>
   );
 }
 
@@ -154,7 +181,7 @@ function useColumns(labelColumns: readonly string[], selecting: boolean): DataCo
       {
         id: "status",
         header: t("alertGroups.columns.status"),
-        Cell: ({ row }) => <StatusBadge status={row.status} />,
+        Cell: StatusCell,
       },
       { id: "number", header: "#", Cell: NumberCell },
       {
@@ -257,8 +284,11 @@ function CompactRow({ row }: { row: AlertGroup }) {
     status: statusLabel(t, row.status),
     duration: formatElapsed(t, elapsedSeconds(row.started_at, row.resolved_at, at)),
   });
-  const label =
+  const withOwner =
     owner === undefined ? base : t("alertGroups.rowLabelOwner", { label: base, name: owner });
+  const label = row.delivery_problem
+    ? t("alertGroups.rowLabelDeliveryProblem", { label: withOwner })
+    : withOwner;
   return (
     <li
       className="flex min-w-0 items-start border-t first:border-t-0"
@@ -291,6 +321,15 @@ function CompactRow({ row }: { row: AlertGroup }) {
         {owner !== undefined && (
           <span className="text-xs text-muted-foreground wrap-anywhere" data-testid="owner">
             {t("alertGroups.owner", { name: owner })}
+          </span>
+        )}
+        {row.delivery_problem && (
+          <span
+            className="flex items-start gap-1 text-xs text-destructive"
+            data-testid="delivery-problem-text"
+          >
+            <MailWarningIcon aria-hidden="true" className="mt-px size-3.5 shrink-0" />
+            <span className="min-w-0 wrap-anywhere">{t("alertGroups.deliveryProblem")}</span>
           </span>
         )}
       </Link>

@@ -1,0 +1,104 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright The Muster Authors
+
+// "Create destination" (C-13.FR-9): the choice of the type, then its form; the new Destination's page opens after it
+// is saved. Telegram (C-14) and the outgoing webhook (C-15) join the choice with their own fields.
+
+import { useQueryClient } from "@tanstack/react-query";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { ArrowLeftIcon } from "lucide-react";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { getListConnectionsQueryKey } from "../api/gen/endpoints/connections/connections";
+import {
+  createDestination,
+  getGetDestinationQueryKey,
+  getListDestinationsQueryKey,
+} from "../api/gen/endpoints/destinations/destinations";
+import { getListRouteSuggestionsQueryKey } from "../api/gen/endpoints/routes/routes";
+import type { DestinationType } from "../api/gen/model";
+import { RequirePermission } from "../components/app-shell";
+import { DestinationForm } from "../components/destination-form";
+import { destinationTypeName } from "../components/destination-health";
+import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
+import { buttonVariants } from "../components/ui/button";
+
+export const Route = createFileRoute("/destinations/new")({
+  staticData: { shell: true },
+  component: NewDestinationPage,
+});
+
+const TYPES: readonly DestinationType[] = ["mattermost"];
+
+function NewDestination() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [type, setType] = useState<DestinationType>();
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <Link
+          to="/destinations"
+          className={buttonVariants({ variant: "link", className: "w-fit px-0" })}
+        >
+          <ArrowLeftIcon aria-hidden="true" />
+          {t("destinations.title")}
+        </Link>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("destinations.create.title")}</h1>
+      </div>
+      <fieldset className="flex min-w-0 flex-col gap-3">
+        <legend className="mb-2 text-sm font-medium">{t("destinations.create.type")}</legend>
+        <div className="flex flex-wrap gap-3">
+          {TYPES.map((k) => (
+            <label
+              key={k}
+              className="flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium has-checked:border-primary has-checked:bg-accent has-focus-visible:ring-2 has-focus-visible:ring-ring"
+            >
+              <input
+                type="radio"
+                name="destination-type"
+                value={k}
+                className="size-4 accent-primary outline-none"
+                checked={type === k}
+                onChange={() => setType(k)}
+              />
+              {destinationTypeName(t, k)}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      {type === "mattermost" && (
+        <DestinationForm
+          kind={MATTERMOST_KIND}
+          submitLabel={t("common.save")}
+          save={async (input) => {
+            const created = await createDestination(input);
+            queryClient.setQueryData(
+              getGetDestinationQueryKey(created.destination.id),
+              created.destination,
+            );
+            void queryClient.invalidateQueries({ queryKey: getListDestinationsQueryKey() });
+            void queryClient.invalidateQueries({ queryKey: getListConnectionsQueryKey() });
+            void queryClient.invalidateQueries({ queryKey: getListRouteSuggestionsQueryKey() });
+            await navigate({
+              to: "/destinations/$destinationId",
+              params: { destinationId: created.destination.id },
+            });
+            return undefined;
+          }}
+          onCancel={() => void navigate({ to: "/destinations" })}
+        />
+      )}
+    </div>
+  );
+}
+
+function NewDestinationPage() {
+  return (
+    <RequirePermission permission="destinations:write">
+      <NewDestination />
+    </RequirePermission>
+  );
+}

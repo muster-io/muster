@@ -14,12 +14,17 @@ import {
   getGetAlertGroupQueryKey,
   getGetAlertGroupTimelineQueryKey,
   getListAlertGroupAlertsQueryKey,
+  getListAlertGroupDeliveriesQueryKey,
   getListRelatedAlertGroupsQueryKey,
 } from "../api/gen/endpoints/alert-groups/alert-groups";
 import {
   getGetConnectionQueryKey,
   getListConnectionsQueryKey,
 } from "../api/gen/endpoints/connections/connections";
+import {
+  getGetDestinationQueryKey,
+  getListDestinationsQueryKey,
+} from "../api/gen/endpoints/destinations/destinations";
 import {
   getGetIntegrationQueryKey,
   getListIntegrationTokensQueryKey,
@@ -85,10 +90,18 @@ registerHint("connection", (id) =>
     ? [getListConnectionsQueryKey()]
     : [getListConnectionsQueryKey(), getGetConnectionQueryKey(id)],
 );
-// A Destination came or went: the Connections list counts the Destinations of each Connection.
-registerHint("destination", () => [getListConnectionsQueryKey()]);
+// A Destination changed, came or went, or became Broken or healthy: the list with its health, the Destination's page,
+// the Connections list, which counts the Destinations of each Connection, and the suggestion of a Route for Internal
+// alerts, which needs a Destination. The Route editor reads the health of its Destinations from the list.
+registerHint("destination", (id) => [
+  getListDestinationsQueryKey(),
+  getListConnectionsQueryKey(),
+  getListRouteSuggestionsQueryKey(),
+  ...(id === null ? [] : [getGetDestinationQueryKey(id)]),
+]);
 
-// An Alert Group changed: the counts of the list, and its page with its Alerts, Timeline and previous Alert Groups.
+// An Alert Group changed: the counts of the list, and its page with its Alerts, Timeline, delivery state and previous
+// Alert Groups.
 // The rows of the list follow it through a listener (onHint), so that the list does not move.
 registerHint("alert-group", (id) =>
   id === null
@@ -98,6 +111,7 @@ registerHint("alert-group", (id) =>
         getGetAlertGroupQueryKey(id),
         getListAlertGroupAlertsQueryKey(id),
         getGetAlertGroupTimelineQueryKey(id),
+        getListAlertGroupDeliveriesQueryKey(id),
         getListRelatedAlertGroupsQueryKey(id),
       ],
 );

@@ -2,11 +2,12 @@
 // Copyright The Muster Authors
 
 // The Route editor (C-08.FR-1, FR-2, FR-4, FR-5): the name, the description, the Matchers (none for the Default route),
-// the urgent mark, the Group key with its preview, the Lifecycle section (C-09.FR-4, FR-5, FR-9), the Snooze durations
-// (C-10.FR-6) and the Message section (C-12.FR-2, FR-3, FR-5), with the banner of a template that keeps failing
-// (C-12.FR-6). The other fields of a Route — its Destinations and the policy fields of later capabilities — are not
-// shown yet: they travel unchanged from the profile of a new Route, or from the stored Route, with every save. Without
-// routes:write the editor only shows the Route.
+// the urgent mark, the Group key with its preview, the Destinations with their health and the Storm banner (C-13.FR-11,
+// C-11.FR-9), the Lifecycle section (C-09.FR-4, FR-5, FR-9), the Delivery section (the Thread batching window and the
+// Storm threshold of C-11), the Snooze durations (C-10.FR-6) and the Message section (C-12.FR-2, FR-3, FR-5), with the
+// banner of a template that keeps failing (C-12.FR-6). The policy fields of later capabilities are not shown yet: they
+// travel unchanged from the profile of a new Route, or from the stored Route, with every save. Without routes:write
+// the editor only shows the Route.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
@@ -30,6 +31,15 @@ import {
   matchersOf,
   sentRows,
 } from "./matcher-builder";
+import { RouteDestinations } from "./route-destinations";
+import {
+  DELIVERY_POINTERS,
+  RoutePolicyDelivery,
+  RoutePolicyDeliveryReadOnly,
+  deliverySchema,
+  deliveryValues,
+  withDelivery,
+} from "./route-policy-delivery";
 import {
   LIFECYCLE_POINTERS,
   RoutePolicyLifecycle,
@@ -78,6 +88,7 @@ const formSchema = z
       }),
     ),
     group_key: z.array(z.string()),
+    destination_ids: z.array(z.string()),
     snooze_durations: z.array(z.number().int().min(1)),
     message: z.object({
       language: z.enum(["en", "ru"]),
@@ -88,6 +99,7 @@ const formSchema = z
       }),
     }),
     ...lifecycleSchema,
+    ...deliverySchema,
   })
   .superRefine((v, ctx) => {
     v.matchers.forEach((row, index) => {
@@ -106,9 +118,11 @@ function formValues(base: RouteInput): FormValues {
     urgent: base.urgent,
     matchers: matcherRows(base.matchers),
     group_key: [...base.group_key],
+    destination_ids: [...base.destination_ids],
     snooze_durations: sortedDurations(base.policy.snooze_durations_seconds),
     message: messageValues(base.policy),
     ...lifecycleValues(base.policy),
+    ...deliveryValues(base.policy),
   };
 }
 
@@ -118,10 +132,7 @@ function withDraft(key: readonly string[], draft: string): string[] {
   return name === "" || key.includes(name) ? [...key] : [...key, name];
 }
 
-/**
- * The input of a save: the fields of the form, and the Destinations and policy fields unchanged from the values the
- * form started from.
- */
+/** The input of a save: the fields of the form, and the policy fields it does not show unchanged from base. */
 function inputOf(base: RouteInput, v: FormValues, draft: string, isDefault: boolean): RouteInput {
   return {
     name: v.name.trim(),
@@ -129,12 +140,36 @@ function inputOf(base: RouteInput, v: FormValues, draft: string, isDefault: bool
     urgent: v.urgent,
     matchers: isDefault ? [] : matchersOf(v.matchers),
     group_key: withDraft(v.group_key, draft),
-    destination_ids: [...base.destination_ids],
-    policy: withMessage(
-      { ...withLifecycle(base.policy, v), snooze_durations_seconds: v.snooze_durations },
-      v.message,
+    destination_ids: [...v.destination_ids],
+    policy: withDelivery(
+      withMessage(
+        { ...withLifecycle(base.policy, v), snooze_durations_seconds: v.snooze_durations },
+        v.message,
+      ),
+      v,
     ),
   };
+}
+
+/** The errors of a refusal about single Destinations (/destination_ids/N), by the Destination they were sent for. */
+function destinationErrors(
+  errors: readonly ProblemError[],
+  sent: readonly string[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const item of errors) {
+    const id = destinationOfPointer(item.pointer, sent);
+    if (id !== undefined && out[id] === undefined) {
+      out[id] = item.code;
+    }
+  }
+  return out;
+}
+
+/** The Destination a pointer /destination_ids/N names among those sent, or undefined. */
+function destinationOfPointer(pointer: string, sent: readonly string[]): string | undefined {
+  const match = /^\/destination_ids\/(\d+)$/.exec(pointer);
+  return match === null ? undefined : sent[Number(match[1])];
 }
 
 function nameErrorText(t: TFunction, code: string | undefined): string {
@@ -219,6 +254,9 @@ export function RouteForm({
     Partial<Record<MessageTemplate, ProblemError[]>>
   >({});
   const [languageError, setLanguageError] = useState<string>();
+  const [serverDestinationErrors, setServerDestinationErrors] = useState<Record<string, string>>(
+    {},
+  );
   const [unmatched, setUnmatched] = useState<string[]>([]);
   // A label name typed in the Group key field: Save and Preview take it as if it had been added.
   const [keyDraft, setKeyDraft] = useState("");
@@ -255,13 +293,14 @@ export function RouteForm({
     mutationFn: ({ input }: { input: RouteInput; sent: MatcherRow[] }) => save(input),
     onMutate: () => {
       setUnmatched([]);
+      setServerDestinationErrors({});
       setSnoozeError(undefined);
       setTemplateErrors({});
       setLanguageError(undefined);
       setServerMatcherErrors(new Map());
       setServerGroupKeyError(undefined);
     },
-    onError: (err, { sent }) => {
+    onError: (err, { input, sent }) => {
       if (!isApiError(err)) {
         return;
       }
@@ -270,10 +309,13 @@ export function RouteForm({
         return;
       }
       applyFieldProblem(err, sent);
+      const byDestination = destinationErrors(err.errors ?? [], input.destination_ids);
+      setServerDestinationErrors(byDestination);
       const rest: string[] = [];
       const byTemplate: Partial<Record<MessageTemplate, ProblemError[]>> = {};
       for (const item of err.errors ?? []) {
         const lifecycleField = LIFECYCLE_POINTERS[item.pointer];
+        const deliveryField = DELIVERY_POINTERS[item.pointer];
         const template = templateOfPointer(item.pointer);
         if (template !== undefined) {
           byTemplate[template] = [...(byTemplate[template] ?? []), item];
@@ -287,6 +329,15 @@ export function RouteForm({
             { type: item.code, message: item.code },
             { shouldFocus: true },
           );
+        } else if (deliveryField !== undefined) {
+          form.setError(
+            deliveryField,
+            { type: item.code, message: item.code },
+            { shouldFocus: true },
+          );
+        } else if (destinationOfPointer(item.pointer, input.destination_ids) !== undefined) {
+          // Shown at the Destination it is about; the focus goes to the section's picker.
+          document.getElementById(`${ID}-destinations-add`)?.focus();
         } else if (item.pointer === "/description") {
           form.setError("description", { type: item.code, message: item.code });
         } else if (item.pointer.startsWith(SNOOZE_POINTER)) {
@@ -382,7 +433,14 @@ export function RouteForm({
             readOnly
           />
         </div>
+        <RouteDestinations
+          id={`${ID}-destinations`}
+          value={base.destination_ids}
+          route={route}
+          readOnly
+        />
         <RoutePolicyLifecycleReadOnly policy={base.policy} />
+        <RoutePolicyDeliveryReadOnly policy={base.policy} />
         <RoutePolicySnoozeReadOnly durations={base.policy.snooze_durations_seconds} />
         <RoutePolicyMessage
           id={`${ID}-message`}
@@ -529,6 +587,24 @@ export function RouteForm({
           }}
         />
       </div>
+      <Controller
+        control={form.control}
+        name="destination_ids"
+        render={({ field }) => (
+          <RouteDestinations
+            id={`${ID}-destinations`}
+            value={field.value}
+            route={route}
+            errors={serverDestinationErrors}
+            onChange={(next) => {
+              setServerDestinationErrors((prev) =>
+                Object.fromEntries(Object.entries(prev).filter(([id]) => next.includes(id))),
+              );
+              field.onChange(next);
+            }}
+          />
+        )}
+      />
       <RoutePolicyLifecycle
         id={`${ID}-lifecycle`}
         reopenWindow={form.register("reopen_window_minutes", { valueAsNumber: true })}
@@ -538,6 +614,15 @@ export function RouteForm({
           reopen_window_minutes: errors.reopen_window_minutes?.message,
           grace_period_minutes: errors.grace_period_minutes?.message,
           urgent_rise_removes_ack: errors.urgent_rise_removes_ack?.message,
+        }}
+      />
+      <RoutePolicyDelivery
+        id={`${ID}-delivery`}
+        batchingWindow={form.register("thread_batching_window_seconds", { valueAsNumber: true })}
+        threshold={form.register("storm_threshold", { valueAsNumber: true })}
+        errors={{
+          thread_batching_window_seconds: errors.thread_batching_window_seconds?.message,
+          storm_threshold: errors.storm_threshold?.message,
         }}
       />
       <Controller

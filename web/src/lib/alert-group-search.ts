@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The view of the Alert Group list in the URL (C-09.FR-13, C-10.FR-13): tab, filters (the Owner and "Snoozed with no
-// end" among them), time range, search, label columns and sort as
+// The view of the Alert Group list in the URL (C-09.FR-13, C-10.FR-13, C-13.FR-12): tab, filters (the Owner, "Snoozed
+// with no end" and "Delivery problem" among them), time range, search, label columns and sort as
 // typed search parameters, so that a view is shared as a link. The list route validates them before its page loads,
 // so this module stays small: it loads with the application.
 
@@ -86,6 +86,7 @@ export const alertGroupSearchSchema = z.object({
   label: strings,
   owner: text,
   snoozed_no_end: z.literal(true).optional().catch(undefined),
+  delivery_problem: z.literal(true).optional().catch(undefined),
   range: z.enum(TIME_RANGES).optional().catch(undefined),
   from: instant,
   to: instant,
@@ -107,6 +108,7 @@ export const FILTER_KEYS = [
   "label",
   "owner",
   "snoozed_no_end",
+  "delivery_problem",
 ] as const satisfies readonly (keyof AlertGroupSearch)[];
 
 /** How many filters of the panel are set, for the "Filters" button of a phone. */
@@ -155,6 +157,7 @@ export function countParams(search: AlertGroupSearch, now: number): GetAlertGrou
     label: search.label,
     owner: search.owner,
     snoozed_no_end: search.snoozed_no_end,
+    delivery_problem: search.delivery_problem,
     ...rangeParams(search, now),
     q: q ? q : undefined,
   };
