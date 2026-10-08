@@ -53,7 +53,7 @@ acceptance:
   - "[C-09.FR-3] A Snapshot whose Alerts join Alert Groups that are already open does not take the Organization's `alert_group_counters` row; one that creates or reopens an Alert Group does, and two that create an Alert Group of the same Route and Group key values at the same time make one."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 165
 ---
 
 # S-065. Parallel Snapshot processing per Alertmanager group and a shorter grouping lock (BE)
