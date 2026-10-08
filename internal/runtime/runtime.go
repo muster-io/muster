@@ -25,6 +25,8 @@ import (
 	"github.com/muster-io/muster/internal/buildinfo"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
+	"github.com/muster-io/muster/internal/connections"
+	connectionsdb "github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
@@ -41,6 +43,7 @@ import (
 	"github.com/muster-io/muster/internal/links"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/metrics"
@@ -127,6 +130,8 @@ type database interface {
 	LinksStore() links.Store
 	DestinationsStore() destinations.Store
 	DestinationsWriter() destinations.Writer
+	// ConnectionsStore serves the Connections.
+	ConnectionsStore() connections.Store
 	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
 	SessionListenConn(ctx context.Context) (db.ListenConn, error)
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
@@ -197,6 +202,8 @@ func (d pgDatabase) LinksStore() links.Store { return links.NewStore(d.Pool) }
 func (d pgDatabase) DestinationsStore() destinations.Store { return destinations.NewStore(d.Pool) }
 
 func (d pgDatabase) DestinationsWriter() destinations.Writer { return destinations.NewWriter(d.Pool) }
+
+func (d pgDatabase) ConnectionsStore() connections.Store { return connections.NewStore(d.Pool) }
 
 func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
 	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
@@ -720,6 +727,16 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, routeID int64, added, removed []int64) error {
 		return p.delivery.RouteDestinationsChanged(ctx, tx, routeID, added, removed)
 	})
+	// Connections and Mattermost Destinations check their bot on the interactive path, which takes the tokens of the
+	// same limiters as the delivery worker (C-11.FR-2).
+	interactive := &delivery.Interactive{OrgID: orgID, Store: p.db.DeliveryStore(), Clocks: p.clocks}
+	conns := connections.New(connections.Config{OrgID: orgID, Store: p.db.ConnectionsStore(), Keyring: p.keyring,
+		Audit: w, Clocks: p.clocks, Interactive: interactive, IngestURL: p.cfg.IngestURL, Log: p.log,
+		Network: mattermost.Network{Policy: organization.NewOutboundPolicies(p.db.OrganizationStore(), orgID,
+			p.clocks.Real), Log: p.log, Real: p.clocks.Real},
+		Abandon: func(ctx context.Context, tx connectionsdb.DBTX, id int64) (func(context.Context), error) {
+			return p.delivery.AbandonConnection(ctx, tx, id)
+		}})
 	p.destinations = destinations.New(orgID, p.db.DestinationsStore())
 	p.destinations.SetWriter(destinations.WriterConfig{Writer: p.db.DestinationsWriter(), Audit: w,
 		Business: p.clocks.Business,
@@ -728,8 +745,13 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		},
 		Retire: func(ctx context.Context, tx destinationsdb.DBTX, id int64) error {
 			return p.delivery.RetireDestination(ctx, tx, id)
-		}})
+		},
+		Mentions: p.mentions, Mattermost: conns,
+		Healthy: p.delivery.EndBroken})
 	if p.opts.Development {
+		if err := conns.EnsureDemo(ctx, devmode.ConnectionDemo()); err != nil {
+			return nil, fmt.Errorf("the demo connection: %w", err)
+		}
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
 			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)
 		}
@@ -759,6 +781,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		AlertGroups:    p.groups,
 		Commands:       p.groups,
 		Directory:      users.NewDirectory(orgID, p.db.AdminStore()),
+		Connections:    conns,
 		Destinations:   p.destinations,
 		Deliveries:     p.delivery,
 		Templates:      p.renderer,

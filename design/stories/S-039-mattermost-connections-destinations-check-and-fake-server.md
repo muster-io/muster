@@ -10,26 +10,40 @@ files_touched:
   - internal/connections/connections.go
   - internal/connections/query.sql
   - internal/connections/connections_test.go
+  - internal/connections/live_test.go
   - internal/destinations/write.go
   - internal/destinations/query.sql
   - internal/destinations/write_test.go
+  - internal/destinations/delete.go
+  - internal/delivery/interactive.go
+  - internal/delivery/broken.go
+  - internal/delivery/broken_test.go
+  - internal/delivery/limiter_test.go
+  - internal/delivery/live_test.go
+  - internal/delivery/deliverytest/unlimited.go
+  - internal/delivery/deliverytest/unlimited_test.go
   - internal/mattermost/client.go
   - internal/mattermost/check.go
   - internal/mattermost/check_test.go
   - internal/api/connections.go
   - internal/api/destinations.go
   - internal/api/connections_test.go
+  - internal/api/destinations_test.go
   - internal/api/server.go
   - internal/api/problem.go
+  - internal/fakes/fakeserver/fakeserver.go
+  - internal/fakes/fakeserver/fakeserver_test.go
   - internal/fakes/fakemattermost/fakemattermost.go
   - internal/fakes/fakemattermost/posts.go
   - internal/fakes/fakemattermost/presses.go
   - internal/fakes/fakemattermost/fakemattermost_test.go
   - internal/devmode/devmode.go
+  - internal/devmode/devmode_test.go
   - internal/runtime/runtime.go
-  - internal/logging/events.go
+  - internal/runtime/runtime_test.go
   - internal/archlint/secretleak.go
   - sqlc.yaml
+  - api/openapi.yaml
   - test/e2e/smoke_test.go
 acceptance:
   - "[C-13.FR-1, C-13.FR-2] A Mattermost Connection is created with a name, the server URL, a write-only bot token, a proxy and its limiter (`connection.mattermost.limiter`); `checkConnection` on the interactive path returns the bot's name, and a revoked token fails the check."
@@ -250,6 +264,26 @@ None.
 - Suggested commit: `feat(mattermost): add mattermost connections, destinations and the destination check`.
 - The fake server is the largest part of this story; the facts it reproduces are its contract with S-061, S-047 and
   S-049.
+- Corrections made while implementing:
+  - `delivery.Interactive.Do` takes an `Op` instead of a function (journal D277): `PublishOp`, `UpdateOp` and
+    `ReplyOp` make the adapter's send or edit inside `interactive.go`, so lint 3 stays strict; `CheckOp` runs an
+    adapter's `Check`; `ReadOp` carries a read such as this story's checks and channel list. Each HTTP request of a
+    check or a listing takes its own limiter token. `deliverytest.Unlimited` is an interactive path without a
+    database for the tests of its callers.
+  - Once the token and the membership pass, the Destination check also reads the channel and its team
+    (`GET /api/v4/channels/{channel_id}`, `GET /api/v4/teams/{team_id}`) for the names it stores; a channel of
+    another team fails `bot_in_channel` with "The channel is not in this team.", and an archived one with "The
+    channel is archived." (posts to it would answer `404`, which is Fatal).
+  - `updateConnection` refuses a new `server_url` without the `bot_token` (`422 required` at `/bot_token`), so that
+    the stored token is never sent to another server.
+  - `api/openapi.yaml`: `MattermostConnection.bot_username` (read-only, the check stores it) was missing, and
+    `createDestination` and `updateDestination` lacked the `503` their Destination check on the interactive path
+    answers.
+  - The Destination write path lives in `destinations` with its type check behind an interface that
+    `connections` implements, so `destinations/delete.go` gains the save's queries and settings; a passing save of a
+    Broken Destination also ends the Broken state.
+  - No log event, metric or Internal alert is new: the Audit log records the changes, and the final edits that the
+    deletion of a Connection abandons log `delivery_not_delivered`.
 
 ## Coverage
 

@@ -59,6 +59,7 @@ export const ListConnectionsResponse = zod.object({
   "set": zod.boolean(),
   "updated_at": zod.iso.datetime({"offset":true}).nullish()
 }).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "bot_username": zod.string().nullish().describe('The bot\'s username, as the last successful Connection check found it; null before one and after the server URL or the bot token changed.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -188,6 +189,7 @@ export const CreateConnectionResponse = zod.union([zod.object({
   "set": zod.boolean(),
   "updated_at": zod.iso.datetime({"offset":true}).nullish()
 }).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "bot_username": zod.string().nullish().describe('The bot\'s username, as the last successful Connection check found it; null before one and after the server URL or the bot token changed.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -272,6 +274,7 @@ export const GetConnectionResponse = zod.union([zod.object({
   "set": zod.boolean(),
   "updated_at": zod.iso.datetime({"offset":true}).nullish()
 }).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "bot_username": zod.string().nullish().describe('The bot\'s username, as the last successful Connection check found it; null before one and after the server URL or the bot token changed.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -410,6 +413,7 @@ export const UpdateConnectionResponse = zod.union([zod.object({
   "set": zod.boolean(),
   "updated_at": zod.iso.datetime({"offset":true}).nullish()
 }).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "bot_username": zod.string().nullish().describe('The bot\'s username, as the last successful Connection check found it; null before one and after the server URL or the bot token changed.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),

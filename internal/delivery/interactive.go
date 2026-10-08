@@ -57,11 +57,71 @@ func (e *LimitedError) Seconds() int {
 	return max(int(math.Ceil(e.RetryAfter.Seconds())), 1)
 }
 
-// Do makes call once a token of s is taken, in the interactive client class. When no token frees within the budget it
+// Op is one interactive call. A send or an edit is an adapter call made here, in interactive.go, so that lint 3 allows
+// it nowhere else: PublishOp, UpdateOp and ReplyOp. CheckOp is an adapter's Destination check, and ReadOp a read that
+// changes no message, such as a Connection check or a channel list, whose answer its function keeps.
+type Op interface {
+	call(ctx context.Context, c Call) Outcome
+}
+
+type readOp func(ctx context.Context, c Call) Outcome
+
+func (f readOp) call(ctx context.Context, c Call) Outcome { return f(ctx, c) }
+
+// ReadOp is a read that sends and edits nothing; a messenger send or edit inside read is still refused by lint 3.
+func ReadOp(read func(ctx context.Context, c Call) Outcome) Op { return readOp(read) }
+
+type checkOp struct{ checker Checker }
+
+func (o checkOp) call(ctx context.Context, c Call) Outcome { return o.checker.Check(ctx, c) }
+
+// CheckOp is the Destination check of an adapter (C-13.FR-10, C-14.FR-14).
+func CheckOp(ch Checker) Op { return checkOp{checker: ch} }
+
+type publishOp struct {
+	adapter Adapter
+	message Message
+}
+
+func (o publishOp) call(ctx context.Context, c Call) Outcome {
+	return o.adapter.Publish(ctx, c, o.message)
+}
+
+// PublishOp sends m as a new message through a.
+func PublishOp(a Adapter, m Message) Op { return publishOp{adapter: a, message: m} }
+
+type updateOp struct {
+	adapter   Adapter
+	messageID string
+	message   Message
+}
+
+func (o updateOp) call(ctx context.Context, c Call) Outcome {
+	return o.adapter.Update(ctx, c, o.messageID, o.message)
+}
+
+// UpdateOp edits the message messageID to m through a.
+func UpdateOp(a Adapter, messageID string, m Message) Op {
+	return updateOp{adapter: a, messageID: messageID, message: m}
+}
+
+type replyOp struct {
+	adapter Adapter
+	root    Root
+	message Message
+}
+
+func (o replyOp) call(ctx context.Context, c Call) Outcome {
+	return o.adapter.Reply(ctx, c, o.root, o.message)
+}
+
+// ReplyOp sends m into the Thread of root through a.
+func ReplyOp(a Adapter, root Root, m Message) Op { return replyOp{adapter: a, root: root, message: m} }
+
+// Do makes op once a token of s is taken, in the interactive client class. When no token frees within the budget it
 // returns a *LimitedError and calls nothing. A RetryAfter the call answers holds the bucket of its scope, as for the
 // worker.
-func (i *Interactive) Do(ctx context.Context, s Subject, call func(ctx context.Context, c Call) Outcome) (Outcome,
-	error) {
+func (i *Interactive) Do(ctx context.Context, s Subject, op Op) (Outcome, error) {
 	budget := i.Budget
 	if budget <= 0 {
 		budget = InteractiveBudget
@@ -102,7 +162,7 @@ func (i *Interactive) Do(ctx context.Context, s Subject, call func(ctx context.C
 			return Outcome{}, ctx.Err()
 		}
 	}
-	out := call(ctx, c)
+	out := op.call(ctx, c)
 	if out.Kind != OutcomeRetryAfter || (s.Destination == nil && out.Scope != ScopeConnection) {
 		return out, nil
 	}

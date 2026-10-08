@@ -370,6 +370,20 @@ func TestMarkHealthy(t *testing.T) {
 	}
 }
 
+// TestEndBroken: the end of a Broken state after a check started by a person, in its own transaction.
+func TestEndBroken(t *testing.T) {
+	e := newEnv(t)
+	e.breakDest(destMM, "x")
+	if err := e.svc.EndBroken(t.Context(), destMM); err != nil || e.db.dests[destMM].health != "healthy" {
+		t.Fatalf("end broken %v %+v", err, e.db.dests[destMM])
+	}
+	e.breakDest(destMM, "x")
+	e.db.fail["MarkDestinationHealthy"] = errBoom
+	if err := e.svc.EndBroken(t.Context(), destMM); !errors.Is(err, errBoom) {
+		t.Errorf("failed = %v", err)
+	}
+}
+
 // TestProbeFailures: a probe that fails is logged as delivery_work_failed with the work probe, and a failed claim fails
 // the round.
 func TestProbeFailures(t *testing.T) {

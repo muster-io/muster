@@ -3730,6 +3730,9 @@ type MattermostConnection struct {
 	// BotTokenStatus What a read shows instead of a Secret. The value itself is never returned.
 	BotTokenStatus SecretStatus `json:"bot_token_status"`
 
+	// BotUsername The bot's username, as the last successful Connection check found it; null before one and after the server URL or the bot token changed.
+	BotUsername nullable.Nullable[string] `json:"bot_username,omitempty"`
+
 	// CallbackUrl The address that Mattermost calls for button presses of this Connection — `mattermostAction` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/mattermost/<id>`). The Connection page shows it with the hint about `AllowedUntrustedInternalConnections`.
 	CallbackUrl *string   `json:"callback_url,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -24347,6 +24350,11 @@ type CreateDestinationResponse429Headers struct {
 	RetryAfter *int
 }
 
+// CreateDestinationResponse503Headers the declared response headers of an HTTP 503 response for CreateDestination
+type CreateDestinationResponse503Headers struct {
+	RetryAfter *int
+}
+
 type CreateDestinationResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -24364,10 +24372,14 @@ type CreateDestinationResponse struct {
 	ApplicationproblemJSON422 *Unprocessable
 	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
 	ApplicationproblemJSON429 *TooManyRequests
+	// ApplicationproblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationproblemJSON503 *Limited
 	// Headers201 the parsed response headers for an HTTP 201 response
 	Headers201 *CreateDestinationResponse201Headers
 	// Headers429 the parsed response headers for an HTTP 429 response
 	Headers429 *CreateDestinationResponse429Headers
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *CreateDestinationResponse503Headers
 }
 
 // GetJSON201 returns the response for an HTTP 201 `application/json` response
@@ -24403,6 +24415,11 @@ func (r CreateDestinationResponse) GetApplicationproblemJSON422() *Unprocessable
 // GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
 func (r CreateDestinationResponse) GetApplicationproblemJSON429() *TooManyRequests {
 	return r.ApplicationproblemJSON429
+}
+
+// GetApplicationproblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r CreateDestinationResponse) GetApplicationproblemJSON503() *Limited {
+	return r.ApplicationproblemJSON503
 }
 
 // GetBody returns the raw response body bytes
@@ -24603,6 +24620,11 @@ type UpdateDestinationResponse429Headers struct {
 	RetryAfter *int
 }
 
+// UpdateDestinationResponse503Headers the declared response headers of an HTTP 503 response for UpdateDestination
+type UpdateDestinationResponse503Headers struct {
+	RetryAfter *int
+}
+
 type UpdateDestinationResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -24626,10 +24648,14 @@ type UpdateDestinationResponse struct {
 	ApplicationproblemJSON428 *PreconditionRequired
 	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
 	ApplicationproblemJSON429 *TooManyRequests
+	// ApplicationproblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationproblemJSON503 *Limited
 	// Headers200 the parsed response headers for an HTTP 200 response
 	Headers200 *UpdateDestinationResponse200Headers
 	// Headers429 the parsed response headers for an HTTP 429 response
 	Headers429 *UpdateDestinationResponse429Headers
+	// Headers503 the parsed response headers for an HTTP 503 response
+	Headers503 *UpdateDestinationResponse503Headers
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -24680,6 +24706,11 @@ func (r UpdateDestinationResponse) GetApplicationproblemJSON428() *PreconditionR
 // GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
 func (r UpdateDestinationResponse) GetApplicationproblemJSON429() *TooManyRequests {
 	return r.ApplicationproblemJSON429
+}
+
+// GetApplicationproblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r UpdateDestinationResponse) GetApplicationproblemJSON503() *Limited {
+	return r.ApplicationproblemJSON503
 }
 
 // GetBody returns the raw response body bytes
@@ -39171,6 +39202,13 @@ func ParseCreateDestinationResponse(rsp *http.Response) (*CreateDestinationRespo
 		}
 		response.ApplicationproblemJSON429 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Limited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
 	}
 
 	switch {
@@ -39201,6 +39239,16 @@ func ParseCreateDestinationResponse(rsp *http.Response) (*CreateDestinationRespo
 			headers.RetryAfter = &value
 		}
 		response.Headers429 = &headers
+	case rsp.StatusCode == 503:
+		var headers CreateDestinationResponse503Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
 	}
 
 	return response, nil
@@ -39437,6 +39485,13 @@ func ParseUpdateDestinationResponse(rsp *http.Response) (*UpdateDestinationRespo
 		}
 		response.ApplicationproblemJSON429 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Limited
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
 	}
 
 	switch {
@@ -39460,6 +39515,16 @@ func ParseUpdateDestinationResponse(rsp *http.Response) (*UpdateDestinationRespo
 			headers.RetryAfter = &value
 		}
 		response.Headers429 = &headers
+	case rsp.StatusCode == 503:
+		var headers UpdateDestinationResponse503Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers503 = &headers
 	}
 
 	return response, nil

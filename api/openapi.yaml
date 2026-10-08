@@ -4329,6 +4329,8 @@ paths:
           $ref: '#/components/responses/Unprocessable'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/Limited'
   /destinations/{destination_id}:
     get:
       operationId: getDestination
@@ -4412,6 +4414,8 @@ paths:
           $ref: '#/components/responses/PreconditionRequired'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/Limited'
     delete:
       operationId: deleteDestination
       tags:
@@ -11074,6 +11078,13 @@ components:
             $ref: '#/components/schemas/PublicId'
           bot_token_status:
             $ref: '#/components/schemas/SecretStatus'
+          bot_username:
+            type:
+            - string
+            - 'null'
+            readOnly: true
+            description: The bot's username, as the last successful Connection check found it; null before one and after
+              the server URL or the bot token changed.
           proxy:
             $ref: '#/components/schemas/ProxyConfig'
           destination_count:

@@ -54,6 +54,7 @@ type TxQueries interface {
 	LockDestination(ctx context.Context, arg dbgen.LockDestinationParams) (dbgen.LockDestinationRow, error)
 	MarkDestinationDeleted(ctx context.Context, arg dbgen.MarkDestinationDeletedParams) error
 	DeleteDestinationRoutes(ctx context.Context, arg dbgen.DeleteDestinationRoutesParams) error
+	writeQueries
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the transaction the queries run in, which the Retire hook writes through.
@@ -89,13 +90,17 @@ func (q txQueries) Notify(ctx context.Context, h db.Hint) error { return db.Noti
 func (q txQueries) DB() dbgen.DBTX { return q.tx }
 
 // WriterConfig is what the changes of Destinations need: the Writer, the Audit log, the business clock that dates the
-// deletion, routing's Routes hook and delivery's Retire hook.
+// changes, routing's Routes hook and delivery's Retire hook; and for the saves, the validation of Mention settings, the
+// Destination check of the Mattermost type and delivery's end of a Broken state.
 type WriterConfig struct {
-	Writer   Writer
-	Audit    *audit.Writer
-	Business clock.Clock
-	Routes   Routes
-	Retire   Retire
+	Writer     Writer
+	Audit      *audit.Writer
+	Business   clock.Clock
+	Routes     Routes
+	Retire     Retire
+	Mentions   MentionValidator
+	Mattermost MattermostChecker
+	Healthy    Healthy
 }
 
 // SetWriter fills what the changes of Destinations need, before any change.

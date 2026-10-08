@@ -163,6 +163,13 @@ func (s *Service) MarkHealthy(ctx context.Context, tx dbgen.DBTX, destinationID 
 	return committed, nil
 }
 
+// EndBroken is MarkHealthy in a transaction of its own, for a successful Destination check started by a person
+// (C-13.FR-10): its log line follows the commit.
+func (s *Service) EndBroken(ctx context.Context, destinationID int64) error {
+	_, err := s.MarkHealthy(ctx, nil, destinationID)
+	return err
+}
+
 // probe claims the Broken Destinations of the Organization whose probe is due, Batch at a time, and probes each.
 func (w *Worker) probe(ctx context.Context, org int64) error {
 	for {

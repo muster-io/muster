@@ -82,3 +82,34 @@ WHERE org_id = @org_id AND id = @id;
 -- name: DeleteDestinationRoutes :exec
 DELETE FROM route_destinations
 WHERE org_id = @org_id AND destination_id = @destination_id;
+
+-- LockMattermostConnection takes the Mattermost Connection that is not deleted in share mode for the save of one of
+-- its Destinations, so that the Connection's deletion, which locks it for update, sees the saved Destination.
+-- name: LockMattermostConnection :one
+SELECT id
+FROM connections
+WHERE org_id = @org_id AND id = @id AND type = 'mattermost' AND deleted_at IS NULL
+FOR SHARE;
+
+-- InsertMattermostDestination creates a healthy Mattermost Destination with the team and channel names its
+-- Destination check read.
+-- name: InsertMattermostDestination :one
+INSERT INTO destinations (
+    org_id, public_id, type, name, connection_id, mattermost_team_id, mattermost_channel_id, mattermost_team_name,
+    mattermost_channel_name, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at
+)
+VALUES (
+    @org_id, @public_id, 'mattermost', @name, @connection_id, @team_id, @channel_id, @team_name, @channel_name,
+    @mentions, @limiter_limit, @limiter_per_seconds, 'healthy', @now::timestamptz, @now::timestamptz
+)
+RETURNING id;
+
+-- UpdateMattermostDestination replaces the configured fields of a Mattermost Destination and the team and channel
+-- names its Destination check read; its health is left alone.
+-- name: UpdateMattermostDestination :exec
+UPDATE destinations
+SET name = @name, connection_id = @connection_id, mattermost_team_id = @team_id,
+    mattermost_channel_id = @channel_id, mattermost_team_name = @team_name, mattermost_channel_name = @channel_name,
+    mentions = @mentions, limiter_limit = @limiter_limit, limiter_per_seconds = @limiter_per_seconds,
+    updated_at = @now::timestamptz, version = version + 1
+WHERE org_id = @org_id AND id = @id;

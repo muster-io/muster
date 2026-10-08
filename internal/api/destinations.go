@@ -13,14 +13,20 @@ import (
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/mentions"
 )
 
 // Destinations is what the API needs of internal/destinations: reading Destinations of every type with their health
-// and Routes, the Destinations of Routes, and deleting a Destination.
+// and Routes, the Destinations of Routes, saving a Mattermost Destination, its Destination check, and deleting a
+// Destination.
 type Destinations interface {
 	List(ctx context.Context, f destinations.ListFilter) (destinations.Page, error)
 	Get(ctx context.Context, publicID string) (destinations.Destination, error)
 	RouteRefs(ctx context.Context, routeIDs []int64) (map[int64][]destinations.Ref, error)
+	Create(ctx context.Context, r destinations.Requester, in destinations.Input) (destinations.Destination, error)
+	Update(ctx context.Context, r destinations.Requester, publicID string, version *int64, in destinations.Input) (
+		destinations.Destination, error)
+	Check(ctx context.Context, publicID string) (destinations.CheckResult, error)
 	Delete(ctx context.Context, r destinations.Requester, publicID string, version *int64) error
 }
 
@@ -84,6 +90,149 @@ func (s *Server) GetDestination(ctx context.Context, req gen.GetDestinationReque
 	}
 	tag := etag(d.Version)
 	return gen.GetDestination200JSONResponse{Body: body, Headers: gen.GetDestination200ResponseHeaders{ETag: &tag}}, nil
+}
+
+func destinationRequester(ctx context.Context) (destinations.Requester, error) {
+	id, err := identity(ctx)
+	if err != nil {
+		return destinations.Requester{}, err
+	}
+	return destinations.Requester{Actor: id.Actor(), Transport: id.Transport, Address: clientAddress(ctx)}, nil
+}
+
+// CreateDestination is createDestination (C-13.FR-2, FR-3): a Mattermost Destination, saved once its Destination check
+// passed on the interactive path; the other types answer unsupported until their stories.
+func (s *Server) CreateDestination(ctx context.Context, req gen.CreateDestinationRequestObject) (
+	gen.CreateDestinationResponseObject, error) {
+	r, err := destinationRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	in, err := destinationInputOf(*req.Body)
+	if err != nil {
+		return nil, err
+	}
+	d, err := s.destinations.Create(ctx, r, in)
+	if err != nil {
+		return nil, err
+	}
+	body, err := destinationOf(d)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.DestinationCreated{Destination: body}
+	out.SigningSecret.SetNull()
+	tag, location := etag(d.Version), BasePath+"/destinations/"+d.PublicID
+	return gen.CreateDestination201JSONResponse{Body: out,
+		Headers: gen.CreateDestination201ResponseHeaders{ETag: &tag, Location: &location}}, nil
+}
+
+// UpdateDestination is updateDestination, with If-Match: saving a Mattermost Destination runs its Destination check
+// as createDestination does.
+func (s *Server) UpdateDestination(ctx context.Context, req gen.UpdateDestinationRequestObject) (
+	gen.UpdateDestinationResponseObject, error) {
+	r, err := destinationRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	version, err := ifMatch(req.Params.IfMatch)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	in, err := destinationInputOf(*req.Body)
+	if err != nil {
+		return nil, err
+	}
+	d, err := s.destinations.Update(ctx, r, req.DestinationId, version, in)
+	if errors.Is(err, destinations.ErrVersionMismatch) {
+		return nil, errPreconditionFailed
+	}
+	if err != nil {
+		return nil, err
+	}
+	body, err := destinationOf(d)
+	if err != nil {
+		return nil, err
+	}
+	tag := etag(d.Version)
+	return gen.UpdateDestination200JSONResponse{Body: body, Headers: gen.UpdateDestination200ResponseHeaders{ETag: &tag}},
+		nil
+}
+
+// CheckDestination is checkDestination (C-13.FR-10) on the interactive path: each check with its result, and the
+// health after it; a passing check ends a Broken state.
+func (s *Server) CheckDestination(ctx context.Context, req gen.CheckDestinationRequestObject) (
+	gen.CheckDestinationResponseObject, error) {
+	res, err := s.destinations.Check(ctx, req.DestinationId)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.CheckDestination200JSONResponse{Ok: res.OK, Health: healthOf(res.Health),
+		Checks: make([]gen.DestinationCheckItem, 0, len(res.Items))}
+	for _, it := range res.Items {
+		item := gen.DestinationCheckItem{Name: gen.DestinationCheckItemName(it.Name), Ok: it.OK}
+		if it.Message != "" {
+			item.Message.Set(it.Message)
+		} else {
+			item.Message.SetNull()
+		}
+		out.Checks = append(out.Checks, item)
+	}
+	return out, nil
+}
+
+// destinationInputOf is the Input of a Destination's body; the types without a write path yet reach the service with
+// their type only, which refuses them.
+func destinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
+	kind, err := body.Discriminator()
+	if err != nil {
+		return destinations.Input{}, fieldProblem(http.StatusBadRequest, "/type", fieldInvalidFormat,
+			"The type is not mattermost, telegram or webhook.")
+	}
+	if kind != delivery.TypeMattermost {
+		return destinations.Input{Type: kind}, nil
+	}
+	m, err := body.AsMattermostDestinationInput()
+	if err != nil {
+		return destinations.Input{}, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
+			"The body is not a Mattermost Destination.")
+	}
+	set, err := mentionSettingsOf(m.Mentions)
+	if err != nil {
+		return destinations.Input{}, err
+	}
+	return destinations.Input{Type: kind, Name: m.Name, Mentions: set,
+		Limiter: destinations.Limiter{Limit: int64(m.Limiter.Limit), PerSeconds: int64(m.Limiter.PerSeconds)},
+		Mattermost: &destinations.MattermostInput{Connection: m.ConnectionId, TeamID: m.TeamId,
+			ChannelID: m.ChannelId}}, nil
+}
+
+// mentionSettingsOf is the Mention settings of a body, keyed by kind, with empty lists for missing ones.
+func mentionSettingsOf(m gen.MentionSettings) (mentions.Settings, error) {
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	var set mentions.Settings
+	if err := json.Unmarshal(raw, &set); err != nil {
+		return nil, err
+	}
+	for kind, v := range set {
+		if v.UserIDs == nil {
+			v.UserIDs = []string{}
+		}
+		if v.Groups == nil {
+			v.Groups = []string{}
+		}
+		set[kind] = v
+	}
+	return set, nil
 }
 
 // DeleteDestination is deleteDestination (C-11.FR-14), with an optional If-Match: the Destination leaves every Route

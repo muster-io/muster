@@ -237,7 +237,7 @@ return apiFetch<DestinationCreated>(getCreateDestinationUrl(),
 
 export const getCreateDestinationMutationKey = () => ['createDestination'] as const;
 
-export const getCreateDestinationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
+export const getCreateDestinationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDestination>>, TError,CreateDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createDestination>>, TError,CreateDestinationMutationVariables, TContext> => {
 
@@ -266,13 +266,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateDestinationMutationResult = NonNullable<Awaited<ReturnType<typeof createDestination>>>
     export type CreateDestinationMutationBody = DestinationInput
-    export type CreateDestinationMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse
+    export type CreateDestinationMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse
     export type CreateDestinationMutationVariables = {data: DestinationInput}
 
     /**
  * @summary Create Destination
  */
-export const useCreateDestination = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse,
+export const useCreateDestination = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDestination>>, TError,CreateDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createDestination>>,
@@ -426,7 +426,7 @@ return apiFetch<Destination>(getUpdateDestinationUrl(destinationId),
 
 export const getUpdateDestinationMutationKey = () => ['updateDestination'] as const;
 
-export const getUpdateDestinationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
+export const getUpdateDestinationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse | LimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDestination>>, TError,UpdateDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateDestination>>, TError,UpdateDestinationMutationVariables, TContext> => {
 
@@ -455,13 +455,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateDestinationMutationResult = NonNullable<Awaited<ReturnType<typeof updateDestination>>>
     export type UpdateDestinationMutationBody = DestinationInput
-    export type UpdateDestinationMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse
+    export type UpdateDestinationMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse | LimitedResponse
     export type UpdateDestinationMutationVariables = {destinationId: string;data: DestinationInput}
 
     /**
  * @summary Update Destination
  */
-export const useUpdateDestination = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse,
+export const useUpdateDestination = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | PreconditionFailedResponse | UnprocessableResponse | PreconditionRequiredResponse | TooManyRequestsResponse | LimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDestination>>, TError,UpdateDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateDestination>>,

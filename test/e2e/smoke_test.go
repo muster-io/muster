@@ -26,11 +26,15 @@ type answer struct {
 
 var client = &http.Client{Timeout: 10 * time.Second}
 
-func call(t *testing.T, method, url, body string) answer {
+// call sends a request with the given header names and values.
+func call(t *testing.T, method, url, body string, header ...string) answer {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, url, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
+	}
+	for i := 0; i+1 < len(header); i += 2 {
+		req.Header.Set(header[i], header[i+1])
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -43,6 +47,9 @@ func call(t *testing.T, method, url, body string) answer {
 	}
 	return answer{status: resp.StatusCode, header: resp.Header, body: b}
 }
+
+// botToken is any token the fake Mattermost takes as its bot's.
+var botToken = []string{"Authorization", "Bearer dev-bot-token"}
 
 func decode(t *testing.T, a answer, v any) {
 	t.Helper()
@@ -99,13 +106,17 @@ func TestDevModeFakes(t *testing.T) {
 		var me struct {
 			IsBot bool `json:"is_bot"`
 		}
-		a := call(t, http.MethodGet, h.Fakes.Mattermost+"/api/v4/users/me", "")
+		a := call(t, http.MethodGet, h.Fakes.Mattermost+"/api/v4/users/me", "", botToken...)
 		decode(t, a, &me)
 		if a.status != http.StatusOK || !me.IsBot {
 			t.Errorf("users/me = %d %s", a.status, a.body)
 		}
-		if a := call(t, http.MethodPost, h.Fakes.Mattermost+"/api/v4/posts", `{}`); a.status != http.StatusNotImplemented {
-			t.Errorf("POST /api/v4/posts = %d, want 501", a.status)
+		if a := call(t, http.MethodGet, h.Fakes.Mattermost+"/api/v4/users/me", ""); a.status != http.StatusUnauthorized {
+			t.Errorf("users/me without a token = %d, want 401", a.status)
+		}
+		if a := call(t, http.MethodPost, h.Fakes.Mattermost+"/hooks/smoke", `{"text":"x"}`); a.status !=
+			http.StatusNotImplemented {
+			t.Errorf("POST /hooks/smoke = %d, want 501", a.status)
 		}
 	})
 
@@ -125,7 +136,7 @@ func TestDevModeFakes(t *testing.T) {
 			t.Fatalf("POST /_fake/faults %s = %d %s", delay, a.status, a.body)
 		}
 		begin := time.Now()
-		a = call(t, http.MethodGet, h.Fakes.Mattermost+"/api/v4/users/me", "")
+		a = call(t, http.MethodGet, h.Fakes.Mattermost+"/api/v4/users/me", "", botToken...)
 		if elapsed := time.Since(begin); elapsed < 200*time.Millisecond || a.status != http.StatusOK {
 			t.Errorf("users/me with a delay = %d after %v, want 200 after at least 200ms", a.status, elapsed)
 		}
@@ -133,7 +144,8 @@ func TestDevModeFakes(t *testing.T) {
 		if a := call(t, http.MethodDelete, faults, ""); a.status != http.StatusNoContent {
 			t.Errorf("DELETE /_fake/faults = %d", a.status)
 		}
-		if a := call(t, http.MethodGet, h.Fakes.Mattermost+"/api/v4/users/me", ""); a.status != http.StatusOK {
+		if a := call(t, http.MethodGet, h.Fakes.Mattermost+"/api/v4/users/me", "", botToken...); a.status !=
+			http.StatusOK {
 			t.Errorf("users/me after the reset = %d, want 200", a.status)
 		}
 	})

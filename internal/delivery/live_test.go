@@ -658,8 +658,7 @@ func TestLive(t *testing.T) {
 			dest := delivery.Destination{ID: l.dests[0], PublicID: "DSAAAAAAAAAAA1", Type: delivery.TypeMattermost,
 				Connection: &conn}
 			at := l.business.Now()
-			out, err := in.Do(t.Context(), delivery.Subject{Destination: &dest},
-				func(ctx context.Context, c delivery.Call) delivery.Outcome { return l.rec.Check(ctx, c) })
+			out, err := in.Do(t.Context(), delivery.Subject{Destination: &dest}, delivery.CheckOp(l.rec))
 			if err != nil || out.Kind != delivery.OutcomeOK || l.business.Now().Sub(at) != 5*time.Second {
 				t.Fatalf("interactive %+v %v after %v", out, err, l.business.Now().Sub(at))
 			}
@@ -678,7 +677,7 @@ func TestLive(t *testing.T) {
 			l.fresh(t, 1, 12)
 			in := l.interactive()
 			dest := delivery.Destination{ID: l.dests[0], PublicID: "DSAAAAAAAAAAA1", Type: delivery.TypeMattermost}
-			ok := func(ctx context.Context, c delivery.Call) delivery.Outcome { return l.rec.Check(ctx, c) }
+			ok := delivery.CheckOp(l.rec)
 			if _, err := in.Do(t.Context(), delivery.Subject{Destination: &dest}, ok); err != nil {
 				t.Fatal(err)
 			}

@@ -17,6 +17,7 @@ import (
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/connections"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/groups"
@@ -25,6 +26,7 @@ import (
 	"github.com/muster-io/muster/internal/links"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/oidc"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
@@ -83,6 +85,7 @@ const (
 	codeBuiltinImmutable      = "builtin_immutable"
 	codeSuggestionObsolete    = "suggestion_obsolete"
 	codeInUse                 = "in_use"
+	codeCheckFailed           = "destination_check_failed"
 
 	fieldRequired      = "required"
 	fieldInvalidFormat = "invalid_format"
@@ -161,6 +164,17 @@ func inUseProblem(err error) *Problem {
 	}
 	p.Detail = "These Link rules read this Lookup table: " + strings.Join(names, ", ") +
 		"; change them before deleting or renaming the table."
+	return p
+}
+
+// checkFailedProblem is the 422 of a save that its Destination check refused: one item per failing check at the field
+// it concerns, with the check's message as its detail.
+func checkFailedProblem(c *destinations.CheckFailedError) *Problem {
+	p := problem(http.StatusUnprocessableEntity, typeValidationFailed, "", detailSemanticValidation)
+	for _, it := range c.Items {
+		detail := it.Message
+		p.Errors = append(p.Errors, gen.ProblemError{Pointer: it.Pointer, Code: codeCheckFailed, Detail: &detail})
+	}
 	return p
 }
 
@@ -291,6 +305,21 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		p.Errors[0].Line, p.Errors[0].Column = positive(f.Line), positive(f.Column)
 		return p
 	}
+	if f, ok := errors.AsType[*connections.FieldError](err); ok {
+		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
+	if f, ok := errors.AsType[*destinations.FieldError](err); ok {
+		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
+	if f, ok := errors.AsType[*mentions.FieldError](err); ok {
+		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
+	if c, ok := errors.AsType[*destinations.CheckFailedError](err); ok {
+		return checkFailedProblem(c)
+	}
+	if m, ok := errors.AsType[*connections.MessengerError](err); ok {
+		return problem(http.StatusConflict, typeConflict, "", "Mattermost refused the call: "+m.Text)
+	}
 	if f, ok := errors.AsType[*groups.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
@@ -371,6 +400,19 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		return errPreconditionFailed
 	case errors.Is(err, destinations.ErrNotFound):
 		return errDestinationNotFound
+	case errors.Is(err, destinations.ErrNameTaken):
+		return problem(http.StatusConflict, typeConflict, codeNameTaken, "Another Destination has this name.")
+	case errors.Is(err, destinations.ErrVersionMismatch), errors.Is(err, connections.ErrVersionMismatch):
+		return errPreconditionFailed
+	case errors.Is(err, connections.ErrNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Connection.")
+	case errors.Is(err, connections.ErrNameTaken):
+		return problem(http.StatusConflict, typeConflict, codeNameTaken, "Another Connection has this name.")
+	case errors.Is(err, connections.ErrInUse):
+		return problem(http.StatusConflict, typeConflict, codeInUse,
+			"Destinations use this Connection; delete them or move them to another Connection first.")
+	case errors.Is(err, connections.ErrNotMattermost):
+		return problem(http.StatusConflict, typeConflict, "", "This is not a Mattermost Connection.")
 	case errors.Is(err, routing.ErrNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Route.")
 	case errors.Is(err, routing.ErrNameTaken):

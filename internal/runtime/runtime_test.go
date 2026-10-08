@@ -27,6 +27,8 @@ import (
 	adb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
+	"github.com/muster-io/muster/internal/connections"
+	connectionsdb "github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
@@ -79,6 +81,7 @@ type fakeDB struct {
 	totp  totp.Store
 	oidc  fakeOIDCStore
 	integ fakeIntegrationsStore
+	conns fakeConnectionsStore
 	route fakeRoutingStore
 	// devOffset is the offset of the development clock in runtime_state; nil has no row. devErr fails its read.
 	devOffset *int64
@@ -450,6 +453,55 @@ func (fakeLinksStore) EnsureExploreRule(context.Context, linksdb.EnsureExploreRu
 
 // DestinationsStore has no Destinations.
 func (f *fakeDB) DestinationsStore() destinations.Store { return fakeDestinationsStore{} }
+
+// ConnectionsStore records the demo Connection of development mode.
+func (f *fakeDB) ConnectionsStore() connections.Store { return &f.conns }
+
+// fakeConnectionsStore records the demo Connection of development mode; it has no other Connection.
+type fakeConnectionsStore struct {
+	connections.Queries
+	created []connectionsdb.InsertConnectionParams
+	audited []string
+}
+
+func (s *fakeConnectionsStore) InTx(_ context.Context, f func(connections.Queries) error) error {
+	return f(s)
+}
+
+func (s *fakeConnectionsStore) LockDemo(context.Context, int64) error { return nil }
+
+func (s *fakeConnectionsStore) FindConnectionByName(context.Context, connectionsdb.FindConnectionByNameParams) (int64,
+	error) {
+	if len(s.created) == 0 {
+		return 0, pgx.ErrNoRows
+	}
+	return 1, nil
+}
+
+func (s *fakeConnectionsStore) InsertConnection(_ context.Context, arg connectionsdb.InsertConnectionParams) (int64,
+	error) {
+	s.created = append(s.created, arg)
+	return 1, nil
+}
+
+func (s *fakeConnectionsStore) GetConnection(context.Context, connectionsdb.GetConnectionParams) (
+	connectionsdb.GetConnectionRow, error) {
+	if len(s.created) == 0 {
+		return connectionsdb.GetConnectionRow{}, pgx.ErrNoRows
+	}
+	c := s.created[0]
+	return connectionsdb.GetConnectionRow{ID: 1, PublicID: c.PublicID, Type: connections.TypeMattermost, Name: c.Name,
+		MattermostServerUrl: c.ServerUrl, BotTokenCiphertext: c.BotTokenCiphertext, BotTokenKeyID: c.BotTokenKeyID,
+		BotTokenUpdatedAt: c.BotTokenUpdatedAt, Proxy: c.Proxy, LimiterLimit: c.LimiterLimit,
+		LimiterPerSeconds: c.LimiterPerSeconds, CreatedAt: c.Now, Version: 1}, nil
+}
+
+func (s *fakeConnectionsStore) InsertAuditEntry(_ context.Context, arg auditdb.InsertAuditEntryParams) error {
+	s.audited = append(s.audited, arg.Action)
+	return nil
+}
+
+func (s *fakeConnectionsStore) Notify(context.Context, db.Hint) error { return nil }
 
 // DestinationsWriter has no database: every change fails.
 func (f *fakeDB) DestinationsWriter() destinations.Writer { return noDestinationsWriter{} }
@@ -1177,6 +1229,11 @@ func TestDevelopmentKeyInDevelopmentMode(t *testing.T) {
 	if len(fake.integ.created) != 1 || fake.integ.created[0].Name != "dev-alertmanager" ||
 		string(fake.integ.created[0].StaticLabels) != `{"cluster":"dev"}` {
 		t.Errorf("demo integration = %+v", fake.integ.created)
+	}
+	if len(fake.conns.created) != 1 || fake.conns.created[0].Name != "Dev Mattermost" ||
+		fake.conns.created[0].ServerUrl.String != "http://127.0.0.1:18065" ||
+		!slices.Equal(fake.conns.audited, []string{"connection.created"}) {
+		t.Errorf("demo connection = %+v, audited %v", fake.conns.created, fake.conns.audited)
 	}
 	if len(fake.integ.tokens) != 1 || len(fake.integ.tokens[0].TokenHash) != 32 {
 		t.Errorf("demo integration token = %+v", fake.integ.tokens)

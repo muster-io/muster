@@ -3728,6 +3728,9 @@ type MattermostConnection struct {
 	// BotTokenStatus What a read shows instead of a Secret. The value itself is never returned.
 	BotTokenStatus SecretStatus `json:"bot_token_status"`
 
+	// BotUsername The bot's username, as the last successful Connection check found it; null before one and after the server URL or the bot token changed.
+	BotUsername nullable.Nullable[string] `json:"bot_username,omitempty"`
+
 	// CallbackUrl The address that Mattermost calls for button presses of this Connection — `mattermostAction` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/mattermost/<id>`). The Connection page shows it with the hint about `AllowedUntrustedInternalConnections`.
 	CallbackUrl *string   `json:"callback_url,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -17256,6 +17259,25 @@ func (response CreateDestination429ApplicationProblemPlusJSONResponse) VisitCrea
 	return err
 }
 
+type CreateDestination503ApplicationProblemPlusJSONResponse struct {
+	LimitedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateDestination503ApplicationProblemPlusJSONResponse) VisitCreateDestinationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type DeleteDestinationRequestObject struct {
 	DestinationId DestinationId `json:"destination_id"`
 	Params        DeleteDestinationParams
@@ -17632,6 +17654,25 @@ func (response UpdateDestination429ApplicationProblemPlusJSONResponse) VisitUpda
 		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
 	}
 	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateDestination503ApplicationProblemPlusJSONResponse struct {
+	LimitedApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateDestination503ApplicationProblemPlusJSONResponse) VisitUpdateDestinationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }

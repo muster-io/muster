@@ -317,8 +317,11 @@ func TestFaultDelayEndsWhenTheClientGivesUp(t *testing.T) {
 	if elapsed := time.Since(begin); elapsed > 5*time.Second {
 		t.Errorf("the held request returned after %v, want soon after the client gave up", elapsed)
 	}
-	if h.calls.Load() != 0 {
-		t.Error("the handler answered a request whose client gave up")
+	if h.calls.Load() != 1 {
+		t.Errorf("the handler ran %d times, want once before the delay", h.calls.Load())
+	}
+	if reqs := s.Requests(); len(reqs) != 1 || reqs[0].Status != 0 {
+		t.Errorf("recorded %+v, want the request with status 0: no answer was written", reqs)
 	}
 }
 
@@ -587,5 +590,188 @@ func TestCloseTimesOut(t *testing.T) {
 	defer cancel()
 	if err := s.Close(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Close with a stuck handler = %v, want the deadline", err)
+	}
+}
+
+func TestRecordedStatus(t *testing.T) {
+	s := fakeserver.New("Status", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/created":
+			w.WriteHeader(http.StatusCreated)
+			w.WriteHeader(http.StatusOK)
+		case "/body":
+			_, _ = io.WriteString(w, "ok")
+		case "/abort":
+			panic(http.ErrAbortHandler)
+		}
+	}))
+	serve := func(p string) {
+		defer func() { _ = recover() }()
+		s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, p, nil))
+	}
+	if err := s.SetFault(fakeserver.Fault{Path: "/faulted", Status: http.StatusServiceUnavailable}); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/created", "/body", "/nothing", "/abort", "/faulted"} {
+		serve(p)
+	}
+	want := map[string]int{"/created": 201, "/body": 200, "/nothing": 200, "/abort": 0, "/faulted": 503}
+	reqs := s.Requests()
+	if len(reqs) != len(want) {
+		t.Fatalf("recorded %d requests, want %d", len(reqs), len(want))
+	}
+	for _, r := range reqs {
+		if r.Status != want[r.Path] {
+			t.Errorf("%s: status %d, want %d", r.Path, r.Status, want[r.Path])
+		}
+	}
+}
+
+func TestRecordedStatusOfADroppedRequest(t *testing.T) {
+	var s *fakeserver.Server
+	s = fakeserver.New("Reset", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		s.ResetRequests()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/a", nil))
+	if reqs := s.Requests(); len(reqs) != 0 {
+		t.Errorf("a request dropped while it was served came back: %+v", reqs)
+	}
+}
+
+func TestRecordedStatusOverHTTP(t *testing.T) {
+	s, _ := start(t)
+	setFault(t, s, `{"path":"/f","status":429}`)
+	do(t, http.MethodGet, s.URL()+"/f", "")
+	do(t, http.MethodGet, s.URL()+"/ok", "")
+	reqs := recorded(t, s)
+	if len(reqs) != 2 || reqs[0].Status != http.StatusTooManyRequests || reqs[1].Status != http.StatusOK {
+		t.Errorf("recorded %+v, want statuses 429 and 200", reqs)
+	}
+}
+
+func TestFaultTimes(t *testing.T) {
+	s, h := start(t)
+	setFault(t, s, `{"path":"/p","status":500,"times":2}`)
+	for i, want := range []int{500, 500, 200, 200} {
+		if r := do(t, http.MethodGet, s.URL()+"/p", ""); r.status != want {
+			t.Errorf("request %d: %d, want %d", i+1, r.status, want)
+		}
+	}
+	if h.calls.Load() != 2 {
+		t.Errorf("the handler ran %d times, want 2 after the fault was used up", h.calls.Load())
+	}
+
+	setFault(t, s, `{"path":"/p","status":500,"times":1}`)
+	setFault(t, s, `{"path":"/p","status":502,"times":1}`)
+	if r := do(t, http.MethodGet, s.URL()+"/p", ""); r.status != http.StatusBadGateway {
+		t.Errorf("after replacement: %d, want 502", r.status)
+	}
+	if r := do(t, http.MethodGet, s.URL()+"/p", ""); r.status != http.StatusOK {
+		t.Errorf("a replaced fault kept the hits of the old one: %d, want 200", r.status)
+	}
+}
+
+func TestFaultPatterns(t *testing.T) {
+	s, _ := start(t)
+	setFault(t, s, `{"path":"/api/v4/posts/*/patch","status":500}`)
+	setFault(t, s, `{"path":"/api/v4/posts/*","status":501}`)
+	setFault(t, s, `{"path":"/api/v4/posts/x*","status":502}`)
+	setFault(t, s, `{"path":"/api/v4/posts/exact","status":503}`)
+	tests := []struct {
+		path string
+		want int
+	}{
+		{"/api/v4/posts/abc/patch", 500},
+		{"/api/v4/posts/abc", 501},
+		{"/api/v4/posts/xyz", 501},
+		{"/api/v4/posts/exact", 503},
+		{"/api/v4/posts/a/b/patch", 200},
+		{"/api/v4/posts", 200},
+	}
+	for _, tt := range tests {
+		if r := do(t, http.MethodGet, s.URL()+tt.path, ""); r.status != tt.want {
+			t.Errorf("%s: %d, want %d", tt.path, r.status, tt.want)
+		}
+	}
+	setFault(t, s, `{"path":"/api/v4/posts/*","status":504,"times":1}`)
+	if r := do(t, http.MethodGet, s.URL()+"/api/v4/posts/abc", ""); r.status != http.StatusGatewayTimeout {
+		t.Errorf("a replaced pattern lost its place: %d, want 504", r.status)
+	}
+	if r := do(t, http.MethodGet, s.URL()+"/api/v4/posts/xyz", ""); r.status != http.StatusBadGateway {
+		t.Errorf("after the first pattern was used up: %d, want 502", r.status)
+	}
+}
+
+func TestFaultContentType(t *testing.T) {
+	s, _ := start(t)
+	setFault(t, s, `{"path":"/p","status":429,"body":"{\"a\":1}","content_type":"text/plain; charset=utf-8"}`)
+	r := do(t, http.MethodGet, s.URL()+"/p", "")
+	if r.status != http.StatusTooManyRequests || r.body != `{"a":1}` ||
+		r.header.Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Errorf("answer %d %q as %q, want 429 with the body as text", r.status, r.body, r.header.Get("Content-Type"))
+	}
+}
+
+func TestFaultDelayHoldsTheAnswer(t *testing.T) {
+	var made atomic.Int32
+	s := fakeserver.New("Hold", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		made.Add(1)
+		w.Header().Set("X-Made", "yes")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, "created")
+	}))
+	if err := s.Start(t.Context(), "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	if err := s.SetFault(fakeserver.Fault{Path: "/post", DelayMs: 50}); err != nil {
+		t.Fatal(err)
+	}
+	begin := time.Now()
+	r := do(t, http.MethodPost, s.URL()+"/post", "")
+	if elapsed := time.Since(begin); elapsed < 50*time.Millisecond {
+		t.Errorf("answered after %v, want at least 50ms", elapsed)
+	}
+	if r.status != http.StatusCreated || r.body != "created" || r.header.Get("X-Made") != "yes" {
+		t.Errorf("held answer = %d %q, X-Made %q", r.status, r.body, r.header.Get("X-Made"))
+	}
+	if reqs := s.Requests(); len(reqs) != 1 || reqs[0].Status != http.StatusCreated {
+		t.Errorf("recorded %+v, want status 201", reqs)
+	}
+
+	if err := s.SetFault(fakeserver.Fault{Path: "/post", DelayMs: 60_000}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.URL()+"/post", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("the client got an answer during the delay")
+	}
+	if made.Load() != 2 {
+		t.Errorf("the handler ran %d times, want twice: the change is made before the delay", made.Load())
+	}
+}
+
+func TestFaultValidationOfTheNewFields(t *testing.T) {
+	for _, tt := range []struct {
+		fault   fakeserver.Fault
+		wantErr string
+	}{
+		{fakeserver.Fault{Path: "/a[", Status: 500}, "not a valid pattern"},
+		{fakeserver.Fault{Path: "/a", Status: 500, Times: -1}, "times must not be negative"},
+		{fakeserver.Fault{Path: "/a", DelayMs: 5, ContentType: "text/plain"}, "need a status"},
+	} {
+		if err := tt.fault.Validate(); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+			t.Errorf("Validate(%+v) = %v, want %q", tt.fault, err, tt.wantErr)
+		}
+	}
+	if err := (fakeserver.Fault{Path: "/a/*/b", Status: 500, Times: 3, ContentType: "text/plain"}).Validate(); err != nil {
+		t.Errorf("a valid fault: %v", err)
 	}
 }

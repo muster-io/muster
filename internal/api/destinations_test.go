@@ -14,10 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/mattermost"
+	"github.com/muster-io/muster/internal/mentions"
 )
 
 const (
@@ -44,6 +47,58 @@ type fakeDestinations struct {
 	versions []*int64
 	by       []destinations.Requester
 	err      error
+	// The saves and checks: their inputs and versions, and what they answer.
+	saved    []destinations.Input
+	saveVers []*int64
+	saveErr  error
+	check    destinations.CheckResult
+	checkErr error
+}
+
+func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, in destinations.Input) (
+	destinations.Destination, error) {
+	f.saved, f.by = append(f.saved, in), append(f.by, r)
+	if f.saveErr != nil {
+		return destinations.Destination{}, f.saveErr
+	}
+	set, err := json.Marshal(in.Mentions)
+	if err != nil {
+		return destinations.Destination{}, err
+	}
+	d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA9", Type: in.Type,
+		Name: in.Name, Connection: &in.Mattermost.Connection, MattermostTeamID: &in.Mattermost.TeamID,
+		MattermostChannelID: &in.Mattermost.ChannelID, MattermostTeamName: ptr("dev"),
+		MattermostChannelName: ptr("alerts"), Mentions: set, LimiterLimit: in.Limiter.Limit,
+		LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
+		Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
+	f.list = append(f.list, d)
+	return d, nil
+}
+
+func (f *fakeDestinations) Update(_ context.Context, r destinations.Requester, id string, version *int64,
+	in destinations.Input) (destinations.Destination, error) {
+	f.saved, f.saveVers, f.by = append(f.saved, in), append(f.saveVers, version), append(f.by, r)
+	i := slices.IndexFunc(f.list, func(d destinations.Destination) bool { return d.PublicID == id })
+	if i < 0 {
+		return destinations.Destination{}, destinations.ErrNotFound
+	}
+	if version != nil && *version != f.list[i].Version {
+		return destinations.Destination{}, destinations.ErrVersionMismatch
+	}
+	if f.saveErr != nil {
+		return destinations.Destination{}, f.saveErr
+	}
+	d := &f.list[i]
+	d.Name, d.MattermostChannelID, d.LimiterLimit = in.Name, &in.Mattermost.ChannelID, in.Limiter.Limit
+	d.Version++
+	return *d, nil
+}
+
+func (f *fakeDestinations) Check(_ context.Context, id string) (destinations.CheckResult, error) {
+	if !slices.ContainsFunc(f.list, func(d destinations.Destination) bool { return d.PublicID == id }) {
+		return destinations.CheckResult{}, destinations.ErrNotFound
+	}
+	return f.check, f.checkErr
 }
 
 func (f *fakeDestinations) Delete(_ context.Context, r destinations.Requester, id string, version *int64) error {
@@ -372,5 +427,179 @@ func TestDeleteDestinationAPI(t *testing.T) {
 	if a := x.as(t, destinationsWriter, http.MethodDelete, path+mattermostID, ""); a.status !=
 		http.StatusInternalServerError {
 		t.Errorf("failure = %d", a.status)
+	}
+}
+
+const (
+	destinationsTester = "mstr_pat_destinations_test"
+	mattermostBody     = `{"type":"mattermost","name":"alerts","connection_id":"CNAAAAAAAAAAA1","team_id":"team-dev",` +
+		`"channel_id":"ch-alerts","mentions":` + noMentions + `,"limiter":{"limit":5,"per_seconds":1}}`
+)
+
+// TestCreateDestinationAPI is createDestination for Mattermost (C-13.FR-2, FR-3, C-11.FR-18, C-12.FR-8): 201 with
+// the Destination, its team and channel names and a null signing_secret; a failing Destination check is 422
+// destination_check_failed at the field it concerns; a Mention of no User is 422 unknown_id; no limiter token in time
+// is 503 with Retry-After.
+func TestCreateDestinationAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", mattermostBody)
+	if a.status != http.StatusCreated || a.header.Get("ETag") != `"1"` ||
+		a.header.Get("Location") != "/api/v1/destinations/DSAAAAAAAAAAA9" {
+		t.Fatalf("create = %d %v %s", a.status, a.header, a.body)
+	}
+	var created gen.DestinationCreated
+	decodeInto(t, a, &created)
+	d, err := created.Destination.AsMattermostDestination()
+	if err != nil || !created.SigningSecret.IsNull() || d.Id != "DSAAAAAAAAAAA9" || d.TeamName.MustGet() != "dev" ||
+		d.ChannelName.MustGet() != "alerts" || d.Limiter.Limit != 5 || d.ConnectionId != "CNAAAAAAAAAAA1" {
+		t.Errorf("created %+v, %v: %s", d, err, a.body)
+	}
+	in := fd.saved[0]
+	if in.Type != "mattermost" || in.Name != "alerts" || in.Mattermost.Connection != "CNAAAAAAAAAAA1" ||
+		in.Mattermost.TeamID != "team-dev" || in.Mattermost.ChannelID != "ch-alerts" || in.Limiter.PerSeconds != 1 ||
+		len(in.Mentions) != 6 || in.Mentions["rise_to_urgent"].Everyone != "here" ||
+		!slices.Equal(in.Mentions["rise_to_urgent"].Groups, []string{"sre"}) || in.Mentions["reopen"].UserIDs == nil ||
+		fd.by[0].Actor.TokenName != "destinations-write" {
+		t.Errorf("input %+v", in)
+	}
+	fd.saveErr = &destinations.CheckFailedError{Items: []destinations.CheckItem{{Name: mattermost.StepBotInChannel,
+		Message: mattermost.MessageNotMember, Pointer: "/channel_id"}}}
+	a = x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", mattermostBody)
+	if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity ||
+		a.json(t)["type"] != problemBase+"validation-failed" || len(errs) != 1 || errs[0]["pointer"] != "/channel_id" ||
+		errs[0]["code"] != "destination_check_failed" || errs[0]["detail"] != mattermost.MessageNotMember {
+		t.Errorf("no bot = %d %s", a.status, a.body)
+	}
+	fd.saveErr = &destinations.CheckFailedError{Items: []destinations.CheckItem{{Name: mattermost.StepToken,
+		Message: mattermost.MessageTokenInvalid, Pointer: "/connection_id"}}}
+	if errs := problemErrors(t, x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
+		mattermostBody)); len(errs) != 1 || errs[0]["pointer"] != "/connection_id" {
+		t.Errorf("revoked token = %v", errs)
+	}
+	fd.saveErr = &mentions.FieldError{Pointer: "/mentions/new_alerts/user_ids/0", Code: mentions.CodeUnknownID,
+		Detail: "No such user."}
+	if errs := problemErrors(t, x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
+		mattermostBody)); len(errs) != 1 || errs[0]["code"] != "unknown_id" ||
+		errs[0]["pointer"] != "/mentions/new_alerts/user_ids/0" {
+		t.Errorf("unknown user = %v", errs)
+	}
+	fd.saveErr = &destinations.FieldError{Pointer: "/connection_id", Code: destinations.CodeUnknownID,
+		Detail: "No such Mattermost Connection."}
+	if errs := problemErrors(t, x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
+		mattermostBody)); len(errs) != 1 || errs[0]["code"] != "unknown_id" || errs[0]["pointer"] != "/connection_id" {
+		t.Errorf("unknown connection = %v", errs)
+	}
+	fd.saveErr = &delivery.LimitedError{RetryAfter: 2 * time.Second}
+	if a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", mattermostBody); a.status !=
+		http.StatusServiceUnavailable || a.header.Get("Retry-After") != "2" {
+		t.Errorf("limited = %d %v %s", a.status, a.header, a.body)
+	}
+	fd.saveErr = destinations.ErrNameTaken
+	if a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", mattermostBody); a.status !=
+		http.StatusConflict || a.code(t) != "name_taken" {
+		t.Errorf("taken = %d %s", a.status, a.body)
+	}
+	fd.saveErr = &destinations.FieldError{Pointer: "/type", Code: destinations.CodeUnsupported, Detail: "later"}
+	telegram := `{"type":"telegram","name":"tg","connection_id":"CNAAAAAAAAAAA2","channel_id":"@alerts",` +
+		`"mentions":` + noMentions + `,"limiter":{"limit":5,"per_seconds":1}}`
+	a = x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", telegram)
+	if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity || errs[0]["pointer"] != "/type" ||
+		fd.saved[len(fd.saved)-1].Type != "telegram" || fd.saved[len(fd.saved)-1].Mattermost != nil {
+		t.Errorf("telegram = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, destinationsReader, http.MethodPost, "/api/v1/destinations", mattermostBody); a.status !=
+		http.StatusForbidden {
+		t.Errorf("by a reader = %d", a.status)
+	}
+}
+
+// TestUpdateDestinationAPI is updateDestination: If-Match is required (428) and must be current (412); the save runs
+// as createDestination's.
+func TestUpdateDestinationAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	path := "/api/v1/destinations/" + mattermostID
+	if a := x.as(t, destinationsWriter, http.MethodPut, path, mattermostBody); a.status !=
+		http.StatusPreconditionRequired {
+		t.Errorf("without If-Match = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, destinationsWriter, http.MethodPut, path, mattermostBody, "If-Match", `"1"`); a.status !=
+		http.StatusPreconditionFailed {
+		t.Errorf("stale = %d %s", a.status, a.body)
+	}
+	a := x.as(t, destinationsWriter, http.MethodPut, path, mattermostBody, "If-Match", `"2"`)
+	if a.status != http.StatusOK || a.header.Get("ETag") != `"3"` || a.json(t)["name"] != "alerts" ||
+		a.json(t)["channel_id"] != "ch-alerts" || *fd.saveVers[len(fd.saveVers)-1] != 2 {
+		t.Errorf("update = %d %s", a.status, a.body)
+	}
+	fd.saveErr = &destinations.CheckFailedError{Items: []destinations.CheckItem{{Name: mattermost.StepBotInChannel,
+		Message: mattermost.MessageNotMember, Pointer: "/channel_id"}}}
+	if a := x.as(t, destinationsWriter, http.MethodPut, path, mattermostBody, "If-Match", `"3"`); a.status !=
+		http.StatusUnprocessableEntity || problemErrors(t, a)[0]["code"] != "destination_check_failed" {
+		t.Errorf("no bot = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, destinationsWriter, http.MethodPut, "/api/v1/destinations/DS000000000000", mattermostBody,
+		"If-Match", `"1"`); a.status != http.StatusNotFound {
+		t.Errorf("unknown = %d", a.status)
+	}
+}
+
+// TestCheckDestinationAPI is checkDestination (C-13.FR-10) with destinations:test: each check with its result and the
+// health after it; a type without a check is 422 check_not_supported; no limiter token in time is 503.
+func TestCheckDestinationAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	ft := x.srv.tokens.(*fakeTokens)
+	ft.idents[destinationsTester] = &auth.Identity{Session: ft.idents[fullToken].Session,
+		Permissions: []auth.Permission{"destinations:read", "destinations:test"}, Transport: audit.TransportAPI,
+		Token: &auth.Token{ID: 53, Name: "destinations-test"}}
+	path := "/api/v1/destinations/" + mattermostID + "/checks"
+	fd.check = destinations.CheckResult{Health: destinations.Health{State: "healthy"}, Items: []destinations.CheckItem{
+		{Name: mattermost.StepToken, OK: true}, {Name: mattermost.StepBotInChannel, Message: mattermost.MessageNotMember}}}
+	a := x.as(t, destinationsTester, http.MethodPost, path, "")
+	var res gen.DestinationCheckResult
+	decodeInto(t, a, &res)
+	if a.status != http.StatusOK || res.Ok || len(res.Checks) != 2 || res.Checks[0].Name != "token" ||
+		!res.Checks[0].Ok || !res.Checks[0].Message.IsNull() || res.Checks[1].Name != "bot_in_channel" ||
+		res.Checks[1].Message.MustGet() != "The bot is not a member of this channel." ||
+		res.Health.State != gen.Healthy {
+		t.Errorf("check = %d %s", a.status, a.body)
+	}
+	fd.check = destinations.CheckResult{OK: true, Health: destinations.Health{State: "healthy"},
+		Items: []destinations.CheckItem{{Name: mattermost.StepToken, OK: true},
+			{Name: mattermost.StepBotInChannel, OK: true}}}
+	if a := x.as(t, destinationsTester, http.MethodPost, path, ""); a.status != http.StatusOK || a.json(t)["ok"] != true {
+		t.Errorf("passing = %d %s", a.status, a.body)
+	}
+	fd.checkErr = &destinations.FieldError{Pointer: "/path/destination_id", Code: destinations.CodeCheckNotSupported,
+		Detail: "This type of Destination has no Destination check."}
+	a = x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/"+webhookID+"/checks", "")
+	if a.status != http.StatusUnprocessableEntity || problemErrors(t, a)[0]["code"] != "check_not_supported" {
+		t.Errorf("webhook = %d %s", a.status, a.body)
+	}
+	fd.checkErr = &delivery.LimitedError{RetryAfter: 4 * time.Second}
+	if a := x.as(t, destinationsTester, http.MethodPost, path, ""); a.status != http.StatusServiceUnavailable ||
+		a.header.Get("Retry-After") != "4" {
+		t.Errorf("limited = %d %v", a.status, a.header)
+	}
+	if a := x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DS000000000000/checks", ""); a.status !=
+		http.StatusNotFound {
+		t.Errorf("unknown = %d", a.status)
+	}
+	if a := x.as(t, destinationsWriter, http.MethodPost, path, ""); a.status != http.StatusForbidden {
+		t.Errorf("without destinations:test = %d", a.status)
+	}
+}
+
+// TestMattermostDestinationRead is C-11.FR-18 and C-13.FR-2: a saved Mattermost Destination reads with its
+// Connection, team and channel and their names, its Mention settings and its limiter.
+func TestMattermostDestinationRead(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	fd.list[0].MattermostTeamName = ptr("dev")
+	a := x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/"+mattermostID, "")
+	m := a.json(t)
+	if a.status != http.StatusOK || m["connection_id"] != "CNAAAAAAAAAAA1" || m["team_id"] != "team" ||
+		m["team_name"] != "dev" || m["channel_name"] != "ops" ||
+		m["mentions"].(map[string]any)["rise_to_urgent"].(map[string]any)["everyone"] != "here" ||
+		m["limiter"].(map[string]any)["limit"] != float64(30) {
+		t.Errorf("read = %d %s", a.status, a.body)
 	}
 }

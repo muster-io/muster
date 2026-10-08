@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Package fakeserver is the HTTP harness the fake servers are built on: it records every request, answers scripted
-// faults and serves the control endpoints under /_fake/. The same servers run in Go tests and in `muster dev`.
+// Package fakeserver is the HTTP harness the fake servers are built on: it records every request with the status it
+// was answered with, answers scripted faults and serves the control endpoints under /_fake/. The same servers run in Go
+// tests and in `muster dev`.
 package fakeserver
 
 import (
@@ -13,8 +14,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,16 +52,29 @@ type Request struct {
 	Body         string `json:"body"`
 	BodyEncoding string `json:"body_encoding"`
 	AtMs         int64  `json:"at_ms"`
+	// Status is the status the request was answered with, filled in once the answer is written; it is 0 while the
+	// request is served and when no answer was written: the client gave up during a fault's delay, or the handler
+	// aborted.
+	Status int `json:"status"`
 }
 
-// Fault is a scripted answer for one exact request path. A fault waits DelayMs first; then, with a Status, it answers
-// that status, and without one the fake answers as usual.
+// Fault is a scripted answer for the requests to a path. With a Status, a fault waits DelayMs and answers that status
+// with Body, as ContentType when it is set and otherwise as JSON when Body is valid JSON and as text when it is not.
+// Without a Status, the fake answers as usual, but the answer is held for DelayMs after the fake made it: what the
+// request changed is done even when the client gives up waiting.
+//
+// Path is an exact path or a path.Match pattern, in which `*` matches any run of characters within one segment (`?`
+// and `[...]` work as there too). An
+// exact path wins over patterns, and among patterns the one added first wins. Times is how many requests the fault
+// hits before it is removed; 0 is every request until the faults are reset.
 type Fault struct {
 	Path              string `json:"path"`
 	Status            int    `json:"status"`
 	RetryAfterSeconds int    `json:"retry_after_seconds"`
 	DelayMs           int    `json:"delay_ms"`
 	Body              string `json:"body"`
+	ContentType       string `json:"content_type"`
+	Times             int    `json:"times"`
 }
 
 func (f Fault) Validate() error {
@@ -66,6 +83,8 @@ func (f Fault) Validate() error {
 		return errors.New("path is required")
 	case !strings.HasPrefix(f.Path, "/"):
 		return errors.New("path must start with /")
+	case !validPattern(f.Path):
+		return errors.New("path is not a valid pattern")
 	case f.Path+"/" == ControlPrefix || strings.HasPrefix(f.Path, ControlPrefix):
 		return fmt.Errorf("path must not be under %s", ControlPrefix)
 	// net/http treats 1xx statuses as informational and answers 200 after them, so they cannot be scripted.
@@ -75,12 +94,31 @@ func (f Fault) Validate() error {
 		return errors.New("retry_after_seconds must not be negative")
 	case f.DelayMs < 0:
 		return errors.New("delay_ms must not be negative")
+	case f.Times < 0:
+		return errors.New("times must not be negative")
 	case f.Status == 0 && f.DelayMs == 0:
 		return errors.New("a fault needs a status or a delay_ms")
-	case f.Status == 0 && (f.RetryAfterSeconds != 0 || f.Body != ""):
-		return errors.New("retry_after_seconds and body need a status")
+	case f.Status == 0 && (f.RetryAfterSeconds != 0 || f.Body != "" || f.ContentType != ""):
+		return errors.New("retry_after_seconds, body and content_type need a status")
 	}
 	return nil
+}
+
+func validPattern(p string) bool {
+	_, err := path.Match(p, "")
+	return err == nil
+}
+
+// matches reports whether the fault applies to the request path p.
+func (f Fault) matches(p string) bool {
+	ok, _ := path.Match(f.Path, p)
+	return ok
+}
+
+// fault is a scripted fault with the number of hits it has left; left is 0 for a fault without Times.
+type fault struct {
+	Fault
+	left int
 }
 
 // Server wraps a fake's own handler with recording, faults and the control endpoints.
@@ -89,11 +127,14 @@ type Server struct {
 	handler http.Handler
 	control *http.ServeMux
 
-	mu       sync.Mutex
-	requests []Request
+	mu sync.Mutex
+	// requests are pointers, so that the status of an answer can be filled in after the request was recorded; a request
+	// dropped meanwhile is simply not listed.
+	requests []*Request
 	// first is the index of the oldest request once the record is full and works as a ring.
-	first  int
-	faults map[string]Fault
+	first int
+	// faults are in the order they were added, which decides between patterns.
+	faults []*fault
 
 	srv    *http.Server
 	ln     net.Listener
@@ -111,7 +152,6 @@ func New(name string, h http.Handler) *Server {
 		name:    name,
 		handler: h,
 		control: http.NewServeMux(),
-		faults:  map[string]Fault{},
 	}
 	s.control.HandleFunc("GET /_fake/requests", s.listRequests)
 	s.control.HandleFunc("DELETE /_fake/requests", func(w http.ResponseWriter, _ *http.Request) {
@@ -210,8 +250,13 @@ func (s *Server) Requests() []Request {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]Request, 0, len(s.requests))
-	out = append(out, s.requests[s.first:]...)
-	return append(out, s.requests[:s.first]...)
+	for _, r := range s.requests[s.first:] {
+		out = append(out, *r)
+	}
+	for _, r := range s.requests[:s.first] {
+		out = append(out, *r)
+	}
+	return out
 }
 
 func (s *Server) ResetRequests() {
@@ -220,21 +265,49 @@ func (s *Server) ResetRequests() {
 	s.requests, s.first = nil, 0
 }
 
-// SetFault adds a fault, replacing an earlier one for the same path.
+// SetFault adds a fault, replacing an earlier one for the same path in its place.
 func (s *Server) SetFault(f Fault) error {
 	if err := f.Validate(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.faults[f.Path] = f
+	nf := &fault{Fault: f, left: f.Times}
+	for i, old := range s.faults {
+		if old.Path == f.Path {
+			s.faults[i] = nf
+			return nil
+		}
+	}
+	s.faults = append(s.faults, nf)
 	return nil
 }
 
 func (s *Server) ResetFaults() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	clear(s.faults)
+	s.faults = nil
+}
+
+// takeFault returns the fault for the request path p and counts the hit, removing the fault after its last one.
+func (s *Server) takeFault(p string) (Fault, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.faults, func(f *fault) bool { return f.Path == p })
+	if i < 0 {
+		i = slices.IndexFunc(s.faults, func(f *fault) bool { return f.matches(p) })
+	}
+	if i < 0 {
+		return Fault{}, false
+	}
+	f := s.faults[i]
+	if f.Times > 0 {
+		f.left--
+		if f.left == 0 {
+			s.faults = slices.Delete(s.faults, i, i+1)
+		}
+	}
+	return f.Fault, true
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -246,20 +319,99 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.control.ServeHTTP(w, r)
 		return
 	}
-	s.record(r)
-	s.mu.Lock()
-	f, faulted := s.faults[r.URL.Path]
-	s.mu.Unlock()
-	if faulted {
-		if !wait(r.Context(), time.Duration(f.DelayMs)*time.Millisecond) {
-			return
-		}
-		if f.Status != 0 {
-			writeFault(w, f)
-			return
-		}
+	req := s.record(r)
+	sw := &statusWriter{ResponseWriter: w}
+	// A handler that aborts with a panic skips this, and its request keeps the status 0.
+	if s.serve(sw, r) {
+		s.mu.Lock()
+		req.Status = sw.answered()
+		s.mu.Unlock()
 	}
-	s.handler.ServeHTTP(w, r)
+}
+
+// serve answers r and reports whether an answer was written.
+func (s *Server) serve(w http.ResponseWriter, r *http.Request) bool {
+	f, faulted := s.takeFault(r.URL.Path)
+	if !faulted {
+		s.handler.ServeHTTP(w, r)
+		return true
+	}
+	delay := time.Duration(f.DelayMs) * time.Millisecond
+	if f.Status != 0 {
+		if !wait(r.Context(), delay) {
+			return false
+		}
+		writeFault(w, f)
+		return true
+	}
+	held := &heldAnswer{header: http.Header{}}
+	s.handler.ServeHTTP(held, r)
+	if !wait(r.Context(), delay) {
+		return false
+	}
+	held.writeTo(w)
+	return true
+}
+
+// statusWriter notes the status a handler answers with.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	if w.status == 0 && status >= 200 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// answered is the status of the answer; net/http answers 200 for a handler that wrote nothing.
+func (w *statusWriter) answered() int {
+	if w.status == 0 {
+		return http.StatusOK
+	}
+	return w.status
+}
+
+// heldAnswer keeps a handler's answer until a fault's delay has passed.
+type heldAnswer struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func (h *heldAnswer) Header() http.Header { return h.header }
+
+func (h *heldAnswer) WriteHeader(status int) {
+	if h.status == 0 && status >= 200 {
+		h.status = status
+	}
+}
+
+func (h *heldAnswer) Write(b []byte) (int, error) {
+	if h.status == 0 {
+		h.status = http.StatusOK
+	}
+	return h.body.Write(b)
+}
+
+func (h *heldAnswer) writeTo(w http.ResponseWriter) {
+	maps.Copy(w.Header(), h.header)
+	if h.status == 0 {
+		h.status = http.StatusOK
+	}
+	w.WriteHeader(h.status)
+	_, _ = w.Write(h.body.Bytes())
 }
 
 // refuseControl keeps browsers away from the control endpoints: a web page can reach loopback, but its requests carry
@@ -297,11 +449,11 @@ func wait(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func (s *Server) record(r *http.Request) {
+func (s *Server) record(r *http.Request) *Request {
 	// A read error shows again to the handler when it reads past the recorded part.
 	body, _ := io.ReadAll(io.LimitReader(r.Body, MaxBodyBytes))
 	r.Body = readCloser{io.MultiReader(bytes.NewReader(body), r.Body), r.Body}
-	req := Request{
+	req := &Request{
 		Method:       r.Method,
 		Path:         r.URL.Path,
 		Query:        r.URL.RawQuery,
@@ -320,10 +472,11 @@ func (s *Server) record(r *http.Request) {
 	defer s.mu.Unlock()
 	if len(s.requests) < MaxRequests {
 		s.requests = append(s.requests, req)
-		return
+		return req
 	}
 	s.requests[s.first] = req
 	s.first = (s.first + 1) % MaxRequests
+	return req
 }
 
 type readCloser struct {
@@ -345,6 +498,9 @@ func writeFault(w http.ResponseWriter, f Fault) {
 		body = http.StatusText(f.Status)
 	case json.Valid([]byte(body)):
 		contentType = "application/json"
+	}
+	if f.ContentType != "" {
+		contentType = f.ContentType
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(f.Status)
