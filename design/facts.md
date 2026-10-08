@@ -188,11 +188,13 @@ request with `SessionHasPermissionTo`, which asks `RolesGrantPermission` whether
 is not deleted lists the permission; a bot token's session carries the bot's roles, which `GET /api/v4/users/me`
 returns in `roles` (`system_user` for the test stand's bot, read on 2026-10-08). `POST /api/v4/roles/names` with those
 names reads the same roles through the same `GetRolesByNames`, and needs only a session, no permission, so the bot can
-make the server's decision itself without trying an ephemeral post. — _2026-10-08 · `SessionHasPermissionTo` and
-`RolesGrantPermission` in `server/channels/app/authorization.go` and `getRolesByNames` in
-`server/channels/api4/role.go` of the v11.2.2 source; the bot's `roles` from `GET /api/v4/users/me` on the test stand.
-The read of the roles itself was not made against the test stand (see [Pending](#pending)) · Mattermost 11.2.2_ · Used
-in C-13.FR-2.
+make the server's decision itself without trying an ephemeral post. On the test stand, `POST /api/v4/roles/names` with
+`["system_user"]` and the bot's token answered `200` with one role, not deleted, whose 13 permissions do not include
+`create_post_ephemeral`, and the Connection check of that bot passed with the warning `press_answers_in_thread`. —
+_2026-10-08 · `SessionHasPermissionTo` and `RolesGrantPermission` in `server/channels/app/authorization.go` and
+`getRolesByNames` in `server/channels/api4/role.go` of the v11.2.2 source; `GET /api/v4/users/me` and
+`POST /api/v4/roles/names` with the bot token on the test stand, and Muster's Connection check against it ·
+Mattermost 11.2.2_ · Used in C-13.FR-2.
 
 **F-054. A bot can press its own button.** `POST /api/v4/posts/{post_id}/actions/{action_id}` with the bot's token
 answers `200` with `status` `OK` and a `trigger_id`, and the server then calls the button's URL as for any press, with
@@ -417,8 +419,6 @@ snippet with and without the catch-all; Alertmanager routing documentation_ · U
   without the system admin role gets the same answers about a deleted root post as in F-058 — its plain read answered
   `404` on 2026-10-08 (F-061); `403` to an edit and `400` to a reply are still to be seen — and whether it may read the
   post with `?include_deleted=true`, which probably needs that role (not verified; Muster does not use that read).
-  `POST /api/v4/roles/names` with the roles of a bot without the system admin role, read from the source only (F-064):
-  that it answers `200` and that `system_user` lacks `create_post_ephemeral` on a server with default permissions.
 - **Alertmanager.** A restart of an HA instance without a persistent volume, and `--dispatch.start-delay` on an HA pair
   (tested on the single instance only); `externalURL` of instances without `--web.external-url`; a resolve during a mute
   with vmalert as the source; how often tick races of an HA pair cause duplicates over hours of operation — none in
