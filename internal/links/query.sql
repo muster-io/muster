@@ -95,9 +95,9 @@ FROM link_rule_matchers
 WHERE org_id = @org_id AND link_rule_id = ANY(@link_rule_ids::bigint[])
 ORDER BY link_rule_id, position;
 
--- ListLinkRuleTemplates lists the URL templates of every Link rule, for the use of a Lookup table.
+-- ListLinkRuleTemplates lists the names and URL templates of every Link rule, for the use of a Lookup table.
 -- name: ListLinkRuleTemplates :many
-SELECT public_id, url_template
+SELECT public_id, name, url_template
 FROM link_rules
 WHERE org_id = @org_id
 ORDER BY id;

@@ -8707,7 +8707,7 @@ type ClientInterface interface {
 
 	// DeleteLookupTable Delete LookupTable
 	//
-	// Refused with `409` while a Link rule uses the table.
+	// Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, the detail naming the rules.
 	//
 	// Corresponds with DELETE /lookup-tables/{lookup_table_id} (the `DeleteLookupTable` operationId).
 	DeleteLookupTable(ctx context.Context, lookupTableId LookupTableId, params *DeleteLookupTableParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -8719,7 +8719,7 @@ type ClientInterface interface {
 
 	// UpdateLookupTableWithBody Update LookupTable
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -8728,7 +8728,7 @@ type ClientInterface interface {
 
 	// UpdateLookupTable Update LookupTable
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -11092,7 +11092,7 @@ func (c *Client) CreateLookupTable(ctx context.Context, body CreateLookupTableJS
 
 // DeleteLookupTable Delete LookupTable
 //
-// Refused with `409` while a Link rule uses the table.
+// Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, the detail naming the rules.
 //
 // Corresponds with DELETE /lookup-tables/{lookup_table_id} (the `DeleteLookupTable` operationId).
 func (c *Client) DeleteLookupTable(ctx context.Context, lookupTableId LookupTableId, params *DeleteLookupTableParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -11124,7 +11124,7 @@ func (c *Client) GetLookupTable(ctx context.Context, lookupTableId LookupTableId
 
 // UpdateLookupTableWithBody Update LookupTable
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
 //
 // Takes any type of body and a specified content type.
 //
@@ -11143,7 +11143,7 @@ func (c *Client) UpdateLookupTableWithBody(ctx context.Context, lookupTableId Lo
 
 // UpdateLookupTable Update LookupTable
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -20932,7 +20932,7 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteLookupTableWithResponse Delete LookupTable
 	//
-	// Refused with `409` while a Link rule uses the table.
+	// Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, the detail naming the rules.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -20948,7 +20948,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateLookupTableWithBodyWithResponse Update LookupTable
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -20957,7 +20957,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateLookupTableWithResponse Update LookupTable
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -35303,7 +35303,7 @@ func (c *ClientWithResponses) CreateLookupTableWithResponse(ctx context.Context,
 
 // DeleteLookupTableWithResponse Delete LookupTable
 //
-// Refused with `409` while a Link rule uses the table.
+// Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, the detail naming the rules.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -35331,7 +35331,7 @@ func (c *ClientWithResponses) GetLookupTableWithResponse(ctx context.Context, lo
 
 // UpdateLookupTableWithBodyWithResponse Update LookupTable
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -35346,7 +35346,7 @@ func (c *ClientWithResponses) UpdateLookupTableWithBodyWithResponse(ctx context.
 
 // UpdateLookupTableWithResponse Update LookupTable
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

@@ -34,6 +34,7 @@ files_touched:
   - test/e2e/mattermost_test.go
   - test/load/main.go
   - .github/workflows/nightly.yml
+  - design/facts.md
   - sqlc.yaml
 acceptance:
   - "[C-13.AC-13, C-13.FR-3, C-12.FR-1, C-12.FR-11] A new Alert Group creates one post whose `message` is the summary line — the status emoji, `#N` and the title — with one attachment coloured by status, whose title `#N` and the title links to the Alert Group page, whose text has the line of links under the Alerts starting with \"Open in Muster\" and ends with the footer line, whose `footer` is \"Muster v<version>\" with the logo URL as `footer_icon`, and whose buttons follow; every link is in the attachment, none is a button; the post of an Alert Group of 600 Alerts keeps its `message` and its attachment text within 16,383 characters, its Alert list ends with \"…and N more\" and the link to Muster stays."
@@ -377,6 +378,11 @@ shown (F-056); and that after the Root message is deleted in the client, the nex
 - `operator_attention`: the optional manual check against the operator's test Mattermost server.
 - The load test is the first place where NFR-1 and NFR-2 can be measured end to end; the nightly job fails on a breach
   from this story on.
+- The footer names a user by their Mattermost username without `@` (S-037), on the assumption that a bare username
+  never notifies; no fact in `design/facts.md` confirms it. This story verifies it against the real Mattermost on the
+  epsilon stand — a root post and a reply whose footer carries the bare username of a user mentioned nowhere else,
+  watched in that user's client — records the result as a new `F-NNN` under Mattermost in `design/facts.md`, and, if a
+  bare username does notify, changes the footer so that it no longer does (`internal/mattermost/layout.go`).
 
 ## Coverage
 

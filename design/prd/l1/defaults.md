@@ -134,6 +134,9 @@ Other lifecycle values:
 | `template.dry_run_sample` | up to 20 most recent Stored Snapshots of the Route | built in | C-12 | decided |
 | `template.output_cap` | about 50,000 characters | built in | C-12 | decided |
 | `message.value_cap` | 4 KB per label or annotation value | built in | C-12 | decided |
+| `lookup_table.size_max` | 50 columns and 10,000 rows per Lookup table; a name or a column name up to 200 characters, the description up to 2,000, a key or a value up to 4,096; above that `422` (`too_long`) | built in | C-12 | P-46 |
+| `template.lookups_per_render` | 100 rows read by `lookup` in one render; the 101st is a template error | built in | C-12 | P-47 |
+| `lookup_table.page_max` | 50 Lookup tables per page of `listLookupTables`, since each carries its rows; a larger `limit` is lowered to it | built in | C-12 | P-48 |
 | `destination.mentions` | nobody, for every kind of Loud event | Destination | C-12 | decided |
 
 ## Connections and Destinations

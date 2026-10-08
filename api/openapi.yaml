@@ -4882,7 +4882,8 @@ paths:
       - Links
       summary: Update LookupTable
       description: Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps
-        its stored value; an explicit `null` clears a nullable one.
+        its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link
+        rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
       x-permission: lookup-tables:write
       x-listener: app
       security:
@@ -4931,7 +4932,8 @@ paths:
       tags:
       - Links
       summary: Delete LookupTable
-      description: Refused with `409` while a Link rule uses the table.
+      description: Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, the detail
+        naming the rules.
       x-permission: lookup-tables:write
       x-listener: app
       security:

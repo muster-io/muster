@@ -327,7 +327,8 @@ func (f *fakeStore) ListLinkRuleTemplates(context.Context, int64) ([]dbgen.ListL
 	}
 	var out []dbgen.ListLinkRuleTemplatesRow
 	for _, r := range f.rules {
-		out = append(out, dbgen.ListLinkRuleTemplatesRow{PublicID: r.PublicID, UrlTemplate: r.UrlTemplate})
+		out = append(out, dbgen.ListLinkRuleTemplatesRow{PublicID: r.PublicID, Name: r.Name,
+			UrlTemplate: r.UrlTemplate})
 	}
 	return out, nil
 }
@@ -645,7 +646,9 @@ func TestLookupTableInUse(t *testing.T) {
 	if err := EnsureExplore(ctx, f, orgID, t0); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteTable(ctx, by, table.PublicID, nil); !errors.Is(err, ErrInUse) {
+	err = s.DeleteTable(ctx, by, table.PublicID, nil)
+	var inUse *InUseError
+	if !errors.Is(err, ErrInUse) || !errors.As(err, &inUse) || !slices.Equal(inUse.Rules, []string{"Explore"}) {
 		t.Fatalf("a table the built-in rule reads: %v", err)
 	}
 	// A rule whose stored template does not parse reads nothing.
@@ -662,6 +665,56 @@ func TestLookupTableInUse(t *testing.T) {
 	}
 	if err := s.DeleteTable(ctx, by, other.PublicID, nil); err == nil || errors.Is(err, ErrInUse) {
 		t.Errorf("a failing read: %v", err)
+	}
+}
+
+// TestLookupTableRenameInUse: a new name for a table that Link rules read by its name is refused with those rules
+// named, since they would read nothing; new rows under the same name, and a new name for a table no rule reads, are
+// saved.
+func TestLookupTableRenameInUse(t *testing.T) {
+	ctx := t.Context()
+	f := newFake()
+	s, _ := newService(t, f)
+	table, err := s.CreateTable(ctx, by, grafana())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureExplore(ctx, f, orgID, t0); err != nil {
+		t.Fatal(err)
+	}
+	f.rules = append(f.rules, &ruleRow{GetLinkRuleRow: dbgen.GetLinkRuleRow{ID: 99, PublicID: "KRZZZZZZZZZZZZ",
+		Name: "Dashboard", ScopeType: ScopeAlertGroup,
+		UrlTemplate: `{{ lookup "grafana" .Labels.cluster "address" }}`}})
+	renamed := grafana()
+	renamed.Name = "grafana-old"
+	_, err = s.UpdateTable(ctx, by, table.PublicID, nil, renamed)
+	var inUse *InUseError
+	if !errors.Is(err, ErrInUse) || !errors.As(err, &inUse) ||
+		!slices.Equal(inUse.Rules, []string{"Explore", "Dashboard"}) ||
+		!strings.Contains(err.Error(), "Explore, Dashboard") {
+		t.Fatalf("renaming a table two rules read: %v", err)
+	}
+	if got, err := s.GetTable(ctx, table.PublicID); err != nil || got.Name != "grafana" || got.Version !=
+		table.Version {
+		t.Errorf("the refused rename changed the table: %+v %v", got, err)
+	}
+	same := grafana()
+	same.Entries = same.Entries[:1]
+	if got, err := s.UpdateTable(ctx, by, table.PublicID, nil, same); err != nil || len(got.Entries) != 1 {
+		t.Errorf("new rows under the same name: %+v %v", got, err)
+	}
+	f.fail["ListLinkRuleTemplates"] = errors.New("boom")
+	if _, err := s.UpdateTable(ctx, by, table.PublicID, nil, renamed); err == nil || errors.Is(err, ErrInUse) {
+		t.Errorf("a failing read: %v", err)
+	}
+	delete(f.fail, "ListLinkRuleTemplates")
+	other, err := s.CreateTable(ctx, by, TableInput{Name: "dc", Columns: []string{"site"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.UpdateTable(ctx, by, other.PublicID, nil, TableInput{Name: "sites",
+		Columns: []string{"site"}}); err != nil || got.Name != "sites" {
+		t.Errorf("renaming a table no rule reads: %+v %v", got, err)
 	}
 }
 
