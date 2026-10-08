@@ -434,8 +434,8 @@ func TestMoveAndDeleteRouteAPI(t *testing.T) {
 }
 
 // TestListAlertGroupsAPI is listAlertGroups (C-09.FR-13): every filter reaches internal/groups, the items carry
-// label_values and details_removed without the labels of the page, the cursor keeps the sort, and the filters of
-// later stories answer 422 unsupported.
+// label_values and details_removed without the labels of the page, the cursor keeps the sort, and the filter of a
+// later story answers 422 unsupported.
 func TestListAlertGroupsAPI(t *testing.T) {
 	x, fg, _ := newAlertGroupsAPI(t)
 	q := url.Values{"status": {"firing", "resolved"}, "route": {routeID}, "integration": {"NTAAAAAAAAAAAA"},
@@ -474,19 +474,16 @@ func TestListAlertGroupsAPI(t *testing.T) {
 		fg.lists[2].Sort != groups.SortStartedDesc || fg.lists[2].Limit != 50 {
 		t.Errorf("defaults = %d %+v", a.status, fg.lists[2])
 	}
-	for _, name := range []string{"delivery_problem=true", "unclaimed=true"} {
-		a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?"+name, "")
-		var p gen.Problem
-		decodeInto(t, a, &p)
-		key, _, _ := strings.Cut(name, "=")
-		if a.status != http.StatusUnprocessableEntity || p.Errors == nil || (*p.Errors)[0].Code != "unsupported" ||
-			(*p.Errors)[0].Pointer != "/query/"+key {
-			t.Errorf("%s = %d %s", name, a.status, a.body)
-		}
-		if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-counts?"+name, ""); a.status !=
-			http.StatusUnprocessableEntity {
-			t.Errorf("counts %s = %d", name, a.status)
-		}
+	a = x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?unclaimed=true", "")
+	var p gen.Problem
+	decodeInto(t, a, &p)
+	if a.status != http.StatusUnprocessableEntity || p.Errors == nil || (*p.Errors)[0].Code != "unsupported" ||
+		(*p.Errors)[0].Pointer != "/query/unclaimed" {
+		t.Errorf("unclaimed = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-counts?unclaimed=true", ""); a.status !=
+		http.StatusUnprocessableEntity {
+		t.Errorf("counts unclaimed = %d", a.status)
 	}
 	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?label=pod%3D~%22%28%22", ""); a.status !=
 		http.StatusBadRequest || a.json(t)["errors"].([]any)[0].(map[string]any)["code"] != "invalid_regex" {
@@ -539,6 +536,38 @@ func TestOwnerFiltersAPI(t *testing.T) {
 	if a.status != http.StatusUnprocessableEntity || a.json(t)["errors"].([]any)[0].(map[string]any)["code"] !=
 		"unsupported" {
 		t.Errorf("owner=me by a service account = %d %s", a.status, a.body)
+	}
+}
+
+// TestDeliveryProblemAPI is C-13.FR-12 and C-13.AC-10 on the API: delivery_problem reaches the list and the counts,
+// and the Alert Group and the list items carry delivery_problem.
+func TestDeliveryProblemAPI(t *testing.T) {
+	x, fg, _ := newAlertGroupsAPI(t)
+	fg.view.DeliveryProblem = true
+	for _, path := range []string{"/api/v1/alert-groups", "/api/v1/alert-group-counts"} {
+		for _, v := range []string{"true", "false"} {
+			if a := x.as(t, groupsReader, http.MethodGet, path+"?delivery_problem="+v, ""); a.status != http.StatusOK {
+				t.Fatalf("%s %s = %d %s", path, v, a.status, a.body)
+			}
+		}
+	}
+	for i, f := range []groups.Filter{fg.lists[0].Filter, fg.lists[1].Filter, fg.counts[0], fg.counts[1]} {
+		if f.DeliveryProblem == nil || *f.DeliveryProblem != (i%2 == 0) {
+			t.Errorf("filter %d %+v", i, f)
+		}
+	}
+	a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups", "")
+	var list gen.AlertGroupList
+	decodeInto(t, a, &list)
+	if a.status != http.StatusOK || len(list.Items) != 1 || !list.Items[0].DeliveryProblem ||
+		fg.lists[2].DeliveryProblem != nil {
+		t.Errorf("list = %d %s", a.status, a.body)
+	}
+	a = x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/"+groupID, "")
+	var g gen.AlertGroup
+	decodeInto(t, a, &g)
+	if a.status != http.StatusOK || !g.DeliveryProblem {
+		t.Errorf("alert group = %d %s", a.status, a.body)
 	}
 }
 

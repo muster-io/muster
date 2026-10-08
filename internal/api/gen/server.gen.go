@@ -4670,7 +4670,7 @@ type RouteSuggestion struct {
 	// Id `heartbeat_lost` suggests a Route for `alertname="MusterHeartbeatLost"`; `internal_alerts` suggests a Route for `alertname=~"Muster.*"`.
 	Id RouteSuggestionId `json:"id"`
 
-	// Route The Route that accepting would create at the top of the list.
+	// Route The Route that accepting would create at the top of the list, or for `internal_alerts` directly below the last Route other than the Default route that takes an Internal alert.
 	Route RouteInput `json:"route"`
 }
 

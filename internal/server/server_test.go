@@ -102,6 +102,36 @@ func TestMergedListeners(t *testing.T) {
 	}
 }
 
+// TestIngestHandler: the ingest listener hands the Heartbeat to its handler, the messenger callbacks to the callback
+// mux and everything else to ingestion, on its own port and on the one port it shares with app (server.Merge).
+func TestIngestHandler(t *testing.T) {
+	callbacks := http.NewServeMux()
+	callbacks.Handle("/api/v1/callbacks/mattermost/{connection_id}", stub("mattermost"))
+	ingest := Ingest(stub("ingest"), stub("heartbeat"), callbacks)
+	want := map[string]string{
+		"/api/v1/ingest":                   "ingest /api/v1/ingest",
+		"/api/v1/heartbeat/tok3n":          "heartbeat /api/v1/heartbeat/tok3n",
+		"/api/v1/callbacks/mattermost/CN1": "mattermost /api/v1/callbacks/mattermost/CN1",
+		"/api/v1/callbacks/mattermost/x":   "mattermost /api/v1/callbacks/mattermost/x",
+		"/api/v1/callbacks/telegram/CN1":   "404 page not found\n",
+		"/api/v1/ingest/tok3n":             "ingest /api/v1/ingest/tok3n",
+	}
+	separate := start(t, Addresses{App: "127.0.0.1:0", Ingest: "localhost:0", Internal: "127.0.0.1:0"},
+		Handlers{App: stub("app"), Ingest: ingest, Internal: stub("internal")})
+	merged := start(t, Addresses{App: "127.0.0.1:0", Ingest: "127.0.0.1:0", Internal: "127.0.0.1:0"},
+		Handlers{App: stub("app"), Ingest: ingest, Internal: stub("internal")})
+	for _, base := range []string{separate.Addrs().Ingest, merged.Addrs().App} {
+		for p, body := range want {
+			if _, got := get(t, "http://"+base+p); got != body {
+				t.Errorf("GET %s%s = %q, want %q", base, p, got, body)
+			}
+		}
+	}
+	if _, got := get(t, "http://"+merged.Addrs().App+"/api/v1/alert-groups"); got != "app /api/v1/alert-groups" {
+		t.Errorf("the merged port answered %q", got)
+	}
+}
+
 func TestSeparateListeners(t *testing.T) {
 	s := start(t, Addresses{App: "127.0.0.1:0", Ingest: "localhost:0", Internal: "127.0.0.1:0"}, stubs())
 	a := s.Addrs()

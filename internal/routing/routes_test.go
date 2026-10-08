@@ -65,9 +65,10 @@ type fakeStore struct {
 	alerts        map[int64][]byte
 	routed        map[int64]dbgen.SetAlertRoutesParams
 
-	// The Integrations with a Heartbeat, and the Route suggestions each User dismissed.
-	heartbeats []dbgen.ListHeartbeatIntegrationsRow
-	dismissals map[int64][]string
+	// The Integrations with a Heartbeat, every Integration, and the Route suggestions each User dismissed.
+	heartbeats   []dbgen.ListHeartbeatIntegrationsRow
+	integrations []dbgen.ListAlertingIntegrationsRow
+	dismissals   map[int64][]string
 
 	// open are the open Alert Groups of each Route by id.
 	open map[int64]int64

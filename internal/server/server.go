@@ -31,7 +31,7 @@ const (
 func IsIngestPath(p string) bool {
 	switch {
 	case p == "/api/v1/ingest", strings.HasPrefix(p, "/api/v1/ingest/"),
-		IsHeartbeatPath(p), strings.HasPrefix(p, "/api/v1/callbacks/"):
+		IsHeartbeatPath(p), IsCallbackPath(p):
 		return true
 	}
 	return false
@@ -42,15 +42,23 @@ func IsHeartbeatPath(p string) bool {
 	return p == "/api/v1/heartbeat" || strings.HasPrefix(p, "/api/v1/heartbeat/")
 }
 
-// Ingest is the handler of the ingest listener: heartbeat serves the Heartbeat endpoint and ingest everything else,
-// ingestion and the messenger callbacks.
-func Ingest(ingest, heartbeat http.Handler) http.Handler {
+// IsCallbackPath reports whether p is under the messenger callbacks, /api/v1/callbacks/.
+func IsCallbackPath(p string) bool {
+	return strings.HasPrefix(p, "/api/v1/callbacks/")
+}
+
+// Ingest is the handler of the ingest listener: heartbeat serves the Heartbeat endpoint, callbacks the messenger
+// callbacks, and ingest everything else, ingestion first.
+func Ingest(ingest, heartbeat, callbacks http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if IsHeartbeatPath(r.URL.Path) {
+		switch {
+		case IsHeartbeatPath(r.URL.Path):
 			heartbeat.ServeHTTP(w, r)
-			return
+		case IsCallbackPath(r.URL.Path):
+			callbacks.ServeHTTP(w, r)
+		default:
+			ingest.ServeHTTP(w, r)
 		}
-		ingest.ServeHTTP(w, r)
 	})
 }
 

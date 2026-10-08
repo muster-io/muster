@@ -58,6 +58,7 @@ type fakeFilter struct {
 	ownerSet      bool
 	owner         pgtype.Int8
 	snoozedNoEnd  pgtype.Bool
+	problem       pgtype.Bool
 }
 
 func (f *fakeDB) matches(g *dbgen.LockGroupsRow, p fakeFilter) bool {
@@ -100,6 +101,9 @@ func (f *fakeDB) matches(g *dbgen.LockGroupsRow, p fakeFilter) bool {
 	if p.snoozedNoEnd.Valid && (g.Status == "snoozed" && g.SnoozeNoEnd) != p.snoozedNoEnd.Bool {
 		return false
 	}
+	if p.problem.Valid && f.problems[g.ID] != p.problem.Bool {
+		return false
+	}
 	if p.contains != nil {
 		var want, have map[string]string
 		_ = json.Unmarshal(p.contains, &want)
@@ -133,7 +137,7 @@ func (f *fakeDB) listRow(g *dbgen.LockGroupsRow) listRow {
 		LastChangedAt: g.LastChangedAt, RoutePublicID: r.PublicID, RouteName: r.name, OwnerUserID: g.OwnerUserID,
 		SnoozeUntil: g.SnoozeUntil, SnoozedByUserID: g.SnoozedByUserID,
 		SnoozedByServiceAccountID: g.SnoozedByServiceAccountID, NewerPublicID: newerID, NewerNumber: newerNumber,
-		RouteDeleted: r.deleted}
+		RouteDeleted: r.deleted, DeliveryProblem: f.problems[g.ID]}
 }
 
 func (f *fakeDB) list(name string, p dbgen.ListGroupsStartedDescParams, changed, asc bool) ([]listRow, error) {
@@ -145,7 +149,7 @@ func (f *fakeDB) list(name string, p dbgen.ListGroupsStartedDescParams, changed,
 	ff := fakeFilter{number: p.Number, from: p.RangeFrom, to: p.RangeTo, routes: p.RouteIds, ints: p.IntegrationIds,
 		severities: p.Severities, urgent: p.Urgent, resolvedBy: p.ResolvedBy, reason: p.ResolveReason,
 		reopened: p.Reopened, contains: p.Contains, pattern: p.Pattern, statuses: p.Statuses, ownerSet: p.OwnerSet,
-		owner: p.OwnerID, snoozedNoEnd: p.SnoozedNoEnd}
+		owner: p.OwnerID, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem}
 	key := func(g *dbgen.LockGroupsRow) time.Time {
 		if changed {
 			return g.LastChangedAt
@@ -227,7 +231,7 @@ func (f *fakeDB) CountGroups(_ context.Context, p dbgen.CountGroupsParams) ([]db
 	ff := fakeFilter{number: p.Number, from: p.RangeFrom, to: p.RangeTo, routes: p.RouteIds, ints: p.IntegrationIds,
 		severities: p.Severities, urgent: p.Urgent, resolvedBy: p.ResolvedBy, reason: p.ResolveReason,
 		reopened: p.Reopened, contains: p.Contains, pattern: p.Pattern, withoutStatus: true, ownerSet: p.OwnerSet,
-		owner: p.OwnerID, snoozedNoEnd: p.SnoozedNoEnd}
+		owner: p.OwnerID, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem}
 	counts := map[[2]string]int64{}
 	for _, g := range f.groups {
 		if !f.matches(g, ff) {
@@ -890,6 +894,48 @@ func TestOwnerFilters(t *testing.T) {
 	if _, err := h.svc.List(t.Context(), ListRequest{Filter: Filter{Owner: bob.Actor.PublicID}, Limit: 5}); !errors.Is(
 		err, errBoom) {
 		t.Errorf("a failing user lookup = %v", err)
+	}
+}
+
+// TestDeliveryProblem is C-13.FR-12, C-13.AC-10 and C-09.FR-13: delivery_problem selects the list and the counts,
+// and the list items and the Alert Group carry it.
+func TestDeliveryProblem(t *testing.T) {
+	h := newHarness(t)
+	h.summary(1, 2, t0.Add(-time.Hour), time.Time{}, "A", nil)
+	acked := h.summary(2, 2, t0.Add(-time.Hour), time.Time{}, "B", nil)
+	acked.Status = string(StatusAcknowledged)
+	h.summary(3, 2, t0.Add(-time.Hour), time.Time{}, "C", nil)
+	h.db.problems = map[int64]bool{1001: true, 1002: true}
+	yes, no := true, false
+	for _, c := range []struct {
+		name   string
+		f      Filter
+		want   []int64
+		counts Counts
+	}{
+		{"with a problem", Filter{DeliveryProblem: &yes}, []int64{2, 1}, Counts{Firing: 1, Acknowledged: 1, All: 2}},
+		{"without", Filter{DeliveryProblem: &no}, []int64{3}, Counts{Firing: 1, All: 1}},
+		{"any", Filter{}, []int64{3, 2, 1}, Counts{Firing: 2, Acknowledged: 1, All: 3}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := numbers(h.list(t, ListRequest{Filter: c.f})); !slices.Equal(got, c.want) {
+				t.Errorf("list = %v, want %v", got, c.want)
+			}
+			if got, err := h.svc.Counts(t.Context(), c.f); err != nil || got != c.counts {
+				t.Errorf("counts = %+v %v, want %+v", got, err, c.counts)
+			}
+		})
+	}
+	for _, v := range h.list(t, ListRequest{}).Groups {
+		if v.DeliveryProblem != (v.Number != 3) {
+			t.Errorf("#%d delivery problem %v", v.Number, v.DeliveryProblem)
+		}
+	}
+	for n, want := range map[int64]bool{1: true, 3: false} {
+		v, err := h.svc.Get(t.Context(), h.db.groups[1000+n].PublicID)
+		if err != nil || v.DeliveryProblem != want {
+			t.Errorf("get #%d = %v %v", n, v.DeliveryProblem, err)
+		}
 	}
 }
 

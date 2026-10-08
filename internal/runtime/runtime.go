@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/muster-io/muster/internal/accountlinks"
 	"github.com/muster-io/muster/internal/api"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
@@ -130,8 +131,9 @@ type database interface {
 	LinksStore() links.Store
 	DestinationsStore() destinations.Store
 	DestinationsWriter() destinations.Writer
-	// ConnectionsStore serves the Connections.
+	// ConnectionsStore serves the Connections; AccountLinksDB is the main pool the Account links are read from.
 	ConnectionsStore() connections.Store
+	AccountLinksDB() accountlinks.DBTX
 	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
 	SessionListenConn(ctx context.Context) (db.ListenConn, error)
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
@@ -204,6 +206,8 @@ func (d pgDatabase) DestinationsStore() destinations.Store { return destinations
 func (d pgDatabase) DestinationsWriter() destinations.Writer { return destinations.NewWriter(d.Pool) }
 
 func (d pgDatabase) ConnectionsStore() connections.Store { return connections.NewStore(d.Pool) }
+
+func (d pgDatabase) AccountLinksDB() accountlinks.DBTX { return d.Pool }
 
 func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
 	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
@@ -433,12 +437,18 @@ type process struct {
 	groups *groups.Service
 	timers *timers.Worker
 	// delivery is the delivery of the Organization, which the dispatcher's re-render step fills, and deliverer the
-	// delivery worker of this replica; destinations reads the Destinations.
+	// delivery worker of this replica; destinations reads the Destinations, and connections holds the Connections
+	// that the Mattermost adapter posts through.
 	delivery     *delivery.Service
 	deliverer    *delivery.Worker
 	renderer     *messages.Renderer
 	mentions     *mentions.Service
 	destinations *destinations.Service
+	connections  *connections.Service
+	// interactive is the interactive path and roles the Permissions of each Role, which the callback of Mattermost
+	// button presses answers through and runs Commands with.
+	interactive *delivery.Interactive
+	roles       auth.Roles
 	// devClock is the development clock of `muster dev`, nil outside development mode; clockMoved wakes the
 	// Leader's Heartbeat check and Stale scan when it moves.
 	devClock   *devmode.Clock
@@ -557,7 +567,7 @@ func (p *process) serve(ctx context.Context) error {
 			TrustedProxies: p.cfg.TrustedProxies,
 		}), heartbeat.NewHandler(heartbeat.HandlerConfig{
 			Auth: p.integrations, Signals: p.signals, Log: p.log, TrustedProxies: p.cfg.TrustedProxies,
-		})),
+		}), p.callbacks()),
 		Internal: p.internalHandler(health),
 	})
 	if err != nil {
@@ -618,6 +628,17 @@ func (p *process) serve(ctx context.Context) error {
 	}
 	p.log.Log(ctx, logging.ProcessStopped)
 	return nil
+}
+
+// callbacks is the callback mux of the ingest listener: the button presses of Mattermost Connections (C-13.FR-4), on
+// every method, since the callback answers each request 200 with an empty JSON object.
+func (p *process) callbacks() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle(mattermost.CallbackPattern, mattermost.NewCallback(mattermost.CallbackConfig{
+		Connections: p.connections, Bindings: p.delivery, Links: accountlinks.New(p.orgID, p.db.AccountLinksDB()),
+		Commands: p.groups, Roles: p.roles, Keys: p.keyring, Path: p.interactive, Business: p.clocks.Business,
+		PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit, Log: p.log}))
+	return mux
 }
 
 // internalHandler serves health and metrics, and in development mode the development clock.
@@ -737,6 +758,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Abandon: func(ctx context.Context, tx connectionsdb.DBTX, id int64) (func(context.Context), error) {
 			return p.delivery.AbandonConnection(ctx, tx, id)
 		}})
+	p.connections, p.interactive, p.roles = conns, interactive, roles
 	p.destinations = destinations.New(orgID, p.db.DestinationsStore())
 	p.destinations.SetWriter(destinations.WriterConfig{Writer: p.db.DestinationsWriter(), Audit: w,
 		Business: p.clocks.Business,
@@ -1007,7 +1029,8 @@ func (p *process) configureWorker() {
 	p.deliverer.Store = p.db.DeliveryStore()
 	p.deliverer.Lease = db.Lease{Owner: p.replica.ID(), Duration: delivery.Lease, Clocks: p.clocks}
 	p.deliverer.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
-	p.deliverer.Adapters = delivery.Adapters{}
+	p.deliverer.Adapters = delivery.Adapters{delivery.TypeMattermost: &mattermost.Adapter{Targets: p.connections,
+		PublicURL: p.cfg.PublicURL.String(), IngestURL: p.cfg.IngestURL.String(), Version: buildinfo.Version}}
 	p.deliverer.RunbookBase = p.cfg.RunbookBaseURL.String()
 	p.deliverer.PublicURL = p.cfg.PublicURL.String()
 	p.deliverer.Renderer = delivery.MessageRenderer{Renderer: p.renderer}

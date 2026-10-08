@@ -16,6 +16,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -313,6 +314,25 @@ func (r *Replica) waitFor(t testing.TB, what string, cond func() bool) {
 		case <-time.After(pollInterval):
 		}
 	}
+}
+
+// runCLIStdout runs `muster dev <args>` against the harness's database and returns its exit code and standard output.
+func (h *Harness) runCLIStdout(t *testing.T, args ...string) (int, string) {
+	t.Helper()
+	//nolint:gosec // G204: the binary under test, from MUSTER_E2E_BINARY
+	cmd := exec.CommandContext(t.Context(), h.binary, append([]string{"dev"}, args...)...)
+	cmd.Env = append(os.Environ(), h.databaseEnv()...)
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode(), stdout.String()
+	}
+	if err != nil {
+		t.Fatalf("run muster dev %v: %v; standard error:\n%s", args, err, stderr.String())
+	}
+	return 0, stdout.String()
 }
 
 func (h *Harness) databaseEnv() []string {

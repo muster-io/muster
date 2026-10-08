@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -56,8 +57,8 @@ const (
 )
 
 // CallbackPath is where Mattermost calls Muster for the button presses of a Connection, under MUSTER_INGEST_URL, with
-// the Connection's public_id after it (C-13.FR-13); the callback itself comes with S-061.
-const CallbackPath = "/api/v1/callbacks/mattermost/"
+// the Connection's public_id after it (C-13.FR-13).
+const CallbackPath = mattermost.CallbackPath
 
 // The default limiter of a Mattermost Connection (connection.mattermost.limiter): 5 requests per second, half of the
 // 10 that Mattermost's rate limit allows per client address when an admin turns it on (F-030).
@@ -194,6 +195,8 @@ type Queries interface {
 	CountConnectionDestinations(ctx context.Context, arg dbgen.CountConnectionDestinationsParams) (int64, error)
 	MarkConnectionDeleted(ctx context.Context, arg dbgen.MarkConnectionDeletedParams) error
 	LockDemo(ctx context.Context, key int64) error
+	GetDestinationTarget(ctx context.Context, arg dbgen.GetDestinationTargetParams) (dbgen.GetDestinationTargetRow,
+		error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the pool or transaction the queries run in, which the Abandon hook writes through.
@@ -261,14 +264,24 @@ type Config struct {
 	Log       *logging.Logger
 }
 
-// Service holds the Connections of the Organization.
+// Service holds the Connections of the Organization, and the clients the adapter posts through, built once per
+// version of their Connection.
 type Service struct {
 	cfg Config
+
+	mu      sync.Mutex
+	clients map[int64]cachedClient
+}
+
+// cachedClient is the client of a version of a Connection.
+type cachedClient struct {
+	version int64
+	client  *mattermost.Client
 }
 
 // New returns the Service of the Organization in cfg.
 func New(cfg Config) *Service {
-	return &Service{cfg: cfg}
+	return &Service{cfg: cfg, clients: map[int64]cachedClient{}}
 }
 
 // CallbackURL is the read-only callback address of the Connection publicID: MUSTER_INGEST_URL followed by
@@ -644,6 +657,70 @@ func (s *Service) client(row dbgen.GetConnectionRow) (*mattermost.Client, error)
 	}
 	return mattermost.NewClient(s.cfg.Network, mattermost.Settings{ServerURL: row.MattermostServerUrl.String,
 		Token: token, Proxy: p.Outbound(password)})
+}
+
+// Target is where the Mattermost Destination destinationID posts, for the adapter: its team and channel and the client
+// of its Connection, which is kept, with its outbound transports, until the Connection changes. A deleted Destination
+// still has one, for its final edit. A Destination that is unknown, not a Mattermost one, or whose Connection is deleted
+// is mattermost.ErrNoTarget.
+func (s *Service) Target(ctx context.Context, destinationID int64) (mattermost.Target, error) {
+	r, err := s.cfg.Store.GetDestinationTarget(ctx, dbgen.GetDestinationTargetParams{OrgID: s.cfg.OrgID,
+		DestinationID: destinationID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return mattermost.Target{}, mattermost.ErrNoTarget
+	}
+	if err != nil {
+		return mattermost.Target{}, fmt.Errorf("read the connection of the destination %d: %w", destinationID, err)
+	}
+	c, err := s.cachedClient(dbgen.GetConnectionRow{ID: r.ID, PublicID: r.PublicID, Type: r.Type, Name: r.Name,
+		MattermostServerUrl: r.MattermostServerUrl, BotTokenCiphertext: r.BotTokenCiphertext,
+		BotTokenKeyID: r.BotTokenKeyID, BotTokenUpdatedAt: r.BotTokenUpdatedAt, Proxy: r.Proxy,
+		ProxyPasswordCiphertext: r.ProxyPasswordCiphertext, ProxyPasswordKeyID: r.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt, Version: r.Version})
+	if errors.Is(err, ErrNotMattermost) {
+		return mattermost.Target{}, mattermost.ErrNoTarget
+	}
+	if err != nil {
+		return mattermost.Target{}, err
+	}
+	return mattermost.Target{Client: c, ConnectionID: r.ID, ConnectionPublicID: r.PublicID,
+		TeamID: r.MattermostTeamID.String, TeamName: r.MattermostTeamName.String,
+		ChannelID: r.MattermostChannelID.String}, nil
+}
+
+// Connection is the Mattermost Connection publicID with its client, for the callback of its button presses; a
+// Connection that is unknown, deleted or not a Mattermost one is mattermost.ErrNoConnection.
+func (s *Service) Connection(ctx context.Context, publicID string) (mattermost.Connection, error) {
+	r, err := s.row(ctx, s.cfg.Store, publicID)
+	if errors.Is(err, ErrNotFound) {
+		return mattermost.Connection{}, mattermost.ErrNoConnection
+	}
+	if err != nil {
+		return mattermost.Connection{}, err
+	}
+	c, err := s.cachedClient(r)
+	if errors.Is(err, ErrNotMattermost) {
+		return mattermost.Connection{}, mattermost.ErrNoConnection
+	}
+	if err != nil {
+		return mattermost.Connection{}, err
+	}
+	return mattermost.Connection{ID: r.ID, PublicID: r.PublicID, Client: c}, nil
+}
+
+// cachedClient is the client of the Connection of r, built again when the Connection's version changed.
+func (s *Service) cachedClient(r dbgen.GetConnectionRow) (*mattermost.Client, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cc, ok := s.clients[r.ID]; ok && cc.version == r.Version {
+		return cc.client, nil
+	}
+	c, err := s.client(r)
+	if err != nil {
+		return nil, err
+	}
+	s.clients[r.ID] = cachedClient{version: r.Version, client: c}
+	return c, nil
 }
 
 // Step is a step of a Connection check: its latency and path, and when it failed what answered.

@@ -102,3 +102,22 @@ WHERE org_id = @org_id AND id = @id;
 -- LockDemo serializes the demo start-up step of replicas that start together, until the transaction ends.
 -- name: LockDemo :exec
 SELECT pg_advisory_xact_lock(@key::bigint);
+
+-- GetDestinationTarget reads where a Mattermost Destination posts — its team and channel — with the Connection it
+-- posts through and that Connection's secrets as stored. A deleted Destination is read too, since its final edit still
+-- runs; its Connection must not be deleted.
+-- name: GetDestinationTarget :one
+SELECT d.mattermost_team_id, d.mattermost_team_name, d.mattermost_channel_id, c.id, c.public_id, c.type, c.name,
+       c.mattermost_server_url, c.bot_token_ciphertext, c.bot_token_key_id, c.bot_token_updated_at, c.proxy,
+       c.proxy_password_ciphertext, c.proxy_password_key_id, c.proxy_password_updated_at, c.version
+FROM destinations d
+JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+WHERE d.org_id = @org_id AND d.id = @destination_id AND d.type = 'mattermost' AND c.deleted_at IS NULL;
+
+-- ListMattermostDestinations lists the Mattermost Destinations that are not deleted, in id order, with their
+-- Connection, team and channel, for muster doctor.
+-- name: ListMattermostDestinations :many
+SELECT id, public_id, name, connection_id, mattermost_team_id, mattermost_channel_id
+FROM destinations
+WHERE org_id = @org_id AND type = 'mattermost' AND deleted_at IS NULL
+ORDER BY id;

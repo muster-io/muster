@@ -7,38 +7,73 @@ layer: L1
 depends_on: [S-039]
 covers: [C-13.FR-3, C-13.FR-4, C-13.FR-5, C-13.FR-7, C-13.FR-8, C-13.FR-10, C-13.FR-11, C-13.FR-12, C-13.AC-1, C-13.AC-2, C-13.AC-3, C-13.AC-4, C-13.AC-5, C-13.AC-6, C-13.AC-8, C-13.AC-9, C-13.AC-10, C-13.AC-11, C-13.AC-12, C-13.AC-13, C-13.AC-14, C-13.AC-15, C-11.AC-1, C-11.AC-5, C-11.AC-7, C-12.AC-3, C-11.FR-2, C-11.FR-7, C-11.FR-9, C-12.FR-1, C-12.FR-7, C-12.FR-8, C-12.FR-11, C-10.FR-3, C-10.FR-6, C-10.FR-11, C-09.FR-13, C-08.FR-11, C-02.FR-14, C-01.FR-7, C-11.FR-8]
 files_touched:
-  - internal/mattermost/adapter.go
-  - internal/mattermost/layout.go
-  - internal/mattermost/classify.go
-  - internal/mattermost/callback.go
-  - internal/mattermost/adapter_test.go
-  - internal/mattermost/layout_test.go
-  - internal/mattermost/callback_test.go
+  - .github/workflows/nightly.yml
+  - api/openapi.yaml
+  - design/facts.md
+  - design/prd/l1/C-08-routing.md
+  - docs/messengers/mattermost.md
+  - internal/accountlinks/live_test.go
   - internal/accountlinks/lookup.go
+  - internal/accountlinks/lookup_test.go
   - internal/accountlinks/query.sql
-  - internal/server/server.go
-  - internal/server/server_test.go
+  - internal/api/alertgroups.go
   - internal/api/alertgroups_test.go
+  - internal/archlint/secretleak.go
+  - internal/connections/connections.go
+  - internal/connections/connections_test.go
+  - internal/connections/doctor.go
+  - internal/connections/doctor_test.go
+  - internal/connections/live_test.go
+  - internal/connections/query.sql
+  - internal/delivery/delivery.go
+  - internal/delivery/interactive.go
+  - internal/delivery/live_test.go
+  - internal/delivery/presses.go
+  - internal/delivery/presses_test.go
+  - internal/delivery/query.sql
+  - internal/delivery/worker_test.go
+  - internal/doctor/doctor.go
+  - internal/doctor/doctor_integration_test.go
+  - internal/doctor/doctor_test.go
+  - internal/groups/counts.go
+  - internal/groups/dispatcher_test.go
   - internal/groups/filters.go
-  - internal/groups/read.go
-  - internal/groups/query.sql
+  - internal/groups/groups_integration_test.go
+  - internal/groups/list.go
   - internal/groups/list_test.go
+  - internal/groups/query.sql
+  - internal/groups/read.go
+  - internal/logging/events.go
+  - internal/mattermost/adapter.go
+  - internal/mattermost/adapter_test.go
+  - internal/mattermost/callback.go
+  - internal/mattermost/callback_test.go
+  - internal/mattermost/check_test.go
+  - internal/mattermost/classify.go
+  - internal/mattermost/client.go
+  - internal/mattermost/export_test.go
+  - internal/mattermost/layout.go
+  - internal/mattermost/layout_test.go
+  - internal/messages/texts/en.json
+  - internal/messages/texts/ru.json
+  - internal/routing/evaluate.go
+  - internal/routing/query.sql
+  - internal/routing/routes.go
+  - internal/routing/routes_test.go
+  - internal/routing/routing_integration_test.go
   - internal/routing/suggestions.go
   - internal/routing/suggestions_test.go
-  - internal/doctor/doctor.go
   - internal/runtime/runtime.go
-  - internal/logging/events.go
-  - internal/archlint/secretleak.go
-  - internal/archlint/archlint.go
-  - docs/messengers/mattermost.md
+  - internal/runtime/runtime_test.go
+  - internal/server/server.go
+  - internal/server/server_test.go
+  - sqlc.yaml
+  - test/e2e/alert_group_list_test.go
   - test/e2e/harness.go
   - test/e2e/mattermost_test.go
   - test/load/main.go
-  - .github/workflows/nightly.yml
-  - design/facts.md
-  - sqlc.yaml
 acceptance:
-  - "[C-13.AC-13, C-13.FR-3, C-12.FR-1, C-12.FR-11] A new Alert Group creates one post whose `message` is the summary line — the status emoji, `#N` and the title — with one attachment coloured by status, whose title `#N` and the title links to the Alert Group page, whose text has the line of links under the Alerts starting with \"Open in Muster\" and ends with the footer line, whose `footer` is \"Muster v<version>\" with the logo URL as `footer_icon`, and whose buttons follow; every link is in the attachment, none is a button; the post of an Alert Group of 600 Alerts keeps its `message` and its attachment text within 16,383 characters, its Alert list ends with \"…and N more\" and the link to Muster stays."
+  - "[C-13.AC-13, C-13.FR-3, C-12.FR-1, C-12.FR-11] A new Alert Group creates one post whose `message` is the summary line — the status emoji, `#N` and the title — with one attachment coloured by status, whose title `#N` and the title links to the Alert Group page, whose text has the line of links under the Alerts starting with \"Open in Muster\" and ends with the footer line, whose `footer` is \"Muster v<version>\" with the logo URL as `footer_icon`, and whose buttons follow; every link is in the attachment, none is a button; the post of an Alert Group of 600 Alerts keeps its `message` and its attachment text within 16,383 characters, its Alert list is cut to the distinct values of S-036, each label ending with \"+N more\", with \"Full list in Muster\", and the link to Muster stays."
   - "[C-13.AC-1] Acknowledge through the API edits that post in place to the acknowledged colour, footer and buttons; a new Alert creates a reply with the post as `root_id`, which raises its reply count."
   - "[C-13.AC-5, C-13.FR-8, C-12.FR-7] A label value `@channel <b>x</b>` arrives as literal text and the fake server records no notification for it."
   - "[C-13.AC-6, C-13.FR-8, C-11.FR-7, C-12.FR-8] A Quiet Thread reply carries no Mention; a Loud one carries the Mention configured for its event — `@channel` for `new_alerts` — in the post's message, and the fake server records the notification; a Loud Root message carries its Mentions in its `message` after the summary line, never in the attachment; an edit never notifies."
@@ -51,7 +86,7 @@ acceptance:
   - "[C-13.AC-8, C-13.FR-10] With the bot removed from the channel, a new Alert Group meets a `403` and resolves while the Destination is Broken; after the bot is added back the next probe — the Destination check, as the adapter's `Check` — ends the Broken state and resolves `MusterDestinationBroken` with no new Alert Group, its requests counted under `client=\"delivery\"`; `checkDestination` does the same at once under `client=\"interactive\"`."
   - "[C-13.AC-12, C-13.FR-5] A `404` naming the channel makes the Destination Broken; an edit refused with `403` for a deleted Root message — confirmed by the plain read `GET /api/v4/posts/{id}` answering `404` — republishes the Root message once with \"The previous message was deleted at HH:MM\" and leaves the Destination healthy, and a reply refused with `400` `api.post.create_post.root_id.app_error` does the same without the read; an edit refused with `403` while the read answers `200` makes the Destination Broken."
   - "[C-13.AC-15, C-13.FR-5, C-11.FR-8] A `429` with a plain-text body and `Retry-After: 1` delays the next request through that Connection, to any of its Destinations, by 1 to 2 seconds and is not counted as an attempt."
-  - "[C-13.FR-11, C-13.AC-9, C-08.FR-11] With a Mattermost Destination and no Route but the Default one for `alertname=~\"Muster.*\"`, `listRouteSuggestions` offers `internal_alerts`; accepting it with that Destination creates the Route at the top of the list with that Destination."
+  - "[C-13.FR-11, C-13.AC-9, C-08.FR-11] With a Mattermost Destination and no Route but the Default one for `alertname=~\"Muster.*\"`, `listRouteSuggestions` offers `internal_alerts`; accepting it with that Destination creates the Route at the top of the list — directly below a Route that already takes an Internal alert, when one does (D268) — with that Destination."
   - "[C-13.FR-12, C-13.AC-10, C-09.FR-13] An Alert Group whose delivery ended as Not delivered is returned by `listAlertGroups?delivery_problem=true` with `delivery_problem: true`; after a later successful delivery it is not."
   - "[C-11.AC-1, C-11.AC-5, C-11.AC-7, C-12.AC-3] Against the fake server: ten Alerts and an Acknowledge within 2 seconds give one post and at most one edit; stopping Muster — a `muster dev --replica` process of the harness mode with the fakes in the test process — while the server holds the answer to a new post gives a second post and a \"possible duplicate\" entry after the restart; recovery after a Broken period publishes, edits and withholds as C-11.AC-7 says; a failing Route template produces the Fallback template in the post."
   - "[C-02.FR-14] `muster doctor` prints one line per Mattermost Connection check and per Mattermost Destination check."
@@ -105,19 +140,22 @@ issue: 61
   `<MUSTER_PUBLIC_URL>/muster-mark-256.png` (the mark in `web/public/`); `actions` the buttons of the status, each `type: button`
   with a stable `id` (`ack`, `unack`, `resolve`, `unsnooze`, `snooze0`…) and `integration` `{url:
   <MUSTER_INGEST_URL>/api/v1/callbacks/mattermost/<connection public_id>, context: {action, key_id}}`. Mentions never
-  go into the attachment: there they would notify with an empty notification (F-056). The adapter declares `Markup()`
+  go into the attachment: there they would notify with an empty notification (F-056). A trusted Mention token of a
+  Route template shows in the attachment as text that notifies nobody, and on a Loud Publication its Mention joins the
+  others in `message`; the Owner token stays text, since the message carries no username of the Owner. The adapter declares `Markup()`
   `markdown` and `LengthLimit()` 16,383 characters, the server's `MaxPostSize` (F-057), which the layout applies to the
   `message` and to the attachment text; a longer Root message is shortened by S-036 — its Alert list is cut and ends
-  with "…and N more" — and the link to Muster stays.
+  with the distinct values of the labels that differ, each ending with "+N more", and "Full list in Muster" — and
+  the link to Muster stays.
 - **Edits and replies** (C-13.FR-3, FR-8): an update is `PUT /api/v4/posts/{id}/patch` with `message` the current
   summary line, without Mentions, and the new `props`; a Thread reply is `POST /api/v4/posts` with `root_id` the Root
   message and the reply text (S-036) in `message`. A Quiet new message carries no Mention; a Loud one carries the
   resolved targets of S-037 — `@channel`, `@all`, `@here`, `@<group>`, or `@<username>` of a user's Account link in
   `mattermost:<connection>` (otherwise the display name as plain text). Edits are always Quiet.
 - **Escaping** (C-12.FR-7, C-13.FR-8): alert data are escaped for Mattermost Markdown with the escaper of S-036 — the
-  Markdown control characters backslash-escaped; HTML tags, which Mattermost shows as text, left as they are — and `@`
-  is neutralized, so `@channel <b>x</b>` shows as literal text and notifies nobody; trusted Mention tokens become real
-  Mentions.
+  Markdown control characters backslash-escaped, `<` and `>` among them, so that an HTML tag arrives as `\<b\>` and
+  Mattermost shows it as the literal text — and `@` is neutralized, so `@channel <b>x</b>` shows as literal text and
+  notifies nobody; trusted Mention tokens become real Mentions only in the `message` of a Loud post.
 - **Response mapping** (C-13.FR-5, C-11.FR-8; `classify.go`): `429` → `retry_after` scoped to the Connection for the
   seconds of `Retry-After`, classified by status and headers alone because the body is `text/plain` (F-031); `5xx`,
   timeouts and network errors → `transient`; `401`, `403` and a `404` on creating a post (the channel is unknown or
@@ -145,17 +183,21 @@ issue: 61
   Connection (unknown or deleted: nothing more), verifies the action id with
   `internal/buttons` and the key named by `context.key_id`, and checks that `post_id` is the `message_id` of the Alert
   Group's delivery to a Destination of this Connection and that `channel_id` is that Destination's channel; any failure
-  is a refusal. It maps `user_id` through `accountlinks.Lookup("mattermost:<connection>", user_id)`; without a link it
+  is a refusal, answered only when `post_id` is the `message_id` of a delivery to a Destination of this Connection in
+  that `channel_id` — otherwise nothing is sent, so that a forged callback can neither post into another channel nor
+  spend the Destination's limiter tokens. It maps `user_id` through `accountlinks.Lookup("mattermost:<connection>", user_id)`; without a link it
   sends "Your Mattermost account is not linked to Muster. Link it in your profile: {MUSTER_PUBLIC_URL}/profile". With
   a link it dispatches the Command — `acknowledge`, `unacknowledge`, `resolve`, `unsnooze`, or `snooze` until now plus
   the pressed duration of `route.snooze_durations` — as the User with the Transport `mattermost`, and answers after the
   dispatch, well within the 30 s the server waits (F-032). Every text for the person — the refusal of C-10 (its
   `detail`), "This button could not be verified; nothing was changed.", the texts of C-18.FR-8 for Viewers and disabled
   Users — goes as one `POST /api/v4/posts/ephemeral` (`user_id`, `post: {channel_id, message}`) through
-  `delivery.Interactive` on the Connection's limiter, without `root_id` for a press on a Root message (F-026) and with
+  `delivery.Interactive` on the limiters of the Destination and its Connection, without `root_id` for a press on a Root message (F-026) and with
   the Root message as `root_id` for a press on a Thread reply (F-055, used from S-049); nothing is sent on success. The
-  answer never carries `update` or `ephemeral_text` (F-023, F-025). Log events `mattermost_press` (INFO: `connection`,
-  `group`, `command`, `outcome`).
+  answer never carries `update` or `ephemeral_text` (F-023, F-025). A panic while handling a press is logged and still
+  answered `200` `{}`. A Snooze button names the index of its duration, which is read from the Route at the press. Log
+  events `mattermost_press` (INFO: `connection`, `group`, `command`, `outcome`, and `error` when the press failed or its
+  answer was not sent).
 - **Account link lookup** (`internal/accountlinks`): `Lookup(identity_space, external_id) → User` over `account_links`,
   read-only; S-051 adds everything else.
 - **Delivery problem** (C-13.FR-12; `internal/groups/filters.go`, `read.go`): an Alert Group has `delivery_problem`
@@ -168,7 +210,11 @@ issue: 61
   "Muster: Heartbeat lost" that the `heartbeat_lost` suggestion of S-026 creates matches only
   `alertname="MusterHeartbeatLost"`, so it takes that one alert and leaves the suggestion standing for the others;
   both suggestions can apply at once. Accepting `internal_alerts` creates the Route "Muster internal alerts" with the
-  Matcher `alertname=~"Muster.*"`, the chosen `destination_ids` and the place of the Open question below.
+  Matcher `alertname=~"Muster.*"`, the chosen `destination_ids` (required: without them `422` `required` at
+  `/destination_ids`), not Urgent, the Group key `[alertname, integration, destination, route]` and the On-call
+  profile, directly below the last Route other than the Default route that takes an Internal alert, otherwise at the
+  top (D268). The labels an Internal alert is raised with are tried with every Integration that is not deleted (its
+  Static labels included), every Destination that is not deleted and every Route, and once without an entity.
 - **`muster doctor`** (C-02.FR-14): one line per Mattermost Connection (`connection <name>: ok` or the failing step) and
   per Mattermost Destination (`destination <name>: ok` or the failing check), with the checks of S-039, read-only, in
   the background class.
@@ -185,8 +231,9 @@ issue: 61
   It needs no token from outside: it signs in with the bootstrap Admin (`MUSTER_LOAD_ADMIN_EMAIL` and
   `MUSTER_LOAD_ADMIN_PASSWORD`, by default those of the development defaults) and creates a Personal access token for
   the run, then with it an Integration whose token it registers with its fake Alertmanager, a Route with the Group key
-  `[alertname, cluster]` and a Mattermost Destination on the fake server whose limiter, and the fake's rate limit, leave
-  room; it then drives the fake Alertmanager to send 50 webhooks per second for one minute that bring 10,000
+  `[alertname, cluster]` and a Storm threshold above the run's Alert Groups, so that no Storm holds the posts it
+  measures, and a Mattermost Destination on the fake server whose limiter (and its Connection's, 1,000 per second) and
+  the fake's rate limit, turned off, leave room; it then drives the fake Alertmanager to send 50 webhooks per second for one minute that bring 10,000
   fingerprints into 1,000 Alert Groups. It fails when a webhook is rejected or fails, when fewer than 10,000 Alerts fire
   or fewer than 1,000 Alert Groups are open at the end, when the 99th percentile of
   `muster_ingest_request_duration_seconds` exceeds 1 s (P-44), or when the 95th percentile of
@@ -230,25 +277,25 @@ curl -s -X PUT $FAM/groups/d1 -d '{"receiver":"lab","route":"{}","labels":{"aler
 curl -s -X PUT $FAM/groups/d1/alerts/i1 -d '{"labels":{"team":"db","cluster":"a","pod":"i1","note":"@channel <b>x</b>"}}' > /dev/null
 NOTIFY d1 '{"reason":"first notification"}'; sleep 1; G=$(AG 'pod%3D%22i1%22')
 POSTS '[.[] | select(.root_id == "") | .props.attachments[0] | {n: (.actions | length), title, tl: (.title_link | test("/alert-groups/AG")), footer, color,
-  open: (.text | test("\\[Open in Muster\\]")), lit: (.text | test("@​channel <b>x</b>"))}]'
+  open: (.text | test("\\[Open in Muster\\]")), lit: (.text | test("@​channel \\\\<b\\\\>x"))}]'
 # [{"n":5,"title":"#1 DiskFull","tl":true,"footer":"Muster v…","color":"#d32f2f","open":true,"lit":true}]
 POSTS '[.[] | select(.root_id == "") | .message] | first'                    # "🔴 #1 DiskFull"
 curl -s $FMM/notifications | jq length                                      # 0
 
 # C-13.AC-1, AC-6: Acknowledge edits; a new Alert is a Thread reply — Quiet now, since the Alert Group is acknowledged
 curl -s "${H[@]}" -X POST $API/alert-groups/$G/acknowledge | jq -r .outcome  # done
-sleep 1; REQ '[.[] | select(.path | test("/patch$")) | .body.props.attachments[0] | {color, a: [.actions[].name]}] | last'
+sleep 1; REQ '[.[] | select(.path | test("/patch$")) | .body | fromjson | .props.attachments[0] | {color, a: [.actions[].name]}] | last'
 # {"color":"#f57c00","a":["Unack","Resolve","Snooze 1 h","Snooze 4 h","Snooze 24 h"]}
-curl -s -X PUT $FAM/groups/d1/alerts/i2 -d '{"labels":{"team":"db","cluster":"a","pod":"i2"}}' > /dev/null
+curl -s -X PUT $FAM/groups/d1/alerts/i2 -d '{"labels":{"team":"db","cluster":"a","disk":"i2"}}' > /dev/null
 NOTIFY d1 '{"reason":"new alerts added"}'; sleep 1
 POSTS '[.[] | select(.root_id != "") | {m: (.message | test("@")), root: (.root_id != "")}] | last'   # {"m":false,"root":true}
 POSTS '[.[] | select(.root_id == "") | .reply_count] | first'                # 1
 # a Loud reply: new Alerts in a firing Alert Group mention @channel (the Destination's new_alerts setting)
 curl -s "${H[@]}" -X POST $API/alert-groups/$G/unacknowledge > /dev/null
-curl -s -X PUT $FAM/groups/d1/alerts/i3 -d '{"labels":{"team":"db","cluster":"a","pod":"i3"}}' > /dev/null
+curl -s -X PUT $FAM/groups/d1/alerts/i3 -d '{"labels":{"team":"db","cluster":"a","disk":"i3"}}' > /dev/null
 NOTIFY d1 '{"reason":"new alerts added"}'; ADV 60; sleep 1                  # past the Thread batching window
 POSTS '[.[] | select(.root_id != "") | .message | startswith("@channel")] | last'   # true
-curl -s $FMM/notifications | jq -c '[.[] | .reason] | unique'                # ["channel"]
+curl -s $FMM/notifications | jq -c '[.[] | .kind] | unique'                # ["channel"]
 
 # C-13.AC-4, AC-14: a press from an account without an Account link
 ROOT=$(POSTS '[.[] | select(.root_id == "")][0].id' | tr -d '"')
@@ -278,41 +325,41 @@ curl -s -X POST localhost:8081/api/v1/callbacks/mattermost/$C -d 'not json' -w '
 
 # C-13.AC-15: 429 text/plain with Retry-After: 1 holds the whole Connection
 curl -s -X POST $FMM/faults -d '{"path":"/api/v4/posts","status":429,"retry_after_seconds":1,"content_type":"text/plain","body":"limit exceeded","times":1}'
-curl -s -X PUT $FAM/groups/d1/alerts/i4 -d '{"labels":{"team":"db","cluster":"a","pod":"i4"}}' > /dev/null
+curl -s -X PUT $FAM/groups/d1/alerts/i4 -d '{"labels":{"team":"db","cluster":"a","disk":"i4"}}' > /dev/null
 NOTIFY d1 '{"reason":"new alerts added"}'; ADV 60; sleep 3
 REQ '[.[] | select(.path == "/api/v4/posts")] | .[-2:] | (.[1].at_ms - .[0].at_ms) / 1000 | . >= 1 and . < 2'   # true
 
 # C-13.AC-3, AC-8: the bot leaves the channel; a new Alert Group meets 403 and resolves while Broken
 curl -s -X DELETE $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
-curl -s -X PUT $FAM/groups/d1/alerts/j1 -d '{"labels":{"team":"db","cluster":"b","pod":"j1"}}' > /dev/null
+curl -s -X PUT $FAM/groups/d1/alerts/j1 -d '{"labels":{"team":"db","cluster":"b","disk":"j1"}}' > /dev/null
 NOTIFY d1 '{"reason":"new alerts added"}'; sleep 1
 curl -s -b jar $API/destinations/$D | jq -c '.health | {state, r: (.reason | test("403"))}'   # {"state":"broken","r":true}
 curl -s -b jar $API/routes/$R | jq -r '.destinations[0].health.state'        # broken
 curl -s -b jar "$API/integrations/$(curl -s -b jar $API/integrations | jq -r '.items[] | select(.builtin) | .id')/alerts?state=firing" \
   | jq -r '.items[].labels.alertname'                                       # MusterDestinationBroken
-curl -s -X PUT $FAM/groups/d1/alerts/j1 -d '{"labels":{"team":"db","cluster":"b","pod":"j1"},"status":"resolved"}' > /dev/null
+curl -s -X PUT $FAM/groups/d1/alerts/j1 -d '{"labels":{"team":"db","cluster":"b","disk":"j1"},"status":"resolved"}' > /dev/null
 NOTIFY d1 '{"reason":"some alerts resolved"}'
 curl -s -X PUT $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
 D0=$(curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="delivery",outcome="ok"}' | awk '{print $2}')
 ADV 300; sleep 2
 curl -s -b jar $API/destinations/$D | jq -r .health.state                   # healthy
-curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="delivery",outcome="ok"}' | awk -v d=$D0 '{print ($2 - d) >= 2}'   # 1
+curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="delivery",outcome="ok"}' | awk -v d=$D0 '{print (($2 - d) >= 2)}'   # 1
 # the same through "Check", at once, in the interactive class
 curl -s -X DELETE $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
-curl -s -X PUT $FAM/groups/d1/alerts/i5 -d '{"labels":{"team":"db","cluster":"a","pod":"i5"}}' > /dev/null
+curl -s -X PUT $FAM/groups/d1/alerts/i5 -d '{"labels":{"team":"db","cluster":"a","disk":"i5"}}' > /dev/null
 NOTIFY d1 '{"reason":"new alerts added"}'; sleep 1
 curl -s -b jar $API/destinations/$D | jq -r .health.state                   # broken
 curl -s -X PUT $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
 I0=$(curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="interactive",outcome="ok"}' | awk '{print $2}')
 curl -s "${H[@]}" -X POST $API/destinations/$D/checks | jq -c '{ok, h: .health.state}'   # {"ok":true,"h":"healthy"}
-curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="interactive",outcome="ok"}' | awk -v i=$I0 '{print ($2 - i) >= 2}'   # 1
+curl -s localhost:8082/metrics | grep 'muster_client_requests_total{client="interactive",outcome="ok"}' | awk -v i=$I0 '{print (($2 - i) >= 2)}'   # 1
 
 # C-13.AC-12: a deleted post of an open Alert Group answers the edit with 403; the plain read answers 404, and the
 # Root message is republished once, Quietly, with the note; the Destination stays healthy
 curl -s -X DELETE $FMM/posts/$ROOT; curl -s "${H[@]}" -X POST $API/alert-groups/$G/unacknowledge > /dev/null; sleep 2
 REQ "[.[] | select(.path == \"/api/v4/posts/$ROOT/patch\") | .status] | last"            # 403
 REQ "[.[] | select(.path == \"/api/v4/posts/$ROOT\") | .status] | last"                 # 404
-POSTS '[.[] | select(.root_id == "" and .deleted == false) | .props.attachments[0].text | test("The previous message was deleted at [0-9]{2}:[0-9]{2}")] | last'   # true
+POSTS '[.[] | select(.root_id == "" and .delete_at == 0) | .props.attachments[0].text | test("The previous message was deleted at [0-9]{2}:[0-9]{2}")] | last'   # true
 curl -s -b jar $API/destinations/$D | jq -r .health.state                   # healthy
 
 # C-13.AC-10: Not delivered, filtered, then delivered again
@@ -325,15 +372,15 @@ curl -s "${H[@]}" -X POST $API/alert-groups/$G/unacknowledge > /dev/null; sleep 
 curl -s -b jar "$API/alert-groups?delivery_problem=true" | jq '[.items[] | select(.id == "'$G'")] | length'   # 0
 
 # C-13.FR-11, AC-9: the Internal alerts Route suggestion
-curl -s -b jar $API/route-suggestions | jq -r '.items[].id'                  # internal_alerts
+curl -s -b jar $API/route-suggestions | jq -r '.items[].id'                  # heartbeat_lost (the demo Integration), internal_alerts
 curl -s "${H[@]}" -X POST $API/route-suggestions/internal_alerts/accept -d "{\"destination_ids\":[\"$D\"]}" > /dev/null
 curl -s -b jar $API/routes | jq -c '.items[0] | {m: .matchers[0].value, d: [.destinations[].id]}'   # {"m":"Muster.*","d":["DS…"]}
 
 # C-02.FR-14
-./bin/muster dev doctor | grep -E '^(connection|destination) '
-# connection Dev Mattermost: ok
-# connection mm: ok
-# destination alerts: ok
+./bin/muster dev doctor | grep -E ' (connection|destination) '
+# OK   connection Dev Mattermost: ok
+# OK   connection mm: ok
+# OK   destination alerts: ok
 
 # C-01.FR-7: the full load profile (NFR-1, NFR-2, P-44)
 make load-test                                   # signs in as admin@example.org and creates its own data
@@ -349,7 +396,7 @@ the `muster dev --replica` process is stopped and started again while the fake k
 `possible_duplicate` Timeline entry), C-11.AC-6 and AC-7 (repeated `500`s until Broken, then recovery) — and C-12.AC-3
 and AC-5 (a failing Route template gives the Fallback template in the post; a Russian Route gives Russian posts and
 replies), C-12.FR-11 with the limit of F-057 (an Alert Group of 600 Alerts whose post keeps its `message` and its
-attachment text within 16,383 characters, its Alert list ending with "…and N more" and the link to Muster kept), a
+attachment text within 16,383 characters, its Alert list cut to the distinct values ending with "+N more" and the link to Muster kept), a
 Thread reply under a deleted Root message (`400` for its `root_id`, F-058) that republishes the Root message without a
 read, and an edit refused with `403` while the post still exists (a fault on its patch, the plain read `200`) that makes
 the Destination Broken.
@@ -364,12 +411,13 @@ shown (F-056); and that after the Root message is deleted in the client, the nex
 
 ## Open questions
 
-- **Where the "Muster internal alerts" Route goes when "Muster: Heartbeat lost" exists.** C-08.FR-11 creates an
+- ~~**Where the "Muster internal alerts" Route goes when "Muster: Heartbeat lost" exists.** C-08.FR-11 creates an
   accepted suggestion at the top of the list. Placed above "Muster: Heartbeat lost", the broader `Muster.*` Route
   would take `MusterHeartbeatLost` first, and that alert would lose its urgent Route and its Group key by Integration.
   Recommendation: when a Route other than the Default route already takes an Internal alert, insert the new Route
   directly below the last such Route, otherwise at the top; this changes C-08.FR-11's "at the top of the list" for this
-  one case, so the maintainer decides it (and the PRD wording) before the suggestion is implemented.
+  one case, so the maintainer decides it (and the PRD wording) before the suggestion is implemented.~~
+  _Resolved (D268):_ as recommended; C-08.FR-11 says so.
 
 ## Notes
 
@@ -384,6 +432,11 @@ shown (F-056); and that after the Root message is deleted in the client, the nex
   epsilon stand — a root post and a reply whose footer carries the bare username of a user mentioned nowhere else,
   watched in that user's client — records the result as a new `F-NNN` under Mattermost in `design/facts.md`, and, if a
   bare username does notify, changes the footer so that it no longer does (`internal/mattermost/layout.go`).
+- The full load profile against `muster dev` on a developer workstation (macOS, PostgreSQL in Docker) fails NFR-2:
+  Snapshot processing of one Integration takes about 35 ms each, so 50 webhooks per second build a backlog, and the
+  delivery latency, counted from receipt, reaches about 58 s at p95 while delivery itself adds about 6 ms. The
+  maintainer decides how NFR-2 is met (faster processing, the profile over several Integrations, or a narrower NFR-2)
+  before the nightly job relies on it.
 - Lint 3 stays strict (journal D282). `delivery.PublishOp`, `UpdateOp` and `ReplyOp` are exported, so any package can
   send, but only through `Interactive.Do`, which always takes a limiter token. The Mattermost client's post and patch
   methods therefore stay unexported, or `DefaultConfig` in `internal/archlint/archlint.go` adds them to lint 3's

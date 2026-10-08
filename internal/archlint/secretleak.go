@@ -16,6 +16,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"slices"
@@ -25,19 +26,23 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/accountlinks"
 	"github.com/muster-io/muster/internal/api"
 	"github.com/muster-io/muster/internal/audit"
 	adb "github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/auth"
 	authdb "github.com/muster-io/muster/internal/auth/dbgen"
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/connections"
 	cdb "github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/doctor"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/heartbeat"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
@@ -46,6 +51,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
+	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/oidc"
 	odb "github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/outbound"
@@ -1174,7 +1180,9 @@ func (s *probeSnapshots) Store(context.Context, ingest.Received) (ingest.Stored,
 // probeMattermost pushes the bot token (secret 0) and the proxy password (secret 1) of a Mattermost Connection through
 // its creation, the Connection check, the channel list and the Destination check, against a stand-in server that
 // answers every call with the token and the Authorization header in its error, directly and through a SOCKS5 proxy
-// that refuses the password; and builds a client whose proxy, with a password (secret 2), is refused.
+// that refuses the password; sends button presses to the callback of the Connection, whose ephemeral answers the
+// server refuses; publishes, edits, replies and checks through the adapter and runs the checks of muster doctor
+// against the same server; and builds a client whose proxy, with a password (secret 2), is refused.
 func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
@@ -1216,7 +1224,8 @@ func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error
 		return err
 	}
 	network := mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}}
-	svc := connections.New(connections.Config{OrgID: 1, Store: &probeConnections{}, Keyring: k,
+	store := &probeConnections{}
+	svc := connections.New(connections.Config{OrgID: 1, Store: store, Keyring: k,
 		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks, Network: network,
 		Interactive: deliverytest.Unlimited(1, clocks), IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081"},
 		Log: logger})
@@ -1244,6 +1253,7 @@ func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error
 	errs = append(errs, err, texts(res))
 	_, err = svc.Channels(ctx, c.PublicID, "", "")
 	errs = append(errs, err)
+	errs = append(errs, probePresses(ctx, svc, k, clocks, logger, c.PublicID), probeAdapter(ctx, svc, store, clocks))
 	checked, err := svc.CheckChannel(ctx, destinations.ChannelCheck{Connection: c.PublicID, TeamID: "t",
 		ChannelID: "c"})
 	errs = append(errs, err)
@@ -1254,6 +1264,115 @@ func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error
 		Token: logging.Secret(secrets[0]), Proxy: &outbound.Proxy{Type: "ftp", Address: "proxy:1", Username: "muster",
 			Password: logging.Secret(secrets[2])}})
 	return errors.Join(append(errs, err)...)
+}
+
+// probePresses sends button presses to the callback of the Connection publicID: one that cannot be verified, one from
+// an account without an Account link and one whose Command is refused, each answered with an ephemeral post that the
+// stand-in server refuses with the bot token in its error, and each logged.
+func probePresses(ctx context.Context, svc *connections.Service, k *keyring.Keyring, clocks clock.Clocks,
+	logger *logging.Logger, publicID string) error {
+	action, keyID, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectRoot, PublicID: "AGAAAAAAAAAAA1",
+		Command: buttons.CommandAcknowledge})
+	if err != nil {
+		return err
+	}
+	mux := http.NewServeMux()
+	mux.Handle(mattermost.CallbackPattern, mattermost.NewCallback(mattermost.CallbackConfig{Connections: svc,
+		Bindings: probeBindings{}, Links: probeLinks{}, Commands: probeCommands{}, Keys: k,
+		Path: deliverytest.Unlimited(1, clocks), Business: clocks.Business, PublicURL: "http://localhost:8080",
+		Log: logger}))
+	var errs []error
+	for _, p := range []struct{ user, action string }{{"u-linked", "x" + action[1:]}, {"u-unlinked", action},
+		{"u-linked", action}} {
+		body := fmt.Sprintf(`{"user_id":%q,"channel_id":"c","post_id":"p","context":{"action":%q,"key_id":%q}}`,
+			p.user, p.action, keyID)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, mattermost.CallbackPath+publicID,
+			strings.NewReader(body))
+		if err != nil {
+			return err
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		errs = append(errs, errors.New(rec.Body.String()))
+	}
+	return errors.Join(errs...)
+}
+
+// probeAdapter publishes, edits and replies through the adapter to the Destination 1 of the Connection on the
+// interactive path, as lint 3 allows, checks it in the delivery class as the Broken probe does, and runs the checks of
+// muster doctor in the background class; it returns the text of every outcome and finding.
+func probeAdapter(ctx context.Context, svc *connections.Service, store *probeConnections, clocks clock.Clocks) error {
+	a := &mattermost.Adapter{Targets: svc, PublicURL: "http://localhost:8080", IngestURL: "http://localhost:8081",
+		Version: "v0.0.0"}
+	conn := int64(1)
+	dest := delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1", Type: delivery.TypeMattermost, Connection: &conn}
+	m := delivery.Message{Kind: messages.KindRoot, Language: "en", Colour: "firing", Heading: &messages.Heading{
+		Number: 1, Title: "probe", URL: "http://localhost:8080/alert-groups/AGAAAAAAAAAAA1"}}
+	path := deliverytest.Unlimited(1, clocks)
+	var errs []error
+	for _, op := range []delivery.Op{delivery.PublishOp(a, m), delivery.UpdateOp(a, "post-1", m),
+		delivery.ReplyOp(a, delivery.Root{MessageID: "post-1"}, m), delivery.CheckOp(a)} {
+		o, err := path.Do(ctx, delivery.Subject{Destination: &dest}, op)
+		errs = append(errs, err, errors.New(string(o.Error)))
+	}
+	o := a.Check(ctx, delivery.Call{Class: outbound.ClassDelivery, Destination: dest})
+	errs = append(errs, errors.New(string(o.Error)))
+	found, err := svc.Doctor(ctx, store, 5*time.Second)
+	errs = append(errs, err)
+	for _, f := range found {
+		errs = append(errs, errors.New(f.Message))
+	}
+	return errors.Join(errs...)
+}
+
+// probeBindings bind every press to Destination 1 in the channel c.
+type probeBindings struct{}
+
+func (probeBindings) PressBinding(context.Context, int64, string, string) (delivery.Binding, error) {
+	conn := int64(1)
+	return delivery.Binding{Destination: delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1",
+		Type: delivery.TypeMattermost, Connection: &conn}, ChannelID: "c", Language: "en"}, nil
+}
+
+func (probeBindings) PostDestination(context.Context, int64, string, string) (delivery.Destination, bool, error) {
+	conn := int64(1)
+	return delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1", Type: delivery.TypeMattermost,
+		Connection: &conn}, true, nil
+}
+
+// probeLinks link the account u-linked only.
+type probeLinks struct{}
+
+func (probeLinks) Lookup(_ context.Context, _, external string) (accountlinks.User, error) {
+	if external != "u-linked" {
+		return accountlinks.User{}, accountlinks.ErrNotLinked
+	}
+	return accountlinks.User{ID: 1, PublicID: "SRAAAAAAAAAAA1", Login: "bob", Name: "Bob", Role: "responder",
+		Status: accountlinks.StatusActive}, nil
+}
+
+// probeCommands refuse every Command.
+type probeCommands struct{}
+
+func (probeCommands) Acknowledge(context.Context, groups.Caller, string) (groups.Result, error) {
+	return groups.Result{}, &groups.RefusedError{Code: groups.CodeAlreadyResolved, Message: "already resolved"}
+}
+
+func (probeCommands) Unacknowledge(ctx context.Context, c groups.Caller, id string) (groups.Result, error) {
+	return probeCommands{}.Acknowledge(ctx, c, id)
+}
+
+func (probeCommands) Resolve(ctx context.Context, c groups.Caller, id string, _ *string) (groups.Result, error) {
+	return probeCommands{}.Acknowledge(ctx, c, id)
+}
+
+func (probeCommands) Snooze(ctx context.Context, c groups.Caller, id string, _ groups.SnoozeEnd) (groups.Result,
+	error) {
+	return probeCommands{}.Acknowledge(ctx, c, id)
+}
+
+func (probeCommands) Unsnooze(ctx context.Context, c groups.Caller, id string) (groups.Result, error) {
+	return probeCommands{}.Acknowledge(ctx, c, id)
 }
 
 // probeConnections is the one Connection of probeMattermost in memory.
@@ -1296,6 +1415,38 @@ func (s *probeConnections) UpdateConnection(_ context.Context, a cdb.UpdateConne
 	s.row.ProxyPasswordCiphertext, s.row.ProxyPasswordKeyID = a.ProxyPasswordCiphertext, a.ProxyPasswordKeyID
 	s.row.Version++
 	return nil
+}
+
+// GetDestinationTarget is the Destination 1 of the Connection, in the team t and the channel c.
+func (s *probeConnections) GetDestinationTarget(context.Context, cdb.GetDestinationTargetParams) (
+	cdb.GetDestinationTargetRow, error) {
+	if s.row == nil {
+		return cdb.GetDestinationTargetRow{}, pgx.ErrNoRows
+	}
+	r := s.row
+	return cdb.GetDestinationTargetRow{MattermostTeamID: pgtype.Text{String: "t", Valid: true},
+		MattermostChannelID: pgtype.Text{String: "c", Valid: true}, ID: r.ID, PublicID: r.PublicID, Type: r.Type,
+		Name: r.Name, MattermostServerUrl: r.MattermostServerUrl, BotTokenCiphertext: r.BotTokenCiphertext,
+		BotTokenKeyID: r.BotTokenKeyID, BotTokenUpdatedAt: r.BotTokenUpdatedAt, Proxy: r.Proxy,
+		ProxyPasswordCiphertext: r.ProxyPasswordCiphertext, ProxyPasswordKeyID: r.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt, Version: r.Version}, nil
+}
+
+// ListConnections lists the Connection for muster doctor.
+func (s *probeConnections) ListConnections(context.Context, cdb.ListConnectionsParams) ([]cdb.ListConnectionsRow,
+	error) {
+	if s.row == nil {
+		return nil, nil
+	}
+	return []cdb.ListConnectionsRow{cdb.ListConnectionsRow(*s.row)}, nil
+}
+
+// ListMattermostDestinations lists the Destination 1 of the Connection for muster doctor.
+func (s *probeConnections) ListMattermostDestinations(context.Context, int64) ([]cdb.ListMattermostDestinationsRow,
+	error) {
+	return []cdb.ListMattermostDestinationsRow{{ID: 1, PublicID: "DSAAAAAAAAAAA1", Name: "probe",
+		ConnectionID: pgtype.Int8{Int64: 1, Valid: true}, MattermostTeamID: pgtype.Text{String: "t", Valid: true},
+		MattermostChannelID: pgtype.Text{String: "c", Valid: true}}}, nil
 }
 
 func (s *probeConnections) SetBotIdentity(context.Context, cdb.SetBotIdentityParams) error {

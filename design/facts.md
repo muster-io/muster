@@ -1,7 +1,7 @@
 # Verified facts
 
 - Status: Living document
-- Date: 2026-10-07
+- Date: 2026-10-08
 
 External behaviour that Muster's design relies on and that was checked against the real system rather than taken from
 its documentation: how Telegram, Mattermost and Alertmanager actually behave. Each fact has a stable id `F-NNN`, never
@@ -195,6 +195,14 @@ notified with the text and the attachment shown. Phone push was not checked. —
 notifications received by email by the mentioned user · Mattermost 11.2.2_ · Used in C-12.FR-1, C-13.FR-3,
 C-13.FR-8.
 
+**F-060. A username without `@` does not notify.** A bot post whose `message` and attachment text both ended with
+"Acknowledged by <username>" — the username of a channel member, written without `@` and mentioned nowhere else, as
+the footer of a Root message names a person — left that member's `mention_count` at `0`: it was read with
+`GET /api/v4/channels/{channel_id}/members/{user_id}` before the post and again 3 s after. The member kept their own
+notification settings; a person who adds their username to their own mention keywords would still be notified. —
+_2026-10-08 · one post in a public channel with a bot without the system admin role, deleted afterwards · Mattermost
+11.2.2_ · Used in C-12.FR-12, C-13.FR-3.
+
 ### Rate limit and server settings
 
 **F-030. The rate limit is off by default and counted per client address.** `RateLimitSettings.Enable` is `false` by
@@ -228,6 +236,11 @@ with `400` `api.post.create_post.root_id.app_error` ("Invalid RootId parameter")
 system admin role, which the test bot had, so Muster relies only on the `404` of the plain read (see
 [Pending](#pending)). — _2026-10-04 · a deleted root post, then a reply, an edit and both reads with the test bot's
 token (the bot has the system admin role) · Mattermost 11.2.2_ · Used in C-13.FR-5, C-13.AC-12.
+
+**F-061. A bot without the system admin role gets `404` for its deleted post.** After the bot of F-060, which has
+only the system user role, deleted its own post, the plain read `GET /api/v4/posts/{id}` of it answered `404`, as in
+F-058. — _2026-10-08 · the post of F-060, deleted through the API and read again · Mattermost 11.2.2_ · Used in
+C-13.FR-5.
 
 ## Alertmanager
 
@@ -369,9 +382,9 @@ snippet with and without the catch-all; Alertmanager routing documentation_ · U
 - **Mattermost.** How the client shows buttons on Thread replies, which the server accepts (F-055,
   [L1 open question 6](prd/L1.md#51-test-environment-facts)), and how phones are notified
   ([question 4](prd/L1.md#51-test-environment-facts)): the test server had push notifications off. Whether a bot
-  without the system admin role gets the same answers about a deleted root post as in F-058 — `404` to the plain read,
-  `403` to an edit, `400` to a reply — and whether it may read the post with `?include_deleted=true`, which probably
-  needs that role (not verified; Muster does not use that read).
+  without the system admin role gets the same answers about a deleted root post as in F-058 — its plain read answered
+  `404` on 2026-10-08 (F-061); `403` to an edit and `400` to a reply are still to be seen — and whether it may read the
+  post with `?include_deleted=true`, which probably needs that role (not verified; Muster does not use that read).
 - **Alertmanager.** A restart of an HA instance without a persistent volume, and `--dispatch.start-delay` on an HA pair
   (tested on the single instance only); `externalURL` of instances without `--web.external-url`; a resolve during a mute
   with vmalert as the source; how often tick races of an HA pair cause duplicates over hours of operation — none in

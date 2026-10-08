@@ -446,6 +446,17 @@ var DeliveryNotDelivered = newEvent("delivery_not_delivered", LevelWarn, "C-11",
 		"change of the Alert Group starts a new delivery.",
 	"destination", "group", "kind", "error_class")
 
+// MattermostPress is logged for each request to the callback of Mattermost button presses (C-13.FR-4).
+var MattermostPress = newEvent("mattermost_press", LevelInfo, "C-13",
+	"The callback of a Mattermost Connection received a button press and answered 200 with an empty JSON object: "+
+		"connection is the public_id of the Connection, empty when it does not exist; group the public_id of the "+
+		"Alert Group and command the Command, once the signed action id is verified; outcome done or unchanged for "+
+		"a Command that ran; refused, forbidden, not_linked, disabled or not_verified for a press that changed "+
+		"nothing and was answered with an ephemeral post, a not_verified one only in the channel of a Destination of "+
+		"the Connection; invalid_request for a body that is not a press, unknown_connection, or failed; error why "+
+		"the press failed or why its ephemeral answer was not sent, masked of secrets.",
+	"connection", "group", "command", "outcome", "error")
+
 // StormStarted is logged when a Route's new Alert Groups start a Storm (C-11.FR-6).
 var StormStarted = newEvent("storm_started", LevelInfo, "C-11",
 	"The new Alert Groups of a Route exceeded route.storm_threshold within a minute and started a Storm: route is the "+

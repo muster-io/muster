@@ -1066,3 +1066,30 @@ SELECT id
 FROM destinations
 WHERE org_id = @org_id AND connection_id = @connection_id AND deleted_at IS NOT NULL
 ORDER BY id;
+
+-- GetPressBinding reads what a button press on the Root message message_id of the Alert Group group_public_id is bound
+-- to (C-13.FR-4): the delivery of that Alert Group to a Mattermost Destination of the Connection that is not deleted
+-- and whose Root message is message_id, with the Destination's channel and the Route's language and Snooze durations.
+-- name: GetPressBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       coalesce(ds.mattermost_channel_id, '')::text AS channel_id, r.language, r.snooze_durations_seconds
+FROM deliveries d
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE d.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'mattermost' AND ds.deleted_at IS NULL
+  AND g.public_id = @group_public_id AND d.message_id = @message_id::text
+ORDER BY d.id
+LIMIT 1;
+
+-- GetPostDestination reads the Mattermost Destination of the Connection, not deleted, whose channel is channel_id and
+-- to which some delivery posted message_id.
+-- name: GetPostDestination :one
+SELECT ds.id, ds.public_id, ds.name
+FROM destinations ds
+WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'mattermost' AND ds.deleted_at IS NULL
+  AND ds.mattermost_channel_id = @channel_id::text
+  AND EXISTS (SELECT 1 FROM deliveries d
+              WHERE d.org_id = @org_id AND d.destination_id = ds.id AND d.message_id = @message_id::text)
+ORDER BY ds.id
+LIMIT 1;

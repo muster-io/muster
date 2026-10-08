@@ -185,6 +185,22 @@ FROM integrations
 WHERE org_id = @org_id AND deleted_at IS NULL AND heartbeat_enabled
 ORDER BY id;
 
+-- ListAlertingIntegrations lists the Integrations that are not deleted, the built-in one aside, with what the Internal
+-- alerts about an Integration carry of them: the public_id, the name and the Static labels.
+-- name: ListAlertingIntegrations :many
+SELECT public_id, name, static_labels
+FROM integrations
+WHERE org_id = @org_id AND deleted_at IS NULL AND NOT builtin
+ORDER BY id;
+
+-- ListAlertingDestinations lists the Destinations that are not deleted, of every type, with what the Internal alerts
+-- about a Destination carry of them: the public_id and the name.
+-- name: ListAlertingDestinations :many
+SELECT public_id, name
+FROM destinations
+WHERE org_id = @org_id AND deleted_at IS NULL
+ORDER BY id;
+
 -- ListRouteSuggestionDismissals lists the Route suggestions a User dismissed.
 -- name: ListRouteSuggestionDismissals :many
 SELECT suggestion

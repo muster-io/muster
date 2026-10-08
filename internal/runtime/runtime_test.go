@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -21,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/accountlinks"
 	"github.com/muster-io/muster/internal/audit"
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/auth"
@@ -47,6 +50,7 @@ import (
 	"github.com/muster-io/muster/internal/links"
 	linksdb "github.com/muster-io/muster/internal/links/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/oidc"
 	oidcdb "github.com/muster-io/muster/internal/oidc/dbgen"
@@ -441,6 +445,9 @@ func (f *fakeDB) DeliveryStore() *delivery.Store { return delivery.NewStore(noDB
 
 // MessagesDB has no database: every preview fails.
 func (f *fakeDB) MessagesDB() messages.DBTX { return noDB{} }
+
+// AccountLinksDB has no database: every lookup fails.
+func (f *fakeDB) AccountLinksDB() accountlinks.DBTX { return noDB{} }
 
 // LinksStore has the built-in Link rule only; nothing else reads it in these tests.
 func (f *fakeDB) LinksStore() links.Store { return fakeLinksStore{} }
@@ -862,6 +869,10 @@ func TestRunAndShutdown(t *testing.T) {
 	if code, _ := get(t, "http://"+addrs.App+"/api/v1/ingest"); code != http.StatusNotFound {
 		t.Errorf("the ingest handler answered %d, want 404 until the ingestion route exists", code)
 	}
+	if code, body := get(t, "http://"+addrs.App+"/api/v1/callbacks/mattermost/CN000000000000"); code != http.StatusOK ||
+		body != "{}" {
+		t.Errorf("the Mattermost callback answered %d %q, want 200 {}", code, body)
+	}
 	if code, _ := get(t, "http://"+addrs.App+"/"); code != http.StatusOK && code != http.StatusServiceUnavailable {
 		t.Errorf("the SPA answered %d", code)
 	}
@@ -886,12 +897,13 @@ func TestRunAndShutdown(t *testing.T) {
 	}
 	lines := out.events(t)
 	want := []string{"process_started", "database_settings_conflict", "keyring_loaded", "organization_created",
-		"partitions_maintained", "listeners_started", "shutdown_requested", "process_stopped"}
+		"partitions_maintained", "listeners_started", "mattermost_press", "shutdown_requested", "process_stopped"}
 	if strings.Join(names(lines), " ") != strings.Join(want, " ") {
 		t.Fatalf("events %v, want %v", names(lines), want)
 	}
 	if lines[1]["used"] != "MUSTER_DATABASE_URL" || lines[1]["level"] != "WARN" ||
-		lines[6]["level"] != "WARN" || lines[6]["grace_seconds"] != float64(2) {
+		lines[6]["outcome"] != "invalid_request" ||
+		lines[7]["level"] != "WARN" || lines[7]["grace_seconds"] != float64(2) {
 		t.Errorf("lines %v", lines)
 	}
 	d := net.Dialer{Timeout: time.Second}
@@ -1630,5 +1642,61 @@ func TestDeliveryLeaderTasks(t *testing.T) {
 	}
 	if _, err := p.threadReplyRetention(t.Context(), 1, time.Now()); !errors.Is(err, errNoDB) {
 		t.Errorf("retention = %v", err)
+	}
+}
+
+// TestConfigureWorker: the delivery worker posts to Mattermost Destinations through the Mattermost adapter, with the
+// public and ingest addresses of the configuration, and the timer handlers fire the timers of this Organization only,
+// each in the timer's transaction.
+func TestConfigureWorker(t *testing.T) {
+	public, _ := url.Parse("https://muster.example.org")
+	ingestURL, _ := url.Parse("https://ingest.example.org")
+	business := clock.NewManual(time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC))
+	log := logging.New(io.Discard, logging.LevelInfo)
+	p := &process{orgID: 1, db: &fakeDB{}, log: log, clocks: clock.Clocks{Business: business, Real: business},
+		cfg:     config.Config{PublicURL: public, IngestURL: ingestURL, RunbookBaseURL: public},
+		replica: keyring.NewRecorder(nil, nil, business, log, "r-1", "host", "v1"),
+		worker:  &ingest.Worker{Log: log}, timers: &timers.Worker{Log: log}, deliverer: &delivery.Worker{Log: log},
+		groups: groups.New(groups.Config{OrgID: 1, Business: business, Log: log}),
+		delivery: delivery.New(delivery.Config{OrgID: 1, Store: delivery.NewStore(noDB{}, noDB{}),
+			Business: business})}
+	p.configureWorker()
+	a, ok := p.deliverer.Adapters[delivery.TypeMattermost].(*mattermost.Adapter)
+	if !ok || a.PublicURL != "https://muster.example.org" || a.IngestURL != "https://ingest.example.org" ||
+		a.Targets != mattermost.Targets(p.connections) {
+		t.Fatalf("adapters = %+v", p.deliverer.Adapters)
+	}
+	id := int64(9)
+	for name, h := range p.timers.Handlers {
+		for _, org := range []int64{2, 1} {
+			after, err := h(t.Context(), noDB{}, org, timers.Timer{AlertGroupID: &id, StormID: &id})
+			if after != nil || (org == 1) != errors.Is(err, errNoDB) {
+				t.Errorf("%s in organization %d = %v", name, org, err)
+			}
+		}
+	}
+	if len(p.timers.Handlers) != 4 {
+		t.Errorf("handlers %v", slices.Collect(maps.Keys(p.timers.Handlers)))
+	}
+}
+
+// TestPGDatabaseStores: every store of the database is built over its main pool, and the Account links, the messages
+// and the clock skew check read that pool itself.
+func TestPGDatabaseStores(t *testing.T) {
+	d := pgDatabase{&db.DB{}}
+	stores := []any{d.KeyringStore(), d.OrganizationStore(), d.UsersStore(), d.AdminStore(), d.AuditReader(),
+		d.AuthStore(), d.TOTPStore(), d.SettingsStore(), d.OIDCStore(), d.TokensStore(), d.IntegrationsStore(),
+		d.RoutingStore(), d.HeartbeatStore(), d.IngestStore(), d.ProcessStore(), d.ReplayStore(), d.ClockStore(),
+		d.GroupsStore(), d.TimersStore(), d.DeliveryStore(), d.LinksStore(), d.DestinationsStore(),
+		d.DestinationsWriter(), d.ConnectionsStore(), d.LeaderStore(), d.ReplicaPruner(), d.AuthPruner(),
+		d.UsersPruner(), d.OIDCPruner(), d.OIDCClaimer(db.Lease{})}
+	for i, s := range stores {
+		if s == nil {
+			t.Errorf("store %d is nil", i)
+		}
+	}
+	if d.MessagesDB() != messages.DBTX(d.Pool) || d.AccountLinksDB() != accountlinks.DBTX(d.Pool) ||
+		d.Clock() != rowQuerier(d.Pool) {
+		t.Error("a direct read is not over the main pool")
 	}
 }

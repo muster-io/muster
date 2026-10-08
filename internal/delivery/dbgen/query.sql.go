@@ -1003,6 +1003,95 @@ func (q *Queries) GetLeasedReply(ctx context.Context, arg GetLeasedReplyParams) 
 	return i, err
 }
 
+const getPostDestination = `-- name: GetPostDestination :one
+SELECT ds.id, ds.public_id, ds.name
+FROM destinations ds
+WHERE ds.org_id = $1 AND ds.connection_id = $2 AND ds.type = 'mattermost' AND ds.deleted_at IS NULL
+  AND ds.mattermost_channel_id = $3::text
+  AND EXISTS (SELECT 1 FROM deliveries d
+              WHERE d.org_id = $1 AND d.destination_id = ds.id AND d.message_id = $4::text)
+ORDER BY ds.id
+LIMIT 1
+`
+
+type GetPostDestinationParams struct {
+	OrgID        int64
+	ConnectionID pgtype.Int8
+	ChannelID    string
+	MessageID    string
+}
+
+type GetPostDestinationRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+}
+
+// GetPostDestination reads the Mattermost Destination of the Connection, not deleted, whose channel is channel_id and
+// to which some delivery posted message_id.
+func (q *Queries) GetPostDestination(ctx context.Context, arg GetPostDestinationParams) (GetPostDestinationRow, error) {
+	row := q.db.QueryRow(ctx, getPostDestination,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.ChannelID,
+		arg.MessageID,
+	)
+	var i GetPostDestinationRow
+	err := row.Scan(&i.ID, &i.PublicID, &i.Name)
+	return i, err
+}
+
+const getPressBinding = `-- name: GetPressBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       coalesce(ds.mattermost_channel_id, '')::text AS channel_id, r.language, r.snooze_durations_seconds
+FROM deliveries d
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE d.org_id = $1 AND ds.connection_id = $2 AND ds.type = 'mattermost' AND ds.deleted_at IS NULL
+  AND g.public_id = $3 AND d.message_id = $4::text
+ORDER BY d.id
+LIMIT 1
+`
+
+type GetPressBindingParams struct {
+	OrgID         int64
+	ConnectionID  pgtype.Int8
+	GroupPublicID string
+	MessageID     string
+}
+
+type GetPressBindingRow struct {
+	DestinationID          int64
+	DestinationPublicID    string
+	DestinationName        string
+	ChannelID              string
+	Language               string
+	SnoozeDurationsSeconds []int64
+}
+
+// GetPressBinding reads what a button press on the Root message message_id of the Alert Group group_public_id is bound
+// to (C-13.FR-4): the delivery of that Alert Group to a Mattermost Destination of the Connection that is not deleted
+// and whose Root message is message_id, with the Destination's channel and the Route's language and Snooze durations.
+func (q *Queries) GetPressBinding(ctx context.Context, arg GetPressBindingParams) (GetPressBindingRow, error) {
+	row := q.db.QueryRow(ctx, getPressBinding,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.GroupPublicID,
+		arg.MessageID,
+	)
+	var i GetPressBindingRow
+	err := row.Scan(
+		&i.DestinationID,
+		&i.DestinationPublicID,
+		&i.DestinationName,
+		&i.ChannelID,
+		&i.Language,
+		&i.SnoozeDurationsSeconds,
+	)
+	return i, err
+}
+
 const getRetentionDetailsDays = `-- name: GetRetentionDetailsDays :one
 SELECT retention_alert_details_days
 FROM organizations

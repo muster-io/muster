@@ -124,6 +124,9 @@ type View struct {
 	Newer *GroupRef
 	// Links are its links, computed on read (C-09.FR-14, C-12.FR-9).
 	Links []Link
+	// DeliveryProblem is set while a delivery of it is Not delivered or deleted in the messenger, waits for a Broken
+	// Destination, or has a Thread not attached (C-13.FR-12).
+	DeliveryProblem bool
 	// ownerID is the Owner's id, stillFiring the Alerts still firing in it and routeDeleted whether its Route was
 	// deleted, which allowed_commands needs.
 	ownerID      int64
@@ -203,7 +206,7 @@ func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
 		Route: Ref{PublicID: r.RoutePublicID, Name: r.RouteName}, StartedAt: r.CreatedAt.UTC(),
 		LastChangedAt: r.LastChangedAt.UTC(), ResolvedAt: timeOf(r.ResolvedAt), ReopenCount: r.ReopenCount,
 		FiringCount: r.FiringAlertCount, ResolvedCount: r.ResolvedAlertCount, Integrations: []Ref{},
-		Notices: []Notice{}, Links: []Link{}}
+		Notices: []Notice{}, Links: []Link{}, DeliveryProblem: r.DeliveryProblem}
 	for _, f := range []struct {
 		raw  []byte
 		into *map[string]string

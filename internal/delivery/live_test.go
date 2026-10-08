@@ -920,6 +920,8 @@ func TestLive(t *testing.T) {
 			{"storm_texts", l.stormTexts},
 			// S-037.
 			{"mentions", l.mentionTargets},
+			// S-061.
+			{"press_binding", l.pressBinding},
 		} {
 			t.Run(sub.name, sub.run)
 		}
@@ -2819,4 +2821,56 @@ func (l *live) mentionTargets(t *testing.T) {
 	t.Logf("created → %q; firing alerts_added → %q; footer %q in %s; alerts_added on acknowledged → none; "+
 		"reopen into acknowledged → [owner] → %q", "everyone:channel", "user:alice.mm", "Acknowledged by alice.mm",
 		space, targets(r))
+}
+
+// pressBinding is the binding of a Mattermost button press (C-13.FR-4, AC-11): the post of the Alert Group's delivery
+// to a Destination of the Connection binds the press, with the Destination's channel and the Route's language and
+// Snooze durations; another post, another Connection or a deleted Destination does not; the Destination of a post of
+// the Connection is found by the post and its channel.
+func (l *live) pressBinding(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.fire(t, "press", "Press/a")
+	gid := l.group(t, "Press")
+	l.round(t, l.a)
+	l.exec(t, `UPDATE deliveries SET message_id = 'post-press' WHERE org_id = $1 AND destination_id = $2`, l.orgID,
+		l.dests[0])
+	var snooze []int64
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT snooze_durations_seconds FROM routes WHERE id = $1`,
+		l.routeID).Scan(&snooze); err != nil {
+		t.Fatal(err)
+	}
+	b, err := l.svc.PressBinding(t.Context(), l.conn, gid, "post-press")
+	if err != nil || b.Destination.ID != l.dests[0] || b.Destination.PublicID != "DSAAAAAAAAAAA1" ||
+		b.Destination.Name != "ops-1" || *b.Destination.Connection != l.conn || b.ChannelID != "chan1" ||
+		b.Language != "en" || !slices.Equal(b.SnoozeSeconds, snooze) || len(snooze) == 0 {
+		t.Fatalf("PressBinding = %+v, %v; snooze %v", b, err, snooze)
+	}
+	for _, c := range []struct {
+		conn        int64
+		group, post string
+	}{{l.conn, gid, "post-other"}, {l.conn + 1000, gid, "post-press"}, {l.conn, "AG0000000000ZZ", "post-press"}} {
+		if _, err := l.svc.PressBinding(t.Context(), c.conn, c.group, c.post); !errors.Is(err, delivery.ErrNotBound) {
+			t.Errorf("PressBinding(%d, %s, %s) = %v", c.conn, c.group, c.post, err)
+		}
+	}
+	d, ok, err := l.svc.PostDestination(t.Context(), l.conn, "post-press", "chan1")
+	if err != nil || !ok || d.ID != l.dests[0] || d.PublicID != "DSAAAAAAAAAAA1" {
+		t.Errorf("PostDestination(post-press, chan1) = %+v, %v, %v", d, ok, err)
+	}
+	for _, c := range []struct{ post, channel string }{{"post-press", "chan2"}, {"post-garbage", "chan1"},
+		{"post-press", "chan-foreign"}} {
+		if _, ok, err := l.svc.PostDestination(t.Context(), l.conn, c.post, c.channel); ok || err != nil {
+			t.Errorf("PostDestination(%s, %s) = %v, %v", c.post, c.channel, ok, err)
+		}
+	}
+	l.exec(t, `UPDATE destinations SET deleted_at = $2 WHERE org_id = $1 AND id = $3`, l.orgID, l.business.Now(),
+		l.dests[0])
+	defer l.exec(t, `UPDATE destinations SET deleted_at = NULL WHERE org_id = $1 AND id = $2`, l.orgID, l.dests[0])
+	if _, err := l.svc.PressBinding(t.Context(), l.conn, gid, "post-press"); !errors.Is(err, delivery.ErrNotBound) {
+		t.Errorf("a deleted Destination = %v", err)
+	}
+	if _, ok, err := l.svc.PostDestination(t.Context(), l.conn, "post-press", "chan1"); ok || err != nil {
+		t.Errorf("the post of a deleted Destination = %v, %v", ok, err)
+	}
+	t.Log("press binding: post, connection, channel and route values read from PostgreSQL")
 }

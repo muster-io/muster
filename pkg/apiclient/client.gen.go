@@ -4672,7 +4672,7 @@ type RouteSuggestion struct {
 	// Id `heartbeat_lost` suggests a Route for `alertname="MusterHeartbeatLost"`; `internal_alerts` suggests a Route for `alertname=~"Muster.*"`.
 	Id RouteSuggestionId `json:"id"`
 
-	// Route The Route that accepting would create at the top of the list.
+	// Route The Route that accepting would create at the top of the list, or for `internal_alerts` directly below the last Route other than the Default route that takes an Internal alert.
 	Route RouteInput `json:"route"`
 }
 
@@ -9177,7 +9177,7 @@ type ClientInterface interface {
 
 	// AcceptRouteSuggestionWithBody Accept a Route suggestion
 	//
-	// Creates the suggested Route at the top of the list. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`.
+	// Creates the suggested Route at the top of the list; the Route for `internal_alerts` goes directly below the last Route other than the Default route that already takes an Internal alert, such as the Route for `MusterHeartbeatLost`, and at the top when none does. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`; `422` (`required` at `/destination_ids`) when `internal_alerts` is accepted without Destinations.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -9186,7 +9186,7 @@ type ClientInterface interface {
 
 	// AcceptRouteSuggestion Accept a Route suggestion
 	//
-	// Creates the suggested Route at the top of the list. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`.
+	// Creates the suggested Route at the top of the list; the Route for `internal_alerts` goes directly below the last Route other than the Default route that already takes an Internal alert, such as the Route for `MusterHeartbeatLost`, and at the top when none does. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`; `422` (`required` at `/destination_ids`) when `internal_alerts` is accepted without Destinations.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -12102,7 +12102,7 @@ func (c *Client) ListRouteSuggestions(ctx context.Context, reqEditors ...Request
 
 // AcceptRouteSuggestionWithBody Accept a Route suggestion
 //
-// Creates the suggested Route at the top of the list. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`.
+// Creates the suggested Route at the top of the list; the Route for `internal_alerts` goes directly below the last Route other than the Default route that already takes an Internal alert, such as the Route for `MusterHeartbeatLost`, and at the top when none does. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`; `422` (`required` at `/destination_ids`) when `internal_alerts` is accepted without Destinations.
 //
 // Takes any type of body and a specified content type.
 //
@@ -12121,7 +12121,7 @@ func (c *Client) AcceptRouteSuggestionWithBody(ctx context.Context, suggestionId
 
 // AcceptRouteSuggestion Accept a Route suggestion
 //
-// Creates the suggested Route at the top of the list. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`.
+// Creates the suggested Route at the top of the list; the Route for `internal_alerts` goes directly below the last Route other than the Default route that already takes an Internal alert, such as the Route for `MusterHeartbeatLost`, and at the top when none does. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`; `422` (`required` at `/destination_ids`) when `internal_alerts` is accepted without Destinations.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -21450,7 +21450,7 @@ type ClientWithResponsesInterface interface {
 
 	// AcceptRouteSuggestionWithBodyWithResponse Accept a Route suggestion
 	//
-	// Creates the suggested Route at the top of the list. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`.
+	// Creates the suggested Route at the top of the list; the Route for `internal_alerts` goes directly below the last Route other than the Default route that already takes an Internal alert, such as the Route for `MusterHeartbeatLost`, and at the top when none does. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`; `422` (`required` at `/destination_ids`) when `internal_alerts` is accepted without Destinations.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21459,7 +21459,7 @@ type ClientWithResponsesInterface interface {
 
 	// AcceptRouteSuggestionWithResponse Accept a Route suggestion
 	//
-	// Creates the suggested Route at the top of the list. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`.
+	// Creates the suggested Route at the top of the list; the Route for `internal_alerts` goes directly below the last Route other than the Default route that already takes an Internal alert, such as the Route for `MusterHeartbeatLost`, and at the top when none does. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`; `422` (`required` at `/destination_ids`) when `internal_alerts` is accepted without Destinations.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -36173,7 +36173,7 @@ func (c *ClientWithResponses) ListRouteSuggestionsWithResponse(ctx context.Conte
 
 // AcceptRouteSuggestionWithBodyWithResponse Accept a Route suggestion
 //
-// Creates the suggested Route at the top of the list. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`.
+// Creates the suggested Route at the top of the list; the Route for `internal_alerts` goes directly below the last Route other than the Default route that already takes an Internal alert, such as the Route for `MusterHeartbeatLost`, and at the top when none does. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`; `422` (`required` at `/destination_ids`) when `internal_alerts` is accepted without Destinations.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36188,7 +36188,7 @@ func (c *ClientWithResponses) AcceptRouteSuggestionWithBodyWithResponse(ctx cont
 
 // AcceptRouteSuggestionWithResponse Accept a Route suggestion
 //
-// Creates the suggested Route at the top of the list. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`.
+// Creates the suggested Route at the top of the list; the Route for `internal_alerts` goes directly below the last Route other than the Default route that already takes an Internal alert, such as the Route for `MusterHeartbeatLost`, and at the top when none does. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`; `422` (`required` at `/destination_ids`) when `internal_alerts` is accepted without Destinations.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

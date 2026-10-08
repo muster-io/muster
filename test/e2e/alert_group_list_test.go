@@ -95,7 +95,7 @@ func (s *stream) isClosed() bool {
 
 // TestAlertGroupList is S-029 against `muster dev`, with E2E_REPLICAS=2 on two replicas: the live-update hints of a
 // new Alert Group and of each change (C-09.AC-13), the list's filters on the common labels (C-09.AC-15, AC-25),
-// search inside words and the counts (C-09.AC-20), the unsupported filters, the open count of an Integration
+// search inside words and the counts (C-09.AC-20), the Delivery problem filter, the open count of an Integration
 // (C-09.FR-21), statistics per Route and per Integration (C-09.AC-17), related Alert Groups (C-09.AC-16), an old open
 // Alert Group in the default view (C-09.AC-5), #N 60 days after its resolution and one statistics item per Route
 // (C-09.AC-23), the removal of details after retention.alert_details on the development clock (C-09.AC-18), and the
@@ -229,8 +229,8 @@ func TestAlertGroupList(t *testing.T) {
 		c["all"] != 1.0 || c["resolved"] != 0.0 {
 		t.Errorf("counts = %v", c)
 	}
-	if a := pat.do(http.MethodGet, "/api/v1/alert-groups?delivery_problem=true", ""); a.status !=
-		http.StatusUnprocessableEntity || !strings.Contains(string(a.body), `"code":"unsupported"`) {
+	if a := pat.do(http.MethodGet, "/api/v1/alert-groups?delivery_problem=true", ""); a.status != http.StatusOK ||
+		!strings.Contains(string(a.body), `"items":[]`) {
 		t.Errorf("delivery_problem = %d %s", a.status, a.body)
 	}
 	if n := read("/api/v1/integrations/" + intID)["open_alert_group_count"]; n != 2.0 {

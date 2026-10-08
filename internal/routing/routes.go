@@ -106,6 +106,7 @@ const (
 	CodeInvalidRegex     = "invalid_regex"
 	CodeRouteSetMismatch = "route_set_mismatch"
 	CodeOneOfRequired    = "one_of_required"
+	CodeRequired         = "required"
 )
 
 // Matcher is a Matcher of a Route as the API and the Audit log show it: a label, an operator and a value.
@@ -295,6 +296,8 @@ type Queries interface {
 	SetRoutePositions(ctx context.Context, arg dbgen.SetRoutePositionsParams) error
 	ListRouteInfo(ctx context.Context, orgID int64) ([]dbgen.ListRouteInfoRow, error)
 	ListHeartbeatIntegrations(ctx context.Context, orgID int64) ([]dbgen.ListHeartbeatIntegrationsRow, error)
+	ListAlertingIntegrations(ctx context.Context, orgID int64) ([]dbgen.ListAlertingIntegrationsRow, error)
+	ListAlertingDestinations(ctx context.Context, orgID int64) ([]dbgen.ListAlertingDestinationsRow, error)
 	ListRouteSuggestionDismissals(ctx context.Context, arg dbgen.ListRouteSuggestionDismissalsParams) ([]string,
 		error)
 	DismissRouteSuggestion(ctx context.Context, arg dbgen.DismissRouteSuggestionParams) error
@@ -690,10 +693,11 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Route, err
 }
 
 // creation is how a Route is created: at the top of the list instead of before the Default route, after a
-// precondition checked under the lock of the list, and with details for its Audit log entry.
+// precondition checked under the lock of the list, and with details for its Audit log entry. The precondition may
+// return a Route, by id, to place the new one directly below instead; 0 leaves it where it was inserted.
 type creation struct {
 	first        bool
-	precondition func(Queries) error
+	precondition func(Queries) (int64, error)
 	details      map[string]any
 }
 
@@ -711,8 +715,10 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 		if _, err := q.BumpRouteOrder(ctx, dbgen.BumpRouteOrderParams{OrgID: s.orgID}); err != nil {
 			return fmt.Errorf("bump the route order: %w", err)
 		}
+		below := int64(0)
 		if how.precondition != nil {
-			if err := how.precondition(q); err != nil {
+			var err error
+			if below, err = how.precondition(q); err != nil {
 				return err
 			}
 		}
@@ -741,6 +747,11 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 		if err != nil {
 			return fmt.Errorf("create the route: %w", nameTaken(err))
 		}
+		if below != 0 {
+			if err := s.placeBelow(ctx, q, routeID, below); err != nil {
+				return err
+			}
+		}
 		if err := s.writeMatchers(ctx, q, routeID, in.Matchers); err != nil {
 			return err
 		}
@@ -764,6 +775,34 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 	}
 	s.exportInfo(created.PublicID, created.Name)
 	return created, nil
+}
+
+// placeBelow moves the Route routeID directly below the Route below in the evaluation order, renumbering the Routes
+// other than the Default route.
+func (s *Service) placeBelow(ctx context.Context, q Queries, routeID, below int64) error {
+	current, err := q.ListRoutes(ctx, s.orgID)
+	if err != nil {
+		return fmt.Errorf("list the routes: %w", err)
+	}
+	order := make([]int64, 0, len(current))
+	for _, r := range current {
+		if r.IsDefault || r.ID == routeID {
+			continue
+		}
+		order = append(order, r.ID)
+		if r.ID == below {
+			order = append(order, routeID)
+		}
+	}
+	positions := make([]int64, len(order))
+	for i := range order {
+		positions[i] = int64(i)
+	}
+	if err := q.SetRoutePositions(ctx, dbgen.SetRoutePositionsParams{OrgID: s.orgID, Ids: order,
+		Positions: positions}); err != nil {
+		return fmt.Errorf("write the route order: %w", err)
+	}
+	return nil
 }
 
 // writeMatchers writes the Matchers of a Route in their order.

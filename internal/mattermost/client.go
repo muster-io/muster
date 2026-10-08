@@ -54,8 +54,8 @@ type Settings struct {
 	Proxy     *outbound.Proxy
 }
 
-// Client calls the REST API of one Mattermost Connection, in the interactive and the delivery client classes; the
-// outbound client of a class is built on its first call.
+// Client calls the REST API of one Mattermost Connection, in the interactive and the delivery client classes and, for
+// muster doctor, the background class; the outbound client of a class is built on its first call.
 type Client struct {
 	network  Network
 	settings Settings
@@ -80,7 +80,7 @@ func NewClient(n Network, s Settings) (*Client, error) {
 
 // client is the outbound client of class, built once.
 func (c *Client) client(class outbound.Class) (*outbound.Client, error) {
-	if class != outbound.ClassInteractive && class != outbound.ClassDelivery {
+	if class != outbound.ClassInteractive && class != outbound.ClassDelivery && class != outbound.ClassBackground {
 		return nil, fmt.Errorf("the Mattermost client has no %s class", class)
 	}
 	c.mu.Lock()
@@ -185,21 +185,116 @@ func (c *Client) Member(ctx context.Context, class outbound.Class, channelID str
 
 // get reads path into out in the client class.
 func (c *Client) get(ctx context.Context, class outbound.Class, path string, out any) Result {
+	return c.send(ctx, class, http.MethodGet, path, nil, out)
+}
+
+// send makes one call of method on path in the client class, with body as JSON unless it is nil, and reads a
+// successful answer into out unless it is nil.
+func (c *Client) send(ctx context.Context, class outbound.Class, method, path string, body, out any) Result {
 	oc, err := c.client(class)
 	if err != nil {
 		return Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(err.Error())}}
 	}
-	res, err := oc.Do(ctx, outbound.Request{Method: http.MethodGet, URL: path, Mapping: mapping,
-		Header: http.Header{"Authorization": {"Bearer " + string(c.settings.Token)}, "Accept": {"application/json"}}})
+	header := http.Header{"Authorization": {"Bearer " + string(c.settings.Token)}, "Accept": {"application/json"}}
+	var data []byte
+	if body != nil {
+		if data, err = json.Marshal(body); err != nil {
+			return Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeUnknown,
+				Error: outbound.Untrusted(method + " " + path + ": the request is not valid JSON")}}
+		}
+		header.Set("Content-Type", "application/json")
+	}
+	res, err := oc.Do(ctx, outbound.Request{Method: method, URL: path, Header: header, Body: data, Mapping: mapping})
 	r := resultOf(res, err)
-	if !r.OK() {
+	if !r.OK() || out == nil {
 		return r
 	}
 	if err := json.Unmarshal(res.Body, out); err != nil {
 		return Result{Status: res.Status, Outcome: delivery.Outcome{Kind: delivery.OutcomeUnknown,
-			Error: outbound.Untrusted("GET " + path + ": the answer is not the expected JSON")}}
+			Error: outbound.Untrusted(method + " " + path + ": the answer is not the expected JSON")}}
 	}
 	return r
+}
+
+// post is a post as Muster creates, edits and reads it; Props holds the attachment of a Root message.
+type post struct {
+	ID        string `json:"id,omitempty"`
+	ChannelID string `json:"channel_id,omitempty"`
+	RootID    string `json:"root_id,omitempty"`
+	Message   string `json:"message"`
+	Props     *props `json:"props,omitempty"`
+}
+
+// props are the properties of a post that Muster sets: its attachments, one for a Root message.
+type props struct {
+	Attachments []attachment `json:"attachments"`
+}
+
+// attachment is a message attachment: its colour, title and link, text, footer and buttons.
+type attachment struct {
+	Color      string   `json:"color,omitempty"`
+	Title      string   `json:"title,omitempty"`
+	TitleLink  string   `json:"title_link,omitempty"`
+	Text       string   `json:"text,omitempty"`
+	Footer     string   `json:"footer,omitempty"`
+	FooterIcon string   `json:"footer_icon,omitempty"`
+	Actions    []action `json:"actions,omitempty"`
+}
+
+// action is a button of an attachment: Mattermost calls integration.url with integration.context when it is pressed.
+type action struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Type        string      `json:"type"`
+	Integration integration `json:"integration"`
+}
+
+type integration struct {
+	URL     string        `json:"url"`
+	Context actionContext `json:"context"`
+}
+
+// actionContext is what a button sends back: its signed action id and the id of the key that signed it.
+type actionContext struct {
+	Action string `json:"action"`
+	KeyID  string `json:"key_id"`
+}
+
+// patch is an edit of a post: its message and its props, both replaced.
+type patch struct {
+	Message string `json:"message"`
+	Props   *props `json:"props"`
+}
+
+// createPost creates the post p: a Root message, or a Thread reply when p has a root_id. Only the adapter calls it,
+// from the delivery worker and the interactive path (lint 3).
+func (c *Client) createPost(ctx context.Context, class outbound.Class, p post) (post, Result) {
+	var out post
+	return out, c.send(ctx, class, http.MethodPost, "/api/v4/posts", p, &out)
+}
+
+// patchPost edits the post id to p, which never notifies anyone (F-029).
+func (c *Client) patchPost(ctx context.Context, class outbound.Class, id string, p patch) (post, Result) {
+	var out post
+	return out, c.send(ctx, class, http.MethodPut, "/api/v4/posts/"+url.PathEscape(id)+"/patch", p, &out)
+}
+
+// getPost reads the post id with the plain read, which answers 404 for a deleted post; Muster never reads with
+// include_deleted, which may need the system admin role (F-058).
+func (c *Client) getPost(ctx context.Context, class outbound.Class, id string) Result {
+	var out post
+	return c.get(ctx, class, "/api/v4/posts/"+url.PathEscape(id), &out)
+}
+
+// ephemeralPost shows message to the user userID alone in the channel channelID: in the channel view without a
+// rootID, in the Thread of rootID with one (F-025, F-026).
+func (c *Client) ephemeralPost(ctx context.Context, class outbound.Class, userID, channelID, rootID,
+	message string) Result {
+	body := struct {
+		UserID string `json:"user_id"`
+		Post   post   `json:"post"`
+	}{UserID: userID, Post: post{ChannelID: channelID, RootID: rootID, Message: message}}
+	return c.send(ctx, class, http.MethodPost, "/api/v4/posts/ephemeral", body, nil)
 }
 
 // mapping classifies the status of an answer to the reads of this client (C-13.FR-5): 429 waits for the whole

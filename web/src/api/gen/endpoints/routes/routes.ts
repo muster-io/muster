@@ -993,7 +993,7 @@ export const getAcceptRouteSuggestionUrl = (suggestionId: 'heartbeat_lost' | 'in
 }
 
 /**
- * Creates the suggested Route at the top of the list. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`.
+ * Creates the suggested Route at the top of the list; the Route for `internal_alerts` goes directly below the last Route other than the Default route that already takes an Internal alert, such as the Route for `MusterHeartbeatLost`, and at the top when none does. `409` (`suggestion_obsolete`) when it no longer applies: a matching Route exists now, it was accepted already, or no Destination exists for `internal_alerts`; `422` (`required` at `/destination_ids`) when `internal_alerts` is accepted without Destinations.
  * @summary Accept a Route suggestion
  */
 export const acceptRouteSuggestion = async (suggestionId: 'heartbeat_lost' | 'internal_alerts',

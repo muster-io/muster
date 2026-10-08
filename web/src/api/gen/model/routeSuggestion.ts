@@ -22,6 +22,6 @@ import type { RouteSuggestionId } from './routeSuggestionId';
 
 export interface RouteSuggestion {
   id: RouteSuggestionId;
-  /** The Route that accepting would create at the top of the list. */
+  /** The Route that accepting would create at the top of the list, or for `internal_alerts` directly below the last Route other than the Default route that takes an Internal alert. */
   route: RouteInput;
 }
