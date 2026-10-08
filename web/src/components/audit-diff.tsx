@@ -164,6 +164,36 @@ function linkRuleField(t: TFunction, pointer: string): string | undefined {
   }
 }
 
+/** The names of the changed fields of a Connection; the bot token and the proxy password are Secrets. */
+function connectionField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/name":
+      return t("connections.fields.name");
+    case "/server_url":
+      return t("connections.fields.serverUrl");
+    case "/bot_token":
+      return t("connections.fields.botToken");
+    case "/limiter/limit":
+      return t("audit.fields.limiterLimit");
+    case "/limiter/per_seconds":
+      return t("audit.fields.limiterPerSeconds");
+    case "/proxy/enabled":
+      return t("audit.fields.proxyEnabled");
+    case "/proxy/type":
+      return t("audit.fields.proxyType");
+    case "/proxy/address":
+      return t("audit.fields.proxyAddress");
+    case "/proxy/username":
+      return t("audit.fields.proxyUsername");
+    case "/proxy/password":
+      return t("audit.fields.proxyPassword");
+    case "/deleted_at":
+      return t("audit.fields.deletedAt");
+    default:
+      return undefined;
+  }
+}
+
 /** The names of the changed fields of the OIDC settings. */
 function oidcField(t: TFunction, pointer: string): string | undefined {
   switch (pointer) {
@@ -240,6 +270,9 @@ export function fieldLabel(
       break;
     case "link_rule":
       label = linkRuleField(t, pointer);
+      break;
+    case "connection":
+      label = connectionField(t, pointer);
       break;
     default:
       break;

@@ -260,6 +260,8 @@
       "gracePeriodSeconds": "Grace period (seconds)",
       "heartbeatEnabled": "Heartbeat",
       "heartbeatTimeoutSeconds": "Heartbeat timeout (seconds)",
+      "limiterLimit": "Rate limit: requests",
+      "limiterPerSeconds": "Rate limit: period (seconds)",
       "lineTemplate": "Line template",
       "login": "Login",
       "messageLanguage": "Message language",
@@ -406,6 +408,85 @@
     "reload": "Reload",
     "save": "Save",
     "saved": "Saved."
+  },
+  "connections": {
+    "callback": {
+      "hint": "Mattermost calls {{address}} when someone presses a button. If that address is internal, add its host to AllowedUntrustedInternalConnections in the Mattermost server settings; otherwise presses fail with 'Action integration error'. A test message to a Destination checks it.",
+      "label": "Callback address",
+      "title": "Button presses"
+    },
+    "check": {
+      "busy": "The messenger is busy; try again in {{seconds}} s.",
+      "connectedAs": "Connected as {{bot}}",
+      "direct": "direct",
+      "failed": "failed",
+      "failedSummary": "The check failed.",
+      "hint": "Checks the saved bot token on the Mattermost server and shows the bot's name.",
+      "latency": "{{ms}} ms",
+      "ok": "ok",
+      "passed": "The check passed.",
+      "running": "Checking…",
+      "skipped": "skipped",
+      "start": "Check connection",
+      "steps": {
+        "dryProbe": "Address",
+        "getMe": "getMe",
+        "getWebhookInfo": "getWebhookInfo",
+        "token": "Token"
+      },
+      "stepsLabel": "Steps of the check",
+      "title": "Connection check",
+      "unknownError": "No details.",
+      "unsaved": "The check uses the saved settings: save your changes first.",
+      "viaProxy": "through the proxy",
+      "warnings": {
+        "pressAnswersInThread": "The bot may not make ephemeral messages, so answers to button presses show in the Thread of the Root message. Give the bot the <code>create_post_ephemeral</code> permission, for example the system admin role, to show them in the channel."
+      }
+    },
+    "create": {
+      "start": "Create connection",
+      "title": "New Connection",
+      "type": "Messenger"
+    },
+    "delete": {
+      "action": "Delete",
+      "description": "Muster stops using this bot account. This cannot be undone.",
+      "inUse_one": "This Connection is used by {{count}} Destination. Delete them first.",
+      "inUse_other": "This Connection is used by {{count}} Destinations. Delete them first.",
+      "inUseSingle": "This Connection is used by 1 Destination. Delete it first.",
+      "title": "Delete Connection {{name}}?"
+    },
+    "edit": {
+      "bot": "Bot: {{bot}}",
+      "botUnknown": "Bot: known after the first successful check.",
+      "title": "Connection",
+      "unsupported": "Connections of this type cannot be changed here yet."
+    },
+    "errors": {
+      "changedElsewhere": "This Connection was changed elsewhere.",
+      "nameTaken": "Another Connection has this name.",
+      "stale": "Someone else changed this Connection. Reload to see the changes.",
+      "tokenForNewServer": "Enter the bot token again: the stored token is sent only to the server it was entered for."
+    },
+    "fields": {
+      "botToken": "Bot token",
+      "destinations": "Destinations",
+      "name": "Name",
+      "serverUrl": "Server URL",
+      "type": "Type"
+    },
+    "form": {
+      "fixErrors": "Fix the marked fields and save again.",
+      "limiterHint": "At most this many requests go to the Mattermost server through this Connection. Mattermost's own rate limit, when an admin turns it on, allows 10 requests per second per client address, which the Connections of this installation to the same server usually share.",
+      "mattermost": "Mattermost",
+      "readOnly": "You can view this Connection but not change it.",
+      "serverUrlHint": "The address of the Mattermost server, such as https://mattermost.example.org."
+    },
+    "hint": "How Muster reaches messengers: a bot account on a Mattermost server.",
+    "list": {
+      "empty": "No Connections yet."
+    },
+    "title": "Connections"
   },
   "duration": {
     "between": "{{start}} – {{end}}",
@@ -583,6 +664,13 @@
     "valuePlaceholder": "prod-eu",
     "valueRow": "Label value {{row}}"
   },
+  "limiter": {
+    "limit": "Requests",
+    "per": "per",
+    "perSeconds": "Period in seconds",
+    "seconds": "s",
+    "title": "Rate limit: requests per period"
+  },
   "linkRules": {
     "builtin": "Built-in",
     "create": {
@@ -733,6 +821,7 @@
   "nav": {
     "alertGroups": "Alert Groups",
     "auditLog": "Audit log",
+    "connections": "Connections",
     "integrations": "Integrations",
     "label": "Main",
     "linkRules": "Link rules",

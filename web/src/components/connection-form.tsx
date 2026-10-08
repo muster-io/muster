@@ -1,0 +1,606 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright The Muster Authors
+
+// The form of a Mattermost Connection (C-13.FR-1): its name, the server URL, the write-only bot token, the proxy form
+// and the limiter. The bot token is never shown: a read gives only whether it is set and when it changed, and a save
+// sends it only when it was replaced. The stored token is sent only to the server it was entered for, so a new server
+// URL needs the token again. Without connections:write the form only shows the Connection. The delete dialog refuses a
+// Connection that Destinations use (in_use).
+
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import type { TFunction } from "i18next";
+import { useEffect, useRef, useState } from "react";
+import { Controller, useForm } from "react-hook-form";
+import { useTranslation } from "react-i18next";
+
+import {
+  deleteConnection,
+  getGetConnectionQueryKey,
+  getListConnectionsQueryKey,
+} from "../api/gen/endpoints/connections/connections";
+import type { MattermostConnection, MattermostConnectionInput } from "../api/gen/model";
+import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
+import {
+  LimiterField,
+  type LimiterValues,
+  limiterErrors,
+  limiterInput,
+  limiterValues,
+} from "./limiter-field";
+import {
+  type ProxyField,
+  ProxyForm,
+  type ProxyValues,
+  proxyErrors,
+  proxyInput,
+  proxyValues,
+} from "./proxy-form";
+import { KEEP_SECRET, type SecretChange, SecretField } from "./secret-field";
+import { Alert, AlertDescription } from "./ui/alert";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+
+const ID = "connection";
+const NAME_MAX = 200;
+
+/** The limiter of a new Mattermost Connection: connection.mattermost.limiter, 5 requests per second. */
+export const DEFAULT_MATTERMOST_LIMITER = { limit: 5, per_seconds: 1 } as const;
+
+export interface ConnectionValues {
+  name: string;
+  server_url: string;
+  bot_token: SecretChange;
+  proxy: ProxyValues;
+  limiter: LimiterValues;
+}
+
+export function connectionValues(c: MattermostConnection | undefined): ConnectionValues {
+  return {
+    name: c?.name ?? "",
+    server_url: c?.server_url ?? "",
+    bot_token: KEEP_SECRET,
+    proxy: proxyValues(c?.proxy),
+    limiter: limiterValues(c?.limiter ?? DEFAULT_MATTERMOST_LIMITER),
+  };
+}
+
+/** The request of a save: the bot token only when it was replaced, so that an update keeps the stored one. */
+export function connectionInput(v: ConnectionValues): MattermostConnectionInput {
+  const input: MattermostConnectionInput = {
+    type: "mattermost",
+    name: v.name.trim(),
+    server_url: v.server_url.trim(),
+    proxy: proxyInput(v.proxy),
+    limiter: limiterInput(v.limiter),
+  };
+  if (v.bot_token.mode === "replace") {
+    input.bot_token = v.bot_token.value;
+  }
+  return input;
+}
+
+/** An absolute http or https URL without user information, query or fragment, as the server checks it. */
+export function isServerUrl(text: string): boolean {
+  const value = text.trim();
+  if (value.includes("#") || value.includes("?")) {
+    return false;
+  }
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.host !== "" &&
+      url.username === "" &&
+      url.password === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Field errors by JSON pointer, such as "/server_url" or "/proxy/address", with their codes. */
+export type ConnectionErrors = Record<string, string>;
+
+/** The code of a bot token that a new server URL needs again. */
+export const TOKEN_FOR_NEW_SERVER = "token_for_new_server";
+
+/** The checks the server repeats, before the form is sent; stored is the Connection of an edit. */
+export function connectionErrors(
+  v: ConnectionValues,
+  stored: MattermostConnection | undefined,
+): ConnectionErrors {
+  const errors: ConnectionErrors = {};
+  const name = v.name.trim();
+  if (name === "") {
+    errors["/name"] = "required";
+  } else if (Array.from(name).length > NAME_MAX) {
+    errors["/name"] = "too_long";
+  }
+  if (v.server_url.trim() === "") {
+    errors["/server_url"] = "required";
+  } else if (!isServerUrl(v.server_url)) {
+    errors["/server_url"] = "invalid_format";
+  }
+  if (v.bot_token.mode === "replace") {
+    if (v.bot_token.value === "") {
+      errors["/bot_token"] = "required";
+    }
+  } else if (stored === undefined) {
+    errors["/bot_token"] = "required";
+  } else if (v.server_url.trim() !== stored.server_url) {
+    errors["/bot_token"] = TOKEN_FOR_NEW_SERVER;
+  }
+  for (const [field, code] of Object.entries(proxyErrors(v.proxy))) {
+    errors[`/proxy/${field}`] = code;
+  }
+  for (const [field, code] of Object.entries(limiterErrors(v.limiter))) {
+    errors[`/limiter/${field}`] = code;
+  }
+  return errors;
+}
+
+/**
+ * The field errors of a refused save by pointer. The server names the whole limiter as /limiter, and a bot token that
+ * a new server URL needs as /bot_token required, which the form explains.
+ */
+export function serverErrors(err: unknown, serverUrlChanged: boolean): ConnectionErrors {
+  if (!isApiError(err)) {
+    return {};
+  }
+  if (err.status === 409 && err.code === "name_taken") {
+    return { "/name": "name_taken" };
+  }
+  const errors: ConnectionErrors = {};
+  for (const item of err.errors ?? []) {
+    if (item.pointer === "/limiter") {
+      errors["/limiter/limit"] = item.code;
+      errors["/limiter/per_seconds"] = item.code;
+    } else if (item.pointer === "/bot_token" && item.code === "required" && serverUrlChanged) {
+      errors["/bot_token"] = TOKEN_FOR_NEW_SERVER;
+    } else {
+      errors[item.pointer] = item.code;
+    }
+  }
+  return errors;
+}
+
+export function connectionErrorText(t: TFunction, code: string): string {
+  switch (code) {
+    case "name_taken":
+      return t("connections.errors.nameTaken");
+    case TOKEN_FOR_NEW_SERVER:
+      return t("connections.errors.tokenForNewServer");
+    default:
+      return fieldErrorText(t, code);
+  }
+}
+
+/** The pointers of the fields that show their errors themselves. */
+const SHOWN =
+  /^\/(name|server_url|bot_token|limiter\/(limit|per_seconds)|proxy\/(type|address|username|password))$/;
+
+function isOutdated(err: unknown): boolean {
+  return isStale(err) || (isApiError(err) && err.status === 428);
+}
+
+export interface ConnectionFormProps {
+  /** The stored Connection of an edit. */
+  connection?: MattermostConnection;
+  readOnly?: boolean;
+  submitLabel: string;
+  /**
+   * Sends the request; the form shows a refusal. An edit resolves with the saved Connection, which the form then shows
+   * without being mounted again, so that the focus stays on "Save".
+   */
+  save: (input: MattermostConnectionInput) => Promise<MattermostConnection | undefined>;
+  /** A newer version of the Connection was read; a save would be refused. */
+  stale?: boolean;
+  onReload?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Shown beside the submit button once a save has gone through. */
+  saved?: boolean;
+  onCancel?: () => void;
+}
+
+export function ConnectionForm({
+  connection,
+  readOnly = false,
+  submitLabel,
+  save,
+  stale = false,
+  onReload,
+  onDirtyChange,
+  saved = false,
+  onCancel,
+}: ConnectionFormProps) {
+  const { t } = useTranslation();
+  const [defaultValues] = useState(() => connectionValues(connection));
+  const form = useForm<ConnectionValues>({ defaultValues });
+  const [errors, setErrors] = useState<ConnectionErrors>({});
+  const formElement = useRef<HTMLFormElement>(null);
+  const [focusRequest, setFocusRequest] = useState(0);
+  // The refusal of the last save was shown on the fields; it is not shown again as a whole once they are edited.
+  const [fieldHandled, setFieldHandled] = useState(false);
+  const dirty = form.formState.isDirty;
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  // A field's errors go away once it is edited.
+  useEffect(() => {
+    return form.subscribe({
+      formState: { values: true },
+      callback: ({ name }) => {
+        if (name === undefined) {
+          return;
+        }
+        const prefix = `/${name.split(".")[0]}`;
+        setErrors((current) => {
+          const kept = Object.entries(current).filter(([pointer]) => !pointer.startsWith(prefix));
+          return kept.length === Object.keys(current).length ? current : Object.fromEntries(kept);
+        });
+      },
+    });
+  }, [form]);
+  // After a refused save, the focus goes to the first marked field.
+  useEffect(() => {
+    if (focusRequest > 0) {
+      formElement.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+    }
+  }, [focusRequest]);
+
+  /**
+   * Marks the fields of errors and moves the focus to the first. A bot token that a new server URL needs opens its
+   * input, which takes the focus, so that the refusal is found by keyboard and screen reader.
+   */
+  const showErrors = (found: ConnectionErrors) => {
+    if (
+      found["/bot_token"] === TOKEN_FOR_NEW_SERVER &&
+      form.getValues("bot_token").mode !== "replace"
+    ) {
+      form.setValue("bot_token", { mode: "replace", value: "" }, { shouldDirty: true });
+    }
+    setErrors(found);
+    setFocusRequest((n) => n + 1);
+  };
+
+  const submit = useMutation({
+    mutationFn: ({ input }: { input: MattermostConnectionInput; serverUrlChanged: boolean }) =>
+      save(input),
+    onMutate: () => setFieldHandled(false),
+    onSuccess: (updated) => {
+      if (updated !== undefined) {
+        form.reset(connectionValues(updated));
+      }
+    },
+    onError: (err, { serverUrlChanged }) => {
+      const found = serverErrors(err, serverUrlChanged);
+      if (Object.keys(found).length > 0) {
+        showErrors(found);
+        setFieldHandled(true);
+      }
+    },
+  });
+
+  const err = (pointer: string) =>
+    errors[pointer] === undefined ? undefined : connectionErrorText(t, errors[pointer]);
+  const proxyFieldErrors: Partial<Record<ProxyField, string>> = {};
+  for (const field of ["type", "address", "username", "password"] as const) {
+    const text = err(`/proxy/${field}`);
+    if (text !== undefined) {
+      proxyFieldErrors[field] = text;
+    }
+  }
+  const limiterFieldErrors: Partial<Record<keyof LimiterValues, string>> = {};
+  for (const field of ["limit", "per_seconds"] as const) {
+    const text = err(`/limiter/${field}`);
+    if (text !== undefined) {
+      limiterFieldErrors[field] = text;
+    }
+  }
+  const unshown = Object.entries(errors).filter(([pointer]) => !SHOWN.test(pointer));
+  const showStale = (stale && !submit.isPending) || isOutdated(submit.error);
+  const otherError = submit.isError && !isOutdated(submit.error) && !fieldHandled;
+
+  const text = (name: "name" | "server_url", label: string, hint?: string) => {
+    const id = `${ID}-${name.replace("_", "-")}`;
+    const error = err(`/${name}`);
+    const describedBy =
+      [hint === undefined ? null : `${id}-hint`, error === undefined ? null : `${id}-error`]
+        .filter(Boolean)
+        .join(" ") || undefined;
+    return (
+      <div className="flex min-w-0 flex-col gap-2">
+        <Label htmlFor={id}>{label}</Label>
+        <Input
+          id={id}
+          type={name === "server_url" ? "url" : "text"}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={name === "server_url" ? "https://mattermost.example.org" : undefined}
+          aria-invalid={error !== undefined}
+          aria-describedby={describedBy}
+          {...form.register(name)}
+        />
+        {hint !== undefined && (
+          <p id={`${id}-hint`} className="text-sm text-muted-foreground">
+            {hint}
+          </p>
+        )}
+        {error !== undefined && (
+          <p id={`${id}-error`} className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <form
+      ref={formElement}
+      noValidate
+      className="flex min-w-0 flex-col gap-6"
+      onSubmit={form.handleSubmit((values) => {
+        const found = connectionErrors(values, connection);
+        showErrors(found);
+        if (Object.keys(found).length === 0) {
+          submit.mutate({
+            input: connectionInput(values),
+            serverUrlChanged:
+              connection !== undefined && values.server_url.trim() !== connection.server_url,
+          });
+        }
+      })}
+    >
+      {readOnly && (
+        <p className="text-sm text-muted-foreground" data-testid="connection-read-only">
+          {t("connections.form.readOnly")}
+        </p>
+      )}
+      <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2>{t("connections.form.mattermost")}</h2>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              {text("name", t("connections.fields.name"))}
+              {text(
+                "server_url",
+                t("connections.fields.serverUrl"),
+                t("connections.form.serverUrlHint"),
+              )}
+              <Controller
+                control={form.control}
+                name="bot_token"
+                render={({ field }) => (
+                  <SecretField
+                    id={`${ID}-bot-token`}
+                    label={t("connections.fields.botToken")}
+                    status={connection?.bot_token_status}
+                    value={field.value}
+                    disabled={readOnly}
+                    error={err("/bot_token")}
+                    onChange={field.onChange}
+                  />
+                )}
+              />
+            </div>
+            <Controller
+              control={form.control}
+              name="limiter"
+              render={({ field }) => (
+                <LimiterField
+                  id={`${ID}-limiter`}
+                  value={field.value}
+                  hint={t("connections.form.limiterHint")}
+                  errors={limiterFieldErrors}
+                  disabled={readOnly}
+                  onChange={field.onChange}
+                />
+              )}
+            />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <Controller
+              control={form.control}
+              name="proxy"
+              render={({ field }) => (
+                <ProxyForm
+                  idPrefix={`${ID}-proxy`}
+                  value={field.value}
+                  passwordStatus={connection?.proxy.password_status}
+                  errors={proxyFieldErrors}
+                  disabled={readOnly}
+                  onChange={field.onChange}
+                />
+              )}
+            />
+          </CardContent>
+        </Card>
+      </fieldset>
+      {!readOnly && (
+        <div className="flex flex-col gap-3">
+          {showStale && (
+            <Alert variant="destructive" data-testid="connection-stale">
+              <AlertDescription className="flex flex-wrap items-center gap-3 text-current">
+                <span>{t("connections.errors.stale")}</span>
+                {onReload !== undefined && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      submit.reset();
+                      setErrors({});
+                      onReload();
+                    }}
+                  >
+                    {t("common.reload")}
+                  </Button>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
+          {otherError && (
+            <Alert variant="destructive">
+              <AlertDescription className="text-current">
+                {problemText(t, submit.error)}
+              </AlertDescription>
+            </Alert>
+          )}
+          {Object.keys(errors).length > 0 && (
+            <div className="text-sm text-destructive" role="alert">
+              <p>{t("connections.form.fixErrors")}</p>
+              {unshown.length > 0 && (
+                <ul className="mt-1 list-disc pl-5">
+                  {unshown.map(([pointer, code]) => (
+                    <li key={pointer}>
+                      <span className="font-mono">{pointer}</span>: {connectionErrorText(t, code)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="submit" disabled={submit.isPending}>
+              {submitLabel}
+            </Button>
+            {onCancel !== undefined && (
+              <Button variant="outline" onClick={onCancel}>
+                {t("common.cancel")}
+              </Button>
+            )}
+            <span
+              role="status"
+              className="text-sm text-muted-foreground"
+              data-testid="connection-status"
+            >
+              {saved && !dirty ? t("common.saved") : ""}
+            </span>
+          </div>
+        </div>
+      )}
+    </form>
+  );
+}
+
+/**
+ * The text of the in_use refusal, in its plural forms. One Destination has a sentence of its own, since the plural form
+ * "one" of Russian also covers 21, 31, … Destinations, which are deleted as "them".
+ */
+export function inUseText(t: TFunction, count: number): string {
+  return count <= 1
+    ? t("connections.delete.inUseSingle")
+    : t("connections.delete.inUse", { count });
+}
+
+const CANCEL_ID = "connection-delete-cancel";
+
+function isInUse(err: unknown): boolean {
+  return isApiError(err) && err.status === 409 && err.code === "in_use";
+}
+
+/** "Delete" with its dialog; a Connection that Destinations use is refused and the dialog says by how many. */
+export function ConnectionDeleteDialog({ connection }: { connection: MattermostConnection }) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const remove = useMutation({
+    mutationFn: () => deleteConnection(connection.id, { headers: { "If-Match": connection.etag } }),
+    onSuccess: async () => {
+      await navigate({ to: "/connections" });
+      queryClient.removeQueries({ queryKey: getGetConnectionQueryKey(connection.id) });
+      void queryClient.invalidateQueries({ queryKey: getListConnectionsQueryKey() });
+    },
+    onError: (err) => {
+      // The number of Destinations or the version may have changed: read the Connection again.
+      if (isInUse(err) || isStale(err)) {
+        void queryClient.invalidateQueries({ queryKey: getGetConnectionQueryKey(connection.id) });
+      }
+      // "Delete" is disabled after in_use; the focus moves to "Cancel" instead of being lost.
+      if (isInUse(err)) {
+        requestAnimationFrame(() => document.getElementById(CANCEL_ID)?.focus());
+      }
+    },
+  });
+  return (
+    <>
+      <Button
+        variant="destructive"
+        onClick={() => {
+          remove.reset();
+          setOpen(true);
+        }}
+      >
+        {t("connections.delete.action")}
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent closeLabel={t("common.close")}>
+          <DialogHeader>
+            <DialogTitle className="pr-8 break-words">
+              {t("connections.delete.title", { name: connection.name })}
+            </DialogTitle>
+            <DialogDescription>{t("connections.delete.description")}</DialogDescription>
+          </DialogHeader>
+          {remove.isError && (
+            <Alert variant="destructive">
+              <AlertDescription
+                className="flex flex-wrap items-center gap-3 text-current"
+                data-testid="connection-delete-error"
+              >
+                {isInUse(remove.error) ? (
+                  inUseText(t, connection.destination_count)
+                ) : isStale(remove.error) ? (
+                  <>
+                    <span>{t("connections.errors.stale")}</span>
+                    {/* The page has read the newer version; the dialog closes to show it. */}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setOpen(false)}
+                    >
+                      {t("common.reload")}
+                    </Button>
+                  </>
+                ) : (
+                  problemText(t, remove.error)
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" id={CANCEL_ID} />}>
+              {t("common.cancel")}
+            </DialogClose>
+            <Button
+              variant="destructive"
+              disabled={remove.isPending || isInUse(remove.error)}
+              onClick={() => remove.mutate()}
+            >
+              {t("connections.delete.action")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
