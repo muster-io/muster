@@ -61,6 +61,7 @@ const AUDITED: Record<string, readonly string[]> = {
     "/matchers",
     "/urgent",
     "/group_key",
+    "/destination_ids",
     "/policy/reopen_window_seconds",
     "/policy/grace_period_seconds",
     "/policy/urgent_rise_removes_ack",
@@ -93,6 +94,16 @@ const AUDITED: Record<string, readonly string[]> = {
     "/proxy/address",
     "/proxy/username",
     "/proxy/password",
+    "/deleted_at",
+  ],
+  destination: [
+    "/name",
+    "/connection_id",
+    "/team_id",
+    "/channel_id",
+    "/mentions",
+    "/limiter/limit",
+    "/limiter/per_seconds",
     "/deleted_at",
   ],
 };
@@ -134,6 +145,31 @@ describe("fieldLabel", () => {
     await i18n.changeLanguage("ru");
     expect(fieldLabel(i18n.t, "connection", "/server_url")).toBe("URL сервера");
     expect(fieldLabel(i18n.t, "connection", "/bot_token")).toBe("Токен бота");
+  });
+
+  test("names the Destinations and the delivery fields of a Route", async () => {
+    expect(fieldLabel(i18n.t, "route", "/destination_ids")).toBe("Destinations");
+    expect(fieldLabel(i18n.t, "route", "/policy/thread_batching_window_seconds")).toBe(
+      "Thread batching window (seconds)",
+    );
+    expect(fieldLabel(i18n.t, "route", "/policy/storm_threshold")).toBe(
+      "Storm threshold (new Alert Groups per minute)",
+    );
+    await i18n.changeLanguage("ru");
+    expect(fieldLabel(i18n.t, "route", "/destination_ids")).toBe("Места доставки");
+  });
+
+  test("names the Connection, team, channel, Mentions and limiter of a Destination", async () => {
+    expect(fieldLabel(i18n.t, "destination", "/connection_id")).toBe("Connection");
+    expect(fieldLabel(i18n.t, "destination", "/team_id")).toBe("Team");
+    expect(fieldLabel(i18n.t, "destination", "/channel_id")).toBe("Channel");
+    expect(fieldLabel(i18n.t, "destination", "/mentions")).toBe("Mentions");
+    expect(fieldLabel(i18n.t, "destination", "/limiter/per_seconds")).toBe(
+      "Rate limit: period (seconds)",
+    );
+    await i18n.changeLanguage("ru");
+    expect(fieldLabel(i18n.t, "destination", "/channel_id")).toBe("Канал");
+    expect(fieldLabel(i18n.t, "destination", "/mentions")).toBe("Упоминания");
   });
 
   test("shows the pointer of a field without a name", () => {

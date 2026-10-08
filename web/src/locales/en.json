@@ -25,6 +25,7 @@
       "title": "Title"
     },
     "deactivated": "{{name}} (deactivated)",
+    "deliveryProblem": "Delivery problem: open the Alert Group to see which Destination",
     "empty": "No Alert Groups in this time range.",
     "emptyFiltered": "No Alert Groups match these filters.",
     "fields": {
@@ -49,6 +50,8 @@
       "bySystem": "The system",
       "chosen": "Chosen: {{label}}",
       "clear": "Clear filters",
+      "deliveryProblem": "Delivery problem",
+      "deliveryProblemHint": "Not delivered, waiting for a Broken Destination, deleted in the messenger, or a Thread not attached.",
       "done": "Show Alert Groups",
       "integration": "Integrations",
       "mine": "Mine",
@@ -120,6 +123,7 @@
       "byUnknown": "Resolved by a person"
     },
     "rowLabel": "{{title}}, #{{number}}, {{status}}, {{duration}}",
+    "rowLabelDeliveryProblem": "{{label}}, delivery problem",
     "rowLabelOwner": "{{label}}, Owner: {{name}}",
     "rowLabelUrgent": "{{title}}, #{{number}}, {{status}}, Urgent, {{duration}}",
     "search": {
@@ -488,6 +492,115 @@
     },
     "title": "Connections"
   },
+  "deliveries": {
+    "newTab": "(opens in a new tab)",
+    "none": "No deliveries.",
+    "possibleDuplicate": "Possible duplicate",
+    "state": {
+      "deletedInMessenger": "Deleted in the messenger",
+      "delivered": "Delivered",
+      "notDelivered": "Not delivered: {{error}}",
+      "notDeliveredNoError": "Not delivered",
+      "pending": "Pending",
+      "retired": "No longer updated here",
+      "waiting": "Waiting: {{destination}} is Broken",
+      "withheld": "Not posted: resolved during a Storm or while the Destination was Broken"
+    },
+    "threadNotAttached": "Thread not attached to the Root message",
+    "title": "Delivery"
+  },
+  "destinations": {
+    "check": {
+      "failed": "Check failed",
+      "hint": "Checks with the saved settings that Muster can still reach the channel and post there, without sending a message. A passing check ends the Broken state.",
+      "itemFailed": "failed",
+      "items": {
+        "botInChannel": "Bot in the channel",
+        "botRightsChannel": "Bot's rights in the channel",
+        "botRightsGroup": "Bot's rights in the discussion group",
+        "channelExists": "Channel",
+        "discussionGroup": "Discussion group",
+        "token": "Token"
+      },
+      "itemsLabel": "Checks",
+      "noDetails": "No details.",
+      "ok": "ok",
+      "passed": "Check passed",
+      "running": "Checking…",
+      "start": "Check",
+      "title": "Destination check",
+      "unsaved": "The check uses the saved settings: save your changes first."
+    },
+    "create": {
+      "start": "Create destination",
+      "title": "New Destination",
+      "type": "Type"
+    },
+    "delete": {
+      "action": "Delete",
+      "description": "Muster stops sending here, and the Destination leaves every Route. Open Root messages get one final edit, \"No longer updated here\". This cannot be undone.",
+      "title": "Delete Destination {{name}}?"
+    },
+    "edit": {
+      "title": "Destination",
+      "unsupported": "Destinations of this type cannot be changed here yet."
+    },
+    "errors": {
+      "changedElsewhere": "This Destination was changed elsewhere.",
+      "checkFailed": "The Destination check failed.",
+      "nameTaken": "Another Destination has this name.",
+      "stale": "Someone else changed this Destination. Reload to see the changes.",
+      "unknownConnection": "This Connection no longer exists. Choose another one."
+    },
+    "fields": {
+      "health": "Health",
+      "name": "Name",
+      "routes": "Routes",
+      "type": "Type"
+    },
+    "form": {
+      "fixErrors": "Fix the marked fields and save again.",
+      "readOnly": "You can view this Destination but not change it.",
+      "saving": "Checking and saving…",
+      "settings": "Settings"
+    },
+    "health": {
+      "broken": "Broken",
+      "brokenNoSince": "Broken: {{reason}}. Muster tries again every {{interval}}.",
+      "brokenSince": "Broken since {{time}}: {{reason}}. Muster tries again every {{interval}}.",
+      "healthy": "Healthy",
+      "noReason": "no details"
+    },
+    "hint": "Where Muster sends the messages of Alert Groups: a Route sends to its Destinations.",
+    "list": {
+      "broken": "Broken Destinations",
+      "empty": "No Destinations yet."
+    },
+    "mattermost": {
+      "archived": "{{name}} (archived)",
+      "channel": "Channel",
+      "channelHint": "The list shows the channels the bot is a member of: add the bot to a channel to send there.",
+      "channelWithName": "{{display}} ({{name}})",
+      "chooseChannel": "Choose a channel",
+      "chooseConnection": "Choose a Connection",
+      "chooseTeam": "Choose a team",
+      "connection": "Connection",
+      "connectionFirst": "Choose a Connection first.",
+      "limiterHint": "At most this many requests go to the messenger for this Destination. A new Mattermost Destination takes the limit of its Connection, since Mattermost limits requests per client address.",
+      "needsConnectionsWrite": "Only someone who may change Connections can pick the team and the channel: the lists come from the Mattermost server through the bot.",
+      "noChannels": "The bot sees no channel in this team.",
+      "noConnections": "There is no Mattermost Connection yet: create one under Connections first.",
+      "retry": "Try again",
+      "team": "Team"
+    },
+    "page": {
+      "noRoutes": "No Route sends here yet."
+    },
+    "title": "Destinations",
+    "types": {
+      "webhook": "Outgoing webhook"
+    }
+  },
   "duration": {
     "between": "{{start}} – {{end}}",
     "days": "{{value}} d",
@@ -818,10 +931,39 @@
       "unclosedValue": "Close the quoted value with a quote."
     }
   },
+  "mentions": {
+    "addGroup": "Add group",
+    "addGroupTo": "Group to mention for {{kind}}",
+    "addUser": "Add a user…",
+    "addUserTo": "Add a user to mention for {{kind}}",
+    "always": "Reminders and auto-unacknowledge always mention the Owner; a Takeover mentions the previous Owner.",
+    "chosen": "Also mentioned for {{kind}}",
+    "errors": {
+      "duplicateUser": "A user is listed twice.",
+      "invalidGroup": "A group name has letters, digits, \".\", \"_\" and \"-\".",
+      "unknownUser": "A chosen user no longer exists.",
+      "unsupported": "This messenger does not support this mention."
+    },
+    "everyoneHint": "Whom in the chat to mention as a whole: nobody, @channel, @all or @here. Chosen users and groups are mentioned as well.",
+    "groupPlaceholder": "Mattermost group",
+    "hint": "Whom the message of each kind of Loud event mentions in this Destination.",
+    "kinds": {
+      "ackTimeout": "Ack timeout notice",
+      "newAlertGroup": "New Alert Group",
+      "newAlerts": "New Alerts",
+      "reopen": "Reopen",
+      "riseToUrgent": "Rise to Urgent",
+      "snoozeEnded": "Snooze ended"
+    },
+    "nobody": "Nobody",
+    "remove": "Remove {{value}}",
+    "title": "Mentions"
+  },
   "nav": {
     "alertGroups": "Alert Groups",
     "auditLog": "Audit log",
     "connections": "Connections",
+    "destinations": "Destinations",
     "integrations": "Integrations",
     "label": "Main",
     "linkRules": "Link rules",
@@ -1008,6 +1150,35 @@
       "startedMeanwhile": "New Alert Groups started on this route meanwhile.",
       "title": "Delete route {{name}}?"
     },
+    "delivery": {
+      "perMinute": "new Alert Groups per minute",
+      "seconds": "seconds",
+      "threshold": "Storm threshold",
+      "thresholdHint": "When more new Alert Groups than this start on the route within a minute, its Destinations get one Storm summary instead of a message each.",
+      "thresholdInvalid": "Enter a whole number, 1 or more.",
+      "thresholdValue_one": "{{count}} new Alert Group per minute",
+      "thresholdValue_other": "{{count}} new Alert Groups per minute",
+      "title": "Delivery",
+      "window": "Thread batching window",
+      "windowHint": "New alerts that arrive within this time after a Thread reply are collected into one reply.",
+      "windowInvalid": "Enter a whole number of seconds, 0 or more."
+    },
+    "destinations": {
+      "add": "Add a Destination",
+      "choose": "Choose a Destination…",
+      "duplicate": "This Destination is listed twice.",
+      "hint": "Where the route sends the messages of its Alert Groups.",
+      "list": "Destinations of the route",
+      "none": "No Destinations: Muster sends no messages for this route.",
+      "noneExist": "No Destinations yet",
+      "option": "{{name}} ({{type}})",
+      "optionBroken": "{{name}} ({{type}}, {{health}})",
+      "remove": "Remove {{name}}",
+      "storm_one": "Storm since {{time}}: {{count}} new Alert Group. Destinations receive a Storm summary.",
+      "storm_other": "Storm since {{time}}: {{count}} new Alert Groups. Destinations receive a Storm summary.",
+      "title": "Destinations",
+      "unknown": "This Destination no longer exists. Remove it and save again."
+    },
     "edit": {
       "title": "Route"
     },
@@ -1143,8 +1314,13 @@
     },
     "suggestions": {
       "accept": "Create the route",
+      "chooseDestination": "Choose a Destination…",
+      "destination": "Destination",
+      "destinationRequired": "Choose the Destination for Muster's own alerts.",
       "dismiss": "Dismiss",
       "heartbeatLost": "Muster raises MusterHeartbeatLost when an Integration loses its Heartbeat, and only the Default route takes it now.",
+      "internalAlerts": "Send Muster's own alerts to a Destination",
+      "internalAlertsHint": "Muster raises Internal alerts such as MusterDestinationBroken, and only the Default route takes them now. The new route sends them to the Destination you choose.",
       "title": "Suggestions"
     },
     "templateError": {
@@ -1410,7 +1586,7 @@
       "publication": "Published in {{destination}}",
       "republished": "Published again in {{destination}}",
       "stormSummary": "Storm summary in {{destination}}",
-      "threadNotAttached": "Thread not attached to the post in {{destination}}"
+      "threadNotAttached": "Thread not attached to the Root message in {{destination}}"
     },
     "details": {
       "detail": "Detail",

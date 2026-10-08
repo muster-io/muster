@@ -22,6 +22,9 @@ import { Route as AlertGroupsAlertGroupIdRouteImport } from './routes/alert-grou
 import { Route as ConnectionsIndexRouteImport } from './routes/connections.index'
 import { Route as ConnectionsConnectionIdRouteImport } from './routes/connections.$connectionId'
 import { Route as ConnectionsNewRouteImport } from './routes/connections.new'
+import { Route as DestinationsIndexRouteImport } from './routes/destinations.index'
+import { Route as DestinationsDestinationIdRouteImport } from './routes/destinations.$destinationId'
+import { Route as DestinationsNewRouteImport } from './routes/destinations.new'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
 import { Route as IntegrationsNewRouteImport } from './routes/integrations.new'
 import { Route as RoutesIndexRouteImport } from './routes/routes.index'
@@ -106,6 +109,22 @@ const ConnectionsConnectionIdRoute = ConnectionsConnectionIdRouteImport.update({
 const ConnectionsNewRoute = ConnectionsNewRouteImport.update({
   id: '/connections/new',
   path: '/connections/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DestinationsIndexRoute = DestinationsIndexRouteImport.update({
+  id: '/destinations/',
+  path: '/destinations/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DestinationsDestinationIdRoute =
+  DestinationsDestinationIdRouteImport.update({
+    id: '/destinations/$destinationId',
+    path: '/destinations/$destinationId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const DestinationsNewRoute = DestinationsNewRouteImport.update({
+  id: '/destinations/new',
+  path: '/destinations/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
@@ -233,12 +252,15 @@ export interface FileRoutesByFullPath {
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
   '/connections/new': typeof ConnectionsNewRoute
+  '/destinations/$destinationId': typeof DestinationsDestinationIdRoute
+  '/destinations/new': typeof DestinationsNewRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/alert-groups/': typeof AlertGroupsIndexRoute
   '/connections/': typeof ConnectionsIndexRoute
+  '/destinations/': typeof DestinationsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
@@ -268,12 +290,15 @@ export interface FileRoutesByTo {
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
   '/connections/new': typeof ConnectionsNewRoute
+  '/destinations/$destinationId': typeof DestinationsDestinationIdRoute
+  '/destinations/new': typeof DestinationsNewRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/alert-groups': typeof AlertGroupsIndexRoute
   '/connections': typeof ConnectionsIndexRoute
+  '/destinations': typeof DestinationsIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
   '/routes': typeof RoutesIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
@@ -304,12 +329,15 @@ export interface FileRoutesById {
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
   '/connections/new': typeof ConnectionsNewRoute
+  '/destinations/$destinationId': typeof DestinationsDestinationIdRoute
+  '/destinations/new': typeof DestinationsNewRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/alert-groups/': typeof AlertGroupsIndexRoute
   '/connections/': typeof ConnectionsIndexRoute
+  '/destinations/': typeof DestinationsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
@@ -341,12 +369,15 @@ export interface FileRouteTypes {
     | '/alert-groups/$alertGroupId'
     | '/connections/$connectionId'
     | '/connections/new'
+    | '/destinations/$destinationId'
+    | '/destinations/new'
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
     | '/sign-in/totp'
     | '/alert-groups/'
     | '/connections/'
+    | '/destinations/'
     | '/integrations/'
     | '/routes/'
     | '/admin/organization/security'
@@ -376,12 +407,15 @@ export interface FileRouteTypes {
     | '/alert-groups/$alertGroupId'
     | '/connections/$connectionId'
     | '/connections/new'
+    | '/destinations/$destinationId'
+    | '/destinations/new'
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
     | '/sign-in/totp'
     | '/alert-groups'
     | '/connections'
+    | '/destinations'
     | '/integrations'
     | '/routes'
     | '/admin/organization/security'
@@ -411,12 +445,15 @@ export interface FileRouteTypes {
     | '/alert-groups/$alertGroupId'
     | '/connections/$connectionId'
     | '/connections/new'
+    | '/destinations/$destinationId'
+    | '/destinations/new'
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
     | '/sign-in/totp'
     | '/alert-groups/'
     | '/connections/'
+    | '/destinations/'
     | '/integrations/'
     | '/routes/'
     | '/admin/organization/security'
@@ -447,11 +484,14 @@ export interface RootRouteChildren {
   AlertGroupsAlertGroupIdRoute: typeof AlertGroupsAlertGroupIdRoute
   ConnectionsConnectionIdRoute: typeof ConnectionsConnectionIdRoute
   ConnectionsNewRoute: typeof ConnectionsNewRoute
+  DestinationsDestinationIdRoute: typeof DestinationsDestinationIdRoute
+  DestinationsNewRoute: typeof DestinationsNewRoute
   IntegrationsNewRoute: typeof IntegrationsNewRoute
   RoutesRouteIdRoute: typeof RoutesRouteIdRoute
   RoutesNewRoute: typeof RoutesNewRoute
   AlertGroupsIndexRoute: typeof AlertGroupsIndexRoute
   ConnectionsIndexRoute: typeof ConnectionsIndexRoute
+  DestinationsIndexRoute: typeof DestinationsIndexRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
   RoutesIndexRoute: typeof RoutesIndexRoute
   AdminOrganizationSecurityRoute: typeof AdminOrganizationSecurityRoute
@@ -561,6 +601,27 @@ declare module '@tanstack/react-router' {
       path: '/connections/new'
       fullPath: '/connections/new'
       preLoaderRoute: typeof ConnectionsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/destinations/': {
+      id: '/destinations/'
+      path: '/destinations'
+      fullPath: '/destinations/'
+      preLoaderRoute: typeof DestinationsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/destinations/$destinationId': {
+      id: '/destinations/$destinationId'
+      path: '/destinations/$destinationId'
+      fullPath: '/destinations/$destinationId'
+      preLoaderRoute: typeof DestinationsDestinationIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/destinations/new': {
+      id: '/destinations/new'
+      path: '/destinations/new'
+      fullPath: '/destinations/new'
+      preLoaderRoute: typeof DestinationsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integrations/': {
@@ -729,11 +790,14 @@ const rootRouteChildren: RootRouteChildren = {
   AlertGroupsAlertGroupIdRoute: AlertGroupsAlertGroupIdRoute,
   ConnectionsConnectionIdRoute: ConnectionsConnectionIdRoute,
   ConnectionsNewRoute: ConnectionsNewRoute,
+  DestinationsDestinationIdRoute: DestinationsDestinationIdRoute,
+  DestinationsNewRoute: DestinationsNewRoute,
   IntegrationsNewRoute: IntegrationsNewRoute,
   RoutesRouteIdRoute: RoutesRouteIdRoute,
   RoutesNewRoute: RoutesNewRoute,
   AlertGroupsIndexRoute: AlertGroupsIndexRoute,
   ConnectionsIndexRoute: ConnectionsIndexRoute,
+  DestinationsIndexRoute: DestinationsIndexRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
   RoutesIndexRoute: RoutesIndexRoute,
   AdminOrganizationSecurityRoute: AdminOrganizationSecurityRoute,

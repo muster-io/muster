@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The filters of the Alert Group list (C-09.FR-13, C-10.FR-13): Route and Integration (several of each), Severity
-// level, Urgent, resolved by a person or by the system with its reason, Reopened, the Owner, "Snoozed with no end",
-// and label Matchers; on a desktop also the label
+// The filters of the Alert Group list (C-09.FR-13, C-10.FR-13, C-13.FR-12): Route and Integration (several of each),
+// Severity level, Urgent, resolved by a person or by the system with its reason, Reopened, the Owner, "Snoozed with no
+// end", "Delivery problem" and label Matchers; on a desktop also the label
 // columns. All combine, and all live in the URL. The pickers are native selects (D250); a picker that takes several
 // values adds each chosen one as a chip that removes it again.
 
@@ -291,6 +291,24 @@ export function AlertGroupFilters({
         <Label htmlFor={`${id}-no-end`} className="leading-snug">
           {t("alertGroups.filters.snoozedNoEnd")}
         </Label>
+      </div>
+      <div className="flex items-start gap-2">
+        <input
+          id={`${id}-delivery-problem`}
+          type="checkbox"
+          className="mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          checked={search.delivery_problem === true}
+          aria-describedby={`${id}-delivery-problem-hint`}
+          onChange={(e) => onChange({ delivery_problem: e.target.checked ? true : undefined })}
+        />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <Label htmlFor={`${id}-delivery-problem`} className="leading-snug">
+            {t("alertGroups.filters.deliveryProblem")}
+          </Label>
+          <p id={`${id}-delivery-problem-hint`} className="text-xs text-muted-foreground">
+            {t("alertGroups.filters.deliveryProblemHint")}
+          </p>
+        </div>
       </div>
       <LabelMatchersInput
         id={`${id}-matchers`}

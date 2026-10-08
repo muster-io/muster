@@ -23,8 +23,10 @@ files_touched:
   - web/src/components/route-form.tsx
   - web/src/components/route-suggestions.tsx
   - web/src/components/alert-group-deliveries.tsx
+  - web/src/components/alert-group-deliveries.test.tsx
   - web/src/routes/alert-groups.$alertGroupId.tsx
   - web/src/components/alert-group-filters.tsx
+  - web/src/components/alert-group-filters.test.tsx
   - web/src/components/alert-group-table.tsx
   - web/src/lib/alert-group-search.ts
   - web/src/lib/live.ts
@@ -43,7 +45,7 @@ acceptance:
   - "[C-08.FR-1, C-13.FR-11, C-13.AC-9] The Route editor has a Destinations section whose picker lists Destinations of every type with their health; with a Mattermost Destination and no Route for Muster's Internal alerts, the Routes page offers \"Send Muster's own alerts to a Destination\", and accepting it with that Destination creates the Route \"Muster internal alerts\"."
   - "[C-08.FR-1] The Route editor has a Delivery section with the Thread batching window and the Storm threshold, pre-filled from the profile on creation, and the Audit log names `/destination_ids` and both fields of a Route."
   - "[C-08.FR-1] The Route editor shows \"Storm since HH:MM: N new Alert Groups. Destinations receive a Storm summary.\" from `Route.storm` while the Route's Storm is active."
-  - "[C-11.FR-16, C-11.FR-10, C-09.FR-14] The Alert Group page has a Delivery section with one row per Destination: \"Delivered\" with a link to the message, \"Pending\", \"Not delivered: {error}\", \"Waiting: {Destination} is Broken\", \"Deleted in the messenger\", \"Thread not attached to the post\", \"Possible duplicate\", \"Not posted: resolved during a Storm or while the Destination was Broken\" or \"No longer updated here\"."
+  - "[C-11.FR-16, C-11.FR-10, C-09.FR-14] The Alert Group page has a Delivery section with one row per Destination: \"Delivered\" with a link to the message, \"Pending\", \"Not delivered: {error}\", \"Waiting: {Destination} is Broken\", \"Deleted in the messenger\", \"Thread not attached to the Root message\", \"Possible duplicate\", \"Not posted: resolved during a Storm or while the Destination was Broken\" or \"No longer updated here\"."
   - "[C-13.FR-12, C-13.AC-10, C-09.FR-13] The Alert Group list has the filter \"Delivery problem\", kept in the URL, and marks such rows; an Alert Group whose delivery ended as Not delivered is listed and marked, and after a later successful delivery it is not."
   - "[C-13.FR-9] Without `destinations:write` the Destination pages are read-only: no \"Create destination\", \"Save\" or \"Delete\", and \"Check\" needs `destinations:test`."
 verify: "make ci e2e"
@@ -118,8 +120,10 @@ issue: 138
   `/policy/thread_batching_window_seconds` and `/policy/storm_threshold`, which S-035 records in the Route's diff.
 - **Delivery section** (`alert-group-deliveries.tsx`): one row per item of `listAlertGroupDeliveries` with the
   Destination's name and health and the state texts of
-  [reference.md](../prd/l1/reference.md#banners-warnings-and-notices); "Delivered" links to `message_url` in a new tab;
-  `error` is untrusted text. Refreshed by the `alert-group` hint.
+  [reference.md](../prd/l1/reference.md#banners-warnings-and-notices), with "Thread not attached to the Root message"
+  for the reference's "Thread not attached to the post" (CONTEXT.md lists "Post" under _Avoid_); "Delivered" links to
+  `message_url` in a new tab; `error` is untrusted text. Refreshed by the `alert-group` hint, and read again every few
+  seconds while a delivery is `pending`, because the end of a delivery sends no hint of its own.
 - **Delivery problem** (`alert-group-filters.tsx`, `alert-group-table.tsx`, `alert-group-search.ts`): the filter
   "Delivery problem" (`delivery_problem=true`) in the URL and the counts; rows with `delivery_problem` carry a mark with
   the tooltip "Delivery problem: open the Alert Group to see which Destination", also shown in the row's details for
@@ -139,9 +143,11 @@ Run `make dev`, sign in as `admin@example.org` / `muster-dev-password`; the fake
 its team `dev` and channels, and the Connection "mm" exists (S-040). Then in Playwright, with alerts sent from a
 terminal through the fake Alertmanager as in S-061:
 
-1. Destinations → "Create destination" → Mattermost → Connection "mm" → team "dev" → channel "no-bot" → "Save" → next
-   to the channel: "The bot is not a member of this channel." → channel "alerts" → "New Alerts": "@channel" → "Save" →
-   the list shows "alerts", Mattermost, "Healthy".
+1. Destinations → "Create destination" → Mattermost → Connection "mm" → team "dev" → the channel list holds the
+   channels the bot is a member of ("alerts", "alerts-prod"; the fake's "no-bot" is not offered) → channel
+   "alerts-prod" → from a terminal remove the bot from `ch-alerts-prod` → "Save" → next to the channel: "The bot is not
+   a member of this channel." → channel "alerts" → "New Alerts": "@channel" → "Save" → the list shows "alerts",
+   Mattermost, "Healthy".
 2. Routes → "db" → Destinations → add "alerts"; Delivery → "Thread batching window" 120, "Storm threshold" 30 →
    "Save" → reload → the values stay; Audit log → the `route.updated` entry names "Destinations" and both fields.
 3. The Routes page shows the card "Send Muster's own alerts to a Destination" → pick "alerts" → "Create the route" →

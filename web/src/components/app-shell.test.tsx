@@ -147,6 +147,26 @@ describe("navigation", () => {
       .not.toBeInTheDocument();
   });
 
+  test("Destinations follows Connections and needs destinations:read", async () => {
+    const index = NAVIGATION.findIndex((e) => e.to === "/destinations");
+    expect(NAVIGATION[index - 1]?.to).toBe("/connections");
+    expect(NAVIGATION[index]).toEqual({
+      to: "/destinations",
+      label: "destinations",
+      permission: "destinations:read",
+    });
+
+    const shown = await renderNavigation(["destinations:read"], NAVIGATION);
+    await expect.element(shown.getByRole("link", { name: "Destinations" })).toBeVisible();
+    await shown.unmount();
+
+    const without = await renderNavigation(["connections:read"], NAVIGATION);
+    await expect.element(without.getByRole("link", { name: "Connections" })).toBeVisible();
+    await expect
+      .element(without.getByRole("link", { name: "Destinations" }))
+      .not.toBeInTheDocument();
+  });
+
   test("Lookup tables and Link rules follow Security under Organization, each with its read Permission", async () => {
     const index = NAVIGATION.findIndex((e) => e.to === "/admin/organization/security");
     expect(NAVIGATION.slice(index + 1, index + 3)).toEqual([

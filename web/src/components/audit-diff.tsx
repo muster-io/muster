@@ -89,6 +89,8 @@ function routeField(t: TFunction, pointer: string): string | undefined {
       return t("routes.fields.urgent");
     case "/group_key":
       return t("routes.fields.groupKey");
+    case "/destination_ids":
+      return t("routes.destinations.title");
     case "/policy/reopen_window_seconds":
       return t("audit.fields.reopenWindowSeconds");
     case "/policy/grace_period_seconds":
@@ -194,6 +196,30 @@ function connectionField(t: TFunction, pointer: string): string | undefined {
   }
 }
 
+/** The names of the changed fields of a Destination; the Mentions are one field. */
+function destinationField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/name":
+      return t("destinations.fields.name");
+    case "/connection_id":
+      return t("destinations.mattermost.connection");
+    case "/team_id":
+      return t("destinations.mattermost.team");
+    case "/channel_id":
+      return t("destinations.mattermost.channel");
+    case "/mentions":
+      return t("mentions.title");
+    case "/limiter/limit":
+      return t("audit.fields.limiterLimit");
+    case "/limiter/per_seconds":
+      return t("audit.fields.limiterPerSeconds");
+    case "/deleted_at":
+      return t("audit.fields.deletedAt");
+    default:
+      return undefined;
+  }
+}
+
 /** The names of the changed fields of the OIDC settings. */
 function oidcField(t: TFunction, pointer: string): string | undefined {
   switch (pointer) {
@@ -273,6 +299,9 @@ export function fieldLabel(
       break;
     case "connection":
       label = connectionField(t, pointer);
+      break;
+    case "destination":
+      label = destinationField(t, pointer);
       break;
     default:
       break;
