@@ -558,7 +558,7 @@ func TestMattermost(t *testing.T) {
 
 	// C-13.AC-4, AC-14 (D284): a press from an account without an Account link. The bot, which has the role Member,
 	// first tries an ephemeral post, which the server refuses with 403 (F-063), then answers with ephemeral_text, which
-	// the server shows to that person alone, from System, in the Thread of the post (F-025, F-062).
+	// the server shows to that person alone, from System, in the Thread of the Root message (F-025, F-062).
 	notLinked := "Your Mattermost account is not linked to Muster. Link it in your profile: " + devmode.PublicURL +
 		"/profile"
 	if res := e.press(root.ID, "ack", fakemattermost.AliceUserID); res.Status != http.StatusOK ||

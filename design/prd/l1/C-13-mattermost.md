@@ -32,9 +32,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
 - **C-13.FR-2** The connection check (interactive) verifies the token and shows the bot's name; saving a Destination
   verifies that the bot is a member of the channel and refuses otherwise, naming the failing check. When the bot's
   roles do not grant `create_post_ephemeral` — read with `POST /api/v4/roles/names`, as the server decides it (F-064)
-  — the check still passes, with the warning `press_answers_in_thread`: answers to button presses will show in the
-  Thread of the post, and granting the bot that permission, for example the system admin role, shows them in the
-  channel (FR-4, F-063). `muster doctor` prints the same hint as a WARN line.
+  — the check still passes, with the warning `press_answers_in_thread`: the bot may not make ephemeral messages, so
+  answers to button presses will show in the Thread of the Root message, and granting the bot that permission, for
+  example the system admin role, shows them in the channel (FR-4, F-063). `muster doctor` prints the same hint as a
+  WARN line.
 - **C-13.FR-3** A Mattermost Destination has a Connection, a team and channel, its Mention settings (C-12.FR-8) and its
   limiter (`destination.mattermost.limiter`). The Root message is a post whose `message` is a short summary line — the
   status emoji, `#N` and the Alert Group's title — with one attachment, coloured by status, that holds the details of

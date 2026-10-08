@@ -44,15 +44,21 @@ function integrationRow(page: Page, name: string, table = "Integrations") {
     .filter({ has: page.getByRole("link", { name, exact: true }) });
 }
 
-/** The time of the last signal as the lost banner shows it: HH:MM in the time zone, with the date when not today. */
+/**
+ * The time of the last signal as the lost banner shows it: HH:MM in the time zone, with the date when not today and
+ * the year when not this year. The signal carries the business clock's time, which earlier specs moved ahead, and the
+ * page compares it with the browser's real time, so near midnight, or at the turn of the year, both parts show.
+ */
 function shownSince(iso: string, locale: string): string {
   const day = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: TIME_ZONE });
+  const now = new Date();
   const options: Intl.DateTimeFormatOptions =
-    day(new Date(iso)) === day(new Date())
+    day(new Date(iso)) === day(now)
       ? { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: TIME_ZONE }
       : {
           day: "numeric",
           month: "short",
+          ...(day(new Date(iso)).slice(0, 4) === day(now).slice(0, 4) ? {} : { year: "numeric" }),
           hour: "2-digit",
           minute: "2-digit",
           hourCycle: "h23",

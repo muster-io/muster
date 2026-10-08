@@ -503,7 +503,7 @@ sequenceDiagram
 ```
 
 Commands on one Alert Group are serialized, so two simultaneous presses give one acknowledgement and one Takeover
-([C-10].FR-10). The answer to a press never edits the post: only the delivery worker edits the Root message. Text for
+([C-10].FR-10). The answer to a press never edits the Root message: only the delivery worker does. Text for
 the person goes first as a separate ephemeral post through the interactive path — without `root_id` for a press on a
 Root message, so that it shows in the channel view, in the Thread for a press on a Thread reply. That post needs the
 `create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other

@@ -11,6 +11,7 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   APP,
   adminApi,
+  devClockOffset,
   expectNoHorizontalScroll,
   shot,
   signIn,
@@ -102,7 +103,9 @@ test("lists, filters and shows Stored Snapshots as inert text", async ({ page })
   await expect(page.getByText("No Stored Snapshots match these filters.")).toBeVisible();
   await page.getByLabel("State").selectOption({ label: "Failed" });
   await expect(snapshotRows(page)).toHaveCount(5);
-  const tomorrow = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  // Snapshots carry the business clock's time, which earlier specs moved ahead of the real one.
+  const business = Date.now() + (await devClockOffset()) * 1000;
+  const tomorrow = new Date(business + 36 * 60 * 60 * 1000).toISOString().slice(0, 10);
   await page.getByLabel("From").fill(tomorrow);
   await expect(page).toHaveURL(new RegExp(`snapshot_from=${tomorrow}`));
   await expect(page.getByText("No Stored Snapshots match these filters.")).toBeVisible();

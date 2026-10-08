@@ -3037,7 +3037,7 @@ type ConnectionCheckResult struct {
 	PendingUpdates nullable.Nullable[int]    `json:"pending_updates,omitempty"`
 	Steps          []ConnectionCheckStep     `json:"steps"`
 
-	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the answers to button presses show in the Thread of the post instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.
+	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.
 	Warnings []ConnectionCheckResultWarnings `json:"warnings"`
 
 	// WebhookSet Telegram only. A set webhook makes long polling fail with 409.
@@ -3699,7 +3699,7 @@ type MatcherOp string
 
 // MattermostActionAnswer Empty, or the text for the person who pressed when its ephemeral post was refused or failed. Never `update`.
 type MattermostActionAnswer struct {
-	// EphemeralText Shown by Mattermost to the person who pressed alone, from System, in the Thread of the pressed post.
+	// EphemeralText Shown by Mattermost to the person who pressed alone, from System, in the Thread of the Root message.
 	EphemeralText *string `json:"ephemeral_text,omitempty"`
 
 	// SkipSlackParsing Always `true` with `ephemeral_text`, so that the text is shown as it is.

@@ -136,9 +136,9 @@ type Role struct {
 const PermissionEphemeralPosts = "create_post_ephemeral"
 
 // HintPressAnswersInThread is the hint of a Connection whose bot lacks PermissionEphemeralPosts (D284).
-const HintPressAnswersInThread = "the bot may not make ephemeral posts (create_post_ephemeral), so answers to " +
-	"button presses show in the post's Thread; give it that permission, for example the system admin role, to show " +
-	"them in the channel"
+const HintPressAnswersInThread = "the bot may not make ephemeral messages (create_post_ephemeral), so answers to " +
+	"button presses show in the Thread of the Root message; give it that permission, for example the system admin " +
+	"role, to show them in the channel"
 
 // Team is a Mattermost team: Name is its URL name, the team_domain of a press.
 type Team struct {

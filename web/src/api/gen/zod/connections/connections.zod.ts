@@ -506,7 +506,7 @@ export const CheckConnectionResponse = zod.object({
   "via": zod.enum(['direct', 'proxy']).optional().describe('How the request travelled.'),
   "message": zod.string().nullish().describe('What answered when the step failed; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked.')
 })),
-  "warnings": zod.array(zod.enum(['press_answers_in_thread'])).describe('Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot\'s roles do not grant `create_post_ephemeral`, so the answers to button presses show in the Thread of the post instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.'),
+  "warnings": zod.array(zod.enum(['press_answers_in_thread'])).describe('Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot\'s roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.'),
   "bot_name": zod.string().nullish().describe('The bot\'s name or username.'),
   "webhook_set": zod.boolean().nullish().describe('Telegram only. A set webhook makes long polling fail with 409.'),
   "pending_updates": zod.int().nullish()
