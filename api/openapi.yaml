@@ -4883,7 +4883,7 @@ paths:
       summary: Update LookupTable
       description: Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps
         its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link
-        rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
+        rule reads by its name is refused with `409` (`in_use`), `link_rules` naming the rules, since they would read nothing.
       x-permission: lookup-tables:write
       x-listener: app
       security:
@@ -4932,8 +4932,8 @@ paths:
       tags:
       - Links
       summary: Delete LookupTable
-      description: Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, the detail
-        naming the rules.
+      description: Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name,
+        `link_rules` naming the rules.
       x-permission: lookup-tables:write
       x-listener: app
       security:
@@ -7318,6 +7318,12 @@ components:
           description: Set on refusals that name another Alert Group, such as an Unresolve refused because a newer open Alert
             Group exists.
           $ref: '#/components/schemas/AlertGroupRef'
+        link_rules:
+          type: array
+          description: Set on the `in_use` refusal of a Lookup table (`updateLookupTable`, `deleteLookupTable`); the Link
+            rules whose URL templates read the table by its name, in the order they were created.
+          items:
+            $ref: '#/components/schemas/EntityRef'
         retry_after_seconds:
           type: integer
           description: Set on `rate-limited`; equals the `Retry-After` header.
@@ -7480,7 +7486,8 @@ components:
         - code: name_taken
           description: A natural key, such as a name, already exists.
         - code: in_use
-          description: Other resources still use this one, such as a Connection with Destinations that are not deleted.
+          description: Other resources still use this one, such as a Connection with Destinations that are not deleted, or
+            a Lookup table that Link rules read (`link_rules` names them).
         - code: builtin_immutable
           description: The built-in Integration or Link rule cannot be changed this way.
         - code: role_locked
@@ -10042,12 +10049,29 @@ components:
           $ref: '#/components/schemas/AlertGroupRef'
     AlertGroupLink:
       type: object
+      description: One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in
+        its own language and tell them from a Link rule that has the same name.
       required:
+      - kind
       - name
       - url
       properties:
+        kind:
+          type: string
+          enum:
+          - runbook
+          - dashboard
+          - source
+          - link_rule
+          description: '`runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from
+            the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).'
         name:
           type: string
+          description: 'The name of a `link_rule` link — the rule''s name, followed by `: ` and the label value for the scope
+            `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`).'
+        link_rule_id:
+          description: The `public_id` of the Link rule; set only for the kind `link_rule`.
+          $ref: '#/components/schemas/PublicId'
         url:
           type: string
           format: uri

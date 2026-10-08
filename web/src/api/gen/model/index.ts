@@ -48,6 +48,7 @@ export * from './alertGroupCounts';
 export * from './alertGroupDelivery';
 export * from './alertGroupDeliveryList';
 export * from './alertGroupLink';
+export * from './alertGroupLinkKind';
 export * from './alertGroupList';
 export * from './alertGroupNotice';
 export * from './alertGroupNoticeKind';

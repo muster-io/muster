@@ -3,7 +3,8 @@
 
 // The Lookup table editor in a real browser: the grid of a key column and named columns, rows and columns added and
 // removed, the rows a save sends, the errors it finds itself, a refusal landing on its column, key, cell or row
-// (column_mismatch), a rename refused while a Link rule reads the table (in_use, with the rules named), a newer version
+// (column_mismatch), a rename refused while a Link rule reads the table (in_use, with the rules its link_rules names), a
+// newer version
 // (412), and the read-only table without lookup-tables:write.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -14,7 +15,7 @@ import { render } from "vitest-browser-react";
 
 import type { LookupTable, LookupTableBase, Permission, Session } from "../api/gen/model";
 import i18n from "../i18n";
-import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { ApiError, SESSION_QUERY_KEY, type SessionRead, apiFetch } from "../lib/api";
 import {
   LookupTableEditor,
   addColumn,
@@ -23,7 +24,6 @@ import {
   entriesOf,
   gridOf,
   removeColumn,
-  rulesReading,
   serverErrors,
 } from "./lookup-table-editor";
 
@@ -38,9 +38,6 @@ const TABLE: LookupTable = {
   created_at: "2026-10-08T09:00:00Z",
   etag: '"3"',
 };
-
-const EXPLORE =
-  '{{- $address := lookup "grafana" $key "address" -}}{{ lookup "other" .Labels.x "y" }}';
 
 function refusal(status: number, problem: Record<string, unknown>): ApiError {
   return new ApiError(
@@ -107,28 +104,36 @@ describe("the grid", () => {
       entries: "too_long",
     });
   });
+});
 
-  test("names the Link rules whose URL templates read a table", () => {
-    const rules = [
-      { name: "Explore", url_template: EXPLORE },
-      { name: "Raw", url_template: "{{ lookup `grafana` .Labels.cluster `address` }}" },
-      { name: "Other", url_template: '{{ lookup "grafana-stage" .Labels.cluster "address" }}' },
-    ];
-    expect(rulesReading(rules, "grafana")).toEqual(["Explore", "Raw"]);
-    expect(rulesReading(rules, "other")).toEqual(["Explore"]);
+describe("the in_use refusal", () => {
+  test("carries the Link rules of link_rules and leaves out malformed items", async () => {
+    vi.spyOn(window, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          type: "https://muster-io.github.io/muster/problems/conflict",
+          title: "Conflict",
+          status: 409,
+          code: "in_use",
+          link_rules: [{ id: "KR0000000000AA", name: "Explore" }, { id: 1 }, "Dashboard"],
+        }),
+        { status: 409, headers: { "Content-Type": "application/problem+json" } },
+      ),
+    );
+    const err: unknown = await apiFetch("/api/v1/lookup-tables/TB0000000000AA", {
+      method: "DELETE",
+    }).catch((e: unknown) => e);
+    if (!(err instanceof ApiError)) {
+      throw new Error("not an ApiError");
+    }
+    expect(err.code).toBe("in_use");
+    expect(err.link_rules).toEqual([{ id: "KR0000000000AA", name: "Explore" }]);
   });
 });
 
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": status < 300 ? "application/json" : "application/problem+json" },
-  });
-}
-
 async function renderEditor(
   save: (input: LookupTableBase) => Promise<unknown>,
-  permissions: Permission[] = ["lookup-tables:read", "lookup-tables:write", "link-rules:read"],
+  permissions: Permission[] = ["lookup-tables:read", "lookup-tables:write"],
   readOnly = false,
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -240,22 +245,19 @@ describe("LookupTableEditor", () => {
       .toHaveAttribute("aria-invalid", "true");
   });
 
-  test("names the Link rules that read the table when a rename is refused", async () => {
-    vi.spyOn(window, "fetch").mockImplementation(() =>
-      Promise.resolve(
-        json(200, {
-          items: [
-            { name: "Explore", url_template: EXPLORE },
-            {
-              name: "Dashboard",
-              url_template: '{{ lookup "grafana" .Labels.cluster "address" }}/d',
-            },
+  test("names the Link rules of the refusal when a rename is refused, without reading the rules", async () => {
+    const fetch = vi.spyOn(window, "fetch");
+    await renderEditor(() =>
+      Promise.reject(
+        refusal(409, {
+          code: "in_use",
+          link_rules: [
+            { id: "KR0000000000AA", name: "Explore" },
+            { id: "KR0000000000BB", name: "Dashboard" },
           ],
-          next_cursor: null,
         }),
       ),
     );
-    await renderEditor(() => Promise.reject(refusal(409, { code: "in_use" })));
     await userEvent.fill(page.getByLabelText("Name"), "grafana-prod");
     await page.getByRole("button", { name: "Save" }).click();
     await expect
@@ -263,6 +265,20 @@ describe("LookupTableEditor", () => {
       .toHaveTextContent(
         "This table is used by a Link rule and cannot be renamed. Link rules that read it: Explore, Dashboard.",
       );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  test("says only the sentence of the action when the refusal names no rules", async () => {
+    await renderEditor(() => Promise.reject(refusal(409, { code: "in_use" })));
+    await userEvent.fill(page.getByLabelText("Name"), "grafana-prod");
+    await page.getByRole("button", { name: "Save" }).click();
+    const text = page.getByTestId("lookup-table-in-use");
+    await expect
+      .element(text)
+      .toHaveTextContent("This table is used by a Link rule and cannot be renamed.");
+    expect(text.element().textContent).toBe(
+      "This table is used by a Link rule and cannot be renamed.",
+    );
   });
 
   test("offers a reload when someone else changed the table", async () => {

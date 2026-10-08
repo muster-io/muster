@@ -17,34 +17,16 @@
  * During 0.x breaking changes are allowed; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
  * OpenAPI spec version: 0.1.0
  */
-import type { AlertGroupRef } from './alertGroupRef';
-import type { EntityRef } from './entityRef';
-import type { ProblemError } from './problemError';
 
 /**
- * RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
+ * `runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).
  */
-export interface Problem {
-  /** Stable problem type URI. */
-  type: string;
-  /** Short human summary; may change between releases. */
-  title: string;
-  /** HTTP status code. */
-  status: number;
-  /** Human explanation of this occurrence; may change between releases. */
-  detail?: string;
-  /** Request path that produced the problem. */
-  instance?: string;
-  /** Stable machine code that refines `type`, listed per type in `x-problem-codes`. Clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. */
-  code?: string;
-  /** Field-level errors. Present for `validation-failed`. */
-  errors?: ProblemError[];
-  /** Set on `route-has-open-alert-groups`; the number of open Alert Groups that block the deletion. */
-  open_alert_group_count?: number;
-  /** Set on refusals that name another Alert Group, such as an Unresolve refused because a newer open Alert Group exists. */
-  related_alert_group?: AlertGroupRef;
-  /** Set on the `in_use` refusal of a Lookup table (`updateLookupTable`, `deleteLookupTable`); the Link rules whose URL templates read the table by its name, in the order they were created. */
-  link_rules?: EntityRef[];
-  /** Set on `rate-limited`; equals the `Retry-After` header. */
-  retry_after_seconds?: number;
-}
+export type AlertGroupLinkKind = typeof AlertGroupLinkKind[keyof typeof AlertGroupLinkKind];
+
+
+export const AlertGroupLinkKind = {
+  runbook: 'runbook',
+  dashboard: 'dashboard',
+  source: 'source',
+  link_rule: 'link_rule',
+} as const;

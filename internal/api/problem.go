@@ -129,6 +129,8 @@ type Problem struct {
 	OpenAlertGroupCount int64
 	// RelatedAlertGroup is set on a refusal that names another Alert Group.
 	RelatedAlertGroup *gen.AlertGroupRef
+	// LinkRules is set on the in_use refusal of a Lookup table: the Link rules that read it.
+	LinkRules []gen.EntityRef
 }
 
 func (p *Problem) Error() string {
@@ -142,19 +144,24 @@ func problem(status int, typ, code, detail string) *Problem {
 	return &Problem{Status: status, Type: typ, Code: code, Detail: detail}
 }
 
-// inUseDetail is the detail of the in_use problem of a Lookup table: the Link rules that read it, when the error
-// names them.
-func inUseDetail(err error) string {
-	var e *links.InUseError
-	if !errors.As(err, &e) || len(e.Rules) == 0 {
-		return "A Link rule reads this Lookup table; change the rule before deleting or renaming the table."
+// inUseProblem is the in_use problem of a Lookup table, with the Link rules that read it in link_rules and the
+// detail when the error names them.
+func inUseProblem(err error) *Problem {
+	p := problem(http.StatusConflict, typeConflict, codeInUse,
+		"A Link rule reads this Lookup table; change the rule before deleting or renaming the table.")
+	e, ok := errors.AsType[*links.InUseError](err)
+	if !ok || len(e.Rules) == 0 {
+		return p
 	}
 	names := make([]string, len(e.Rules))
-	for i, n := range e.Rules {
-		names[i] = strconv.Quote(n)
+	p.LinkRules = make([]gen.EntityRef, len(e.Rules))
+	for i, r := range e.Rules {
+		names[i] = strconv.Quote(r.Name)
+		p.LinkRules[i] = gen.EntityRef{Id: r.PublicID, Name: r.Name}
 	}
-	return "These Link rules read this Lookup table: " + strings.Join(names, ", ") +
+	p.Detail = "These Link rules read this Lookup table: " + strings.Join(names, ", ") +
 		"; change them before deleting or renaming the table."
+	return p
 }
 
 // forbidden is the 403 of a missing Permission, from the middleware or from the dispatcher of a Command.
@@ -229,6 +236,9 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 		body.OpenAlertGroupCount = &count
 	}
 	body.RelatedAlertGroup = p.RelatedAlertGroup
+	if len(p.LinkRules) > 0 {
+		body.LinkRules = &p.LinkRules
+	}
 	if p.RetryAfter > 0 {
 		body.RetryAfterSeconds = &p.RetryAfter
 		w.Header().Set(retryAfterHeader, strconv.Itoa(p.RetryAfter))
@@ -352,7 +362,7 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	case errors.Is(err, links.ErrRuleNameTaken):
 		return problem(http.StatusConflict, typeConflict, codeNameTaken, "Another Link rule has this name.")
 	case errors.Is(err, links.ErrInUse):
-		return problem(http.StatusConflict, typeConflict, codeInUse, inUseDetail(err))
+		return inUseProblem(err)
 	case errors.Is(err, links.ErrBuiltinImmutable):
 		return problem(http.StatusConflict, typeConflict, codeBuiltinImmutable,
 			"The built-in Explore rule cannot be deleted, renamed or given another scope; its Matchers and URL "+

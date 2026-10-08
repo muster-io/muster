@@ -1,22 +1,37 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The Links block of an Alert Group's page (C-09.FR-14, C-12.FR-9): the links of its Link rules and of the
-// annotations runbook_url and dashboard_url, and generatorURL as "Source", as the API names them, each opening in a
-// new tab without access to this page. Only http(s) links are shown; the block is hidden when there are none. It wraps
-// at phone width.
+// The Links block of an Alert Group's page (C-09.FR-14, C-12.FR-9): the links of its Link rules by the rule's name,
+// then the annotations runbook_url and dashboard_url and generatorURL by their names in the UI language ("Runbook",
+// "Dashboard", "Source"), each opening in a new tab without access to this page. Only http(s) links are shown; the
+// block is hidden when there are none. It wraps at phone width.
 
+import type { TFunction } from "i18next";
 import { ExternalLinkIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { AlertGroupLink } from "../api/gen/model";
 import { safeUrl } from "./template-preview";
 
+/** The text of a link: a Link rule's name as the API gives it, a built-in link's name in the UI language. */
+function linkName(t: TFunction, link: AlertGroupLink): string {
+  switch (link.kind) {
+    case "runbook":
+      return t("links.kind.runbook");
+    case "dashboard":
+      return t("links.kind.dashboard");
+    case "source":
+      return t("links.kind.source");
+    default:
+      return link.name;
+  }
+}
+
 export function AlertGroupLinks({ links }: { links: readonly AlertGroupLink[] | undefined }) {
   const { t } = useTranslation();
   const shown = (links ?? []).flatMap((l) => {
     const url = safeUrl(l.url);
-    return url === undefined ? [] : [{ name: l.name, url }];
+    return url === undefined ? [] : [{ name: linkName(t, l), url }];
   });
   if (shown.length === 0) {
     return null;

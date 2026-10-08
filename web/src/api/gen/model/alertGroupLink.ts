@@ -17,8 +17,18 @@
  * During 0.x breaking changes are allowed; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
  * OpenAPI spec version: 0.1.0
  */
+import type { AlertGroupLinkKind } from './alertGroupLinkKind';
+import type { PublicId } from './publicId';
 
+/**
+ * One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in its own language and tell them from a Link rule that has the same name.
+ */
 export interface AlertGroupLink {
+  /** `runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`). */
+  kind: AlertGroupLinkKind;
+  /** The name of a `link_rule` link — the rule's name, followed by `: ` and the label value for the scope `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`). */
   name: string;
+  /** The `public_id` of the Link rule; set only for the kind `link_rule`. */
+  link_rule_id?: PublicId;
   url: string;
 }

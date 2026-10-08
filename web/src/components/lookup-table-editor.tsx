@@ -5,10 +5,11 @@
 // column per named column. Columns and rows are added and removed; a save replaces the stored rows as a whole and
 // sends the version the editor read as If-Match. Without lookup-tables:write the table only shows. A refusal lands on
 // its field: a column, a key, a cell, or the row whose values do not match the columns (column_mismatch); a new name
-// for a table that a Link rule reads is refused (409 in_use) with the rules named, as is the deletion of such a table.
+// for a table that a Link rule reads is refused (409 in_use) with the rules its link_rules names, as is the deletion
+// of such a table.
 // The limits are those of lookup_table.size_max.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
 import { PlusIcon, XIcon } from "lucide-react";
@@ -19,11 +20,9 @@ import {
   deleteLookupTable,
   getGetLookupTableQueryKey,
   getListLookupTablesQueryKey,
-  listLinkRules,
 } from "../api/gen/endpoints/links/links";
 import type { LookupTable, LookupTableBase } from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
-import { useCan } from "./app-shell";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import {
@@ -248,44 +247,11 @@ export function gridErrorText(
   }
 }
 
-/** The names of the Link rules whose URL templates call lookup with a table's name. */
-export function rulesReading(
-  rules: readonly { name: string; url_template: string }[],
-  table: string,
-): string[] {
-  const call = /\blookup\s+(?:"((?:\\.|[^"\\])*)"|`([^`]*)`)/g;
-  return rules
-    .filter((r) =>
-      [...r.url_template.matchAll(call)].some((m) => {
-        if (m[2] !== undefined) {
-          return m[2] === table;
-        }
-        try {
-          return JSON.parse(`"${m[1] ?? ""}"`) === table;
-        } catch {
-          return false;
-        }
-      }),
-    )
-    .map((r) => r.name);
-}
-
-/** The Link rules that read a table, read once a refusal names it in use. */
-function useReaders(table: string): string[] {
-  const canRules = useCan("link-rules:read");
-  const query = useQuery({
-    queryKey: ["lookup-table-readers", table],
-    // One page of the largest size; an Organization has far fewer Link rules than that.
-    queryFn: ({ signal }) => listLinkRules({ limit: 500 }, { signal }),
-    enabled: canRules,
-  });
-  return query.data === undefined ? [] : rulesReading(query.data.items, table);
-}
-
-/** The text of an in_use refusal: the sentence of the action, and the rules that read the table when they are known. */
-function InUseText({ table, action }: { table: string; action: "delete" | "rename" }) {
+/** The text of an in_use refusal: the sentence of the action, and the rules that read the table, as the refusal
+ * names them in link_rules. */
+function InUseText({ error, action }: { error: unknown; action: "delete" | "rename" }) {
   const { t } = useTranslation();
-  const readers = useReaders(table);
+  const readers = isApiError(error) ? (error.link_rules ?? []).map((r) => r.name) : [];
   return (
     <span data-testid="lookup-table-in-use">
       {action === "delete"
@@ -855,7 +821,7 @@ export function LookupTableEditor({
         <Alert variant="destructive">
           <AlertDescription className="text-current">
             {isInUse(submit.error) ? (
-              <InUseText table={table?.name ?? name} action="rename" />
+              <InUseText error={submit.error} action="rename" />
             ) : (
               problemText(t, submit.error)
             )}
@@ -916,7 +882,7 @@ export function LookupTableDeleteDialog({ table }: { table: LookupTable }) {
             <Alert variant="destructive">
               <AlertDescription className="flex flex-wrap items-center gap-3 text-current">
                 {isInUse(remove.error) ? (
-                  <InUseText table={table.name} action="delete" />
+                  <InUseText error={remove.error} action="delete" />
                 ) : isStale(remove.error) ? (
                   <>
                     <span>{t("lookupTables.errors.stale")}</span>

@@ -21,10 +21,10 @@ import (
 	"github.com/muster-io/muster/internal/templates"
 )
 
-// The kinds of a link: a Link rule's, or the runbook_url and dashboard_url annotations and the generatorURL of the
-// Alerts.
+// The kinds of a link, as the API names them: a Link rule's, or the runbook_url and dashboard_url annotations and the
+// generatorURL of the Alerts.
 const (
-	KindRule      = "rule"
+	KindRule      = "link_rule"
 	KindRunbook   = "runbook"
 	KindDashboard = "dashboard"
 	KindSource    = "source"
@@ -46,11 +46,13 @@ const ReadAlerts = 1000
 // ErrNotFound is an Alert Group that does not exist in the Organization.
 var ErrNotFound = errors.New("no such alert group")
 
-// Link is one link of an Alert Group: its kind, its name and its http(s) URL.
+// Link is one link of an Alert Group: its kind, its name and its http(s) URL, and for the kind KindRule the public_id
+// of its Link rule.
 type Link struct {
 	Kind string
 	Name string
 	URL  string
+	Rule string
 }
 
 // Input is an Alert Group as its links are computed from: its public_id and its Route's, which the metric and the log
@@ -110,7 +112,7 @@ func (s *Service) ruleLinks(r Rule, env templates.Env, d templates.Data) ([]Link
 		if err != nil || u == "" {
 			return nil, err
 		}
-		return []Link{{Kind: KindRule, Name: r.Name, URL: u}}, nil
+		return []Link{{Kind: KindRule, Name: r.Name, URL: u, Rule: r.PublicID}}, nil
 	}
 	var out []Link
 	seen := map[string]bool{}
@@ -125,7 +127,7 @@ func (s *Service) ruleLinks(r Rule, env templates.Env, d templates.Data) ([]Link
 			return nil, err
 		}
 		if u != "" {
-			out = append(out, Link{Kind: KindRule, Name: r.Name + ": " + v, URL: u})
+			out = append(out, Link{Kind: KindRule, Name: r.Name + ": " + v, URL: u, Rule: r.PublicID})
 		}
 	}
 	return out, nil

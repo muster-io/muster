@@ -61,6 +61,7 @@ export const listAlertGroupsResponseItemsItemRouteIdRegExp = new RegExp('^[A-HJK
 export const listAlertGroupsResponseItemsItemIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listAlertGroupsResponseItemsItemResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listAlertGroupsResponseItemsItemNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const listAlertGroupsResponseItemsItemLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const ListAlertGroupsResponse = zod.object({
@@ -135,9 +136,11 @@ export const ListAlertGroupsResponse = zod.object({
 }).optional().describe('For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that takes part in grouping, shown as a link in place of Unresolve.')
 }).describe('A banner for the Alert Group page; the UI owns the wording.')).optional(),
   "links": zod.array(zod.object({
-  "name": zod.string(),
+  "kind": zod.enum(['runbook', 'dashboard', 'source', 'link_rule']).describe('`runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).'),
+  "name": zod.string().describe('The name of a `link_rule` link — the rule\'s name, followed by `: ` and the label value for the scope `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`).'),
+  "link_rule_id": zod.string().regex(listAlertGroupsResponseItemsItemLinksItemLinkRuleIdRegExp).optional().describe('The `public_id` of the Link rule; set only for the kind `link_rule`.'),
   "url": zod.url()
-})).optional(),
+}).describe('One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in its own language and tell them from a Link rule that has the same name.')).optional(),
   "allowed_commands": zod.array(zod.enum(['acknowledge', 'unacknowledge', 'resolve', 'unresolve', 'snooze', 'unsnooze', 'still_on_it', 'add_note']).describe('The Commands a caller may run on an Alert Group now (`allowed_commands`). `still_on_it` appears while a Reminder is pending and the caller is the Owner; `add_note` while the caller holds `alert-groups:note`. A Service account is never offered `acknowledge` or `still_on_it`.')).describe('Commands the current status allows for the caller\'s Permissions and identity; Acknowledge on another user\'s Alert Group is a Takeover. A Service account is not offered `acknowledge` or `still_on_it`.')
 })),
   "next_cursor": zod.string().nullable()
@@ -248,6 +251,7 @@ export const getAlertGroupResponseRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-h
 export const getAlertGroupResponseIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupResponseResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupResponseNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getAlertGroupResponseLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const GetAlertGroupResponse = zod.object({
@@ -321,9 +325,11 @@ export const GetAlertGroupResponse = zod.object({
 }).optional().describe('For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that takes part in grouping, shown as a link in place of Unresolve.')
 }).describe('A banner for the Alert Group page; the UI owns the wording.')).optional(),
   "links": zod.array(zod.object({
-  "name": zod.string(),
+  "kind": zod.enum(['runbook', 'dashboard', 'source', 'link_rule']).describe('`runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).'),
+  "name": zod.string().describe('The name of a `link_rule` link — the rule\'s name, followed by `: ` and the label value for the scope `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`).'),
+  "link_rule_id": zod.string().regex(getAlertGroupResponseLinksItemLinkRuleIdRegExp).optional().describe('The `public_id` of the Link rule; set only for the kind `link_rule`.'),
   "url": zod.url()
-})).optional(),
+}).describe('One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in its own language and tell them from a Link rule that has the same name.')).optional(),
   "allowed_commands": zod.array(zod.enum(['acknowledge', 'unacknowledge', 'resolve', 'unresolve', 'snooze', 'unsnooze', 'still_on_it', 'add_note']).describe('The Commands a caller may run on an Alert Group now (`allowed_commands`). `still_on_it` appears while a Reminder is pending and the caller is the Owner; `add_note` while the caller holds `alert-groups:note`. A Service account is never offered `acknowledge` or `still_on_it`.')).describe('Commands the current status allows for the caller\'s Permissions and identity; Acknowledge on another user\'s Alert Group is a Takeover. A Service account is not offered `acknowledge` or `still_on_it`.')
 })
 
@@ -683,6 +689,7 @@ export const acknowledgeAlertGroupResponseAlertGroupRouteIdRegExp = new RegExp('
 export const acknowledgeAlertGroupResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const acknowledgeAlertGroupResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const acknowledgeAlertGroupResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const acknowledgeAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const AcknowledgeAlertGroupResponse = zod.object({
@@ -758,9 +765,11 @@ export const AcknowledgeAlertGroupResponse = zod.object({
 }).optional().describe('For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that takes part in grouping, shown as a link in place of Unresolve.')
 }).describe('A banner for the Alert Group page; the UI owns the wording.')).optional(),
   "links": zod.array(zod.object({
-  "name": zod.string(),
+  "kind": zod.enum(['runbook', 'dashboard', 'source', 'link_rule']).describe('`runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).'),
+  "name": zod.string().describe('The name of a `link_rule` link — the rule\'s name, followed by `: ` and the label value for the scope `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`).'),
+  "link_rule_id": zod.string().regex(acknowledgeAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp).optional().describe('The `public_id` of the Link rule; set only for the kind `link_rule`.'),
   "url": zod.url()
-})).optional(),
+}).describe('One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in its own language and tell them from a Link rule that has the same name.')).optional(),
   "allowed_commands": zod.array(zod.enum(['acknowledge', 'unacknowledge', 'resolve', 'unresolve', 'snooze', 'unsnooze', 'still_on_it', 'add_note']).describe('The Commands a caller may run on an Alert Group now (`allowed_commands`). `still_on_it` appears while a Reminder is pending and the caller is the Owner; `add_note` while the caller holds `alert-groups:note`. A Service account is never offered `acknowledge` or `still_on_it`.')).describe('Commands the current status allows for the caller\'s Permissions and identity; Acknowledge on another user\'s Alert Group is a Takeover. A Service account is not offered `acknowledge` or `still_on_it`.')
 })
 })
@@ -783,6 +792,7 @@ export const unacknowledgeAlertGroupResponseAlertGroupRouteIdRegExp = new RegExp
 export const unacknowledgeAlertGroupResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unacknowledgeAlertGroupResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unacknowledgeAlertGroupResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const unacknowledgeAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const UnacknowledgeAlertGroupResponse = zod.object({
@@ -858,9 +868,11 @@ export const UnacknowledgeAlertGroupResponse = zod.object({
 }).optional().describe('For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that takes part in grouping, shown as a link in place of Unresolve.')
 }).describe('A banner for the Alert Group page; the UI owns the wording.')).optional(),
   "links": zod.array(zod.object({
-  "name": zod.string(),
+  "kind": zod.enum(['runbook', 'dashboard', 'source', 'link_rule']).describe('`runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).'),
+  "name": zod.string().describe('The name of a `link_rule` link — the rule\'s name, followed by `: ` and the label value for the scope `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`).'),
+  "link_rule_id": zod.string().regex(unacknowledgeAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp).optional().describe('The `public_id` of the Link rule; set only for the kind `link_rule`.'),
   "url": zod.url()
-})).optional(),
+}).describe('One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in its own language and tell them from a Link rule that has the same name.')).optional(),
   "allowed_commands": zod.array(zod.enum(['acknowledge', 'unacknowledge', 'resolve', 'unresolve', 'snooze', 'unsnooze', 'still_on_it', 'add_note']).describe('The Commands a caller may run on an Alert Group now (`allowed_commands`). `still_on_it` appears while a Reminder is pending and the caller is the Owner; `add_note` while the caller holds `alert-groups:note`. A Service account is never offered `acknowledge` or `still_on_it`.')).describe('Commands the current status allows for the caller\'s Permissions and identity; Acknowledge on another user\'s Alert Group is a Takeover. A Service account is not offered `acknowledge` or `still_on_it`.')
 })
 })
@@ -891,6 +903,7 @@ export const resolveAlertGroupResponseAlertGroupRouteIdRegExp = new RegExp('^[A-
 export const resolveAlertGroupResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const resolveAlertGroupResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const resolveAlertGroupResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const resolveAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const ResolveAlertGroupResponse = zod.object({
@@ -966,9 +979,11 @@ export const ResolveAlertGroupResponse = zod.object({
 }).optional().describe('For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that takes part in grouping, shown as a link in place of Unresolve.')
 }).describe('A banner for the Alert Group page; the UI owns the wording.')).optional(),
   "links": zod.array(zod.object({
-  "name": zod.string(),
+  "kind": zod.enum(['runbook', 'dashboard', 'source', 'link_rule']).describe('`runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).'),
+  "name": zod.string().describe('The name of a `link_rule` link — the rule\'s name, followed by `: ` and the label value for the scope `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`).'),
+  "link_rule_id": zod.string().regex(resolveAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp).optional().describe('The `public_id` of the Link rule; set only for the kind `link_rule`.'),
   "url": zod.url()
-})).optional(),
+}).describe('One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in its own language and tell them from a Link rule that has the same name.')).optional(),
   "allowed_commands": zod.array(zod.enum(['acknowledge', 'unacknowledge', 'resolve', 'unresolve', 'snooze', 'unsnooze', 'still_on_it', 'add_note']).describe('The Commands a caller may run on an Alert Group now (`allowed_commands`). `still_on_it` appears while a Reminder is pending and the caller is the Owner; `add_note` while the caller holds `alert-groups:note`. A Service account is never offered `acknowledge` or `still_on_it`.')).describe('Commands the current status allows for the caller\'s Permissions and identity; Acknowledge on another user\'s Alert Group is a Takeover. A Service account is not offered `acknowledge` or `still_on_it`.')
 })
 })
@@ -991,6 +1006,7 @@ export const unresolveAlertGroupResponseAlertGroupRouteIdRegExp = new RegExp('^[
 export const unresolveAlertGroupResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unresolveAlertGroupResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unresolveAlertGroupResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const unresolveAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const UnresolveAlertGroupResponse = zod.object({
@@ -1066,9 +1082,11 @@ export const UnresolveAlertGroupResponse = zod.object({
 }).optional().describe('For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that takes part in grouping, shown as a link in place of Unresolve.')
 }).describe('A banner for the Alert Group page; the UI owns the wording.')).optional(),
   "links": zod.array(zod.object({
-  "name": zod.string(),
+  "kind": zod.enum(['runbook', 'dashboard', 'source', 'link_rule']).describe('`runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).'),
+  "name": zod.string().describe('The name of a `link_rule` link — the rule\'s name, followed by `: ` and the label value for the scope `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`).'),
+  "link_rule_id": zod.string().regex(unresolveAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp).optional().describe('The `public_id` of the Link rule; set only for the kind `link_rule`.'),
   "url": zod.url()
-})).optional(),
+}).describe('One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in its own language and tell them from a Link rule that has the same name.')).optional(),
   "allowed_commands": zod.array(zod.enum(['acknowledge', 'unacknowledge', 'resolve', 'unresolve', 'snooze', 'unsnooze', 'still_on_it', 'add_note']).describe('The Commands a caller may run on an Alert Group now (`allowed_commands`). `still_on_it` appears while a Reminder is pending and the caller is the Owner; `add_note` while the caller holds `alert-groups:note`. A Service account is never offered `acknowledge` or `still_on_it`.')).describe('Commands the current status allows for the caller\'s Permissions and identity; Acknowledge on another user\'s Alert Group is a Takeover. A Service account is not offered `acknowledge` or `still_on_it`.')
 })
 })
@@ -1096,6 +1114,7 @@ export const snoozeAlertGroupResponseAlertGroupRouteIdRegExp = new RegExp('^[A-H
 export const snoozeAlertGroupResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const snoozeAlertGroupResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const snoozeAlertGroupResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const snoozeAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const SnoozeAlertGroupResponse = zod.object({
@@ -1171,9 +1190,11 @@ export const SnoozeAlertGroupResponse = zod.object({
 }).optional().describe('For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that takes part in grouping, shown as a link in place of Unresolve.')
 }).describe('A banner for the Alert Group page; the UI owns the wording.')).optional(),
   "links": zod.array(zod.object({
-  "name": zod.string(),
+  "kind": zod.enum(['runbook', 'dashboard', 'source', 'link_rule']).describe('`runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).'),
+  "name": zod.string().describe('The name of a `link_rule` link — the rule\'s name, followed by `: ` and the label value for the scope `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`).'),
+  "link_rule_id": zod.string().regex(snoozeAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp).optional().describe('The `public_id` of the Link rule; set only for the kind `link_rule`.'),
   "url": zod.url()
-})).optional(),
+}).describe('One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in its own language and tell them from a Link rule that has the same name.')).optional(),
   "allowed_commands": zod.array(zod.enum(['acknowledge', 'unacknowledge', 'resolve', 'unresolve', 'snooze', 'unsnooze', 'still_on_it', 'add_note']).describe('The Commands a caller may run on an Alert Group now (`allowed_commands`). `still_on_it` appears while a Reminder is pending and the caller is the Owner; `add_note` while the caller holds `alert-groups:note`. A Service account is never offered `acknowledge` or `still_on_it`.')).describe('Commands the current status allows for the caller\'s Permissions and identity; Acknowledge on another user\'s Alert Group is a Takeover. A Service account is not offered `acknowledge` or `still_on_it`.')
 })
 })
@@ -1196,6 +1217,7 @@ export const unsnoozeAlertGroupResponseAlertGroupRouteIdRegExp = new RegExp('^[A
 export const unsnoozeAlertGroupResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unsnoozeAlertGroupResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unsnoozeAlertGroupResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const unsnoozeAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const UnsnoozeAlertGroupResponse = zod.object({
@@ -1271,9 +1293,11 @@ export const UnsnoozeAlertGroupResponse = zod.object({
 }).optional().describe('For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that takes part in grouping, shown as a link in place of Unresolve.')
 }).describe('A banner for the Alert Group page; the UI owns the wording.')).optional(),
   "links": zod.array(zod.object({
-  "name": zod.string(),
+  "kind": zod.enum(['runbook', 'dashboard', 'source', 'link_rule']).describe('`runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).'),
+  "name": zod.string().describe('The name of a `link_rule` link — the rule\'s name, followed by `: ` and the label value for the scope `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`).'),
+  "link_rule_id": zod.string().regex(unsnoozeAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp).optional().describe('The `public_id` of the Link rule; set only for the kind `link_rule`.'),
   "url": zod.url()
-})).optional(),
+}).describe('One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in its own language and tell them from a Link rule that has the same name.')).optional(),
   "allowed_commands": zod.array(zod.enum(['acknowledge', 'unacknowledge', 'resolve', 'unresolve', 'snooze', 'unsnooze', 'still_on_it', 'add_note']).describe('The Commands a caller may run on an Alert Group now (`allowed_commands`). `still_on_it` appears while a Reminder is pending and the caller is the Owner; `add_note` while the caller holds `alert-groups:note`. A Service account is never offered `acknowledge` or `still_on_it`.')).describe('Commands the current status allows for the caller\'s Permissions and identity; Acknowledge on another user\'s Alert Group is a Takeover. A Service account is not offered `acknowledge` or `still_on_it`.')
 })
 })
@@ -1375,6 +1399,7 @@ export const answerReminderResponseAlertGroupRouteIdRegExp = new RegExp('^[A-HJK
 export const answerReminderResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const answerReminderResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const answerReminderResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const answerReminderResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const AnswerReminderResponse = zod.object({
@@ -1450,9 +1475,11 @@ export const AnswerReminderResponse = zod.object({
 }).optional().describe('For `newer_alert_group_exists`: the open Alert Group of the same Route and Group key values that takes part in grouping, shown as a link in place of Unresolve.')
 }).describe('A banner for the Alert Group page; the UI owns the wording.')).optional(),
   "links": zod.array(zod.object({
-  "name": zod.string(),
+  "kind": zod.enum(['runbook', 'dashboard', 'source', 'link_rule']).describe('`runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).'),
+  "name": zod.string().describe('The name of a `link_rule` link — the rule\'s name, followed by `: ` and the label value for the scope `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`).'),
+  "link_rule_id": zod.string().regex(answerReminderResponseAlertGroupLinksItemLinkRuleIdRegExp).optional().describe('The `public_id` of the Link rule; set only for the kind `link_rule`.'),
   "url": zod.url()
-})).optional(),
+}).describe('One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in its own language and tell them from a Link rule that has the same name.')).optional(),
   "allowed_commands": zod.array(zod.enum(['acknowledge', 'unacknowledge', 'resolve', 'unresolve', 'snooze', 'unsnooze', 'still_on_it', 'add_note']).describe('The Commands a caller may run on an Alert Group now (`allowed_commands`). `still_on_it` appears while a Reminder is pending and the caller is the Owner; `add_note` while the caller holds `alert-groups:note`. A Service account is never offered `acknowledge` or `still_on_it`.')).describe('Commands the current status allows for the caller\'s Permissions and identity; Acknowledge on another user\'s Alert Group is a Takeover. A Service account is not offered `acknowledge` or `still_on_it`.')
 })
 })

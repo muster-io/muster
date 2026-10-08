@@ -129,7 +129,7 @@ export const GetLookupTableResponse = zod.object({
 }))
 
 /**
- * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
+ * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), `link_rules` naming the rules, since they would read nothing.
  * @summary Update LookupTable
  */
 export const updateLookupTablePathLookupTableIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -181,7 +181,7 @@ export const UpdateLookupTableResponse = zod.object({
 }))
 
 /**
- * Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, the detail naming the rules.
+ * Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, `link_rules` naming the rules.
  * @summary Delete LookupTable
  */
 export const deleteLookupTablePathLookupTableIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');

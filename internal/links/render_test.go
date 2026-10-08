@@ -62,7 +62,8 @@ func TestEvaluate(t *testing.T) {
 	if _, err := s.CreateTable(ctx, by, grafana()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateRule(ctx, by, dashboard()); err != nil {
+	dash, err := s.CreateRule(ctx, by, dashboard())
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.CreateRule(ctx, by, RuleInput{Name: "Broken", Scope: Scope{Type: ScopeAlertGroup},
@@ -92,8 +93,10 @@ func TestEvaluate(t *testing.T) {
 	if strings.Join(names(got), "\n") != strings.Join(want, "\n") {
 		t.Fatalf("links\n%s\nwant\n%s", strings.Join(names(got), "\n"), strings.Join(want, "\n"))
 	}
-	if got[0].Kind != KindRule || got[2].Kind != KindRunbook || got[3].Kind != KindSource {
-		t.Errorf("kinds %+v", got)
+	if got[0].Kind != KindRule || got[0].Rule != f.rules[0].PublicID || got[1].Kind != KindRule ||
+		got[1].Rule != dash.PublicID || got[2].Kind != KindRunbook || got[2].Rule != "" || got[3].Kind != KindSource ||
+		got[3].Rule != "" {
+		t.Errorf("kinds and rules %+v", got)
 	}
 	if _, err := s.Evaluate(ctx, nil, in); err != nil {
 		t.Fatal(err)
@@ -179,8 +182,9 @@ func TestEvaluateLabelValue(t *testing.T) {
 	ctx := t.Context()
 	f := newFake()
 	s, _ := newService(t, f)
-	if _, err := s.CreateRule(ctx, by, RuleInput{Name: "Logs", Scope: Scope{Type: ScopeLabelValue, Label: "pod"},
-		URLTemplate: "https://logs.example.org/{{ .Labels.namespace }}/{{ .Value }}"}); err != nil {
+	logs, err := s.CreateRule(ctx, by, RuleInput{Name: "Logs", Scope: Scope{Type: ScopeLabelValue, Label: "pod"},
+		URLTemplate: "https://logs.example.org/{{ .Labels.namespace }}/{{ .Value }}"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.CreateRule(ctx, by, RuleInput{Name: "Empty", Scope: Scope{Type: ScopeLabelValue, Label: "pod"},
@@ -199,6 +203,9 @@ func TestEvaluateLabelValue(t *testing.T) {
 	if strings.Join(names(got), "|") != "Logs: p1 https://logs.example.org/a/p1|Logs: p2 https://logs.example.org/b/p2|"+
 		"Empty: p1 https://e.example.org" {
 		t.Errorf("links %v", names(got))
+	}
+	if got[0].Kind != KindRule || got[0].Rule != logs.PublicID || got[1].Rule != logs.PublicID {
+		t.Errorf("a label_value link names its rule: %+v", got)
 	}
 }
 
