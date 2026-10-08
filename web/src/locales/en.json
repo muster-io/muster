@@ -583,6 +583,126 @@
     "valuePlaceholder": "prod-eu",
     "valueRow": "Label value {{row}}"
   },
+  "linkRules": {
+    "builtin": "Built-in",
+    "create": {
+      "start": "Create rule",
+      "submit": "Create",
+      "title": "Create Link rule"
+    },
+    "delete": {
+      "action": "Delete",
+      "description": "Messages and Alert Group pages stop showing its links.",
+      "title": "Delete Link rule {{name}}?"
+    },
+    "edit": {
+      "title": "Link rule"
+    },
+    "errors": {
+      "builtin": "The built-in Explore rule cannot be deleted, renamed or given another scope.",
+      "changedElsewhere": "This Link rule was changed elsewhere.",
+      "nameTaken": "Another Link rule has this name.",
+      "scopeLabelRequired": "Enter a label name.",
+      "stale": "Someone else changed this Link rule. Reload to see the changes.",
+      "urlTemplateRequired": "Enter a URL template."
+    },
+    "fields": {
+      "matchers": "Matchers",
+      "name": "Name",
+      "scope": "Scope",
+      "scopeLabel": "Label",
+      "urlTemplate": "URL template"
+    },
+    "form": {
+      "back": "Back to the Link rules",
+      "builtinHint": "The built-in rule keeps its name and scope; its Matchers and URL template can be changed.",
+      "matchersHint": "The rule makes links for Alert Groups whose common labels match every Matcher; a label that only some Alerts carry counts as missing.",
+      "previewEmpty": "Write a URL template to see its link.",
+      "readOnly": "You can view this Link rule but not change it.",
+      "scopeHint": "One link for each distinct value of this label among the Alerts.",
+      "urlTemplateHint": "A Go template; lookup \"table\" key \"column\" reads one cell of a Lookup table."
+    },
+    "hint": "Rules that turn an Alert Group or a label value into a link to another tool, shown in messages and on the Alert Group page.",
+    "list": {
+      "empty": "No Link rules yet.",
+      "noMatchers": "No Matchers: every Alert Group"
+    },
+    "scope": {
+      "alertGroup": "Alert Group",
+      "labelValue": "Each value of label",
+      "labelValueOf": "Each value of {{label}}"
+    },
+    "title": "Link rules"
+  },
+  "links": {
+    "newTab": "(opens in a new tab)",
+    "title": "Links"
+  },
+  "lookupTables": {
+    "back": "Back to the Lookup tables",
+    "create": {
+      "start": "Create table",
+      "submit": "Create",
+      "title": "Create Lookup table"
+    },
+    "delete": {
+      "action": "Delete",
+      "description": "Link rules can no longer read its values.",
+      "title": "Delete Lookup table {{name}}?"
+    },
+    "edit": {
+      "title": "Lookup table"
+    },
+    "errors": {
+      "changedElsewhere": "This Lookup table was changed elsewhere.",
+      "columnMismatch": "The values of this row do not match the columns.",
+      "columnRequired": "Enter a column name.",
+      "columnsRequired": "A Lookup table has at least one column.",
+      "duplicateColumn": "Another column has this name.",
+      "duplicateKey": "Another row has this key.",
+      "inUseDelete": "This table is used by a Link rule and cannot be deleted.",
+      "inUseRename": "This table is used by a Link rule and cannot be renamed.",
+      "keyRequired": "Enter a key.",
+      "nameTaken": "Another Lookup table has this name.",
+      "readers": "Link rules that read it: {{rules}}.",
+      "stale": "Someone else changed this Lookup table. Reload to see the changes.",
+      "tooLarge": "A Lookup table has at most {{columns}} columns and {{rows}} rows."
+    },
+    "fields": {
+      "columns": "Columns",
+      "description": "Description",
+      "name": "Name",
+      "rows": "Rows"
+    },
+    "grid": {
+      "actions": "Actions",
+      "addColumn": "Add column",
+      "addRow": "Add row",
+      "cell": "{{column}} of row {{row}}",
+      "columnName": "Name of column {{column}}",
+      "columnPlaceholder": "column",
+      "hint": "Each row has a key and one value per column. A Link rule reads one cell, such as the address of the key prod.",
+      "key": "Key",
+      "keyOfRow": "Key of row {{row}}",
+      "label": "Rows of the Lookup table",
+      "noRows": "No rows yet.",
+      "removeColumn": "Remove column {{column}}",
+      "removeColumnNumber": "Remove column {{column}}",
+      "removeRow": "Remove row {{row}}",
+      "rowCount_one": "{{count}} row",
+      "rowCount_other": "{{count}} rows",
+      "title": "Rows"
+    },
+    "hint": "Tables of values that Link rules read with lookup, such as the Grafana address of each environment.",
+    "list": {
+      "empty": "No Lookup tables yet.",
+      "rows_one": "{{count}} row",
+      "rows_other": "{{count}} rows"
+    },
+    "nameHint": "Link rules read the table by this name: lookup \"name\" key \"column\".",
+    "readOnly": "You can view this Lookup table but not change it.",
+    "title": "Lookup tables"
+  },
   "matchers": {
     "add": "Add matcher",
     "applied": "Applied matchers",
@@ -610,6 +730,8 @@
     "auditLog": "Audit log",
     "integrations": "Integrations",
     "label": "Main",
+    "linkRules": "Link rules",
+    "lookupTables": "Lookup tables",
     "oidc": "OIDC",
     "profile": "Profile",
     "routes": "Routes",
@@ -849,6 +971,7 @@
       "openAlertGroups_one": "{{count}} open Alert Group",
       "openAlertGroups_other": "{{count}} open Alert Groups",
       "stale": "Someone else changed the order. Reload to see it.",
+      "templateError": "Template error",
       "urgent": "Urgent"
     },
     "matchers": {
@@ -863,6 +986,19 @@
       "removeRow": "Remove matcher {{row}}",
       "valuePlaceholder": "value",
       "valueRow": "Value of matcher {{row}}"
+    },
+    "message": {
+      "ackTimeoutNotice": "Ack timeout notice",
+      "ackTimeoutNoticeHint": "The reply sent when nobody acknowledges an Alert Group in time.",
+      "builtin": "Built-in",
+      "custom": "Custom",
+      "language": "Language",
+      "line": "Alert line",
+      "lineHint": "The line of each Alert in the list of the message.",
+      "rootMessage": "Root message",
+      "rootMessageHint": "The body of the message: environment, start time, labels, summary and Alerts. The status, heading, links, notices, footer and buttons always come from Muster.",
+      "source": "Template of {{template}}",
+      "title": "Message"
     },
     "preview": {
       "alerts": "Alerts",
@@ -916,6 +1052,11 @@
       "dismiss": "Dismiss",
       "heartbeatLost": "Muster raises MusterHeartbeatLost when an Integration loses its Heartbeat, and only the Default route takes it now.",
       "title": "Suggestions"
+    },
+    "templateError": {
+      "fallback": "Messages use the fallback template.",
+      "notSent": "Requests are not sent.",
+      "since": "Template error since {{time}}: {{error}}."
     },
     "title": "Routes"
   },
@@ -1129,6 +1270,35 @@
   "table": {
     "loadMore": "Load more"
   },
+  "templates": {
+    "errors": {
+      "atLine": "Line {{line}}: {{error}}",
+      "atLineColumn": "Line {{line}}, column {{column}}: {{error}}",
+      "syntax": "The template is not valid.",
+      "unknownFunction": "Unknown function: {{name}}",
+      "unknownFunctionNoName": "The template calls a function that Muster does not have."
+    },
+    "preview": {
+      "empty": "The template renders nothing for this sample.",
+      "example": "Rendered against a built-in example: there are no recent snapshots to use.",
+      "failed": "The template failed:",
+      "markup": "Markup of the preview",
+      "mattermost": "Mattermost",
+      "noLink": "The template renders no link for this sample.",
+      "telegram": "Telegram",
+      "title": "Preview",
+      "truncated": "Shortened to fit"
+    },
+    "sample": {
+      "alertGroups": "Alert Groups",
+      "example": "Built-in example",
+      "label": "Sample",
+      "routeRecent": "Recent snapshots of this route",
+      "snapshot_one": "{{time}} · {{count}} alert",
+      "snapshot_other": "{{time}} · {{count}} alerts",
+      "snapshotsOf": "Stored Snapshots of {{integration}}"
+    }
+  },
   "timeline": {
     "actorVia": "{{actor}} via {{transport}}",
     "actorWithToken": "{{actor}} via {{transport}}, token {{token}}",
@@ -1217,6 +1387,7 @@
       "ownerDisabled": "the owner was disabled"
     },
     "system": {
+      "fallbackTemplateFailed": "Fallback template used: {{template}} failed — {{error}}",
       "fallbackTemplateUsed": "Messages used the fallback template",
       "musterUnavailable": "Muster was unavailable from {{from}} to {{to}}",
       "musterUnavailableUnknown": "Muster was unavailable",

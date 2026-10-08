@@ -127,6 +127,29 @@ describe("navigation", () => {
     await expect.element(holding.getByRole("link", { name: "Alert Groups" })).toBeVisible();
   });
 
+  test("Lookup tables and Link rules follow Security under Organization, each with its read Permission", async () => {
+    const index = NAVIGATION.findIndex((e) => e.to === "/admin/organization/security");
+    expect(NAVIGATION.slice(index + 1, index + 3)).toEqual([
+      {
+        to: "/admin/organization/lookup-tables",
+        label: "lookupTables",
+        permission: "lookup-tables:read",
+      },
+      { to: "/admin/organization/link-rules", label: "linkRules", permission: "link-rules:read" },
+    ]);
+
+    const shown = await renderNavigation(["lookup-tables:read", "link-rules:read"], NAVIGATION);
+    await expect.element(shown.getByRole("link", { name: "Lookup tables" })).toBeVisible();
+    await expect.element(shown.getByRole("link", { name: "Link rules" })).toBeVisible();
+    await shown.unmount();
+
+    const without = await renderNavigation(["link-rules:read"], NAVIGATION);
+    await expect
+      .element(without.getByRole("link", { name: "Lookup tables" }))
+      .not.toBeInTheDocument();
+    await expect.element(without.getByRole("link", { name: "Link rules" })).toBeVisible();
+  });
+
   test("Statistics follows Alert Groups and needs alert-groups:read", async () => {
     const index = NAVIGATION.findIndex((e) => e.to === "/statistics");
     expect(NAVIGATION[index - 1]?.to).toBe("/alert-groups");

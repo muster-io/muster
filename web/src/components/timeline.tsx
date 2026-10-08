@@ -27,6 +27,7 @@ import {
 import { problemText } from "../lib/api";
 import { useTimeFormat } from "../lib/time";
 import { reasonLabel } from "./integration-alerts";
+import { templateName } from "./template-editor";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Label } from "./ui/label";
@@ -110,6 +111,25 @@ function changeReason(t: TFunction, reason: string | null | undefined): string |
     default:
       return reason;
   }
+}
+
+/** What failed in a fallback_template_used entry, from its detail "<template> template failed: <error>". */
+export function fallbackFailure(
+  detail: string | null | undefined,
+): { template: string; error: string } | undefined {
+  const m = /^([a-z_]+) template failed: ([\s\S]*)$/.exec(detail ?? "");
+  return m === null ? undefined : { template: m[1] ?? "", error: m[2] ?? "" };
+}
+
+/** "Fallback template used: {template} failed — {error}" (C-12.FR-6), or the plain text without a readable detail. */
+function fallbackText(t: TFunction, detail: string | null | undefined): string {
+  const failure = fallbackFailure(detail);
+  return failure === undefined
+    ? t("timeline.system.fallbackTemplateUsed")
+    : t("timeline.system.fallbackTemplateFailed", {
+        template: templateName(t, failure.template),
+        error: failure.error,
+      });
 }
 
 /** The text of an entry, in the language of the page; times in the user's time zone through dateTime. */
@@ -235,7 +255,7 @@ export function entryText(
               })
             : t("timeline.system.musterUnavailableUnknown");
         case "fallback_template_used":
-          return t("timeline.system.fallbackTemplateUsed");
+          return fallbackText(t, entry.detail);
         case "template_value_missing":
           return t("timeline.system.templateValueMissing");
         default:
@@ -294,7 +314,12 @@ function EntryDetails({ entry }: { entry: TimelineEntry }) {
       </Detail>,
     );
   }
-  if (entry.kind === "system" && entry.detail) {
+  // The detail of a fallback_template_used entry is already in its text when it could be read.
+  if (
+    entry.kind === "system" &&
+    entry.detail &&
+    !(entry.system_event === "fallback_template_used" && fallbackFailure(entry.detail))
+  ) {
     rows.push(
       <Detail key="detail" term={t("timeline.details.detail")}>
         <span className="font-mono">{entry.detail}</span>
