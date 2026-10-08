@@ -648,7 +648,8 @@ func TestLookupTableInUse(t *testing.T) {
 	}
 	err = s.DeleteTable(ctx, by, table.PublicID, nil)
 	var inUse *InUseError
-	if !errors.Is(err, ErrInUse) || !errors.As(err, &inUse) || !slices.Equal(inUse.Rules, []string{"Explore"}) {
+	if !errors.Is(err, ErrInUse) || !errors.As(err, &inUse) ||
+		!slices.Equal(inUse.Rules, []RuleRef{{PublicID: f.rules[0].PublicID, Name: "Explore"}}) {
 		t.Fatalf("a table the built-in rule reads: %v", err)
 	}
 	// A rule whose stored template does not parse reads nothing.
@@ -690,7 +691,8 @@ func TestLookupTableRenameInUse(t *testing.T) {
 	_, err = s.UpdateTable(ctx, by, table.PublicID, nil, renamed)
 	var inUse *InUseError
 	if !errors.Is(err, ErrInUse) || !errors.As(err, &inUse) ||
-		!slices.Equal(inUse.Rules, []string{"Explore", "Dashboard"}) ||
+		!slices.Equal(inUse.Rules, []RuleRef{{PublicID: f.rules[0].PublicID, Name: "Explore"},
+			{PublicID: "KRZZZZZZZZZZZZ", Name: "Dashboard"}}) ||
 		!strings.Contains(err.Error(), "Explore, Dashboard") {
 		t.Fatalf("renaming a table two rules read: %v", err)
 	}

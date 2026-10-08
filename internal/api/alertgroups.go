@@ -692,11 +692,14 @@ func (s *Server) ListAlertGroupDeliveries(ctx context.Context, req gen.ListAlert
 	return out, nil
 }
 
-// linksOf are the links of an Alert Group as the API shows them.
+// linksOf are the links of an Alert Group as the API shows them: the kind of each, and the rule of a Link rule's.
 func linksOf(ls []groups.Link) *[]gen.AlertGroupLink {
 	out := make([]gen.AlertGroupLink, len(ls))
 	for i, l := range ls {
-		out[i] = gen.AlertGroupLink{Name: l.Name, Url: l.URL}
+		out[i] = gen.AlertGroupLink{Kind: gen.AlertGroupLinkKind(l.Kind), Name: l.Name, Url: l.URL}
+		if l.Rule != "" {
+			out[i].LinkRuleId = &l.Rule
+		}
 	}
 	return &out
 }

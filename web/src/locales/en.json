@@ -635,6 +635,11 @@
     "title": "Link rules"
   },
   "links": {
+    "kind": {
+      "dashboard": "Dashboard",
+      "runbook": "Runbook",
+      "source": "Source"
+    },
     "newTab": "(opens in a new tab)",
     "title": "Links"
   },

@@ -9,7 +9,7 @@ import { queryOptions, useQuery } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import type { FieldValues, Path, UseFormSetError } from "react-hook-form";
 
-import type { AlertGroupRef, Problem, ProblemError, Session } from "../api/gen/model";
+import type { AlertGroupRef, EntityRef, Problem, ProblemError, Session } from "../api/gen/model";
 
 /** An answer that is not 2xx, with its RFC 9457 Problem. Clients branch on status, code and errors[].code only. */
 export class ApiError extends Error implements Problem {
@@ -20,6 +20,7 @@ export class ApiError extends Error implements Problem {
   readonly errors?: ProblemError[];
   readonly retry_after_seconds?: number;
   readonly related_alert_group?: AlertGroupRef;
+  readonly link_rules?: EntityRef[];
 
   constructor(status: number, problem: Partial<Problem>, retryAfter: number | undefined) {
     super(problem.title ?? `HTTP ${status}`);
@@ -31,6 +32,7 @@ export class ApiError extends Error implements Problem {
     this.errors = problem.errors;
     this.retry_after_seconds = problem.retry_after_seconds ?? retryAfter;
     this.related_alert_group = problem.related_alert_group;
+    this.link_rules = problem.link_rules;
   }
 }
 
@@ -173,6 +175,13 @@ function problemOf(body: unknown): Partial<Problem> {
       isRecord(related) && typeof related.id === "string" && typeof related.number === "number"
         ? { id: related.id, number: related.number }
         : undefined,
+    link_rules: Array.isArray(body.link_rules)
+      ? body.link_rules.flatMap((r) =>
+          isRecord(r) && typeof r.id === "string" && typeof r.name === "string"
+            ? [{ id: r.id, name: r.name }]
+            : [],
+        )
+      : undefined,
   };
 }
 

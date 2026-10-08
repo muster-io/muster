@@ -98,7 +98,8 @@ issue: 37
   has at most 200 characters, the description 2,000, a key or a value 4,096 (`422 too_long`). Configuration
   conventions of ADR-0008: `ETag`, `If-Match`, Audit log entries `lookup_table.created`, `.updated`, `.deleted` with
   diffs. Deleting a table answers `409 in_use` while the URL template of a Link rule calls `lookup` with its name (found
-  by parsing the templates). The hint `organization` is not used; Link rules and tables change no message by themselves.
+  by parsing the templates); the Problem names those rules in `link_rules`, `{id, name}` in the order they were
+  created. The hint `organization` is not used; Link rules and tables change no message by themselves.
 - **`lookup` function** (`internal/templates/sandbox.go`): `lookup "<table>" <key> "<column>"` reads one cell through a
   per-render cache; a missing table, key or column yields the empty string, never an error. One render reads at most
   100 rows; the 101st is a template error, as a loop past its cap is. A table name or key that cannot exist — not
@@ -141,8 +142,10 @@ issue: 37
   Muster" in one line (`Message.Links`), a rule's link by its name made neutral like alert data and the others by the
   built-in texts `link.runbook`, `link.dashboard` and `link.source` in the Route's language; the links of a Root
   message are computed when it is rendered, through the transaction of the change, and a preview of a Root message
-  shows those of its sample. `getAlertGroup` returns them as `links` (`name`, `url`), computed on read through
-  `groups.SetLinks` with the English names. In Mattermost Markdown a link's URL has `(`, `)`, `<`, `>` and `\`
+  shows those of its sample. `getAlertGroup` returns them as `links` (`kind`, `name`, `url`, and `link_rule_id` for a
+  rule's link), computed on read through `groups.SetLinks` with the English names; `kind` is `link_rule`, `runbook`,
+  `dashboard` or `source`, so a client names the built-in links in its own language and tells them from a rule of the
+  same name. In Mattermost Markdown a link's URL has `(`, `)`, `<`, `>` and `\`
   percent-encoded; in Telegram HTML it is escaped.
 - **Mention settings** (C-12.FR-8; `internal/mentions`): `Validate(type, MentionSettings)` — every kind of
   `MentionSettings` present; `everyone` one of `none`, `channel`, `all`, `here` for Mattermost and `none` only for
@@ -228,18 +231,19 @@ PREVIEW "{\"kind\":\"link_rule\",\"template\":\"$LR\",\"stored_snapshot_id\":\"$
 # {"valid":true,"output":"https://grafana.example.org/d/latency?var-ns=api"}
 ERR() { curl -s localhost:8082/metrics | grep '^muster_template_errors_total{.*template="link_rule"' | awk '{s+=$2} END {print s+0}'; }
 E0=$(ERR)
-curl -s -b jar "$API/alert-groups/$G" | jq -c '[.links[] | {name, url: .url[0:60]}]'
-# [{"name":"Explore","url":"https://grafana.example.org/explore?schemaVersion=1&orgId=1&"},
-#  {"name":"Dashboard","url":"https://grafana.example.org/d/latency?var-ns=api"},
-#  {"name":"Runbook","url":"https://wiki.example.org/latency"},
-#  {"name":"Source","url":"http://prometheus:9090/graph?g0.expr=up%3D%3D0"}]          (no "Broken", no javascript:)
+curl -s -b jar "$API/alert-groups/$G" | jq -c '[.links[] | {kind, name, url: .url[0:60]}]'
+# [{"kind":"link_rule","name":"Explore","url":"https://grafana.example.org/explore?schemaVersion=1&orgId=1&"},
+#  {"kind":"link_rule","name":"Dashboard","url":"https://grafana.example.org/d/latency?var-ns=api"},
+#  {"kind":"runbook","name":"Runbook","url":"https://wiki.example.org/latency"},
+#  {"kind":"source","name":"Source","url":"http://prometheus:9090/graph?g0.expr=up%3D%3D0"}]  (no "Broken", no javascript:)
+curl -s -b jar "$API/alert-groups/$G" | jq -r '[.links[] | .link_rule_id // "-"] | join(" ")'  # KR… KR… - -
 echo $(( $(ERR) - E0 ))                                                                       # 1
 
 # C-12.FR-9: the built-in rule
 EX=$(curl -s -b jar $API/link-rules | jq -r '.items[] | select(.builtin) | .id')
 curl -s "${H[@]}" -X DELETE $API/link-rules/$EX | jq -c '[.status, .code]'   # [409,"builtin_immutable"]
-curl -s "${H[@]}" -X DELETE $API/lookup-tables/$(curl -s -b jar $API/lookup-tables | jq -r '.items[0].id') | jq -c '[.status, .code]'
-# [409,"in_use"]
+curl -s "${H[@]}" -X DELETE $API/lookup-tables/$(curl -s -b jar $API/lookup-tables | jq -r '.items[0].id') | jq -c '[.status, .code, [.link_rules[].name]]'
+# [409,"in_use",["Explore","Dashboard"]]
 
 # C-12.FR-8: trusted and literal mentions in a template
 PREVIEW '{"kind":"root_message","template":"{{ mention \"all\" }} and @all"}' | jq -r .output | sed -n 2p | od -c | head -2

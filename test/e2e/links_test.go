@@ -57,8 +57,9 @@ func TestLinksAndLookupTables(t *testing.T) {
 		t.Errorf("column mismatch = %d %s", bad.status, bad.body)
 	}
 	const dashboard = `{{ lookup \"grafana\" .Labels.cluster \"address\" }}/d/latency?var-ns={{ .Labels.namespace }}`
-	admin.json(http.MethodPost, "/api/v1/link-rules", `{"name":"Dashboard","matchers":[{"label":"cluster","op":"=~",
-		"value":".+"}],"scope":{"type":"alert_group"},"url_template":"`+dashboard+`"}`, http.StatusCreated)
+	dashboardRule := admin.json(http.MethodPost, "/api/v1/link-rules", `{"name":"Dashboard","matchers":[{"label":
+		"cluster","op":"=~","value":".+"}],"scope":{"type":"alert_group"},"url_template":"`+dashboard+`"}`,
+		http.StatusCreated)["id"].(string)
 	admin.json(http.MethodPost, "/api/v1/link-rules", `{"name":"Broken","matchers":[],"scope":{"type":"alert_group"},
 		"url_template":"https://x.example.org/{{ if eq .Labels.namespace \"api\" }}{{ (index .Alerts 5).Labels.pod }}{{ end }}"}`,
 		http.StatusCreated)
@@ -119,17 +120,21 @@ func TestLinksAndLookupTables(t *testing.T) {
 	group = read.json(http.MethodGet, "/api/v1/alert-groups/"+groupID, "", http.StatusOK)
 	after, _ := strconv.Atoi(reader.Metric(t, series))
 	var got []string
+	ruleIDs := map[string]string{}
 	for _, l := range group["links"].([]any) {
 		m := l.(map[string]any)
-		got = append(got, m["name"].(string)+" "+m["url"].(string))
+		got = append(got, m["kind"].(string)+" "+m["name"].(string)+" "+m["url"].(string))
+		if id, ok := m["link_rule_id"].(string); ok {
+			ruleIDs[m["name"].(string)] = id
+		}
 	}
 	panes := `{"muster":{"datasource":"PROM1","queries":[{"refId":"A","expr":"up==0","datasource":{"type":"prometheus",` +
 		`"uid":"PROM1"}}],"range":{"from":"now-1h","to":"now"}}}`
 	want := []string{
-		"Explore https://grafana.example.org/explore?schemaVersion=1&orgId=1&panes=" + url.QueryEscape(panes),
-		"Dashboard https://grafana.example.org/d/latency?var-ns=api",
-		"Runbook https://wiki.example.org/latency",
-		"Source http://prometheus:9090/graph?g0.expr=up%3D%3D0",
+		"link_rule Explore https://grafana.example.org/explore?schemaVersion=1&orgId=1&panes=" + url.QueryEscape(panes),
+		"link_rule Dashboard https://grafana.example.org/d/latency?var-ns=api",
+		"runbook Runbook https://wiki.example.org/latency",
+		"source Source http://prometheus:9090/graph?g0.expr=up%3D%3D0",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("links\n%v\nwant\n%v", got, want)
@@ -138,6 +143,9 @@ func TestLinksAndLookupTables(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("link %d = %q, want %q", i, got[i], want[i])
 		}
+	}
+	if len(ruleIDs) != 2 || ruleIDs["Dashboard"] != dashboardRule || !strings.HasPrefix(ruleIDs["Explore"], "KR") {
+		t.Errorf("link_rule_id of the rule links = %v, Dashboard is %s", ruleIDs, dashboardRule)
 	}
 	if after-before != 1 {
 		t.Errorf("muster_template_errors_total{template=\"link_rule\"} grew by %d on one read, want 1", after-before)
@@ -150,6 +158,7 @@ func TestLinksAndLookupTables(t *testing.T) {
 	var rules struct {
 		Items []struct {
 			ID      string `json:"id"`
+			Name    string `json:"name"`
 			Builtin bool   `json:"builtin"`
 		} `json:"items"`
 	}
@@ -163,9 +172,22 @@ func TestLinksAndLookupTables(t *testing.T) {
 			t.Errorf("delete the built-in rule = %d %s", a.status, a.body)
 		}
 	}
-	if a := admin.do(http.MethodDelete, "/api/v1/lookup-tables/"+table["id"].(string), ""); a.status !=
-		http.StatusConflict || codeOf(t, a) != "in_use" {
+	// The in_use refusal names the rules that read the table in link_rules: the built-in Explore and Dashboard.
+	var inUse struct {
+		LinkRules []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"link_rules"`
+	}
+	a := admin.do(http.MethodDelete, "/api/v1/lookup-tables/"+table["id"].(string), "")
+	if a.status != http.StatusConflict || codeOf(t, a) != "in_use" {
 		t.Errorf("delete the table in use = %d %s", a.status, a.body)
+	}
+	decode(t, a, &inUse)
+	if len(inUse.LinkRules) != 2 || inUse.LinkRules[0].ID != ruleIDs["Explore"] ||
+		inUse.LinkRules[0].Name != "Explore" || inUse.LinkRules[1].ID != dashboardRule ||
+		inUse.LinkRules[1].Name != "Dashboard" {
+		t.Errorf("link_rules of in_use = %s", a.body)
 	}
 
 	// C-12.FR-8: a trusted Mention and a literal one.

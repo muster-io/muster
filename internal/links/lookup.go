@@ -117,13 +117,23 @@ func (e *FieldError) Error() string {
 }
 
 // InUseError is the deletion or the renaming of a Lookup table that the URL templates of Link rules read by its
-// name, with the names of those rules in the order they were created. It is ErrInUse.
+// name, with those rules in the order they were created. It is ErrInUse.
 type InUseError struct {
-	Rules []string
+	Rules []RuleRef
+}
+
+// RuleRef names a Link rule: its public_id and its name.
+type RuleRef struct {
+	PublicID string
+	Name     string
 }
 
 func (e *InUseError) Error() string {
-	return ErrInUse.Error() + ": " + strings.Join(e.Rules, ", ")
+	names := make([]string, len(e.Rules))
+	for i, r := range e.Rules {
+		names[i] = r.Name
+	}
+	return ErrInUse.Error() + ": " + strings.Join(names, ", ")
 }
 
 // Is makes an InUseError match ErrInUse.
@@ -683,14 +693,14 @@ func (s *Service) refuseInUse(ctx context.Context, q Queries, name string) error
 	if err != nil {
 		return fmt.Errorf("read the link rules: %w", err)
 	}
-	var readers []string
+	var readers []RuleRef
 	for _, r := range rows {
 		t, err := s.parse(r.UrlTemplate)
 		if err != nil {
 			continue // saved templates parse; one that does not reads nothing
 		}
 		if slices.Contains(t.LookupTables(), name) {
-			readers = append(readers, r.Name)
+			readers = append(readers, RuleRef{PublicID: r.PublicID, Name: r.Name})
 		}
 	}
 	if len(readers) > 0 {

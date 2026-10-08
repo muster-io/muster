@@ -59,6 +59,30 @@ func (e ActorRefKind) Valid() bool {
 	}
 }
 
+// Defines values for AlertGroupLinkKind.
+const (
+	AlertGroupLinkKindDashboard AlertGroupLinkKind = "dashboard"
+	AlertGroupLinkKindLinkRule  AlertGroupLinkKind = "link_rule"
+	AlertGroupLinkKindRunbook   AlertGroupLinkKind = "runbook"
+	AlertGroupLinkKindSource    AlertGroupLinkKind = "source"
+)
+
+// Valid indicates whether the value is a known member of the AlertGroupLinkKind enum.
+func (e AlertGroupLinkKind) Valid() bool {
+	switch e {
+	case AlertGroupLinkKindDashboard:
+		return true
+	case AlertGroupLinkKindLinkRule:
+		return true
+	case AlertGroupLinkKindRunbook:
+		return true
+	case AlertGroupLinkKindSource:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AlertGroupNoticeKind.
 const (
 	AlertsStillFiring             AlertGroupNoticeKind = "alerts_still_firing"
@@ -2725,11 +2749,21 @@ type AlertGroupDeliveryList struct {
 	Items []AlertGroupDelivery `json:"items"`
 }
 
-// AlertGroupLink defines model for AlertGroupLink.
+// AlertGroupLink One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in its own language and tell them from a Link rule that has the same name.
 type AlertGroupLink struct {
+	// Kind `runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).
+	Kind AlertGroupLinkKind `json:"kind"`
+
+	// LinkRuleId The `public_id` of the Link rule; set only for the kind `link_rule`.
+	LinkRuleId *PublicId `json:"link_rule_id,omitempty"`
+
+	// Name The name of a `link_rule` link — the rule's name, followed by `: ` and the label value for the scope `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`).
 	Name string `json:"name"`
 	Url  string `json:"url"`
 }
+
+// AlertGroupLinkKind `runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).
+type AlertGroupLinkKind string
 
 // AlertGroupList defines model for AlertGroupList.
 type AlertGroupList struct {
@@ -4328,6 +4362,9 @@ type Problem struct {
 
 	// Instance Request path that produced the problem.
 	Instance *string `json:"instance,omitempty"`
+
+	// LinkRules Set on the `in_use` refusal of a Lookup table (`updateLookupTable`, `deleteLookupTable`); the Link rules whose URL templates read the table by its name, in the order they were created.
+	LinkRules *[]EntityRef `json:"link_rules,omitempty"`
 
 	// OpenAlertGroupCount Set on `route-has-open-alert-groups`; the number of open Alert Groups that block the deletion.
 	OpenAlertGroupCount *int `json:"open_alert_group_count,omitempty"`

@@ -61,6 +61,30 @@ func (e ActorRefKind) Valid() bool {
 	}
 }
 
+// Defines values for AlertGroupLinkKind.
+const (
+	AlertGroupLinkKindDashboard AlertGroupLinkKind = "dashboard"
+	AlertGroupLinkKindLinkRule  AlertGroupLinkKind = "link_rule"
+	AlertGroupLinkKindRunbook   AlertGroupLinkKind = "runbook"
+	AlertGroupLinkKindSource    AlertGroupLinkKind = "source"
+)
+
+// Valid indicates whether the value is a known member of the AlertGroupLinkKind enum.
+func (e AlertGroupLinkKind) Valid() bool {
+	switch e {
+	case AlertGroupLinkKindDashboard:
+		return true
+	case AlertGroupLinkKindLinkRule:
+		return true
+	case AlertGroupLinkKindRunbook:
+		return true
+	case AlertGroupLinkKindSource:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AlertGroupNoticeKind.
 const (
 	AlertsStillFiring             AlertGroupNoticeKind = "alerts_still_firing"
@@ -2727,11 +2751,21 @@ type AlertGroupDeliveryList struct {
 	Items []AlertGroupDelivery `json:"items"`
 }
 
-// AlertGroupLink defines model for AlertGroupLink.
+// AlertGroupLink One link of an Alert Group. `kind` says where it comes from, so a client can name the built-in links in its own language and tell them from a Link rule that has the same name.
 type AlertGroupLink struct {
+	// Kind `runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).
+	Kind AlertGroupLinkKind `json:"kind"`
+
+	// LinkRuleId The `public_id` of the Link rule; set only for the kind `link_rule`.
+	LinkRuleId *PublicId `json:"link_rule_id,omitempty"`
+
+	// Name The name of a `link_rule` link — the rule's name, followed by `: ` and the label value for the scope `label_value` — or the English name of a built-in link (`Runbook`, `Dashboard`, `Source`).
 	Name string `json:"name"`
 	Url  string `json:"url"`
 }
+
+// AlertGroupLinkKind `runbook` and `dashboard` come from the `runbook_url` and `dashboard_url` annotations, `source` from the `generatorURL` of a firing Alert, `link_rule` from a Link rule (see `link_rule_id`).
+type AlertGroupLinkKind string
 
 // AlertGroupList defines model for AlertGroupList.
 type AlertGroupList struct {
@@ -4330,6 +4364,9 @@ type Problem struct {
 
 	// Instance Request path that produced the problem.
 	Instance *string `json:"instance,omitempty"`
+
+	// LinkRules Set on the `in_use` refusal of a Lookup table (`updateLookupTable`, `deleteLookupTable`); the Link rules whose URL templates read the table by its name, in the order they were created.
+	LinkRules *[]EntityRef `json:"link_rules,omitempty"`
 
 	// OpenAlertGroupCount Set on `route-has-open-alert-groups`; the number of open Alert Groups that block the deletion.
 	OpenAlertGroupCount *int `json:"open_alert_group_count,omitempty"`
@@ -8707,7 +8744,7 @@ type ClientInterface interface {
 
 	// DeleteLookupTable Delete LookupTable
 	//
-	// Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, the detail naming the rules.
+	// Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, `link_rules` naming the rules.
 	//
 	// Corresponds with DELETE /lookup-tables/{lookup_table_id} (the `DeleteLookupTable` operationId).
 	DeleteLookupTable(ctx context.Context, lookupTableId LookupTableId, params *DeleteLookupTableParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -8719,7 +8756,7 @@ type ClientInterface interface {
 
 	// UpdateLookupTableWithBody Update LookupTable
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), `link_rules` naming the rules, since they would read nothing.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -8728,7 +8765,7 @@ type ClientInterface interface {
 
 	// UpdateLookupTable Update LookupTable
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), `link_rules` naming the rules, since they would read nothing.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -11092,7 +11129,7 @@ func (c *Client) CreateLookupTable(ctx context.Context, body CreateLookupTableJS
 
 // DeleteLookupTable Delete LookupTable
 //
-// Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, the detail naming the rules.
+// Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, `link_rules` naming the rules.
 //
 // Corresponds with DELETE /lookup-tables/{lookup_table_id} (the `DeleteLookupTable` operationId).
 func (c *Client) DeleteLookupTable(ctx context.Context, lookupTableId LookupTableId, params *DeleteLookupTableParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -11124,7 +11161,7 @@ func (c *Client) GetLookupTable(ctx context.Context, lookupTableId LookupTableId
 
 // UpdateLookupTableWithBody Update LookupTable
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), `link_rules` naming the rules, since they would read nothing.
 //
 // Takes any type of body and a specified content type.
 //
@@ -11143,7 +11180,7 @@ func (c *Client) UpdateLookupTableWithBody(ctx context.Context, lookupTableId Lo
 
 // UpdateLookupTable Update LookupTable
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), `link_rules` naming the rules, since they would read nothing.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -20932,7 +20969,7 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteLookupTableWithResponse Delete LookupTable
 	//
-	// Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, the detail naming the rules.
+	// Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, `link_rules` naming the rules.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -20948,7 +20985,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateLookupTableWithBodyWithResponse Update LookupTable
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), `link_rules` naming the rules, since they would read nothing.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -20957,7 +20994,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateLookupTableWithResponse Update LookupTable
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), `link_rules` naming the rules, since they would read nothing.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -35303,7 +35340,7 @@ func (c *ClientWithResponses) CreateLookupTableWithResponse(ctx context.Context,
 
 // DeleteLookupTableWithResponse Delete LookupTable
 //
-// Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, the detail naming the rules.
+// Refused with `409` (`in_use`) while the URL template of a Link rule reads the table by its name, `link_rules` naming the rules.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -35331,7 +35368,7 @@ func (c *ClientWithResponses) GetLookupTableWithResponse(ctx context.Context, lo
 
 // UpdateLookupTableWithBodyWithResponse Update LookupTable
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), `link_rules` naming the rules, since they would read nothing.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -35346,7 +35383,7 @@ func (c *ClientWithResponses) UpdateLookupTableWithBodyWithResponse(ctx context.
 
 // UpdateLookupTableWithResponse Update LookupTable
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), the detail naming the rules, since they would read nothing.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. A new name for a table that the URL template of a Link rule reads by its name is refused with `409` (`in_use`), `link_rules` naming the rules, since they would read nothing.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

@@ -103,9 +103,8 @@ issue: 38
 
   "Create table" opens `/admin/organization/lookup-tables/new` (`admin.organization.lookup-tables.new.tsx`) with the same
   editor. A `422 column_mismatch` marks the row; `409 in_use` shows "This table is used by a Link rule and cannot be
-  deleted." (or "… cannot be renamed." for a new name) followed by the Link rules that read it — the Problem names them
-  only in its `detail`, which clients never parse, so the page reads `listLinkRules` and names the rules whose URL
-  templates call `lookup` with the table's name; `412` and `428` show the conflict message of S-015 with "Reload".
+  deleted." (or "… cannot be renamed." for a new name) followed by the Link rules that read it, as the Problem names
+  them in `link_rules`; `412` and `428` show the conflict message of S-015 with "Reload".
 - **Link rules** (navigation entry "Link rules" under Organization with `link-rules:read`):
 
   | Route | Permission | Content |
@@ -132,7 +131,10 @@ issue: 38
   text, and the Routes list marks the Route; the Timeline of S-030 gains the text of the `system` entry
   `fallback_template_used` (S-036): "Fallback template used: {template} failed — {error}".
 - **Links block** (`alert-group-links.tsx`): `AlertGroup.links` as a list of named links with `rel="noopener
-  noreferrer"` and `target="_blank"`, under the header on the Alert Group page; hidden when empty.
+  noreferrer"` and `target="_blank"`, under the header on the Alert Group page; hidden when empty. A link of the kind
+  `link_rule` shows the rule's name as the API gives it; the kinds `runbook`, `dashboard` and `source` show their names
+  in the UI language: "Runbook", "Dashboard", "Source" and in Russian "Ранбук", "Дашборд", "Источник", the words of the
+  built-in message texts.
 
 ## Steps
 

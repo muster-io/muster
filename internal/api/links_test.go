@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -52,7 +53,8 @@ func (f *fakeLinks) refuse(name string) error {
 	case "rule-taken":
 		return links.ErrRuleNameTaken
 	case "in-use":
-		return &links.InUseError{Rules: []string{"Explore", "Dashboard"}}
+		return &links.InUseError{Rules: []links.RuleRef{{PublicID: ruleID, Name: "Explore"},
+			{PublicID: "KRBBBBBBBBBBBB", Name: "Dashboard"}}}
 	case "mismatch":
 		return &links.FieldError{Pointer: "/entries/0/values", Code: links.CodeColumnMismatch, Detail: "x"}
 	case "template":
@@ -96,7 +98,7 @@ func (f *fakeLinks) DeleteTable(_ context.Context, r links.Requester, id string,
 		return links.ErrTableNotFound
 	}
 	if version == nil {
-		return &links.InUseError{Rules: []string{"Explore"}}
+		return &links.InUseError{Rules: []links.RuleRef{{PublicID: ruleID, Name: "Explore"}}}
 	}
 	return f.err
 }
@@ -223,11 +225,13 @@ func TestLookupTablesAPI(t *testing.T) {
 	}
 	if a = x.as(t, linksWriter, http.MethodPut, path, `{"name":"in-use","columns":["a"],"entries":[]}`,
 		"If-Match", `"3"`); a.status != http.StatusConflict || a.code(t) != "in_use" ||
-		!strings.Contains(a.json(t)["detail"].(string), `"Explore", "Dashboard"`) {
+		!strings.Contains(a.json(t)["detail"].(string), `"Explore", "Dashboard"`) ||
+		fmt.Sprint(a.json(t)["link_rules"]) != "[map[id:"+ruleID+" name:Explore] map[id:KRBBBBBBBBBBBB name:Dashboard]]" {
 		t.Errorf("rename in use = %d %s", a.status, a.body)
 	}
 	if a = x.as(t, linksWriter, http.MethodDelete, path, ""); a.status != http.StatusConflict ||
-		a.code(t) != "in_use" || !strings.Contains(a.json(t)["detail"].(string), `"Explore"`) {
+		a.code(t) != "in_use" || !strings.Contains(a.json(t)["detail"].(string), `"Explore"`) ||
+		fmt.Sprint(a.json(t)["link_rules"]) != "[map[id:"+ruleID+" name:Explore]]" {
 		t.Errorf("delete in use = %d %s", a.status, a.body)
 	}
 	if a = x.as(t, linksWriter, http.MethodDelete, path, "", "If-Match", `"3"`); a.status != http.StatusNoContent ||
@@ -409,14 +413,23 @@ func TestLinkRulePreviewAPI(t *testing.T) {
 	}
 }
 
-// TestAlertGroupLinksAPI (C-09.FR-14): getAlertGroup returns the links of the Alert Group by name and URL.
+// TestAlertGroupLinksAPI (C-09.FR-14): getAlertGroup returns the links of the Alert Group by kind, name and URL, a
+// Link rule's with the rule's public_id.
 func TestAlertGroupLinksAPI(t *testing.T) {
 	x, fg, _ := newAlertGroupsAPI(t)
-	fg.view.Links = []groups.Link{{Name: "Runbook", URL: "https://wiki.example.org/latency"}}
+	fg.view.Links = []groups.Link{
+		{Kind: links.KindRule, Name: "Dashboard", URL: "https://grafana.example.org/d/x", Rule: ruleID},
+		{Kind: links.KindRunbook, Name: links.NameRunbook, URL: "https://wiki.example.org/latency"},
+		{Kind: links.KindDashboard, Name: links.NameDashboard, URL: "https://grafana.example.org/d/annotated"},
+		{Kind: links.KindSource, Name: links.NameSource, URL: "http://prometheus:9090/graph"},
+	}
 	a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/"+groupID, "")
 	ls, _ := a.json(t)["links"].([]any)
-	if l, _ := ls[0].(map[string]any); a.status != http.StatusOK || len(ls) != 1 || l["name"] != "Runbook" ||
-		l["url"] != "https://wiki.example.org/latency" {
+	want := "[map[kind:link_rule link_rule_id:" + ruleID + " name:Dashboard url:https://grafana.example.org/d/x] " +
+		"map[kind:runbook name:Runbook url:https://wiki.example.org/latency] " +
+		"map[kind:dashboard name:Dashboard url:https://grafana.example.org/d/annotated] " +
+		"map[kind:source name:Source url:http://prometheus:9090/graph]]"
+	if a.status != http.StatusOK || fmt.Sprint(ls) != want {
 		t.Errorf("links = %d %s", a.status, a.body)
 	}
 	fg.view.Links = nil

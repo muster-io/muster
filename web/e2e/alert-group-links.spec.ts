@@ -6,7 +6,8 @@
 // runbook, a dashboard, a `javascript:` runbook and a generatorURL to the Integration "agl-lab". The page shows the
 // links of the built-in "Explore" and the rule "Dashboard", then "Runbook", the annotation's "Dashboard" and "Source",
 // each opening in a new tab without access to the page, and no `javascript:` link; at 360 × 740 it does not scroll
-// sideways; no Content Security Policy violation.
+// sideways; in a Russian browser the built-in links read "Ранбук", "Дашборд" and "Источник" while the rules keep their
+// names; no Content Security Policy violation.
 
 import { expect, test } from "@playwright/test";
 
@@ -110,6 +111,8 @@ test.afterAll(async () => {
 test("shows the Links block, each link opening in a new tab, at phone width", async ({
   page,
   context,
+  browser,
+  baseURL,
 }) => {
   const csp = watchCsp(page);
   const admin = await adminApi();
@@ -168,5 +171,32 @@ test("shows the Links block, each link opening in a new tab, at phone width", as
   expect(widths.scroll).toBe(widths.viewport);
   await expectNoHorizontalScroll(page);
   await shot(page, "alert-group-links-360");
+
+  // The admin's profile names no language, so a Russian browser gets the Russian UI: the built-in links by their
+  // Russian names, the Link rules by their own.
+  const ru = await browser.newContext({
+    baseURL,
+    locale: "ru-RU",
+    viewport: { width: 360, height: 740 },
+    storageState: await context.storageState(),
+  });
+  try {
+    const ruPage = await ru.newPage();
+    const ruCsp = watchCsp(ruPage);
+    await ruPage.goto(`/alert-groups/${groupId}`);
+    const ruBlock = ruPage.getByRole("navigation", { name: "Ссылки" });
+    await expect(ruBlock.getByTestId("alert-group-link")).toHaveText([
+      /^Explore/,
+      /^Dashboard/,
+      /^Ранбук/,
+      /^Дашборд/,
+      /^Источник/,
+    ]);
+    await expectNoHorizontalScroll(ruPage);
+    await shot(ruPage, "alert-group-links-360-ru");
+    expect(ruCsp).toEqual([]);
+  } finally {
+    await ru.close();
+  }
   expect(csp).toEqual([]);
 });
