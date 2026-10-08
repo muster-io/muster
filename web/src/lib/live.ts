@@ -17,6 +17,10 @@ import {
   getListRelatedAlertGroupsQueryKey,
 } from "../api/gen/endpoints/alert-groups/alert-groups";
 import {
+  getGetConnectionQueryKey,
+  getListConnectionsQueryKey,
+} from "../api/gen/endpoints/connections/connections";
+import {
   getGetIntegrationQueryKey,
   getListIntegrationTokensQueryKey,
   getListIntegrationsQueryKey,
@@ -74,6 +78,15 @@ registerHint("route", (id) =>
     ? [getListRoutesQueryKey(), getListRouteSuggestionsQueryKey()]
     : [getListRoutesQueryKey(), getListRouteSuggestionsQueryKey(), getGetRouteQueryKey(id)],
 );
+// A Connection changed, or the bot a check found: the list with its Destination counts, and the Connection's page,
+// whose untouched form then takes the new version.
+registerHint("connection", (id) =>
+  id === null
+    ? [getListConnectionsQueryKey()]
+    : [getListConnectionsQueryKey(), getGetConnectionQueryKey(id)],
+);
+// A Destination came or went: the Connections list counts the Destinations of each Connection.
+registerHint("destination", () => [getListConnectionsQueryKey()]);
 
 // An Alert Group changed: the counts of the list, and its page with its Alerts, Timeline and previous Alert Groups.
 // The rows of the list follow it through a listener (onHint), so that the list does not move.

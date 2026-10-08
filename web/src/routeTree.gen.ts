@@ -19,6 +19,9 @@ import { Route as AdminAuditLogRouteImport } from './routes/admin.audit-log'
 import { Route as AdminOidcRouteImport } from './routes/admin.oidc'
 import { Route as AlertGroupsIndexRouteImport } from './routes/alert-groups.index'
 import { Route as AlertGroupsAlertGroupIdRouteImport } from './routes/alert-groups.$alertGroupId'
+import { Route as ConnectionsIndexRouteImport } from './routes/connections.index'
+import { Route as ConnectionsConnectionIdRouteImport } from './routes/connections.$connectionId'
+import { Route as ConnectionsNewRouteImport } from './routes/connections.new'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
 import { Route as IntegrationsNewRouteImport } from './routes/integrations.new'
 import { Route as RoutesIndexRouteImport } from './routes/routes.index'
@@ -88,6 +91,21 @@ const AlertGroupsIndexRoute = AlertGroupsIndexRouteImport.update({
 const AlertGroupsAlertGroupIdRoute = AlertGroupsAlertGroupIdRouteImport.update({
   id: '/alert-groups/$alertGroupId',
   path: '/alert-groups/$alertGroupId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectionsIndexRoute = ConnectionsIndexRouteImport.update({
+  id: '/connections/',
+  path: '/connections/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectionsConnectionIdRoute = ConnectionsConnectionIdRouteImport.update({
+  id: '/connections/$connectionId',
+  path: '/connections/$connectionId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectionsNewRoute = ConnectionsNewRouteImport.update({
+  id: '/connections/new',
+  path: '/connections/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
@@ -213,11 +231,14 @@ export interface FileRoutesByFullPath {
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
+  '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
+  '/connections/new': typeof ConnectionsNewRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/alert-groups/': typeof AlertGroupsIndexRoute
+  '/connections/': typeof ConnectionsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
@@ -245,11 +266,14 @@ export interface FileRoutesByTo {
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
+  '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
+  '/connections/new': typeof ConnectionsNewRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/alert-groups': typeof AlertGroupsIndexRoute
+  '/connections': typeof ConnectionsIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
   '/routes': typeof RoutesIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
@@ -278,11 +302,14 @@ export interface FileRoutesById {
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
+  '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
+  '/connections/new': typeof ConnectionsNewRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
   '/alert-groups/': typeof AlertGroupsIndexRoute
+  '/connections/': typeof ConnectionsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
@@ -312,11 +339,14 @@ export interface FileRouteTypes {
     | '/admin/audit-log'
     | '/admin/oidc'
     | '/alert-groups/$alertGroupId'
+    | '/connections/$connectionId'
+    | '/connections/new'
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
     | '/sign-in/totp'
     | '/alert-groups/'
+    | '/connections/'
     | '/integrations/'
     | '/routes/'
     | '/admin/organization/security'
@@ -344,11 +374,14 @@ export interface FileRouteTypes {
     | '/admin/audit-log'
     | '/admin/oidc'
     | '/alert-groups/$alertGroupId'
+    | '/connections/$connectionId'
+    | '/connections/new'
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
     | '/sign-in/totp'
     | '/alert-groups'
+    | '/connections'
     | '/integrations'
     | '/routes'
     | '/admin/organization/security'
@@ -376,11 +409,14 @@ export interface FileRouteTypes {
     | '/admin/audit-log'
     | '/admin/oidc'
     | '/alert-groups/$alertGroupId'
+    | '/connections/$connectionId'
+    | '/connections/new'
     | '/integrations/new'
     | '/routes/$routeId'
     | '/routes/new'
     | '/sign-in/totp'
     | '/alert-groups/'
+    | '/connections/'
     | '/integrations/'
     | '/routes/'
     | '/admin/organization/security'
@@ -409,10 +445,13 @@ export interface RootRouteChildren {
   AdminAuditLogRoute: typeof AdminAuditLogRoute
   AdminOidcRoute: typeof AdminOidcRoute
   AlertGroupsAlertGroupIdRoute: typeof AlertGroupsAlertGroupIdRoute
+  ConnectionsConnectionIdRoute: typeof ConnectionsConnectionIdRoute
+  ConnectionsNewRoute: typeof ConnectionsNewRoute
   IntegrationsNewRoute: typeof IntegrationsNewRoute
   RoutesRouteIdRoute: typeof RoutesRouteIdRoute
   RoutesNewRoute: typeof RoutesNewRoute
   AlertGroupsIndexRoute: typeof AlertGroupsIndexRoute
+  ConnectionsIndexRoute: typeof ConnectionsIndexRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
   RoutesIndexRoute: typeof RoutesIndexRoute
   AdminOrganizationSecurityRoute: typeof AdminOrganizationSecurityRoute
@@ -501,6 +540,27 @@ declare module '@tanstack/react-router' {
       path: '/alert-groups/$alertGroupId'
       fullPath: '/alert-groups/$alertGroupId'
       preLoaderRoute: typeof AlertGroupsAlertGroupIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connections/': {
+      id: '/connections/'
+      path: '/connections'
+      fullPath: '/connections/'
+      preLoaderRoute: typeof ConnectionsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connections/$connectionId': {
+      id: '/connections/$connectionId'
+      path: '/connections/$connectionId'
+      fullPath: '/connections/$connectionId'
+      preLoaderRoute: typeof ConnectionsConnectionIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connections/new': {
+      id: '/connections/new'
+      path: '/connections/new'
+      fullPath: '/connections/new'
+      preLoaderRoute: typeof ConnectionsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integrations/': {
@@ -667,10 +727,13 @@ const rootRouteChildren: RootRouteChildren = {
   AdminAuditLogRoute: AdminAuditLogRoute,
   AdminOidcRoute: AdminOidcRoute,
   AlertGroupsAlertGroupIdRoute: AlertGroupsAlertGroupIdRoute,
+  ConnectionsConnectionIdRoute: ConnectionsConnectionIdRoute,
+  ConnectionsNewRoute: ConnectionsNewRoute,
   IntegrationsNewRoute: IntegrationsNewRoute,
   RoutesRouteIdRoute: RoutesRouteIdRoute,
   RoutesNewRoute: RoutesNewRoute,
   AlertGroupsIndexRoute: AlertGroupsIndexRoute,
+  ConnectionsIndexRoute: ConnectionsIndexRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
   RoutesIndexRoute: RoutesIndexRoute,
   AdminOrganizationSecurityRoute: AdminOrganizationSecurityRoute,
