@@ -73,15 +73,15 @@ func TestLinksAndLookupTables(t *testing.T) {
 		intToken+`"}`); a.status != http.StatusNoContent {
 		t.Fatalf("register = %d %s", a.status, a.body)
 	}
-	for path, body := range map[string]string{
-		"/groups/l1": `{"receiver":"lnk","route":"{}","labels":{"alertname":"HighLatency"}}`,
-		"/groups/l1/alerts/a": `{"labels":{"cluster":"prod","namespace":"api"},"annotations":{"runbook_url":` +
-			`"https://wiki.example.org/latency"},"generator_url":"http://prometheus:9090/graph?g0.expr=up%3D%3D0"}`,
-		"/groups/l1/alerts/b": `{"labels":{"cluster":"prod","namespace":"api","pod":"b"},"annotations":{"runbook_url":` +
-			`"javascript:alert(1)"}}`,
+	for _, put := range []struct{ path, body string }{
+		{"/groups/l1", `{"receiver":"lnk","route":"{}","labels":{"alertname":"HighLatency"}}`},
+		{"/groups/l1/alerts/a", `{"labels":{"cluster":"prod","namespace":"api"},"annotations":{"runbook_url":` +
+			`"https://wiki.example.org/latency"},"generator_url":"http://prometheus:9090/graph?g0.expr=up%3D%3D0"}`},
+		{"/groups/l1/alerts/b", `{"labels":{"cluster":"prod","namespace":"api","pod":"b"},"annotations":{"runbook_url":` +
+			`"javascript:alert(1)"}}`},
 	} {
-		if a := call(t, http.MethodPut, fam+path, body); a.status/100 != 2 {
-			t.Fatalf("PUT %s = %d %s", path, a.status, a.body)
+		if a := call(t, http.MethodPut, fam+put.path, put.body); a.status/100 != 2 {
+			t.Fatalf("PUT %s = %d %s", put.path, a.status, a.body)
 		}
 	}
 	if a := call(t, http.MethodPost, fam+"/groups/l1/notify", `{"reason":"first notification"}`); a.status !=
