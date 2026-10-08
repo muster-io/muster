@@ -2,12 +2,14 @@
 // Copyright The Muster Authors
 
 // The names of the changed fields in the Audit log: every field that the server records for a resource type has one in
-// English and Russian, and a field without one shows its JSON pointer.
+// English and Russian, and a field without one shows its JSON pointer. A changed Secret shows only that it changed.
 
+import { I18nextProvider } from "react-i18next";
 import { afterEach, describe, expect, test } from "vitest";
+import { render } from "vitest-browser-react";
 
 import i18n from "../i18n";
-import { fieldLabel } from "./audit-diff";
+import { AuditDiff, fieldLabel } from "./audit-diff";
 
 /** Every resource type with a diff and the pointers the server writes for it. */
 const AUDITED: Record<string, readonly string[]> = {
@@ -80,6 +82,19 @@ const AUDITED: Record<string, readonly string[]> = {
   ],
   lookup_table: ["/name", "/description", "/columns", "/entries"],
   link_rule: ["/name", "/matchers", "/scope/type", "/scope/label", "/url_template"],
+  connection: [
+    "/name",
+    "/server_url",
+    "/bot_token",
+    "/limiter/limit",
+    "/limiter/per_seconds",
+    "/proxy/enabled",
+    "/proxy/type",
+    "/proxy/address",
+    "/proxy/username",
+    "/proxy/password",
+    "/deleted_at",
+  ],
 };
 
 afterEach(async () => {
@@ -112,9 +127,44 @@ describe("fieldLabel", () => {
     expect(fieldLabel(i18n.t, "link_rule", "/url_template")).toBe("Шаблон URL");
   });
 
+  test("names the server URL, the bot token and the limiter of a Connection", async () => {
+    expect(fieldLabel(i18n.t, "connection", "/server_url")).toBe("Server URL");
+    expect(fieldLabel(i18n.t, "connection", "/bot_token")).toBe("Bot token");
+    expect(fieldLabel(i18n.t, "connection", "/limiter/limit")).toBe("Rate limit: requests");
+    await i18n.changeLanguage("ru");
+    expect(fieldLabel(i18n.t, "connection", "/server_url")).toBe("URL сервера");
+    expect(fieldLabel(i18n.t, "connection", "/bot_token")).toBe("Токен бота");
+  });
+
   test("shows the pointer of a field without a name", () => {
     expect(fieldLabel(i18n.t, "service_account", "/unknown")).toBe("/unknown");
     expect(fieldLabel(i18n.t, "api_token", "/name")).toBe("/name");
     expect(fieldLabel(i18n.t, null, "/role")).toBe("/role");
+  });
+});
+
+describe("AuditDiff", () => {
+  test("shows a replaced bot token of a Connection as a changed Secret, never its value", async () => {
+    const screen = await render(
+      <I18nextProvider i18n={i18n}>
+        <AuditDiff
+          resourceType="connection"
+          diff={[
+            {
+              pointer: "/server_url",
+              before: "http://old.example.org",
+              after: "http://127.0.0.1:18065",
+            },
+            { pointer: "/bot_token", secret_changed: true },
+          ]}
+        />
+      </I18nextProvider>,
+    );
+    const diff = screen.getByTestId("audit-diff");
+    await expect.element(diff).toBeVisible();
+    const text = diff.element().textContent;
+    expect(text).toContain("Bot token:changed");
+    expect(text).toContain("Server URL:http://old.example.org");
+    expect(text).not.toContain("mm-dev-token");
   });
 });

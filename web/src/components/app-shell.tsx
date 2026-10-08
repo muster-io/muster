@@ -74,6 +74,7 @@ export type NavLabel =
   | "statistics"
   | "integrations"
   | "routes"
+  | "connections"
   | "profile"
   | "users"
   | "serviceAccounts"
@@ -89,6 +90,7 @@ export const NAVIGATION: readonly NavEntry[] = [
   { to: "/statistics", label: "statistics", permission: "alert-groups:read" },
   { to: "/integrations", label: "integrations", permission: "integrations:read" },
   { to: "/routes", label: "routes", permission: "routes:read" },
+  { to: "/connections", label: "connections", permission: "connections:read" },
   { to: "/profile", label: "profile" },
   { to: "/admin/users", label: "users", permission: "users:read" },
   { to: "/admin/service-accounts", label: "serviceAccounts", permission: "service-accounts:read" },
@@ -121,6 +123,8 @@ function navLabel(t: (key: string) => string, label: NavLabel): string {
       return t("nav.integrations");
     case "routes":
       return t("nav.routes");
+    case "connections":
+      return t("nav.connections");
     case "profile":
       return t("nav.profile");
     case "users":
