@@ -10,6 +10,7 @@ import {
   ADMIN_LOGIN,
   APP,
   adminApi,
+  devClockOffset,
   expectNoHorizontalScroll,
   shot,
   signInAdmin,
@@ -28,10 +29,13 @@ function rows(page: Page) {
   return page.getByRole("table", { name: "Audit log" }).getByRole("row");
 }
 
-/** The day n days before today in Europe/Berlin, the browser's time zone of the specs, as YYYY-MM-DD. */
-function berlinDay(daysBefore: number): string {
+/**
+ * The day n days before the instant now (by default the real time, which the page's default range follows) in
+ * Europe/Berlin, the browser's time zone of the specs, as YYYY-MM-DD.
+ */
+function berlinDay(daysBefore: number, now: number = Date.now()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" }).format(
-    new Date(Date.now() - daysBefore * 24 * 60 * 60 * 1000),
+    new Date(now - daysBefore * 24 * 60 * 60 * 1000),
   );
 }
 
@@ -80,12 +84,18 @@ test("filters the Audit log and shows a Secret only as changed", async ({ page }
   await shot(page, "audit-log-360");
   await page.setViewportSize({ width: 1280, height: 800 });
 
-  // A day range and the actor filter.
-  await page.getByLabel("To", { exact: true }).fill(berlinDay(0));
-  await expect(page).toHaveURL(new RegExp(`[?&]to=${berlinDay(0)}`));
+  // A day range and the actor filter. Entries carry the business clock's time, which earlier specs may have moved
+  // past midnight, so the range ends on the business clock's today; a range a month after it holds no entry.
+  const business = Date.now() + (await devClockOffset()) * 1000;
+  const today = berlinDay(0, business);
+  const empty = berlinDay(-30, business);
+  await page.getByLabel("To", { exact: true }).fill(today);
+  await expect(page).toHaveURL(new RegExp(`[?&]to=${today}`));
   await expect(rows(page).nth(1).getByTestId("audit-actor")).toHaveText("admin");
-  await page.getByLabel("From", { exact: true }).fill(berlinDay(-1));
-  await page.getByLabel("To", { exact: true }).fill(berlinDay(-1));
+  await page.getByLabel("From", { exact: true }).fill(empty);
+  await page.getByLabel("To", { exact: true }).fill(empty);
+  await expect(page).toHaveURL(new RegExp(`[?&]from=${empty}`));
+  await expect(page).toHaveURL(new RegExp(`[?&]to=${empty}`));
   await expect(page.getByText("No entries match these filters.")).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
   await expect(page).toHaveURL(`${APP}/admin/audit-log`);

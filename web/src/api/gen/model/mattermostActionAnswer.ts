@@ -22,7 +22,7 @@
  * Empty, or the text for the person who pressed when its ephemeral post was refused or failed. Never `update`.
  */
 export interface MattermostActionAnswer {
-  /** Shown by Mattermost to the person who pressed alone, from System, in the Thread of the pressed post. */
+  /** Shown by Mattermost to the person who pressed alone, from System, in the Thread of the Root message. */
   ephemeral_text?: string;
   /** Always `true` with `ephemeral_text`, so that the text is shown as it is. */
   skip_slack_parsing?: boolean;

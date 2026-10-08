@@ -23,7 +23,7 @@ import type { ConnectionCheckStep } from './connectionCheckStep';
 export interface ConnectionCheckResult {
   ok: boolean;
   steps: ConnectionCheckStep[];
-  /** Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the answers to button presses show in the Thread of the post instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel. */
+  /** Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel. */
   warnings: ConnectionCheckResultWarningsItem[];
   /**
      * The bot's name or username.

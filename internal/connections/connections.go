@@ -741,8 +741,8 @@ type CheckResult struct {
 	Warnings []string
 }
 
-// WarningPressAnswersInThread is the warning of a Connection whose bot may not make ephemeral posts: answers to
-// button presses then show in the Thread of the post, not in the channel view (D284, F-063).
+// WarningPressAnswersInThread is the warning of a Connection whose bot may not make ephemeral messages: answers to
+// button presses then show in the Thread of the Root message, not in the channel view (D284, F-063).
 const WarningPressAnswersInThread = "press_answers_in_thread"
 
 // Check runs the Connection check of the Mattermost Connection publicID (C-13.FR-2) on the interactive path, limited

@@ -2558,7 +2558,7 @@ paths:
         a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel
         view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot
         with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as
-        `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the pressed post and which needs
+        `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the Root message and which needs
         no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which
         Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.'
       x-permission: none
@@ -11300,9 +11300,9 @@ components:
         warnings:
           type: array
           description: 'Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot''s roles do not
-            grant `create_post_ephemeral`, so the answers to button presses show in the Thread of the post instead of
-            the channel view; granting that permission, for example with the system admin role, shows them in the
-            channel.'
+            grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses
+            show in the Thread of the Root message instead of the channel view; granting that permission, for example
+            with the system admin role, shows them in the channel.'
           items:
             type: string
             enum:
@@ -12687,8 +12687,8 @@ components:
       properties:
         ephemeral_text:
           type: string
-          description: Shown by Mattermost to the person who pressed alone, from System, in the Thread of the pressed
-            post.
+          description: Shown by Mattermost to the person who pressed alone, from System, in the Thread of the Root
+            message.
         skip_slack_parsing:
           type: boolean
           description: Always `true` with `ephemeral_text`, so that the text is shown as it is.

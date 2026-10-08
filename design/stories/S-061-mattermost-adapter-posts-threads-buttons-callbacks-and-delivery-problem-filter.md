@@ -83,7 +83,7 @@ acceptance:
   - "[C-13.AC-1] Acknowledge through the API edits that post in place to the acknowledged colour, footer and buttons; a new Alert creates a reply with the post as `root_id`, which raises its reply count."
   - "[C-13.AC-5, C-13.FR-8, C-12.FR-7] A label value `@channel <b>x</b>` arrives as literal text and the fake server records no notification for it."
   - "[C-13.AC-6, C-13.FR-8, C-11.FR-7, C-12.FR-8] A Quiet Thread reply carries no Mention; a Loud one carries the Mention configured for its event — `@channel` for `new_alerts` — in the post's message, and the fake server records the notification; a Loud Root message carries its Mentions in its `message` after the summary line, never in the attachment; an edit never notifies."
-  - "[C-13.AC-14, C-13.FR-4, C-11.FR-2] A press on a Root message is answered 200 with a JSON object that never carries `update`, `{}` when the Command ran. A refused press first gets one ephemeral post through `POST /api/v4/posts/ephemeral` in the channel, without `root_id`, through the interactive path: with `bot_system_admin` on the fake server it is made and the answer is `{}`; by default the fake refuses it with `403` `api.context.permissions.app_error` (F-063) and the answer is `{\"ephemeral_text\": <text>, \"skip_slack_parsing\": true}`, which the fake shows to the person alone, from System, in the Thread of the post (F-025, F-062); a failed post of an admin bot — `5xx`, no limiter token, slower than `delivery.interactive_budget` — falls back the same way (D284)."
+  - "[C-13.AC-14, C-13.FR-4, C-11.FR-2] A press on a Root message is answered 200 with a JSON object that never carries `update`, `{}` when the Command ran. A refused press first gets one ephemeral post through `POST /api/v4/posts/ephemeral` in the channel, without `root_id`, through the interactive path: with `bot_system_admin` on the fake server it is made and the answer is `{}`; by default the fake refuses it with `403` `api.context.permissions.app_error` (F-063) and the answer is `{\"ephemeral_text\": <text>, \"skip_slack_parsing\": true}`, which the fake shows to the person alone, from System, in the Thread of the Root message (F-025, F-062); a failed post of an admin bot — `5xx`, no limiter token, slower than `delivery.interactive_budget` — falls back the same way (D284)."
   - "[C-13.AC-4, C-10.FR-11] A press from a Mattermost account without an Account link changes nothing and gets the ephemeral \"Your Mattermost account is not linked to Muster. Link it in your profile: {link}\", as a post in the channel or as the answer's `ephemeral_text`."
   - "[C-13.FR-4, C-10.FR-3, C-10.FR-6] A press from an account linked to a Responder (link rows set up directly; S-051 creates them) runs Acknowledge, Resolve or a Snooze for the pressed duration as that User with the Transport `mattermost`; the delivery worker, not the answer, edits the post."
   - "[C-13.AC-16, C-13.FR-2] The Connection check of a bot whose roles, read with `POST /api/v4/roles/names`, do not grant `create_post_ephemeral` passes with the warning `press_answers_in_thread`, and `muster doctor` prints \"WARN connection <name>: \" and the hint; with `bot_system_admin` on the fake server there is no warning (F-064)."
@@ -222,9 +222,9 @@ issue: 61
   then `POST /api/v4/roles/names` with them — and, when no role that is not deleted lists `create_post_ephemeral`,
   passes with the warning `press_answers_in_thread` in `ConnectionCheckResult.warnings`, the same decision the server
   makes for the bot's requests (F-064); a failed read of the roles adds nothing. `muster doctor` prints the Connection
-  as `WARN connection <name>: ` with the hint that answers to button presses show in the post's Thread and that the
-  permission, for example the system admin role, shows them in the channel; a WARN fails nothing. S-040 shows the
-  warning on the Connection page.
+  as `WARN connection <name>: ` with the hint that answers to button presses show in the Thread of the Root message
+  and that the permission, for example the system admin role, shows them in the channel; a WARN fails nothing. S-040
+  shows the warning on the Connection page.
 - **Account link lookup** (`internal/accountlinks`): `Lookup(identity_space, external_id) → User` over `account_links`,
   read-only; S-051 adds everything else.
 - **Delivery problem** (C-13.FR-12; `internal/groups/filters.go`, `read.go`): an Alert Group has `delivery_problem`
@@ -248,7 +248,7 @@ issue: 61
 - **Secrets** (C-03.FR-21, lint 5): the probe of S-039 in `internal/archlint/secretleak.go` is extended to the adapter,
   the callback and the answers to presses.
 - **Documentation** (C-13.FR-7; `docs/messengers/mattermost.md`): the bot account and its permissions — the role
-  Member is enough, and answers to presses then show in the post's Thread (F-025, F-063); `create_post_ephemeral`, for
+  Member is enough, and answers to presses then show in the Thread of the Root message (F-025, F-063); `create_post_ephemeral`, for
   example through the system admin role, shows them in the channel, and the Connection check says which applies;
   allowing the bot
   to send direct messages (F-028); `ServiceSettings.AllowedUntrustedInternalConnections` with the host of
@@ -415,8 +415,8 @@ curl -s -b jar $API/routes | jq -c '.items[0] | {m: .matchers[0].value, d: [.des
 
 # C-02.FR-14
 ./bin/muster dev doctor | grep -E ' (connection|destination) '
-# WARN connection Dev Mattermost: the bot may not make ephemeral posts (create_post_ephemeral), so answers to button presses show in the post's Thread; …
-# WARN connection mm: the bot may not make ephemeral posts (create_post_ephemeral), so answers to button presses show in the post's Thread; …
+# WARN connection Dev Mattermost: the bot may not make ephemeral messages (create_post_ephemeral), so answers to button presses show in the Thread of the Root message; …
+# WARN connection mm: the bot may not make ephemeral messages (create_post_ephemeral), so answers to button presses show in the Thread of the Root message; …
 # OK   destination alerts: ok
 
 # C-01.FR-7: the full load profile (NFR-1, NFR-2, P-44)
@@ -441,7 +441,7 @@ the Destination Broken.
 **Optional manual check against a real server** (the operator's test Mattermost 11.2.2): create a bot without the
 system admin role and a channel, create the Connection and a Destination through the API, send one Alert Group from the
 fake Alertmanager, and confirm by eye that the post shows the attachment, the links and the buttons; that Acknowledge
-in Muster edits it; that a press from an unlinked account shows the ephemeral message from System in the post's Thread; that a Loud reply
+in Muster edits it; that a press from an unlinked account shows the ephemeral message from System in the Thread of the Root message; that a Loud reply
 with `@channel` notifies while an edit does not; that a Loud Root message with a Mention notifies with the summary line
 shown (F-056); and that after the Root message is deleted in the client, the next edit republishes it with the note
 (F-058), which also answers the Mattermost entry of the facts' Pending list for a bot without that role.
