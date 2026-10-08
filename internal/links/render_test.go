@@ -176,6 +176,63 @@ func TestEvaluateWithoutTable(t *testing.T) {
 	}
 }
 
+// TestEvaluateExploreWithoutKey: with the Lookup table "grafana", an Alert Group without the environment and the
+// cluster label gets no Explore link, no error, no count and no log line, while the same Alert Group with the
+// environment label gets its link; a rule someone wrote that passes the missing label to lookup still fails and is
+// counted and logged.
+func TestEvaluateExploreWithoutKey(t *testing.T) {
+	ctx := t.Context()
+	f := newFake()
+	s, log := newService(t, f)
+	if err := EnsureExplore(ctx, f, orgID, t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateTable(ctx, by, grafana()); err != nil {
+		t.Fatal(err)
+	}
+	in := highLatency()
+	delete(in.Data.CommonLabels, "cluster")
+	for _, a := range in.Data.Alerts {
+		delete(a.Labels, "cluster")
+	}
+	before := metrics.TemplateErrors.With(in.Route, "", "link_rule").Get()
+	got, err := s.Evaluate(ctx, nil, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(names(got), "|") != "Runbook https://wiki.example.org/latency|"+
+		"Source http://prometheus:9090/graph?g0.expr=up%3D%3D0" {
+		t.Errorf("links %v", names(got))
+	}
+	if metrics.TemplateErrors.With(in.Route, "", "link_rule").Get() != before ||
+		strings.Contains(log.String(), "link_rule_failed") {
+		t.Errorf("a missing label is no error: %s", log.String())
+	}
+	in.Data.CommonLabels["environment"] = "dev"
+	got, err = s.Evaluate(ctx, nil, in)
+	if err != nil || len(got) == 0 ||
+		names(got)[0] != "Explore "+exploreURL("https://dev.example.org", "PROM2", "up==0") {
+		t.Errorf("by environment: %v %v", names(got), err)
+	}
+	delete(in.Data.CommonLabels, "environment")
+	old, err := s.CreateRule(ctx, by, RuleInput{Name: "Old Explore", Scope: Scope{Type: ScopeAlertGroup},
+		URLTemplate: previousExploreTemplates[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.Evaluate(ctx, nil, in)
+	if err != nil || strings.Contains(strings.Join(names(got), "|"), "Explore") {
+		t.Errorf("links %v %v", names(got), err)
+	}
+	if d := metrics.TemplateErrors.With(in.Route, "", "link_rule").Get() - before; d != 1 {
+		t.Errorf("muster_template_errors_total grew by %d, want 1", d)
+	}
+	if !strings.Contains(log.String(), `"event":"link_rule_failed"`) ||
+		!strings.Contains(log.String(), `"link_rule":"`+old.PublicID+`"`) {
+		t.Errorf("the written rule is logged: %s", log.String())
+	}
+}
+
 // TestEvaluateLabelValue: a rule of the scope label_value yields one link per distinct value of its label among the
 // Alerts, with the labels of the first Alert carrying it.
 func TestEvaluateLabelValue(t *testing.T) {
