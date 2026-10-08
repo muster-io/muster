@@ -22,6 +22,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
@@ -51,7 +52,9 @@ type Worker struct {
 	Organizations func(ctx context.Context) ([]int64, error)
 	Adapters      Adapters
 	Renderer      Renderer
-	Log           *logging.Logger
+	// Mentions resolves the Mentions of Loud calls; nil mentions nobody.
+	Mentions Mentioner
+	Log      *logging.Logger
 	// MaxWait bounds the wait between rounds, and Batch the rows one claim takes; zero is the default.
 	MaxWait time.Duration
 	Batch   int32
@@ -230,6 +233,8 @@ type attempt struct {
 	late        bool
 	message     Message
 	at          time.Time
+	// targets are the Mentions of a Loud Publication.
+	targets []mentions.Target
 }
 
 // kind is the kind of the attempt's call: the final edit, a call of a Storm summary, a Publication or an edit.
@@ -283,7 +288,7 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 	var a attempt
 	var logs after
 	ok := false
-	err := w.Store.inTx(ctx, func(q queries) error {
+	err := w.Store.inTxWith(ctx, func(tx dbgen.DBTX, q queries) error {
 		ok, logs = false, nil
 		realNow := w.Lease.Clocks.Real.Now().UTC()
 		row, err := q.GetLeasedDelivery(ctx, dbgen.GetLeasedDeliveryParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
@@ -348,6 +353,10 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 			if a.message, a.late, err = publicationNotes(ctx, q, org, row, a.message); err != nil {
 				return err
 			}
+			loud, ms := publicationLoudness(row.PublicationLoud, row.StormID.Valid)
+			if a.targets, err = w.targets(ctx, tx, org, d, row.AlertGroupID, 0, loud, ms); err != nil {
+				return err
+			}
 		}
 		ok = true
 		return nil
@@ -378,6 +387,7 @@ func (w *Worker) call(ctx context.Context, org int64, a attempt) error {
 	kind := a.kind()
 	if a.publication {
 		c.Loudness, c.Mentions = publicationLoudness(a.row.PublicationLoud, a.row.StormID.Valid)
+		c.Targets = a.targets
 	}
 	start := w.Lease.Clocks.Real.Now()
 	out := w.send(ctx, a, c)

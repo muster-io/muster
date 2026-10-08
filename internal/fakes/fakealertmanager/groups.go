@@ -37,14 +37,16 @@ type GroupSpec struct {
 
 // AlertSpec sets an Alert of a group. The group labels are merged into its labels. StartsAt and EndsAt are RFC 3339
 // times or "now"; StartsAt defaults to now at the Alert's first firing, and a resolve sets EndsAt to now unless
-// given. Status is firing or resolved, firing by default; Fingerprint replaces the one computed from the labels.
+// given. Status is firing or resolved, firing by default; Fingerprint replaces the one computed from the labels;
+// GeneratorURL is sent as the Alert's generatorURL, empty by default.
 type AlertSpec struct {
-	Labels      map[string]string `json:"labels"`
-	Annotations map[string]string `json:"annotations"`
-	Status      string            `json:"status"`
-	StartsAt    string            `json:"starts_at"`
-	EndsAt      string            `json:"ends_at"`
-	Fingerprint string            `json:"fingerprint"`
+	Labels       map[string]string `json:"labels"`
+	Annotations  map[string]string `json:"annotations"`
+	Status       string            `json:"status"`
+	StartsAt     string            `json:"starts_at"`
+	EndsAt       string            `json:"ends_at"`
+	Fingerprint  string            `json:"fingerprint"`
+	GeneratorURL string            `json:"generator_url"`
 }
 
 // NotifyOptions shape the Snapshot of a group: its notification_reason (left out when empty or with OmitReason), the
@@ -84,6 +86,7 @@ type fakeAlert struct {
 	status              string
 	startsAt, endsAt    time.Time
 	fingerprint         string
+	generatorURL        string
 	removed             bool
 }
 
@@ -185,7 +188,7 @@ func (f *Fake) PutAlert(group, name string, s AlertSpec) error {
 		annotations = map[string]string{}
 	}
 	next := fakeAlert{labels: labels, annotations: annotations, status: s.Status, startsAt: a.startsAt,
-		fingerprint: s.Fingerprint}
+		fingerprint: s.Fingerprint, generatorURL: s.GeneratorURL}
 	if next.fingerprint == "" {
 		next.fingerprint = fingerprint(labels)
 	}
@@ -388,7 +391,8 @@ func (f *Fake) groupWebhook(g *fakeGroup, o NotifyOptions, status string, listed
 			ends = a.endsAt.Format(time.RFC3339Nano)
 		}
 		b.Alerts = append(b.Alerts, alert{Status: a.status, Labels: a.labels, Annotations: a.annotations,
-			StartsAt: a.startsAt.Format(time.RFC3339Nano), EndsAt: ends, GeneratorURL: "", Fingerprint: a.fingerprint})
+			StartsAt: a.startsAt.Format(time.RFC3339Nano), EndsAt: ends, GeneratorURL: a.generatorURL,
+			Fingerprint: a.fingerprint})
 	}
 	return b
 }

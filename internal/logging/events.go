@@ -634,3 +634,13 @@ var TemplateRecovered = newEvent("template_recovered", LevelInfo, "C-12",
 		"of template. The Route's template error is cleared and MusterTemplateError resolves. Logged once the change "+
 		"committed.",
 	"route", "template")
+
+// LinkRuleFailed is logged when the URL template of a Link rule failed while computing the links of an Alert Group
+// (C-12.FR-6, FR-9).
+var LinkRuleFailed = newEvent("link_rule_failed", LevelWarn, "C-12",
+	"The URL template of a Link rule failed while computing the links of an Alert Group, so the rule's link is left "+
+		"out and muster_template_errors_total{template=\"link_rule\"} grows: link_rule is the public_id of the Link "+
+		"rule, route the public_id of the Alert Group's Route, group the public_id of the Alert Group and error what "+
+		"failed, with its line and column. Logged once per rule and Alert Group on each replica; the counter grows "+
+		"at every failure.",
+	"link_rule", "route", "group", "error")

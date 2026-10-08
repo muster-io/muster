@@ -38,8 +38,10 @@ import (
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/leader"
 	leaderdb "github.com/muster-io/muster/internal/leader/dbgen"
+	"github.com/muster-io/muster/internal/links"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/oidc"
@@ -119,8 +121,10 @@ type database interface {
 	// DeliveryStore serves delivery and its worker; DestinationsStore the reads of Destinations and DestinationsWriter
 	// their changes.
 	DeliveryStore() *delivery.Store
-	// MessagesDB is the main pool that previews and dry runs of templates read.
+	// MessagesDB is the main pool that previews and dry runs of templates read, and that Mention settings are read
+	// from; LinksStore serves Lookup tables and Link rules.
 	MessagesDB() messages.DBTX
+	LinksStore() links.Store
 	DestinationsStore() destinations.Store
 	DestinationsWriter() destinations.Writer
 	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
@@ -187,6 +191,8 @@ func (d pgDatabase) TimersStore() timers.Store { return timers.NewStore(d.Pool) 
 func (d pgDatabase) DeliveryStore() *delivery.Store { return delivery.NewStore(d.Pool, d.Pool) }
 
 func (d pgDatabase) MessagesDB() messages.DBTX { return d.Pool }
+
+func (d pgDatabase) LinksStore() links.Store { return links.NewStore(d.Pool) }
 
 func (d pgDatabase) DestinationsStore() destinations.Store { return destinations.NewStore(d.Pool) }
 
@@ -424,6 +430,7 @@ type process struct {
 	delivery     *delivery.Service
 	deliverer    *delivery.Worker
 	renderer     *messages.Renderer
+	mentions     *mentions.Service
 	destinations *destinations.Service
 	// devClock is the development clock of `muster dev`, nil outside development mode; clockMoved wakes the
 	// Leader's Heartbeat check and Stale scan when it moves.
@@ -689,11 +696,17 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Restamp: func(ctx context.Context, tx groups.DBTX, alertIDs []int64, routeID int64) error {
 			return routing.RestampAlerts(ctx, tx, orgID, alertIDs, routeID)
 		}})
+	// Lookup tables and Link rules give every Alert Group its links (C-12.FR-9); Mention settings name users by their
+	// Account links (C-12.FR-8, FR-12).
+	linkService := links.New(links.Config{OrgID: orgID, Store: p.db.LinksStore(), Audit: w, Business: p.clocks.Business,
+		Real: p.clocks.Real, PublicURL: p.cfg.PublicURL.String(), Log: p.log})
+	p.mentions = mentions.New(orgID, p.db.MessagesDB())
+	p.groups.SetLinks(linkService.ForGroup)
 	// Messages are rendered in the sandbox, with the buttons signed by the Keyring (C-12, ADR-0012); Route templates
 	// are dry-run on save.
 	p.renderer = messages.New(messages.Config{OrgID: orgID, DB: p.db.MessagesDB(), PublicURL: p.cfg.PublicURL.String(),
 		Business: p.clocks.Business, Real: p.clocks.Real, Keys: p.keyring, Log: p.log,
-		RunbookBase: p.cfg.RunbookBaseURL.String()})
+		RunbookBase: p.cfg.RunbookBaseURL.String(), Links: linkService, Names: p.mentions})
 	p.routes.SetTemplates(routing.TemplateHooks{Check: p.renderer.CheckTemplate,
 		Saved: func(ctx context.Context, tx routingdb.DBTX, routeID int64, publicID string, kinds []string) error {
 			return p.renderer.TemplateSaved(ctx, tx, routeID, publicID, kinds)
@@ -749,6 +762,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Destinations:   p.destinations,
 		Deliveries:     p.delivery,
 		Templates:      p.renderer,
+		Links:          linkService,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -974,6 +988,7 @@ func (p *process) configureWorker() {
 	p.deliverer.RunbookBase = p.cfg.RunbookBaseURL.String()
 	p.deliverer.PublicURL = p.cfg.PublicURL.String()
 	p.deliverer.Renderer = delivery.MessageRenderer{Renderer: p.renderer}
+	p.deliverer.Mentions = p.mentions
 	p.timers.Handlers = map[string]timers.Handler{
 		delivery.TimerStormCalmCheck: func(ctx context.Context, tx timersdb.DBTX, org int64, t timers.Timer) (
 			func(context.Context), error) {

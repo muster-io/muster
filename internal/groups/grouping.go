@@ -60,6 +60,7 @@ type Service struct {
 	restamp Restamp
 	queries func(dbgen.DBTX) Queries
 	d       *dispatcher
+	links   Linker
 }
 
 // New returns the Service of the Organization in cfg.

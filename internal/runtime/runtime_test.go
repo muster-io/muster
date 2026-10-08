@@ -42,6 +42,8 @@ import (
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/leader"
 	ldb "github.com/muster-io/muster/internal/leader/dbgen"
+	"github.com/muster-io/muster/internal/links"
+	linksdb "github.com/muster-io/muster/internal/links/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/oidc"
@@ -436,6 +438,15 @@ func (f *fakeDB) DeliveryStore() *delivery.Store { return delivery.NewStore(noDB
 
 // MessagesDB has no database: every preview fails.
 func (f *fakeDB) MessagesDB() messages.DBTX { return noDB{} }
+
+// LinksStore has the built-in Link rule only; nothing else reads it in these tests.
+func (f *fakeDB) LinksStore() links.Store { return fakeLinksStore{} }
+
+type fakeLinksStore struct{ links.Store }
+
+func (fakeLinksStore) EnsureExploreRule(context.Context, linksdb.EnsureExploreRuleParams) (string, error) {
+	return "", pgx.ErrNoRows
+}
 
 // DestinationsStore has no Destinations.
 func (f *fakeDB) DestinationsStore() destinations.Store { return fakeDestinationsStore{} }

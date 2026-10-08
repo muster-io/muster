@@ -155,7 +155,7 @@ func (r *Renderer) newAlerts(ctx context.Context, q queries, src *Source, in Rep
 			if slices.Contains(excludedLabels, name) || src.CommonLabels[name] == labels[name] {
 				continue
 			}
-			parts = append(parts, name+": "+Value(labels[name]))
+			parts = append(parts, Value(name)+": "+Value(labels[name]))
 		}
 		if len(parts) == 0 {
 			parts = []string{Value(cmp.Or(labels["alertname"], fp))}

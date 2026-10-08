@@ -107,9 +107,13 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		if err != nil {
 			return fmt.Errorf("render the thread reply: %w", err)
 		}
+		targets, err := w.targets(ctx, tx, org, d, row.AlertGroupID, seq, groups.Loudness(row.Loudness), mentions)
+		if err != nil {
+			return err
+		}
 		a = replyAttempt{row: row, destination: d,
 			call: Call{Class: outbound.ClassDelivery, Destination: d, Loudness: groups.Loudness(row.Loudness),
-				Mentions: mentions},
+				Mentions: mentions, Targets: targets},
 			message: msg}
 		ok = true
 		return nil

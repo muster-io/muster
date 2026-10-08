@@ -2,8 +2,8 @@
 // Copyright The Muster Authors
 
 // Package deliverytest is the recording test adapter that the tests of C-11 to C-16 deliver to through the adapter
-// interface (C-11, Acceptance): it records every call with its time, Destination, message and loudness, and answers
-// from a script — any outcome, after a delay, with a hook that runs once it accepted the call.
+// interface (C-11, Acceptance): it records every call with its time, Destination, message, loudness and Mentions, and
+// answers from a script — any outcome, after a delay, with a hook that runs once it accepted the call.
 package deliverytest
 
 import (
@@ -16,6 +16,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
@@ -40,6 +41,8 @@ type Call struct {
 	Message   delivery.Message
 	Loudness  groups.Loudness
 	Mentions  []groups.Mention
+	// Targets are the resolved Mentions of a Loud call (C-12.FR-8).
+	Targets []mentions.Target
 	// Plain is a call without markup, after the messenger rejected the markup.
 	Plain bool
 	// Answered is the outcome the recorder answered with.
@@ -169,19 +172,19 @@ func (r *Recorder) answer(ctx context.Context, c Call) delivery.Outcome {
 // Publish records a new Root message.
 func (r *Recorder) Publish(ctx context.Context, c delivery.Call, m delivery.Message) delivery.Outcome {
 	return r.answer(ctx, Call{Method: MethodPublish, Class: c.Class, Destination: c.Destination, Message: m,
-		Loudness: c.Loudness, Mentions: c.Mentions, Plain: c.Plain})
+		Loudness: c.Loudness, Mentions: c.Mentions, Targets: c.Targets, Plain: c.Plain})
 }
 
 // Update records an edit of the message messageID.
 func (r *Recorder) Update(ctx context.Context, c delivery.Call, messageID string, m delivery.Message) delivery.Outcome {
 	return r.answer(ctx, Call{Method: MethodUpdate, Class: c.Class, Destination: c.Destination, MessageID: messageID,
-		Message: m, Loudness: c.Loudness, Mentions: c.Mentions, Plain: c.Plain})
+		Message: m, Loudness: c.Loudness, Mentions: c.Mentions, Targets: c.Targets, Plain: c.Plain})
 }
 
 // Reply records a Thread reply under root.
 func (r *Recorder) Reply(ctx context.Context, c delivery.Call, root delivery.Root, m delivery.Message) delivery.Outcome {
 	return r.answer(ctx, Call{Method: MethodReply, Class: c.Class, Destination: c.Destination,
-		MessageID: root.MessageID, Root: root, Message: m, Loudness: c.Loudness, Mentions: c.Mentions, Plain: c.Plain})
+		MessageID: root.MessageID, Root: root, Message: m, Loudness: c.Loudness, Mentions: c.Mentions, Targets: c.Targets, Plain: c.Plain})
 }
 
 // Check records a Destination check.

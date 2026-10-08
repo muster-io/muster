@@ -35,6 +35,7 @@ import (
 	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/organization"
@@ -77,8 +78,9 @@ type live struct {
 	dsvc      *destinations.Service
 	timers    *timers.Worker
 	defaultID int64
-	// renderer renders messages as the runtime does (C-12).
+	// renderer renders messages as the runtime does (C-12); mentions resolves the Mentions of Loud calls.
 	renderer *messages.Renderer
+	mentions *mentions.Service
 }
 
 func setupLive(t *testing.T, s dbtest.Server) *live {
@@ -156,8 +158,9 @@ func setupLive(t *testing.T, s dbtest.Server) *live {
 	if err := keys.Open(ctx, logger, state); err != nil {
 		t.Fatal(err)
 	}
+	l.mentions = mentions.New(org.ID, d.Pool)
 	l.renderer = messages.New(messages.Config{OrgID: org.ID, DB: d.Pool, PublicURL: "http://localhost:8080",
-		Business: l.business, Real: l.real, Keys: keys, Log: logger})
+		Business: l.business, Real: l.real, Keys: keys, Log: logger, Names: l.mentions})
 	l.routes.SetTemplates(routing.TemplateHooks{Check: l.renderer.CheckTemplate,
 		Saved: func(ctx context.Context, tx routingdb.DBTX, routeID int64, publicID string, kinds []string) error {
 			return l.renderer.TemplateSaved(ctx, tx, routeID, publicID, kinds)
@@ -247,7 +250,8 @@ func (l *live) worker(owner string) *delivery.Worker {
 		Duration: delivery.Lease, Clocks: clock.Clocks{Business: l.business, Real: l.real}},
 		Organizations: func(context.Context) ([]int64, error) { return []int64{l.orgID}, nil },
 		Adapters:      delivery.Adapters{delivery.TypeMattermost: l.rec}, Log: l.logger,
-		PublicURL: "http://localhost:8080", Renderer: delivery.MessageRenderer{Renderer: l.renderer}}
+		PublicURL: "http://localhost:8080", Renderer: delivery.MessageRenderer{Renderer: l.renderer},
+		Mentions: l.mentions}
 }
 
 // attach puts Destinations on the Route, and only them.
@@ -915,6 +919,8 @@ func TestLive(t *testing.T) {
 			{"fallback_template", l.fallbackTemplate},
 			{"russian_replies", l.russianReplies},
 			{"storm_texts", l.stormTexts},
+			// S-037.
+			{"mentions", l.mentionTargets},
 		} {
 			t.Run(sub.name, sub.run)
 		}
@@ -2704,4 +2710,114 @@ func (l *live) stormTexts(t *testing.T) {
 		t.Fatalf("final state %q", over)
 	}
 	t.Logf("%q … %q", summary, over)
+}
+
+// mentionTargets is C-12.FR-8 and C-12.FR-12 through the recording adapter: a Destination whose new_alert_group
+// mentions the channel and whose new_alerts mention Alice, who has an Account link in its identity space. A firing
+// `created` carries everyone:channel; a Loud `alerts_added` carries Alice by her username; once Alice acknowledged,
+// the footer names her by her username in that identity space and by her display name elsewhere; an `alerts_added` on
+// the acknowledged Alert Group carries none; a Reopen into acknowledged carries only the Owner, although the reopen
+// setting mentions the channel.
+func (l *live) mentionTargets(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	nobody := `{"everyone":"none","user_ids":[],"groups":[]}`
+	l.exec(t, `UPDATE destinations SET mentions = $1 WHERE id = $2`, `{"new_alert_group":{"everyone":"channel",
+		"user_ids":[],"groups":[]},"new_alerts":{"everyone":"none","user_ids":["sraaaaaaaaaaa1"],"groups":[]},
+		"reopen":{"everyone":"channel","user_ids":[],"groups":[]},"ack_timeout":`+nobody+`,"snooze_ended":`+nobody+
+		`,"rise_to_urgent":`+nobody+`}`, l.dests[0])
+	l.exec(t, `INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id, username,
+		created_at) SELECT $1, 'AKAAAAAAAAAAA1', id, 'mattermost', $2, 'mm-alice', 'alice.mm', $3 FROM users
+		WHERE public_id = 'SRAAAAAAAAAAA1'`, l.orgID, l.conn, t0)
+	t.Cleanup(func() {
+		for _, stmt := range []string{`UPDATE destinations SET mentions = '{}'`, `DELETE FROM account_links`} {
+			if _, err := l.d.Pool.Exec(context.Background(), stmt); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	targets := func(c deliverytest.Call) string {
+		var out []string
+		for _, tg := range c.Targets {
+			switch tg.Kind {
+			case mentions.TargetUser:
+				out = append(out, "user:"+tg.User.Display())
+			default:
+				out = append(out, tg.Kind+":"+tg.Everyone+tg.Group)
+			}
+		}
+		return strings.Join(out, ",")
+	}
+	last := func(method string) deliverytest.Call {
+		calls := only(l.rec.Calls(), method)
+		if len(calls) == 0 {
+			t.Fatalf("no %s: %s", method, methods(l.rec.Calls()))
+		}
+		return calls[len(calls)-1]
+	}
+	fire := func(names ...string) {
+		alerts := make([]alert, len(names))
+		for i, n := range names {
+			alerts[i] = alert{name: "Mention/" + n, team: "db"}
+		}
+		l.fireAlerts(t, "men", alerts...)
+		l.round(t, l.a)
+	}
+	fire("a")
+	gid := l.group(t, "Mention")
+	if pub := last(deliverytest.MethodPublish); pub.Loudness != groups.Loud || targets(pub) != "everyone:channel" {
+		t.Fatalf("created: %s %q", pub.Loudness, targets(pub))
+	}
+	l.business.Advance(2 * time.Minute)
+	fire("a", "b")
+	if r := last(deliverytest.MethodReply); r.Loudness != groups.Loud || targets(r) != "user:alice.mm" ||
+		r.Targets[0].User.PublicID != "SRAAAAAAAAAAA1" || r.Targets[0].User.Name != "alice" {
+		t.Fatalf("firing alerts_added: %s %q", r.Loudness, targets(r))
+	}
+	if _, err := l.groups.Acknowledge(t.Context(), l.alice, gid); err != nil {
+		t.Fatal(err)
+	}
+	l.round(t, l.a)
+	space := fmt.Sprintf("mattermost:%d", l.conn)
+	if u := last(deliverytest.MethodUpdate); u.Loudness != groups.Quiet || u.Targets != nil ||
+		u.Message.FooterIn(space) != "Acknowledged by alice.mm" || u.Message.Footer != "Acknowledged by alice" ||
+		u.Message.FooterIn("telegram") != "Acknowledged by alice" {
+		t.Fatalf("acknowledged: %q %q %v", u.Message.Footer, u.Message.FooterIn(space), u.Targets)
+	}
+	l.business.Advance(2 * time.Minute)
+	fire("a", "b", "c")
+	if r := last(deliverytest.MethodReply); r.Loudness != groups.Quiet || r.Targets != nil {
+		t.Fatalf("alerts_added on acknowledged: %s %q", r.Loudness, targets(r))
+	}
+	l.business.Advance(2 * time.Minute)
+	var resolved []string
+	for _, n := range []string{"a", "b", "c"} {
+		resolved = append(resolved, `{"status":"resolved","labels":{"alertname":"Mention","team":"db","disk":"Mention/`+
+			n+`"},"annotations":{},"startsAt":"2026-10-07T11:00:00Z","endsAt":"2026-10-07T11:30:00Z"}`)
+	}
+	if _, err := l.snaps.Store(t.Context(), ingest.Received{IntegrationID: l.intID,
+		Body: []byte(`{"groupKey":"men","status":"resolved","alerts":[` + strings.Join(resolved, ",") + `]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	l.process(t)
+	l.round(t, l.a)
+	if st := l.count(t, `SELECT count(*) FROM alert_groups WHERE public_id = $1 AND status = 'resolved'`, gid); st != 1 {
+		t.Fatalf("not resolved: %s", methods(l.rec.Calls()))
+	}
+	l.business.Advance(time.Minute)
+	l.rec.Reset()
+	if _, err := l.snaps.Store(t.Context(), ingest.Received{IntegrationID: l.intID,
+		Body: []byte(`{"groupKey":"men","status":"firing","alerts":[{"status":"firing","labels":{"alertname":"Mention",` +
+			`"team":"db","disk":"Mention/a"},"annotations":{},"startsAt":"2026-10-07T11:45:00Z"}]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	l.process(t)
+	l.round(t, l.a)
+	r := last(deliverytest.MethodReply)
+	if r.Loudness != groups.Loud || !slices.Equal(r.Mentions, []groups.Mention{groups.MentionOwner}) ||
+		targets(r) != "user:alice.mm" {
+		t.Fatalf("reopened into acknowledged: %s %v %q", r.Loudness, r.Mentions, targets(r))
+	}
+	t.Logf("created → %q; firing alerts_added → %q; footer %q in %s; alerts_added on acknowledged → none; "+
+		"reopen into acknowledged → [owner] → %q", "everyone:channel", "user:alice.mm", "Acknowledged by alice.mm",
+		space, targets(r))
 }

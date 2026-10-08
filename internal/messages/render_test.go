@@ -19,7 +19,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	idb "github.com/muster-io/muster/internal/internalalerts/dbgen"
+	"github.com/muster-io/muster/internal/links"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages/dbgen"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/templates"
@@ -695,5 +697,158 @@ func TestCheckTemplate(t *testing.T) {
 	}
 	if len(r.cache) >= cacheSize {
 		t.Errorf("cache of %d", len(r.cache))
+	}
+}
+
+// fakeLinks give every Alert Group a Link rule's link, a runbook and a source, and render a URL template by its
+// source; fail makes them fail.
+type fakeLinks struct {
+	inputs []links.Input
+	fail   error
+}
+
+func (f *fakeLinks) Evaluate(_ context.Context, _ links.DBTX, in links.Input) ([]links.Link, error) {
+	f.inputs = append(f.inputs, in)
+	return []links.Link{{Kind: links.KindRule, Name: "Logs: @here", URL: "https://logs.example.org/x(1)"},
+		{Kind: links.KindRunbook, Name: links.NameRunbook, URL: "https://runbooks.example.org/a"},
+		{Kind: links.KindSource, Name: links.NameSource, URL: "https://prometheus.example.org/g"}}, f.fail
+}
+
+func (f *fakeLinks) RenderURL(_ context.Context, _ links.DBTX, source string, in links.Input) (string, error) {
+	f.inputs = append(f.inputs, in)
+	if strings.Contains(source, "fail") {
+		return "", &templates.Error{Code: templates.CodeSyntax, Line: 1, Column: 3, Detail: "failed"}
+	}
+	return source + "|" + in.Data.CommonLabels["cluster"], f.fail
+}
+
+// fakeNames name the footer's user by a username in one identity space.
+type fakeNames struct{ fail error }
+
+func (f fakeNames) FooterNames(context.Context, mentions.DBTX, int64) (map[string]string, error) {
+	return map[string]string{"mattermost:3": "alice.mm", "telegram": "Alice"}, f.fail
+}
+
+// TestLinksMentionsAndFooters (C-12.FR-1 item 9, C-12.FR-7, C-12.FR-8, C-12.FR-12): the links follow "Open in
+// Muster" on one line, a rule's by its neutral name and the others in the message's language; a literal @all of a
+// template is neutralized while `mention` leaves a token the layout shows as @all; the footer names the user by the
+// username of each identity space, the display name elsewhere; a link_rule preview renders the URL template.
+func TestLinksMentionsAndFooters(t *testing.T) {
+	ctx := t.Context()
+	f := &fakeQueries{group: source("acknowledged", 2)}
+	f.group.Owner = "Alice Smith"
+	f.group.Route.RootMessage = ptr(`{{ mention "all" }} and @all {{ mention "group" "db-oncall" }} {{ mention "owner" }}`)
+	r := withFake(t, f)
+	fl := &fakeLinks{}
+	r.links, r.names = fl, fakeNames{}
+	src, err := r.Load(ctx, nil, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fl.inputs) != 1 || fl.inputs[0].Group != "AGK7M3QX9P2RTA" || fl.inputs[0].Route != "RTAAAAAAAAAAA1" ||
+		fl.inputs[0].Data.CommonLabels["owner"] != "@channel" {
+		t.Fatalf("link input %+v", fl.inputs)
+	}
+	rd := r.Root(src, MarkupMarkdown)
+	m := rd.Message
+	if len(m.Links) != 4 || m.Links[1].Text != "Logs: @\u200bhere" || m.Links[2].Text != "Runbook" ||
+		m.Links[3].Text != "Source" {
+		t.Fatalf("links %+v", m.Links)
+	}
+	if m.Footer != "Acknowledged by Alice Smith" || m.FooterIn("mattermost:3") != "Acknowledged by alice.mm" ||
+		m.FooterIn("telegram") != "Acknowledged by Alice" || m.FooterIn("mattermost:4") != m.Footer ||
+		len(m.Footers) != 2 {
+		t.Errorf("footers %q %v", m.Footer, m.Footers)
+	}
+	if tokens := templates.Tokens(m.Body.Text); len(tokens) != 3 || tokens[0].Name != "all" ||
+		tokens[1].Group != "db-oncall" || tokens[2].Name != "owner" {
+		t.Errorf("tokens %v in %q", tokens, m.Body.Text)
+	}
+	out := Layout(m, MarkupMarkdown)
+	mustKeep(t, out, "@all and @\u200ball @db-oncall @owner",
+		"[Open in Muster](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA) · [Logs: @\u200bhere](https://logs.example.org/x%281%29) · [Runbook](https://runbooks.example.org/a) · [Source](https://prometheus.example.org/g)")
+	if strings.ContainsAny(out, "") || strings.ContainsAny(m.Text(), "") {
+		t.Error("token characters reach the layout")
+	}
+	mustKeep(t, Layout(m, MarkupHTML), `<a href="https://logs.example.org/x(1)">Logs: @`+"\u200b"+`here</a>`)
+	ru := *src
+	ru.Route.Language = "ru"
+	mustKeep(t, Layout(r.Root(&ru, MarkupPlain).Message, MarkupPlain), "Ранбук https://runbooks.example.org/a",
+		"Источник https://prometheus.example.org/g")
+	// Alert data cannot forge a token: its token characters are dropped.
+	f.group.CommonLabels["team"] = "all"
+	f.group.Route.RootMessage = ptr("{{ .CommonLabels.team }}")
+	src, _ = r.Load(ctx, nil, 9)
+	if body := r.Root(src, MarkupMarkdown).Message.Body.Text; body != "all" {
+		t.Errorf("forged token %q", body)
+	}
+	// Nor can a label name or a fingerprint, in the built-in templates or in the default layout.
+	forged := "team\ue000channel\ue002"
+	f.group.CommonLabels = map[string]string{forged: "x", "cluster": "prod"}
+	f.group.KeyLabels = append(f.group.KeyLabels, forged)
+	f.group.KeyValues[forged] = "y"
+	f.group.Alerts[0].Fingerprint = "\ue000here\ue002"
+	f.group.Alerts[0].Labels[forged] = "z"
+	f.group.Route.RootMessage = ptr(BuiltinSource(TemplateRootMessage, "en") + "{{ range .Alerts }}{{ .Fingerprint }}{{ end }}")
+	src, _ = r.Load(ctx, nil, 9)
+	for _, m := range []Message{r.Root(src, MarkupMarkdown).Message, func() Message {
+		def := *src
+		def.Route.RootMessage = nil
+		return r.Root(&def, MarkupMarkdown).Message
+	}()} {
+		out := Layout(m, MarkupMarkdown)
+		body := ""
+		if m.Body != nil {
+			body = m.Body.Text
+		}
+		if tk := templates.Tokens(body); len(tk) != 0 || strings.Contains(out, "@channel") ||
+			strings.Contains(out, "@here") || strings.ContainsAny(out, "\ue000\ue001\ue002") {
+			t.Errorf("forged tokens %v in %q", tk, out)
+		}
+	}
+	// A line template is neutralized the same way.
+	f.group.Route.RootMessage, f.group.Route.Line = nil, ptr("@here {{ .Labels.pod }}")
+	src, _ = r.Load(ctx, nil, 9)
+	if line := r.Root(src, MarkupMarkdown).Message.Alerts.Lines[0].Text; line != "@\u200bhere p1" {
+		t.Errorf("line %q", line)
+	}
+	// Failing links or names fail the load.
+	fl.fail = errBoom
+	if _, err := r.Load(ctx, nil, 9); !errors.Is(err, errBoom) {
+		t.Errorf("failing links: %v", err)
+	}
+	fl.fail, r.names = nil, fakeNames{fail: errBoom}
+	if _, err := r.Load(ctx, nil, 9); !errors.Is(err, errBoom) {
+		t.Errorf("failing names: %v", err)
+	}
+	r.names = nil
+	// The preview of a URL template, against the example and against a Stored Snapshot.
+	res, err := r.Preview(ctx, PreviewRequest{Kind: TemplateLinkRule, Template: "https://x/{{ .Labels.cluster }}"})
+	if err != nil || !res.Valid || res.Output != "https://x/{{ .Labels.cluster }}|prod" || res.Format != "" ||
+		res.Sample != SampleExample {
+		t.Errorf("link preview %+v %v", res, err)
+	}
+	f.snapshots = [][]byte{webhook("a")}
+	res, _ = r.Preview(ctx, PreviewRequest{Kind: TemplateLinkRule, Template: "fail", SnapshotID: "SS000000000000"})
+	if res.Valid || len(res.Errors) != 1 || res.Errors[0].Line != 1 || res.Sample != SampleStoredSnapshot {
+		t.Errorf("failing link preview %+v", res)
+	}
+	// A root_message preview of a sample shows the sample's links.
+	fl.inputs = nil
+	res, err = r.Preview(ctx, PreviewRequest{Kind: TemplateRootMessage, SnapshotID: "SS000000000000"})
+	if err != nil || !strings.Contains(res.Output, "[Runbook](https://runbooks.example.org/a)") || len(fl.inputs) != 1 {
+		t.Errorf("root preview %+v %v", res, err)
+	}
+	fl.fail = errBoom
+	if _, err := r.Preview(ctx, PreviewRequest{Kind: TemplateRootMessage, SnapshotID: "SS000000000000"}); err == nil {
+		t.Error("failing links fail the preview")
+	}
+	r.links = nil
+	if _, err := r.Preview(ctx, PreviewRequest{Kind: TemplateLinkRule, Template: "x"}); !errors.Is(err,
+		ErrUnsupportedKind) {
+		t.Errorf("no links: %v", err)
+	}
+	if Neutralize(Neutralize("a@b @@")) != "a@\u200bb @\u200b@\u200b" {
+		t.Error("neutralizing twice changes nothing")
 	}
 }

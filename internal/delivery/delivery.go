@@ -26,6 +26,7 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/publicid"
@@ -129,15 +130,42 @@ type Outcome struct {
 }
 
 // Call is one adapter call: its client class (ADR-0015) — delivery for the worker, interactive for the interactive
-// path — its Destination, and for a new message its loudness and symbolic Mentions, which the adapter resolves from
-// S-037 on. An edit is always Quiet and mentions nobody. Plain asks for the same text without markup, after the
-// messenger rejected the markup (C-11.FR-8).
+// path — its Destination, and for a new message its loudness, its symbolic Mentions and, for a Loud one, their
+// targets in the Destination (C-12.FR-8), which the adapter renders in its messenger's syntax. An edit is always Quiet
+// and mentions nobody. Plain asks for the same text without markup, after the messenger rejected the markup
+// (C-11.FR-8).
 type Call struct {
 	Class       outbound.Class
 	Destination Destination
 	Loudness    groups.Loudness
 	Mentions    []groups.Mention
+	Targets     []mentions.Target
 	Plain       bool
+}
+
+// Mentioner resolves the symbolic Mentions of a Loud message into the targets of its Destination (C-12.FR-8), reading
+// through the transaction of the call's preparation; declared by its consumer, *mentions.Service implements it.
+type Mentioner interface {
+	Resolve(ctx context.Context, db mentions.DBTX, org int64, r mentions.Request) ([]mentions.Target, error)
+}
+
+// targets are the targets of a call of the Destination d about the Alert Group group and its lifecycle event seq:
+// none for a Quiet one, without Mentions or without a Mentioner.
+func (w *Worker) targets(ctx context.Context, db mentions.DBTX, org int64, d Destination, group, seq int64,
+	loud groups.Loudness, ms []groups.Mention) ([]mentions.Target, error) {
+	if w.Mentions == nil || loud != groups.Loud || len(ms) == 0 {
+		return nil, nil
+	}
+	names := make([]string, len(ms))
+	for i, m := range ms {
+		names[i] = string(m)
+	}
+	out, err := w.Mentions.Resolve(ctx, db, org, mentions.Request{DestinationID: d.ID, DestinationType: d.Type,
+		ConnectionID: d.Connection, AlertGroupID: group, Seq: seq, Mentions: names})
+	if err != nil {
+		return nil, fmt.Errorf("resolve the mentions: %w", err)
+	}
+	return out, nil
 }
 
 // Root is the Root message a Thread reply goes under: its message id and, in Telegram, the automatic copy in the
