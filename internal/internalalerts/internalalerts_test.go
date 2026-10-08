@@ -89,10 +89,15 @@ func TestRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 3 || defs[0] != DestinationBroken || defs[1] != HeartbeatLost || defs[2] != SnapshotTruncated ||
-		Lookup("MusterSnapshotTruncated") != SnapshotTruncated || Lookup("MusterHeartbeatLost") != HeartbeatLost ||
-		Lookup("MusterDestinationBroken") != DestinationBroken || Lookup("MusterUnknown") != nil {
+	if len(defs) != 4 || defs[0] != DestinationBroken || defs[1] != HeartbeatLost || defs[2] != SnapshotTruncated ||
+		defs[3] != TemplateError || Lookup("MusterSnapshotTruncated") != SnapshotTruncated ||
+		Lookup("MusterHeartbeatLost") != HeartbeatLost || Lookup("MusterDestinationBroken") != DestinationBroken ||
+		Lookup("MusterTemplateError") != TemplateError || Lookup("MusterUnknown") != nil {
 		t.Errorf("registry %v", defs)
+	}
+	if d := TemplateError; d.Severity != SeverityWarning || d.Capability != "C-12" ||
+		!slices.Equal(d.Labels(), []string{"route", "route_name", "template"}) {
+		t.Errorf("MusterTemplateError = %+v", d)
 	}
 	if d := DestinationBroken; d.Severity != SeverityCritical || d.StaticLabels || d.Capability != "C-11" ||
 		!slices.Equal(d.Labels(), []string{"destination", "destination_name"}) {

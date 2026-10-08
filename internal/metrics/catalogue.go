@@ -427,3 +427,31 @@ var DestinationInfo = newGauge(Definition{
 	},
 	Capability: "C-11",
 })
+
+// TemplateKinds are the values of the label template: the templates of C-12.FR-4.
+var TemplateKinds = []string{"root_message", "line", "ack_timeout_notice", "link_rule", "webhook_request"}
+
+// TemplateErrors counts the template renders that failed at runtime, by the Route or the Destination that owns the
+// template, the other one empty (C-12.FR-6, ADR-0012).
+var TemplateErrors = newCounter(Definition{
+	Name: "muster_template_errors_total",
+	Help: "Templates that failed while rendering, by the Route or the Destination that owns the template (the other " +
+		"label empty) and the kind of template; a message falls back to the Fallback template, an outgoing webhook " +
+		"request is not sent.",
+	Labels: []Label{
+		entity("route"),
+		entity("destination"),
+		closed("template", "the kind of template", TemplateKinds...),
+	},
+	Capability: "C-12",
+})
+
+// TemplateRenderDuration observes the time of every template render, by the kind of template (C-12.FR-13).
+var TemplateRenderDuration = newHistogram(Definition{
+	Name: "muster_template_render_duration_seconds",
+	Help: "Time to render a template in the sandbox, by the kind of template; a Root message is observed as a whole, " +
+		"its built-in default included.",
+	Labels:     []Label{closed("template", "the kind of template", TemplateKinds...)},
+	Buckets:    []float64{0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5},
+	Capability: "C-12",
+})

@@ -1119,6 +1119,29 @@ func TestDispatch(t *testing.T) {
 		!slices.Equal(rendered, []int64{row.ID}) || row.RouteID != 1 {
 		t.Errorf("moved = %v, rendered %v", err, rendered)
 	}
+	// A Route template that failed while rendering is recorded as the system entry fallback_template_used, by the
+	// system, once the re-render step returned; a failed record fails the change.
+	h.svc.d.rerender = func(_ context.Context, _ Queries, r Rendering) error {
+		r.Fallback(TemplateFailure{Template: "root_message", Detail: "root_message template failed: line 1: x"})
+		return nil
+	}
+	g.MovedFromRouteID, g.RouteID = nil, 2
+	entries := len(h.db.entries)
+	if err := h.svc.d.dispatch(t.Context(), h.db, g, Actor{Kind: audit.ActorUser, Transport: audit.TransportUI, Person: alice.Actor}, moveToDefault{from: 2, to: 1}, &after); err != nil {
+		t.Fatal(err)
+	}
+	if e := h.db.entries[len(h.db.entries)-1]; len(h.db.entries) != entries+2 || e.Kind != string(KindSystem) ||
+		e.SystemEvent.String != "fallback_template_used" || e.Detail.String != "root_message template failed: line 1: x" ||
+		e.ActorKind != "system" || e.Event.Valid {
+		t.Errorf("fallback entry %+v", e)
+	}
+	h.db.fail["InsertTimelineEntry"] = errBoom
+	g.MovedFromRouteID, g.RouteID = nil, 2
+	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1}, &after); !errors.Is(err,
+		errBoom) {
+		t.Errorf("a failed fallback entry = %v", err)
+	}
+	delete(h.db.fail, "InsertTimelineEntry")
 	h.svc.d.rerender = func(context.Context, Queries, Rendering) error { return errBoom }
 	g.MovedFromRouteID = nil
 	g.RouteID = 2

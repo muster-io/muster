@@ -63,7 +63,7 @@ func (w *Worker) reply(ctx context.Context, org, id int64) {
 func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt, bool, error) {
 	var a replyAttempt
 	ok := false
-	err := w.Store.inTx(ctx, func(q queries) error {
+	err := w.Store.inTxWith(ctx, func(tx dbgen.DBTX, q queries) error {
 		ok = false
 		realNow := w.Lease.Clocks.Real.Now().UTC()
 		row, err := q.GetLeasedReply(ctx, dbgen.GetLeasedReplyParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
@@ -92,28 +92,29 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 			LeaseUntil: realNow.Add(w.Lease.Duration)}); err != nil {
 			return fmt.Errorf("renew the lease of the thread reply: %w", err)
 		}
-		g := GroupView{PublicID: row.AlertGroupPublicID, Number: row.Number, Title: row.Title,
+		g := GroupView{ID: row.AlertGroupID, PublicID: row.AlertGroupPublicID, Number: row.Number, Title: row.Title,
 			Status: groups.Status(row.Status), Urgent: row.Urgent}
 		mentions := make([]groups.Mention, len(row.Mentions))
 		for i, m := range row.Mentions {
 			mentions[i] = groups.Mention(m)
 		}
+		var seq int64
+		if len(row.EventSeqs) > 0 {
+			seq = row.EventSeqs[0]
+		}
+		msg, err := w.Renderer.Reply(ctx, tx, ReplyView{Event: groups.Event(row.Event), Seq: seq,
+			Fingerprints: row.Fingerprints, Language: row.Language, Listed: ThreadAlertsListed}, g)
+		if err != nil {
+			return fmt.Errorf("render the thread reply: %w", err)
+		}
 		a = replyAttempt{row: row, destination: d,
 			call: Call{Class: outbound.ClassDelivery, Destination: d, Loudness: groups.Loudness(row.Loudness),
 				Mentions: mentions},
-			message: w.renderer().RenderReply(ReplyView{Event: groups.Event(row.Event), Fingerprints: row.Fingerprints,
-				Language: row.Language, Listed: ThreadAlertsListed}, g, d)}
+			message: msg}
 		ok = true
 		return nil
 	})
 	return a, ok, err
-}
-
-func (w *Worker) renderer() Renderer {
-	if w.Renderer == nil {
-		return MinimalRenderer{}
-	}
-	return w.Renderer
 }
 
 // sendReply sends a prepared Thread reply outside any transaction and records its outcome by its rule (outcomes.go);

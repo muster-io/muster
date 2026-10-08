@@ -81,7 +81,7 @@ type (
 		state                               string
 		urgent                              bool
 		version                             int64
-		text                                string
+		text, buttonKeyID                   string
 		payload, hash                       []byte
 		receivedAt                          *time.Time
 		loud                                pgtype.Bool
@@ -379,7 +379,8 @@ func (f *fakeDB) SetDesired(_ context.Context, arg dbgen.SetDesiredParams) (stri
 	}
 	d := f.delivery(arg.ID)
 	d.version++
-	d.text, d.payload, d.hash = arg.DesiredText, arg.DesiredPayload, arg.DesiredHash
+	d.text, d.payload, d.hash, d.buttonKeyID = arg.DesiredText, arg.DesiredPayload, arg.DesiredHash,
+		arg.ButtonKeyID.String
 	if d.receivedAt == nil && arg.ReceivedAt.Valid {
 		d.receivedAt = at(arg.ReceivedAt.Time)
 	}
@@ -1518,11 +1519,13 @@ func newEnv(t *testing.T) *env {
 	e.rec.Clock = e.business
 	e.store = delivery.NewTestStore(e.begin, f)
 	logger := logging.New(e.log, logging.LevelInfo)
-	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Log: logger})
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Log: logger,
+		Renderer: stubRenderer{}})
 	e.w = &delivery.Worker{Store: e.store, Lease: db.Lease{Owner: "r1", Duration: delivery.Lease,
 		Clocks: clock.Clocks{Business: e.business, Real: e.real}},
 		Organizations: func(context.Context) ([]int64, error) { return []int64{orgID}, nil },
-		Adapters:      delivery.Adapters{delivery.TypeMattermost: e.rec, delivery.TypeWebhook: e.rec}, Log: logger}
+		Adapters:      delivery.Adapters{delivery.TypeMattermost: e.rec, delivery.TypeWebhook: e.rec}, Log: logger,
+		Renderer: stubRenderer{}}
 	return e
 }
 

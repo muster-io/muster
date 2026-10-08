@@ -307,8 +307,8 @@ func routeListOf(list routing.List) gen.RouteList {
 	return out
 }
 
-// routeOf is the API form of a Route without its Destinations, which routeView adds, with its active Storm. The
-// template error state arrives with its capability.
+// routeOf is the API form of a Route without its Destinations, which routeView adds, with its template error and its
+// active Storm.
 func routeOf(rt routing.Route) gen.Route {
 	tag, description := etag(rt.Version), rt.Description
 	key := rt.GroupKey
@@ -324,6 +324,10 @@ func routeOf(rt routing.Route) gen.Route {
 	}
 	if rt.Storm != nil {
 		out.Storm = &gen.RouteStorm{Since: rt.Storm.Since.UTC(), AlertGroupCount: int(rt.Storm.AlertGroupCount)}
+	}
+	if te := rt.TemplateError; te != nil {
+		out.TemplateError = &gen.TemplateErrorState{Since: te.Since.UTC(), Error: te.Error,
+			Fallback: gen.FallbackTemplate}
 	}
 	for _, m := range rt.Matchers {
 		out.Matchers = append(out.Matchers, gen.Matcher{Label: m.Label, Op: gen.MatcherOp(m.Op), Value: m.Value})
@@ -352,8 +356,11 @@ func routePolicyOf(p routing.Policy) gen.RoutePolicy {
 }
 
 func routeInputOf(in gen.RouteInput) routing.Input {
+	t := in.Policy.Templates
 	out := routing.Input{Name: in.Name, Description: in.Description, Urgent: in.Urgent, GroupKey: in.GroupKey,
-		DestinationIDs: in.DestinationIds, Policy: routingPolicyOf(in.Policy)}
+		DestinationIDs: in.DestinationIds, Policy: routingPolicyOf(in.Policy),
+		Keep: routing.KeepTemplates{RootMessage: !t.RootMessage.IsSpecified(), Line: !t.Line.IsSpecified(),
+			AckTimeoutNotice: !t.AckTimeoutNotice.IsSpecified()}}
 	for _, m := range in.Matchers {
 		out.Matchers = append(out.Matchers, routing.Matcher{Label: m.Label, Op: string(m.Op), Value: m.Value})
 	}
@@ -380,7 +387,8 @@ func routingPolicyOf(p gen.RoutePolicy) routing.Policy {
 	}
 }
 
-// templateOf is a template as given: nil when it is absent or null, which is the built-in template.
+// templateOf is a template as given: nil when it is absent or null, which is the built-in template; an update keeps
+// the stored template of an absent key (routing.KeepTemplates).
 func templateOf(v nullable.Nullable[string]) *string {
 	if !v.IsSpecified() || v.IsNull() {
 		return nil

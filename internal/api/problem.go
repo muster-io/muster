@@ -160,6 +160,14 @@ func fieldProblem(status int, pointer, code, detail string) *Problem {
 	return p
 }
 
+// positive is n for an optional field that is set when positive, such as the line and column of a template error.
+func positive(n int) *int {
+	if n <= 0 {
+		return nil
+	}
+	return &n
+}
+
 var (
 	errNotImplemented = problem(http.StatusNotImplemented, typeNotImplemented, "",
 		"This build does not implement the operation yet.")
@@ -247,7 +255,9 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
 	if f, ok := errors.AsType[*routing.FieldError](err); ok {
-		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+		p := fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+		p.Errors[0].Line, p.Errors[0].Column = positive(f.Line), positive(f.Column)
+		return p
 	}
 	if f, ok := errors.AsType[*groups.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)

@@ -201,6 +201,7 @@ type Config struct {
 	Directory    UserDirectory
 	Destinations Destinations
 	Deliveries   Deliveries
+	Templates    Templates
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -231,6 +232,7 @@ type Server struct {
 	directory      UserDirectory
 	destinations   Destinations
 	deliveries     Deliveries
+	templates      Templates
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -272,6 +274,7 @@ var implemented = map[string]bool{
 	"UnresolveAlertGroup": true, "SnoozeAlertGroup": true, "UnsnoozeAlertGroup": true, "RunBulkCommand": true,
 	"ListAlertGroupNotes": true, "CreateAlertGroupNote": true, "ListUserDirectory": true,
 	"ListAlertGroupDeliveries": true, "ListDestinations": true, "GetDestination": true, "DeleteDestination": true,
+	"PreviewTemplate": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -301,7 +304,7 @@ func New(cfg Config) (*Server, error) {
 		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, oidc: cfg.OIDC, tokens: cfg.Tokens,
 		integrations: cfg.Integrations, snapshots: cfg.Snapshots, alerts: cfg.Alerts, routes: cfg.Routes,
 		alertGroups: cfg.AlertGroups, commands: cfg.Commands, directory: cfg.Directory,
-		destinations: cfg.Destinations, deliveries: cfg.Deliveries,
+		destinations: cfg.Destinations, deliveries: cfg.Deliveries, templates: cfg.Templates,
 		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}

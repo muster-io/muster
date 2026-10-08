@@ -271,12 +271,18 @@ func (s *Store) inTx(ctx context.Context, f func(q queries) error) error {
 	return pgx.BeginFunc(ctx, s.begin, func(tx pgx.Tx) error { return f(s.queries(tx)) })
 }
 
+// inTxWith runs f in one short transaction with the transaction itself, which the renderer reads through.
+func (s *Store) inTxWith(ctx context.Context, f func(tx dbgen.DBTX, q queries) error) error {
+	return pgx.BeginFunc(ctx, s.begin, func(tx pgx.Tx) error { return f(tx, s.queries(tx)) })
+}
+
 // Config is what a Service needs.
 type Config struct {
 	OrgID int64
 	Store *Store
 	// Business is the business clock: due times, windows and the time of delivery events.
 	Business clock.Clock
+	// Renderer renders Root messages and Storm summaries (C-12).
 	Renderer Renderer
 	Log      *logging.Logger
 	// RunbookBase is MUSTER_RUNBOOK_BASE_URL, the base of the runbook_url of MusterDestinationBroken.
@@ -295,13 +301,9 @@ type Service struct {
 	internal *internalalerts.Raiser
 }
 
-// New returns the Service of the Organization in cfg; a nil Renderer is the minimal renderer.
+// New returns the Service of the Organization in cfg.
 func New(cfg Config) *Service {
-	r := cfg.Renderer
-	if r == nil {
-		r = MinimalRenderer{}
-	}
-	return &Service{orgID: cfg.OrgID, store: cfg.Store, clock: cfg.Business, renderer: r, log: cfg.Log,
+	return &Service{orgID: cfg.OrgID, store: cfg.Store, clock: cfg.Business, renderer: cfg.Renderer, log: cfg.Log,
 		internal: internalalerts.NewRaiser(cfg.OrgID, cfg.RunbookBase)}
 }
 

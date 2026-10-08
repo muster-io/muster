@@ -19,6 +19,7 @@ files_touched:
   - internal/messages/fallback.go
   - internal/messages/render.go
   - internal/messages/preview.go
+  - internal/messages/query.sql
   - internal/messages/texts/en.json
   - internal/messages/texts/ru.json
   - internal/messages/default_test.go
@@ -27,22 +28,47 @@ files_touched:
   - internal/messages/render_test.go
   - internal/buttons/buttons.go
   - internal/buttons/buttons_test.go
+  - internal/keyring/keyring.go
+  - internal/keyring/keyring_test.go
   - internal/delivery/render.go
+  - internal/delivery/delivery.go
+  - internal/delivery/enqueue.go
+  - internal/delivery/membership.go
+  - internal/delivery/publication.go
+  - internal/delivery/storm.go
+  - internal/delivery/threads.go
+  - internal/delivery/worker.go
+  - internal/delivery/query.sql
+  - internal/delivery/render_test.go
+  - internal/delivery/enqueue_test.go
+  - internal/delivery/membership_test.go
+  - internal/delivery/publication_test.go
+  - internal/delivery/storm_test.go
+  - internal/delivery/threads_test.go
+  - internal/delivery/worker_test.go
+  - internal/delivery/deliverytest/recorder_test.go
   - internal/delivery/live_test.go
   - internal/groups/dispatcher.go
+  - internal/groups/events.go
+  - internal/groups/dispatcher_test.go
   - internal/routing/routes.go
+  - internal/routing/query.sql
   - internal/routing/routes_test.go
   - internal/internalalerts/registry.go
+  - internal/internalalerts/internalalerts_test.go
   - internal/api/templates.go
   - internal/api/templates_test.go
   - internal/api/routes.go
   - internal/api/routes_test.go
+  - internal/api/problem.go
   - internal/api/server.go
   - api/openapi.yaml
   - internal/metrics/catalogue.go
   - internal/logging/events.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - test/e2e/routing_test.go
+  - sqlc.yaml
   - go.mod
   - NOTICE
 acceptance:
@@ -215,9 +241,11 @@ curl -s "${H[@]}" $API/routes -d "{\"name\":\"T\",\"matchers\":[],\"urgent\":fal
   \"policy\":$(jq -c '.templates.root_message = "{{ env \"HOME\" }}"' <<<"$P")}" | jq -c '{status, e: .errors[0] | {pointer, code, line}}'
 # {"status":422,"e":{"pointer":"/policy/templates/root_message","code":"unknown_function","line":1}}
 
-# C-12.AC-1, AC-4: 25 Alerts, one of them carrying @channel
+# C-12.AC-1, AC-4: 25 Alerts, all carrying @channel and a long common annotation, so that 4,096 characters need
+# shortening
 curl -s -X PUT $FAM/groups/m1 -d '{"receiver":"lab","route":"{}","labels":{"alertname":"PodDown"}}' > /dev/null
-for i in $(seq 1 25); do curl -s -X PUT $FAM/groups/m1/alerts/p$i -d "{\"labels\":{\"pod\":\"p$i\",\"cluster\":\"prod\",\"owner\":\"@channel\"}}" > /dev/null; done
+LONG=$(printf 'd%.0s' $(seq 1 4000))
+for i in $(seq 1 25); do curl -s -X PUT $FAM/groups/m1/alerts/p$i -d "{\"labels\":{\"pod\":\"p$i\",\"cluster\":\"prod\",\"owner\":\"@channel\"},\"annotations\":{\"details\":\"$LONG\"}}" > /dev/null; done
 NOTIFY m1 '{"reason":"first notification"}'; G=$(AG 'alertname%3D%22PodDown%22')
 OUT=$(PREVIEW "{\"kind\":\"root_message\",\"template\":\"\",\"alert_group_id\":\"$G\",\"length_limit\":4096}")
 jq -c '{valid, truncated, len: (.output | length <= 4096)}' <<<"$OUT"        # {"valid":true,"truncated":true,"len":true}
@@ -235,10 +263,13 @@ NOTIFY m1 '{"reason":"all alerts resolved"}'
 PREVIEW "{\"kind\":\"root_message\",\"template\":\"\",\"alert_group_id\":\"$G\",\"language\":\"ru\"}" | jq -r .output | grep -c '^Закрыта автоматически: '
 # 1
 
-# C-12.FR-5: a valid template is saved and previewed against the Route's recent Snapshots
+# C-12.FR-5: a valid template is saved and previewed against the Route's recent Snapshots — the Route takes the next
+# Snapshot of PodDown once it exists
 R=$(curl -s "${H[@]}" $API/routes -d "{\"name\":\"pods\",\"matchers\":[{\"label\":\"alertname\",\"op\":\"=\",\"value\":\"PodDown\"}],\"urgent\":false,
   \"group_key\":[\"alertname\"],\"destination_ids\":[],\"policy\":$(jq -c '.templates.line = "{{ .Labels.pod }} on {{ .Labels.cluster }}"' <<<"$P")}")
 jq -c '{t: .policy.templates.line, e: .template_error}' <<<"$R"               # {"t":"{{ .Labels.pod }} on {{ .Labels.cluster }}","e":null}
+for i in 1 2; do curl -s -X PUT $FAM/groups/m1/alerts/q$i -d "{\"labels\":{\"pod\":\"q$i\",\"cluster\":\"prod\"}}" > /dev/null; done
+NOTIFY m1 '{"reason":"new alerts added"}'
 PREVIEW "{\"kind\":\"line\",\"template\":\"{{ .Labels.pod }} on {{ .Labels.cluster }}\",\"route_id\":$(jq .id <<<"$R")}" | jq -c '{valid, sample}'
 # {"valid":true,"sample":"stored_snapshot"}
 ```
@@ -269,6 +300,25 @@ None.
 - `operator_attention: true` — the Russian texts of `texts/ru.json` are reviewed by the operator in the pull request.
 - The Alertmanager functions are re-implemented from their documented behaviour; no code is copied from Alertmanager's
   repository beyond what its licence allows, and none from copyleft projects.
+- The default Root message is laid out from its sections, not by executing the built-in template, so that shortening
+  can trim the Alert lines and the label sections in turn; the built-in templates, whose sources `previewTemplate`
+  returns for an empty `template`, render the same sections for an editor to start from.
+- Route templates render the Root message; Thread replies use the built-in texts, so the Fallback template and the
+  template error state concern Root messages.
+- `updateRoute` resolves a template key left out to the stored template before it writes the row, which leaves the
+  other columns as they were; the dry run runs before the Route is locked, and again under the lock only for a
+  template that changed meanwhile.
+- The sandbox leaves out sprout's `shuffle` (not deterministic) and `set`, `unset`, `merge` and `mergeOverwrite`
+  (they change a dict in place, which can make it contain itself); besides the caps of the Contracts, every
+  function result is bounded in total size, and the calls that multiply their input (`repeat`, `indent`, `replace`,
+  `join`, `wrap`, the regular expression replacements, `print`) are refused before they build too much.
+- When a Destination joins a Route, its Root messages are rendered and the template error state is settled in the
+  Route's transaction; the counter, the log line and the Timeline entry of a failure there come with the next render
+  through the dispatcher.
+- Delivery reads what a message shows through the dispatcher's transaction (`internal/messages/query.sql`), signs the
+  buttons with the Keyring (`keyring.VerifyPrefix` checks a signature cut to 128 bits), stores the key in
+  `deliveries.desired_button_key_id`, and reports a failed Route template to the dispatcher, which records
+  `fallback_template_used`; the Message type of delivery is `messages.Message`, which is why its tests change.
 
 ## Coverage
 

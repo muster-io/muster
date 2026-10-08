@@ -117,6 +117,27 @@ func TestSubKeysAreSeparate(t *testing.T) {
 	if _, err := k.Verify(PurposeCSRF, "k-unknown", msg, b); !errors.Is(err, ErrKeyNotHeld) {
 		t.Errorf("Verify with an unknown key = %v", err)
 	}
+	// A signature cut to its first 16 bytes verifies; a shorter one, a changed byte or an unknown key do not.
+	if ok, err := k.VerifyPrefix(PurposeButtonSignature, id, msg, b[:MinSignaturePrefix]); !ok || err != nil {
+		t.Errorf("VerifyPrefix = %v, %v", ok, err)
+	}
+	changed := bytes.Clone(b[:MinSignaturePrefix])
+	changed[3] ^= 1
+	if ok, _ := k.VerifyPrefix(PurposeButtonSignature, id, msg, changed); ok {
+		t.Error("a changed signature verifies")
+	}
+	if ok, _ := k.VerifyPrefix(PurposeButtonSignature, id, msg, append(bytes.Clone(b), 0)); ok {
+		t.Error("a signature longer than the MAC verifies")
+	}
+	if _, err := k.VerifyPrefix(PurposeButtonSignature, id, msg, b[:8]); err == nil {
+		t.Error("a signature of 8 bytes verifies")
+	}
+	if _, err := k.VerifyPrefix(PurposeButtonSignature, "k-unknown", msg, b); !errors.Is(err, ErrKeyNotHeld) {
+		t.Errorf("VerifyPrefix with an unknown key = %v", err)
+	}
+	if _, err := k.VerifyPrefix(PurposeEncryption, id, msg, b); err == nil {
+		t.Error("the encryption sub-key verifies a prefix")
+	}
 	// The encryption sub-key differs from the material and from both signature sub-keys.
 	enc, err := hkdf.Key(sha256.New, material('a'), nil, hkdfInfo+string(PurposeEncryption), KeySize)
 	if err != nil {

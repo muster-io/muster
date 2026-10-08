@@ -193,8 +193,10 @@ func (r Row) mentionsOf(e groups.Recorded) []string {
 }
 
 // Enqueue is the re-render step of the dispatcher (C-11.FR-1, FR-20; groups.Rerender), in the dispatcher's
-// transaction tx. For each Destination of the Alert Group's Route that is not deleted it creates the delivery when it is
-// missing, renders the Root message and, when what it shows changed, stores it as the next Desired state, due now; the
+// transaction tx. It renders the Root message once per markup of the Route's Destinations, reading through tx, and
+// reports each Route template that failed, whose message is the Fallback template, through r.Fallback (C-12.FR-6).
+// For each Destination of the Alert Group's Route that is not deleted it creates the delivery when it is missing and,
+// when what its Root message shows changed, stores it as the next Desired state, due now; the
 // lifecycle events whose form is a Thread reply queue one, new Alerts within the Thread batching window, or drop it
 // while the Destination is Broken, a Storm holds the delivery or it ended. A delivery created by `created` is a Loud
 // Publication unless a Storm of the Route holds it (C-11.FR-6); the first Publication of an Alert Group that resolves
@@ -263,8 +265,23 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		return s.wake(ctx, q, left > 0)
 	}
 	window := time.Duration(route.ThreadBatchingWindowSeconds) * time.Second
-	how := enqueueing{language: route.Language, created: created, moved: moved, replies: replies, now: now,
-		window: window}
+	types := make([]string, len(dests))
+	for i, d := range dests {
+		types[i] = d.Type
+	}
+	roots, err := s.renderer.Roots(ctx, tx, viewOf(g), markupsOf(types))
+	if err != nil {
+		return fmt.Errorf("render alert group #%d: %w", g.Number, err)
+	}
+	if roots.After != nil {
+		later(roots.After)
+	}
+	for _, f := range roots.Failures {
+		if r.Fallback != nil {
+			r.Fallback(groups.TemplateFailure{Template: f.Template, Detail: f.Detail()})
+		}
+	}
+	how := enqueueing{created: created, moved: moved, replies: replies, now: now, window: window, roots: roots}
 	if st != nil && !g.Urgent {
 		how.heldBy = &st.id
 	}
@@ -275,7 +292,8 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		}
 	}
 	if st != nil {
-		if err := s.renderSummaries(ctx, q, st, route.Name, dests, now); err != nil {
+		if err := s.renderSummaries(ctx, q, st, stormRoute{publicID: route.PublicID, name: route.Name,
+			language: route.Language}, dests, now); err != nil {
 			return err
 		}
 	}
@@ -299,10 +317,10 @@ type reply struct {
 	row   Row
 }
 
-// enqueueing is how a rendering reaches each Destination: the language of the Route, whether the Alert Group was
+// enqueueing is how a rendering reaches each Destination: its Root messages by markup, whether the Alert Group was
 // created or moved, the Storm that holds a new one, its Thread replies, the time and the Thread batching window.
 type enqueueing struct {
-	language       string
+	roots          Roots
 	created, moved bool
 	heldBy         *int64
 	replies        []reply
@@ -347,14 +365,14 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 		}
 		held = false
 	}
-	msg := encode(s.renderer.Render(viewOf(g), d, how.language))
+	msg := encodeRoot(how.roots.Messages[markupOf(d.Type)])
 	if !bytes.Equal(row.DesiredHash, msg.hash) {
 		var received pgtype.Timestamptz
 		if r.ReceivedAt != nil {
 			received = pgtype.Timestamptz{Time: r.ReceivedAt.UTC(), Valid: true}
 		}
 		if state, err = q.SetDesired(ctx, dbgen.SetDesiredParams{OrgID: s.orgID, ID: row.ID, DesiredText: msg.text,
-			DesiredPayload: msg.payload, DesiredHash: msg.hash, ReceivedAt: received,
+			DesiredPayload: msg.payload, DesiredHash: msg.hash, ButtonKeyID: nonEmpty(msg.keyID), ReceivedAt: received,
 			Open:   g.Status != groups.StatusResolved,
 			Firing: deliveryEvent(DeliveryAfterRecovery).loud(g.Status == groups.StatusFiring), Urgent: g.Urgent,
 			Now: now}); err != nil {

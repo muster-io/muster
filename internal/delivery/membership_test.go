@@ -391,7 +391,7 @@ func TestRouteMembership(t *testing.T) {
 	for i, publicID := range []string{"AGAAAAAAAAAA21", "AGAAAAAAAA0022"} {
 		c := final[i]
 		if c.Loudness != groups.Quiet || len(c.Message.Buttons) != 0 ||
-			c.Message.Sections[len(c.Message.Sections)-1] != finalText(publicID) {
+			c.Message.Notices[len(c.Message.Notices)-1] != finalText(publicID) {
 			t.Errorf("final edit %+v", c)
 		}
 	}
@@ -498,7 +498,7 @@ func TestDeleteDestinationDelivery(t *testing.T) {
 		t.Fatalf("before the final edit %+v", wh)
 	}
 	e.round(t)
-	if c := e.callsTo(destWH); callMethods(c) != "update" || c[0].Message.Sections[len(c[0].Message.Sections)-1] !=
+	if c := e.callsTo(destWH); callMethods(c) != "update" || c[0].Message.Notices[len(c[0].Message.Notices)-1] !=
 		finalText("AGAAAAAAAAAA21") {
 		t.Errorf("final edit %+v", c)
 	}
@@ -577,7 +577,7 @@ func TestMoveToDefaultRoute(t *testing.T) {
 		"No longer updated") {
 		t.Errorf("both %+v", mm)
 	}
-	if callMethods(x) != "update" || x[0].Message.Sections[len(x[0].Message.Sections)-1] != finalText("AGAAAAAAAAAA21") ||
+	if callMethods(x) != "update" || x[0].Message.Notices[len(x[0].Message.Notices)-1] != finalText("AGAAAAAAAAAA21") ||
 		e.deliveryOf(groupID, destX).state != "retired" {
 		t.Errorf("left %+v", x)
 	}

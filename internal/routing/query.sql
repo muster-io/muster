@@ -1,28 +1,30 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Copyright The Muster Authors
 
--- ListRoutes lists the Routes that are not deleted in evaluation order, the Default route last, with their active
--- Storm.
+-- ListRoutes lists the Routes that are not deleted in evaluation order, the Default route last, with their template
+-- error and their active Storm.
 -- name: ListRoutes :many
 SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urgent, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
        r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
        r.reminders_enabled, r.reminders_first_interval_seconds, r.reminders_cap_seconds, r.auto_unacknowledge,
-       r.created_at, r.version, s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count
+       r.created_at, r.version, r.template_error_since, r.template_error, s.started_at AS storm_since,
+       s.alert_group_count AS storm_alert_group_count
 FROM routes r
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
 WHERE r.org_id = @org_id AND r.deleted_at IS NULL
 ORDER BY r.is_default, r.position, r.id;
 
--- GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, and its active Storm.
+-- GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, its template error and its
+-- active Storm.
 -- name: GetRoute :one
 SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urgent, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
        r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
        r.reminders_enabled, r.reminders_first_interval_seconds, r.reminders_cap_seconds, r.auto_unacknowledge,
-       r.created_at, r.version,
+       r.created_at, r.version, r.template_error_since, r.template_error,
        (SELECT count(*)
         FROM routes o
         WHERE o.org_id = @org_id AND o.deleted_at IS NULL

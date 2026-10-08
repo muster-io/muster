@@ -49,6 +49,8 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_route_info` | gauge | route, name | C-08 | no | Always 1, one series per Route that is not deleted, the Default route included; the labels carry its public_id and name. |
 | `muster_short_lived_rows_pruned_total` | counter | table | C-02 | no | Short-lived rows that could no longer be used and that the Leader deleted, by table. |
 | `muster_storm_active` | gauge | route | C-11 | yes | 1 while the Route has an active Storm, 0 otherwise, per Route that is not deleted; set by the Leader. |
+| `muster_template_errors_total` | counter | route, destination, template | C-12 | no | Templates that failed while rendering, by the Route or the Destination that owns the template (the other label empty) and the kind of template; a message falls back to the Fallback template, an outgoing webhook request is not sent. |
+| `muster_template_render_duration_seconds` | histogram | template | C-12 | no | Time to render a template in the sandbox, by the kind of template; a Root message is observed as a whole, its built-in default included. Buckets (le): 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5. |
 
 ## Label values
 
@@ -102,3 +104,7 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_route_info` | `name` | info: the name of the Route |
 | `muster_short_lived_rows_pruned_total` | `table` | `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests` — the short-lived table the rows were deleted from |
 | `muster_storm_active` | `route` | entity: the public_id of the route |
+| `muster_template_errors_total` | `route` | entity: the public_id of the route |
+| `muster_template_errors_total` | `destination` | entity: the public_id of the destination |
+| `muster_template_errors_total` | `template` | `root_message`, `line`, `ack_timeout_notice`, `link_rule`, `webhook_request` — the kind of template |
+| `muster_template_render_duration_seconds` | `template` | `root_message`, `line`, `ack_timeout_notice`, `link_rule`, `webhook_request` — the kind of template |

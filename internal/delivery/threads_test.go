@@ -4,6 +4,7 @@
 package delivery_test
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/messages"
 )
 
 // alertsAdded is the alerts_added event of new Alerts joining an Alert Group in a status.
@@ -80,8 +82,8 @@ func TestThreadBatching(t *testing.T) {
 	e.business.Set(business0.Add(60 * time.Second))
 	e.round(t)
 	r := e.replies()
-	if len(r) != 2 || len(r[1].Message.Sections) != 12 || r[1].Message.Sections[11] != "…and 2 more — open in Muster" ||
-		r[1].Message.Sections[1] != "fp01" {
+	if len(r) != 2 || len(r[1].Message.Lines) != 12 || r[1].Message.Lines[11] != "…and 2 more — open in Muster" ||
+		r[1].Message.Lines[1] != "fp01" {
 		t.Fatalf("batch %+v", r)
 	}
 	// Alerts keep arriving: the next ones wait for the next window.
@@ -259,11 +261,15 @@ func TestReplyOutcomes(t *testing.T) {
 	}
 }
 
-// customRenderer renders replies as its name, to show that the worker uses the Renderer it is given.
-type customRenderer struct{ delivery.MinimalRenderer }
+// customRenderer renders replies as its name, to show that the worker uses the Renderer it is given, or fails.
+type customRenderer struct {
+	stubRenderer
+	err error
+}
 
-func (customRenderer) RenderReply(r delivery.ReplyView, _ delivery.GroupView, _ delivery.Destination) delivery.Message {
-	return delivery.Message{Sections: []string{"custom " + string(r.Event)}}
+func (c customRenderer) Reply(_ context.Context, _ messages.DBTX, r delivery.ReplyView, _ delivery.GroupView) (
+	delivery.Message, error) {
+	return delivery.Message{Lines: []string{"custom " + string(r.Event)}}, c.err
 }
 
 func TestReplyRenderer(t *testing.T) {
@@ -274,5 +280,13 @@ func TestReplyRenderer(t *testing.T) {
 	e.round(t)
 	if r := e.replies(); len(r) != 1 || r[0].Message.Text() != "custom takeover" {
 		t.Errorf("replies %+v", r)
+	}
+	// A reply that cannot be rendered is not sent; its lease runs out and it is tried again.
+	e.w.Renderer = customRenderer{err: errBoom}
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: 3,
+		Event: groups.EventTakeover, Loudness: groups.Loud})
+	e.round(t)
+	if r := e.replies(); len(r) != 1 || !strings.Contains(e.log.String(), "render the thread reply") {
+		t.Errorf("replies %+v, log %s", r, e.log)
 	}
 }

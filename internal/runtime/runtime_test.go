@@ -43,6 +43,7 @@ import (
 	"github.com/muster-io/muster/internal/leader"
 	ldb "github.com/muster-io/muster/internal/leader/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/oidc"
 	oidcdb "github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/organization"
@@ -432,6 +433,9 @@ func (fakeTimersStore) Next(_ context.Context, _ db.Lease, _ int64, _ []string, 
 
 // DeliveryStore has no database: every claim fails, and the delivery worker backs off.
 func (f *fakeDB) DeliveryStore() *delivery.Store { return delivery.NewStore(noDB{}, noDB{}) }
+
+// MessagesDB has no database: every preview fails.
+func (f *fakeDB) MessagesDB() messages.DBTX { return noDB{} }
 
 // DestinationsStore has no Destinations.
 func (f *fakeDB) DestinationsStore() destinations.Store { return fakeDestinationsStore{} }

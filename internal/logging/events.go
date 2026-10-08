@@ -617,3 +617,20 @@ func validate(infos []EventInfo) error {
 	}
 	return errors.Join(errs...)
 }
+
+// FallbackTemplateUsed is logged when a template of a Route failed while rendering a message and the Fallback
+// template stood in for it (C-12.FR-6, ADR-0012).
+var FallbackTemplateUsed = newEvent("fallback_template_used", LevelWarn, "C-12",
+	"A template of a Route failed while rendering a message, so the message used the Fallback template — every label "+
+		"under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the "+
+		"Alert Group, template the kind of template and error what failed, with its line and column. The Route shows "+
+		"a template error and MusterTemplateError fires until the template renders again. Logged once the change "+
+		"committed.",
+	"route", "group", "template", "error")
+
+// TemplateRecovered is logged when a template of a Route that kept failing rendered again (C-12.FR-6).
+var TemplateRecovered = newEvent("template_recovered", LevelInfo, "C-12",
+	"A template of a Route that kept failing rendered again: route is the public_id of the Route and template the kind "+
+		"of template. The Route's template error is cleared and MusterTemplateError resolves. Logged once the change "+
+		"committed.",
+	"route", "template")

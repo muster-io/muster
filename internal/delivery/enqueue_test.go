@@ -193,34 +193,3 @@ func TestEnqueue(t *testing.T) {
 		delete(e.db.fail, q)
 	}
 }
-
-// TestMinimalRenderer is the stand-in of S-036: status, #N and title with the buttons of the status, in English and
-// Russian; a resolved Root message has no buttons and a link; a Thread reply lists at most its limit of new Alerts.
-func TestMinimalRenderer(t *testing.T) {
-	r := delivery.MinimalRenderer{}
-	m := r.Render(delivery.GroupView{Number: 3, Title: "disk", Status: groups.StatusSnoozed, Urgent: true},
-		delivery.Destination{}, "ru")
-	if m.Text() != "#3 disk\nОтложена · Срочная" || len(m.Buttons) != 3 || m.Buttons[1].Label != "Отменить откладывание" ||
-		m.Colour == "" {
-		t.Errorf("ru %+v", m)
-	}
-	m = r.Render(delivery.GroupView{Number: 3, Title: "disk", Status: groups.StatusResolved}, delivery.Destination{}, "xx")
-	if len(m.Buttons) != 0 || !strings.HasSuffix(m.Text(), "Open in Muster") {
-		t.Errorf("resolved %+v", m)
-	}
-	var fps []string
-	for i := range 12 {
-		fps = append(fps, fmt.Sprintf("fp%02d", i))
-	}
-	m = r.RenderReply(delivery.ReplyView{Event: groups.EventAlertsAdded, Fingerprints: fps, Language: "en",
-		Listed: delivery.ThreadAlertsListed}, delivery.GroupView{Number: 3, Status: groups.StatusFiring},
-		delivery.Destination{})
-	if len(m.Sections) != 12 || m.Sections[10] != "fp09" || m.Sections[11] != "…and 2 more — open in Muster" {
-		t.Errorf("reply %q", m.Sections)
-	}
-	m = r.RenderReply(delivery.ReplyView{Event: groups.EventTakeover, Language: "ru", Listed: 10},
-		delivery.GroupView{Number: 3}, delivery.Destination{})
-	if m.Text() != "#3 takeover" {
-		t.Errorf("takeover %q", m.Text())
-	}
-}

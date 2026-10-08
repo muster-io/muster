@@ -37,9 +37,6 @@ const TimerStormCalmCheck = "storm_calm_check"
 // hintRoute is the live-update hint of a Route, whose Storm state changed.
 const hintRoute = "route"
 
-// stormColour is the colour of a Storm summary.
-const stormColour = "#d93025"
-
 // stormQueries are the queries of Storms.
 type stormQueries interface {
 	CountRecentGroups(ctx context.Context, arg dbgen.CountRecentGroupsParams) (int64, error)
@@ -124,11 +121,16 @@ func (s *Service) joinStorm(ctx context.Context, q queries, g *groups.Group, rou
 	return st, nil
 }
 
+// stormRoute is the Route of a Storm as its summary names it, in its language.
+type stormRoute struct {
+	publicID, name, language string
+}
+
 // renderSummaries sets the Desired state of the Storm summary of st in each Destination of its Route, creating the
 // summaries a new Storm needs; an update of what it shows is a Quiet edit.
-func (s *Service) renderSummaries(ctx context.Context, q queries, st *storm, routeName string,
+func (s *Service) renderSummaries(ctx context.Context, q queries, st *storm, route stormRoute,
 	dests []dbgen.ListRouteDestinationsRow, now time.Time) error {
-	msg := encode(activeSummary(routeName, st.count, st.urgent, st.started))
+	msg := encode(s.renderer.Storm(route.publicID, route.name, route.language, st.count, st.urgent))
 	for _, d := range dests {
 		row, err := q.EnsureStormSummary(ctx, dbgen.EnsureStormSummaryParams{OrgID: s.orgID, DestinationID: d.ID,
 			StormID: pgtype.Int8{Int64: st.id, Valid: true}, Now: now})
@@ -152,24 +154,6 @@ func (s *Service) setSummary(ctx context.Context, q queries, id int64, hash []by
 		return fmt.Errorf("set the desired state of the storm summary %d: %w", id, err)
 	}
 	return nil
-}
-
-// activeSummary is the Storm summary of an active Storm.
-func activeSummary(route string, count, urgent int64, since time.Time) Message {
-	return Message{Sections: []string{
-		fmt.Sprintf("Storm on Route %s: %d new Alert Groups since %s, %d Urgent", route, count,
-			since.UTC().Format(noteClock), urgent),
-		"Only Urgent Alert Groups are posted one by one until it calms down.",
-	}, Buttons: []Button{}, Colour: stormColour}
-}
-
-// finalSummary is the final state of the Storm summary of a Storm that ended.
-func finalSummary(route string, open, count int64, from, to time.Time) Message {
-	return Message{Sections: []string{
-		fmt.Sprintf("Storm over: %d Alert Groups still open", open),
-		fmt.Sprintf("Route %s: %d new Alert Groups from %s to %s", route, count, from.UTC().Format(noteClock),
-			to.UTC().Format(noteClock)),
-	}, Buttons: []Button{}, Colour: stormColour}
 }
 
 // CheckStormCalm is the handler of the timers kind storm_calm_check, in the transaction tx of the timer (C-11.FR-6):
@@ -226,7 +210,7 @@ func (s *Service) endStorm(ctx context.Context, q queries, st dbgen.LockStormRow
 	if err != nil {
 		return nil, fmt.Errorf("list the summaries of the storm %d: %w", st.ID, err)
 	}
-	msg := encode(finalSummary(st.RouteName, open, st.AlertGroupCount, st.StartedAt, now))
+	msg := encode(s.renderer.StormOver(st.RoutePublicID, st.RouteLanguage, open))
 	if err := q.QuietStormSummaries(ctx, dbgen.QuietStormSummariesParams{OrgID: s.orgID, StormID: st.ID,
 		Now: now}); err != nil {
 		return nil, fmt.Errorf("make the unpublished summaries of the storm %d quiet: %w", st.ID, err)

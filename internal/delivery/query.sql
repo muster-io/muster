@@ -42,11 +42,11 @@ ON CONFLICT (alert_group_id, destination_id) WHERE alert_group_id IS NOT NULL
 DO UPDATE SET updated_at = deliveries.updated_at
 RETURNING id, desired_version, desired_hash, thread_batch_until, state, held_by_storm_id, (xmax = 0)::boolean AS inserted;
 
--- SetDesired stores a new Desired state: the next version, its text, payload and hash, the receipt time of the oldest
--- Snapshot it carries that is not delivered yet, and makes the delivery due now, and returns the state it leaves. A
--- delivery deleted in the messenger or retired stays so; a withheld one stays so unless its Alert Group is open again
--- (@open), when it is published after all, Loud when it is @firing (C-11.FR-19); a Not delivered one starts a new
--- delivery (C-11.FR-10). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
+-- SetDesired stores a new Desired state: the next version, its text, payload and hash, the key that signed its
+-- buttons, the receipt time of the oldest Snapshot it carries that is not delivered yet, and makes the delivery due
+-- now, and returns the state it leaves. A delivery deleted in the messenger or retired stays so; a withheld one stays
+-- so unless its Alert Group is open again (@open), when it is published after all, Loud when it is @firing
+-- (C-11.FR-19); a Not delivered one starts a new delivery (C-11.FR-10). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
 -- before it was made loses the note and takes the loudness of the recovery rule, Loud when @firing (C-11.FR-11).
 -- name: SetDesired :one
 UPDATE deliveries
@@ -54,6 +54,7 @@ SET desired_version     = desired_version + 1,
     desired_text        = @desired_text::text,
     desired_payload     = @desired_payload,
     desired_hash        = @desired_hash,
+    desired_button_key_id = sqlc.narg('button_key_id')::text,
     desired_received_at = coalesce(desired_received_at, sqlc.narg('received_at')::timestamptz),
     state               = CASE
                               WHEN state IN ('deleted_in_messenger', 'retired') THEN state
@@ -793,7 +794,7 @@ WHERE org_id = @org_id AND id = @id AND held_by_storm_id IS NOT NULL;
 -- LockStorm reads, and locks, a Storm that has not ended, with the public_id, name and Storm threshold of its Route.
 -- name: LockStorm :one
 SELECT s.id, s.route_id, s.started_at, s.calm_since, s.alert_group_count, s.urgent_count, r.public_id AS route_public_id,
-       r.name AS route_name, r.storm_threshold
+       r.name AS route_name, r.language AS route_language, r.storm_threshold
 FROM storms s
 JOIN routes r ON r.org_id = s.org_id AND r.id = s.route_id
 WHERE s.org_id = @org_id AND s.id = @id AND s.ended_at IS NULL
