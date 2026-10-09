@@ -172,6 +172,59 @@ func (q *Queries) InsertMattermostDestination(ctx context.Context, arg InsertMat
 	return id, err
 }
 
+const insertTelegramDestination = `-- name: InsertTelegramDestination :one
+INSERT INTO destinations (
+    org_id, public_id, type, name, connection_id, telegram_channel_id, telegram_channel_chat_id,
+    telegram_discussion_chat_id, telegram_channel_title, telegram_discussion_group_title, mentions, limiter_limit,
+    limiter_per_seconds, health, created_at, updated_at
+)
+VALUES (
+    $1, $2, 'telegram', $3, $4, $5, $6, $7,
+    $8, $9, $10, $11, $12, 'healthy',
+    $13::timestamptz, $13::timestamptz
+)
+RETURNING id
+`
+
+type InsertTelegramDestinationParams struct {
+	OrgID                int64
+	PublicID             string
+	Name                 string
+	ConnectionID         pgtype.Int8
+	ChannelID            pgtype.Text
+	ChannelChatID        pgtype.Int8
+	DiscussionChatID     pgtype.Int8
+	ChannelTitle         pgtype.Text
+	DiscussionGroupTitle pgtype.Text
+	Mentions             []byte
+	LimiterLimit         int64
+	LimiterPerSeconds    int64
+	Now                  time.Time
+}
+
+// InsertTelegramDestination creates a healthy Telegram Destination with the channel as entered and what its
+// Destination check found: the numeric ids and the titles of the channel and of its discussion group.
+func (q *Queries) InsertTelegramDestination(ctx context.Context, arg InsertTelegramDestinationParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertTelegramDestination,
+		arg.OrgID,
+		arg.PublicID,
+		arg.Name,
+		arg.ConnectionID,
+		arg.ChannelID,
+		arg.ChannelChatID,
+		arg.DiscussionChatID,
+		arg.ChannelTitle,
+		arg.DiscussionGroupTitle,
+		arg.Mentions,
+		arg.LimiterLimit,
+		arg.LimiterPerSeconds,
+		arg.Now,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertWebhookDestination = `-- name: InsertWebhookDestination :one
 INSERT INTO destinations (
     org_id, public_id, type, name, webhook_mode, webhook_events_config, proxy, proxy_password_ciphertext,
@@ -544,6 +597,27 @@ func (q *Queries) LockMattermostConnection(ctx context.Context, arg LockMattermo
 	return id, err
 }
 
+const lockTelegramConnection = `-- name: LockTelegramConnection :one
+SELECT id
+FROM connections
+WHERE org_id = $1 AND id = $2 AND type = 'telegram' AND deleted_at IS NULL
+FOR SHARE
+`
+
+type LockTelegramConnectionParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// LockTelegramConnection takes the Telegram Connection that is not deleted in share mode for the save of one of its
+// Destinations, as LockMattermostConnection does.
+func (q *Queries) LockTelegramConnection(ctx context.Context, arg LockTelegramConnectionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockTelegramConnection, arg.OrgID, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const markDestinationDeleted = `-- name: MarkDestinationDeleted :exec
 UPDATE destinations
 SET deleted_at = $1, updated_at = $1, version = version + 1
@@ -596,6 +670,53 @@ func (q *Queries) UpdateMattermostDestination(ctx context.Context, arg UpdateMat
 		arg.ChannelID,
 		arg.TeamName,
 		arg.ChannelName,
+		arg.Mentions,
+		arg.LimiterLimit,
+		arg.LimiterPerSeconds,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
+const updateTelegramDestination = `-- name: UpdateTelegramDestination :exec
+UPDATE destinations
+SET name = $1, connection_id = $2, telegram_channel_id = $3,
+    telegram_channel_chat_id = $4, telegram_discussion_chat_id = $5,
+    telegram_channel_title = $6, telegram_discussion_group_title = $7,
+    mentions = $8, limiter_limit = $9, limiter_per_seconds = $10,
+    updated_at = $11::timestamptz, version = version + 1
+WHERE org_id = $12 AND id = $13 AND type = 'telegram'
+`
+
+type UpdateTelegramDestinationParams struct {
+	Name                 string
+	ConnectionID         pgtype.Int8
+	ChannelID            pgtype.Text
+	ChannelChatID        pgtype.Int8
+	DiscussionChatID     pgtype.Int8
+	ChannelTitle         pgtype.Text
+	DiscussionGroupTitle pgtype.Text
+	Mentions             []byte
+	LimiterLimit         int64
+	LimiterPerSeconds    int64
+	Now                  time.Time
+	OrgID                int64
+	ID                   int64
+}
+
+// UpdateTelegramDestination replaces the configured fields of a Telegram Destination and what its Destination check
+// found; its health is left alone.
+func (q *Queries) UpdateTelegramDestination(ctx context.Context, arg UpdateTelegramDestinationParams) error {
+	_, err := q.db.Exec(ctx, updateTelegramDestination,
+		arg.Name,
+		arg.ConnectionID,
+		arg.ChannelID,
+		arg.ChannelChatID,
+		arg.DiscussionChatID,
+		arg.ChannelTitle,
+		arg.DiscussionGroupTitle,
 		arg.Mentions,
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,

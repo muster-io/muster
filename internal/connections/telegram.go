@@ -18,6 +18,7 @@ import (
 	"github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/outbound"
@@ -319,4 +320,98 @@ func int8Of(v pgtype.Int8) *int64 {
 		return nil
 	}
 	return &v.Int64
+}
+
+// unhook removes the webhook of the deleted Telegram Connection row, as it was saved before its deletion — its bot and
+// base URL — when it was in the webhook update mode, so that Telegram stops sending its updates to Muster. It is a
+// best effort after the deletion committed, in the interactive class, bounded by telegram.CallTimeout and not ended by
+// a client that stops waiting: it never fails the deletion, and its outcome is logged with telegram_webhook_deleted
+// or telegram_webhook_delete_failed, the error masked of the bot token. The client of the Connection is dropped.
+func (s *Service) unhook(ctx context.Context, row dbgen.GetConnectionRow) {
+	s.mu.Lock()
+	delete(s.tgClients, row.ID)
+	delete(s.clients, row.ID)
+	s.mu.Unlock()
+	if row.Type != TypeTelegram || row.TelegramUpdateMode.String != ModeWebhook {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), telegram.CallTimeout)
+	defer cancel()
+	c, err := s.telegramClient(row)
+	detail := ""
+	switch {
+	case err != nil:
+		detail = err.Error()
+	default:
+		if r := c.DeleteWebhook(ctx, outbound.ClassInteractive); !r.OK() {
+			detail = string(r.Outcome.Error)
+		}
+	}
+	if detail != "" {
+		s.cfg.Log.Log(ctx, logging.TelegramWebhookDeleteFailed, logging.F("connection", row.PublicID),
+			logging.F("error", detail))
+		return
+	}
+	s.cfg.Log.Log(ctx, logging.TelegramWebhookDeleted, logging.F("connection", row.PublicID))
+}
+
+// TelegramTarget is where the Telegram Destination destinationID sends, for the adapter: its channel, the ids of the
+// channel and of its discussion group that its Destination check learned, and the client of its Connection, kept until
+// the Connection changes. A deleted Destination still has one, for its final edit. A Destination that is unknown, not a
+// Telegram one, or whose Connection is deleted is telegram.ErrNoTarget.
+func (s *Service) TelegramTarget(ctx context.Context, destinationID int64) (telegram.Target, error) {
+	r, err := s.cfg.Store.GetTelegramDestinationTarget(ctx, dbgen.GetTelegramDestinationTargetParams{
+		OrgID: s.cfg.OrgID, DestinationID: destinationID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return telegram.Target{}, telegram.ErrNoTarget
+	}
+	if err != nil {
+		return telegram.Target{}, fmt.Errorf("read the connection of the destination %d: %w", destinationID, err)
+	}
+	row := dbgen.GetConnectionRow{ID: r.ID, PublicID: r.PublicID, Type: r.Type, Name: r.Name,
+		TelegramBotApiBaseUrl: r.TelegramBotApiBaseUrl, BotTokenCiphertext: r.BotTokenCiphertext,
+		BotTokenKeyID: r.BotTokenKeyID, BotTokenUpdatedAt: r.BotTokenUpdatedAt, Proxy: r.Proxy,
+		ProxyPasswordCiphertext: r.ProxyPasswordCiphertext, ProxyPasswordKeyID: r.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt, Version: r.Version}
+	c, err := s.cachedTelegramClient(r.ID, r.Version, func() (*telegram.Client, error) { return s.telegramClient(row) })
+	if errors.Is(err, errNotTelegram) {
+		return telegram.Target{}, telegram.ErrNoTarget
+	}
+	if err != nil {
+		return telegram.Target{}, err
+	}
+	return telegram.Target{Client: c, ConnectionID: r.ID, Channel: r.TelegramChannelID.String,
+		ChannelID: r.TelegramChannelChatID.Int64, GroupID: r.TelegramDiscussionChatID.Int64}, nil
+}
+
+// CheckTelegramChannel runs the Destination check of a Telegram Destination being saved or checked, for the
+// Destination write path (C-14.FR-2, FR-14): through the Telegram Connection that the check names, on the interactive
+// path, limited by the Destination when it exists and by the Connection otherwise. A Connection that is missing,
+// deleted or not a Telegram one is destinations.ErrUnknownConnection.
+func (s *Service) CheckTelegramChannel(ctx context.Context, in destinations.TelegramChannelCheck) (
+	destinations.TelegramChannelChecked, error) {
+	row, err := s.row(ctx, s.cfg.Store, in.Connection)
+	if errors.Is(err, ErrNotFound) || (err == nil && row.Type != TypeTelegram) {
+		return destinations.TelegramChannelChecked{}, destinations.ErrUnknownConnection
+	}
+	if err != nil {
+		return destinations.TelegramChannelChecked{}, err
+	}
+	c, err := s.cachedTelegramClient(row.ID, row.Version, func() (*telegram.Client, error) {
+		return s.telegramClient(row)
+	})
+	if err != nil {
+		return destinations.TelegramChannelChecked{}, err
+	}
+	conn := row.ID
+	subject := delivery.Subject{Connection: &conn}
+	if in.Destination != nil {
+		subject = delivery.Subject{Destination: &delivery.Destination{ID: *in.Destination, Type: TypeTelegram,
+			Connection: &conn}}
+	}
+	res, err := telegram.CheckDestination(ctx, c, telegram.Interactive(s.cfg.Interactive, subject), in.ChannelID)
+	if err != nil {
+		return destinations.TelegramChannelChecked{}, err
+	}
+	return destinations.TelegramChannelChecked{ConnectionID: row.ID, Check: res}, nil
 }

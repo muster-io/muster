@@ -22,6 +22,7 @@ files_touched:
   - internal/connections/query.sql
   - internal/connections/telegram.go
   - internal/connections/telegram_test.go
+  - internal/destinations/delete.go
   - internal/destinations/query.sql
   - internal/destinations/write.go
   - internal/destinations/write_test.go
@@ -32,6 +33,9 @@ files_touched:
   - internal/fakes/faketelegram/faketelegram.go
   - internal/fakes/faketelegram/faketelegram_test.go
   - internal/logging/events.go
+  - internal/mentions/mentions.go
+  - internal/mentions/mentions_test.go
+  - internal/mentions/query.sql
   - internal/runtime/runtime.go
   - internal/runtime/runtime_test.go
   - internal/telegram/adapter.go
@@ -42,7 +46,7 @@ files_touched:
   - internal/telegram/destcheck_test.go
   - internal/telegram/layout.go
   - internal/telegram/layout_test.go
-  - test/e2e/harness.go
+  - test/e2e/smoke_test.go
   - test/e2e/telegram_test.go
 acceptance:
   - "[C-14.FR-2, C-14.FR-14, C-14.AC-13, C-11.FR-18] `createDestination` of type `telegram` takes only the Connection and the channel; the Destination check finds the discussion group through `getChat` (`linked_chat_id`) and the Destination shows it read-only; a channel without a linked group is refused with \"Comments are not enabled for this channel. Enable comments in the channel settings in Telegram; this creates its discussion group.\", and a group where the bot is not an admin with \"The bot is not an admin of the discussion group {group}. Make the bot an admin there, allowed to post messages.\""
@@ -250,7 +254,7 @@ grep -c "dev-telegram-token" dev.log                                         # 0
 psql "$MUSTER_DATABASE_URL" -Atc "SELECT count(*) FROM delivery_events WHERE error LIKE '%dev-telegram-token%'"   # 0
 
 # C-02.FR-14
-./bin/muster dev doctor | grep '^destination alerts'                        # destination alerts: ok
+./bin/muster dev doctor | grep 'destination alerts'                         # OK   destination alerts: ok
 
 # deleteWebhook on delete: a second Connection in the webhook mode, deleted
 W=$(curl -s "${H[@]}" $API/connections -d '{"type":"telegram","name":"hooked","bot_token":"777020:hook-token",
@@ -294,6 +298,12 @@ and see the post edited with its buttons kept. Record the bot-wide rate (P-28) i
   handler, and S-067 replaces the row lock with an advisory lock before its presses run.
 - Split from the former S-042 together with S-066 and S-067 before its implementation, because the completed contract
   touched about 63 files.
+- Corrected in the implementation: `internal/destinations/delete.go` holds `WriterConfig`, which takes the Telegram
+  checker; `internal/mentions` reads the Telegram user id of an Account link (`account_links.external_id`) beside its
+  username, since a `tg://user` link names the user by id; `test/e2e/smoke_test.go` used `sendMessage` as the
+  example of a method the fake does not implement, which it now does; `test/e2e/harness.go` needed no change, because
+  the in-process harness already exposes the fake Telegram server; and `muster doctor` prints its lines with the `OK`
+  column, so the Verification greps for `destination alerts` anywhere in the line.
 
 ## Coverage
 

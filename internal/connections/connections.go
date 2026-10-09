@@ -228,6 +228,8 @@ type Queries interface {
 	LockDemo(ctx context.Context, key int64) error
 	GetDestinationTarget(ctx context.Context, arg dbgen.GetDestinationTargetParams) (dbgen.GetDestinationTargetRow,
 		error)
+	GetTelegramDestinationTarget(ctx context.Context, arg dbgen.GetTelegramDestinationTargetParams) (
+		dbgen.GetTelegramDestinationTargetRow, error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the pool or transaction the queries run in, which the Abandon hook writes through.
@@ -678,13 +680,15 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 // Delete deletes the Connection publicID (C-13.FR-6); a non-nil version must be its current one. While a Destination
 // that is not deleted uses it the deletion is ErrInUse. Otherwise, in one transaction, it is marked deleted and its
 // secrets are wiped, delivery abandons the final edits still pending for its deleted Destinations (C-11.FR-14), and
-// the Audit log entry connection.deleted is written.
+// the Audit log entry connection.deleted is written. A Telegram Connection in the webhook update mode then has its
+// webhook removed as a best effort (unhook).
 func (s *Service) Delete(ctx context.Context, r Requester, publicID string, version *int64) error {
 	id, err := publicid.Parse(publicid.Connection, publicID)
 	if err != nil {
 		return ErrNotFound
 	}
 	var done func(context.Context)
+	var deleted dbgen.GetConnectionRow
 	err = s.cfg.Store.InTx(ctx, func(q Queries) error {
 		lock, err := q.LockConnection(ctx, dbgen.LockConnectionParams{OrgID: s.cfg.OrgID, PublicID: id})
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -708,6 +712,7 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		if err != nil {
 			return err
 		}
+		deleted = row
 		c, err := connectionOf(row)
 		if err != nil {
 			return err
@@ -730,6 +735,7 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 	if done != nil {
 		done(ctx)
 	}
+	s.unhook(ctx, deleted)
 	return nil
 }
 

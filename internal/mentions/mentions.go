@@ -234,13 +234,15 @@ type Target struct {
 	User     *User  `json:"user,omitempty"`
 }
 
-// User is a User as a Mention names them: public_id, display name, login, and the username of their Account link in
-// the Destination's identity space, empty without one.
+// User is a User as a Mention names them: public_id, display name, login, and the username and the messenger's user
+// id of their Account link in the Destination's identity space, empty without one; Telegram mentions a user by that
+// id (C-12.FR-8).
 type User struct {
-	PublicID string `json:"id"`
-	Name     string `json:"name"`
-	Login    string `json:"login"`
-	Username string `json:"username,omitempty"`
+	PublicID   string `json:"id"`
+	Name       string `json:"name"`
+	Login      string `json:"login"`
+	Username   string `json:"username,omitempty"`
+	ExternalID string `json:"external_id,omitempty"`
 }
 
 // Display is how the User is shown: the messenger username of their Account link, otherwise the display name as
@@ -308,7 +310,8 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) ([
 			return nil, fmt.Errorf("read the users of the mentions: %w", err)
 		}
 		for _, u := range rows {
-			users[u.PublicID] = User{PublicID: u.PublicID, Name: u.Name, Login: u.Login, Username: u.Username}
+			users[u.PublicID] = User{PublicID: u.PublicID, Name: u.Name, Login: u.Login, Username: u.Username,
+				ExternalID: u.ExternalID}
 			byID[u.ID] = u.PublicID
 		}
 	}

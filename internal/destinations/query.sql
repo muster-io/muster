@@ -114,6 +114,40 @@ SET name = @name, connection_id = @connection_id, mattermost_team_id = @team_id,
     updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
+-- LockTelegramConnection takes the Telegram Connection that is not deleted in share mode for the save of one of its
+-- Destinations, as LockMattermostConnection does.
+-- name: LockTelegramConnection :one
+SELECT id
+FROM connections
+WHERE org_id = @org_id AND id = @id AND type = 'telegram' AND deleted_at IS NULL
+FOR SHARE;
+
+-- InsertTelegramDestination creates a healthy Telegram Destination with the channel as entered and what its
+-- Destination check found: the numeric ids and the titles of the channel and of its discussion group.
+-- name: InsertTelegramDestination :one
+INSERT INTO destinations (
+    org_id, public_id, type, name, connection_id, telegram_channel_id, telegram_channel_chat_id,
+    telegram_discussion_chat_id, telegram_channel_title, telegram_discussion_group_title, mentions, limiter_limit,
+    limiter_per_seconds, health, created_at, updated_at
+)
+VALUES (
+    @org_id, @public_id, 'telegram', @name, @connection_id, @channel_id, @channel_chat_id, @discussion_chat_id,
+    @channel_title, @discussion_group_title, @mentions, @limiter_limit, @limiter_per_seconds, 'healthy',
+    @now::timestamptz, @now::timestamptz
+)
+RETURNING id;
+
+-- UpdateTelegramDestination replaces the configured fields of a Telegram Destination and what its Destination check
+-- found; its health is left alone.
+-- name: UpdateTelegramDestination :exec
+UPDATE destinations
+SET name = @name, connection_id = @connection_id, telegram_channel_id = @channel_id,
+    telegram_channel_chat_id = @channel_chat_id, telegram_discussion_chat_id = @discussion_chat_id,
+    telegram_channel_title = @channel_title, telegram_discussion_group_title = @discussion_group_title,
+    mentions = @mentions, limiter_limit = @limiter_limit, limiter_per_seconds = @limiter_per_seconds,
+    updated_at = @now::timestamptz, version = version + 1
+WHERE org_id = @org_id AND id = @id AND type = 'telegram';
+
 -- InsertWebhookDestination creates a healthy outgoing webhook Destination with its request, its proxy and the
 -- password of the proxy, and its first Signing secret (C-15.FR-1, FR-5).
 -- name: InsertWebhookDestination :one

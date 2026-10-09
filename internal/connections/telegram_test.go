@@ -9,13 +9,19 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/connections"
+	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/telegram"
 )
@@ -419,6 +425,203 @@ func TestTelegramDoctor(t *testing.T) {
 	found, err := noKeys.Doctor(t.Context(), e.store, 0)
 	if err != nil || len(found) != 2 || !strings.Contains(found[0].Message, "master keys") {
 		t.Fatalf("without keys = %+v, %v", found, err)
+	}
+}
+
+// TestTelegramDestinationsDoctor is C-02.FR-14: muster doctor prints one line per Telegram Destination with the result
+// of its Destination check: ok, the failing step with its message, or what failed of its Connection.
+func TestTelegramDestinationsDoctor(t *testing.T) {
+	e := newTGEnv(t)
+	c, err := e.svc.Create(t.Context(), by, e.input("tg", connections.ModeLongPolling))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := e.input("revoked", connections.ModeLongPolling)
+	in.BotToken = keyring.Replace(tgOtherToken)
+	revoked, err := e.svc.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = e.tg.SetConfig(nil, nil, &[]string{tgOtherToken})
+	e.store.tgTargets[7] = memTGTarget{connection: c.ID, channel: "@muster_alerts"}
+	e.store.tgTargets[8] = memTGTarget{connection: c.ID, channel: "@no_comments"}
+	e.store.tgTargets[9] = memTGTarget{connection: revoked.ID, channel: "@muster_alerts"}
+	e.store.tgTargets[10] = memTGTarget{connection: 999, channel: "@muster_alerts"}
+	got := findings(t, e.svc, e.store)
+	want := "connection tg: ok\nconnection revoked: get_me: " + telegram.MessageTokenInvalid + "\n" +
+		"destination tg-dest-7: ok\n" +
+		"destination tg-dest-8: discussion_group: " + telegram.MessageNoComments + "\n" +
+		"destination tg-dest-9: its Connection failed its check: get_me: " + telegram.MessageTokenInvalid + "\n" +
+		"destination tg-dest-10: its Connection is deleted"
+	if got != want {
+		t.Fatalf("findings:\n%s", got)
+	}
+	for _, r := range e.tg.Requests() {
+		if strings.Contains(r.Path, "/sendMessage") || strings.Contains(r.Path, "/editMessageText") {
+			t.Fatalf("the doctor sent a message: %s", r.Path)
+		}
+	}
+	// A check whose time is up names the step that ran out of it.
+	if err := e.tg.SetFault(fakeserver.Fault{Path: "/bot" + tgToken + "/getChatMember", DelayMs: 400}); err != nil {
+		t.Fatal(err)
+	}
+	found, err := e.svc.Doctor(t.Context(), e.store, 300*time.Millisecond)
+	if err != nil || found[2].OK() || !strings.HasPrefix(found[2].Message, "bot_rights_channel: ") {
+		t.Fatalf("slow = %+v %v", found, err)
+	}
+}
+
+// TestTelegramTarget: the adapter's Target of a Telegram Destination — its channel, the ids its check learned and the
+// client of its Connection — posts and checks through the Connection; one that is unknown, of a deleted Connection or
+// of a Mattermost Connection has none.
+func TestTelegramTarget(t *testing.T) {
+	e := newTGEnv(t)
+	c, err := e.svc.Create(t.Context(), by, e.input("tg", connections.ModeLongPolling))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mm := e.create(t, "mm")
+	e.store.tgTargets[7] = memTGTarget{connection: c.ID, channel: "@muster_alerts", channelID: faketelegram.ChannelID,
+		groupID: faketelegram.GroupID}
+	e.store.tgTargets[8] = memTGTarget{connection: mm.ID, channel: "@muster_alerts"}
+	tg, err := e.svc.TelegramTarget(t.Context(), 7)
+	if err != nil || tg.Client == nil || tg.ConnectionID != c.ID || tg.Channel != "@muster_alerts" ||
+		tg.ChannelID != faketelegram.ChannelID || tg.GroupID != faketelegram.GroupID {
+		t.Fatalf("target = %+v, %v", tg, err)
+	}
+	again, _ := e.svc.TelegramTarget(t.Context(), 7)
+	if again.Client != tg.Client {
+		t.Fatal("the client of an unchanged Connection was built again")
+	}
+	a := &telegram.Adapter{Targets: e.svc}
+	call := delivery.Call{Class: outbound.ClassDelivery, Destination: delivery.Destination{ID: 7,
+		Type: delivery.TypeTelegram}}
+	m := messages.Message{Language: "en", Colour: messages.ColourFiring, Heading: &messages.Heading{Number: 1,
+		Title: "x"}, Buttons: []messages.Button{}}
+	if o := a.Publish(t.Context(), call, m); o.Kind != delivery.OutcomeOK || len(e.tg.Messages(faketelegram.ChannelID)) != 1 {
+		t.Fatalf("publish = %+v", o)
+	}
+	if o := a.Check(t.Context(), call); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("check = %+v", o)
+	}
+	for _, id := range []int64{8, 9} {
+		if _, err := e.svc.TelegramTarget(t.Context(), id); !errors.Is(err, telegram.ErrNoTarget) {
+			t.Errorf("target %d = %v", id, err)
+		}
+	}
+	e.store.fail["GetTelegramDestinationTarget"] = errors.New("down")
+	if _, err := e.svc.TelegramTarget(t.Context(), 7); err == nil || errors.Is(err, telegram.ErrNoTarget) {
+		t.Errorf("unreadable = %v", err)
+	}
+	delete(e.store.fail, "GetTelegramDestinationTarget")
+	e.store.rows[c.ID].row.BotTokenCiphertext = []byte("garbage")
+	e.store.rows[c.ID].row.Version++
+	if _, err := e.svc.TelegramTarget(t.Context(), 7); err == nil || errors.Is(err, telegram.ErrNoTarget) {
+		t.Errorf("a token that cannot be opened = %v", err)
+	}
+}
+
+// TestCheckTelegramChannel is the Destination check of a Telegram Destination being saved (C-14.FR-2, FR-14): through
+// the Connection on the interactive path, limited by the Destination once it exists and by the Connection before.
+func TestCheckTelegramChannel(t *testing.T) {
+	e := newTGEnv(t)
+	c, err := e.svc.Create(t.Context(), by, e.input("tg", connections.ModeLongPolling))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.svc.CheckTelegramChannel(t.Context(), destinations.TelegramChannelCheck{Connection: c.PublicID,
+		ChannelID: "@muster_alerts"})
+	if err != nil || res.ConnectionID != c.ID || !res.Check.OK() || res.Check.GroupID != faketelegram.GroupID {
+		t.Fatalf("check = %+v, %v", res, err)
+	}
+	subjects := len(e.path.subjects)
+	dest := int64(4)
+	res, err = e.svc.CheckTelegramChannel(t.Context(), destinations.TelegramChannelCheck{Connection: c.PublicID,
+		Destination: &dest, ChannelID: "@no_comments"})
+	if err != nil || res.Check.OK() || len(e.path.subjects) == subjects {
+		t.Fatalf("no comments = %+v, %v", res, err)
+	}
+	if s := e.path.subjects[len(e.path.subjects)-1]; s.Destination == nil || s.Destination.ID != 4 ||
+		s.Destination.Type != connections.TypeTelegram {
+		t.Fatalf("subject = %+v", s)
+	}
+	mm := e.create(t, "mm")
+	for _, id := range []string{"CN000000000000", "bad", mm.PublicID} {
+		if _, err := e.svc.CheckTelegramChannel(t.Context(), destinations.TelegramChannelCheck{Connection: id,
+			ChannelID: "@x"}); !errors.Is(err, destinations.ErrUnknownConnection) {
+			t.Errorf("%s = %v", id, err)
+		}
+	}
+	e.store.fail["GetConnection"] = errors.New("down")
+	if _, err := e.svc.CheckTelegramChannel(t.Context(), destinations.TelegramChannelCheck{Connection: c.PublicID,
+		ChannelID: "@x"}); err == nil || errors.Is(err, destinations.ErrUnknownConnection) {
+		t.Errorf("unreadable = %v", err)
+	}
+	delete(e.store.fail, "GetConnection")
+	e.path.limited = true
+	if _, err := e.svc.CheckTelegramChannel(t.Context(), destinations.TelegramChannelCheck{Connection: c.PublicID,
+		ChannelID: "@x"}); err == nil {
+		t.Error("a limited check passed")
+	}
+	e.path.limited = false
+	e.store.rows[c.ID].row.BotTokenCiphertext = []byte("garbage")
+	e.store.rows[c.ID].row.Version++
+	if _, err := e.svc.CheckTelegramChannel(t.Context(), destinations.TelegramChannelCheck{Connection: c.PublicID,
+		ChannelID: "@x"}); err == nil {
+		t.Error("a token that cannot be opened")
+	}
+}
+
+// TestDeleteRemovesTheWebhook: deleting a Telegram Connection in the webhook update mode calls deleteWebhook with its
+// saved bot as a best effort after the deletion committed, and logs the outcome; a refused call fails nothing, and its
+// error carries no token. A Connection in the long-polling mode calls nothing.
+func TestDeleteRemovesTheWebhook(t *testing.T) {
+	e := newTGEnv(t)
+	c, err := e.svc.Create(t.Context(), by, e.input("hooked", connections.ModeWebhook))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Delete(t.Context(), by, c.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.tg.Webhooks()[tgToken]; ok {
+		t.Fatal("the webhook is still set")
+	}
+	if !strings.Contains(e.log.String(), `"event":"telegram_webhook_deleted","connection":"`+c.PublicID+`"`) {
+		t.Fatalf("log %s", e.log)
+	}
+	in := e.input("refused", connections.ModeWebhook)
+	in.BotToken = keyring.Replace(tgOtherToken)
+	c, err = e.svc.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = e.tg.SetConfig(nil, nil, &[]string{tgOtherToken})
+	if err := e.svc.Delete(t.Context(), by, c.PublicID, nil); err != nil {
+		t.Fatalf("a refused deleteWebhook failed the deletion: %v", err)
+	}
+	if !e.store.rows[c.ID].deleted || !strings.Contains(e.log.String(), `"event":"telegram_webhook_delete_failed",`+
+		`"connection":"`+c.PublicID+`","error":"Telegram answered 401: Unauthorized"`) {
+		t.Fatalf("log %s", e.log)
+	}
+	polling, err := e.svc.Create(t.Context(), by, e.input("polling", connections.ModeLongPolling))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(e.tg.Requests())
+	if err := e.svc.Delete(t.Context(), by, polling.PublicID, nil); err != nil || len(e.tg.Requests()) != before ||
+		strings.Contains(e.log.String(), `"telegram_webhook_delete`) && strings.Contains(e.log.String(),
+			`"connection":"`+polling.PublicID+`"}`) {
+		t.Fatalf("long polling delete = %v, %d requests", err, len(e.tg.Requests())-before)
+	}
+	hooked, err := e.svc.Create(t.Context(), by, e.input("garbled", connections.ModeWebhook))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.store.rows[hooked.ID].row.BotTokenCiphertext = []byte("garbage")
+	if err := e.svc.Delete(t.Context(), by, hooked.PublicID, nil); err != nil ||
+		!strings.Contains(e.log.String(), `"event":"telegram_webhook_delete_failed","connection":"`+hooked.PublicID) {
+		t.Fatalf("a token that cannot be opened = %v, log %s", err, e.log)
 	}
 }
 

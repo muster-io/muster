@@ -139,7 +139,8 @@ func (q *Queries) ListLiveUserPublicIDs(ctx context.Context, arg ListLiveUserPub
 }
 
 const listMentionUsers = `-- name: ListMentionUsers :many
-SELECT u.id, u.public_id, u.name, u.login, coalesce(al.username, '')::text AS username
+SELECT u.id, u.public_id, u.name, u.login, coalesce(al.username, '')::text AS username,
+       coalesce(al.external_id, '')::text AS external_id
 FROM users u
 LEFT JOIN account_links al ON al.org_id = u.org_id AND al.user_id = u.id
                           AND al.identity_space = $1::text
@@ -156,15 +157,16 @@ type ListMentionUsersParams struct {
 }
 
 type ListMentionUsersRow struct {
-	ID       int64
-	PublicID string
-	Name     string
-	Login    string
-	Username string
+	ID         int64
+	PublicID   string
+	Name       string
+	Login      string
+	Username   string
+	ExternalID string
 }
 
-// ListMentionUsers reads the Users that are not deleted among the ids and the public_ids, with the username of their
-// Account link in the identity space, empty without one.
+// ListMentionUsers reads the Users that are not deleted among the ids and the public_ids, with the username and the
+// messenger's user id of their Account link in the identity space, empty without one.
 func (q *Queries) ListMentionUsers(ctx context.Context, arg ListMentionUsersParams) ([]ListMentionUsersRow, error) {
 	rows, err := q.db.Query(ctx, listMentionUsers,
 		arg.IdentitySpace,
@@ -185,6 +187,7 @@ func (q *Queries) ListMentionUsers(ctx context.Context, arg ListMentionUsersPara
 			&i.Name,
 			&i.Login,
 			&i.Username,
+			&i.ExternalID,
 		); err != nil {
 			return nil, err
 		}

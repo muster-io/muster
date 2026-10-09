@@ -18,10 +18,11 @@ FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id AND event_seq = @event_seq::bigint
 LIMIT 1;
 
--- ListMentionUsers reads the Users that are not deleted among the ids and the public_ids, with the username of their
--- Account link in the identity space, empty without one.
+-- ListMentionUsers reads the Users that are not deleted among the ids and the public_ids, with the username and the
+-- messenger's user id of their Account link in the identity space, empty without one.
 -- name: ListMentionUsers :many
-SELECT u.id, u.public_id, u.name, u.login, coalesce(al.username, '')::text AS username
+SELECT u.id, u.public_id, u.name, u.login, coalesce(al.username, '')::text AS username,
+       coalesce(al.external_id, '')::text AS external_id
 FROM users u
 LEFT JOIN account_links al ON al.org_id = u.org_id AND al.user_id = u.id
                           AND al.identity_space = @identity_space::text

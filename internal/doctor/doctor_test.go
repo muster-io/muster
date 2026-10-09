@@ -30,6 +30,7 @@ import (
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/telegram"
 )
 
 // rows are query results; Scan assigns each value to its destination as it is.
@@ -94,6 +95,7 @@ func newFakeDB(ssl bool) *fakeDB {
 		"FROM encrypted_values":      {values: [][]any{}},
 		"ListConnections":            {values: [][]any{}},
 		"ListMattermostDestinations": {values: [][]any{}},
+		"ListTelegramDestinations":   {values: [][]any{}},
 	}}
 }
 
@@ -432,7 +434,8 @@ func TestReadOnly(t *testing.T) {
 
 // messengerDB is a fake database with the Mattermost Connection "Dev Mattermost" of the fake server, its bot token
 // sealed with key, and its Destinations "alerts" and "no-bot", and the Telegram Connection "Dev Telegram" of the fake
-// Bot API, under an outbound policy that allows the loopback network.
+// Bot API with its Destinations "tg-alerts" and "tg-no-comments", under an outbound policy that allows the loopback
+// network.
 func messengerDB(t *testing.T, key string) *fakeDB {
 	t.Helper()
 	f := fakemattermost.New()
@@ -482,6 +485,10 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 		{int64(8), "DSAAAAAAAAAAA2", "no-bot", pgtype.Int8{Int64: 1, Valid: true}, text(fakemattermost.TeamID),
 			text(fakemattermost.ChannelNoBot)},
 	}}
+	d.answers["ListTelegramDestinations"] = &rows{values: [][]any{
+		{int64(9), "DSAAAAAAAAAAA3", "tg-alerts", pgtype.Int8{Int64: 2, Valid: true}, text("@muster_alerts")},
+		{int64(10), "DSAAAAAAAAAAA4", "tg-no-comments", pgtype.Int8{Int64: 2, Valid: true}, text("@no_comments")},
+	}}
 	d.answers["GetOutboundPolicy"] = &rows{values: [][]any{{"standard", []string{"127.0.0.0/8"}, []string(nil)}}}
 	return d
 }
@@ -491,8 +498,8 @@ const (
 	doctorTelegramToken = "777001:doctor-telegram-token"
 )
 
-// TestMessengerChecks is C-02.FR-14: one line per Connection and per Mattermost Destination, ok, the message of the
-// step that failed — for a Telegram Connection with the step's name — or, as a WARN that fails nothing, the hint that
+// TestMessengerChecks is C-02.FR-14: one line per Connection and per Mattermost and Telegram Destination, ok, the
+// message of the step that failed — for a Telegram Connection or Destination with the step's name — or, as a WARN that fails nothing, the hint that
 // the bot may not make ephemeral posts (D284), made in the background class; a failure fails the doctor, and the bot
 // tokens are never printed.
 func TestMessengerChecks(t *testing.T) {
@@ -504,8 +511,10 @@ func TestMessengerChecks(t *testing.T) {
 	want := "WARN connection Dev Mattermost: " + mattermost.HintPressAnswersInThread + "\n" +
 		"OK   connection Dev Telegram: ok\n" +
 		"OK   destination alerts: ok\n" +
-		"FAIL destination no-bot: " + mattermost.MessageNotMember + "\n"
-	if ok || !strings.HasSuffix(out, want) || strings.Count(out, "\n") != 12 || strings.Contains(out, doctorToken) ||
+		"FAIL destination no-bot: " + mattermost.MessageNotMember + "\n" +
+		"OK   destination tg-alerts: ok\n" +
+		"FAIL destination tg-no-comments: discussion_group: " + telegram.MessageNoComments + "\n"
+	if ok || !strings.HasSuffix(out, want) || strings.Count(out, "\n") != 14 || strings.Contains(out, doctorToken) ||
 		strings.Contains(out, doctorTelegramToken) {
 		t.Errorf("ok %v, output:\n%s\nwant the end:\n%s", ok, out, want)
 	}
@@ -522,7 +531,8 @@ func TestMessengerChecks(t *testing.T) {
 	out, ok = run(t, d, environ(""))
 	if ok || !strings.Contains(out, "FAIL connection Dev Mattermost: the bot token cannot be opened: the master keys "+
 		"could not be loaded\n") || !strings.Contains(out, "FAIL destination alerts: its Connection failed its check") ||
-		!strings.Contains(out, "FAIL connection Dev Telegram: the bot token cannot be opened") {
+		!strings.Contains(out, "FAIL connection Dev Telegram: the bot token cannot be opened") ||
+		!strings.Contains(out, "FAIL destination tg-alerts: its Connection failed its check") {
 		t.Errorf("without the master keys, ok %v, output:\n%s", ok, out)
 	}
 }

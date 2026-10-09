@@ -508,6 +508,21 @@ var TelegramWebhookSet = newEvent("telegram_webhook_set", LevelInfo, "C-14",
 		"token, at MUSTER_INGEST_URL: connection is the public_id of the Connection, host the host of the webhook's URL.",
 	"connection", "host")
 
+// TelegramWebhookDeleted is logged when Muster removed the webhook of a deleted Telegram Connection (C-14.FR-1).
+var TelegramWebhookDeleted = newEvent("telegram_webhook_deleted", LevelInfo, "C-14",
+	"A Telegram Connection in the webhook update mode was deleted and deleteWebhook, called with its bot and base URL "+
+		"after the deletion, removed its webhook: connection is the public_id of the Connection.",
+	"connection")
+
+// TelegramWebhookDeleteFailed is logged when Muster could not remove the webhook of a deleted Telegram Connection
+// (C-14.FR-1).
+var TelegramWebhookDeleteFailed = newEvent("telegram_webhook_delete_failed", LevelWarn, "C-14",
+	"A Telegram Connection in the webhook update mode was deleted, and deleteWebhook, called with its bot and base URL "+
+		"as a best effort after the deletion, failed: connection is the public_id of the Connection, error what "+
+		"Telegram or the network answered, without the bot token. The deletion stands; Telegram keeps posting the "+
+		"bot's updates to Muster, which answers them 401, until the webhook is removed with the bot's token elsewhere.",
+	"connection", "error")
+
 // StormStarted is logged when a Route's new Alert Groups start a Storm (C-11.FR-6).
 var StormStarted = newEvent("storm_started", LevelInfo, "C-11",
 	"The new Alert Groups of a Route exceeded route.storm_threshold within a minute and started a Storm: route is the "+

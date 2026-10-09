@@ -195,6 +195,67 @@ func (q *Queries) GetDestinationTarget(ctx context.Context, arg GetDestinationTa
 	return i, err
 }
 
+const getTelegramDestinationTarget = `-- name: GetTelegramDestinationTarget :one
+SELECT d.telegram_channel_id, d.telegram_channel_chat_id, d.telegram_discussion_chat_id, c.id, c.public_id, c.type,
+       c.name, c.telegram_bot_api_base_url, c.bot_token_ciphertext, c.bot_token_key_id, c.bot_token_updated_at,
+       c.proxy, c.proxy_password_ciphertext, c.proxy_password_key_id, c.proxy_password_updated_at, c.version
+FROM destinations d
+JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+WHERE d.org_id = $1 AND d.id = $2 AND d.type = 'telegram' AND c.deleted_at IS NULL
+`
+
+type GetTelegramDestinationTargetParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+type GetTelegramDestinationTargetRow struct {
+	TelegramChannelID        pgtype.Text
+	TelegramChannelChatID    pgtype.Int8
+	TelegramDiscussionChatID pgtype.Int8
+	ID                       int64
+	PublicID                 string
+	Type                     string
+	Name                     string
+	TelegramBotApiBaseUrl    pgtype.Text
+	BotTokenCiphertext       []byte
+	BotTokenKeyID            pgtype.Text
+	BotTokenUpdatedAt        time.Time
+	Proxy                    []byte
+	ProxyPasswordCiphertext  []byte
+	ProxyPasswordKeyID       pgtype.Text
+	ProxyPasswordUpdatedAt   pgtype.Timestamptz
+	Version                  int64
+}
+
+// GetTelegramDestinationTarget reads where a Telegram Destination sends — its channel as entered and the ids of the
+// channel and of its discussion group that its Destination check learned — with the Connection it sends through and
+// that Connection's secrets as stored. A deleted Destination is read too, since its final edit still runs; its
+// Connection must not be deleted.
+func (q *Queries) GetTelegramDestinationTarget(ctx context.Context, arg GetTelegramDestinationTargetParams) (GetTelegramDestinationTargetRow, error) {
+	row := q.db.QueryRow(ctx, getTelegramDestinationTarget, arg.OrgID, arg.DestinationID)
+	var i GetTelegramDestinationTargetRow
+	err := row.Scan(
+		&i.TelegramChannelID,
+		&i.TelegramChannelChatID,
+		&i.TelegramDiscussionChatID,
+		&i.ID,
+		&i.PublicID,
+		&i.Type,
+		&i.Name,
+		&i.TelegramBotApiBaseUrl,
+		&i.BotTokenCiphertext,
+		&i.BotTokenKeyID,
+		&i.BotTokenUpdatedAt,
+		&i.Proxy,
+		&i.ProxyPasswordCiphertext,
+		&i.ProxyPasswordKeyID,
+		&i.ProxyPasswordUpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
 const insertConnection = `-- name: InsertConnection :one
 INSERT INTO connections (
     org_id, public_id, type, name, mattermost_server_url, telegram_bot_api_base_url, telegram_update_mode,
@@ -472,6 +533,49 @@ func (q *Queries) ListPollingConnections(ctx context.Context, orgID int64) ([]Li
 			&i.ProxyPasswordKeyID,
 			&i.ProxyPasswordUpdatedAt,
 			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTelegramDestinations = `-- name: ListTelegramDestinations :many
+SELECT id, public_id, name, connection_id, telegram_channel_id
+FROM destinations
+WHERE org_id = $1 AND type = 'telegram' AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListTelegramDestinationsRow struct {
+	ID                int64
+	PublicID          string
+	Name              string
+	ConnectionID      pgtype.Int8
+	TelegramChannelID pgtype.Text
+}
+
+// ListTelegramDestinations lists the Telegram Destinations that are not deleted, in id order, with their Connection
+// and channel, for muster doctor.
+func (q *Queries) ListTelegramDestinations(ctx context.Context, orgID int64) ([]ListTelegramDestinationsRow, error) {
+	rows, err := q.db.Query(ctx, listTelegramDestinations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTelegramDestinationsRow{}
+	for rows.Next() {
+		var i ListTelegramDestinationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.ConnectionID,
+			&i.TelegramChannelID,
 		); err != nil {
 			return nil, err
 		}

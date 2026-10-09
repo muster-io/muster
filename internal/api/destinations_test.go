@@ -78,6 +78,16 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 		f.list = append(f.list, d)
 		return d, nil
 	}
+	if in.Telegram != nil {
+		d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA7", Type: in.Type,
+			Name: in.Name, Connection: &in.Telegram.Connection, TelegramChannelID: &in.Telegram.ChannelID,
+			TelegramChannelTitle: ptr("Muster alerts"), TelegramDiscussionGroupID: ptr("-1001000000002"),
+			TelegramDiscussionGroupTitle: ptr("Muster alerts Chat"), Mentions: set, LimiterLimit: in.Limiter.Limit,
+			LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
+			Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
+		f.list = append(f.list, d)
+		return d, nil
+	}
 	d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA9", Type: in.Type,
 		Name: in.Name, Connection: &in.Mattermost.Connection, MattermostTeamID: &in.Mattermost.TeamID,
 		MattermostChannelID: &in.Mattermost.ChannelID, MattermostTeamName: ptr("dev"),
@@ -102,7 +112,13 @@ func (f *fakeDestinations) Update(_ context.Context, r destinations.Requester, i
 		return destinations.Destination{}, f.saveErr
 	}
 	d := &f.list[i]
-	d.Name, d.MattermostChannelID, d.LimiterLimit = in.Name, &in.Mattermost.ChannelID, in.Limiter.Limit
+	d.Name, d.LimiterLimit = in.Name, in.Limiter.Limit
+	switch {
+	case in.Mattermost != nil:
+		d.MattermostChannelID = &in.Mattermost.ChannelID
+	case in.Telegram != nil:
+		d.TelegramChannelID = &in.Telegram.ChannelID
+	}
 	d.Version++
 	return *d, nil
 }
@@ -512,14 +528,6 @@ func TestCreateDestinationAPI(t *testing.T) {
 		http.StatusConflict || a.code(t) != "name_taken" {
 		t.Errorf("taken = %d %s", a.status, a.body)
 	}
-	fd.saveErr = &destinations.FieldError{Pointer: "/type", Code: destinations.CodeUnsupported, Detail: "later"}
-	telegram := `{"type":"telegram","name":"tg","connection_id":"CNAAAAAAAAAAA2","channel_id":"@alerts",` +
-		`"mentions":` + noMentions + `,"limiter":{"limit":5,"per_seconds":1}}`
-	a = x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", telegram)
-	if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity || errs[0]["pointer"] != "/type" ||
-		fd.saved[len(fd.saved)-1].Type != "telegram" || fd.saved[len(fd.saved)-1].Mattermost != nil {
-		t.Errorf("telegram = %d %s", a.status, a.body)
-	}
 	if a := x.as(t, destinationsReader, http.MethodPost, "/api/v1/destinations", mattermostBody); a.status !=
 		http.StatusForbidden {
 		t.Errorf("by a reader = %d", a.status)
@@ -855,5 +863,48 @@ func TestSigningSecretAPI(t *testing.T) {
 	}
 	if a := x.as(t, destinationsReader, http.MethodPost, path, ""); a.status != http.StatusForbidden {
 		t.Errorf("by a reader = %d", a.status)
+	}
+}
+
+// TestTelegramDestinationAPI is createDestination and updateDestination of type telegram (C-14.FR-2, C-14.AC-13,
+// C-11.FR-18): the body names the Connection and the channel only; the Destination shows the discussion group its
+// check found, read-only; a refused check is 422 destination_check_failed with the check's message as the detail.
+func TestTelegramDestinationAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	body := `{"type":"telegram","name":"tg","connection_id":"CNAAAAAAAAAAA2","channel_id":"@muster_alerts",` +
+		`"mentions":` + noMentions + `,"limiter":{"limit":10,"per_seconds":60}}`
+	a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", body)
+	if a.status != http.StatusCreated {
+		t.Fatalf("create = %d %s", a.status, a.body)
+	}
+	created := a.json(t)["destination"].(map[string]any)
+	in := fd.saved[len(fd.saved)-1]
+	if in.Type != "telegram" || in.Telegram == nil || in.Telegram.Connection != "CNAAAAAAAAAAA2" ||
+		in.Telegram.ChannelID != "@muster_alerts" || in.Mattermost != nil || in.Limiter.Limit != 10 {
+		t.Errorf("input %+v", in)
+	}
+	if created["type"] != "telegram" || created["channel_id"] != "@muster_alerts" ||
+		created["discussion_group_id"] != "-1001000000002" || created["discussion_group_title"] != "Muster alerts Chat" ||
+		created["channel_title"] != "Muster alerts" {
+		t.Errorf("created %s", a.body)
+	}
+	update := strings.Replace(body, `"name":"tg"`, `"name":"tg2"`, 1)
+	a = x.as(t, destinationsWriter, http.MethodPut, "/api/v1/destinations/DSAAAAAAAAAAA7", update,
+		"If-Match", `"1"`)
+	if a.status != http.StatusOK || a.json(t)["name"] != "tg2" || fd.saved[len(fd.saved)-1].Telegram == nil {
+		t.Errorf("update = %d %s", a.status, a.body)
+	}
+	fd.saveErr = &destinations.CheckFailedError{Items: []destinations.CheckItem{{Name: "discussion_group",
+		Pointer: "/channel_id", Message: "Comments are not enabled for this channel. Enable comments in the channel " +
+			"settings in Telegram; this creates its discussion group."}}}
+	a = x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", body)
+	if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity || errs[0]["code"] != "destination_check_failed" ||
+		errs[0]["pointer"] != "/channel_id" || !strings.HasPrefix(errs[0]["detail"].(string), "Comments are not enabled") {
+		t.Errorf("refused = %d %s", a.status, a.body)
+	}
+	fd.saveErr = nil
+	if a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
+		strings.Replace(body, `"channel_id":"@muster_alerts",`, "", 1)); a.status != http.StatusBadRequest {
+		t.Errorf("without a channel = %d %s", a.status, a.body)
 	}
 }

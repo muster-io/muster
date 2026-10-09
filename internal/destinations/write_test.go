@@ -24,7 +24,9 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
+	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/templates"
 	"github.com/muster-io/muster/internal/webhooks"
 )
@@ -44,6 +46,19 @@ func (f *fakeWriter) UpdateMattermostDestination(context.Context, dbgen.UpdateMa
 	return errBoom
 }
 
+func (f *fakeWriter) LockTelegramConnection(context.Context, dbgen.LockTelegramConnectionParams) (int64, error) {
+	return 0, pgx.ErrNoRows
+}
+
+func (f *fakeWriter) InsertTelegramDestination(context.Context, dbgen.InsertTelegramDestinationParams) (int64,
+	error) {
+	return 0, errBoom
+}
+
+func (f *fakeWriter) UpdateTelegramDestination(context.Context, dbgen.UpdateTelegramDestinationParams) error {
+	return errBoom
+}
+
 func (f *fakeWriter) InsertWebhookDestination(context.Context, dbgen.InsertWebhookDestinationParams) (int64, error) {
 	return 0, errBoom
 }
@@ -59,6 +74,8 @@ type saveWriter struct {
 	versions map[string]int64
 	inserted []dbgen.InsertMattermostDestinationParams
 	updated  []dbgen.UpdateMattermostDestinationParams
+	tgIns    []dbgen.InsertTelegramDestinationParams
+	tgSets   []dbgen.UpdateTelegramDestinationParams
 	hooks    []dbgen.InsertWebhookDestinationParams
 	hookSets []dbgen.UpdateWebhookDestinationParams
 	audit    []auditdb.InsertAuditEntryParams
@@ -110,6 +127,34 @@ func (w *saveWriter) UpdateMattermostDestination(_ context.Context, arg dbgen.Up
 		return err
 	}
 	w.updated = append(w.updated, arg)
+	return nil
+}
+
+func (w *saveWriter) LockTelegramConnection(_ context.Context, arg dbgen.LockTelegramConnectionParams) (int64,
+	error) {
+	if err := w.fail["LockTelegramConnection"]; err != nil {
+		return 0, err
+	}
+	if !w.conns[arg.ID] {
+		return 0, pgx.ErrNoRows
+	}
+	return arg.ID, nil
+}
+
+func (w *saveWriter) InsertTelegramDestination(_ context.Context, arg dbgen.InsertTelegramDestinationParams) (int64,
+	error) {
+	if err := w.fail["InsertTelegramDestination"]; err != nil {
+		return 0, err
+	}
+	w.tgIns = append(w.tgIns, arg)
+	return int64(30 + len(w.tgIns)), nil
+}
+
+func (w *saveWriter) UpdateTelegramDestination(_ context.Context, arg dbgen.UpdateTelegramDestinationParams) error {
+	if err := w.fail["UpdateTelegramDestination"]; err != nil {
+		return err
+	}
+	w.tgSets = append(w.tgSets, arg)
 	return nil
 }
 
@@ -172,6 +217,55 @@ func (c *fakeChecker) CheckChannel(_ context.Context, in ChannelCheck) (ChannelC
 			{Name: mattermost.StepBotInChannel, OK: true}}}}, nil
 }
 
+// fakeTelegram stands for the Connections: the Destination check of a Telegram channel through the Connection
+// CNAAAAAAAAAAA2, by its channel.
+type fakeTelegram struct {
+	calls []TelegramChannelCheck
+	err   error
+	title string
+}
+
+func (c *fakeTelegram) CheckTelegramChannel(_ context.Context, in TelegramChannelCheck) (TelegramChannelChecked,
+	error) {
+	c.calls = append(c.calls, in)
+	if c.err != nil {
+		return TelegramChannelChecked{}, c.err
+	}
+	if in.Connection != "CNAAAAAAAAAAA2" {
+		return TelegramChannelChecked{}, ErrUnknownConnection
+	}
+	fail := func(steps []telegram.DestinationStep) (TelegramChannelChecked, error) {
+		last := steps[len(steps)-1]
+		return TelegramChannelChecked{ConnectionID: 6, Check: telegram.DestinationCheck{Steps: steps,
+			Outcome: last.Outcome}}, nil
+	}
+	fatal := func(name, message string) telegram.DestinationStep {
+		return telegram.DestinationStep{Name: name, Message: message,
+			Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(message)}}
+	}
+	ok := func(name string) telegram.DestinationStep { return telegram.DestinationStep{Name: name, OK: true} }
+	switch in.ChannelID {
+	case "@no_comments":
+		return fail([]telegram.DestinationStep{ok(telegram.StepChannelExists),
+			fatal(telegram.StepDiscussionGroup, telegram.MessageNoComments)})
+	case "@no_group_admin":
+		return fail([]telegram.DestinationStep{ok(telegram.StepChannelExists), ok(telegram.StepDiscussionGroup),
+			ok(telegram.StepBotRightsChannel),
+			fatal(telegram.StepBotRightsGroup, telegram.MessageGroupNotAdmin("Muster alerts Chat"))})
+	case "@revoked":
+		return fail([]telegram.DestinationStep{fatal(telegram.StepChannelExists, telegram.MessageTokenInvalid)})
+	}
+	title := c.title
+	if title == "" {
+		title = "Muster alerts"
+	}
+	return TelegramChannelChecked{ConnectionID: 6, Check: telegram.DestinationCheck{
+		Steps: []telegram.DestinationStep{ok(telegram.StepChannelExists), ok(telegram.StepDiscussionGroup),
+			ok(telegram.StepBotRightsChannel), ok(telegram.StepBotRightsGroup)},
+		ChannelID: -1001000000001, ChannelTitle: title, GroupID: -1001000000002, GroupTitle: "Muster alerts Chat",
+		Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}}, nil
+}
+
 // fakeMentions refuses the User SR0000000000ZZ, as mentions.Validate does for a User that does not exist.
 type fakeMentions struct{}
 
@@ -190,14 +284,15 @@ func (fakeMentions) Validate(_ context.Context, _ string, set mentions.Settings)
 func newSaver(t *testing.T) (*Service, *fakeStore, *saveWriter, *fakeChecker, *[]int64) {
 	t.Helper()
 	store := newStore()
-	w := &saveWriter{conns: map[int64]bool{5: true}, versions: map[string]int64{"DSAAAAAAAAAAA1": 2,
+	w := &saveWriter{conns: map[int64]bool{5: true, 6: true}, versions: map[string]int64{"DSAAAAAAAAAAA1": 2,
 		"DSAAAAAAAAAAA3": 4}, fail: map[string]error{}}
 	checker := &fakeChecker{}
 	var healed []int64
 	s := New(1, store)
 	logger := logging.New(&bytes.Buffer{}, logging.LevelInfo)
 	s.SetWriter(WriterConfig{Writer: w, Audit: audit.NewWriter(logger, clock.NewManual(t0)),
-		Business: clock.NewManual(t0), Mentions: fakeMentions{}, Mattermost: checker, Keyring: activeKeyring(t),
+		Business: clock.NewManual(t0), Mentions: fakeMentions{}, Mattermost: checker, Telegram: &fakeTelegram{},
+		Keyring:   activeKeyring(t),
 		Templates: templates.New(clock.NewManual(t0), clock.Real{}),
 		Healthy: func(_ context.Context, id int64) error {
 			healed = append(healed, id)
@@ -667,5 +762,224 @@ func TestUpdateWebhook(t *testing.T) {
 	in.Webhook.Proxy = proxyconf.Input{Enabled: true, Address: new("no-port")}
 	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, in); !errorAsField(err) {
 		t.Errorf("bad proxy = %v", err)
+	}
+}
+
+func telegramInput(name, channel string) Input {
+	in := mattermostInput(name, "")
+	in.Type, in.Mattermost = TypeTelegram, nil
+	in.Telegram = &TelegramInput{Connection: "cnaaaaaaaaaaa2", ChannelID: channel}
+	return in
+}
+
+// TestCreateTelegram is createDestination of type telegram (C-14.FR-2, FR-14, C-14.AC-13, C-11.FR-18): the channel
+// alone is entered; the check finds its discussion group, which the Destination shows read-only, and the ids and titles
+// it found are stored.
+func TestCreateTelegram(t *testing.T) {
+	s, _, w, _, _ := newSaver(t)
+	tg := s.writer.Telegram.(*fakeTelegram)
+	d, err := s.Create(t.Context(), saver, telegramInput(" alerts ", " @muster_alerts "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tg.calls) != 1 || tg.calls[0].Destination != nil || tg.calls[0].Connection != "CNAAAAAAAAAAA2" ||
+		tg.calls[0].ChannelID != "@muster_alerts" {
+		t.Errorf("checks %+v", tg.calls)
+	}
+	if d.ID != 31 || d.Name != "alerts" || *d.Connection != "CNAAAAAAAAAAA2" || *d.TelegramChannelID != "@muster_alerts" ||
+		*d.TelegramDiscussionGroupID != "-1001000000002" || *d.TelegramDiscussionGroupTitle != "Muster alerts Chat" ||
+		*d.TelegramChannelTitle != "Muster alerts" || d.Health.State != "healthy" || d.Version != 1 {
+		t.Errorf("created %+v", d)
+	}
+	ins := w.tgIns[0]
+	if ins.ConnectionID.Int64 != 6 || ins.ChannelID.String != "@muster_alerts" || ins.ChannelChatID.Int64 != -1001000000001 ||
+		ins.DiscussionChatID.Int64 != -1001000000002 || ins.ChannelTitle.String != "Muster alerts" ||
+		ins.DiscussionGroupTitle.String != "Muster alerts Chat" {
+		t.Errorf("inserted %+v", ins)
+	}
+	if len(w.audit) != 1 || w.audit[0].Action != ActionCreated || !bytes.Contains(w.audit[0].Diff, []byte("@muster_alerts")) ||
+		len(w.hints) != 1 {
+		t.Errorf("audit %+v hints %+v", w.audit, w.hints)
+	}
+}
+
+// TestCreateTelegramRefusals is C-14.AC-13: a channel without comments and a discussion group whose admins do not
+// include the bot are refused with the texts of reference.md, and nothing is saved; so are an invalid channel, an
+// unknown Connection and a refused token.
+func TestCreateTelegramRefusals(t *testing.T) {
+	s, _, w, _, _ := newSaver(t)
+	tg := s.writer.Telegram.(*fakeTelegram)
+	ctx := t.Context()
+	for channel, want := range map[string]CheckItem{
+		"@no_comments": {Name: "discussion_group", Message: telegram.MessageNoComments, Pointer: "/channel_id"},
+		"@no_group_admin": {Name: "bot_rights_group", Pointer: "/channel_id",
+			Message: "The bot is not an admin of the discussion group Muster alerts Chat. Make the bot an admin there, " +
+				"allowed to post messages."},
+		"@revoked": {Name: "channel_exists", Message: telegram.MessageTokenInvalid, Pointer: "/connection_id"},
+	} {
+		_, err := s.Create(ctx, saver, telegramInput("x", channel))
+		failed, ok := errors.AsType[*CheckFailedError](err)
+		if !ok || len(failed.Items) != 1 || failed.Items[0] != want {
+			t.Errorf("%s = %v", channel, err)
+		}
+	}
+	in := telegramInput("x", "@muster_alerts")
+	in.Telegram.Connection = "CNAAAAAAAAAAA1"
+	assertField(t, "a mattermost connection", func() error { _, err := s.Create(ctx, saver, in); return err },
+		"/connection_id", CodeUnknownID)
+	in.Telegram.Connection = "not-an-id"
+	assertField(t, "malformed connection", func() error { _, err := s.Create(ctx, saver, in); return err },
+		"/connection_id", CodeUnknownID)
+	for name, channel := range map[string]string{"empty": " ", "spaces": "@muster alerts", "short": "@abc",
+		"url": "https://t.me/muster_alerts", "zero": "0"} {
+		in := telegramInput("x", channel)
+		if _, err := s.Create(ctx, saver, in); !errorAsField(err) {
+			t.Errorf("channel %s = %v", name, err)
+		}
+	}
+	in = telegramInput("", "@muster_alerts")
+	assertField(t, "empty name", func() error { _, err := s.Create(ctx, saver, in); return err }, "/name", CodeRequired)
+	in = telegramInput("x", "@muster_alerts")
+	in.Mentions["new_alerts"] = mentions.Setting{Everyone: "none", UserIDs: []string{"SR0000000000ZZ"}, Groups: []string{}}
+	if _, err := s.Create(ctx, saver, in); !errors.As(err, new(*mentions.FieldError)) {
+		t.Errorf("unknown user = %v", err)
+	}
+	if len(w.tgIns) != 0 {
+		t.Fatalf("a refused save inserted %+v", w.tgIns)
+	}
+	w.fail["InsertTelegramDestination"] = &pgconn.PgError{Code: uniqueViolation, ConstraintName: nameIndex}
+	if _, err := s.Create(ctx, saver, telegramInput("ops", "@muster_alerts")); !errors.Is(err, ErrNameTaken) {
+		t.Errorf("name taken = %v", err)
+	}
+	delete(w.fail, "InsertTelegramDestination")
+	delete(w.conns, 6)
+	assertField(t, "connection deleted since the check", func() error {
+		_, err := s.Create(ctx, saver, telegramInput("late", "@muster_alerts"))
+		return err
+	}, "/connection_id", CodeUnknownID)
+	w.fail["LockTelegramConnection"] = errBoom
+	if _, err := s.Create(ctx, saver, telegramInput("late", "@muster_alerts")); !errors.Is(err, errBoom) {
+		t.Errorf("lock failed = %v", err)
+	}
+	tg.err = &delivery.LimitedError{RetryAfter: 2}
+	if _, err := s.Create(ctx, saver, telegramInput("busy", "@muster_alerts")); !errors.As(err,
+		new(*delivery.LimitedError)) {
+		t.Errorf("limited = %v", err)
+	}
+}
+
+// TestUpdateTelegram is updateDestination of type telegram: the check runs limited by the Destination; a change is
+// recorded with its diff, a new title the check found is stored without an Audit log entry, an unchanged save writes
+// nothing, and a passing save of a Broken Destination ends its Broken state.
+func TestUpdateTelegram(t *testing.T) {
+	s, store, w, _, healed := newSaver(t)
+	tg := s.writer.Telegram.(*fakeTelegram)
+	ctx := t.Context()
+	w.versions["DSAAAAAAAAAAA2"] = 1
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("alerts", "@no_comments")); !errors.As(err,
+		new(*CheckFailedError)) {
+		t.Errorf("refused = %v", err)
+	}
+	d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", new(int64(1)), telegramInput("alerts", "@muster_alerts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := tg.calls[len(tg.calls)-1]; last.Destination == nil || *last.Destination != 2 {
+		t.Errorf("the check is not limited by the destination: %+v", last)
+	}
+	if d.Health.State != "healthy" || len(*healed) != 1 || len(w.tgSets) != 1 ||
+		w.tgSets[0].ChannelID.String != "@muster_alerts" || w.tgSets[0].DiscussionChatID.Int64 != -1001000000002 ||
+		len(w.audit) != 1 || w.audit[0].Action != ActionUpdated {
+		t.Errorf("updated %+v, sets %+v, audit %+v", d, w.tgSets, w.audit)
+	}
+	// Stored as the check found it: the same save writes nothing; a new title is stored with a hint only.
+	r := &store.rows[1]
+	r.TelegramChannelID, r.Version, r.Health = txt("@muster_alerts"), 2, "healthy"
+	r.Mentions, _ = json.Marshal(telegramInput("x", "").Mentions)
+	r.LimiterLimit, r.LimiterPerSeconds = 5, 1
+	r.TelegramDiscussionChatID.Int64 = -1001000000002
+	r.TelegramChannelTitle, r.TelegramDiscussionGroupTitle = txt("Muster alerts"), txt("Muster alerts Chat")
+	w.versions["DSAAAAAAAAAAA2"] = 2
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("alerts", "@muster_alerts")); err != nil ||
+		len(w.tgSets) != 1 {
+		t.Errorf("an unchanged save wrote: %v %d", err, len(w.tgSets))
+	}
+	tg.title = "Renamed channel"
+	hints := len(w.hints)
+	if d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("alerts", "@muster_alerts")); err != nil ||
+		len(w.tgSets) != 2 || len(w.audit) != 1 || len(w.hints) != hints+1 || *d.TelegramChannelTitle != "Renamed channel" {
+		t.Errorf("a new title = %+v %v", d, err)
+	}
+	w.versions["DSAAAAAAAAAAA2"] = 9
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("moved", "@muster_alerts")); !errors.Is(err,
+		ErrVersionMismatch) {
+		t.Errorf("moved = %v", err)
+	}
+	delete(w.versions, "DSAAAAAAAAAAA2")
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("gone", "@muster_alerts")); !errors.Is(err,
+		ErrNotFound) {
+		t.Errorf("gone = %v", err)
+	}
+	w.versions["DSAAAAAAAAAAA2"] = 2
+	w.fail["LockDestination"] = errBoom
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("x", "@muster_alerts")); !errors.Is(err,
+		errBoom) {
+		t.Errorf("lock = %v", err)
+	}
+	delete(w.fail, "LockDestination")
+	delete(w.conns, 6)
+	assertField(t, "connection gone", func() error {
+		_, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("y", "@muster_alerts"))
+		return err
+	}, "/connection_id", CodeUnknownID)
+	w.conns[6] = true
+	w.fail["UpdateTelegramDestination"] = &pgconn.PgError{Code: uniqueViolation, ConstraintName: nameIndex}
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("ops", "@muster_alerts")); !errors.Is(err,
+		ErrNameTaken) {
+		t.Errorf("name taken = %v", err)
+	}
+	delete(w.fail, "UpdateTelegramDestination")
+	r.ID, r.Health = 99, "broken"
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("z", "@muster_alerts")); !errors.Is(err,
+		errBoom) {
+		t.Errorf("a failed end of the broken state = %v", err)
+	}
+	r.ID = 2
+	tg.err = errBoom
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("z", "@muster_alerts")); !errors.Is(err,
+		errBoom) {
+		t.Errorf("a failed check = %v", err)
+	}
+}
+
+// TestCheckTelegramDestination is checkDestination of a Telegram Destination (C-14.FR-14): each step with its result,
+// limited by the Destination; a passing check of a Broken Destination ends its Broken state.
+func TestCheckTelegramDestination(t *testing.T) {
+	s, store, _, _, healed := newSaver(t)
+	tg := s.writer.Telegram.(*fakeTelegram)
+	ctx := t.Context()
+	store.rows[1].TelegramChannelID = txt("@no_comments")
+	res, err := s.Check(ctx, "DSAAAAAAAAAAA2")
+	if err != nil || res.OK || len(res.Items) != 2 || res.Items[1].Message != telegram.MessageNoComments ||
+		res.Health.State != "broken" {
+		t.Errorf("failing = %+v, %v", res, err)
+	}
+	if c := tg.calls[0]; c.Destination == nil || *c.Destination != 2 || c.Connection != "CNAAAAAAAAAAA2" {
+		t.Errorf("check %+v", c)
+	}
+	store.rows[1].TelegramChannelID = txt("@muster_alerts")
+	// The stored discussion group (-100200) is not the one the check finds: the check fails until a save.
+	res, err = s.Check(ctx, "DSAAAAAAAAAAA2")
+	if err != nil || res.OK || res.Items[1].Message != telegram.MessageMoved || len(*healed) != 0 {
+		t.Errorf("moved = %+v, %v", res, err)
+	}
+	store.rows[1].TelegramDiscussionChatID.Int64 = -1001000000002
+	res, err = s.Check(ctx, "DSAAAAAAAAAAA2")
+	if err != nil || !res.OK || len(res.Items) != 4 || res.Health.State != "healthy" || len(*healed) != 1 {
+		t.Errorf("recovered = %+v, %v, %v", res, err, *healed)
+	}
+	tg.err = errBoom
+	if _, err := s.Check(ctx, "DSAAAAAAAAAAA2"); !errors.Is(err, errBoom) {
+		t.Errorf("failed check = %v", err)
 	}
 }

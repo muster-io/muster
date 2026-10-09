@@ -5,8 +5,8 @@
 // `<base>/bot<token>/<method>` through internal/outbound with the Connection's proxy, in the client class of the caller
 // (ADR-0015), with the bot token registered for redaction so that every error and log line carries `bot[redacted]`;
 // the step-by-step connection check with its dry probe; and the receiving of updates — long polling on the Leader or
-// the webhook endpoint with its secret token — and the update router both modes share. The adapter of S-042 builds on
-// this client.
+// the webhook endpoint with its secret token — and the update router both modes share; the Destination check of a
+// Telegram Destination and the delivery adapter of its Root messages.
 package telegram
 
 import (
@@ -88,6 +88,7 @@ type Client struct {
 
 	mu      sync.Mutex
 	clients map[clientKey]*outbound.Client
+	botID   int64
 }
 
 // clientKey names an outbound client: its class, and whether it makes long polls, which take longer.
@@ -234,6 +235,120 @@ func (c *Client) DeleteWebhook(ctx context.Context, class outbound.Class) Result
 	return c.call(ctx, clientKey{class: class}, http.MethodPost, "deleteWebhook", map[string]any{}, nil)
 }
 
+// ChatInfo is a chat as getChat answers it: a channel names its discussion group in linked_chat_id only while comments
+// are enabled (F-002).
+type ChatInfo struct {
+	Chat
+	LinkedChatID int64 `json:"linked_chat_id,omitempty"`
+}
+
+// The statuses of a chat member that may write to the chat as an admin.
+const (
+	StatusCreator       = "creator"
+	StatusAdministrator = "administrator"
+)
+
+// ChatMember is a membership as getChatMember answers it; the rights to post and edit are named for channels only.
+type ChatMember struct {
+	Status          string `json:"status"`
+	CanPostMessages bool   `json:"can_post_messages"`
+	CanEditMessages bool   `json:"can_edit_messages"`
+}
+
+// GetChat reads the chat named by an id or an @username.
+func (c *Client) GetChat(ctx context.Context, class outbound.Class, chat string) (ChatInfo, Result) {
+	var ch ChatInfo
+	return ch, c.call(ctx, clientKey{class: class}, http.MethodPost, "getChat", map[string]any{"chat_id": chatRef(chat)},
+		&ch)
+}
+
+// GetChatMember reads the membership of the user in the chat; outside a supergroup the bot gets 403 (F-003).
+func (c *Client) GetChatMember(ctx context.Context, class outbound.Class, chat string, user int64) (ChatMember,
+	Result) {
+	var m ChatMember
+	return m, c.call(ctx, clientKey{class: class}, http.MethodPost, "getChatMember",
+		map[string]any{"chat_id": chatRef(chat), "user_id": user}, &m)
+}
+
+// BotID is the user id of the bot, read with getMe on first use and kept with the client.
+func (c *Client) BotID(ctx context.Context, class outbound.Class) (int64, Result) {
+	c.mu.Lock()
+	id := c.botID
+	c.mu.Unlock()
+	if id != 0 {
+		return id, Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}
+	}
+	u, r := c.GetMe(ctx, class)
+	if !r.OK() {
+		return 0, r
+	}
+	c.mu.Lock()
+	c.botID = u.ID
+	c.mu.Unlock()
+	return u.ID, r
+}
+
+// knownBotID is the bot's user id once BotID read it, 0 before.
+func (c *Client) knownBotID() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.botID
+}
+
+// chatRef is a chat id as the Bot API takes it: an integer, or an @username as text.
+func chatRef(chat string) any {
+	if id, err := strconv.ParseInt(strings.TrimSpace(chat), 10, 64); err == nil {
+		return id
+	}
+	return strings.TrimSpace(chat)
+}
+
+// outgoing is a sendMessage or an editMessageText: an edit names its message and has no disable_notification. Link
+// previews are off, so that the link to Muster does not take the room of the message.
+type outgoing struct {
+	ChatID              any             `json:"chat_id"`
+	MessageID           int64           `json:"message_id,omitempty"`
+	Text                string          `json:"text"`
+	ParseMode           string          `json:"parse_mode,omitempty"`
+	ReplyMarkup         *inlineKeyboard `json:"reply_markup,omitempty"`
+	DisableNotification bool            `json:"disable_notification,omitempty"`
+	LinkPreview         linkPreview     `json:"link_preview_options"`
+}
+
+type linkPreview struct {
+	IsDisabled bool `json:"is_disabled"`
+}
+
+// inlineKeyboard is the keyboard of a message: rows of buttons, none to remove it from an edited message (F-011).
+type inlineKeyboard struct {
+	InlineKeyboard [][]inlineButton `json:"inline_keyboard"`
+}
+
+// inlineButton is a button whose press sends its callback_data, at most 64 bytes.
+type inlineButton struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data"`
+}
+
+// sentMessage is the message a send or an edit answers with.
+type sentMessage struct {
+	MessageID int64 `json:"message_id"`
+	Chat      Chat  `json:"chat"`
+}
+
+// sendMessage sends m. Only the adapter calls it, from the delivery worker and the interactive path (lint 3).
+func (c *Client) sendMessage(ctx context.Context, class outbound.Class, m outgoing) (sentMessage, Result) {
+	var out sentMessage
+	return out, c.call(ctx, clientKey{class: class}, http.MethodPost, "sendMessage", m, &out)
+}
+
+// editMessageText edits the message m names to m, which notifies nobody (F-012) and keeps only the keyboard it
+// carries (F-011).
+func (c *Client) editMessageText(ctx context.Context, class outbound.Class, m outgoing) (sentMessage, Result) {
+	var out sentMessage
+	return out, c.call(ctx, clientKey{class: class}, http.MethodPost, "editMessageText", m, &out)
+}
+
 // DryProbe is `GET <base>/bot0:x/getMe` without the token (C-14.FR-11): a Bot API answers it 401 with a JSON body.
 // The Result is the raw answer, which the check names; a 429 is Transient, never a RetryAfter.
 func (c *Client) DryProbe(ctx context.Context, class outbound.Class) Result {
@@ -322,7 +437,7 @@ func classifyBody(status int, body []byte) (outbound.BodyError, bool) {
 
 // mapping classifies the status of an answer, or the error_code its body reports (C-14.FR-7): 429 is RetryAfter;
 // 5xx, 408 and an answer that is not JSON are Transient; 401, 403 and 404 Fatal; anything else, 409 among them, is
-// unknown and never retried. S-042 refines the answers of sends and edits by their description.
+// unknown and never retried. classify.go refines the answers of sends and edits by their description.
 func mapping(status int, _ time.Duration, _ bool) outbound.Outcome {
 	switch {
 	case status >= 200 && status < 300:
@@ -341,7 +456,7 @@ func mapping(status int, _ time.Duration, _ bool) outbound.Outcome {
 
 // resultOf is the Result of an outbound call: a blocked address and a refused redirect are configuration errors and
 // Fatal; a timeout or a failed connection is Transient; a RetryAfter holds the whole Connection here, since these calls
-// name no chat; the adapter of S-042 holds a Destination for its own calls.
+// name no chat; the adapter holds a Destination for its own calls (classify.go).
 func resultOf(res outbound.Result, err error) Result {
 	r := Result{Status: res.Status}
 	var env envelope

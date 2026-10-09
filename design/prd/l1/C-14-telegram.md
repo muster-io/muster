@@ -76,10 +76,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
 - **C-14.FR-6** Quiet new messages carry `disable_notification`, which in Telegram silences the push but does not
   remove it (F-012).
 - **C-14.FR-7** Response mapping: `429` with `retry_after` → RetryAfter for the Destination, and for the whole Connection
-  when two of its Destinations get `429` within 60 seconds; "message is not modified" → success (F-017); "message to edit not found"
-  → the deleted Root message flow; "message to be replied not found" on a Thread reply → the lost Thread of FR-3, not an
-  error of the Destination; `401` and "bot was kicked" or missing rights → Fatal; an error inside a `200` body
-  (`ok: false`) is classified the same way; a non-JSON answer is a transport error (Transient); anything else → unknown.
+  when two of its Destinations get `429` within 60 seconds; "message is not modified" → success (F-017); "message to
+  edit not found" and "message can't be edited" → the deleted Root message flow, since a bot edits its own messages at
+  any age (F-065); "message to be replied not found" on a Thread reply → the lost Thread of FR-3, not an error of the
+  Destination; `401` and "bot was kicked" or missing rights → Fatal; an error inside a `200` body (`ok: false`) is
+  classified the same way; a non-JSON answer is a transport error (Transient); anything else → unknown.
 - **C-14.FR-8** The bot answers `/start <token>` for Account links (C-18).
 - **C-14.FR-9** The documentation covers creating the bot, enabling comments on the channel (which creates its
   discussion group), adding the bot as an admin to the channel — Telegram adds a bot to a channel only as an admin

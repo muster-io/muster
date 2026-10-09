@@ -93,8 +93,8 @@ func (q txQueries) DB() dbgen.DBTX { return q.tx }
 
 // WriterConfig is what the changes of Destinations need: the Writer, the Audit log, the business clock that dates the
 // changes, routing's Routes hook and delivery's Retire hook; and for the saves, the validation of Mention settings, the
-// Destination check of the Mattermost type and delivery's end of a Broken state, and for outgoing webhooks the Keyring
-// that encrypts their secrets and the template sandbox that checks their request.
+// Destination checks of the Mattermost and Telegram types and delivery's end of a Broken state, and for outgoing
+// webhooks the Keyring that encrypts their secrets and the template sandbox that checks their request.
 type WriterConfig struct {
 	Writer     Writer
 	Audit      *audit.Writer
@@ -103,6 +103,7 @@ type WriterConfig struct {
 	Retire     Retire
 	Mentions   MentionValidator
 	Mattermost MattermostChecker
+	Telegram   TelegramChecker
 	Healthy    Healthy
 	Keyring    *keyring.Keyring
 	Templates  *templates.Sandbox
