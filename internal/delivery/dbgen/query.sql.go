@@ -86,6 +86,50 @@ func (q *Queries) AbandonConnectionDeliveries(ctx context.Context, arg AbandonCo
 	return items, nil
 }
 
+const abandonWebhookEvents = `-- name: AbandonWebhookEvents :many
+UPDATE webhook_events e
+SET state = 'not_delivered', last_error_class = 'unknown', last_error = $1::text
+FROM alert_groups g
+WHERE e.org_id = $2 AND e.destination_id = $3 AND e.state = 'pending' AND g.org_id = $2
+  AND g.id = e.alert_group_id
+RETURNING e.alert_group_id, e.event, g.public_id AS alert_group_public_id
+`
+
+type AbandonWebhookEventsParams struct {
+	Error         string
+	OrgID         int64
+	DestinationID int64
+}
+
+type AbandonWebhookEventsRow struct {
+	AlertGroupID       int64
+	Event              string
+	AlertGroupPublicID string
+}
+
+// AbandonWebhookEvents ends the pending events of a deleted Destination as Not delivered with @error (C-15.FR-12), in
+// the transaction that deletes it, with what their delivery events and log lines name. A lease in flight stays, so
+// that the secrets wait for its call.
+func (q *Queries) AbandonWebhookEvents(ctx context.Context, arg AbandonWebhookEventsParams) ([]AbandonWebhookEventsRow, error) {
+	rows, err := q.db.Query(ctx, abandonWebhookEvents, arg.Error, arg.OrgID, arg.DestinationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AbandonWebhookEventsRow{}
+	for rows.Next() {
+		var i AbandonWebhookEventsRow
+		if err := rows.Scan(&i.AlertGroupID, &i.Event, &i.AlertGroupPublicID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const breakDestination = `-- name: BreakDestination :one
 UPDATE destinations
 SET health = 'broken', broken_since = $1::timestamptz, broken_cause = $2::text, broken_reason = $3::text,
@@ -135,11 +179,16 @@ WITH due AS MATERIALIZED (
                       WHERE p.org_id = x.org_id AND p.destination_id = x.id AND p.state = 'pending'))
       AND (x.next_probe_at <= $3::timestamptz
            OR (x.next_probe_at = 'infinity'
-               AND EXISTS (SELECT 1
-                           FROM deliveries w
-                           WHERE w.org_id = x.org_id AND w.destination_id = x.id AND w.state = 'pending'
-                             AND w.held_by_storm_id IS NULL AND w.next_attempt_at <= $3::timestamptz
-                             AND (w.lease_until IS NULL OR w.lease_until <= $4::timestamptz))))
+               AND (EXISTS (SELECT 1
+                            FROM deliveries w
+                            WHERE w.org_id = x.org_id AND w.destination_id = x.id AND w.state = 'pending'
+                              AND w.held_by_storm_id IS NULL AND w.next_attempt_at <= $3::timestamptz
+                              AND (w.lease_until IS NULL OR w.lease_until <= $4::timestamptz))
+                    OR EXISTS (SELECT 1
+                               FROM webhook_events e
+                               WHERE e.org_id = x.org_id AND e.destination_id = x.id AND e.state = 'pending'
+                                 AND e.next_attempt_at <= $3::timestamptz
+                                 AND (e.lease_until IS NULL OR e.lease_until <= $4::timestamptz)))))
     ORDER BY x.next_probe_at, x.id
     LIMIT $5
     FOR UPDATE OF x SKIP LOCKED
@@ -168,7 +217,7 @@ type ClaimBrokenProbesRow struct {
 }
 
 // ClaimBrokenProbes claims the Broken Destinations whose probe is due (C-11.FR-9, schema.md §5): next_probe_at has
-// passed, or it is marked 'infinity' and one of its deliveries came due. Moving next_probe_at to @next_probe is the
+// passed, or it is marked 'infinity' and one of its deliveries or outgoing webhook events came due. Moving next_probe_at to @next_probe is the
 // lease; another claimer skips the rows this one locked. A deleted Destination is probed only while a final edit of
 // it waits.
 func (q *Queries) ClaimBrokenProbes(ctx context.Context, arg ClaimBrokenProbesParams) ([]ClaimBrokenProbesRow, error) {
@@ -345,6 +394,74 @@ func (q *Queries) ClaimDueReplies(ctx context.Context, arg ClaimDueRepliesParams
 	return items, nil
 }
 
+const claimDueWebhookEvents = `-- name: ClaimDueWebhookEvents :many
+WITH due AS MATERIALIZED (
+    SELECT x.id
+    FROM webhook_events x
+    JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
+    WHERE x.org_id = $3 AND x.state = 'pending' AND x.next_attempt_at <= $4::timestamptz
+      AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND ds.health = 'healthy'
+      AND ds.deleted_at IS NULL
+      AND NOT EXISTS (SELECT 1
+                      FROM webhook_events p
+                      WHERE p.org_id = x.org_id AND p.destination_id = x.destination_id
+                        AND p.alert_group_id = x.alert_group_id AND p.state = 'pending' AND p.sequence < x.sequence)
+    ORDER BY x.next_attempt_at, x.id
+    LIMIT $6
+    FOR UPDATE OF x SKIP LOCKED
+)
+UPDATE webhook_events e
+SET lease_owner = $1::text, lease_until = $2::timestamptz
+FROM due
+WHERE e.org_id = $3 AND e.id = due.id
+RETURNING e.id, e.next_attempt_at
+`
+
+type ClaimDueWebhookEventsParams struct {
+	Owner      string
+	LeaseUntil time.Time
+	OrgID      int64
+	Due        time.Time
+	Now        time.Time
+	Lim        int32
+}
+
+type ClaimDueWebhookEventsRow struct {
+	ID            int64
+	NextAttemptAt time.Time
+}
+
+// ClaimDueWebhookEvents leases the due head events of the healthy Destinations that are not deleted: the pending event
+// with the lowest sequence of its Alert Group and Destination, whose lease is free or ran out; the next one waits until
+// it is delivered or Not delivered, while the events of other Alert Groups go on. The choice is a materialized CTE,
+// run once, as in ClaimDueDeliveries.
+func (q *Queries) ClaimDueWebhookEvents(ctx context.Context, arg ClaimDueWebhookEventsParams) ([]ClaimDueWebhookEventsRow, error) {
+	rows, err := q.db.Query(ctx, claimDueWebhookEvents,
+		arg.Owner,
+		arg.LeaseUntil,
+		arg.OrgID,
+		arg.Due,
+		arg.Now,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClaimDueWebhookEventsRow{}
+	for rows.Next() {
+		var i ClaimDueWebhookEventsRow
+		if err := rows.Scan(&i.ID, &i.NextAttemptAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const collectAlerts = `-- name: CollectAlerts :one
 INSERT INTO thread_replies (org_id, delivery_id, alert_group_id, destination_id, event, event_seqs, loudness,
                             mentions, fingerprints, state, next_attempt_at, created_at)
@@ -410,7 +527,10 @@ SELECT ds.public_id,
        + (SELECT count(*)
           FROM thread_replies r
           WHERE r.org_id = ds.org_id AND r.destination_id = ds.id AND r.state IN ('collecting', 'pending')
-            AND r.next_attempt_at <= $1::timestamptz))::bigint AS queued
+            AND r.next_attempt_at <= $1::timestamptz)
+       + (SELECT count(*)
+          FROM webhook_events e
+          WHERE e.org_id = ds.org_id AND e.destination_id = ds.id AND e.state = 'pending'))::bigint AS queued
 FROM destinations ds
 WHERE ds.org_id = $2 AND ds.deleted_at IS NULL
 `
@@ -425,8 +545,8 @@ type CountDeliveryQueuesRow struct {
 	Queued   int64
 }
 
-// CountDeliveryQueues counts, per Destination that is not deleted, its pending deliveries that no Storm holds and its
-// Thread replies due at @now, for muster_delivery_queue.
+// CountDeliveryQueues counts, per Destination that is not deleted, its pending deliveries that no Storm holds, its
+// Thread replies due at @now and its pending outgoing webhook events, for muster_delivery_queue.
 func (q *Queries) CountDeliveryQueues(ctx context.Context, arg CountDeliveryQueuesParams) ([]CountDeliveryQueuesRow, error) {
 	rows, err := q.db.Query(ctx, countDeliveryQueues, arg.Now, arg.OrgID)
 	if err != nil {
@@ -511,6 +631,32 @@ type DeleteExpiredRepliesParams struct {
 // created before @cutoff, skipping rows another transaction holds.
 func (q *Queries) DeleteExpiredReplies(ctx context.Context, arg DeleteExpiredRepliesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredReplies, arg.OrgID, arg.Cutoff, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteExpiredWebhookEvents = `-- name: DeleteExpiredWebhookEvents :execrows
+DELETE FROM webhook_events t
+WHERE t.org_id = $1 AND t.id IN (SELECT e.id
+                                      FROM webhook_events e
+                                      WHERE e.org_id = $1 AND e.state <> 'pending' AND e.created_at < $2
+                                      ORDER BY e.created_at, e.id
+                                      LIMIT $3
+                                      FOR UPDATE SKIP LOCKED)
+`
+
+type DeleteExpiredWebhookEventsParams struct {
+	OrgID     int64
+	Cutoff    time.Time
+	BatchSize int32
+}
+
+// DeleteExpiredWebhookEvents deletes at most @batch_size events that are delivered or Not delivered and were created
+// before @cutoff, skipping rows another transaction holds.
+func (q *Queries) DeleteExpiredWebhookEvents(ctx context.Context, arg DeleteExpiredWebhookEventsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredWebhookEvents, arg.OrgID, arg.Cutoff, arg.BatchSize)
 	if err != nil {
 		return 0, err
 	}
@@ -1015,6 +1161,74 @@ func (q *Queries) GetLeasedReply(ctx context.Context, arg GetLeasedReplyParams) 
 	return i, err
 }
 
+const getLeasedWebhookEvent = `-- name: GetLeasedWebhookEvent :one
+SELECT e.id, e.alert_group_id, e.sequence, e.webhook_id, e.event, e.body, e.attempts, e.received_at,
+       ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       ds.type AS destination_type, ds.health AS destination_health, g.public_id AS alert_group_public_id, g.number
+FROM webhook_events e
+JOIN destinations ds ON ds.org_id = e.org_id AND ds.id = e.destination_id
+JOIN alert_groups g ON g.org_id = e.org_id AND g.id = e.alert_group_id
+WHERE e.org_id = $1 AND e.id = $2 AND e.state = 'pending' AND e.lease_owner = $3::text
+  AND e.lease_until > $4::timestamptz
+FOR UPDATE OF e
+`
+
+type GetLeasedWebhookEventParams struct {
+	OrgID int64
+	ID    int64
+	Owner string
+	Now   time.Time
+}
+
+type GetLeasedWebhookEventRow struct {
+	ID                  int64
+	AlertGroupID        int64
+	Sequence            int64
+	WebhookID           string
+	Event               string
+	Body                []byte
+	Attempts            int64
+	ReceivedAt          pgtype.Timestamptz
+	DestinationID       int64
+	DestinationPublicID string
+	DestinationName     string
+	DestinationType     string
+	DestinationHealth   string
+	AlertGroupPublicID  string
+	Number              int64
+}
+
+// GetLeasedWebhookEvent reads, and locks, a pending event whose lease this replica still holds at the real time now,
+// with its Destination and its Alert Group. No row when the lease ran out, went to another replica, or the event
+// ended meanwhile.
+func (q *Queries) GetLeasedWebhookEvent(ctx context.Context, arg GetLeasedWebhookEventParams) (GetLeasedWebhookEventRow, error) {
+	row := q.db.QueryRow(ctx, getLeasedWebhookEvent,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+		arg.Now,
+	)
+	var i GetLeasedWebhookEventRow
+	err := row.Scan(
+		&i.ID,
+		&i.AlertGroupID,
+		&i.Sequence,
+		&i.WebhookID,
+		&i.Event,
+		&i.Body,
+		&i.Attempts,
+		&i.ReceivedAt,
+		&i.DestinationID,
+		&i.DestinationPublicID,
+		&i.DestinationName,
+		&i.DestinationType,
+		&i.DestinationHealth,
+		&i.AlertGroupPublicID,
+		&i.Number,
+	)
+	return i, err
+}
+
 const getPostDestination = `-- name: GetPostDestination :one
 SELECT ds.id, ds.public_id, ds.name
 FROM destinations ds
@@ -1289,6 +1503,49 @@ func (q *Queries) InsertThreadReply(ctx context.Context, arg InsertThreadReplyPa
 	return err
 }
 
+const insertWebhookEvent = `-- name: InsertWebhookEvent :exec
+
+INSERT INTO webhook_events (org_id, destination_id, alert_group_id, sequence, webhook_id, event, notify, occurred_at,
+                            body, state, next_attempt_at, received_at, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9,
+        'pending', $8::timestamptz, $10::timestamptz, $8::timestamptz)
+ON CONFLICT (destination_id, alert_group_id, sequence) DO NOTHING
+`
+
+type InsertWebhookEventParams struct {
+	OrgID         int64
+	DestinationID int64
+	AlertGroupID  int64
+	Sequence      int64
+	WebhookID     string
+	Event         string
+	Notify        bool
+	Now           time.Time
+	Body          []byte
+	ReceivedAt    pgtype.Timestamptz
+}
+
+// Outgoing webhook events (C-15.FR-2, schema.md §4.11 and §5): one row per lifecycle event and events-mode
+// Destination, sent in order per Alert Group — only the head event of an Alert Group and Destination is claimed — at
+// least once and never collapsed.
+// InsertWebhookEvent queues one lifecycle event of an Alert Group for an events-mode Destination, due now, with its
+// body rendered now; the event is queued once whatever the retries of the change.
+func (q *Queries) InsertWebhookEvent(ctx context.Context, arg InsertWebhookEventParams) error {
+	_, err := q.db.Exec(ctx, insertWebhookEvent,
+		arg.OrgID,
+		arg.DestinationID,
+		arg.AlertGroupID,
+		arg.Sequence,
+		arg.WebhookID,
+		arg.Event,
+		arg.Notify,
+		arg.Now,
+		arg.Body,
+		arg.ReceivedAt,
+	)
+	return err
+}
+
 const joinStorm = `-- name: JoinStorm :one
 UPDATE storms
 SET alert_group_count = alert_group_count + 1,
@@ -1379,6 +1636,60 @@ func (q *Queries) LeaseOldestWaiting(ctx context.Context, arg LeaseOldestWaiting
 		arg.LeaseUntil,
 	)
 	var i LeaseOldestWaitingRow
+	err := row.Scan(&i.ID, &i.Free)
+	return i, err
+}
+
+const leaseOldestWaitingEvent = `-- name: LeaseOldestWaitingEvent :one
+WITH oldest AS (
+    SELECT x.id, (x.lease_until IS NULL OR x.lease_until <= $1::timestamptz) AS free
+    FROM webhook_events x
+    WHERE x.org_id = $2 AND x.destination_id = $3 AND x.state = 'pending'
+      AND NOT EXISTS (SELECT 1
+                      FROM webhook_events p
+                      WHERE p.org_id = x.org_id AND p.destination_id = x.destination_id
+                        AND p.alert_group_id = x.alert_group_id AND p.state = 'pending' AND p.sequence < x.sequence)
+    ORDER BY (x.next_attempt_at <= $4::timestamptz) DESC, x.id
+    LIMIT 1
+    FOR UPDATE OF x
+), leased AS (
+    UPDATE webhook_events e
+    SET lease_owner = $5::text, lease_until = $6::timestamptz
+    FROM oldest o
+    WHERE e.org_id = $2 AND e.id = o.id AND o.free
+    RETURNING e.id
+)
+SELECT o.id, o.free::boolean AS free
+FROM oldest o
+`
+
+type LeaseOldestWaitingEventParams struct {
+	Now           time.Time
+	OrgID         int64
+	DestinationID int64
+	Due           time.Time
+	Owner         string
+	LeaseUntil    time.Time
+}
+
+type LeaseOldestWaitingEventRow struct {
+	ID   int64
+	Free bool
+}
+
+// LeaseOldestWaitingEvent is the probe's event: among the head events of the Destination's Alert Groups, the oldest
+// one that is due at @due — so that a Retry-After is kept — else the oldest one, leased to this replica when its lease
+// is free. No row when nothing waits; free is false when it is leased elsewhere.
+func (q *Queries) LeaseOldestWaitingEvent(ctx context.Context, arg LeaseOldestWaitingEventParams) (LeaseOldestWaitingEventRow, error) {
+	row := q.db.QueryRow(ctx, leaseOldestWaitingEvent,
+		arg.Now,
+		arg.OrgID,
+		arg.DestinationID,
+		arg.Due,
+		arg.Owner,
+		arg.LeaseUntil,
+	)
+	var i LeaseOldestWaitingEventRow
 	err := row.Scan(&i.ID, &i.Free)
 	return i, err
 }
@@ -1617,7 +1928,7 @@ func (q *Queries) ListPendingGroups(ctx context.Context, arg ListPendingGroupsPa
 const listRouteDestinations = `-- name: ListRouteDestinations :many
 
 
-SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health
+SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health, d.webhook_mode
 FROM route_destinations rd
 JOIN destinations d ON d.org_id = rd.org_id AND d.id = rd.destination_id
 WHERE rd.org_id = $1 AND rd.route_id = $2 AND d.deleted_at IS NULL
@@ -1636,6 +1947,7 @@ type ListRouteDestinationsRow struct {
 	Type         string
 	ConnectionID pgtype.Int8
 	Health       string
+	WebhookMode  pgtype.Text
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -1644,8 +1956,8 @@ type ListRouteDestinationsRow struct {
 // reconciliation by the delivery worker, Thread replies, the shared limiter buckets and the delivery events. Only this
 // package writes deliveries, thread_replies, rate_limit_buckets and delivery_events. Due times are business times and
 // leases real times; both come from Go.
-// ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health, in id order, for
-// Enqueue.
+// ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health and the mode of an
+// outgoing webhook, in id order, for Enqueue.
 func (q *Queries) ListRouteDestinations(ctx context.Context, arg ListRouteDestinationsParams) ([]ListRouteDestinationsRow, error) {
 	rows, err := q.db.Query(ctx, listRouteDestinations, arg.OrgID, arg.RouteID)
 	if err != nil {
@@ -1662,6 +1974,7 @@ func (q *Queries) ListRouteDestinations(ctx context.Context, arg ListRouteDestin
 			&i.Type,
 			&i.ConnectionID,
 			&i.Health,
+			&i.WebhookMode,
 		); err != nil {
 			return nil, err
 		}
@@ -1946,6 +2259,16 @@ WITH due AS (
                       FROM thread_replies p
                       WHERE p.org_id = y.org_id AND p.delivery_id = y.delivery_id AND p.state = 'pending'
                         AND p.id < y.id)
+    UNION ALL
+    SELECT e.next_attempt_at, e.lease_until
+    FROM webhook_events e
+    JOIN destinations ds ON ds.org_id = e.org_id AND ds.id = e.destination_id
+    WHERE e.org_id = $2 AND e.state = 'pending' AND ds.deleted_at IS NULL
+      AND (ds.health = 'healthy' OR ds.next_probe_at = 'infinity')
+      AND NOT EXISTS (SELECT 1
+                      FROM webhook_events p
+                      WHERE p.org_id = e.org_id AND p.destination_id = e.destination_id
+                        AND p.alert_group_id = e.alert_group_id AND p.state = 'pending' AND p.sequence < e.sequence)
 )
 SELECT coalesce(min(at) FILTER (WHERE lease_until IS NULL OR lease_until <= $1::timestamptz),
                 '0001-01-01 00:00:00+00')::timestamptz AS free_at,
@@ -1964,7 +2287,7 @@ type NextDeliveryWorkRow struct {
 	LeaseEnd time.Time
 }
 
-// NextDeliveryWork is when the next delivery, Thread reply or Broken probe can be claimed: the earliest due time of
+// NextDeliveryWork is when the next delivery, Thread reply, outgoing webhook event or Broken probe can be claimed: the earliest due time of
 // free work on the business clock, and the earliest end of a lease still held on the real clock; each the zero time
 // when there is none. A Broken Destination marked for its next due delivery wakes the worker when that one is due;
 // deliveries a Storm holds, and those of a deleted Destination other than its final edits, are not work.
@@ -2317,6 +2640,113 @@ func (q *Queries) RecordRetired(ctx context.Context, arg RecordRetiredParams) (i
 	return id, err
 }
 
+const recordWebhookEventDelivered = `-- name: RecordWebhookEventDelivered :one
+UPDATE webhook_events
+SET state = 'delivered', delivered_at = $1::timestamptz, last_error_class = NULL, last_error = NULL,
+    lease_owner = NULL, lease_until = NULL
+WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text AND state = 'pending'
+RETURNING id
+`
+
+type RecordWebhookEventDeliveredParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+	Owner string
+}
+
+// RecordWebhookEventDelivered records an event the endpoint accepted. No row when the lease went to another replica or
+// the event ended meanwhile, because its Destination was deleted.
+func (q *Queries) RecordWebhookEventDelivered(ctx context.Context, arg RecordWebhookEventDeliveredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, recordWebhookEventDelivered,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const recordWebhookEventNotDelivered = `-- name: RecordWebhookEventNotDelivered :one
+UPDATE webhook_events
+SET state = 'not_delivered', last_error_class = $1::text, last_error = $2::text, lease_owner = NULL,
+    lease_until = NULL
+WHERE org_id = $3 AND id = $4 AND lease_owner = $5::text AND state = 'pending'
+RETURNING id
+`
+
+type RecordWebhookEventNotDeliveredParams struct {
+	ErrorClass string
+	Error      string
+	OrgID      int64
+	ID         int64
+	Owner      string
+}
+
+// RecordWebhookEventNotDelivered ends an event as Not delivered with the error class and the masked error; the next
+// event of its Alert Group follows. No row when the lease went to another replica or the event ended.
+func (q *Queries) RecordWebhookEventNotDelivered(ctx context.Context, arg RecordWebhookEventNotDeliveredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, recordWebhookEventNotDelivered,
+		arg.ErrorClass,
+		arg.Error,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const recordWebhookEventRetry = `-- name: RecordWebhookEventRetry :one
+UPDATE webhook_events
+SET next_attempt_at  = $1,
+    attempts         = attempts + CASE WHEN $2::boolean THEN 1 ELSE 0 END,
+    first_failed_at  = CASE WHEN $2::boolean THEN coalesce(first_failed_at, $3::timestamptz) ELSE first_failed_at END,
+    last_error_class = $4::text,
+    last_error       = $5::text,
+    lease_owner      = NULL,
+    lease_until      = NULL
+WHERE org_id = $6 AND id = $7 AND lease_owner = $8::text AND state = 'pending'
+RETURNING attempts, first_failed_at
+`
+
+type RecordWebhookEventRetryParams struct {
+	At         time.Time
+	Counted    bool
+	Now        time.Time
+	ErrorClass pgtype.Text
+	Error      pgtype.Text
+	OrgID      int64
+	ID         int64
+	Owner      string
+}
+
+type RecordWebhookEventRetryRow struct {
+	Attempts      int64
+	FirstFailedAt pgtype.Timestamptz
+}
+
+// RecordWebhookEventRetry records an outcome of an event that is retried at @at with the same webhook-id and body; a
+// Transient error is @counted against the budget. No row when the lease went to another replica or the event ended.
+func (q *Queries) RecordWebhookEventRetry(ctx context.Context, arg RecordWebhookEventRetryParams) (RecordWebhookEventRetryRow, error) {
+	row := q.db.QueryRow(ctx, recordWebhookEventRetry,
+		arg.At,
+		arg.Counted,
+		arg.Now,
+		arg.ErrorClass,
+		arg.Error,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	var i RecordWebhookEventRetryRow
+	err := row.Scan(&i.Attempts, &i.FirstFailedAt)
+	return i, err
+}
+
 const recoverPublished = `-- name: RecoverPublished :exec
 UPDATE deliveries
 SET next_attempt_at = $1, updated_at = $1
@@ -2452,6 +2882,29 @@ func (q *Queries) ReleaseHeldOpen(ctx context.Context, arg ReleaseHeldOpenParams
 	return err
 }
 
+const releaseWebhookEventLease = `-- name: ReleaseWebhookEventLease :one
+UPDATE webhook_events
+SET lease_owner = NULL, lease_until = NULL
+WHERE org_id = $1 AND id = $2 AND lease_owner = $3::text
+RETURNING destination_id
+`
+
+type ReleaseWebhookEventLeaseParams struct {
+	OrgID int64
+	ID    int64
+	Owner string
+}
+
+// ReleaseWebhookEventLease gives up the lease this replica holds on an event that ended before or while its call was
+// made, because its Destination was deleted, and returns the Destination, whose secrets may now be wiped. No row when
+// the lease is not this replica's.
+func (q *Queries) ReleaseWebhookEventLease(ctx context.Context, arg ReleaseWebhookEventLeaseParams) (int64, error) {
+	row := q.db.QueryRow(ctx, releaseWebhookEventLease, arg.OrgID, arg.ID, arg.Owner)
+	var destination_id int64
+	err := row.Scan(&destination_id)
+	return destination_id, err
+}
+
 const renewDeliveryLease = `-- name: RenewDeliveryLease :exec
 UPDATE deliveries
 SET lease_until = $1::timestamptz
@@ -2493,6 +2946,30 @@ type RenewReplyLeaseParams struct {
 // RenewReplyLease extends the lease of a Thread reply this replica holds before its call.
 func (q *Queries) RenewReplyLease(ctx context.Context, arg RenewReplyLeaseParams) error {
 	_, err := q.db.Exec(ctx, renewReplyLease,
+		arg.LeaseUntil,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	return err
+}
+
+const renewWebhookEventLease = `-- name: RenewWebhookEventLease :exec
+UPDATE webhook_events
+SET lease_until = $1::timestamptz
+WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text
+`
+
+type RenewWebhookEventLeaseParams struct {
+	LeaseUntil time.Time
+	OrgID      int64
+	ID         int64
+	Owner      string
+}
+
+// RenewWebhookEventLease extends the lease of an event this replica holds before its call.
+func (q *Queries) RenewWebhookEventLease(ctx context.Context, arg RenewWebhookEventLeaseParams) error {
+	_, err := q.db.Exec(ctx, renewWebhookEventLease,
 		arg.LeaseUntil,
 		arg.OrgID,
 		arg.ID,
@@ -2543,6 +3020,30 @@ type RescheduleReplyParams struct {
 // RescheduleReply releases a Thread reply that waits for its limiter tokens until @at.
 func (q *Queries) RescheduleReply(ctx context.Context, arg RescheduleReplyParams) error {
 	_, err := q.db.Exec(ctx, rescheduleReply,
+		arg.At,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	return err
+}
+
+const rescheduleWebhookEvent = `-- name: RescheduleWebhookEvent :exec
+UPDATE webhook_events
+SET next_attempt_at = $1, lease_owner = NULL, lease_until = NULL
+WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text
+`
+
+type RescheduleWebhookEventParams struct {
+	At    time.Time
+	OrgID int64
+	ID    int64
+	Owner string
+}
+
+// RescheduleWebhookEvent releases an event that waits for its limiter token until @at, without failing it.
+func (q *Queries) RescheduleWebhookEvent(ctx context.Context, arg RescheduleWebhookEventParams) error {
+	_, err := q.db.Exec(ctx, rescheduleWebhookEvent,
 		arg.At,
 		arg.OrgID,
 		arg.ID,
@@ -2617,6 +3118,28 @@ func (q *Queries) ResetForRepublish(ctx context.Context, arg ResetForRepublishPa
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const resetWebhookEventBudgets = `-- name: ResetWebhookEventBudgets :exec
+UPDATE webhook_events
+SET attempts         = 0,
+    first_failed_at  = NULL,
+    next_attempt_at  = CASE WHEN last_error_class = 'retry_after' THEN next_attempt_at
+                            ELSE least(next_attempt_at, $1::timestamptz) END
+WHERE org_id = $2 AND destination_id = $3 AND state = 'pending'
+`
+
+type ResetWebhookEventBudgetsParams struct {
+	Now           time.Time
+	OrgID         int64
+	DestinationID int64
+}
+
+// ResetWebhookEventBudgets gives the pending events of a recovered Destination a fresh Transient budget and makes
+// those that waited for a backoff due now; a Retry-After still in the future is kept.
+func (q *Queries) ResetWebhookEventBudgets(ctx context.Context, arg ResetWebhookEventBudgetsParams) error {
+	_, err := q.db.Exec(ctx, resetWebhookEventBudgets, arg.Now, arg.OrgID, arg.DestinationID)
+	return err
 }
 
 const retireDestinationDeliveries = `-- name: RetireDestinationDeliveries :many
@@ -3182,10 +3705,18 @@ const wipeDestinationSecrets = `-- name: WipeDestinationSecrets :exec
 WITH gone AS (
     SELECT x.id
     FROM destinations x
-    WHERE x.org_id = $1 AND x.id = $2 AND x.deleted_at IS NOT NULL
+    WHERE x.org_id = $1 AND ($2::bigint IS NULL OR x.id = $2::bigint)
+      AND x.deleted_at IS NOT NULL
+      AND (x.signing_secret_ciphertext IS NOT NULL OR x.previous_signing_secret_ciphertext IS NOT NULL
+           OR x.proxy_password_ciphertext IS NOT NULL
+           OR EXISTS (SELECT 1 FROM destination_secrets n WHERE n.org_id = x.org_id AND n.destination_id = x.id))
       AND NOT EXISTS (SELECT 1
                       FROM deliveries p
-                      WHERE p.org_id = x.org_id AND p.destination_id = x.id AND p.state = 'pending')
+                      WHERE p.org_id = x.org_id AND p.destination_id = x.id
+                        AND (p.state = 'pending' OR p.lease_until > $3::timestamptz))
+      AND NOT EXISTS (SELECT 1
+                      FROM webhook_events e
+                      WHERE e.org_id = x.org_id AND e.destination_id = x.id AND e.lease_until > $3::timestamptz)
 ), secrets AS (
     DELETE FROM destination_secrets s
     USING gone
@@ -3208,14 +3739,18 @@ WHERE d.org_id = $1 AND d.id = gone.id
 
 type WipeDestinationSecretsParams struct {
 	OrgID int64
-	ID    int64
+	ID    pgtype.Int8
+	Now   time.Time
 }
 
-// WipeDestinationSecrets wipes the secrets of a deleted Destination once none of its deliveries is pending: the
-// Signing secrets, the proxy password and its named Secrets (C-11.FR-14); the delete of the named Secrets runs whether
-// or not the update reads it. It changes nothing otherwise, and nothing the second time.
+// WipeDestinationSecrets wipes the secrets of a deleted Destination once none of its deliveries is pending and no call
+// of it — a delivery or an outgoing webhook event — holds a lease at the real time @now, because a call in flight
+// still makes its final edit or signs its request with them: the Signing secrets, the proxy password and its named
+// Secrets (C-11.FR-14, C-15.FR-12); the delete of the named Secrets runs whether or not the update reads it. It
+// changes nothing otherwise, and nothing the second time. @id null wipes every deleted Destination of the
+// Organization that qualifies, which the retention of outgoing webhook events runs for a call whose replica stopped.
 func (q *Queries) WipeDestinationSecrets(ctx context.Context, arg WipeDestinationSecretsParams) error {
-	_, err := q.db.Exec(ctx, wipeDestinationSecrets, arg.OrgID, arg.ID)
+	_, err := q.db.Exec(ctx, wipeDestinationSecrets, arg.OrgID, arg.ID, arg.Now)
 	return err
 }
 

@@ -56,12 +56,14 @@ import (
 	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/internal/telegram"
+	"github.com/muster-io/muster/internal/templates"
 	"github.com/muster-io/muster/internal/timers"
 	timersdb "github.com/muster-io/muster/internal/timers/dbgen"
 	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
 	usersdb "github.com/muster-io/muster/internal/users/dbgen"
+	"github.com/muster-io/muster/internal/webhooks"
 	"github.com/muster-io/muster/web"
 )
 
@@ -132,6 +134,9 @@ type database interface {
 	LinksStore() links.Store
 	DestinationsStore() destinations.Store
 	DestinationsWriter() destinations.Writer
+	// WebhooksStore serves the outgoing webhooks and WebhooksWriter the changes of their secrets.
+	WebhooksStore() webhooks.Store
+	WebhooksWriter() webhooks.Writer
 	// ConnectionsStore serves the Connections; AccountLinksDB is the main pool the Account links are read from.
 	ConnectionsStore() connections.Store
 	AccountLinksDB() accountlinks.DBTX
@@ -205,6 +210,10 @@ func (d pgDatabase) LinksStore() links.Store { return links.NewStore(d.Pool) }
 func (d pgDatabase) DestinationsStore() destinations.Store { return destinations.NewStore(d.Pool) }
 
 func (d pgDatabase) DestinationsWriter() destinations.Writer { return destinations.NewWriter(d.Pool) }
+
+func (d pgDatabase) WebhooksStore() webhooks.Store { return webhooks.NewStore(d.Pool) }
+
+func (d pgDatabase) WebhooksWriter() webhooks.Writer { return webhooks.NewWriter(d.Pool) }
 
 func (d pgDatabase) ConnectionsStore() connections.Store { return connections.NewStore(d.Pool) }
 
@@ -445,6 +454,8 @@ type process struct {
 	renderer     *messages.Renderer
 	mentions     *mentions.Service
 	destinations *destinations.Service
+	webhooks     *webhooks.Service
+	sandbox      *templates.Sandbox
 	connections  *connections.Service
 	// interactive is the interactive path and roles the Permissions of each Role, which the callback of Mattermost
 	// button presses answers through and runs Commands with.
@@ -747,10 +758,16 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Saved: func(ctx context.Context, tx routingdb.DBTX, routeID int64, publicID string, kinds []string) error {
 			return p.renderer.TemplateSaved(ctx, tx, routeID, publicID, kinds)
 		}})
-	// The dispatcher's re-render step sets the Desired state of each Root message (ADR-0005).
+	// Outgoing webhooks keep their Secrets and Signing secrets through the Keyring and render their request templates in
+	// the sandbox (C-15, ADR-0011, ADR-0012); the bodies of their events are rendered when the events are queued.
+	p.sandbox = templates.New(p.clocks.Business, p.clocks.Real)
+	p.webhooks = webhooks.New(orgID, webhooks.Config{Store: p.db.WebhooksStore(), Writer: p.db.WebhooksWriter(),
+		Keyring: p.keyring, Audit: w, Business: p.clocks.Business, PublicURL: p.cfg.PublicURL.String()})
+	// The dispatcher's re-render step sets the Desired state of each Root message and queues the events of outgoing
+	// webhooks (ADR-0005).
 	p.delivery = delivery.New(delivery.Config{OrgID: orgID, Store: p.db.DeliveryStore(), Business: p.clocks.Business,
 		Renderer: delivery.MessageRenderer{Renderer: p.renderer}, Log: p.log,
-		RunbookBase: p.cfg.RunbookBaseURL.String()})
+		RunbookBase: p.cfg.RunbookBaseURL.String(), Real: p.clocks.Real, Bodies: p.webhooks, Mentions: p.mentions})
 	p.groups.SetRerender(p.delivery.Enqueue)
 	// Destinations added to or removed from a Route, or deleted, publish there or get their final edit (C-11.FR-14).
 	p.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, routeID int64, added, removed []int64) error {
@@ -781,7 +798,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			return p.delivery.RetireDestination(ctx, tx, id)
 		},
 		Mentions: p.mentions, Mattermost: conns,
-		Healthy: p.delivery.EndBroken})
+		Healthy: p.delivery.EndBroken, Keyring: p.keyring, Templates: p.sandbox})
 	if p.opts.Development {
 		if err := conns.EnsureDemo(ctx, devmode.ConnectionDemo()); err != nil {
 			return nil, fmt.Errorf("the demo connection: %w", err)
@@ -820,6 +837,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Directory:      users.NewDirectory(orgID, p.db.AdminStore()),
 		Connections:    conns,
 		Destinations:   p.destinations,
+		Webhooks:       p.webhooks,
 		Deliveries:     p.delivery,
 		Templates:      p.renderer,
 		Links:          linkService,
@@ -873,6 +891,12 @@ func (p *process) newKeeper() *leader.Keeper {
 		AlertGroupRetention:  groups.RetentionTask(p.db.GroupsStore()),
 		DeliveryQueue:        p.deliveryQueue,
 		ThreadReplyRetention: p.threadReplyRetention,
+		WebhookEventRetention: func(ctx context.Context, orgID int64, now time.Time) (int64, error) {
+			if orgID != p.orgID {
+				return 0, nil
+			}
+			return p.delivery.PruneWebhookEvents(ctx, now)
+		},
 		TelegramPolling: func(ctx context.Context, orgID int64) error {
 			if orgID != p.orgID {
 				return nil
@@ -1059,6 +1083,9 @@ func (p *process) configureWorker() {
 	p.deliverer.PublicURL = p.cfg.PublicURL.String()
 	p.deliverer.Renderer = delivery.MessageRenderer{Renderer: p.renderer}
 	p.deliverer.Mentions = p.mentions
+	p.deliverer.Events = &webhooks.Adapter{Service: p.webhooks, Sandbox: p.sandbox,
+		Network: webhooks.Network{Policy: organization.NewOutboundPolicies(p.db.OrganizationStore(), p.orgID,
+			p.clocks.Real), Log: p.log, Real: p.clocks.Real}}
 	p.timers.Handlers = map[string]timers.Handler{
 		delivery.TimerStormCalmCheck: func(ctx context.Context, tx timersdb.DBTX, org int64, t timers.Timer) (
 			func(context.Context), error) {

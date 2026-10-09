@@ -67,6 +67,7 @@ import (
 	tdb "github.com/muster-io/muster/internal/totp/dbgen"
 	"github.com/muster-io/muster/internal/users"
 	udb "github.com/muster-io/muster/internal/users/dbgen"
+	"github.com/muster-io/muster/internal/webhooks"
 )
 
 type fakeDB struct {
@@ -512,6 +513,15 @@ func (s *fakeConnectionsStore) Notify(context.Context, db.Hint) error { return n
 
 // DestinationsWriter has no database: every change fails.
 func (f *fakeDB) DestinationsWriter() destinations.Writer { return noDestinationsWriter{} }
+
+// WebhooksStore and WebhooksWriter have no database: every read and change fails.
+func (f *fakeDB) WebhooksStore() webhooks.Store { return webhooks.NewStore(noDB{}) }
+
+func (f *fakeDB) WebhooksWriter() webhooks.Writer { return noWebhooksWriter{} }
+
+type noWebhooksWriter struct{}
+
+func (noWebhooksWriter) InTx(context.Context, func(webhooks.TxQueries) error) error { return errNoDB }
 
 type noDestinationsWriter struct{}
 

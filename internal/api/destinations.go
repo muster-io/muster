@@ -13,7 +13,9 @@ import (
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/webhooks"
 )
 
 // Destinations is what the API needs of internal/destinations: reading Destinations of every type with their health
@@ -29,6 +31,23 @@ type Destinations interface {
 	Check(ctx context.Context, publicID string) (destinations.CheckResult, error)
 	Delete(ctx context.Context, r destinations.Requester, publicID string, version *int64) error
 }
+
+// Webhooks is what the API needs of internal/webhooks: the Secrets and the Signing secrets of outgoing webhook
+// Destinations.
+type Webhooks interface {
+	ListSecrets(ctx context.Context, publicID string) (webhooks.Secrets, error)
+	SetSecret(ctx context.Context, r webhooks.Requester, publicID string, version *int64, name string,
+		value logging.Secret) (webhooks.Secret, int64, error)
+	DeleteSecret(ctx context.Context, r webhooks.Requester, publicID string, version *int64, name string) error
+	SigningStatus(ctx context.Context, publicID string) (webhooks.SigningStatus, error)
+	GenerateSigningSecret(ctx context.Context, r webhooks.Requester, publicID string) (logging.Secret,
+		webhooks.SigningStatus, error)
+	RetirePreviousSigningSecret(ctx context.Context, r webhooks.Requester, publicID string) error
+}
+
+// codeNotWebhook is the conflict of a Secret or Signing secret operation on a Destination that is not an outgoing
+// webhook.
+const codeNotWebhook = "not_webhook_destination"
 
 // Deliveries is what the API needs of internal/delivery: the delivery state of an Alert Group per Destination.
 type Deliveries interface {
@@ -117,7 +136,7 @@ func (s *Server) CreateDestination(ctx context.Context, req gen.CreateDestinatio
 	}
 	d, err := s.destinations.Create(ctx, r, in)
 	if err != nil {
-		return nil, err
+		return nil, templateProblem(err)
 	}
 	body, err := destinationOf(d)
 	if err != nil {
@@ -125,6 +144,9 @@ func (s *Server) CreateDestination(ctx context.Context, req gen.CreateDestinatio
 	}
 	out := gen.DestinationCreated{Destination: body}
 	out.SigningSecret.SetNull()
+	if d.SigningSecretOnce != "" {
+		out.SigningSecret.Set(string(d.SigningSecretOnce))
+	}
 	tag, location := etag(d.Version), BasePath+"/destinations/"+d.PublicID
 	return gen.CreateDestination201JSONResponse{Body: out,
 		Headers: gen.CreateDestination201ResponseHeaders{ETag: &tag, Location: &location}}, nil
@@ -154,7 +176,7 @@ func (s *Server) UpdateDestination(ctx context.Context, req gen.UpdateDestinatio
 		return nil, errPreconditionFailed
 	}
 	if err != nil {
-		return nil, err
+		return nil, templateProblem(err)
 	}
 	body, err := destinationOf(d)
 	if err != nil {
@@ -187,6 +209,17 @@ func (s *Server) CheckDestination(ctx context.Context, req gen.CheckDestinationR
 	return out, nil
 }
 
+// templateProblem is the problem of a request template that failed on save, with its line and column; any other
+// error is left to problemFor.
+func templateProblem(err error) error {
+	if f, ok := errors.AsType[*destinations.FieldError](err); ok && f.Line > 0 {
+		p := fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+		p.Errors[0].Line, p.Errors[0].Column = positive(f.Line), positive(f.Column)
+		return p
+	}
+	return err
+}
+
 // destinationInputOf is the Input of a Destination's body; the types without a write path yet reach the service with
 // their type only, which refuses them.
 func destinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
@@ -194,6 +227,9 @@ func destinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
 	if err != nil {
 		return destinations.Input{}, fieldProblem(http.StatusBadRequest, "/type", fieldInvalidFormat,
 			"The type is not mattermost, telegram or webhook.")
+	}
+	if kind == delivery.TypeWebhook {
+		return webhookInputOf(body)
 	}
 	if kind != delivery.TypeMattermost {
 		return destinations.Input{Type: kind}, nil
@@ -211,6 +247,29 @@ func destinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
 		Limiter: destinations.Limiter{Limit: int64(m.Limiter.Limit), PerSeconds: int64(m.Limiter.PerSeconds)},
 		Mattermost: &destinations.MattermostInput{Connection: m.ConnectionId, TeamID: m.TeamId,
 			ChannelID: m.ChannelId}}, nil
+}
+
+// webhookInputOf is the Input of an outgoing webhook's body: its mode, the request of the events mode and its proxy.
+func webhookInputOf(body gen.DestinationInput) (destinations.Input, error) {
+	w, err := body.AsWebhookDestinationInput()
+	if err != nil {
+		return destinations.Input{}, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
+			"The body is not an outgoing webhook Destination.")
+	}
+	set, err := mentionSettingsOf(w.Mentions)
+	if err != nil {
+		return destinations.Input{}, err
+	}
+	in := &destinations.WebhookInput{Mode: string(w.Mode), Proxy: proxyInput(w.Proxy)}
+	if w.Events != nil {
+		in.Events = &webhooks.EventsConfig{URL: w.Events.Url, Headers: make([]webhooks.Header, 0, len(w.Events.Headers))}
+		for _, h := range w.Events.Headers {
+			in.Events.Headers = append(in.Events.Headers, webhooks.Header{Name: h.Name, Value: h.Value})
+		}
+	}
+	return destinations.Input{Type: delivery.TypeWebhook, Name: w.Name, Mentions: set,
+		Limiter: destinations.Limiter{Limit: int64(w.Limiter.Limit), PerSeconds: int64(w.Limiter.PerSeconds)},
+		Webhook: in}, nil
 }
 
 // mentionSettingsOf is the Mention settings of a body, keyed by kind, with empty lists for missing ones.
@@ -342,6 +401,18 @@ func webhookOf(d destinations.Destination) (gen.WebhookDestination, error) {
 		if err := json.Unmarshal(d.EventsConfig, w.Events); err != nil {
 			return w, fmt.Errorf("read the events request of %s: %w", d.PublicID, err)
 		}
+		if w.Events.Headers == nil {
+			w.Events.Headers = []gen.HeaderTemplate{}
+		}
+		c := webhooks.EventsConfig{URL: w.Events.Url}
+		for _, h := range w.Events.Headers {
+			c.Headers = append(c.Headers, webhooks.Header{Name: h.Name, Value: h.Value})
+		}
+		for _, warning := range webhooks.Warnings("/events", c) {
+			item := gen.DestinationWarning{Kind: gen.DestinationWarningKind(warning.Kind)}
+			item.Field.Set(warning.Field)
+			w.Warnings = append(w.Warnings, item)
+		}
 	}
 	if len(d.TemplateConfig) > 0 {
 		w.Template = &gen.WebhookTemplateConfig{}
@@ -354,3 +425,144 @@ func webhookOf(d destinations.Destination) (gen.WebhookDestination, error) {
 
 // errDestinationNotFound is a Destination that does not exist or is deleted.
 var errDestinationNotFound = problem(http.StatusNotFound, typeNotFound, "", "No such destination.")
+
+// webhookRequester is who changes the secrets of an outgoing webhook, and how.
+func webhookRequester(ctx context.Context) (webhooks.Requester, error) {
+	r, err := destinationRequester(ctx)
+	if err != nil {
+		return webhooks.Requester{}, err
+	}
+	return webhooks.Requester{Actor: r.Actor, Transport: r.Transport, Address: r.Address}, nil
+}
+
+// webhookProblem maps the errors of the Secrets and Signing secrets to their problems.
+func webhookProblem(err error) error {
+	var f *webhooks.FieldError
+	switch {
+	case errors.Is(err, webhooks.ErrNotFound):
+		return errDestinationNotFound
+	case errors.Is(err, webhooks.ErrNotWebhook):
+		return problem(http.StatusConflict, typeConflict, codeNotWebhook, "The Destination is not an outgoing webhook.")
+	case errors.Is(err, webhooks.ErrNoSecret):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such secret.")
+	case errors.Is(err, webhooks.ErrVersionMismatch):
+		return errPreconditionFailed
+	case errors.As(err, &f):
+		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
+	return err
+}
+
+// signingStatusOf is the API form of the status of the Signing secrets.
+func signingStatusOf(st webhooks.SigningStatus) gen.SigningSecretStatus {
+	return gen.SigningSecretStatus{Set: st.Set, UpdatedAt: nullableTime(st.UpdatedAt),
+		PreviousActiveSince: nullableTime(st.PreviousActiveSince)}
+}
+
+// optionalIfMatch is the version an optional If-Match names, nil without one.
+func optionalIfMatch(v *string) (*int64, error) {
+	if v == nil {
+		return nil, nil
+	}
+	return ifMatch(*v)
+}
+
+// ListDestinationSecrets is listDestinationSecrets (C-15.FR-10): the names of the Secrets with their status, never a
+// value, and the ETag of the Secrets.
+func (s *Server) ListDestinationSecrets(ctx context.Context, req gen.ListDestinationSecretsRequestObject) (
+	gen.ListDestinationSecretsResponseObject, error) {
+	list, err := s.webhooks.ListSecrets(ctx, req.DestinationId)
+	if err != nil {
+		return nil, webhookProblem(err)
+	}
+	out := gen.DestinationSecretList{Items: make([]gen.DestinationSecret, 0, len(list.Items))}
+	for _, it := range list.Items {
+		item := gen.DestinationSecret{Name: it.Name, Set: true}
+		item.UpdatedAt.Set(it.UpdatedAt)
+		out.Items = append(out.Items, item)
+	}
+	tag := etag(list.Version)
+	return gen.ListDestinationSecrets200JSONResponse{Body: out,
+		Headers: gen.ListDestinationSecrets200ResponseHeaders{ETag: &tag}}, nil
+}
+
+// SetDestinationSecret is setDestinationSecret (C-15.FR-10): the value is write-only; the answer is its status.
+func (s *Server) SetDestinationSecret(ctx context.Context, req gen.SetDestinationSecretRequestObject) (
+	gen.SetDestinationSecretResponseObject, error) {
+	r, err := webhookRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	version, err := optionalIfMatch(req.Params.IfMatch)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil || req.Body.Value == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "/value", fieldRequired, "The value is missing.")
+	}
+	sec, next, err := s.webhooks.SetSecret(ctx, r, req.DestinationId, version, req.SecretName,
+		logging.Secret(*req.Body.Value))
+	if err != nil {
+		return nil, webhookProblem(err)
+	}
+	item := gen.DestinationSecret{Name: sec.Name, Set: true}
+	item.UpdatedAt.Set(sec.UpdatedAt)
+	tag := etag(next)
+	return gen.SetDestinationSecret200JSONResponse{Body: item,
+		Headers: gen.SetDestinationSecret200ResponseHeaders{ETag: &tag}}, nil
+}
+
+// DeleteDestinationSecret is deleteDestinationSecret (C-15.FR-10).
+func (s *Server) DeleteDestinationSecret(ctx context.Context, req gen.DeleteDestinationSecretRequestObject) (
+	gen.DeleteDestinationSecretResponseObject, error) {
+	r, err := webhookRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	version, err := optionalIfMatch(req.Params.IfMatch)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.webhooks.DeleteSecret(ctx, r, req.DestinationId, version, req.SecretName); err != nil {
+		return nil, webhookProblem(err)
+	}
+	return gen.DeleteDestinationSecret204Response{}, nil
+}
+
+// GetSigningSecret is getSigningSecret (C-15.FR-5): the status of the Signing secrets, never a value.
+func (s *Server) GetSigningSecret(ctx context.Context, req gen.GetSigningSecretRequestObject) (
+	gen.GetSigningSecretResponseObject, error) {
+	st, err := s.webhooks.SigningStatus(ctx, req.DestinationId)
+	if err != nil {
+		return nil, webhookProblem(err)
+	}
+	return gen.GetSigningSecret200JSONResponse(signingStatusOf(st)), nil
+}
+
+// GenerateSigningSecret is generateSigningSecret (C-15.FR-5): the new Signing secret, shown once; the previous one
+// still signs until it is retired.
+func (s *Server) GenerateSigningSecret(ctx context.Context, req gen.GenerateSigningSecretRequestObject) (
+	gen.GenerateSigningSecretResponseObject, error) {
+	r, err := webhookRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	secret, st, err := s.webhooks.GenerateSigningSecret(ctx, r, req.DestinationId)
+	if err != nil {
+		return nil, webhookProblem(err)
+	}
+	return gen.GenerateSigningSecret201JSONResponse{Secret: string(secret), Status: signingStatusOf(st)}, nil
+}
+
+// RetirePreviousSigningSecret is retirePreviousSigningSecret (C-15.FR-5): the previous Signing secret signs no more.
+func (s *Server) RetirePreviousSigningSecret(ctx context.Context, req gen.RetirePreviousSigningSecretRequestObject) (
+	gen.RetirePreviousSigningSecretResponseObject, error) {
+	r, err := webhookRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.webhooks.RetirePreviousSigningSecret(ctx, r, req.DestinationId); err != nil {
+		return nil, webhookProblem(err)
+	}
+	return gen.RetirePreviousSigningSecret204Response{}, nil
+}

@@ -136,11 +136,14 @@ type Work struct {
 	// ThreadReplyRetention deletes, in batches, the Thread replies of the Organization orgID that are sent, dropped or
 	// not delivered and older than retention.alert_details at now, and returns how many it deleted.
 	ThreadReplyRetention func(ctx context.Context, orgID int64, now time.Time) (int64, error)
+	// WebhookEventRetention deletes, in batches, the outgoing webhook events of the Organization orgID that are
+	// delivered or not delivered and older than retention.alert_details at now, and returns how many it deleted.
+	WebhookEventRetention func(ctx context.Context, orgID int64, now time.Time) (int64, error)
 	// TelegramPolling runs the long polling of the Telegram Connections of the Organization orgID until ctx ends
 	// (C-14.FR-1): it stops every poller before it returns, and a failed read of the Connections returns early.
 	TelegramPolling func(ctx context.Context, orgID int64) error
 	// ClockMoved, in development mode, wakes the Heartbeat check, the Stale scan, the Alert Group retention and the
-	// retention of Thread replies when the development clock moved; nil otherwise.
+	// retention of Thread replies and of outgoing webhook events when the development clock moved; nil otherwise.
 	ClockMoved *Wakes
 }
 
@@ -199,13 +202,14 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 // Tasks returns the closed list of Leader tasks (ADR-0007): partition maintenance and retention, the alive mark, the
 // pruning of replica records, the pruning of short-lived state, the ingestion backlog, the retention of the Alerts
 // view, the Heartbeat check, the Stale scan, the count of open Alert Groups, the Alert Group retention, the count of
-// pending deliveries, the retention of Thread replies and the long polling of Telegram Connections. Later capabilities
+// pending deliveries, the retention of Thread replies and of outgoing webhook events and the long polling of Telegram
+// Connections. Later capabilities
 // add theirs here: the outgoing heartbeat and the OIDC client secret expiry check. The Keeper calls the result at every leadership, so each one
 // starts with a takeover; the Heartbeat check waits for it, so that it measures the timeouts from the end of a
 // downtime the takeover records (C-07.FR-4).
 func Tasks(w Work) func() []Task {
 	heartbeatWake, staleWake, retentionWake := w.ClockMoved.channel(), w.ClockMoved.channel(), w.ClockMoved.channel()
-	replyRetentionWake := w.ClockMoved.channel()
+	replyRetentionWake, eventRetentionWake := w.ClockMoved.channel(), w.ClockMoved.channel()
 	return func() []Task {
 		var takenOver atomic.Bool
 		return []Task{
@@ -241,6 +245,8 @@ func Tasks(w Work) func() []Task {
 			{Name: "delivery_queue", Every: DeliveryQueueInterval, Run: w.deliveryQueue},
 			{Name: "thread_reply_retention", Every: MaintenanceInterval, Wake: replyRetentionWake,
 				Run: w.threadReplyRetention},
+			{Name: "webhook_event_retention", Every: MaintenanceInterval, Wake: eventRetentionWake,
+				Run: w.webhookEventRetention},
 			{Name: "telegram_polling", Every: TelegramPollingInterval, Run: w.telegramPolling},
 		}
 	}
@@ -292,6 +298,25 @@ func (w Work) threadReplyRetention(ctx context.Context) error {
 	var errs []error
 	for _, org := range orgs {
 		_, err := w.ThreadReplyRetention(ctx, org, now)
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// webhookEventRetention runs the retention of outgoing webhook events in every Organization at the same now, on the
+// business clock; a failed Organization does not stop the others. Running it twice deletes nothing more.
+func (w Work) webhookEventRetention(ctx context.Context) error {
+	if w.WebhookEventRetention == nil {
+		return nil
+	}
+	orgs, err := w.Organizations(ctx)
+	if err != nil {
+		return fmt.Errorf("list the organizations for the webhook event retention: %w", err)
+	}
+	now := w.Business.Now()
+	var errs []error
+	for _, org := range orgs {
+		_, err := w.WebhookEventRetention(ctx, org, now)
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)

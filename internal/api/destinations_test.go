@@ -19,8 +19,10 @@ import (
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/webhooks"
 )
 
 const (
@@ -64,6 +66,17 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 	set, err := json.Marshal(in.Mentions)
 	if err != nil {
 		return destinations.Destination{}, err
+	}
+	if in.Webhook != nil {
+		events, _ := json.Marshal(in.Webhook.Events)
+		d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA8", Type: in.Type,
+			Name: in.Name, WebhookMode: &in.Webhook.Mode, EventsConfig: events,
+			Proxy:         destinations.Proxy{Enabled: in.Webhook.Proxy.Enabled, PasswordSet: in.Webhook.Proxy.Password.Given},
+			SigningSecret: destinations.SigningSecret{Set: true, UpdatedAt: &t0}, SigningSecretOnce: "whsec_once",
+			Mentions: set, LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds,
+			Health: destinations.Health{State: "healthy"}, Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
+		f.list = append(f.list, d)
+		return d, nil
 	}
 	d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA9", Type: in.Type,
 		Name: in.Name, Connection: &in.Mattermost.Connection, MattermostTeamID: &in.Mattermost.TeamID,
@@ -601,5 +614,246 @@ func TestMattermostDestinationRead(t *testing.T) {
 		m["mentions"].(map[string]any)["rise_to_urgent"].(map[string]any)["everyone"] != "here" ||
 		m["limiter"].(map[string]any)["limit"] != float64(30) {
 		t.Errorf("read = %d %s", a.status, a.body)
+	}
+}
+
+// fakeWebhooks stands for internal/webhooks: the Secrets and Signing secrets of the webhook Destination, what they
+// were asked with, and the error they answer.
+type fakeWebhooks struct {
+	secrets  []webhooks.Secret
+	version  int64
+	values   map[string]logging.Secret
+	versions []*int64
+	by       []webhooks.Requester
+	status   webhooks.SigningStatus
+	err      error
+}
+
+func (f *fakeWebhooks) check(id string) error {
+	switch {
+	case f.err != nil:
+		return f.err
+	case id == mattermostID:
+		return webhooks.ErrNotWebhook
+	case id != webhookID:
+		return webhooks.ErrNotFound
+	}
+	return nil
+}
+
+func (f *fakeWebhooks) ListSecrets(_ context.Context, id string) (webhooks.Secrets, error) {
+	if err := f.check(id); err != nil {
+		return webhooks.Secrets{}, err
+	}
+	return webhooks.Secrets{Items: f.secrets, Version: f.version}, nil
+}
+
+func (f *fakeWebhooks) SetSecret(_ context.Context, r webhooks.Requester, id string, version *int64, name string,
+	value logging.Secret) (webhooks.Secret, int64, error) {
+	f.by, f.versions = append(f.by, r), append(f.versions, version)
+	if err := f.check(id); err != nil {
+		return webhooks.Secret{}, 0, err
+	}
+	if version != nil && *version != f.version {
+		return webhooks.Secret{}, 0, webhooks.ErrVersionMismatch
+	}
+	if !webhooks.ValidSecretName(name) {
+		return webhooks.Secret{}, 0, &webhooks.FieldError{Pointer: "/path/secret_name", Code: "invalid_format",
+			Detail: "bad"}
+	}
+	f.values[name] = value
+	f.version++
+	return webhooks.Secret{Name: name, UpdatedAt: t0}, f.version, nil
+}
+
+func (f *fakeWebhooks) DeleteSecret(_ context.Context, r webhooks.Requester, id string, version *int64,
+	name string) error {
+	f.by, f.versions = append(f.by, r), append(f.versions, version)
+	if err := f.check(id); err != nil {
+		return err
+	}
+	if _, ok := f.values[name]; !ok {
+		return webhooks.ErrNoSecret
+	}
+	delete(f.values, name)
+	return nil
+}
+
+func (f *fakeWebhooks) SigningStatus(_ context.Context, id string) (webhooks.SigningStatus, error) {
+	return f.status, f.check(id)
+}
+
+func (f *fakeWebhooks) GenerateSigningSecret(_ context.Context, r webhooks.Requester, id string) (logging.Secret,
+	webhooks.SigningStatus, error) {
+	f.by = append(f.by, r)
+	if err := f.check(id); err != nil {
+		return "", webhooks.SigningStatus{}, err
+	}
+	f.status = webhooks.SigningStatus{Set: true, UpdatedAt: &t0, PreviousActiveSince: &t0}
+	return "whsec_new", f.status, nil
+}
+
+func (f *fakeWebhooks) RetirePreviousSigningSecret(_ context.Context, r webhooks.Requester, id string) error {
+	f.by = append(f.by, r)
+	if err := f.check(id); err != nil {
+		return err
+	}
+	f.status.PreviousActiveSince = nil
+	return nil
+}
+
+const webhookBody = `{"type":"webhook","name":"auto","mode":"events","events":{"url":"http://127.0.0.1:18093/hook/auto",` +
+	`"headers":[{"name":"Authorization","value":"Bearer {{ .Secrets.token }}"}]},` +
+	`"proxy":{"enabled":false,"password":"pp"},"mentions":` + noMentions + `,"limiter":{"limit":5,"per_seconds":1}}`
+
+// TestCreateWebhookDestinationAPI is createDestination of an outgoing webhook (C-15.FR-1, FR-5, AC-1): the input
+// reaches the service with its mode, request and proxy, and the answer carries the Signing secret once; a request
+// template that fails names its line and column.
+func TestCreateWebhookDestinationAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", webhookBody)
+	if a.status != http.StatusCreated {
+		t.Fatalf("create = %d %s", a.status, a.body)
+	}
+	var created gen.DestinationCreated
+	decodeInto(t, a, &created)
+	w, err := created.Destination.AsWebhookDestination()
+	if err != nil || created.SigningSecret.MustGet() != "whsec_once" || w.Events == nil || len(w.Events.Headers) != 1 ||
+		!w.SigningSecretStatus.Set {
+		t.Fatalf("created %+v (%v): %s", w, err, a.body)
+	}
+	in := fd.saved[0]
+	if in.Type != "webhook" || in.Webhook.Mode != "events" || in.Webhook.Events.URL != "http://127.0.0.1:18093/hook/auto" ||
+		in.Webhook.Events.Headers[0].Value != "Bearer {{ .Secrets.token }}" || in.Webhook.Proxy.Password.Value != "pp" ||
+		in.Limiter.Limit != 5 {
+		t.Errorf("input %+v", in.Webhook)
+	}
+	fd.saveErr = &destinations.FieldError{Pointer: "/events/url", Code: "template_syntax", Detail: "unclosed",
+		Line: 2, Column: 7}
+	a = x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", webhookBody)
+	if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity || errs[0]["line"] != 2.0 ||
+		errs[0]["column"] != 7.0 || errs[0]["pointer"] != "/events/url" {
+		t.Errorf("template error = %d %s", a.status, a.body)
+	}
+	fd.list[2].WebhookMode = ptr("events")
+	fd.saveErr = &destinations.FieldError{Pointer: "/mode", Code: "unsupported", Detail: "later", Line: 1}
+	if a := x.as(t, destinationsWriter, http.MethodPut, "/api/v1/destinations/"+webhookID, webhookBody, "If-Match",
+		`"5"`); a.status != http.StatusUnprocessableEntity {
+		t.Errorf("update = %d %s", a.status, a.body)
+	}
+	noEvents := strings.Replace(webhookBody, `"events":{"url":"http://127.0.0.1:18093/hook/auto","headers":[{"name":"Authorization","value":"Bearer {{ .Secrets.token }}"}]},`, "", 1)
+	fd.saveErr = nil
+	x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", noEvents)
+	if fd.saved[len(fd.saved)-1].Webhook.Events != nil {
+		t.Error("an omitted request reached the service")
+	}
+}
+
+// TestWebhookDestinationWarnings is C-15.FR-10 and the warnings of an outgoing webhook as read: a literal
+// Authorization header gives literal_credential with its JSON Pointer, and a previous Signing secret that still signs
+// previous_signing_secret_active with its date.
+func TestWebhookDestinationWarnings(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	fd.list[2].EventsConfig = json.RawMessage(`{"url":"https://example.org/hook",` +
+		`"headers":[{"name":"Authorization","value":"Bearer abc"}]}`)
+	a := x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/"+webhookID, "")
+	var d gen.Destination
+	decodeInto(t, a, &d)
+	w, err := d.AsWebhookDestination()
+	if err != nil || len(w.Warnings) != 2 || w.Warnings[0].Kind != gen.PreviousSigningSecretActive ||
+		w.Warnings[1].Kind != "literal_credential" || w.Warnings[1].Field.MustGet() != "/events/headers/0/value" {
+		t.Fatalf("warnings %+v (%v): %s", w.Warnings, err, a.body)
+	}
+	fd.list[2].EventsConfig = json.RawMessage(`{"url":"https://example.org/hook"}`)
+	a = x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/"+webhookID, "")
+	if !strings.Contains(string(a.body), `"headers":[]`) {
+		t.Errorf("headers %s", a.body)
+	}
+}
+
+// TestDestinationSecretsAPI is listDestinationSecrets, setDestinationSecret and deleteDestinationSecret (C-15.FR-10):
+// values are write-only; the ETag is the version of the Secrets and If-Match guards the changes; another type is 409
+// not_webhook_destination; readers list but do not change them.
+func TestDestinationSecretsAPI(t *testing.T) {
+	x, _, _ := newDestinationsAPI(t)
+	fw := &fakeWebhooks{version: 5, values: map[string]logging.Secret{}}
+	x.srv.webhooks = fw
+	path := "/api/v1/destinations/" + webhookID + "/secrets"
+	a := x.as(t, destinationsWriter, http.MethodPut, path+"/token", `{"value":"s3cr3t-token-value"}`, "If-Match", `"5"`)
+	if a.status != http.StatusOK || a.header.Get("ETag") != `"6"` || a.json(t)["name"] != "token" ||
+		a.json(t)["set"] != true || strings.Contains(string(a.body), "s3cr3t") || fw.values["token"] != "s3cr3t-token-value" ||
+		*fw.versions[0] != 5 || fw.by[0].Actor.TokenName != "destinations-write" {
+		t.Fatalf("set = %d %s", a.status, a.body)
+	}
+	fw.secrets = []webhooks.Secret{{Name: "token", UpdatedAt: t0}}
+	a = x.as(t, destinationsReader, http.MethodGet, path, "")
+	if a.status != http.StatusOK || a.header.Get("ETag") != `"6"` ||
+		!strings.Contains(string(a.body), `{"name":"token","set":true,"updated_at":"2026-`) {
+		t.Fatalf("list = %d %s", a.status, a.body)
+	}
+	for name, c := range map[string]struct {
+		method, path, body string
+		headers            []string
+		status             int
+		code               string
+	}{
+		"stale":       {http.MethodPut, path + "/token", `{"value":"x"}`, []string{"If-Match", `"1"`}, 412, ""},
+		"bad name":    {http.MethodPut, path + "/9x", `{"value":"x"}`, nil, 400, ""},
+		"no value":    {http.MethodPut, path + "/token", `{}`, nil, 400, ""},
+		"bad etag":    {http.MethodPut, path + "/token", `{"value":"x"}`, []string{"If-Match", `x`}, 412, ""},
+		"not webhook": {http.MethodGet, "/api/v1/destinations/" + mattermostID + "/secrets", "", nil, 409, codeNotWebhook},
+		"unknown":     {http.MethodGet, "/api/v1/destinations/DS000000000000/secrets", "", nil, 404, ""},
+		"no secret":   {http.MethodDelete, path + "/other", "", nil, 404, ""},
+		"del stale":   {http.MethodDelete, path + "/token", "", []string{"If-Match", `x`}, 412, ""},
+		"del other":   {http.MethodDelete, "/api/v1/destinations/" + mattermostID + "/secrets/a", "", nil, 409, codeNotWebhook},
+	} {
+		a := x.as(t, destinationsWriter, c.method, c.path, c.body, c.headers...)
+		if a.status != c.status || (c.code != "" && a.code(t) != c.code) {
+			t.Errorf("%s = %d %s", name, a.status, a.body)
+		}
+	}
+	if a := x.as(t, destinationsReader, http.MethodPut, path+"/token", `{"value":"x"}`); a.status != http.StatusForbidden {
+		t.Errorf("by a reader = %d", a.status)
+	}
+	if a := x.as(t, destinationsWriter, http.MethodDelete, path+"/token", ""); a.status != http.StatusNoContent ||
+		len(fw.values) != 0 {
+		t.Errorf("delete = %d %s", a.status, a.body)
+	}
+	fw.err = errors.New("down")
+	if a := x.as(t, destinationsReader, http.MethodGet, path, ""); a.status != http.StatusInternalServerError {
+		t.Errorf("failure = %d", a.status)
+	}
+}
+
+// TestSigningSecretAPI is getSigningSecret, generateSigningSecret and retirePreviousSigningSecret (C-15.FR-5, AC-2):
+// the status never carries a value; a new secret is shown once, and the previous one signs until it is retired.
+func TestSigningSecretAPI(t *testing.T) {
+	x, _, _ := newDestinationsAPI(t)
+	fw := &fakeWebhooks{values: map[string]logging.Secret{}, status: webhooks.SigningStatus{Set: true, UpdatedAt: &t0}}
+	x.srv.webhooks = fw
+	path := "/api/v1/destinations/" + webhookID + "/signing-secret"
+	a := x.as(t, destinationsReader, http.MethodGet, path, "")
+	if a.status != http.StatusOK || a.json(t)["set"] != true || a.json(t)["previous_active_since"] != nil {
+		t.Fatalf("status = %d %s", a.status, a.body)
+	}
+	a = x.as(t, destinationsWriter, http.MethodPost, path, "")
+	var gen1 gen.SigningSecretGenerated
+	decodeInto(t, a, &gen1)
+	if a.status != http.StatusCreated || gen1.Secret != "whsec_new" || gen1.Status.PreviousActiveSince.IsNull() {
+		t.Fatalf("generate = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, destinationsWriter, http.MethodDelete, path+"/previous", ""); a.status != http.StatusNoContent ||
+		fw.status.PreviousActiveSince != nil {
+		t.Fatalf("retire = %d %s", a.status, a.body)
+	}
+	for _, c := range []struct{ method, path string }{{http.MethodGet, ""}, {http.MethodPost, ""},
+		{http.MethodDelete, "/previous"}} {
+		a := x.as(t, destinationsWriter, c.method, "/api/v1/destinations/"+mattermostID+"/signing-secret"+c.path, "")
+		if a.status != http.StatusConflict || a.code(t) != codeNotWebhook {
+			t.Errorf("%s %s = %d %s", c.method, c.path, a.status, a.body)
+		}
+	}
+	if a := x.as(t, destinationsReader, http.MethodPost, path, ""); a.status != http.StatusForbidden {
+		t.Errorf("by a reader = %d", a.status)
 	}
 }

@@ -17,8 +17,10 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/destinations/dbgen"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
+	"github.com/muster-io/muster/internal/templates"
 )
 
 // The Audit log action and resource type, and the live hint, of Destinations (C-03.FR-14).
@@ -91,7 +93,8 @@ func (q txQueries) DB() dbgen.DBTX { return q.tx }
 
 // WriterConfig is what the changes of Destinations need: the Writer, the Audit log, the business clock that dates the
 // changes, routing's Routes hook and delivery's Retire hook; and for the saves, the validation of Mention settings, the
-// Destination check of the Mattermost type and delivery's end of a Broken state.
+// Destination check of the Mattermost type and delivery's end of a Broken state, and for outgoing webhooks the Keyring
+// that encrypts their secrets and the template sandbox that checks their request.
 type WriterConfig struct {
 	Writer     Writer
 	Audit      *audit.Writer
@@ -101,6 +104,8 @@ type WriterConfig struct {
 	Mentions   MentionValidator
 	Mattermost MattermostChecker
 	Healthy    Healthy
+	Keyring    *keyring.Keyring
+	Templates  *templates.Sandbox
 }
 
 // SetWriter fills what the changes of Destinations need, before any change.
@@ -111,8 +116,9 @@ func (s *Service) SetWriter(c WriterConfig) {
 // Delete deletes the Destination publicID (C-11.FR-14); a non-nil version must be its current one. In one
 // transaction it is marked deleted — it leaves every list and reads as missing, the row stays for history — it leaves
 // every Route, each of which gets a new version and its hint through the Routes hook, delivery gives its open Root
-// messages their final edit through the Retire hook, and the Audit log entry destination.deleted is written. Its secrets are wiped once the final edits are done. A deleted or unknown Destination
-// is ErrNotFound.
+// messages their final edit through the Retire hook, which also ends the waiting events of an outgoing webhook as Not
+// delivered, and the Audit log entry destination.deleted is written. Its secrets are wiped once the final edits are done
+// and no call of it is in flight. A deleted or unknown Destination is ErrNotFound.
 func (s *Service) Delete(ctx context.Context, r Requester, publicID string, version *int64) error {
 	id, err := publicid.Parse(publicid.Destination, publicID)
 	if err != nil {

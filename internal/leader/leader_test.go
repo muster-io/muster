@@ -322,7 +322,8 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	}
 	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning",
 		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges",
-		"alert_group_retention", "delivery_queue", "thread_reply_retention", "telegram_polling"}
+		"alert_group_retention", "delivery_queue", "thread_reply_retention", "webhook_event_retention",
+		"telegram_polling"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
@@ -443,7 +444,7 @@ func TestAlertGroupGauges(t *testing.T) {
 // at one business time, and goes on past one that fails; without the work wired, both do nothing.
 func TestDeliveryTasks(t *testing.T) {
 	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
-	var counted, pruned []int64
+	var counted, pruned, events []int64
 	failed := errors.New("locked")
 	work := Work{
 		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
@@ -465,9 +466,23 @@ func TestDeliveryTasks(t *testing.T) {
 			}
 			return 3, nil
 		},
+		WebhookEventRetention: func(_ context.Context, org int64, at time.Time) (int64, error) {
+			if !at.Equal(now) {
+				t.Errorf("event retention at %v", at)
+			}
+			events = append(events, org)
+			if org == 1 {
+				return 0, failed
+			}
+			return 2, nil
+		},
 	}
 	tasks := Tasks(work)()
-	queue, retention := tasks[10], tasks[11]
+	queue, retention, eventRetention := tasks[10], tasks[11], tasks[12]
+	if err := eventRetention.Run(t.Context()); !errors.Is(err, failed) || !slices.Equal(events, []int64{1, 2}) ||
+		eventRetention.Every != MaintenanceInterval {
+		t.Errorf("event retention %v, %v", events, err)
+	}
 	if queue.Every != DeliveryQueueInterval || retention.Every != MaintenanceInterval {
 		t.Errorf("intervals %v %v", queue.Every, retention.Every)
 	}
@@ -486,8 +501,11 @@ func TestDeliveryTasks(t *testing.T) {
 	if err := tasks[11].Run(t.Context()); !errors.Is(err, orgsErr) {
 		t.Errorf("retention = %v", err)
 	}
+	if err := tasks[12].Run(t.Context()); !errors.Is(err, orgsErr) {
+		t.Errorf("event retention = %v", err)
+	}
 	tasks = Tasks(Work{})()
-	if tasks[10].Run(t.Context()) != nil || tasks[11].Run(t.Context()) != nil {
+	if tasks[10].Run(t.Context()) != nil || tasks[11].Run(t.Context()) != nil || tasks[12].Run(t.Context()) != nil {
 		t.Error("unwired delivery tasks did something")
 	}
 }
@@ -511,7 +529,7 @@ func TestTelegramPollingTask(t *testing.T) {
 			return nil
 		},
 	}
-	task := Tasks(work)()[12]
+	task := Tasks(work)()[13]
 	if task.Name != "telegram_polling" || task.Every != TelegramPollingInterval {
 		t.Fatalf("task %s every %v", task.Name, task.Every)
 	}
@@ -526,10 +544,10 @@ func TestTelegramPollingTask(t *testing.T) {
 	}
 	orgsErr := errors.New("down")
 	work.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
-	if err := Tasks(work)()[12].Run(t.Context()); !errors.Is(err, orgsErr) {
+	if err := Tasks(work)()[13].Run(t.Context()); !errors.Is(err, orgsErr) {
 		t.Fatalf("organizations = %v", err)
 	}
-	if err := Tasks(Work{})()[12].Run(t.Context()); err != nil {
+	if err := Tasks(Work{})()[13].Run(t.Context()); err != nil {
 		t.Fatalf("unwired = %v", err)
 	}
 }

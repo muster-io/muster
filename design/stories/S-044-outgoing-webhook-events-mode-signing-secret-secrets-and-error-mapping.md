@@ -25,18 +25,40 @@ files_touched:
   - internal/delivery/query.sql
   - internal/delivery/webhookevents_test.go
   - internal/delivery/membership_test.go
+  - internal/delivery/delivery.go
+  - internal/delivery/worker.go
+  - internal/delivery/outcomes.go
+  - internal/delivery/recovery.go
+  - internal/delivery/worker_test.go
+  - internal/delivery/live_test.go
   - internal/destinations/write.go
   - internal/destinations/delete.go
+  - internal/destinations/destinations.go
+  - internal/destinations/query.sql
   - internal/destinations/write_test.go
   - internal/api/destinations.go
   - internal/api/destinations_test.go
+  - internal/api/server.go
   - internal/fakes/fakewebhook/fakewebhook.go
   - internal/fakes/fakewebhook/fakewebhook_test.go
+  - internal/fakes/fakeserver/fakeserver.go
+  - internal/fakes/fakeserver/fakeserver_test.go
   - internal/devmode/devmode.go
+  - internal/devmode/devmode_test.go
+  - internal/cli/dev_test.go
   - internal/leader/tasks.go
+  - internal/leader/leader_test.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/logging/events.go
+  - internal/metrics/catalogue.go
   - internal/archlint/secretleak.go
+  - internal/db/migrations/0005_webhook_events_received_at.up.sql
+  - internal/db/migrations/0005_webhook_events_received_at.down.sql
+  - internal/db/migrate_test.go
+  - internal/db/db_test.go
+  - design/db/schema.md
+  - sqlc.yaml
   - docs/outgoing-webhooks/events.md
   - test/e2e/webhook_events_test.go
 acceptance:
@@ -136,15 +158,22 @@ issue: 44
   the
   events go out in order per Alert Group.
 - **Deletion** (C-15.FR-12, C-11.FR-14; `internal/destinations/delete.go`): deleting an events-mode Destination ends its
-  `pending` events as `not_delivered` ("the Destination was deleted") in the same transaction, sends no final event,
-  and wipes the Signing secrets, the Secrets and the proxy password at once.
-- **Retention**: a Leader task deletes `delivered` and `not_delivered` `webhook_events` older than
-  `retention.alert_details`, in batches.
-- **Metrics and log events**: `muster_delivery_attempts_total{kind="webhook_event"}` and the latency of S-034;
-  `webhook_event_not_delivered` (WARN: `destination`, `group`, `event`, `status`).
+  `pending` events as `not_delivered` ("the Destination was deleted") in the same transaction, each with its
+  `not_delivered` delivery event, sends no final event, and wipes the Signing secrets, the Secrets and the proxy
+  password at once — unless a call of the Destination holds a lease, in which case the worker that records the last
+  such call wipes them (Notes).
+- **Retention**: a Leader task, `webhook_event_retention` (hourly, woken by the development clock), deletes `delivered`
+  and `not_delivered` `webhook_events` older than `retention.alert_details`, in batches, and wipes the secrets of a
+  deleted Destination whose last call in flight ended without wiping them because its replica stopped.
+- **Metrics and log events**: `muster_delivery_attempts_total{kind="webhook_event"}` and the latency of S-034, observed
+  from `webhook_events.received_at` (migration `0005_webhook_events_received_at`: the receipt time of the Snapshot
+  behind the change, null for Commands and timers); `webhook_event_not_delivered` (WARN: `destination`, `group`,
+  `lifecycle_event`, `status` — `event` is the field the logger reserves for the name of the log event); pending events
+  count in `muster_delivery_queue`.
 - **Fake receiving endpoint** (C-01.FR-13; `internal/fakes/fakewebhook`, `127.0.0.1:18093`, started by `muster dev`):
-  `POST /hook/{name}` and any method under `/hook/{name}/…` record method, path, headers, body and arrival time and
-  answer `200` unless a fault of the harness scripts a status, `Retry-After`, a `Location` or a delay;
+  `POST /hook/{name}` and any method under `/hook/{name}/…` record method, path, headers (by lower-case name), body
+  and arrival time and answer `200` unless a fault of the harness scripts a status, `Retry-After`, a `Location` (a new
+  field of the harness's faults) or a delay;
   `PUT /_fake/secrets/{name}` registers the secrets to verify with, and each record carries `signatures_valid` — how
   many signatures of `webhook-signature` verify, per Standard Webhooks — and `webhook_id`; `GET /_fake/received/{name}`
   lists the records.
@@ -193,7 +222,7 @@ curl -s "${H[@]}" $API/routes -d "{\"name\":\"wh\",\"matchers\":[{\"label\":\"te
 curl -s -X PUT $FAM/groups/w1 -d '{"receiver":"lab","route":"{}","labels":{"alertname":"JobFailed"}}' > /dev/null
 curl -s -X PUT $FAM/groups/w1/alerts/a -d '{"labels":{"team":"wh","job":"backup"}}' > /dev/null
 NOTIFY w1 '{"reason":"first notification"}'; sleep 1; G=$(AG 'job%3D%22backup%22')
-EV auto '.[0] | {event: .body.event, notify: .body.notify, v: .body.version, m: [.body.mentions[] | {type, login}], auth: .headers.Authorization, sig: .signatures_valid}'
+EV auto '.[0] | {event: .body.event, notify: .body.notify, v: .body.version, m: [.body.mentions[] | {type, login}], auth: .headers.authorization, sig: .signatures_valid}'
 # {"event":"created","notify":true,"v":1,"m":[{"type":"user","login":"alice"}],"auth":"Bearer s3cr3t-token-value","sig":1}
 
 # C-15.AC-6: order, the same webhook-id on retry, nothing overtakes
@@ -256,12 +285,13 @@ psql "$MUSTER_DATABASE_URL" -qc "UPDATE outbound_policies SET policy = 'standard
 
 # C-15.AC-9: a Broken period (404), events of the period delivered in order afterwards
 curl -s -X POST $FWH/_fake/faults -d '{"path":"/hook/auto","status":404}' > /dev/null
-curl -s "${H[@]}" -X POST $API/alert-groups/$G2/unacknowledge > /dev/null; sleep 1
+curl -s "${H[@]}" -X POST $API/alert-groups/$G2/acknowledge > /dev/null; sleep 1
 curl -s -b jar $API/destinations/$D | jq -r .health.state                    # broken
-curl -s "${H[@]}" -X POST $API/alert-groups/$G2/acknowledge > /dev/null
+curl -s "${H[@]}" -X POST $API/alert-groups/$G2/unacknowledge > /dev/null
 curl -s "${H[@]}" -X POST $API/alert-groups/$G2/resolve > /dev/null
 curl -s -X DELETE $FWH/_fake/faults; ADV 300; sleep 3
-EV auto '[.[] | select(.status == 200) | .body.event] | .[-3:]'              # ["unacknowledged","acknowledged","resolved"]
+EV auto '[.[] | select(.status == 200 and .body.alert_group.id == "'$G2'") | .body.event] | .[-3:]'
+# ["acknowledged","unacknowledged","resolved"]
 
 # C-15.AC-13: delete while the endpoint is down with three events queued
 curl -s -X POST $FWH/_fake/faults -d '{"path":"/hook/auto","status":404}' > /dev/null
@@ -295,6 +325,22 @@ None.
   the deleting transaction once no delivery is pending, which is harmless for Mattermost and Telegram. The wipe is
   deferred until no delivery of that Destination holds a lease, and the worker that ends the last such call performs
   it.
+- A `429` or `503` with `Retry-After` delays only that event, exactly as asked; unlike a messenger's, it does not hold
+  the Destination's limiter, so that the events of other Alert Groups do not wait (C-15.AC-6).
+- A request template that fails when the event is sent — a Secret it reads is not set — ends that event as Not
+  delivered with the class `template_error`; the template error state and `MusterTemplateError` are S-045's.
+- `moved_to_default_route` is queued, like every lifecycle event, for the events-mode Destinations of the Route the Alert
+  Group is on after the change — the Default route; the old Route's outgoing webhook receives no event about it leaving
+  (C-15.FR-2 sends the events of the Alert Groups on the Destination's Routes).
+- Saving a Broken outgoing webhook does not probe it at once; the next probe or event comes due as usual.
+- The S-034 journal note about finding the first Publication by `message_id IS NULL` concerns a webhook in the template
+  mode, which may have no extracted id: it is S-045's. The events mode has no delivery and no Root message.
+- `files_touched` grew beyond the first list: adding the events queries to delivery's query interface needs the
+  in-memory database of its tests (`worker_test.go`); the API needs the operations in its list of implemented ones
+  (`server.go`); the Leader's closed list of tasks and the runtime's database interface have tests that enumerate them;
+  the fake's `Location` is a field of the shared fault harness; the head-of-line claim, the probe's lease and the
+  deferred wipe are checked on PostgreSQL in `live_test.go`; and the latency needs `webhook_events.received_at`,
+  whose migration the tests of internal/db count.
 
 ## Coverage
 

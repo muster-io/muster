@@ -201,9 +201,9 @@ func (w *Worker) probe(ctx context.Context, org int64) error {
 	}
 }
 
-// probeOne probes the claimed Broken Destination d: it attempts its oldest waiting delivery through the worker's path;
-// with nothing waiting it runs the adapter's Destination check in the delivery client class; for a type without one
-// it marks d so that its next due delivery is the probe.
+// probeOne probes the claimed Broken Destination d: it attempts its oldest waiting delivery through the worker's path,
+// or for an outgoing webhook its oldest waiting event; with nothing waiting it runs the adapter's Destination check in
+// the delivery client class; for a type without one it marks d so that its next due delivery or event is the probe.
 func (w *Worker) probeOne(ctx context.Context, org int64, d Destination) error {
 	var waiting dbgen.LeaseOldestWaitingRow
 	err := w.Store.inTx(ctx, func(q queries) error {
@@ -226,6 +226,11 @@ func (w *Worker) probeOne(ctx context.Context, org int64, d Destination) error {
 		return nil
 	case waiting.ID != 0:
 		return nil // another replica holds it; the next probe tries again
+	}
+	if d.Type == TypeWebhook {
+		if handled, err := w.probeEvent(ctx, org, d); err != nil || handled {
+			return err
+		}
 	}
 	checker, ok := w.Adapters[d.Type].(Checker)
 	if !ok {

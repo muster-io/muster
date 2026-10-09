@@ -51,7 +51,9 @@ type Worker struct {
 	// Organizations lists the Organizations whose deliveries it makes: one in L1.
 	Organizations func(ctx context.Context) ([]int64, error)
 	Adapters      Adapters
-	Renderer      Renderer
+	// Events sends the events-mode requests of outgoing webhooks.
+	Events   EventSender
+	Renderer Renderer
 	// Mentions resolves the Mentions of Loud calls; nil mentions nobody.
 	Mentions Mentioner
 	Log      *logging.Logger
@@ -133,7 +135,7 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 }
 
 // Round probes every Broken Destination whose probe is due, then attempts every due delivery, then every due Thread
-// reply, of every Organization, claiming Batch at a time, and returns how long until the next one can be claimed, at
+// reply, then every due head event of an outgoing webhook, of every Organization, claiming Batch at a time, and returns how long until the next one can be claimed, at
 // most MaxWait. A row that fails is logged and attempted again once its lease runs out; the round goes on.
 func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	orgs, err := w.Organizations(ctx)
@@ -144,7 +146,7 @@ func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	var errs []error
 	for _, org := range orgs {
 		errs = append(errs, w.probe(ctx, org), w.drain(ctx, org, w.claimDeliveries, w.deliver),
-			w.drain(ctx, org, w.claimReplies, w.reply))
+			w.drain(ctx, org, w.claimReplies, w.reply), w.drain(ctx, org, w.claimEvents, w.sendEvent))
 		n, err := w.next(ctx, org, next)
 		if err != nil {
 			errs = append(errs, err)
@@ -309,7 +311,7 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 			if err := hintGroup(ctx, q, org, row.AlertGroupPublicID); err != nil {
 				return err
 			}
-			return wipeSecrets(ctx, q, org, row.DestinationID)
+			return wipeSecrets(ctx, q, org, row.DestinationID, realNow)
 		}
 		if !row.DesiredRetire && bytes.Equal(row.ActualHash, row.DesiredHash) {
 			if err := q.MarkDelivered(ctx, dbgen.MarkDeliveredParams{OrgID: org, ID: id, Owner: w.Lease.Owner,

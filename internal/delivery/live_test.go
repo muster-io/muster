@@ -925,6 +925,8 @@ func TestLive(t *testing.T) {
 			{"press_binding", l.pressBinding},
 			// S-065.
 			{"claims_choose_once", l.claimsChooseOnce},
+			// S-044.
+			{"webhook_events", l.webhookEvents},
 		} {
 			t.Run(sub.name, sub.run)
 		}
@@ -2924,4 +2926,103 @@ func (l *live) pressBinding(t *testing.T) {
 		t.Errorf("the post of a deleted Destination = %v, %v", ok, err)
 	}
 	t.Log("press binding: post, connection, channel and route values read from PostgreSQL")
+}
+
+// webhookEvents checks the events mode of outgoing webhooks on PostgreSQL (C-15.FR-2, FR-12, C-11.FR-9): only the head
+// event of an Alert Group and Destination is claimed, so an event answered with Retry-After holds back the next one of
+// its Alert Group but not those of another, and its retry keeps its webhook-id; the probe of a Broken Destination
+// leases its oldest waiting event, and waits while another replica holds it; deleting the Destination ends its waiting
+// events and keeps its secrets while a call holds a lease, and the retention wipes them once the lease ran out.
+func (l *live) webhookEvents(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	ctx := t.Context()
+	var dest int64
+	if err := l.d.Pool.QueryRow(ctx, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode,
+		webhook_events_config, signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions,
+		limiter_limit, limiter_per_seconds, health, created_at, updated_at)
+		VALUES ($1, 'DSAAAAAAAAAAWH', 'webhook', 'hook', 'events', '{"url":"http://127.0.0.1/","headers":[]}', '\x01',
+		'k1', $2, '{}', 1000, 1, 'healthy', $2, $2) RETURNING id`, l.orgID, l.business.Now()).Scan(&dest); err != nil {
+		t.Fatal(err)
+	}
+	l.exec(t, `INSERT INTO destination_secrets (destination_id, org_id, name, value_ciphertext, value_key_id,
+		value_updated_at) VALUES ($1, $2, 'token', '\x01', 'k1', $3)`, dest, l.orgID, l.business.Now())
+	l.attach(t, dest)
+	svc := delivery.New(delivery.Config{OrgID: l.orgID, Store: delivery.NewStore(l.d.Pool, l.d.Pool),
+		Business: l.business, Real: l.real, Log: l.logger, Renderer: delivery.MessageRenderer{Renderer: l.renderer},
+		Bodies: &stubBodies{}})
+	l.groups.SetRerender(svc.Enqueue)
+	defer l.groups.SetRerender(l.svc.Enqueue)
+	sender := &fakeSender{answers: []delivery.Outcome{{Kind: delivery.OutcomeRetryAfter, RetryAfter: 10 * time.Second,
+		Status: 503}}}
+	w := l.worker("r1")
+	w.Events = sender
+	l.fire(t, "wh-a", "WhAlpha")
+	alpha := l.group(t, "WhAlpha")
+	l.ack(t, alpha)
+	l.fire(t, "wh-b", "WhBeta")
+	if n := l.count(t, `SELECT count(*) FROM webhook_events WHERE destination_id = $1 AND state = 'pending'`,
+		dest); n != 3 {
+		t.Fatalf("queued %d events", n)
+	}
+	l.round(t, w)
+	got := sender.sent(t)
+	if len(got) != 2 || !strings.HasPrefix(got[0], "created@") || !strings.HasPrefix(got[1], "created@") ||
+		got[0] == got[1] {
+		t.Fatalf("sent %v", got)
+	}
+	if n := l.count(t, `SELECT count(*) FROM webhook_events WHERE destination_id = $1 AND event = 'acknowledged'
+		AND state = 'pending' AND attempts = 0 AND lease_owner IS NULL`, dest); n != 1 {
+		t.Fatal("the acknowledged event did not wait for the created event of its Alert Group")
+	}
+	l.business.Advance(10 * time.Second)
+	for range 3 {
+		l.round(t, w)
+	}
+	got = sender.sent(t)
+	if len(got) != 4 || got[2] != got[0] || !strings.HasPrefix(got[3], "acknowledged@") ||
+		sender.calls[2].WebhookID != sender.calls[0].WebhookID {
+		t.Fatalf("after the Retry-After: %v", got)
+	}
+
+	// The probe leases the oldest waiting event, and waits while another replica holds it.
+	l.brk(t, dest)
+	l.fire(t, "wh-c", "WhGamma")
+	l.exec(t, `UPDATE webhook_events SET lease_owner = 'other', lease_until = $2 WHERE destination_id = $1
+		AND state = 'pending'`, dest, l.real.Now().Add(time.Minute))
+	l.business.Advance(delivery.BrokenProbeInterval)
+	l.round(t, w)
+	if len(sender.calls) != 4 {
+		t.Fatal("the probe sent an event another replica holds")
+	}
+	l.exec(t, `UPDATE webhook_events SET lease_owner = NULL, lease_until = NULL WHERE destination_id = $1`, dest)
+	l.business.Advance(delivery.BrokenProbeInterval)
+	l.round(t, w)
+	if health, _ := l.health(t, dest); len(sender.calls) != 5 || health != "healthy" {
+		t.Fatalf("probe: %d calls, %s", len(sender.calls), health)
+	}
+
+	// Deleted while a call holds a lease: the events end, the secrets wait for the lease.
+	l.brk(t, dest)
+	l.fire(t, "wh-d", "WhDelta")
+	l.exec(t, `UPDATE webhook_events SET lease_owner = 'r9', lease_until = $2 WHERE destination_id = $1
+		AND state = 'pending'`, dest, l.real.Now().Add(time.Minute))
+	l.exec(t, `UPDATE destinations SET deleted_at = $2 WHERE id = $1`, dest, l.business.Now())
+	if err := pgxTx(t, l, func(tx groups.DBTX) error { return svc.RetireDestination(ctx, tx, dest) }); err != nil {
+		t.Fatal(err)
+	}
+	secrets := func() int64 {
+		return l.count(t, `SELECT (signing_secret_ciphertext IS NOT NULL)::int + (SELECT count(*) FROM
+			destination_secrets s WHERE s.destination_id = d.id) FROM destinations d WHERE d.id = $1`, dest)
+	}
+	if n := l.count(t, `SELECT count(*) FROM webhook_events WHERE destination_id = $1 AND state = 'not_delivered'
+		AND last_error = 'the Destination was deleted'`, dest); n != 1 || secrets() != 2 {
+		t.Fatalf("abandoned %d, secrets %d", n, secrets())
+	}
+	l.real.Advance(2 * time.Minute)
+	if _, err := svc.PruneWebhookEvents(ctx, l.business.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if secrets() != 0 {
+		t.Fatal("the secrets outlived the lease")
+	}
 }

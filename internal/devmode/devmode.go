@@ -2,7 +2,8 @@
 // Copyright The Muster Authors
 
 // Package devmode is the development mode of `muster dev`: its published defaults, the rule that lets the environment
-// replace them, the fake Alertmanager, Mattermost, Telegram and OIDC servers and the fake HTTP and SOCKS5 proxies on
+// replace them, the fake Alertmanager, Mattermost, Telegram and OIDC servers, the fake webhook receiver and the fake
+// HTTP and SOCKS5 proxies on
 // fixed loopback addresses, the demo OIDC configuration, and Muster itself in the same process, against the
 // development database and migrated on start, with the demo Integration that the fake Alertmanager sends to; and the
 // development clock that every replica of the development database shares.
@@ -32,6 +33,7 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
+	"github.com/muster-io/muster/internal/fakes/fakewebhook"
 	"github.com/muster-io/muster/internal/integrations"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
@@ -68,6 +70,7 @@ const (
 	OIDCAddr         = "127.0.0.1:18090"
 	HTTPProxyAddr    = "127.0.0.1:18091"
 	SOCKSProxyAddr   = "127.0.0.1:18092"
+	WebhookAddr      = "127.0.0.1:18093"
 	// LoopbackNetwork is added to the allowed networks of the development database, so that Muster may call the
 	// fakes; a real installation keeps the standard policy.
 	LoopbackNetwork = "127.0.0.0/8"
@@ -158,14 +161,14 @@ func Apply(env Env, replica bool) (Applied, error) {
 
 // Addresses are the listen addresses of the fake servers and the fake proxies.
 type Addresses struct {
-	Alertmanager, Mattermost, Telegram, OIDC string
-	HTTPProxy, SOCKSProxy                    string
+	Alertmanager, Mattermost, Telegram, OIDC, Webhook string
+	HTTPProxy, SOCKSProxy                             string
 }
 
 // FakeAddresses are the fixed addresses that later checks and the second replica rely on.
 func FakeAddresses() Addresses {
 	return Addresses{Alertmanager: AlertmanagerAddr, Mattermost: MattermostAddr, Telegram: TelegramAddr,
-		OIDC: OIDCAddr, HTTPProxy: HTTPProxyAddr, SOCKSProxy: SOCKSProxyAddr}
+		OIDC: OIDCAddr, Webhook: WebhookAddr, HTTPProxy: HTTPProxyAddr, SOCKSProxy: SOCKSProxyAddr}
 }
 
 // OIDCDemo is the demo OIDC configuration that `muster dev` stores at its first start on a database: OIDC against the
@@ -245,12 +248,14 @@ type Fakes struct {
 	Mattermost   *fakemattermost.Fake
 	Telegram     *faketelegram.Fake
 	OIDC         *fakeoidc.Fake
+	Webhook      *fakewebhook.Fake
 	HTTPProxy    *fakeproxy.Server
 	SOCKSProxy   *fakeproxy.Server
 }
 
 func (f *Fakes) servers() []*fakeserver.Server {
-	return []*fakeserver.Server{f.Alertmanager.Server, f.Mattermost.Server, f.Telegram.Server, f.OIDC.Server}
+	return []*fakeserver.Server{f.Alertmanager.Server, f.Mattermost.Server, f.Telegram.Server, f.OIDC.Server,
+		f.Webhook.Server}
 }
 
 // StartFakes starts the fake servers and the fake proxies, the fake Mattermost allowing presses to call back on
@@ -261,9 +266,10 @@ func StartFakes(ctx context.Context, addrs Addresses) (*Fakes, error) {
 		Mattermost:   fakemattermost.New(),
 		Telegram:     faketelegram.New(),
 		OIDC:         fakeoidc.New(),
+		Webhook:      fakewebhook.New(),
 	}
 	f.Mattermost.SetAllowedUntrustedInternalConnections(AllowedInternalConnections)
-	listen := []string{addrs.Alertmanager, addrs.Mattermost, addrs.Telegram, addrs.OIDC}
+	listen := []string{addrs.Alertmanager, addrs.Mattermost, addrs.Telegram, addrs.OIDC, addrs.Webhook}
 	for i, s := range f.servers() {
 		if err := s.Start(ctx, listen[i]); err != nil {
 			closeErr := closeAll(context.WithoutCancel(ctx), f.servers()[:i])
@@ -325,6 +331,7 @@ func Run(ctx context.Context, w io.Writer, addrs Addresses, serve func(context.C
 	fmt.Fprintf(w, "muster dev: fake OIDC %s\n", f.OIDC.URL())
 	fmt.Fprintf(w, "muster dev: fake HTTP proxy %s\n", f.HTTPProxy.Addr())
 	fmt.Fprintf(w, "muster dev: fake SOCKS5 proxy %s\n", f.SOCKSProxy.Addr())
+	fmt.Fprintf(w, "muster dev: fake webhook receiver %s\n", f.Webhook.URL())
 	fmt.Fprintf(w, "muster dev: fake Telegram %s\n", f.Telegram.URL())
 	serveErr := serve(ctx)
 	if err := f.Close(context.WithoutCancel(ctx)); err != nil {

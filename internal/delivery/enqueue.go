@@ -201,8 +201,9 @@ func (r Row) mentionsOf(e groups.Recorded) []string {
 // while the Destination is Broken, a Storm holds the delivery or it ended. A delivery created by `created` is a Loud
 // Publication unless a Storm of the Route holds it (C-11.FR-6); the first Publication of an Alert Group that resolves
 // is settled by the rules of late Publications and Broken Destinations; an Alert Group moved to the Default route gets
-// the final edit in the Destinations it leaves and a Quiet Publication in those it joins (C-09.FR-19). It wakes the
-// delivery workers once tx commits.
+// the final edit in the Destinations it leaves and a Quiet Publication in those it joins (C-09.FR-19). An outgoing
+// webhook in the events mode has no Root message: each lifecycle event is queued for it as one event (C-15.FR-2),
+// whether it is Broken or a Storm holds the Alert Group. It wakes the delivery workers once tx commits.
 //
 // It first takes the Route's membership lock shared (ShareRouteMembership), which a change of the Route's Destinations
 // and the deletion of one of them take exclusively, so that an Enqueue and such a change serialize: neither misses a
@@ -237,18 +238,19 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 			replies = append(replies, reply{event: e, row: row})
 		}
 	}
-	dests, err := q.ListRouteDestinations(ctx, dbgen.ListRouteDestinationsParams{OrgID: s.orgID, RouteID: g.RouteID})
+	all, err := q.ListRouteDestinations(ctx, dbgen.ListRouteDestinationsParams{OrgID: s.orgID, RouteID: g.RouteID})
 	if err != nil {
 		return fmt.Errorf("list the destinations of alert group #%d: %w", g.Number, err)
 	}
+	dests, eventDests := splitDestinations(all)
 	now := s.clock.Now().UTC()
 	left := 0
 	if moved {
-		if left, err = s.leave(ctx, q, g, dests, now); err != nil {
+		if left, err = s.leave(ctx, q, g, all, now); err != nil {
 			return err
 		}
 	}
-	if len(dests) == 0 && !created {
+	if len(all) == 0 && !created {
 		return s.wake(ctx, q, left > 0)
 	}
 	route, err := q.GetRouteDelivery(ctx, dbgen.GetRouteDeliveryParams{OrgID: s.orgID, ID: g.RouteID})
@@ -261,8 +263,11 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 			return err
 		}
 	}
+	if err := s.queueEvents(ctx, tx, q, r, eventDests, route, now); err != nil {
+		return err
+	}
 	if len(dests) == 0 {
-		return s.wake(ctx, q, left > 0)
+		return s.wake(ctx, q, left > 0 || len(eventDests) > 0)
 	}
 	window := time.Duration(route.ThreadBatchingWindowSeconds) * time.Second
 	types := make([]string, len(dests))

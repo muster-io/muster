@@ -135,6 +135,8 @@ func (s *Service) publishRoute(ctx context.Context, tx dbgen.DBTX, q queries, ro
 	if err != nil {
 		return fmt.Errorf("read the route %d: %w", routeID, err)
 	}
+	// An outgoing webhook in the events mode publishes nothing: it receives the events from now on.
+	dests, _ = splitDestinations(dests)
 	dests = slices.DeleteFunc(dests, func(d dbgen.ListRouteDestinationsRow) bool { return !slices.Contains(added, d.ID) })
 	types := make([]string, len(dests))
 	for i, d := range dests {
@@ -231,9 +233,10 @@ func (s *Service) dropReplies(ctx context.Context, q queries, ids []int64) error
 
 // RetireDestination is the deletion hook of the Destinations (C-11.FR-14), in the transaction tx that deleted the
 // Destination destinationID: the open Root messages there get the final edit, its other pending deliveries end without
-// a call — retired when published, withheld otherwise — its pending Thread replies are dropped, MusterDestinationBroken
-// about it is resolved, and its secrets are wiped at once when nothing of it is pending. It wakes the delivery workers
-// once tx commits.
+// a call — retired when published, withheld otherwise — its pending Thread replies are dropped, its waiting outgoing
+// webhook events end as Not delivered with no final event sent (C-15.FR-12), MusterDestinationBroken about it is
+// resolved, and its secrets are wiped at once when nothing of it is pending and no call of it is in flight. It wakes
+// the delivery workers once tx commits.
 func (s *Service) RetireDestination(ctx context.Context, tx dbgen.DBTX, destinationID int64) error {
 	q := s.store.queries(tx)
 	now := s.clock.Now().UTC()
@@ -258,16 +261,22 @@ func (s *Service) RetireDestination(ctx context.Context, tx dbgen.DBTX, destinat
 			return fmt.Errorf("resolve MusterDestinationBroken of %s: %w", st.PublicID, err)
 		}
 	}
-	if err := wipeSecrets(ctx, q, s.orgID, destinationID); err != nil {
+	if err := s.abandonEvents(ctx, q, destinationID, now); err != nil {
+		return err
+	}
+	if err := wipeSecrets(ctx, q, s.orgID, destinationID, s.real.Now().UTC()); err != nil {
 		return err
 	}
 	return s.wake(ctx, q, true)
 }
 
-// wipeSecrets wipes the secrets of the deleted Destination id once none of its deliveries is pending; it changes
-// nothing otherwise, and nothing the second time.
-func wipeSecrets(ctx context.Context, q queries, org, id int64) error {
-	if err := q.WipeDestinationSecrets(ctx, dbgen.WipeDestinationSecretsParams{OrgID: org, ID: id}); err != nil {
+// wipeSecrets wipes the secrets of the deleted Destination id once none of its deliveries is pending and no call of
+// it holds a lease at the real time now (C-11.FR-14, C-15.FR-12): a call in flight still makes its final edit or signs
+// its request with them, and the worker that records the last one wipes them. It changes nothing otherwise, and
+// nothing the second time.
+func wipeSecrets(ctx context.Context, q queries, org, id int64, now time.Time) error {
+	if err := q.WipeDestinationSecrets(ctx, dbgen.WipeDestinationSecretsParams{OrgID: org,
+		ID: pgtype.Int8{Int64: id, Valid: true}, Now: now}); err != nil {
 		return fmt.Errorf("wipe the secrets of destination %d: %w", id, err)
 	}
 	return nil
@@ -307,7 +316,7 @@ func (s *Service) AbandonConnection(ctx context.Context, tx dbgen.DBTX, connecti
 			DestinationID: d}); err != nil {
 			return nil, fmt.Errorf("drop the thread replies of destination %d: %w", d, err)
 		}
-		if err := wipeSecrets(ctx, q, s.orgID, d); err != nil {
+		if err := wipeSecrets(ctx, q, s.orgID, d, s.real.Now().UTC()); err != nil {
 			return nil, err
 		}
 	}
