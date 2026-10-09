@@ -33,12 +33,8 @@ import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { channelLabel, teamChannels, teamsOf } from "./channel-picker";
 import { DestinationCheck } from "./destination-check";
-import {
-  DestinationDeleteDialog,
-  DestinationForm,
-  destinationErrorText,
-  serverErrors,
-} from "./destination-form";
+import { DestinationDeleteDialog } from "./destination-delete-dialog";
+import { DestinationForm, destinationErrorText, serverErrors } from "./destination-form";
 import { BrokenBanner, brokenText } from "./destination-health";
 import { MATTERMOST_KIND } from "./mattermost-destination-fields";
 import { defaultMentions } from "./mention-settings";
