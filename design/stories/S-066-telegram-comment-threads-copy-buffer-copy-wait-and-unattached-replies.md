@@ -46,7 +46,7 @@ acceptance:
   - "The `short_lived_pruning` Leader task deletes the rows of `telegram_post_copies` received more than a day ago and counts them in `muster_short_lived_rows_pruned_total{table=\"telegram_post_copies\"}`."
 verify: "make ci test-integration e2e"
 operator_attention: false
-issue: null
+issue: 178
 ---
 
 # S-066. Telegram comment Threads: the post copy buffer, waiting for the copy and unattached replies (BE)
