@@ -233,6 +233,14 @@ func (s *Service) dropReplies(ctx context.Context, q queries, ids []int64) error
 	return nil
 }
 
+// DestinationRenamed is the rename hook of the Destinations, in the transaction tx that renamed the Destination
+// publicID to name: the Internal alerts about it, MusterDestinationBroken among them, take the new name as the same
+// firing.
+func (s *Service) DestinationRenamed(ctx context.Context, tx dbgen.DBTX, publicID, name string) error {
+	return s.internal.Renamed(ctx, s.store.queries(tx), s.clock.Now().UTC(), internalalerts.EntityDestination,
+		publicID, name)
+}
+
 // RetireDestination is the deletion hook of the Destinations (C-11.FR-14), in the transaction tx that deleted the
 // Destination destinationID: the open Root messages there get the final edit, its other pending deliveries end without
 // a call — retired when published, withheld otherwise — its pending Thread replies are dropped, its waiting outgoing

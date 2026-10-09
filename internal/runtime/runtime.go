@@ -811,6 +811,9 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Retire: func(ctx context.Context, tx destinationsdb.DBTX, id int64) error {
 			return p.delivery.RetireDestination(ctx, tx, id)
 		},
+		Renamed: func(ctx context.Context, tx destinationsdb.DBTX, publicID, name string) error {
+			return p.delivery.DestinationRenamed(ctx, tx, publicID, name)
+		},
 		Mentions: p.mentions, Mattermost: conns, Telegram: conns,
 		Healthy: p.delivery.EndBroken, Keyring: p.keyring, Templates: p.sandbox})
 	if p.opts.Development {
