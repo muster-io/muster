@@ -39,7 +39,7 @@ acceptance:
   - "The update router takes a transaction advisory lock keyed by the Connection instead of locking its `connections` row: while a save of the Connection holds the row, a handler runs and a second poller or webhook request with the same update waits and then skips it; only the final offset write waits for the save."
 verify: "make ci test-integration e2e"
 operator_attention: true
-issue: null
+issue: 179
 ---
 
 # S-067. Telegram button presses: callback answers, signed data, Account links and the update router lock (BE)
