@@ -4,7 +4,7 @@ title: Ack timeouts, Unclaimed, Reminders, auto-unacknowledge and "Still on it" 
 capability: C-17
 kind: be
 layer: L1
-depends_on: [S-042, S-047]
+depends_on: [S-066, S-067, S-047]
 covers: [C-17.FR-1, C-17.FR-2, C-17.FR-3, C-17.FR-4, C-17.FR-5, C-17.FR-6, C-17.FR-7, C-17.FR-8, C-17.FR-9, C-17.FR-10, C-17.FR-11, C-17.AC-1, C-17.AC-2, C-17.AC-3, C-17.AC-4, C-17.AC-5, C-17.AC-6, C-17.AC-7, C-17.AC-8, C-17.AC-9, C-09.FR-1, C-09.FR-8, C-09.FR-11, C-09.FR-13, C-10.FR-4, C-10.FR-16, C-04.FR-2, C-03.FR-13, C-02.FR-12, C-11.FR-20, C-12.FR-4, C-13.FR-4, C-14.FR-4, C-15.AC-11, C-03.AC-27]
 files_touched:
   - internal/timers/worker.go
@@ -87,7 +87,7 @@ issue: 49
 - The pages: Route policy fields, the Unclaimed filter, column and badge, the next notice and "Still on it" on the
   Alert Group page (S-050).
 - Creating Account links (S-051), which verifies Reminder presses with links made through the profile; in this story
-  presses come from link rows set up directly, as in S-061 and S-042.
+  presses come from link rows set up directly, as in S-061 and S-067.
 - Buttons signed with a key that a real rotation removed (S-055 repeats the expired-button answer after `rotate-key`).
 
 ## Contracts

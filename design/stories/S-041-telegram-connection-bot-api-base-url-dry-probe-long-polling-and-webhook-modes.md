@@ -76,8 +76,9 @@ issue: 41
 
 **OUT**
 
-- Telegram Destinations, the adapter, presses and the copy buffer (S-042); `/start` for Account links (S-051); the
-  pages (S-043); "Telegram in restricted networks" in the documentation (S-058).
+- Telegram Destinations and the adapter (S-042), the copy buffer and comment Threads (S-066), presses (S-067);
+  `/start` for Account links (S-051); the pages (S-043); "Telegram in restricted networks" in the documentation
+  (S-058).
 
 ## Contracts
 
@@ -143,9 +144,11 @@ issue: 41
   offset after it in the same transaction, so that a second poller of a frozen old Leader, or a webhook request with
   the same update, waits and then skips it; a handler's error stores nothing, so the update comes again. A handler
   therefore runs under the row lock: it must be short, must not lock that row itself and must not wait for a save of
-  the Connection (S-042, S-051). A poll that brings no update waits 1 s before the next. It hands
+  the Connection (S-066, S-067, S-051); S-067 replaces the row lock with a transaction advisory lock keyed by the
+  Connection. A poll that brings no update waits 1 s before the next. It hands
   `callback_query` and the `message` and `edited_message` updates of channels and groups (and `channel_post`) to the
-  handler that S-042 registers, and private messages (`/start <token>`, C-14.FR-8) to the handler that S-051 registers;
+  handlers that S-066 (messages) and S-067 (presses) register, and private messages (`/start <token>`, C-14.FR-8) to
+  the handler that S-051 registers;
   without a handler it logs `telegram_update_dropped` (INFO: `connection`, `kind`: `callback_query`, `chat_message`,
   `private_message`, `my_chat_member` or `other`).
 - **`muster doctor`** (C-02.FR-14): one line per Telegram Connection — `connection <name>: ok` or the failing step with
@@ -296,7 +299,7 @@ None.
 | C-14.AC-6 | partial | the API; the form's unsaved address is S-043 |
 | C-14.AC-7 | partial | the check and the logs; the delivery errors are S-042, the page S-043 |
 | C-14.AC-10 | full | the delivery requests of S-042 use the same client |
-| C-14.AC-11 | partial | the secret token header; processing a press is S-042 |
+| C-14.AC-11 | partial | the secret token header; processing a press is S-067 |
 | C-02.FR-14 | partial | Telegram Connection checks in `muster doctor` |
 | C-01.FR-13 | partial | the fake Telegram server's Bot API surface |
 | C-02.FR-10 | partial | the Leader task of long polling |

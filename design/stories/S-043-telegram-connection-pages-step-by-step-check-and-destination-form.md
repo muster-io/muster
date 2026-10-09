@@ -4,7 +4,7 @@ title: Telegram Connection pages with the step-by-step check and the Telegram De
 capability: C-14
 kind: fe
 layer: L1
-depends_on: [S-064, S-042]
+depends_on: [S-064, S-042, S-066]
 covers: [C-14.FR-1, C-14.FR-2, C-14.FR-10, C-14.FR-11, C-14.FR-14, C-14.AC-6, C-14.AC-7, C-14.AC-13, C-14.AC-16]
 files_touched:
   - web/src/components/telegram-connection-fields.tsx
@@ -86,7 +86,7 @@ issue: 43
 
 ## Verification
 
-Run `make dev`, sign in as `admin@example.org` / `muster-dev-password`; the fake Telegram server of S-041 and S-042 runs
+Run `make dev`, sign in as `admin@example.org` / `muster-dev-password`; the fake Telegram server of S-041, S-042 and S-066 runs
 with its channels. Then in Playwright:
 
 1. Connections → "Create connection" → Telegram → the base URL field shows `https://api.telegram.org` and the hint
@@ -108,7 +108,7 @@ with its channels. Then in Playwright:
 7. "Check" → four rows "Channel exists", "Discussion group", "Bot rights in the channel", "Bot rights in the discussion
    group", all ok → "Check passed".
 8. Add the Destination to a Route, send an Alert Group, delete its copy in the fake server and send a new Alert from a
-   terminal (as in S-042, C-14.AC-16) → the Alert Group page → Delivery shows "Thread not attached to the Root
+   terminal (as in S-066, C-14.AC-16) → the Alert Group page → Delivery shows "Thread not attached to the Root
    message".
 
 `make e2e` runs these steps as `web/e2e/telegram-connection.spec.ts` and `telegram-destination.spec.ts`.
@@ -135,4 +135,4 @@ None.
 | C-14.AC-6 | partial | the form's unsaved address; with S-041 complete |
 | C-14.AC-7 | partial | the error shown in the UI; with S-041 and S-042 complete |
 | C-14.AC-13 | partial | the form; with S-042 complete |
-| C-14.AC-16 | partial | the delivery state on the page; with S-042 complete |
+| C-14.AC-16 | partial | the delivery state on the page; with S-066 complete |

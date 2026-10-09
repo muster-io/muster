@@ -312,11 +312,11 @@ None.
 | C-11.FR-7 | partial | the rule and the table; Quiet new messages per messenger are S-061 and S-042 |
 | C-11.FR-8 | partial | `RetryAfter`; the other classes are S-035 |
 | C-11.FR-15 | full | |
-| C-11.FR-16 | partial | `pending` and `delivered`; the other states are S-035 and S-042, the page S-064 |
+| C-11.FR-16 | partial | `pending` and `delivered`; the other states are S-035 and S-066, the page S-064 |
 | C-11.FR-17 | partial | attempts, latency, queue and info; Broken and Storm metrics are S-035 |
 | C-11.FR-18 | partial | reading Destinations with health and Routes; health changes are S-035, type fields come with each type |
 | C-11.FR-20 | partial | every row but `moved_to_default_route` (S-035); the C-17 rows are produced from S-049 on |
-| C-11.FR-21 | partial | the table, `publication` and the Timeline merge; the other kinds are S-035 and S-042 |
+| C-11.FR-21 | partial | the table, `publication` and the Timeline merge; the other kinds are S-035 and S-066 |
 | C-11.AC-1 | full | repeated against the fake Mattermost server in S-061 |
 | C-11.AC-2 | full | repeated against the fake Mattermost server in S-061 (C-13.AC-15) |
 | C-11.AC-10 | partial | the lifecycle event rows; the delivery-event rows and `moved_to_default_route` are S-035 |

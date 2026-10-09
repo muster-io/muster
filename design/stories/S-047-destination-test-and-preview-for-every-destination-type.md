@@ -4,7 +4,7 @@ title: Destination test and preview for every Destination type (BE)
 capability: C-16
 kind: be
 layer: L1
-depends_on: [S-042, S-045]
+depends_on: [S-067, S-045]
 covers: [C-16.FR-1, C-16.FR-2, C-16.FR-3, C-16.FR-4, C-16.FR-5, C-16.FR-6, C-16.FR-7, C-16.AC-1, C-16.AC-2, C-16.AC-3, C-16.AC-4, C-16.AC-5, C-16.AC-6, C-16.AC-7, C-15.FR-2, C-15.FR-10, C-13.FR-13, C-11.FR-2, C-11.FR-9, C-01.FR-13]
 files_touched:
   - internal/destinations/test.go
@@ -80,7 +80,7 @@ issue: 47
   ServiceSettings.AllowedUntrustedInternalConnections on the Mattermost server." with the class `unknown`.
 - **Presses by people** (C-16.FR-3): a test action id pressed by anyone else gets "This is a test message; nothing was
   changed" — an ephemeral post in Mattermost, or the answer's `ephemeral_text` when that post is refused (S-061's
-  path), the `answerCallbackQuery` text in Telegram (S-042's path) — and changes nothing.
+  path), the `answerCallbackQuery` text in Telegram (S-067's path) — and changes nothing.
 - **Outgoing webhook test** (C-16.FR-1, C-15.FR-2; `internal/webhooks/testevent.go`): events mode — one `test` event
   (`version` 1, `event` `test`, `test: true`, `sequence` 0, `notify` false, `mentions` `[]`, the source as
   `alert_group` and `alerts`), signed like every request, with a new `webhook-id`, never queued; template mode — the

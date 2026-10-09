@@ -229,7 +229,7 @@ issue: 61
   read-only; S-051 adds everything else.
 - **Delivery problem** (C-13.FR-12; `internal/groups/filters.go`, `read.go`): an Alert Group has `delivery_problem`
   when one of its deliveries is `not_delivered`, `deleted_in_messenger`, waits for a Broken Destination, or has a Thread
-  not attached (from S-042); `delivery_problem=true` filters the list and the counts.
+  not attached (from S-066); `delivery_problem=true` filters the list and the counts.
 - **Internal alerts suggestion** (C-13.FR-11, C-08.FR-11; `internal/routing/suggestions.go`): `internal_alerts` applies
   while a Destination exists and some Internal alert of the closed registry (`internal/internalalerts`), with the
   labels it is raised with, would be taken by no Route other than the Default route in the current evaluation order —
