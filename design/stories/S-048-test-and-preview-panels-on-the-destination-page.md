@@ -10,6 +10,7 @@ files_touched:
   - web/src/components/destination-test-panel.tsx
   - web/src/components/destination-test-panel.test.tsx
   - web/src/components/destination-preview-panel.tsx
+  - web/src/components/destination-preview-panel.test.tsx
   - web/src/components/test-source-picker.tsx
   - web/src/components/rendered-request.tsx
   - web/src/routes/destinations.$destinationId.tsx
@@ -46,19 +47,30 @@ issue: 48
 
 - **API used**: `testDestination`, `previewDestination`, `listAlertGroups` (recent Alert Groups of the Destination's
   Routes, `route` filter), `getDestination`; the `destination` hint.
-- **Source selector** (`test-source-picker.tsx`): "Example" (`{kind: "example"}`) or "Alert Group" with a search over
-  the last 7 days of the Destination's Routes (`{kind: "alert_group", alert_group_id}`).
+- **Source selector** (`test-source-picker.tsx`), labelled "Based on" (the glossary keeps "Source" off the UI): "Example"
+  (`{kind: "example"}`) or "Alert Group" with a search over the last 7 days of the Destination's Routes
+  (`{kind: "alert_group", alert_group_id}`). Without `alert-groups:read` or without a Route only the example is
+  offered; `422 unknown_id` reads "This Alert Group is no longer one of the recent Alert Groups of this Destination's
+  Routes. Choose another one."
 - **Test panel** (`destination-test-panel.tsx`): "Send test message" (disabled while a test runs); one block per
   `TestStep` with the step's name — `message` "Message", `press` "Button press", `event` "Event", `create` "Create" —
   the outcome ("Sent", or the class's text: `limited` "The messenger is busy; nothing was sent. Try again in a few
   seconds.", `transient` "No answer or a temporary error", `fatal` "Refused", `unknown` "Unexpected answer",
-  `template_error` "Template error", `blocked` "Blocked by the outbound address policy"), `error` as plain text,
+  `template_error` "Template error", `blocked` "Blocked by the outbound address policy", `retry_after` "Asked to wait
+  and try again later"), `error` as plain text,
   `duration_ms`, the request (`rendered-request.tsx`: method, URL, headers, body as code), `response_status`,
   `response_body` as plain text and `extracted` as a table. The `press` block shows "Button presses reach Muster." when
   it has no error, otherwise its `error`. `health` from the result updates the page's health banner.
-- **Preview panel** (`destination-preview-panel.tsx`): items of `previewDestination`; `markdown` rendered without raw
-  HTML, `html` rendered in a sandboxed `iframe` (`sandbox=""`) with the Telegram subset, `json` and requests as code;
-  links are shown, never followed automatically.
+  When a step failed and the Destination is still Broken, the result says that a test ends the Broken state only when
+  every step succeeds, and, when the message was posted but the `press` step failed, that the button press did not
+  reach Muster (C-16.FR-7). The Mattermost and Telegram hints say that a person's press of a test message changes nothing
+  and is answered in English.
+- **Preview panel** (`destination-preview-panel.tsx`): items of `previewDestination`; the `markdown` (with the post's
+  attachment and buttons from `request.body`) and `html` (the Telegram subset, with the inline keyboard from
+  `request.body`) Root messages are both built element by element from text — the HTML parsed in an inert document,
+  only the subset's tags kept, no attribute — and shown in a sandboxed `iframe` (`sandbox=""`, `srcdoc`) that links the
+  page's own stylesheet, which the Content Security Policy allows; `json` and requests as code; an item with `text` and
+  no request is a failed template; links are shown with their address and are never anchors, so never followed.
 
 ## Steps
 

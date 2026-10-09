@@ -9,12 +9,13 @@
 // untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
 // with the offer to reload. A new version with the same settings — a Secret or the Signing secret changed — becomes the
 // form's version without a word, whether the form has changes or not. Health comes and goes without a reload: from the
-// destination hint, and at once from a check's result.
+// destination hint, and at once from a check's or a test's result. "Test" and "Preview" (C-16) close the page, with
+// destinations:test.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { ArrowLeftIcon } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getListConnectionsQueryKey } from "../api/gen/endpoints/connections/connections";
@@ -41,11 +42,16 @@ import {
 } from "../components/destination-form";
 import { DestinationSecrets, refreshWebhook } from "../components/destination-secrets";
 import { BrokenBanner, HealthBadge, destinationTypeName } from "../components/destination-health";
+import { DestinationPreviewPanel } from "../components/destination-preview-panel";
+import { DestinationTestPanel } from "../components/destination-test-panel";
 import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
 import { SigningSecret } from "../components/signing-secret";
+import { StatusTabs } from "../components/status-tabs";
 import { TELEGRAM_KIND } from "../components/telegram-destination-fields";
+import { EXAMPLE, type PickedSource, TestSourcePicker } from "../components/test-source-picker";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { WEBHOOK_KIND } from "../components/webhook-destination-fields";
 import { problemText } from "../lib/api";
 
@@ -71,13 +77,23 @@ function versionOf(d: Destination): string {
   return d.etag;
 }
 
-function EditForm<V>({ current, kind }: { current: Editable; kind: DestinationKind<V> }) {
+function EditForm<V>({
+  current,
+  kind,
+  onDirtyChange,
+}: {
+  current: Editable;
+  kind: DestinationKind<V>;
+  /** Tells the page whether the form has unsaved changes. */
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const canWrite = useCan("destinations:write");
   const canTest = useCan("destinations:test");
   const [base, setBase] = useState(current);
   const [dirty, setDirty] = useState(false);
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [replaced, setReplaced] = useState(false);
@@ -199,9 +215,83 @@ function RoutesOf({ destination }: { destination: Destination }) {
   );
 }
 
+type TestTab = "test" | "preview";
+
+const TEST_TABS: readonly TestTab[] = ["test", "preview"];
+
+/**
+ * "Test" and "Preview" (C-16.FR-1, FR-4), with destinations:test: one source for both, the result of the last test kept
+ * while the preview shows, and the preview rendered once its tab was opened.
+ */
+function TestAndPreview({ destination, dirty }: { destination: Destination; dirty: boolean }) {
+  const { t } = useTranslation();
+  const panelId = useId();
+  const [tab, setTab] = useState<TestTab>("test");
+  const [previewOpened, setPreviewOpened] = useState(false);
+  const [source, setSource] = useState<PickedSource>(EXAMPLE);
+  const backToExample = useCallback(() => setSource(EXAMPLE), []);
+  return (
+    <Card data-testid="destination-test-preview">
+      <CardHeader>
+        <CardTitle>
+          <h2>{t("destinationTest.title")}</h2>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex min-w-0 flex-col gap-4">
+        <StatusTabs
+          tabs={TEST_TABS}
+          value={tab}
+          label={t("destinationTest.title")}
+          panelId={panelId}
+          labelOf={(x) =>
+            x === "test" ? t("destinationTest.tabs.test") : t("destinationTest.tabs.preview")
+          }
+          onSelect={(x) => {
+            setTab(x);
+            if (x === "preview") {
+              setPreviewOpened(true);
+            }
+          }}
+        />
+        <div
+          id={panelId}
+          role="tabpanel"
+          aria-labelledby={`${panelId}-tab-${tab}`}
+          className="flex min-w-0 flex-col gap-4"
+        >
+          <TestSourcePicker
+            routeIds={destination.routes.map((r) => r.id)}
+            value={source}
+            onChange={setSource}
+          />
+          <div hidden={tab !== "test"}>
+            <DestinationTestPanel
+              destination={destination}
+              source={source}
+              dirty={dirty}
+              onSourceGone={backToExample}
+            />
+          </div>
+          {previewOpened && (
+            <div hidden={tab !== "preview"}>
+              <DestinationPreviewPanel
+                destination={destination}
+                source={source}
+                onSourceGone={backToExample}
+              />
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function DestinationView({ destinationId }: { destinationId: string }) {
   const { t } = useTranslation();
   const canWrite = useCan("destinations:write");
+  const canTest = useCan("destinations:test");
+  const [dirty, setDirty] = useState(false);
   const query = useGetDestination(destinationId);
   const destination = query.data;
   return (
@@ -245,15 +335,18 @@ function DestinationView({ destinationId }: { destinationId: string }) {
           </div>
           <RoutesOf destination={destination} />
           {destination.type === "mattermost" ? (
-            <EditForm current={destination} kind={MATTERMOST_KIND} />
+            <EditForm current={destination} kind={MATTERMOST_KIND} onDirtyChange={setDirty} />
           ) : destination.type === "telegram" ? (
-            <EditForm current={destination} kind={TELEGRAM_KIND} />
+            <EditForm current={destination} kind={TELEGRAM_KIND} onDirtyChange={setDirty} />
           ) : (
             <>
-              <EditForm current={destination} kind={WEBHOOK_KIND} />
+              <EditForm current={destination} kind={WEBHOOK_KIND} onDirtyChange={setDirty} />
               <DestinationSecrets destinationId={destination.id} />
               <SigningSecret destination={destination} />
             </>
+          )}
+          {canTest && (
+            <TestAndPreview key={destination.id} destination={destination} dirty={dirty} />
           )}
         </>
       )}

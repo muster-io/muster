@@ -533,6 +533,17 @@
     "threadNotAttached": "Thread not attached to the Root message",
     "title": "Delivery"
   },
+  "destinationPreview": {
+    "empty": "Nothing to preview.",
+    "expandable": "Expandable quote",
+    "failed": "The template of this request failed:",
+    "frameTitle": "Root message in {{destination}}",
+    "hint": "What this Destination would receive, with Secrets masked. Nothing is sent, and links are not followed.",
+    "items": {
+      "message": "Root message"
+    },
+    "refresh": "Render again"
+  },
   "destinations": {
     "check": {
       "failed": "Check failed",
@@ -737,6 +748,70 @@
       "templateTitle": "Requests",
       "url": "URL"
     }
+  },
+  "destinationTest": {
+    "classes": {
+      "blocked": "Blocked by the outbound address policy",
+      "fatal": "Refused",
+      "limited": "The messenger is busy; nothing was sent. Try again in a few seconds.",
+      "none": "Sent",
+      "retryAfter": "Asked to wait and try again later",
+      "templateError": "Template error",
+      "transient": "No answer or a temporary error",
+      "unknown": "Unexpected answer"
+    },
+    "duration": "Took {{value}} ms",
+    "emptyBody": "Empty.",
+    "errors": {
+      "unknownAlertGroup": "This Alert Group is no longer one of the recent Alert Groups of this Destination's Routes. Choose another one."
+    },
+    "extracted": "Extracted values",
+    "extractedName": "Name",
+    "extractedValue": "Value",
+    "failed": "Test failed",
+    "hints": {
+      "broken": "A test that succeeds in every step ends the Broken state.",
+      "mattermost": "Sends one test message, marked 🧪, with the saved settings, then presses its first button through the bot to check that button presses reach Muster. No Alert Group changes; when a person presses a button of a test message, nothing changes and Muster answers, in English, that it is a test message.",
+      "telegram": "Sends one test message, marked 🧪, with the saved settings. No Alert Group changes; when a person presses a button of a test message, nothing changes and Muster answers, in English, that it is a test message.",
+      "webhook": "Sends the test event, the “Create” request, or both, as the mode of this outgoing webhook says, with the saved settings. No Alert Group changes."
+    },
+    "passed": "Test passed",
+    "pressLimited": "The messenger is busy; the button was not pressed. Try again in a few seconds.",
+    "pressReached": "Button presses reach Muster.",
+    "request": {
+      "headers": "Headers",
+      "noBody": "No body.",
+      "title": "Request"
+    },
+    "responseBody": "Response body",
+    "responseStatus": "Response status: {{status}}",
+    "send": "Send test message",
+    "sending": "Sending…",
+    "source": {
+      "alertGroups": "Recent Alert Groups",
+      "example": "Example",
+      "exampleOnly": "Only the example is offered: you may not read Alert Groups.",
+      "hint": "The example, or an Alert Group of the last 7 days of this Destination's Routes.",
+      "label": "Based on",
+      "noMatch": "No Alert Group matches the search.",
+      "none": "The Routes of this Destination have no Alert Groups in the last 7 days.",
+      "noRoutes": "No Route sends here yet, so only the example is offered.",
+      "search": "Search Alert Groups",
+      "searchPlaceholder": "#N or text"
+    },
+    "steps": {
+      "event": "Event",
+      "message": "Message",
+      "press": "Button press"
+    },
+    "stillBroken": "The Destination stays Broken: a test ends the Broken state only when every step succeeds.",
+    "stillBrokenPress": "The test message was posted, but the Destination stays Broken: a test ends the Broken state only when every step succeeds, the button press included.",
+    "tabs": {
+      "preview": "Preview",
+      "test": "Test"
+    },
+    "title": "Test and preview",
+    "unsaved": "The test uses the saved settings: save your changes first."
   },
   "duration": {
     "between": "{{start}} – {{end}}",
