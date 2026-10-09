@@ -2,8 +2,8 @@
 // Copyright The Muster Authors
 
 // The Delivery section of the Alert Group page in a real browser: the text of every delivery state and mark, a
-// message link that opens only http and https addresses in a new tab without the opener, and the error of the
-// messenger as text.
+// message link that opens only http and https addresses in a new tab without the opener, the error of the messenger as
+// text, and a section that follows the alert-group hint instead of polling.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -14,7 +14,9 @@ import { render } from "vitest-browser-react";
 
 import type { AlertGroupDelivery, Session } from "../api/gen/model";
 import i18n from "../i18n";
+import { getListAlertGroupDeliveriesQueryKey } from "../api/gen/endpoints/alert-groups/alert-groups";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { applyHint } from "../lib/live";
 import { AlertGroupDeliveries, deliveryStateText, safeMessageUrl } from "./alert-group-deliveries";
 
 function delivery(extra: Partial<AlertGroupDelivery>): AlertGroupDelivery {
@@ -32,8 +34,10 @@ function delivery(extra: Partial<AlertGroupDelivery>): AlertGroupDelivery {
   };
 }
 
-function providers(children: ReactNode) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function providers(
+  children: ReactNode,
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   const read: SessionRead = {
     session: {
       state: "active",
@@ -139,6 +143,36 @@ describe("the Delivery section", () => {
       page.getByTestId("delivery-row").nth(1).element().querySelector("a[href^='javascript']"),
     ).toBeNull();
     await expect.element(page.getByTestId("destination-health").nth(1)).toHaveTextContent("Broken");
+  });
+
+  test("does not poll a pending delivery and reads it again on the alert-group hint", async () => {
+    const answers = [
+      [delivery({ state: "pending" })],
+      [delivery({ state: "not_delivered", error: "answered 400" })],
+    ];
+    let reads = 0;
+    const fetch = vi.spyOn(window, "fetch").mockImplementation(async () => {
+      const items = answers[Math.min(reads, answers.length - 1)];
+      reads++;
+      return new Response(JSON.stringify({ items }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await render(providers(<AlertGroupDeliveries alertGroupId="AG0000000000AA" />, queryClient));
+    await expect.element(page.getByTestId("delivery-state")).toHaveTextContent("Pending");
+    const query = queryClient
+      .getQueryCache()
+      .find({ queryKey: getListAlertGroupDeliveriesQueryKey("AG0000000000AA") });
+    expect(query?.observers.map((o) => o.options.refetchInterval)).toEqual([undefined]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    applyHint(queryClient, { type: "alert-group", id: "AG0000000000AA" });
+    await expect
+      .element(page.getByTestId("delivery-state"))
+      .toHaveTextContent("Not delivered: answered 400");
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   test("reads in Russian", async () => {

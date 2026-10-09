@@ -28,7 +28,7 @@ acceptance:
   - "[C-14.AC-7] A check against an address that refuses connections shows its message without the bot token."
   - "[C-14.FR-2, C-14.FR-14, C-14.AC-13] The Telegram Destination form asks only for the Connection and the channel (\"@username or chat id\"); after \"Save\" the page shows the discussion group found, read-only; a channel without comments shows \"Comments are not enabled for this channel. Enable comments in the channel settings in Telegram; this creates its discussion group.\" and a group without the bot as an admin shows \"The bot is not an admin of the discussion group {group}. Make the bot an admin there, allowed to post messages.\", and nothing is saved."
   - "[C-14.FR-14] \"Check\" on a Telegram Destination lists the checks \"Channel exists\", \"Discussion group\", \"Bot rights in the channel\" and \"Bot rights in the discussion group\" with ok or their messages."
-  - "[C-14.AC-16] The Delivery section of an Alert Group whose Thread lost its copy shows \"Thread not attached to the post\" for that Destination."
+  - "[C-14.AC-16] The Delivery section of an Alert Group whose Thread lost its copy shows \"Thread not attached to the Root message\" for that Destination."
 verify: "make ci e2e"
 operator_attention: false
 issue: 43
@@ -44,7 +44,7 @@ issue: 43
   step-by-step check with the unsaved-address rule.
 - The Telegram variant of the Destination form: the channel only, the discussion group shown after the check, the two
   failure texts, the check's steps on "Check".
-- "Thread not attached to the post" in the Delivery section.
+- "Thread not attached to the Root message" in the Delivery section.
 
 **OUT**
 
@@ -74,15 +74,15 @@ issue: 43
 - **Check** (`destination-check.tsx`): the names of the Telegram checks — `channel_exists` "Channel exists",
   `discussion_group` "Discussion group", `bot_rights_channel` "Bot rights in the channel", `bot_rights_group` "Bot rights
   in the discussion group".
-- **Delivery section** (`alert-group-deliveries.tsx`): `thread_not_attached` shows "Thread not attached to the post"
-  next to the state.
+- **Delivery section** (`alert-group-deliveries.tsx`): `thread_not_attached` shows "Thread not attached to the Root
+  message" next to the state.
 
 ## Steps
 
 1. Add the Telegram Connection fields, the hint, the warning and the step-by-step check. Check:
    `telegram-connection-fields.test.tsx` and Playwright steps 1 to 4.
 2. Add the Telegram Destination fields and check names. Check: steps 5 to 7.
-3. Add "Thread not attached to the post". Check: step 8.
+3. Add "Thread not attached to the Root message". Check: step 8.
 
 ## Verification
 
@@ -108,7 +108,8 @@ with its channels. Then in Playwright:
 7. "Check" → four rows "Channel exists", "Discussion group", "Bot rights in the channel", "Bot rights in the discussion
    group", all ok → "Check passed".
 8. Add the Destination to a Route, send an Alert Group, delete its copy in the fake server and send a new Alert from a
-   terminal (as in S-042, C-14.AC-16) → the Alert Group page → Delivery shows "Thread not attached to the post".
+   terminal (as in S-042, C-14.AC-16) → the Alert Group page → Delivery shows "Thread not attached to the Root
+   message".
 
 `make e2e` runs these steps as `web/e2e/telegram-connection.spec.ts` and `telegram-destination.spec.ts`.
 

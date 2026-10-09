@@ -178,7 +178,8 @@ func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a atte
 			return w.notDelivered(ctx, q, org, a, out, now, logs)
 		}
 		return true, rootGone(ctx, q, org, rootOf{delivery: id, group: a.group(), storm: a.storm(),
-			destination: a.destination.ID, resolved: a.row.GroupStatus == string(groups.StatusResolved),
+			destination: a.destination.ID, groupPublicID: a.row.AlertGroupPublicID,
+			resolved:    a.row.GroupStatus == string(groups.StatusResolved),
 			republished: a.row.RepublishedAfterDelete}, now)
 	case OutcomeThreadLost:
 		return w.retry(ctx, q, org, id, now.Add(TransientFirstStep), false, out, now)
@@ -197,6 +198,9 @@ func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, n
 	}
 	if err != nil {
 		return false, fmt.Errorf("record the final edit: %w", err)
+	}
+	if err := hintGroup(ctx, q, org, a.row.AlertGroupPublicID); err != nil {
+		return false, err
 	}
 	if edited {
 		r := deliveryEvent(DeliveryFinalEdit)
@@ -223,6 +227,9 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 	}
 	if err != nil {
 		return false, fmt.Errorf("record the delivered message: %w", err)
+	}
+	if err := hintGroup(ctx, q, org, a.row.AlertGroupPublicID); err != nil {
+		return false, err
 	}
 	if a.publication {
 		kind := EventPublication
@@ -288,6 +295,9 @@ func (w *Worker) notDelivered(ctx context.Context, q queries, org int64, a attem
 	}
 	if err != nil {
 		return false, fmt.Errorf("record the delivery as not delivered: %w", err)
+	}
+	if err := hintGroup(ctx, q, org, a.row.AlertGroupPublicID); err != nil {
+		return false, err
 	}
 	if err := RecordEvent(ctx, q, org, Event{At: now, DestinationID: a.destination.ID, AlertGroupID: a.group(),
 		StormID: a.storm(), Kind: EventNotDelivered, ErrorClass: string(OutcomeUnknown),
@@ -355,7 +365,8 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 		}
 		group := a.row.AlertGroupID
 		return true, rootGone(ctx, q, org, rootOf{delivery: a.row.DeliveryID, group: &group,
-			destination: a.destination.ID, resolved: a.row.Status == string(groups.StatusResolved),
+			destination: a.destination.ID, groupPublicID: a.row.AlertGroupPublicID,
+			resolved:    a.row.Status == string(groups.StatusResolved),
 			republished: a.row.RepublishedAfterDelete}, now)
 	case OutcomeThreadLost:
 		_, ok, err := w.retryReply(ctx, q, org, id, now.Add(TransientFirstStep), false, out, now)

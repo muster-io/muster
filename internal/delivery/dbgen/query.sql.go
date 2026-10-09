@@ -1580,6 +1580,40 @@ func (q *Queries) ListOpenGroupsOfRoute(ctx context.Context, arg ListOpenGroupsO
 	return items, nil
 }
 
+const listPendingGroups = `-- name: ListPendingGroups :many
+SELECT DISTINCT g.public_id
+FROM deliveries d
+JOIN alert_groups g ON g.org_id = $1 AND g.id = d.alert_group_id
+WHERE d.org_id = $1 AND d.destination_id = $2 AND d.state = 'pending'
+`
+
+type ListPendingGroupsParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+// ListPendingGroups lists the Alert Groups with a pending delivery to a Destination, whose delivery state a change of
+// its health turns into waiting or back, for their alert-group hints.
+func (q *Queries) ListPendingGroups(ctx context.Context, arg ListPendingGroupsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listPendingGroups, arg.OrgID, arg.DestinationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var public_id string
+		if err := rows.Scan(&public_id); err != nil {
+			return nil, err
+		}
+		items = append(items, public_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRouteDestinations = `-- name: ListRouteDestinations :many
 
 
@@ -2682,7 +2716,7 @@ FROM alert_groups g
 WHERE d.org_id = $2 AND d.destination_id = $3 AND g.org_id = $2 AND g.id = d.alert_group_id
   AND g.route_id = $4 AND g.status <> 'resolved'
   AND d.state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
-RETURNING d.id
+RETURNING d.id, g.public_id
 `
 
 type RetireRouteDeliveriesParams struct {
@@ -2692,9 +2726,15 @@ type RetireRouteDeliveriesParams struct {
 	RouteID       int64
 }
 
+type RetireRouteDeliveriesRow struct {
+	ID       int64
+	PublicID string
+}
+
 // RetireRouteDeliveries gives the deliveries of the open Alert Groups of a Route in a Destination that left it their
 // final edit (C-11.FR-14): a published Root message is edited once more, and one never published there is withheld.
-func (q *Queries) RetireRouteDeliveries(ctx context.Context, arg RetireRouteDeliveriesParams) ([]int64, error) {
+// It returns each delivery with the public_id of its Alert Group, for the alert-group hints.
+func (q *Queries) RetireRouteDeliveries(ctx context.Context, arg RetireRouteDeliveriesParams) ([]RetireRouteDeliveriesRow, error) {
 	rows, err := q.db.Query(ctx, retireRouteDeliveries,
 		arg.Now,
 		arg.OrgID,
@@ -2705,13 +2745,13 @@ func (q *Queries) RetireRouteDeliveries(ctx context.Context, arg RetireRouteDeli
 		return nil, err
 	}
 	defer rows.Close()
-	items := []int64{}
+	items := []RetireRouteDeliveriesRow{}
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var i RetireRouteDeliveriesRow
+		if err := rows.Scan(&i.ID, &i.PublicID); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -3179,12 +3219,13 @@ func (q *Queries) WipeDestinationSecrets(ctx context.Context, arg WipeDestinatio
 	return err
 }
 
-const withholdHeldResolved = `-- name: WithholdHeldResolved :exec
+const withholdHeldResolved = `-- name: WithholdHeldResolved :many
 UPDATE deliveries d
 SET held_by_storm_id = NULL, state = 'withheld', updated_at = $1
 FROM alert_groups g
 WHERE d.org_id = $2 AND d.held_by_storm_id = $3::bigint AND d.state = 'pending' AND g.org_id = $2
   AND g.id = d.alert_group_id AND g.status = 'resolved'
+RETURNING g.public_id
 `
 
 type WithholdHeldResolvedParams struct {
@@ -3193,10 +3234,26 @@ type WithholdHeldResolvedParams struct {
 	StormID int64
 }
 
-// WithholdHeldResolved withholds the Alert Groups a Storm held that resolved meanwhile: never published.
-func (q *Queries) WithholdHeldResolved(ctx context.Context, arg WithholdHeldResolvedParams) error {
-	_, err := q.db.Exec(ctx, withholdHeldResolved, arg.Now, arg.OrgID, arg.StormID)
-	return err
+// WithholdHeldResolved withholds the Alert Groups a Storm held that resolved meanwhile: never published. It returns
+// their public_ids, once per delivery, for their alert-group hints.
+func (q *Queries) WithholdHeldResolved(ctx context.Context, arg WithholdHeldResolvedParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, withholdHeldResolved, arg.Now, arg.OrgID, arg.StormID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var public_id string
+		if err := rows.Scan(&public_id); err != nil {
+			return nil, err
+		}
+		items = append(items, public_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const withholdLeased = `-- name: WithholdLeased :exec

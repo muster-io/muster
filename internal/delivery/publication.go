@@ -59,6 +59,9 @@ func (w *Worker) possibleDuplicate(ctx context.Context, q queries, org int64, ro
 		Owner: w.Lease.Owner, Now: now}); err != nil {
 		return fmt.Errorf("mark the possible duplicate: %w", err)
 	}
+	if err := hintGroup(ctx, q, org, row.AlertGroupPublicID); err != nil {
+		return err
+	}
 	if err := RecordEvent(ctx, q, org, Event{At: now, DestinationID: row.DestinationID, AlertGroupID: groupOf(row),
 		StormID: int8Of(row.StormID), Kind: EventPossibleDuplicate}); err != nil {
 		return err
@@ -71,11 +74,13 @@ func (w *Worker) possibleDuplicate(ctx context.Context, q queries, org int64, ro
 	return nil
 }
 
-// rootOf is a delivery whose Root message the messenger reports deleted: its Alert Group, or the Storm of a Storm
-// summary, whether the Alert Group is resolved, and whether the Root message was published again once already.
+// rootOf is a delivery whose Root message the messenger reports deleted: its Alert Group with its public_id, or the
+// Storm of a Storm summary, whether the Alert Group is resolved, and whether the Root message was published again once
+// already.
 type rootOf struct {
 	delivery, destination int64
 	group, storm          *int64
+	groupPublicID         string
 	resolved, republished bool
 }
 
@@ -92,6 +97,9 @@ func rootGone(ctx context.Context, q queries, org int64, r rootOf, now time.Time
 		if n == 0 {
 			return nil
 		}
+		if err := hintGroup(ctx, q, org, r.groupPublicID); err != nil {
+			return err
+		}
 		if err := RecordEvent(ctx, q, org, Event{At: now, DestinationID: r.destination, AlertGroupID: r.group,
 			StormID: r.storm, Kind: EventRepublished,
 			Loudness: deliveryEvent(DeliveryRepublication).Loudness}); err != nil {
@@ -105,6 +113,9 @@ func rootGone(ctx context.Context, q queries, org int64, r rootOf, now time.Time
 	}
 	if n == 0 {
 		return nil
+	}
+	if err := hintGroup(ctx, q, org, r.groupPublicID); err != nil {
+		return err
 	}
 	if err := q.DropPendingReplies(ctx, dbgen.DropPendingRepliesParams{OrgID: org,
 		DeliveryID: r.delivery}); err != nil {

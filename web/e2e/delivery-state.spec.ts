@@ -6,7 +6,9 @@
 // Alert Group of the Route "ds" ends as "Not delivered: …" in its Delivery section; the list with "Delivery problem"
 // (kept in the URL) lists it with the mark, and in words on a phone; a later change is delivered, and the row loses
 // the mark; "Delivered" opens the post in the fake server in a new tab. A reader of Russian sees the section at phone
-// width. No page scrolls sideways at 360 px; no Content Security Policy violation.
+// width. A delivery that ends seconds after its change shows its end in the open page and in the list without a
+// reload, through the alert-group hint of the delivery worker. No page scrolls sideways at 360 px; no Content Security
+// Policy violation.
 
 import { type Browser, expect, test, type Page } from "@playwright/test";
 
@@ -275,6 +277,52 @@ test("a reader of Russian sees the Delivery section at phone width", async ({ br
   await admin.dispose();
   // The Viewer stays: users.spec.ts counts the deleted Viewers of the run.
   await russianViewer(browser);
+});
+
+test("the end of a delivery reaches the open page and the list without a reload", async ({
+  page,
+  browser,
+}) => {
+  const csp = watchCsp(page);
+  const g1 = await groupOf("d1");
+  await expect.poll(() => stateOf(g1.id), { timeout: 30_000 }).toBe("delivered");
+  await signInAdmin(page);
+  await page.goto(`/alert-groups/${g1.id}`);
+  const state = page.getByTestId("alert-group-deliveries").getByTestId("delivery-state");
+  await expect(state).toHaveText("Delivered (opens in a new tab)");
+  const listContext = await browser.newContext();
+  const list = await listContext.newPage();
+  await signInAdmin(list);
+  await list.goto(`/alert-groups?q=%23${g1.number}`);
+  await expect(row(list, g1.number)).toHaveCount(1);
+  await expect(row(list, g1.number).getByTestId("delivery-problem-mark")).toHaveCount(0);
+
+  // The edit is refused only after a few seconds: the dispatcher's hint shows it pending, and only the delivery
+  // worker's hint can show its end, since nothing polls and nothing reloads.
+  await fault({
+    path: "/api/v4/posts/*/patch",
+    status: 400,
+    body: '{"message":"bad patch"}',
+    delay_ms: 3000,
+    times: 1,
+  });
+  const admin = await adminApi();
+  try {
+    await admin.call("POST", `/api/v1/alert-groups/${g1.id}/acknowledge`);
+    await expect(state).toHaveText("Pending");
+    await expect(state).toHaveText(/^Not delivered: .*400/, { timeout: 15_000 });
+    await expect(row(list, g1.number).getByTestId("delivery-problem-mark")).toBeVisible();
+
+    // A later change is delivered: the section and the row follow it the same way.
+    await admin.call("POST", `/api/v1/alert-groups/${g1.id}/unacknowledge`);
+    await expect(state).toHaveText("Delivered (opens in a new tab)", { timeout: 15_000 });
+    await expect(row(list, g1.number).getByTestId("delivery-problem-mark")).toHaveCount(0);
+  } finally {
+    await admin.dispose();
+  }
+  await shot(page, "delivery-live");
+  await listContext.close();
+  expect(csp).toEqual([]);
 });
 
 async function russianViewer(browser: Browser): Promise<void> {

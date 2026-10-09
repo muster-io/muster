@@ -21,12 +21,12 @@ import (
 
 // Broken Destinations (C-11.FR-9, FR-18): a Fatal error, or a Transient budget that ran out, makes a Destination
 // Broken in the transaction that records the outcome — health, broken_since, broken_cause, broken_reason and the first
-// probe at now plus delivery.broken_probe_interval, with the destination_broken delivery event, MusterDestinationBroken
-// and the hint destination. Its deliveries wait: the claims skip them, new Thread replies are dropped and a first
-// Publication whose Alert Group resolves is withheld. Every replica probes the Broken Destinations that are due, in the
-// delivery client class: the oldest waiting delivery through the worker's path, else the adapter's Destination check,
-// else, for a type without one, a mark that makes its next due delivery the probe. A success makes it healthy and
-// starts the recovery.
+// probe at now plus delivery.broken_probe_interval, with the destination_broken delivery event, MusterDestinationBroken,
+// the hint destination and the alert-group hints of the Alert Groups that now wait for it. Its deliveries wait: the
+// claims skip them, new Thread replies are dropped and a first Publication whose Alert Group resolves is withheld. Every
+// replica probes the Broken Destinations that are due, in the delivery client class: the oldest waiting delivery
+// through the worker's path, else the adapter's Destination check, else, for a type without one, a mark that makes its
+// next due delivery the probe. A success makes it healthy and starts the recovery.
 
 // The health of a Destination and the causes of a Broken one.
 const (
@@ -49,11 +49,12 @@ type brokenQueries interface {
 	MarkDestinationHealthy(ctx context.Context, arg dbgen.MarkDestinationHealthyParams) (
 		dbgen.MarkDestinationHealthyRow, error)
 	ListDestinationHealth(ctx context.Context, orgID int64) ([]dbgen.ListDestinationHealthRow, error)
+	ListPendingGroups(ctx context.Context, arg dbgen.ListPendingGroupsParams) ([]string, error)
 	recoveryQueries
 }
 
 // breakDestination makes d Broken with cause and reason in the transaction of q: the delivery event, the Internal
-// alert, the hint and the destination_broken line once committed. A Destination that is Broken already stays so with
+// alert, the hints and the destination_broken line once committed. A Destination that is Broken already stays so with
 // reason as its new reason and cause as its cause. It touches no other delivery: replicas that record outcomes of the
 // same Destination at once each hold their own row and wait only for the Destination's; its rows get a fresh Transient
 // budget in the recovery instead.
@@ -86,6 +87,9 @@ func breakDestination(ctx context.Context, q queries, raiser *internalalerts.Rai
 	if err := q.Notify(ctx, db.Hint{OrgID: org, Type: hintDestination, ID: row.PublicID}); err != nil {
 		return err
 	}
+	if err := hintPendingGroups(ctx, q, org, d.ID); err != nil {
+		return err
+	}
 	logs.add(func(ctx context.Context, log *logging.Logger) {
 		log.Log(ctx, logging.DestinationBroken, logging.F("destination", row.PublicID), logging.F("cause", cause),
 			logging.F("reason", reason))
@@ -94,7 +98,7 @@ func breakDestination(ctx context.Context, q queries, raiser *internalalerts.Rai
 }
 
 // markHealthy ends the Broken state of the Destination id in the transaction of q: the delivery event, the resolve of
-// MusterDestinationBroken, the hint, the recovery to the current state and the wake of the delivery workers, and the
+// MusterDestinationBroken, the hints, the recovery to the current state and the wake of the delivery workers, and the
 // destination_recovered line once committed. A healthy Destination changes nothing. A deleted one, whose last final
 // edits a probe reached, only resolves the Internal alert and recovers its final edits: it records no delivery event,
 // sends no hint and logs nothing.
@@ -118,6 +122,9 @@ func markHealthy(ctx context.Context, q queries, raiser *internalalerts.Raiser, 
 	}
 	if !row.Deleted {
 		if err := q.Notify(ctx, db.Hint{OrgID: org, Type: hintDestination, ID: row.PublicID}); err != nil {
+			return err
+		}
+		if err := hintPendingGroups(ctx, q, org, id); err != nil {
 			return err
 		}
 	}

@@ -306,6 +306,9 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 				Now: now}); err != nil {
 				return fmt.Errorf("withhold the delivery: %w", err)
 			}
+			if err := hintGroup(ctx, q, org, row.AlertGroupPublicID); err != nil {
+				return err
+			}
 			return wipeSecrets(ctx, q, org, row.DestinationID)
 		}
 		if !row.DesiredRetire && bytes.Equal(row.ActualHash, row.DesiredHash) {
@@ -313,7 +316,7 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 				Version: row.DesiredVersion, Now: now}); err != nil {
 				return fmt.Errorf("mark the delivery delivered: %w", err)
 			}
-			return nil
+			return hintGroup(ctx, q, org, row.AlertGroupPublicID)
 		}
 		d := Destination{ID: row.DestinationID, PublicID: row.DestinationPublicID, Name: row.DestinationName,
 			Type: row.DestinationType, Connection: int8Of(row.ConnectionID)}

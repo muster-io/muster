@@ -66,7 +66,9 @@ func TestTransientBudgetBreaks(t *testing.T) {
 		e.db.internal[0].labels["destination_name"] != "ops" || e.db.internal[0].labels["severity"] != "critical" {
 		t.Errorf("internal alerts %+v", e.db.internal)
 	}
-	if len(e.db.hints) != 1 || e.db.hints[0] != (db.Hint{OrgID: orgID, Type: "destination", ID: "DSAAAAAAAAAA11"}) {
+	// The destination hint, and the hint of the Alert Group whose delivery now waits for it.
+	if !slices.Equal(e.db.hints, []db.Hint{{OrgID: orgID, Type: "destination", ID: "DSAAAAAAAAAA11"},
+		{OrgID: orgID, Type: "alert-group", ID: "AGAAAAAAAAAA21"}}) {
 		t.Errorf("hints %+v", e.db.hints)
 	}
 	if ev := e.db.events[len(e.db.events)-1]; ev.Kind != "destination_broken" || ev.ErrorClass.String != "transient" ||
@@ -455,8 +457,8 @@ func TestBreakingTouchesNoOtherRow(t *testing.T) {
 }
 
 // TestDeletedBrokenFinalEdit: a probe whose final edit reaches a deleted Broken Destination ends its Broken state
-// without the signs of a recovery — no destination_recovered event, hint or line — but resolves
-// MusterDestinationBroken.
+// without the signs of a recovery — no destination_recovered event, destination hint or line — but resolves
+// MusterDestinationBroken; the Alert Group gets its hint for the retired delivery.
 func TestDeletedBrokenFinalEdit(t *testing.T) {
 	e := memberEnv(t)
 	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
@@ -477,7 +479,8 @@ func TestDeletedBrokenFinalEdit(t *testing.T) {
 	if d.state != "retired" || e.db.dests[destMM].health != "healthy" {
 		t.Fatalf("after the probe %+v, %s", d, e.db.dests[destMM].health)
 	}
-	if slices.Contains(e.eventKinds(), "destination_recovered") || len(e.db.hints) != 0 ||
+	if slices.Contains(e.eventKinds(), "destination_recovered") ||
+		!slices.Equal(e.db.hints, []db.Hint{{OrgID: orgID, Type: "alert-group", ID: "AGAAAAAAAAAA21"}}) ||
 		strings.Contains(e.log.String(), "destination_recovered") {
 		t.Errorf("recovered a deleted destination: %v, hints %+v, log %s", e.eventKinds(), e.db.hints, e.log)
 	}

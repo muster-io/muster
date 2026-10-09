@@ -6,8 +6,8 @@
 // gives one, "Pending", "Not delivered: {error}", "Waiting: {Destination} is Broken", "Deleted in the messenger",
 // "Not posted: …" or "No longer updated here" — and the marks "Thread not attached to the Root message" and "Possible
 // duplicate". The error comes from the messenger and is text only; a link opens in a new tab, and only an http or https
-// one. The alert-group hint reads the section again; while a delivery is pending or waits for a Broken Destination it
-// is read again every few seconds, as its end sends no hint of its own.
+// one. The alert-group hint reads the section again: the dispatcher sends it with every change of the Alert Group, and
+// the delivery worker when a delivery ends or starts or stops waiting for a Broken Destination, so nothing polls.
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
@@ -22,10 +22,6 @@ import { useCan } from "./app-shell";
 import { HealthBadge } from "./destination-health";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { cn } from "./ui/utils";
-
-/** How often a pending delivery, or one waiting for a Broken Destination, is read again. */
-const PENDING_REFRESH_MS = 3_000;
-const WAITING_REFRESH_MS = 15_000;
 
 /** An absolute http or https URL, the only kind of link the section opens; anything else is not linked. */
 export function safeMessageUrl(url: string | null | undefined): string | undefined {
@@ -147,19 +143,7 @@ function Row({ delivery }: { delivery: AlertGroupDelivery }) {
 
 export function AlertGroupDeliveries({ alertGroupId }: { alertGroupId: string }) {
   const { t } = useTranslation();
-  const query = useListAlertGroupDeliveries(alertGroupId, {
-    query: {
-      refetchInterval: (q) => {
-        const items = q.state.data?.items ?? [];
-        if (items.some((d) => d.state === "pending")) {
-          return PENDING_REFRESH_MS;
-        }
-        return items.some((d) => d.state === "waiting_for_broken_destination")
-          ? WAITING_REFRESH_MS
-          : false;
-      },
-    },
-  });
+  const query = useListAlertGroupDeliveries(alertGroupId);
   const items = query.data?.items ?? [];
   return (
     <Card data-testid="alert-group-deliveries">
