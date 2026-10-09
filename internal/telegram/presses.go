@@ -106,6 +106,8 @@ const (
 	outcomeDisabled    = "disabled"
 	outcomeNotVerified = "not_verified"
 	outcomeFailed      = "failed"
+	// outcomeTest is a press of a test message, answered that nothing changed (C-16.FR-3).
+	outcomeTest = "test"
 )
 
 // errUnverifiable is a verified button that names no Command of its Route: a Snooze duration that no longer exists.
@@ -129,7 +131,8 @@ type pressed struct {
 // edited through delivery, never here, and only after the answer: the handler runs under the Connection's update
 // lock, which the delivery worker tries before an edit, rescheduling the edit while it is held. The update is
 // confirmed whatever the press led to, so that a press never runs twice; only a cancelled context leaves it
-// unconfirmed.
+// unconfirmed. A press of a test message, whose verified data name the Destination under test, changes nothing and is
+// answered "This is a test message; nothing was changed" (C-16.FR-3).
 func (p *Presses) Handle(ctx context.Context, c Conn, u Update) error {
 	q := u.CallbackQuery
 	if q == nil || q.ID == "" {
@@ -155,6 +158,11 @@ func (p *Presses) Handle(ctx context.Context, c Conn, u Update) error {
 // handle verifies, binds and runs one press and answers it.
 func (p *Presses) handle(ctx context.Context, c Conn, q *CallbackQuery) pressed {
 	a, err := buttons.Verify(p.Keys, q.Data, "")
+	if len(q.Data) <= buttons.MaxLen && err == nil && a.Subject == buttons.SubjectTest {
+		r := pressed{command: a.Command, outcome: outcomeTest}
+		p.answer(ctx, c, q, &r, messages.T(messages.LanguageEnglish, "press.test", nil))
+		return r
+	}
 	if len(q.Data) > buttons.MaxLen || err != nil || a.Subject != buttons.SubjectRoot || q.Message == nil {
 		return p.notVerified(ctx, c, q, pressed{})
 	}

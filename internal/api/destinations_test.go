@@ -55,6 +55,11 @@ type fakeDestinations struct {
 	saveErr  error
 	check    destinations.CheckResult
 	checkErr error
+	// The tests and previews: their sources and requesters, and what they answer.
+	sources []destinations.Source
+	test    destinations.TestResult
+	preview []delivery.PreviewItem
+	testErr error
 }
 
 func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, in destinations.Input) (
@@ -128,6 +133,24 @@ func (f *fakeDestinations) Check(_ context.Context, id string) (destinations.Che
 		return destinations.CheckResult{}, destinations.ErrNotFound
 	}
 	return f.check, f.checkErr
+}
+
+func (f *fakeDestinations) Test(_ context.Context, r destinations.Requester, id string, src destinations.Source) (
+	destinations.TestResult, error) {
+	f.sources, f.by = append(f.sources, src), append(f.by, r)
+	if !slices.ContainsFunc(f.list, func(d destinations.Destination) bool { return d.PublicID == id }) {
+		return destinations.TestResult{}, destinations.ErrNotFound
+	}
+	return f.test, f.testErr
+}
+
+func (f *fakeDestinations) Preview(_ context.Context, id string, src destinations.Source) ([]delivery.PreviewItem,
+	error) {
+	f.sources = append(f.sources, src)
+	if !slices.ContainsFunc(f.list, func(d destinations.Destination) bool { return d.PublicID == id }) {
+		return nil, destinations.ErrNotFound
+	}
+	return f.preview, f.testErr
 }
 
 func (f *fakeDestinations) Delete(_ context.Context, r destinations.Requester, id string, version *int64) error {
@@ -967,5 +990,118 @@ func TestWebhookRequestPreviewAPI(t *testing.T) {
 	if a.status != http.StatusOK || m["valid"] != true || m["source"] != nil || fake.reqs[0].Kind != "webhook_request" ||
 		fake.reqs[0].Template != "Bearer {{ .Secrets.token }}" {
 		t.Errorf("preview = %d %s", a.status, a.body)
+	}
+}
+
+// TestTestDestinationAPI is testDestination (C-16.FR-1, FR-2) at the API with destinations:test: each step with its
+// masked request, its response and its class, null for what it lacks; the health after the test; a limited step
+// still answers 200; the source reaches the domain; an Alert Group of another Route is 422 unknown_id; an unknown
+// Destination 404; a body that is not a source 400; without the Permission 403.
+func TestTestDestinationAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	ft := x.srv.tokens.(*fakeTokens)
+	ft.idents[destinationsTester] = &auth.Identity{Session: ft.idents[fullToken].Session,
+		Permissions: []auth.Permission{"destinations:read", "destinations:test"}, Transport: audit.TransportAPI,
+		Token: &auth.Token{ID: 53, Name: "destinations-test"}}
+	path := "/api/v1/destinations/" + webhookID + "/tests"
+	body, resp := `{"a":"[redacted]"}`, `{"ok":true}`
+	fd.test = destinations.TestResult{Health: destinations.Health{State: "healthy"}, Steps: []delivery.TestStep{
+		{Name: "event", Request: &delivery.TestRequest{Method: "POST", URL: "https://example.org/hook?k=[redacted]",
+			Headers: [][2]string{{"Authorization", "Bearer [redacted]"}}, Body: &body}, ResponseStatus: 200,
+			ResponseBody: &resp, Duration: 1500 * time.Millisecond, ErrorClass: "none"},
+		{Name: "create", Request: &delivery.TestRequest{Method: "POST", URL: "https://example.org/chat"},
+			Extracted: map[string]string{"id": "m1"}, ErrorClass: "limited", Error: "no token"}}}
+	a := x.as(t, destinationsTester, http.MethodPost, path, `{"source":{"kind":"example"}}`)
+	var res gen.DestinationTestResult
+	decodeInto(t, a, &res)
+	if a.status != http.StatusOK || len(res.Steps) != 2 || res.Health.State != gen.Healthy {
+		t.Fatalf("test = %d %s", a.status, a.body)
+	}
+	ev, cr := res.Steps[0], res.Steps[1]
+	if ev.Name != "event" || ev.ErrorClass != gen.DeliveryErrorClassNone || ev.DurationMs != 1500 ||
+		ev.ResponseStatus.MustGet() != 200 || ev.ResponseBody.MustGet() != resp || !ev.Error.IsNull() ||
+		ev.Request.Url != "https://example.org/hook?k=[redacted]" || ev.Request.Body.MustGet() != body ||
+		ev.Request.Headers[0].Value != "Bearer [redacted]" || ev.Extracted != nil {
+		t.Errorf("event %s", a.body)
+	}
+	if cr.ErrorClass != gen.DeliveryErrorClassLimited || cr.Error.MustGet() != "no token" ||
+		!cr.ResponseStatus.IsNull() || !cr.ResponseBody.IsNull() || (*cr.Extracted)["id"] != "m1" ||
+		!cr.Request.Body.IsNull() {
+		t.Errorf("create %s", a.body)
+	}
+	if fd.sources[0].Kind != "example" || fd.by[0].Transport != audit.TransportAPI {
+		t.Errorf("source %+v %+v", fd.sources, fd.by)
+	}
+	fd.test.Steps[0].Request = nil
+	a = x.as(t, destinationsTester, http.MethodPost, path,
+		`{"source":{"kind":"alert_group","alert_group_id":"AGAAAAAAAAAA21"}}`)
+	if a.status != http.StatusOK || fd.sources[1].AlertGroupID != "AGAAAAAAAAAA21" ||
+		strings.Contains(string(a.body), `"request":null`) {
+		t.Errorf("alert group = %d %s %+v", a.status, a.body, fd.sources)
+	}
+	fd.testErr = &destinations.FieldError{Pointer: "/source/alert_group_id", Code: destinations.CodeUnknownID,
+		Detail: "No such Alert Group of a Route of this Destination."}
+	a = x.as(t, destinationsTester, http.MethodPost, path,
+		`{"source":{"kind":"alert_group","alert_group_id":"AGAAAAAAAAAA22"}}`)
+	if a.status != http.StatusUnprocessableEntity || problemErrors(t, a)[0]["code"] != "unknown_id" {
+		t.Errorf("other route = %d %s", a.status, a.body)
+	}
+	fd.testErr = nil
+	if a := x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DS000000000000/tests",
+		`{"source":{"kind":"example"}}`); a.status != http.StatusNotFound {
+		t.Errorf("unknown = %d", a.status)
+	}
+	if a := x.as(t, destinationsTester, http.MethodPost, path, `{"source":{"kind":"other"}}`); a.status !=
+		http.StatusBadRequest {
+		t.Errorf("bad kind = %d", a.status)
+	}
+	if a := x.as(t, destinationsWriter, http.MethodPost, path, `{"source":{"kind":"example"}}`); a.status !=
+		http.StatusForbidden {
+		t.Errorf("without destinations:test = %d", a.status)
+	}
+}
+
+// TestPreviewDestinationAPI is previewDestination (C-16.FR-4) at the API with destinations:test: each item with its
+// format, text and request, null for what it lacks.
+func TestPreviewDestinationAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	ft := x.srv.tokens.(*fakeTokens)
+	ft.idents[destinationsTester] = &auth.Identity{Session: ft.idents[fullToken].Session,
+		Permissions: []auth.Permission{"destinations:read", "destinations:test"}, Transport: audit.TransportAPI,
+		Token: &auth.Token{ID: 53, Name: "destinations-test"}}
+	text := "🔴 #1 HighErrorRate"
+	fd.preview = []delivery.PreviewItem{{Name: "message", Format: "markdown", Text: &text,
+		Request: &delivery.TestRequest{Method: "POST", URL: "http://mm/api/v4/posts"}}, {Name: "update"}}
+	path := "/api/v1/destinations/" + mattermostID + "/previews"
+	a := x.as(t, destinationsTester, http.MethodPost, path, `{"source":{"kind":"example"}}`)
+	var res gen.DestinationPreview
+	decodeInto(t, a, &res)
+	if a.status != http.StatusOK || len(res.Items) != 2 || res.Items[0].Format.MustGet() != "markdown" ||
+		res.Items[0].Text.MustGet() != text || res.Items[0].Request.Url != "http://mm/api/v4/posts" ||
+		!res.Items[1].Format.IsNull() || !res.Items[1].Text.IsNull() || res.Items[1].Request != nil {
+		t.Fatalf("preview = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DS000000000000/previews",
+		`{"source":{"kind":"example"}}`); a.status != http.StatusNotFound {
+		t.Errorf("unknown = %d", a.status)
+	}
+	if a := x.as(t, destinationsWriter, http.MethodPost, path, `{"source":{"kind":"example"}}`); a.status !=
+		http.StatusForbidden {
+		t.Errorf("without destinations:test = %d", a.status)
+	}
+	srv := x.srv
+	for _, call := range []func() error{
+		func() error {
+			_, err := srv.TestDestination(t.Context(), gen.TestDestinationRequestObject{})
+			return err
+		},
+		func() error {
+			_, err := srv.PreviewDestination(t.Context(), gen.PreviewDestinationRequestObject{})
+			return err
+		},
+	} {
+		if call() == nil {
+			t.Error("a missing body or identity is not refused")
+		}
 	}
 }

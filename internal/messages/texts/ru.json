@@ -44,6 +44,7 @@
   "press.notLinked": "Ваша учётная запись Mattermost не связана с Muster. Свяжите её в профиле: {link}",
   "press.notVerified": "Не удалось проверить эту кнопку; ничего не изменилось.",
   "press.telegramNotLinked": "Ваша учётная запись Telegram не связана с Muster. Свяжите её в профиле: {link}",
+  "press.test": "Это тестовое сообщение; ничего не изменилось",
   "reason.gone": "алерты пропали из Alertmanager",
   "reason.integration_deleted": "интеграция удалена",
   "reason.resolved": "все алерты закрыты",
@@ -79,5 +80,6 @@
   "storm.urgent_one": "{count} срочная",
   "storm.urgent_few": "{count} срочные",
   "storm.urgent_many": "{count} срочных",
-  "storm.urgent_other": "{count} срочной"
+  "storm.urgent_other": "{count} срочной",
+  "test.mark": "🧪 Тестовое сообщение"
 }

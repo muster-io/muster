@@ -2973,6 +2973,35 @@ func (l *live) pressBinding(t *testing.T) {
 			t.Errorf("PostDestination(%s, %s) = %v, %v", c.post, c.channel, ok, err)
 		}
 	}
+	// The Destination of a press on a test message (C-16.FR-3): by its public_id, of the Connection, in its channel.
+	if d, ok, err := l.svc.TestDestination(t.Context(), l.conn, "DSAAAAAAAAAAA1", "chan1"); err != nil || !ok ||
+		d.ID != l.dests[0] {
+		t.Errorf("TestDestination = %+v, %v, %v", d, ok, err)
+	}
+	for _, c := range []struct {
+		conn        int64
+		id, channel string
+	}{{l.conn, "DSAAAAAAAAAAA1", "chan2"}, {l.conn + 1000, "DSAAAAAAAAAAA1", "chan1"},
+		{l.conn, "DS0000000000ZZ", "chan1"}} {
+		if _, ok, err := l.svc.TestDestination(t.Context(), c.conn, c.id, c.channel); ok || err != nil {
+			t.Errorf("TestDestination(%d, %s, %s) = %v, %v", c.conn, c.id, c.channel, ok, err)
+		}
+	}
+	// A save of a Broken Destination makes its probe due at once (C-11.FR-9); a healthy one is left as it is.
+	if err := l.svc.ProbeNow(t.Context(), l.dests[1]); err != nil {
+		t.Fatal(err)
+	}
+	l.brk(t, l.dests[0])
+	if err := l.svc.ProbeNow(t.Context(), l.dests[0]); err != nil {
+		t.Fatal(err)
+	}
+	var due time.Time
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT next_probe_at FROM destinations WHERE id = $1`,
+		l.dests[0]).Scan(&due); err != nil || !due.Equal(l.business.Now()) {
+		t.Errorf("the probe is due at %v, %v", due, err)
+	}
+	l.exec(t, `UPDATE destinations SET health = 'healthy', broken_since = NULL, broken_cause = NULL,
+		broken_reason = NULL, next_probe_at = NULL WHERE id = $1`, l.dests[0])
 	l.exec(t, `UPDATE destinations SET deleted_at = $2 WHERE org_id = $1 AND id = $3`, l.orgID, l.business.Now(),
 		l.dests[0])
 	defer l.exec(t, `UPDATE destinations SET deleted_at = NULL WHERE org_id = $1 AND id = $2`, l.orgID, l.dests[0])
@@ -2981,6 +3010,9 @@ func (l *live) pressBinding(t *testing.T) {
 	}
 	if _, ok, err := l.svc.PostDestination(t.Context(), l.conn, "post-press", "chan1"); ok || err != nil {
 		t.Errorf("the post of a deleted Destination = %v, %v", ok, err)
+	}
+	if _, ok, err := l.svc.TestDestination(t.Context(), l.conn, "DSAAAAAAAAAAA1", "chan1"); ok || err != nil {
+		t.Errorf("the test message of a deleted Destination = %v, %v", ok, err)
 	}
 	t.Log("press binding: post, connection, channel and route values read from PostgreSQL")
 }

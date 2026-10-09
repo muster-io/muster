@@ -84,3 +84,21 @@ func (s *Service) TelegramPressBinding(ctx context.Context, connectionID int64, 
 		Name: r.DestinationName, Type: TypeTelegram, Connection: &connectionID},
 		ChannelID: strconv.FormatInt(chatID, 10), Language: r.Language, SnoozeSeconds: r.SnoozeDurationsSeconds}, nil
 }
+
+// TestDestination reads the Mattermost Destination publicID of the Connection connectionID, not deleted, whose channel
+// is channelID, and whether there is one: the Destination whose test message a person pressed, which limits the
+// private answer (C-16.FR-3).
+func (s *Service) TestDestination(ctx context.Context, connectionID int64, publicID, channelID string) (Destination,
+	bool, error) {
+	r, err := s.store.q().GetTestDestination(ctx, dbgen.GetTestDestinationParams{OrgID: s.orgID,
+		ConnectionID: pgtype.Int8{Int64: connectionID, Valid: true}, PublicID: publicID, ChannelID: channelID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Destination{}, false, nil
+	}
+	if err != nil {
+		return Destination{}, false, fmt.Errorf("read the destination %s of the connection %d: %w", publicID,
+			connectionID, err)
+	}
+	return Destination{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Type: TypeMattermost,
+		Connection: &connectionID}, true, nil
+}

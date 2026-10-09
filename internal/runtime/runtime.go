@@ -464,6 +464,12 @@ type process struct {
 	// button presses answers through and runs Commands with.
 	interactive *delivery.Interactive
 	roles       auth.Roles
+	// mattermost and telegram are the adapters of the messenger Destinations, which the delivery worker and the
+	// Destination tests share; testPresses connect the bot's press of a Mattermost test message, reported by the
+	// callback of any replica, with the test that waits for it.
+	mattermost  *mattermost.Adapter
+	telegram    *telegram.Adapter
+	testPresses *mattermost.PressWaits
 	// updates routes the updates of Telegram Connections, from the Leader's poller or the webhook endpoint, and poller
 	// is the long polling the Leader task telegram_polling runs.
 	updates *telegram.Router
@@ -649,6 +655,18 @@ func (p *process) serve(ctx context.Context) error {
 	return nil
 }
 
+// messengerAdapters makes the adapters of the Mattermost and Telegram Destinations once, over the Connections, with
+// the public and ingest addresses of the configuration: the delivery worker and the Destination tests share them.
+func (p *process) messengerAdapters() {
+	if p.mattermost == nil {
+		p.mattermost = &mattermost.Adapter{Targets: p.connections, PublicURL: p.cfg.PublicURL.String(),
+			IngestURL: p.cfg.IngestURL.String(), Version: buildinfo.Version}
+	}
+	if p.telegram == nil {
+		p.telegram = &telegram.Adapter{Targets: p.connections, Clock: p.clocks.Real}
+	}
+}
+
 // callbacks is the callback mux of the ingest listener: the button presses of Mattermost Connections (C-13.FR-4), on
 // every method, since the callback answers each request 200 with an empty JSON object; and the webhook of Telegram
 // Connections in the webhook update mode (C-14.FR-1), on POST.
@@ -657,7 +675,7 @@ func (p *process) callbacks() http.Handler {
 	mux.Handle(mattermost.CallbackPattern, mattermost.NewCallback(mattermost.CallbackConfig{
 		Connections: p.connections, Bindings: p.delivery, Links: accountlinks.New(p.orgID, p.db.AccountLinksDB()),
 		Commands: p.groups, Roles: p.roles, Keys: p.keyring, Path: p.interactive, Business: p.clocks.Business,
-		PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit, Log: p.log}))
+		PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit, TestPresses: p.testPresses, Log: p.log}))
 	mux.Handle(telegram.WebhookPattern, telegram.NewWebhook(telegram.WebhookConfig{Connections: p.connections,
 		Router: p.updates, Outages: p.connections, Clock: p.clocks.Business, BodyLimit: ingest.BodyLimit, Log: p.log}))
 	return mux
@@ -792,6 +810,12 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			return p.delivery.AbandonConnection(ctx, tx, id)
 		}})
 	p.connections, p.interactive, p.roles = conns, interactive, roles
+	p.messengerAdapters()
+	pool := p.db.MessagesDB()
+	p.testPresses = &mattermost.PressWaits{Notify: func(ctx context.Context, channel, payload string) error {
+		_, err := pool.Exec(ctx, "SELECT pg_notify($1, $2)", channel, payload)
+		return err
+	}}
 	// The updates of Telegram Connections reach one router, from the Leader's poller or from the webhook endpoint;
 	// delivery learns the automatic copies of channel posts from the messages of channels and groups, and presses and
 	// Account links register their handlers on it.
@@ -815,7 +839,16 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			return p.delivery.DestinationRenamed(ctx, tx, publicID, name)
 		},
 		Mentions: p.mentions, Mattermost: conns, Telegram: conns,
-		Healthy: p.delivery.EndBroken, Keyring: p.keyring, Templates: p.sandbox})
+		Healthy: p.delivery.EndBroken, Probe: p.delivery.ProbeNow, Keyring: p.keyring, Templates: p.sandbox,
+		// Destination tests and previews of every type go through the interactive path (C-16).
+		Samples: p.renderer, Log: p.log, Testers: map[string]destinations.Tester{
+			destinations.TypeMattermost: &mattermost.Tester{Adapter: p.mattermost, Path: interactive,
+				Renderer: p.renderer, Waits: p.testPresses, Real: p.clocks.Real},
+			destinations.TypeTelegram: &telegram.Tester{Adapter: p.telegram, Path: interactive, Renderer: p.renderer,
+				Real: p.clocks.Real},
+			destinations.TypeWebhook: &webhooks.Tester{Adapter: p.requests, Path: interactive, Data: p.renderer,
+				DB: pool},
+		}})
 	if p.opts.Development {
 		if err := conns.EnsureDemo(ctx, devmode.ConnectionDemo()); err != nil {
 			return nil, fmt.Errorf("the demo connection: %w", err)
@@ -1007,6 +1040,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	p.listener.Listen(ingest.SnapshotChannel, func(string) { p.worker.Wake() })
 	p.listener.Listen(groups.TimersChannel, func(string) { p.timers.Wake() })
 	p.listener.Listen(delivery.Channel, func(string) { p.deliverer.Wake() })
+	p.listener.Listen(mattermost.TestPressChannel, p.testPresses.Arrived)
 	if p.devClock != nil {
 		p.listener.Listen(devmode.ClockChannel, func(string) {
 			p.loadDevClock(ctx)
@@ -1105,10 +1139,9 @@ func (p *process) configureWorker() {
 	p.deliverer.Store = p.db.DeliveryStore()
 	p.deliverer.Lease = db.Lease{Owner: p.replica.ID(), Duration: delivery.Lease, Clocks: p.clocks}
 	p.deliverer.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
-	p.deliverer.Adapters = delivery.Adapters{delivery.TypeMattermost: &mattermost.Adapter{Targets: p.connections,
-		PublicURL: p.cfg.PublicURL.String(), IngestURL: p.cfg.IngestURL.String(), Version: buildinfo.Version},
-		delivery.TypeTelegram: &telegram.Adapter{Targets: p.connections, Clock: p.clocks.Real},
-		delivery.TypeWebhook:  p.requests}
+	p.messengerAdapters()
+	p.deliverer.Adapters = delivery.Adapters{delivery.TypeMattermost: p.mattermost, delivery.TypeTelegram: p.telegram,
+		delivery.TypeWebhook: p.requests}
 	p.deliverer.RunbookBase = p.cfg.RunbookBaseURL.String()
 	p.deliverer.PublicURL = p.cfg.PublicURL.String()
 	p.deliverer.Renderer = delivery.MessageRenderer{Renderer: p.renderer}

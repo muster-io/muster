@@ -7,22 +7,48 @@ layer: L1
 depends_on: [S-067, S-045]
 covers: [C-16.FR-1, C-16.FR-2, C-16.FR-3, C-16.FR-4, C-16.FR-5, C-16.FR-6, C-16.FR-7, C-16.AC-1, C-16.AC-2, C-16.AC-3, C-16.AC-4, C-16.AC-5, C-16.AC-6, C-16.AC-7, C-15.FR-2, C-15.FR-10, C-13.FR-13, C-11.FR-2, C-11.FR-9, C-01.FR-13]
 files_touched:
+  - internal/delivery/destinationtest.go
+  - internal/delivery/destinationtest_test.go
+  - internal/delivery/delivery.go
+  - internal/delivery/broken.go
+  - internal/delivery/presses.go
+  - internal/delivery/query.sql
+  - internal/delivery/interactive.go
+  - internal/delivery/live_test.go
   - internal/destinations/test.go
   - internal/destinations/preview.go
   - internal/destinations/test_test.go
+  - internal/destinations/delete.go
+  - internal/destinations/write.go
+  - internal/destinations/write_test.go
   - internal/mattermost/testmsg.go
   - internal/mattermost/callback.go
+  - internal/mattermost/check.go
+  - internal/mattermost/client.go
+  - internal/mattermost/adapter.go
   - internal/mattermost/testmsg_test.go
+  - internal/mattermost/callback_test.go
+  - internal/mattermost/export_test.go
+  - internal/connections/connections.go
+  - internal/connections/query.sql
+  - internal/connections/connections_test.go
   - internal/telegram/testmsg.go
   - internal/telegram/presses.go
+  - internal/telegram/client.go
   - internal/telegram/testmsg_test.go
   - internal/webhooks/testevent.go
+  - internal/webhooks/body.go
+  - internal/webhooks/destination.go
   - internal/webhooks/testevent_test.go
   - internal/messages/default.go
+  - internal/messages/preview.go
+  - internal/messages/texts/en.json
+  - internal/messages/texts/ru.json
+  - internal/messages/destinationtest_test.go
   - internal/api/destinations.go
+  - internal/api/server.go
   - internal/api/destinations_test.go
-  - internal/fakes/fakemattermost/presses.go
-  - internal/fakes/fakemattermost/fakemattermost_test.go
+  - internal/runtime/runtime.go
   - internal/logging/events.go
   - internal/archlint/secretleak.go
   - test/e2e/destination_tests_test.go
@@ -74,8 +100,12 @@ issue: 47
 - **Mattermost press check** (C-16.FR-3, C-13.FR-13; F-054, F-022): after the test post, a second interactive request
   `POST /api/v4/posts/{post_id}/actions/{action_id}` with the bot token presses its first button. The callback handler
   of S-061, on any replica, recognises a test action id pressed by the Connection's `bot_user_id`, answers `{}` without
-  an ephemeral post and sends `NOTIFY test_press` with the test's nonce; the test waits for it within the remaining
-  interactive budget. Step `press`: reached → no error; the server answered "Action integration error" or the
+  an ephemeral post and sends `NOTIFY test_press` (the channel `muster_test_press`) with the test's nonce, which the
+  test message's buttons carry in their integration context as `test`; the test waits for it within the remaining
+  interactive budget. The Connection check of S-039 records `bot_user_id`, and so does every Destination check from
+  this story on, which reads the same bot (`GET /api/v4/users/me`), so that a Destination saved on a Connection that
+  was never checked on its own still tells its bot's press. While no check has learned the bot, the test does not
+  press: the step `press` fails with the class `unknown` and asks to run the Connection check. Step `press`: reached → no error; the server answered "Action integration error" or the
   notification did not come → `error` "The button press did not reach Muster. Add the host of {MUSTER_INGEST_URL} to
   ServiceSettings.AllowedUntrustedInternalConnections on the Mattermost server." with the class `unknown`.
 - **Presses by people** (C-16.FR-3): a test action id pressed by anyone else gets "This is a test message; nothing was
@@ -95,9 +125,14 @@ issue: 47
   (resolving `MusterDestinationBroken` and starting recovery); a failed test changes nothing.
 - **Audit log** (C-16.FR-5): `destination.tested` with the Destination, the source and each step's name and class.
 - **Preview** (C-16.FR-4; `internal/destinations/preview.go`): items per type — Mattermost `message` (format
-  `markdown`, the attachment as `request.body`), Telegram `message` (format `html`), outgoing webhook `event` (format
-  `json`) in events mode and `create`, `update`, `open_thread`, `reply_in_thread` (the requests that exist) in template
-  mode, with `.Response` filled with `example-<name>`; nothing is sent; Secrets masked.
+  `markdown`, the post with its attachment as `request.body`), Telegram `message` (format `html`), both with the buttons
+  a test message carries and without its mark, outgoing webhook `event` (format `json`, the body of the first event of
+  an Alert Group) in events mode and `create`, `update`, `open_thread`, `reply_in_thread` (the requests that exist) in
+  template mode, with `.Response` filled with `example-<name>`; nothing is sent; Secrets masked. A request whose
+  template fails shows its error as the item's `text` (format `plain`).
+- **Probe at once** (C-11.FR-9; the note below): saving a Broken outgoing webhook, changed or not, makes its probe due
+  at once (`ProbeBrokenNow`) and wakes the delivery workers; a Mattermost or Telegram save already runs the Destination
+  check, whose success ends the Broken state.
 - **Fake Mattermost** (C-01.FR-13): `POST /api/v4/posts/{post_id}/actions/{action_id}` with the bot token calls the
   button's integration URL with the bot's `user_id` and `user_name` and answers `200 {"status":"OK","trigger_id":…}`
   (F-054), or `400` "Action integration error" when the URL's host is not allowed (F-022).
@@ -125,12 +160,12 @@ API=localhost:8080/api/v1; FAM=127.0.0.1:19093/_fake; FMM=127.0.0.1:18065/_fake;
 TEST() { curl -s "${H[@]}" $API/destinations/$1/tests -d '{"source":{"kind":"example"}}'; }
 
 # C-16.AC-1, AC-7: a Mattermost test message, and the press reaching Muster
-N0=$(curl -s -b jar "$API/alert-groups?status=open" | jq '[.items[].id] | length')
+N0=$(curl -s -b jar "$API/alert-groups" | jq '[.items[].id] | length')
 TEST $MD | jq -c '{s: [.steps[] | {name, error_class, error}], h: .health.state}'
 # {"s":[{"name":"message","error_class":"none","error":null},{"name":"press","error_class":"none","error":null}],"h":"healthy"}
 curl -s $FMM/posts | jq -r '.[-1].props.attachments[0].title | startswith("🧪 Test message")'   # true
 curl -s $FMM/ephemeral | jq '[.[] | select(.message | test("test message"))] | length'          # 0
-curl -s -b jar "$API/alert-groups?status=open" | jq '[.items[].id] | length' | xargs test $N0 -eq && echo unchanged   # unchanged
+curl -s -b jar "$API/alert-groups" | jq '[.items[].id] | length' | xargs test $N0 -eq && echo unchanged   # unchanged
 # the Mattermost server does not allow the address
 curl -s -X PUT $FMM/config -d '{"allowed_untrusted_internal_connections":""}' > /dev/null
 TEST $MD | jq -r '.steps[] | select(.name == "press") | .error'
@@ -169,6 +204,7 @@ NOTIFY d1 '{"reason":"new alerts added"}'; sleep 1                              
 curl -s -b jar $API/destinations/$MD | jq -r .health.state                     # broken
 curl -s -X PUT $FMM/channels/ch-alerts/members/musterdevbotuserfake000000
 TEST $MD | jq -r '.health.state'                                               # healthy
+sleep 1                                                                         # the Internal alert resolves
 curl -s -b jar "$API/integrations/$(curl -s -b jar $API/integrations | jq -r '.items[] | select(.builtin) | .id')/alerts?state=firing" \
   | jq '[.items[] | select(.labels.alertname == "MusterDestinationBroken")] | length'   # 0
 

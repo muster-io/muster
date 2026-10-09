@@ -37,7 +37,10 @@ type Check struct {
 	Steps       []Step
 	TeamName    string
 	ChannelName string
-	Outcome     delivery.Outcome
+	// Bot is the bot the token belongs to, once the step token passed: the callback of button presses tells the bot's
+	// own press of a test message by its user id (C-16.FR-3).
+	Bot     User
+	Outcome delivery.Outcome
 }
 
 // OK reports whether every step passed.
@@ -98,7 +101,8 @@ func CheckDestination(ctx context.Context, c *Client, run Runner, teamID, channe
 		return out
 	}
 	r, err := call(ctx, run, func(ctx context.Context, class outbound.Class) Result {
-		_, r := c.Me(ctx, class)
+		var r Result
+		out.Bot, r = c.Me(ctx, class)
 		return r
 	})
 	if err != nil {

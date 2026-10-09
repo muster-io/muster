@@ -798,11 +798,11 @@ func (s *Service) Target(ctx context.Context, destinationID int64) (mattermost.T
 	}
 	return mattermost.Target{Client: c, ConnectionID: r.ID, ConnectionPublicID: r.PublicID,
 		TeamID: r.MattermostTeamID.String, TeamName: r.MattermostTeamName.String,
-		ChannelID: r.MattermostChannelID.String}, nil
+		ChannelID: r.MattermostChannelID.String, BotUserID: r.BotUserID.String}, nil
 }
 
-// Connection is the Mattermost Connection publicID with its client, for the callback of its button presses; a
-// Connection that is unknown, deleted or not a Mattermost one is mattermost.ErrNoConnection.
+// Connection is the Mattermost Connection publicID with its client and the user id of its bot, for the callback of its
+// button presses; a Connection that is unknown, deleted or not a Mattermost one is mattermost.ErrNoConnection.
 func (s *Service) Connection(ctx context.Context, publicID string) (mattermost.Connection, error) {
 	r, err := s.row(ctx, s.cfg.Store, publicID)
 	if errors.Is(err, ErrNotFound) {
@@ -818,7 +818,7 @@ func (s *Service) Connection(ctx context.Context, publicID string) (mattermost.C
 	if err != nil {
 		return mattermost.Connection{}, err
 	}
-	return mattermost.Connection{ID: r.ID, PublicID: r.PublicID, Client: c}, nil
+	return mattermost.Connection{ID: r.ID, PublicID: r.PublicID, BotUserID: r.BotUserID.String, Client: c}, nil
 }
 
 // cachedClient is the client of the Connection of r, built again when the Connection's version changed.
@@ -1028,7 +1028,26 @@ func (s *Service) CheckChannel(ctx context.Context, in destinations.ChannelCheck
 	if err != nil {
 		return destinations.ChannelChecked{}, err
 	}
+	if err := s.learnBot(ctx, row, res.Bot); err != nil {
+		return destinations.ChannelChecked{}, err
+	}
 	return destinations.ChannelChecked{ConnectionID: row.ID, Check: res}, nil
+}
+
+// learnBot records the bot that the token of the Mattermost Connection row belongs to when a Destination check found
+// another one than recorded, as a Connection check does: the callback of button presses tells the bot's own press of
+// a test message by its user id (C-16.FR-3), so every Destination knows it from its first check.
+func (s *Service) learnBot(ctx context.Context, row dbgen.GetConnectionRow, bot mattermost.User) error {
+	if bot.ID == "" || (bot.ID == row.BotUserID.String && bot.Username == row.BotUsername.String) {
+		return nil
+	}
+	return s.cfg.Store.InTx(ctx, func(q Queries) error {
+		if err := q.SetBotIdentity(ctx, dbgen.SetBotIdentityParams{OrgID: s.cfg.OrgID, ID: row.ID,
+			BotUserID: nonEmpty(bot.ID), BotUsername: nonEmpty(bot.Username)}); err != nil {
+			return fmt.Errorf("record the bot of the connection %s: %w", row.PublicID, err)
+		}
+		return q.Notify(ctx, db.Hint{OrgID: s.cfg.OrgID, Type: Hint, ID: row.PublicID})
+	})
 }
 
 // Demo is a demo Connection of `muster dev`: a Mattermost Connection to the fake server, or, with the type telegram, a

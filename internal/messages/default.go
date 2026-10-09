@@ -5,6 +5,7 @@ package messages
 
 import (
 	"cmp"
+	"context"
 	"maps"
 	"slices"
 	"strconv"
@@ -346,4 +347,54 @@ func rootSource(started, resolved string) string {
 // BuiltinSource is the source of the built-in template of a kind in a language; empty for the kinds without one.
 func BuiltinSource(kind, lang string) string {
 	return builtinSources[kind][language(lang)]
+}
+
+// Destination tests and previews (C-16.FR-1, FR-4) render a recent Alert Group of one of the Destination's Routes or
+// the built-in example; a test sends its Root message once, marked as a test, with buttons whose action ids name the
+// Destination instead of the Alert Group, so that a press changes nothing. Nothing of a test is stored.
+
+// TestSample reads the Alert Group publicID with its Alerts and links, as the source of a Destination test or preview;
+// an unknown one is ErrNotFound. Its Route is in Source.Route.
+func (r *Renderer) TestSample(ctx context.Context, publicID string) (*Source, error) {
+	return r.previewGroup(ctx, r.db, publicID)
+}
+
+// TestExample is the built-in example of a Destination test or preview, with the settings of the Default route: three
+// firing Alerts of one rule in a production cluster, ten minutes old.
+func (r *Renderer) TestExample(ctx context.Context) (*Source, error) {
+	set, err := r.settings(ctx, r.q(r.db), "")
+	if err != nil {
+		return nil, err
+	}
+	src := r.exampleOf(set, "checkout-1", "checkout-2", "checkout-3")
+	if err := r.withLinks(ctx, r.db, src); err != nil {
+		return nil, err
+	}
+	return src, nil
+}
+
+// TestRoot renders the Root message of src in markup as a Destination test sends it, without recording anything about
+// its Route's templates: with destination, the public_id of the Destination under test, its buttons carry action ids of
+// the subject test that name that Destination, whose presses change nothing; with an empty one they are unsigned.
+func (r *Renderer) TestRoot(src *Source, markup Markup, destination string) Rendered {
+	out := r.root(src, markup, false)
+	if destination == "" || r.keys == nil {
+		return out
+	}
+	m := out.Message
+	m.Buttons = slices.Clone(m.Buttons)
+	for i, b := range m.Buttons {
+		id, kid, err := buttons.Sign(r.keys, buttons.Action{Subject: buttons.SubjectTest, PublicID: destination,
+			Command: b.Command, Argument: b.Argument})
+		if err == nil {
+			m.Buttons[i].ActionID, m.Buttons[i].KeyID, out.KeyID = id, kid, kid
+		}
+	}
+	out.Message = m
+	return out
+}
+
+// TestMark is the mark before the heading of a test message in a language: "🧪 Test message".
+func TestMark(lang string) string {
+	return T(lang, "test.mark", nil)
 }

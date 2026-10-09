@@ -476,6 +476,14 @@ var WebhookValueMissing = newEvent("webhook_value_missing", LevelWarn, "C-15",
 		"later request that reads the value fails as a template error. Logged once the outcome is recorded.",
 	"destination", "group", "rule")
 
+// DestinationTested is logged after each Destination test (C-16.FR-5).
+var DestinationTested = newEvent("destination_tested", LevelInfo, "C-16",
+	"A person tested a Destination: destination is its public_id and steps each step of the test with its error "+
+		"class, as name:class separated by commas, such as message:none,press:none; the class none is a step that "+
+		"succeeded, limited one that found no limiter token in time and sent nothing. The Audit log entry "+
+		"destination.tested records the same with the source.",
+	"destination", "steps")
+
 // MattermostPress is logged for each request to the callback of Mattermost button presses (C-13.FR-4).
 var MattermostPress = newEvent("mattermost_press", LevelInfo, "C-13",
 	"The callback of a Mattermost Connection received a button press and answered 200 with a JSON object, never "+
@@ -483,7 +491,9 @@ var MattermostPress = newEvent("mattermost_press", LevelInfo, "C-13",
 		"public_id of the Alert Group and command the Command, once the signed action id is verified; outcome done or "+
 		"unchanged for a Command that ran; refused, forbidden, not_linked, disabled or not_verified for a press that "+
 		"changed nothing and was answered, a not_verified one only on a post delivered to a Destination of the "+
-		"Connection in the channel of the press; invalid_request for a body that is not a press, unknown_connection, "+
+		"Connection in the channel of the press; test for a press of a test message by a person, answered that nothing "+
+		"changed, and test_press for the bot's own press of it during a Destination test, answered with nothing; "+
+		"invalid_request for a body that is not a press, unknown_connection, "+
 		"or failed, answered once the press is bound to its post; answer how the person was answered: ephemeral_post "+
 		"for an ephemeral post in the channel, ephemeral_text for the text in the callback's answer, shown in the "+
 		"Thread, when that post was not made, absent when nothing was answered; error why the press failed or why "+
@@ -497,6 +507,7 @@ var TelegramPress = newEvent("telegram_press", LevelInfo, "C-14",
 		"before the Root message was edited: connection is the public_id of the Connection; group the public_id of "+
 		"the Alert Group and command the Command, once the button data is verified; outcome done or unchanged for a "+
 		"Command that ran; refused, forbidden, not_linked, disabled or not_verified for a press that changed nothing; "+
+		"test for a press of a test message, answered that nothing changed; "+
 		"failed when a read or the Command failed. error, when present, says why the press failed or why its answer "+
 		"was not made — no limiter token within the interactive budget, or Telegram refusing an answer that came too "+
 		"late — masked of the bot token. The update is confirmed whatever the outcome, so that a press never runs "+

@@ -82,6 +82,7 @@ type saveWriter struct {
 	audit    []auditdb.InsertAuditEntryParams
 	hints    []db.Hint
 	fail     map[string]error
+	auditErr error
 }
 
 func (w *saveWriter) InTx(_ context.Context, fn func(TxQueries) error) error { return fn(w) }
@@ -177,6 +178,9 @@ func (w *saveWriter) UpdateWebhookDestination(_ context.Context, arg dbgen.Updat
 }
 
 func (w *saveWriter) InsertAuditEntry(_ context.Context, arg auditdb.InsertAuditEntryParams) error {
+	if w.auditErr != nil {
+		return w.auditErr
+	}
 	w.audit = append(w.audit, arg)
 	return nil
 }

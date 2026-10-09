@@ -32,6 +32,8 @@ type Body struct {
 	Actor      Actor           `json:"actor"`
 	AlertGroup AlertGroup      `json:"alert_group"`
 	Alerts     []Alert         `json:"alerts"`
+	// Test is set only on the test event of a Destination test (C-16.FR-1), which belongs to no Alert Group's order.
+	Test bool `json:"test,omitempty"`
 }
 
 // Actor is who made the change of an event (WebhookActor): a User or a Service account with the token and the

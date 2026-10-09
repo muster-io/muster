@@ -19,7 +19,8 @@ import (
 )
 
 // Destinations is what the API needs of internal/destinations: reading Destinations of every type with their health
-// and Routes, the Destinations of Routes, saving a Destination, its Destination check, and deleting a Destination.
+// and Routes, the Destinations of Routes, saving a Destination, its Destination check, deleting a Destination, and
+// its test and preview.
 type Destinations interface {
 	List(ctx context.Context, f destinations.ListFilter) (destinations.Page, error)
 	Get(ctx context.Context, publicID string) (destinations.Destination, error)
@@ -29,6 +30,9 @@ type Destinations interface {
 		destinations.Destination, error)
 	Check(ctx context.Context, publicID string) (destinations.CheckResult, error)
 	Delete(ctx context.Context, r destinations.Requester, publicID string, version *int64) error
+	Test(ctx context.Context, r destinations.Requester, publicID string, src destinations.Source) (
+		destinations.TestResult, error)
+	Preview(ctx context.Context, publicID string, src destinations.Source) ([]delivery.PreviewItem, error)
 }
 
 // Webhooks is what the API needs of internal/webhooks: the Secrets and the Signing secrets of outgoing webhook
@@ -204,6 +208,106 @@ func (s *Server) CheckDestination(ctx context.Context, req gen.CheckDestinationR
 			item.Message.SetNull()
 		}
 		out.Checks = append(out.Checks, item)
+	}
+	return out, nil
+}
+
+// sourceOf is the source of a test or a preview.
+func sourceOf(src gen.TestSource) destinations.Source {
+	out := destinations.Source{Kind: string(src.Kind)}
+	if id, err := src.AlertGroupId.Get(); err == nil {
+		out.AlertGroupID = id
+	}
+	return out
+}
+
+// TestDestination is testDestination (C-16.FR-1 to FR-3, FR-5, FR-7) on the interactive path: each step with its
+// masked request and response, and the health after the test. A step without a limiter token in time is limited and
+// the operation still answers 200.
+func (s *Server) TestDestination(ctx context.Context, req gen.TestDestinationRequestObject) (
+	gen.TestDestinationResponseObject, error) {
+	r, err := destinationRequester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	res, err := s.destinations.Test(ctx, r, req.DestinationId, sourceOf(req.Body.Source))
+	if err != nil {
+		return nil, err
+	}
+	out := gen.TestDestination200JSONResponse{Health: healthOf(res.Health),
+		Steps: make([]gen.TestStep, 0, len(res.Steps))}
+	for _, st := range res.Steps {
+		out.Steps = append(out.Steps, testStepOf(st))
+	}
+	return out, nil
+}
+
+// testStepOf is the API form of a step of a test.
+func testStepOf(st delivery.TestStep) gen.TestStep {
+	out := gen.TestStep{Name: gen.TestStepName(st.Name), ErrorClass: gen.DeliveryErrorClass(st.ErrorClass),
+		DurationMs: int(st.Duration.Milliseconds()), Request: renderedRequestOf(st.Request)}
+	out.Error.SetNull()
+	if st.Error != "" {
+		out.Error.Set(st.Error)
+	}
+	out.ResponseStatus.SetNull()
+	if st.ResponseStatus != 0 {
+		out.ResponseStatus.Set(st.ResponseStatus)
+	}
+	out.ResponseBody.SetNull()
+	if st.ResponseBody != nil {
+		out.ResponseBody.Set(*st.ResponseBody)
+	}
+	if st.Extracted != nil {
+		extracted := st.Extracted
+		out.Extracted = &extracted
+	}
+	return out
+}
+
+// renderedRequestOf is the API form of a request of a test or a preview, nil for none.
+func renderedRequestOf(r *delivery.TestRequest) *gen.RenderedRequest {
+	if r == nil {
+		return nil
+	}
+	out := &gen.RenderedRequest{Method: r.Method, Url: r.URL, Headers: make([]gen.HeaderTemplate, 0, len(r.Headers))}
+	for _, h := range r.Headers {
+		out.Headers = append(out.Headers, gen.HeaderTemplate{Name: h[0], Value: h[1]})
+	}
+	out.Body.SetNull()
+	if r.Body != nil {
+		out.Body.Set(*r.Body)
+	}
+	return out
+}
+
+// PreviewDestination is previewDestination (C-16.FR-4): what the Destination would receive for the source, rendered
+// without sending anything, with every Secret masked.
+func (s *Server) PreviewDestination(ctx context.Context, req gen.PreviewDestinationRequestObject) (
+	gen.PreviewDestinationResponseObject, error) {
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	items, err := s.destinations.Preview(ctx, req.DestinationId, sourceOf(req.Body.Source))
+	if err != nil {
+		return nil, err
+	}
+	out := gen.PreviewDestination200JSONResponse{Items: make([]gen.DestinationPreviewItem, 0, len(items))}
+	for _, it := range items {
+		item := gen.DestinationPreviewItem{Name: gen.DestinationPreviewItemName(it.Name),
+			Request: renderedRequestOf(it.Request)}
+		item.Format.SetNull()
+		if it.Format != "" {
+			item.Format.Set(gen.DestinationPreviewItemFormat(it.Format))
+		}
+		item.Text.SetNull()
+		if it.Text != nil {
+			item.Text.Set(*it.Text)
+		}
+		out.Items = append(out.Items, item)
 	}
 	return out, nil
 }

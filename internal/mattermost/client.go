@@ -105,11 +105,13 @@ func (c *Client) client(class outbound.Class) (*outbound.Client, error) {
 func (c *Client) Via() string { return c.via }
 
 // Result is how a call ended: its outcome for delivery, which classifies the answer as C-13.FR-5 says, the status of
-// the answer, 0 without one, and the error id Mattermost answered with, such as api.context.permissions.app_error.
+// the answer, 0 without one, the error id Mattermost answered with, such as api.context.permissions.app_error, and the
+// body of the answer as received, which only a Destination test shows, masked (C-16.FR-2).
 type Result struct {
 	Outcome delivery.Outcome
 	Status  int
 	ErrorID string
+	Body    []byte
 }
 
 // OK reports whether the call succeeded.
@@ -241,6 +243,7 @@ func (c *Client) send(ctx context.Context, class outbound.Class, method, path st
 	}
 	res, err := oc.Do(ctx, outbound.Request{Method: method, URL: path, Header: header, Body: data, Mapping: mapping})
 	r := resultOf(res, err)
+	r.Body = res.Body
 	if !r.OK() || out == nil {
 		return r
 	}
@@ -289,10 +292,12 @@ type integration struct {
 	Context actionContext `json:"context"`
 }
 
-// actionContext is what a button sends back: its signed action id and the id of the key that signed it.
+// actionContext is what a button sends back: its signed action id and the id of the key that signed it, and on a
+// test message the nonce of its test, which the bot's own press of it reports (C-16.FR-3).
 type actionContext struct {
 	Action string `json:"action"`
 	KeyID  string `json:"key_id"`
+	Test   string `json:"test,omitempty"`
 }
 
 // patch is an edit of a post: its message and its props, both replaced.
@@ -330,6 +335,13 @@ func (c *Client) ephemeralPost(ctx context.Context, class outbound.Class, userID
 		Post   post   `json:"post"`
 	}{UserID: userID, Post: post{ChannelID: channelID, RootID: rootID, Message: message}}
 	return c.send(ctx, class, http.MethodPost, "/api/v4/posts/ephemeral", body, nil)
+}
+
+// doAction presses the button actionID of the post postID as the bot (F-054): the server calls the button's
+// integration URL as for any press, and answers 400 with "Action integration error" when it could not (F-022).
+func (c *Client) doAction(ctx context.Context, class outbound.Class, postID, actionID string) Result {
+	return c.send(ctx, class, http.MethodPost, "/api/v4/posts/"+url.PathEscape(postID)+"/actions/"+
+		url.PathEscape(actionID), struct{}{}, nil)
 }
 
 // mapping classifies the status of an answer to the reads of this client (C-13.FR-5): 429 waits for the whole
