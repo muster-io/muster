@@ -37,7 +37,7 @@ services:
 
   muster:
     # MUSTER_IMAGE replaces the image, such as a local build.
-    image: ${MUSTER_IMAGE:-ghcr.io/muster-io/muster:v0.0.0} # x-release-please-version
+    image: ${MUSTER_IMAGE:-ghcr.io/muster-io/muster:v0.1.0} # x-release-please-version
     environment:
       # The server migrates on start, and one port serves the app and ingestion.
       MUSTER_MIGRATE_ON_START: "true"
