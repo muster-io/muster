@@ -31,7 +31,9 @@ import (
 //   - markup_rejected: the same text is sent again without markup in the same attempt.
 //   - gone: the deleted Root message flow (publication.go); a Publication cannot be gone and is Not delivered; a final
 //     edit that finds its Root message gone retires the delivery all the same.
-//   - thread_lost: retried after TransientFirstStep until S-042 gives it its rule.
+//   - thread_lost: a Thread reply whose Thread the messenger lost (the copy of a Telegram post was deleted, F-008) is
+//     sent again at once without its reply link, as the first reply of an unattached chain (threads.go); one refused
+//     even so is retried after TransientFirstStep. The Destination stays healthy.
 //
 // A failure of a call to a Destination that is Broken already, which only a probe makes, keeps it Broken with that
 // error as the reason.
@@ -216,9 +218,16 @@ func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, n
 }
 
 // delivered records a call the messenger accepted: the delivery event of a first Publication — storm_summary for a
-// Storm summary — and of a late one, and the end of the Broken state of a Destination that a probe reached.
+// Storm summary — and of a late one, the Thread of a Telegram post — attached to its known copy or waiting for it,
+// under the lock of the post — and the end of the Broken state of a Destination that a probe reached.
 func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt, c Call, out Outcome, now time.Time,
 	logs *after) (bool, error) {
+	p, telegramPost := publicationPost(a, out.MessageID)
+	if telegramPost {
+		if err := lockPost(ctx, q, p); err != nil {
+			return false, err
+		}
+	}
 	_, err := q.RecordDelivered(ctx, dbgen.RecordDeliveredParams{OrgID: org, ID: a.row.ID, Owner: w.Lease.Owner,
 		Version: a.row.DesiredVersion, Hash: a.row.DesiredHash, MessageID: nonEmpty(out.MessageID),
 		MessageUrl: nonEmpty(out.MessageURL), Published: a.publication, Now: now})
@@ -230,6 +239,11 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 	}
 	if err := hintGroup(ctx, q, org, a.row.AlertGroupPublicID); err != nil {
 		return false, err
+	}
+	if telegramPost {
+		if err := publishedThread(ctx, q, org, a.row.ID, p, now); err != nil {
+			return false, err
+		}
 	}
 	if a.publication {
 		kind := EventPublication
@@ -316,12 +330,29 @@ func notDeliveredLine(destination, group, kind string) func(ctx context.Context,
 	}
 }
 
-// recordReply records the outcome of a Thread reply's call in the transaction of q, by the rules above.
+// recordReply records the outcome of a Thread reply's call in the transaction of q, by the rules above, then what it
+// did to a Telegram Thread; lost is the first answer of a reply whose Thread was lost.
 func (w *Worker) recordReply(ctx context.Context, q queries, org int64, a replyAttempt, out Outcome,
-	rejected *Outcome, logs *after) error {
+	rejected, lost *Outcome, logs *after) error {
+	thread := changesThread(a, out, lost)
+	var th dbgen.LockDeliveryThreadRow
+	if thread {
+		var err error
+		if th, err = lockThread(ctx, q, org, a); err != nil {
+			return err
+		}
+	}
 	recorded, err := w.recordReplyOutcome(ctx, q, org, a, out, logs)
-	if err != nil || !recorded || rejected == nil {
+	if err != nil || !recorded {
 		return err
+	}
+	if thread {
+		if err := w.recordThread(ctx, q, org, a, th, out, lost, w.Lease.Clocks.Business.Now().UTC()); err != nil {
+			return err
+		}
+	}
+	if rejected == nil {
+		return nil
 	}
 	return RecordEvent(ctx, q, org, Event{At: w.Lease.Clocks.Business.Now().UTC(), DestinationID: a.destination.ID,
 		AlertGroupID: &a.row.AlertGroupID, Kind: EventMarkupRejected, Error: rejected.Error,

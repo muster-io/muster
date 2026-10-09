@@ -4,6 +4,7 @@
 package faketelegram
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -94,12 +95,18 @@ type Member struct {
 	CanEditMessages bool   `json:"can_edit_messages,omitempty"`
 }
 
-// Message is a message the bot sent, as GET /_fake/messages lists it: the text, parse mode and keyboard it has now,
-// what it was sent with, and its edits.
+// Message is a message of a chat, as GET /_fake/messages lists it: one the bot sent, the automatic copy of a channel
+// post in its discussion group, or a person's comment (copies.go). It carries its sender, the text, parse mode and
+// keyboard it has now, what it was sent with, and its edits.
 type Message struct {
 	ID                  int64           `json:"message_id"`
 	Chat                int64           `json:"chat"`
 	Date                int64           `json:"date"`
+	EditDate            int64           `json:"edit_date,omitempty"`
+	From                *Sender         `json:"from,omitempty"`
+	SenderChat          *ChatRef        `json:"sender_chat,omitempty"`
+	IsAutomaticForward  bool            `json:"is_automatic_forward,omitempty"`
+	ForwardOrigin       *ForwardOrigin  `json:"forward_origin,omitempty"`
 	Text                string          `json:"text"`
 	ParseMode           string          `json:"parse_mode,omitempty"`
 	ReplyMarkup         json.RawMessage `json:"reply_markup,omitempty"`
@@ -107,6 +114,14 @@ type Message struct {
 	MessageThreadID     int64           `json:"message_thread_id,omitempty"`
 	DisableNotification bool            `json:"disable_notification,omitempty"`
 	Edits               []Edit          `json:"edits"`
+
+	// token is the token that sent a channel post, which receives the updates of its copy and its comments; replyTo
+	// is the message a message replies to; copyID is the automatic copy of a channel post in its discussion group, 0
+	// until it exists; withheld says that the updates of a copy are kept back.
+	token    string
+	replyTo  int64
+	copyID   int64
+	withheld bool
 }
 
 // Edit is one editMessageText of a message: the text, parse mode and keyboard it set — none removes the keyboard
@@ -247,7 +262,8 @@ func (f *Fake) SetMember(chat, user int64, m Member) error {
 	return nil
 }
 
-// Messages are the messages the bot sent to the chat, 0 for every chat, in the order they were sent.
+// Messages are the messages of the chat, 0 for every chat, in the order they were sent: the bot's, the automatic
+// copies and the comments.
 func (f *Fake) Messages(chat int64) []Message {
 	c := f.chats
 	c.mu.Lock()
@@ -311,6 +327,7 @@ func (f *Fake) handleChats() {
 	f.HandleControl("GET /_fake/notifications", func(w http.ResponseWriter, _ *http.Request) {
 		fakeserver.WriteJSON(w, http.StatusOK, f.Notifications())
 	})
+	f.handleCopies()
 }
 
 type chatPatch struct {
@@ -530,56 +547,64 @@ func markupJSON(v any) (json.RawMessage, error) {
 
 // sentMessage is the answer of sendMessage and editMessageText.
 type sentMessage struct {
-	MessageID   int64           `json:"message_id"`
-	Date        int64           `json:"date"`
-	EditDate    int64           `json:"edit_date,omitempty"`
-	Chat        Chat            `json:"chat"`
-	Text        string          `json:"text"`
-	ReplyMarkup json.RawMessage `json:"reply_markup,omitempty"`
+	MessageID       int64           `json:"message_id"`
+	Date            int64           `json:"date"`
+	EditDate        int64           `json:"edit_date,omitempty"`
+	Chat            Chat            `json:"chat"`
+	Text            string          `json:"text"`
+	ReplyMarkup     json.RawMessage `json:"reply_markup,omitempty"`
+	MessageThreadID int64           `json:"message_thread_id,omitempty"`
 }
 
-// sendMessage sends a message to a chat within its budget, with notifications for the accounts in it: a channel post
-// notifies member and subscriber, a group message member, without sound with disable_notification (F-012).
-func (f *Fake) sendMessage(w http.ResponseWriter, p params) {
-	c := f.chats
+// sendMessage sends a message to a chat within its budget, from the bot, with notifications for the accounts in it: a
+// channel post notifies member and subscriber, a group message member, without sound with disable_notification
+// (F-012). A reply to the automatic copy of a post, or within its comment Thread, is in that Thread (F-007); a reply to
+// a message that is gone fails (F-008). A channel post gets its automatic copy in the discussion group (copies.go):
+// without a copy delay, before the answer.
+func (f *Fake) sendMessage(ctx context.Context, w http.ResponseWriter, token string, p params) {
+	write, post := f.chats.send(token, p)
+	if post != nil {
+		f.copyLater(ctx, post)
+	}
+	write(w)
+}
+
+// send stores a message the bot sends and returns the answer to write and, for a channel post, the post; c.mu is
+// taken.
+func (c *chats) send(token string, p params) (func(http.ResponseWriter), *Message) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ch, ok := c.resolve(chatParam(p))
 	if !ok {
-		writeFailure(w, http.StatusBadRequest, DescriptionChatNotFound)
-		return
+		return failed(http.StatusBadRequest, DescriptionChatNotFound), nil
 	}
 	now := c.now()
 	if wait := c.take(ch.ID, now); wait > 0 {
-		tooMany(w, wait)
-		return
+		return func(w http.ResponseWriter) { tooMany(w, wait) }, nil
 	}
 	if status, d := c.refusal(ch, false); status != 0 {
-		writeFailure(w, status, d)
-		return
+		return failed(status, d), nil
 	}
 	body, failure := contentOf(p)
 	if failure != "" {
-		writeFailure(w, http.StatusBadRequest, failure)
-		return
+		return failed(http.StatusBadRequest, failure), nil
 	}
-	m := &Message{Chat: ch.ID, Date: now.Unix(), Text: body.text, ParseMode: body.parseMode, ReplyMarkup: body.markup,
-		DisableNotification: p.bool("disable_notification"), Edits: []Edit{}}
+	m := &Message{Chat: ch.ID, Date: now.Unix(), From: &botSender, Text: body.text, ParseMode: body.parseMode,
+		ReplyMarkup: body.markup, DisableNotification: p.bool("disable_notification"), Edits: []Edit{}, token: token}
 	if raw, ok := p["reply_parameters"]; ok && raw != nil {
 		b, err := markupJSON(raw)
 		if err != nil {
-			writeFailure(w, http.StatusBadRequest, "Bad Request: can't parse reply parameters JSON object")
-			return
+			return failed(http.StatusBadRequest, "Bad Request: can't parse reply parameters JSON object"), nil
 		}
 		var rp struct {
 			MessageID int64 `json:"message_id"`
 		}
 		_ = json.Unmarshal(b, &rp)
-		if c.find(ch.ID, rp.MessageID) == nil {
-			writeFailure(w, http.StatusBadRequest, DescriptionReplyNotFound)
-			return
+		target := c.find(ch.ID, rp.MessageID)
+		if target == nil {
+			return failed(http.StatusBadRequest, DescriptionReplyNotFound), nil
 		}
-		m.ReplyParameters = b
+		m.ReplyParameters, m.replyTo, m.MessageThreadID = b, target.ID, threadOf(target)
 	}
 	if thread, ok, _ := p.int("message_thread_id"); ok {
 		m.MessageThreadID = thread
@@ -595,7 +620,26 @@ func (f *Fake) sendMessage(w http.ResponseWriter, p params) {
 		c.notifications = append(c.notifications, Notification{Account: a, Chat: ch.ID, MessageID: m.ID,
 			Sound: !m.DisableNotification})
 	}
-	writeOK(w, sentMessage{MessageID: m.ID, Date: m.Date, Chat: *ch, Text: body.text, ReplyMarkup: m.ReplyMarkup})
+	answer := sentMessage{MessageID: m.ID, Date: m.Date, Chat: *ch, Text: body.text, ReplyMarkup: m.ReplyMarkup,
+		MessageThreadID: m.MessageThreadID}
+	write := func(w http.ResponseWriter) { writeOK(w, answer) }
+	if ch.Type == TypeChannel {
+		return write, m
+	}
+	return write, nil
+}
+
+// failed writes a Bot API failure.
+func failed(status int, description string) func(http.ResponseWriter) {
+	return func(w http.ResponseWriter) { writeFailure(w, status, description) }
+}
+
+// threadOf is the comment Thread that a reply to m joins: the Thread of the automatic copy m, or the Thread m is in.
+func threadOf(m *Message) int64 {
+	if m.IsAutomaticForward {
+		return m.ID
+	}
+	return m.MessageThreadID
 }
 
 // find is the message id of the chat; c.mu is held.
@@ -610,45 +654,56 @@ func (c *chats) find(chat, id int64) *Message {
 
 // editMessageText edits a message within the chat's budget: the edit sets its keyboard, and one without reply_markup
 // removes it (F-011); an edit that changes nothing fails with "message is not modified" (F-017). An edit notifies
-// nobody (F-012).
-func (f *Fake) editMessageText(w http.ResponseWriter, p params) {
-	c := f.chats
+// nobody (F-012). The edit of a channel post edits its automatic copy too, which sends an edited_message for the copy
+// (F-006).
+func (f *Fake) editMessageText(ctx context.Context, w http.ResponseWriter, p params) {
+	write, edited := f.chats.edit(p)
+	if edited != nil {
+		f.send(ctx, edited.token, "edited_message", edited.update)
+	}
+	write(w)
+}
+
+// editedCopy is the edited_message of a copy to deliver to the bot of token.
+type editedCopy struct {
+	token  string
+	update map[string]any
+}
+
+// edit edits a message and returns the answer to write and the edited_message of its copy to deliver, if any; c.mu
+// is taken.
+func (c *chats) edit(p params) (func(http.ResponseWriter), *editedCopy) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ch, ok := c.resolve(chatParam(p))
 	if !ok {
-		writeFailure(w, http.StatusBadRequest, DescriptionChatNotFound)
-		return
+		return failed(http.StatusBadRequest, DescriptionChatNotFound), nil
 	}
 	now := c.now()
 	if wait := c.take(ch.ID, now); wait > 0 {
-		tooMany(w, wait)
-		return
+		return func(w http.ResponseWriter) { tooMany(w, wait) }, nil
 	}
 	if status, d := c.refusal(ch, true); status != 0 {
-		writeFailure(w, status, d)
-		return
+		return failed(status, d), nil
 	}
 	id, _, err := p.int("message_id")
 	m := c.find(ch.ID, id)
 	if err != nil || m == nil {
-		writeFailure(w, http.StatusBadRequest, DescriptionEditNotFound)
-		return
+		return failed(http.StatusBadRequest, DescriptionEditNotFound), nil
 	}
 	body, failure := contentOf(p)
 	if failure != "" {
-		writeFailure(w, http.StatusBadRequest, failure)
-		return
+		return failed(http.StatusBadRequest, failure), nil
 	}
 	if body.text == m.Text && body.parseMode == m.ParseMode && jsonEqual(body.markup, m.ReplyMarkup) {
-		writeFailure(w, http.StatusBadRequest, DescriptionNotModified)
-		return
+		return failed(http.StatusBadRequest, DescriptionNotModified), nil
 	}
 	m.Text, m.ParseMode, m.ReplyMarkup = body.text, body.parseMode, body.markup
 	m.Edits = append(m.Edits, Edit{Date: now.Unix(), Text: body.text, ParseMode: body.parseMode,
 		ReplyMarkup: body.markup})
-	writeOK(w, sentMessage{MessageID: m.ID, Date: m.Date, EditDate: now.Unix(), Chat: *ch, Text: body.text,
-		ReplyMarkup: m.ReplyMarkup})
+	answer := sentMessage{MessageID: m.ID, Date: m.Date, EditDate: now.Unix(), Chat: *ch, Text: body.text,
+		ReplyMarkup: m.ReplyMarkup}
+	return func(w http.ResponseWriter) { writeOK(w, answer) }, c.editCopy(ch, m, now)
 }
 
 // jsonEqual reports whether two keyboards are the same, an empty one being the same as none.

@@ -2,9 +2,9 @@
 -- Copyright The Muster Authors
 
 -- Delivery (C-11, ADR-0005, schema.md §4.11 and §5): the Desired state per Alert Group and Destination, its
--- reconciliation by the delivery worker, Thread replies, the shared limiter buckets and the delivery events. Only this
--- package writes deliveries, thread_replies, rate_limit_buckets and delivery_events. Due times are business times and
--- leases real times; both come from Go.
+-- reconciliation by the delivery worker, Thread replies, the shared limiter buckets, the delivery events and the
+-- Telegram copy buffer. Only this package writes deliveries, thread_replies, rate_limit_buckets, delivery_events and
+-- telegram_post_copies. Due times are business times and leases real times; both come from Go.
 
 -- ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health and the mode of an
 -- outgoing webhook, in id order, for Enqueue.
@@ -145,14 +145,15 @@ RETURNING d.id, d.urgent, d.next_attempt_at, d.last_delivered_at;
 
 -- GetLeasedDelivery reads, and locks, a delivery whose lease this replica still holds at the real time now: its latest
 -- Desired state, whether its next call is the final edit, its actual message, its notes, its Destination with its
--- health and its Alert Group, or its Storm for a Storm summary, whose Alert Group fields are empty. No row when the
--- lease ran out or went to another replica.
+-- health and, for Telegram, its channel and discussion group, and its Alert Group, or its Storm for a Storm summary,
+-- whose Alert Group fields are empty. No row when the lease ran out or went to another replica.
 -- name: GetLeasedDelivery :one
 SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id, d.desired_version,
        d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
        d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
        ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       ds.type AS destination_type, ds.connection_id, ds.health AS destination_health,
+       ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
+       ds.telegram_discussion_chat_id,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
        coalesce(g.status, '')::text AS group_status, coalesce(g.created_at, d.created_at)::timestamptz AS group_created_at,
        g.resolved_at AS group_resolved_at
@@ -444,12 +445,14 @@ WHERE r.org_id = @org_id AND r.id = due.id
 RETURNING r.id, r.next_attempt_at;
 
 -- GetLeasedReply reads, and locks, a Thread reply whose lease this replica still holds at the real time now, with its
--- delivery's Root message, its Destination, its Alert Group and the language of its Route.
+-- delivery's Root message, its Thread and the start of its Publication, its Destination with, for Telegram, its
+-- channel and discussion group, its Alert Group and the language of its Route.
 -- name: GetLeasedReply :one
 SELECT r.id, r.delivery_id, r.alert_group_id, r.event, r.event_seqs, r.loudness, r.mentions, r.fingerprints,
-       r.attempts, d.message_id, d.thread_anchor_id, d.thread_chain_last_id, d.republished_after_delete,
+       r.attempts, d.message_id, d.thread_state, d.thread_anchor_id, d.thread_chain_last_id, d.republished_after_delete,
+       d.publication_started_at,
        ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       ds.type AS destination_type, ds.connection_id,
+       ds.type AS destination_type, ds.connection_id, ds.telegram_channel_chat_id, ds.telegram_discussion_chat_id,
        g.public_id AS alert_group_public_id, g.number, g.title, g.status, g.urgent,
        rt.language
 FROM thread_replies r
@@ -1145,6 +1148,90 @@ WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'm
               WHERE d.org_id = @org_id AND d.destination_id = ds.id AND d.message_id = @message_id::text)
 ORDER BY ds.id
 LIMIT 1;
+
+-- Telegram comment Threads (C-14.FR-3, schema.md §4.11): the automatic copy of a channel post in the discussion group
+-- meets the answer to sendMessage in telegram_post_copies, keyed by the Connection, the channel and the post, in either
+-- order and on any replica. Both sides take the lock of the post first, so that whichever comes second attaches the
+-- Thread; a Thread reply that waits for the copy looks it up again under the same lock.
+
+-- LockPostCopy takes, until the transaction ends, the lock of the copy of one channel post: learning the copy and
+-- recording the Publication of the post serialize on it. A collision of the hash only serializes two posts.
+-- name: LockPostCopy :exec
+SELECT pg_advisory_xact_lock(@lock_class::int, hashtext(format('%s/%s/%s', @connection_id::bigint,
+                                                                @channel_chat_id::bigint, @channel_message_id::bigint)));
+
+-- InsertPostCopy buffers the copy of a channel post as learned at @now, the business time; the first copy learned of a
+-- post wins.
+-- name: InsertPostCopy :exec
+INSERT INTO telegram_post_copies (connection_id, channel_chat_id, channel_message_id, org_id, discussion_chat_id,
+                                  copy_message_id, learned_from, received_at)
+VALUES (@connection_id, @channel_chat_id, @channel_message_id, @org_id, @discussion_chat_id, @copy_message_id,
+        @learned_from, @now::timestamptz)
+ON CONFLICT (connection_id, channel_chat_id, channel_message_id) DO NOTHING;
+
+-- GetPostCopy reads the buffered copy of a channel post: its discussion group and its message id there.
+-- name: GetPostCopy :one
+SELECT discussion_chat_id, copy_message_id
+FROM telegram_post_copies
+WHERE org_id = @org_id AND connection_id = @connection_id AND channel_chat_id = @channel_chat_id
+  AND channel_message_id = @channel_message_id;
+
+-- AttachCopy attaches to the copy @copy_message_id the Threads of the Alert Group deliveries, to the Telegram
+-- Destinations of the Connection with that channel and discussion group, whose Root message is the post @message_id and
+-- whose Thread is not attached: a Thread that lost this very copy stays lost. It returns their Alert Groups.
+-- name: AttachCopy :many
+UPDATE deliveries d
+SET thread_state = 'attached', thread_anchor_id = @copy_message_id::text, thread_chain_last_id = NULL,
+    updated_at = @now::timestamptz
+FROM destinations ds
+WHERE d.org_id = @org_id AND ds.org_id = @org_id AND ds.id = d.destination_id AND ds.type = 'telegram'
+  AND ds.connection_id = @connection_id::bigint AND ds.telegram_channel_chat_id = @channel_chat_id::bigint
+  AND ds.telegram_discussion_chat_id = @discussion_chat_id::bigint AND d.message_id = @message_id::text
+  AND d.alert_group_id IS NOT NULL AND d.thread_state <> 'attached'
+  AND d.thread_anchor_id IS DISTINCT FROM @copy_message_id::text
+RETURNING coalesce((SELECT g.public_id
+                    FROM alert_groups g
+                    WHERE g.org_id = @org_id AND g.id = d.alert_group_id), '')::text AS alert_group_public_id;
+
+-- WakeCopyReplies makes due at @now the Thread replies that wait, without an error, under the post @message_id of the
+-- Connection's channel once its Thread is attached, so that they do not wait out telegram.copy_wait.
+-- name: WakeCopyReplies :execrows
+UPDATE thread_replies r
+SET next_attempt_at = @now::timestamptz
+FROM deliveries d
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+WHERE r.org_id = @org_id AND d.org_id = @org_id AND d.id = r.delivery_id AND ds.type = 'telegram'
+  AND ds.connection_id = @connection_id::bigint AND ds.telegram_channel_chat_id = @channel_chat_id::bigint
+  AND d.message_id = @message_id::text AND d.thread_state = 'attached' AND r.state = 'pending'
+  AND r.next_attempt_at > @now::timestamptz AND r.last_error_class IS NULL;
+
+-- LockDeliveryThread reads, and locks, the Thread of a delivery with the Root message it belongs to.
+-- name: LockDeliveryThread :one
+SELECT thread_state, thread_anchor_id, thread_chain_last_id, message_id
+FROM deliveries
+WHERE org_id = @org_id AND id = @id
+FOR UPDATE;
+
+-- SetThread sets the Thread of a delivery: its state, the copy it is attached to, or lost, and the last reply of its
+-- unattached chain.
+-- name: SetThread :exec
+UPDATE deliveries
+SET thread_state = @thread_state::text, thread_anchor_id = sqlc.narg('anchor_id')::text,
+    thread_chain_last_id = sqlc.narg('chain_last_id')::text, updated_at = @now::timestamptz
+WHERE org_id = @org_id AND id = @id;
+
+-- PrunePostCopies deletes at most @batch_size buffered copies received before @before, skipping rows another
+-- transaction holds.
+-- name: PrunePostCopies :execrows
+DELETE FROM telegram_post_copies t
+WHERE t.org_id = @org_id
+  AND (t.connection_id, t.channel_chat_id, t.channel_message_id) IN (
+      SELECT c.connection_id, c.channel_chat_id, c.channel_message_id
+      FROM telegram_post_copies c
+      WHERE c.org_id = @org_id AND c.received_at < @before::timestamptz
+      ORDER BY c.received_at
+      LIMIT @batch_size
+      FOR UPDATE SKIP LOCKED);
 
 -- Outgoing webhook events (C-15.FR-2, schema.md §4.11 and §5): one row per lifecycle event and events-mode
 -- Destination, sent in order per Alert Group — only the head event of an Alert Group and Destination is claimed — at

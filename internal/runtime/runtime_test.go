@@ -1654,6 +1654,12 @@ func TestDeliveryLeaderTasks(t *testing.T) {
 	if _, err := p.threadReplyRetention(t.Context(), 1, time.Now()); !errors.Is(err, errNoDB) {
 		t.Errorf("retention = %v", err)
 	}
+	if n, err := p.prunePostCopies(t.Context(), 2, time.Now(), 10); n != 0 || err != nil {
+		t.Errorf("another organization = %d, %v", n, err)
+	}
+	if _, err := p.prunePostCopies(t.Context(), 1, time.Now(), 10); !errors.Is(err, errNoDB) {
+		t.Errorf("copies = %v", err)
+	}
 }
 
 // TestConfigureWorker: the delivery worker posts to Mattermost Destinations through the Mattermost adapter, with the

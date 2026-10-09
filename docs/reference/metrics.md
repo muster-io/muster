@@ -102,7 +102,7 @@ replica that is the Leader. The capability is the one that exports the metric.
 | `muster_oidc_checks_total` | `outcome` | `ok`, `refused`, `unavailable`, `skipped` — ok is a refresh the identity provider granted, refused one it refused (the user's sessions ended), unavailable one that reached no decision, skipped a user without a live session or a usable Personal access token, not sent to the identity provider |
 | `muster_route_info` | `route` | entity: the public_id of the route |
 | `muster_route_info` | `name` | info: the name of the Route |
-| `muster_short_lived_rows_pruned_total` | `table` | `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests` — the short-lived table the rows were deleted from |
+| `muster_short_lived_rows_pruned_total` | `table` | `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests`, `telegram_post_copies` — the short-lived table the rows were deleted from |
 | `muster_storm_active` | `route` | entity: the public_id of the route |
 | `muster_template_errors_total` | `route` | entity: the public_id of the route |
 | `muster_template_errors_total` | `destination` | entity: the public_id of the destination |

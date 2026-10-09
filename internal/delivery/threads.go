@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -20,6 +21,12 @@ import (
 // Thread replies (C-11.FR-4, FR-5): follow-ups under a Root message, sent by the delivery worker once the Root message
 // exists, one delivery's replies in id order. A collecting batch of new Alerts closes when its Thread batching window
 // ends; a reply lists at most delivery.thread_alerts_listed new Alerts.
+//
+// In Telegram (C-14.FR-3, copies.go) a reply goes to the discussion group: as a reply to the post's automatic copy
+// while the Thread is attached; while it waits for the copy, at most telegram.copy_wait from the Publication, after
+// which it starts a chain of replies not attached to the post, each a reply to the last, and the Thread is unattached
+// with the thread_not_attached delivery event. A reply the messenger refuses because the copy is gone (thread_lost,
+// F-008) is sent again at once without its reply link and makes the Thread unattached the same way.
 
 // claimReplies leases the due Thread replies of the Organization.
 func (w *Worker) claimReplies(ctx context.Context, org int64) ([]int64, error) {
@@ -38,12 +45,16 @@ func (w *Worker) claimReplies(ctx context.Context, org int64) ([]int64, error) {
 	return ids, nil
 }
 
-// replyAttempt is a Thread reply that has its tokens and is about to be sent.
+// replyAttempt is a Thread reply that has its tokens and is about to be sent: under root, and as a link of an
+// unattached Telegram chain when chain is set; anchor is the copy its Thread was attached to when it was prepared.
 type replyAttempt struct {
 	row         dbgen.GetLeasedReplyRow
 	destination Destination
 	call        Call
 	message     Message
+	root        Root
+	chain       bool
+	anchor      string
 }
 
 // reply sends one claimed Thread reply; a failure is logged and the reply is attempted again once its lease runs out.
@@ -77,6 +88,20 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		now := w.Lease.Clocks.Business.Now().UTC()
 		d := Destination{ID: row.DestinationID, PublicID: row.DestinationPublicID, Name: row.DestinationName,
 			Type: row.DestinationType, Connection: int8Of(row.ConnectionID)}
+		root, chain := Root{MessageID: row.MessageID.String}, false
+		if d.Type == TypeTelegram {
+			var until time.Time
+			if root, chain, until, err = telegramThread(ctx, q, org, row, now); err != nil {
+				return err
+			}
+			if !until.IsZero() {
+				if err := q.RescheduleReply(ctx, dbgen.RescheduleReplyParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
+					At: until}); err != nil {
+					return fmt.Errorf("let the thread reply wait for the copy: %w", err)
+				}
+				return nil
+			}
+		}
 		t, err := takeTokens(ctx, q, org, subjectOf(d), now)
 		if err != nil {
 			return err
@@ -114,7 +139,7 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		a = replyAttempt{row: row, destination: d,
 			call: Call{Class: outbound.ClassDelivery, Destination: d, Loudness: groups.Loudness(row.Loudness),
 				Mentions: mentions, Targets: targets},
-			message: msg}
+			message: msg, root: root, chain: chain, anchor: root.ThreadAnchorID}
 		ok = true
 		return nil
 	})
@@ -122,11 +147,25 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 }
 
 // sendReply sends a prepared Thread reply outside any transaction and records its outcome by its rule (outcomes.go);
-// a markup the messenger rejects is sent again without markup in the same attempt.
+// a markup the messenger rejects is sent again without markup, and a reply whose Thread is lost again without its reply
+// link, in the same attempt.
 func (w *Worker) sendReply(ctx context.Context, org int64, a replyAttempt) error {
 	start := w.Lease.Clocks.Real.Now()
 	c := a.call
-	out := w.sendReplyCall(ctx, a, c)
+	var lost *Outcome
+	send := func(c Call) Outcome {
+		out := w.sendReplyCall(ctx, a, c)
+		if out.Kind != OutcomeThreadLost || (a.root.ThreadAnchorID == "" && a.root.ChainLastID == "") {
+			return out
+		}
+		first := out
+		lost = &first
+		w.attempted(ctx, a.destination, a.row.Number, kindReply, out, a.row.Attempts+1,
+			w.Lease.Clocks.Real.Now().Sub(start))
+		a.root, a.chain = Root{MessageID: a.root.MessageID}, true
+		return w.sendReplyCall(ctx, a, c)
+	}
+	out := send(c)
 	var rejected *Outcome
 	if out.Kind == OutcomeMarkupRejected {
 		first := out
@@ -134,13 +173,13 @@ func (w *Worker) sendReply(ctx context.Context, org int64, a replyAttempt) error
 		w.attempted(ctx, a.destination, a.row.Number, kindReply, out, a.row.Attempts+1,
 			w.Lease.Clocks.Real.Now().Sub(start))
 		c.Plain = true
-		out = plain(func() Outcome { return w.sendReplyCall(ctx, a, c) })
+		out = plain(func() Outcome { return send(c) })
 	}
 	took := w.Lease.Clocks.Real.Now().Sub(start)
 	var logs after
 	err := w.Store.inTx(ctx, func(q queries) error {
 		logs = nil
-		return w.recordReply(ctx, q, org, a, out, rejected, &logs)
+		return w.recordReply(ctx, q, org, a, out, rejected, lost, &logs)
 	})
 	w.attempted(ctx, a.destination, a.row.Number, kindReply, out, a.row.Attempts+1, took)
 	if err == nil {
@@ -151,12 +190,106 @@ func (w *Worker) sendReply(ctx context.Context, org int64, a replyAttempt) error
 
 // sendReplyCall is one adapter call of a prepared Thread reply; a type no adapter serves is an unknown response.
 func (w *Worker) sendReplyCall(ctx context.Context, a replyAttempt, c Call) Outcome {
-	root := Root{MessageID: a.row.MessageID.String, ThreadAnchorID: a.row.ThreadAnchorID.String,
-		ChainLastID: a.row.ThreadChainLastID.String}
 	adapter := w.Adapters[a.destination.Type]
 	if adapter == nil {
 		return Outcome{Kind: OutcomeUnknown, Error: outbound.Untrusted("no adapter for the destination type " +
 			a.destination.Type)}
 	}
-	return adapter.Reply(ctx, c, root, a.message)
+	return adapter.Reply(ctx, c, a.root, a.message)
+}
+
+// telegramThread is where a Telegram Thread reply goes: under the copy of an attached Thread; as the next link of an
+// unattached chain; or, while the Thread waits for the copy, under the copy once it is known — looked up again under
+// the lock of the post, which attaches the Thread — and otherwise, after telegram.copy_wait from the Publication, as the
+// first link of a chain. until is when a reply that still waits for the copy is due again, zero for one to send now.
+func telegramThread(ctx context.Context, q queries, org int64, row dbgen.GetLeasedReplyRow, now time.Time) (
+	Root, bool, time.Time, error) {
+	root := Root{MessageID: row.MessageID.String}
+	state, anchor, chain := row.ThreadState, row.ThreadAnchorID.String, row.ThreadChainLastID.String
+	if state != threadAttached && state != threadUnattached {
+		if p, ok := telegramPost(row.ConnectionID, row.TelegramChannelChatID, row.TelegramDiscussionChatID,
+			row.MessageID.String); ok {
+			if err := lockPost(ctx, q, p); err != nil {
+				return root, false, time.Time{}, err
+			}
+			th, err := q.LockDeliveryThread(ctx, dbgen.LockDeliveryThreadParams{OrgID: org, ID: row.DeliveryID})
+			if err != nil {
+				return root, false, time.Time{}, fmt.Errorf("read the thread of the delivery: %w", err)
+			}
+			state, anchor, chain = th.ThreadState, th.ThreadAnchorID.String, th.ThreadChainLastID.String
+			if state != threadAttached && state != threadUnattached {
+				known, err := knownCopy(ctx, q, org, p)
+				if err != nil {
+					return root, false, time.Time{}, err
+				}
+				if known != "" {
+					if err := setThread(ctx, q, org, row.DeliveryID, threadAttached, known, "", now); err != nil {
+						return root, false, time.Time{}, err
+					}
+					state, anchor = threadAttached, known
+				}
+			}
+		}
+	}
+	switch state {
+	case threadAttached:
+		root.ThreadAnchorID = anchor
+		return root, false, time.Time{}, nil
+	case threadUnattached:
+		root.ChainLastID = chain
+		return root, true, time.Time{}, nil
+	}
+	if started := row.PublicationStartedAt; started.Valid && now.Before(started.Time.Add(CopyWait)) {
+		return root, false, started.Time.Add(CopyWait).UTC(), nil
+	}
+	return root, true, time.Time{}, nil
+}
+
+// changesThread reports whether the outcome of a Thread reply changes its Telegram Thread: a chain link sent, or a
+// lost Thread.
+func changesThread(a replyAttempt, out Outcome, lost *Outcome) bool {
+	return a.chain && (out.Kind == OutcomeOK || lost != nil)
+}
+
+// lockThread locks the Thread of a reply's delivery, before the reply's row is recorded, so that a transaction that
+// records a reply takes the delivery's row before the reply's, as the deletion of a Root message does.
+func lockThread(ctx context.Context, q queries, org int64, a replyAttempt) (dbgen.LockDeliveryThreadRow, error) {
+	th, err := q.LockDeliveryThread(ctx, dbgen.LockDeliveryThreadParams{OrgID: org, ID: a.row.DeliveryID})
+	if err != nil {
+		return th, fmt.Errorf("read the thread of the delivery: %w", err)
+	}
+	return th, nil
+}
+
+// recordThread records, after the outcome of a Telegram Thread reply, what it did to the Thread th, locked before:
+// a chain link sent becomes the last reply of the unattached chain, and a lost Thread is unattached, its chain
+// starting over; a Thread that becomes unattached records the thread_not_attached delivery event and sends the
+// alert-group hint. A chain link sent while the copy was learned leaves the attached Thread alone, and a reply under
+// a Root message that was published again meanwhile leaves the new Thread alone.
+func (w *Worker) recordThread(ctx context.Context, q queries, org int64, a replyAttempt, th dbgen.LockDeliveryThreadRow,
+	out Outcome, lost *Outcome, now time.Time) error {
+	if th.MessageID.String != a.row.MessageID.String ||
+		(th.ThreadState == threadAttached && (lost == nil || th.ThreadAnchorID.String != a.anchor)) {
+		return nil
+	}
+	chain := ""
+	if out.Kind == OutcomeOK {
+		chain = out.MessageID
+	}
+	if err := setThread(ctx, q, org, a.row.DeliveryID, threadUnattached, th.ThreadAnchorID.String, chain,
+		now); err != nil {
+		return err
+	}
+	if th.ThreadState == threadUnattached {
+		return nil
+	}
+	e := Event{At: now, DestinationID: a.destination.ID, AlertGroupID: &a.row.AlertGroupID,
+		Kind: EventThreadNotAttached}
+	if lost != nil {
+		e.Error = outbound.Untrusted(failure(*lost, "the thread was lost"))
+	}
+	if err := RecordEvent(ctx, q, org, e); err != nil {
+		return err
+	}
+	return hintGroup(ctx, q, org, a.row.AlertGroupPublicID)
 }

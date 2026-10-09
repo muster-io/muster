@@ -112,6 +112,8 @@ type Work struct {
 	PruneUsers []PruneTable
 	// PruneOIDC are the short-lived tables of internal/oidc: the OIDC redirects in flight.
 	PruneOIDC []PruneTable
+	// PruneDelivery are the short-lived tables of internal/delivery: the copy buffer of Telegram comment Threads.
+	PruneDelivery []PruneTable
 
 	// IngestBacklog sets muster_ingest_backlog from the pending Stored Snapshots of the Organizations.
 	IngestBacklog func(ctx context.Context, orgs []int64) error
@@ -142,8 +144,9 @@ type Work struct {
 	// TelegramPolling runs the long polling of the Telegram Connections of the Organization orgID until ctx ends
 	// (C-14.FR-1): it stops every poller before it returns, and a failed read of the Connections returns early.
 	TelegramPolling func(ctx context.Context, orgID int64) error
-	// ClockMoved, in development mode, wakes the Heartbeat check, the Stale scan, the Alert Group retention and the
-	// retention of Thread replies and of outgoing webhook events when the development clock moved; nil otherwise.
+	// ClockMoved, in development mode, wakes the Heartbeat check, the Stale scan, the Alert Group retention, the
+	// retention of Thread replies and of outgoing webhook events and the short-lived pruning when the development clock
+	// moved; nil otherwise.
 	ClockMoved *Wakes
 }
 
@@ -157,7 +160,7 @@ type PruneTable struct {
 }
 
 func (w Work) shortLived() []PruneTable {
-	return slices.Concat(w.PruneAuth, w.PruneUsers, w.PruneOIDC)
+	return slices.Concat(w.PruneAuth, w.PruneUsers, w.PruneOIDC, w.PruneDelivery)
 }
 
 // pruneShortLived runs every short-lived table in every Organization at the same now, deleting in batches until a
@@ -210,6 +213,7 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 func Tasks(w Work) func() []Task {
 	heartbeatWake, staleWake, retentionWake := w.ClockMoved.channel(), w.ClockMoved.channel(), w.ClockMoved.channel()
 	replyRetentionWake, eventRetentionWake := w.ClockMoved.channel(), w.ClockMoved.channel()
+	shortLivedWake := w.ClockMoved.channel()
 	return func() []Task {
 		var takenOver atomic.Bool
 		return []Task{
@@ -228,7 +232,7 @@ func Tasks(w Work) func() []Task {
 				return nil
 			}},
 			{Name: "replica_pruning", Every: MaintenanceInterval, Run: w.PruneReplicas},
-			{Name: "short_lived_pruning", Every: MaintenanceInterval, Run: w.pruneShortLived},
+			{Name: "short_lived_pruning", Every: MaintenanceInterval, Wake: shortLivedWake, Run: w.pruneShortLived},
 			{Name: "ingest_backlog", Every: BacklogInterval, Run: w.ingestBacklog},
 			{Name: "alert_retention", Every: MaintenanceInterval, Run: w.alertRetention},
 			{Name: "heartbeat_check", Every: HeartbeatCheckInterval, Wake: heartbeatWake,

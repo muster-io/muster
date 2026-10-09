@@ -540,3 +540,88 @@ func TestRecordAfterTheRowEnded(t *testing.T) {
 		})
 	}
 }
+
+// TestThreadLost is C-14.AC-16, C-11.FR-21: a reply to a deleted copy, refused with "message to be replied not
+// found", is sent again at once without its reply link; the Thread is unattached with a thread_not_attached delivery
+// event carrying the refusal, the Destination stays healthy, the lost copy is never attached again and later replies
+// follow the chain.
+func TestThreadLost(t *testing.T) {
+	e := telegramEnv(t)
+	e.learn(t, tgCopy, delivery.LearnedFromAutomaticForward)
+	d := e.publish(t)
+	e.rec.Script(deliverytest.MethodReply,
+		deliverytest.Failure(delivery.OutcomeThreadLost, "Bad Request: message to be replied not found"),
+		deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, MessageID: "701"}})
+	e.newAlerts(t, 2, "fp2")
+	e.round(t)
+	r := e.replies()
+	if len(r) != 2 || r[0].Root.ThreadAnchorID != "9001" || r[1].Root != (delivery.Root{MessageID: tgPost}) {
+		t.Fatalf("replies %+v", r)
+	}
+	if d.threadState != "unattached" || str(d.anchorID) != "9001" || str(d.chainLastID) != "701" ||
+		e.threadEvents() != 1 || e.db.dests[destTG].health != "healthy" || e.db.replies[0].state != "sent" {
+		t.Fatalf("thread %s %s %s events %d health %s", d.threadState, str(d.anchorID), str(d.chainLastID),
+			e.threadEvents(), e.db.dests[destTG].health)
+	}
+	if ev := e.db.events[len(e.db.events)-1]; !strings.Contains(ev.Error.String, "message to be replied not found") {
+		t.Errorf("event %+v", ev)
+	}
+	if !strings.Contains(e.log.String(), `"outcome":"thread_lost"`) {
+		t.Errorf("no delivery_attempt of the lost call:\n%s", e.log)
+	}
+	e.learn(t, tgCopy, delivery.LearnedFromComment)
+	if d.threadState != "unattached" {
+		t.Fatalf("the lost copy was attached again")
+	}
+	e.business.Set(business0.Add(2 * time.Minute))
+	e.newAlerts(t, 3, "fp3")
+	e.round(t)
+	if r = e.replies(); len(r) != 3 || r[2].Root != (delivery.Root{MessageID: tgPost, ChainLastID: "701"}) ||
+		e.threadEvents() != 1 {
+		t.Fatalf("later reply %+v", r)
+	}
+}
+
+// TestThreadLostResendFails: when the resend without the link fails as well, the Thread is unattached with its chain
+// starting over and the reply is retried as the first link; a reply refused as lost without any link is retried after
+// a short wait.
+func TestThreadLostResendFails(t *testing.T) {
+	e := telegramEnv(t)
+	e.learn(t, tgCopy, delivery.LearnedFromAutomaticForward)
+	d := e.publish(t)
+	e.rec.Script(deliverytest.MethodReply,
+		deliverytest.Failure(delivery.OutcomeThreadLost, "message to be replied not found"),
+		deliverytest.Failure(delivery.OutcomeTransient, "timeout"),
+		deliverytest.Failure(delivery.OutcomeThreadLost, "message to be replied not found"))
+	e.newAlerts(t, 2, "fp2")
+	e.round(t)
+	if d.threadState != "unattached" || d.chainLastID != nil || e.threadEvents() != 1 ||
+		e.db.replies[0].state != "pending" {
+		t.Fatalf("thread %s %s events %d reply %+v", d.threadState, str(d.chainLastID), e.threadEvents(),
+			e.db.replies[0])
+	}
+	e.business.Set(e.db.replies[0].next)
+	e.round(t)
+	r := e.replies()
+	if len(r) != 3 || r[2].Root != (delivery.Root{MessageID: tgPost}) ||
+		!e.db.replies[0].next.Equal(e.business.Now().Add(delivery.TransientFirstStep)) || e.threadEvents() != 1 {
+		t.Fatalf("replies %+v next %v", r, e.db.replies[0].next)
+	}
+}
+
+// TestThreadLostMarkupRejected: a lost Thread found after the markup was rejected is resent plain, without the link.
+func TestThreadLostMarkupRejected(t *testing.T) {
+	e := telegramEnv(t)
+	e.learn(t, tgCopy, delivery.LearnedFromAutomaticForward)
+	d := e.publish(t)
+	e.rec.Script(deliverytest.MethodReply,
+		deliverytest.Failure(delivery.OutcomeMarkupRejected, "can't parse entities"),
+		deliverytest.Failure(delivery.OutcomeThreadLost, "message to be replied not found"),
+		deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, MessageID: "801"}})
+	e.newAlerts(t, 2, "fp2")
+	e.round(t)
+	r := e.replies()
+	if len(r) != 3 || !r[2].Plain || r[2].Root != (delivery.Root{MessageID: tgPost}) || str(d.chainLastID) != "801" {
+		t.Fatalf("replies %+v", r)
+	}
+}

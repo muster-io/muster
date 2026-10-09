@@ -479,7 +479,8 @@ func TestEditsAndKeyboards(t *testing.T) {
 	}
 }
 
-// F-012: a channel post notifies both accounts, without sound with disable_notification; an edit notifies nobody.
+// F-012, F-013: a channel post notifies both accounts, without sound with disable_notification, and its automatic copy
+// notifies member with sound even then; an edit notifies nobody.
 func TestNotificationsOfChannelPosts(t *testing.T) {
 	f, base := start(t)
 	bot(t, base, "sendMessage", `{"chat_id":-1001000000001,"text":"loud"}`)
@@ -489,9 +490,11 @@ func TestNotificationsOfChannelPosts(t *testing.T) {
 	want := []faketelegram.Notification{
 		{Account: "member", Chat: faketelegram.ChannelID, MessageID: 1, Sound: true},
 		{Account: "subscriber", Chat: faketelegram.ChannelID, MessageID: 1, Sound: true},
+		{Account: "member", Chat: faketelegram.GroupID, MessageID: 1, Sound: true},
 		{Account: "member", Chat: faketelegram.ChannelID, MessageID: 2, Sound: false},
 		{Account: "subscriber", Chat: faketelegram.ChannelID, MessageID: 2, Sound: false},
-		{Account: "member", Chat: faketelegram.GroupID, MessageID: 1, Sound: true},
+		{Account: "member", Chat: faketelegram.GroupID, MessageID: 2, Sound: true},
+		{Account: "member", Chat: faketelegram.GroupID, MessageID: 3, Sound: true},
 	}
 	if got := f.Notifications(); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("notifications = %+v", got)
@@ -609,5 +612,296 @@ func TestChatControl(t *testing.T) {
 		if s, _, _ := call(t, c.method, base+c.path, c.body); s/100 != 4 {
 			t.Errorf("%s %s = %d", c.method, c.path, s)
 		}
+	}
+}
+
+// updates reads the queued updates of the test bot and confirms them.
+func updates(t *testing.T, base string) []map[string]json.RawMessage {
+	t.Helper()
+	_, a := bot(t, base, "getUpdates", `{"timeout":0}`)
+	var out []map[string]json.RawMessage
+	if err := json.Unmarshal(a.Result, &out); err != nil {
+		t.Fatalf("updates %s: %v", a.Result, err)
+	}
+	if len(out) > 0 {
+		var id int64
+		_ = json.Unmarshal(out[len(out)-1]["update_id"], &id)
+		bot(t, base, "getUpdates", fmt.Sprintf(`{"timeout":0,"offset":%d}`, id+1))
+	}
+	return out
+}
+
+// copyMessage is the part of a message update that comment Threads use.
+type copyMessage struct {
+	MessageID int64 `json:"message_id"`
+	Date      int64 `json:"date"`
+	EditDate  int64 `json:"edit_date"`
+	From      struct {
+		ID int64 `json:"id"`
+	} `json:"from"`
+	SenderChat *struct {
+		ID int64 `json:"id"`
+	} `json:"sender_chat"`
+	Chat struct {
+		ID   int64  `json:"id"`
+		Type string `json:"type"`
+	} `json:"chat"`
+	IsAutomaticForward bool `json:"is_automatic_forward"`
+	ForwardOrigin      *struct {
+		Type string `json:"type"`
+		Chat struct {
+			ID int64 `json:"id"`
+		} `json:"chat"`
+		MessageID int64 `json:"message_id"`
+	} `json:"forward_origin"`
+	MessageThreadID int64           `json:"message_thread_id"`
+	ReplyMarkup     json.RawMessage `json:"reply_markup"`
+	ReplyToMessage  *copyMessage    `json:"reply_to_message"`
+	Text            string          `json:"text"`
+}
+
+func messageOf(t *testing.T, u map[string]json.RawMessage, kind string) copyMessage {
+	t.Helper()
+	var m copyMessage
+	if err := json.Unmarshal(u[kind], &m); err != nil || u[kind] == nil {
+		t.Fatalf("no %s in %v", kind, u)
+	}
+	return m
+}
+
+func post(t *testing.T, base, text string) int64 {
+	t.Helper()
+	s, a := bot(t, base, "sendMessage", `{"chat_id":-1001000000001,"text":"`+text+`","reply_markup":`+keyboard+`}`)
+	var m struct {
+		MessageID int64 `json:"message_id"`
+	}
+	_ = json.Unmarshal(a.Result, &m)
+	if s != http.StatusOK || m.MessageID == 0 {
+		t.Fatalf("post = %d %+v", s, a)
+	}
+	return m.MessageID
+}
+
+// F-003, F-005: the automatic copy of a post reaches an admin bot as a message in the discussion group from Telegram,
+// on behalf of the channel, naming the post, with edit_date equal to its date and no keyboard; the bot gets no update
+// about its own post. A bot that is only a member of the group, or with copies withheld, gets none, while the copy
+// exists all the same.
+func TestAutomaticCopy(t *testing.T) {
+	f, base := start(t)
+	p := post(t, base, "first")
+	u := updates(t, base)
+	if len(u) != 1 {
+		t.Fatalf("updates %v", u)
+	}
+	m := messageOf(t, u[0], "message")
+	if m.From.ID != faketelegram.TelegramUserID || m.SenderChat == nil || m.SenderChat.ID != faketelegram.ChannelID ||
+		m.Chat.ID != faketelegram.GroupID || m.Chat.Type != "supergroup" || !m.IsAutomaticForward ||
+		m.ForwardOrigin == nil || m.ForwardOrigin.Type != "channel" || m.ForwardOrigin.Chat.ID != faketelegram.ChannelID ||
+		m.ForwardOrigin.MessageID != p || m.EditDate == 0 || m.EditDate != m.Date || m.ReplyMarkup != nil ||
+		m.Text != "first" {
+		t.Fatalf("copy %+v", m)
+	}
+	group := f.Messages(faketelegram.GroupID)
+	if len(group) != 1 || group[0].ID != m.MessageID || !group[0].IsAutomaticForward || group[0].From == nil ||
+		group[0].From.ID != faketelegram.TelegramUserID || group[0].ForwardOrigin.MessageID != p {
+		t.Fatalf("group %+v", group)
+	}
+	if ch := f.Messages(faketelegram.ChannelID); len(ch) != 1 || ch[0].From == nil || ch[0].From.ID != faketelegram.BotID {
+		t.Fatalf("channel %+v", ch)
+	}
+
+	member(t, base, faketelegram.GroupID, faketelegram.StatusMember, false, false)
+	post(t, base, "second")
+	if u := updates(t, base); len(u) != 0 || len(f.Messages(faketelegram.GroupID)) != 2 {
+		t.Fatalf("a member bot got %v", u)
+	}
+	member(t, base, faketelegram.GroupID, faketelegram.StatusAdministrator, true, false)
+	if s, b, _ := call(t, http.MethodPut, base+"/_fake/config", `{"withhold_copies":true}`); s != http.StatusOK ||
+		!strings.Contains(b, `"withhold_copies":true`) {
+		t.Fatalf("withhold = %d %s", s, b)
+	}
+	post(t, base, "third")
+	if u := updates(t, base); len(u) != 0 || len(f.Messages(faketelegram.GroupID)) != 3 {
+		t.Fatalf("a withheld copy reached the bot: %v", u)
+	}
+}
+
+// F-005: the copy arrives copy_delay_ms after the answer to sendMessage.
+func TestCopyDelay(t *testing.T) {
+	f, base := start(t)
+	if s, b, _ := call(t, http.MethodPut, base+"/_fake/config", `{"copy_delay_ms":500}`); s != http.StatusOK ||
+		!strings.Contains(b, `"copy_delay_ms":500`) || f.Config().CopyDelayMS != 500 {
+		t.Fatalf("config = %d %s", s, b)
+	}
+	if s, _, _ := call(t, http.MethodPut, base+"/_fake/config", `{"copy_delay_ms":-1}`); s != http.StatusBadRequest {
+		t.Fatalf("negative delay = %d", s)
+	}
+	p := post(t, base, "late")
+	if len(f.Messages(faketelegram.GroupID)) != 0 || f.Pending(token) != 0 {
+		t.Fatal("the copy came before the delay")
+	}
+	if s, b, _ := call(t, http.MethodPost, base+"/_fake/comment", fmt.Sprintf(`{"post_id":%d,"text":"x"}`, p)); s !=
+		http.StatusConflict {
+		t.Fatalf("comment before the copy = %d %s", s, b)
+	}
+	waitFor(t, func() bool { return f.Pending(token) == 1 })
+	if g := f.Messages(faketelegram.GroupID); len(g) != 1 || g[0].ForwardOrigin.MessageID != p {
+		t.Fatalf("group %+v", g)
+	}
+}
+
+// F-006: an edit of a post edits its copy, and the bot gets an edited_message for the copy, never one for the post.
+func TestEditOfPostEditsCopy(t *testing.T) {
+	f, base := start(t)
+	p := post(t, base, "before")
+	cp := messageOf(t, updates(t, base)[0], "message")
+	if s, a := bot(t, base, "editMessageText", fmt.Sprintf(`{"chat_id":-1001000000001,"message_id":%d,"text":"after",
+		"reply_markup":%s}`, p, keyboard)); s != http.StatusOK {
+		t.Fatalf("edit = %d %+v", s, a)
+	}
+	u := updates(t, base)
+	if len(u) != 1 {
+		t.Fatalf("updates after the edit %v", u)
+	}
+	m := messageOf(t, u[0], "edited_message")
+	if m.MessageID != cp.MessageID || m.Text != "after" || !m.IsAutomaticForward || m.EditDate == 0 ||
+		m.ForwardOrigin.MessageID != p {
+		t.Fatalf("edited copy %+v", m)
+	}
+	if g := f.Messages(faketelegram.GroupID); len(g) != 1 || g[0].Text != "after" || len(g[0].Edits) != 1 {
+		t.Fatalf("group %+v", g)
+	}
+	// A withheld copy's edits are withheld too.
+	call(t, http.MethodPut, base+"/_fake/config", `{"withhold_copies":true}`)
+	q := post(t, base, "hidden")
+	bot(t, base, "editMessageText", fmt.Sprintf(`{"chat_id":-1001000000001,"message_id":%d,"text":"hidden 2"}`, q))
+	if u := updates(t, base); len(u) != 0 {
+		t.Fatalf("withheld edits %v", u)
+	}
+}
+
+// F-007, F-014: a reply to the copy is a comment in its Thread, and so is a reply within the Thread; a person's
+// comment reaches the bot with the copy it replies to, even when the copy was withheld. A reply in a Thread notifies
+// member only, even when it mentions subscriber.
+func TestRepliesToCopyAreComments(t *testing.T) {
+	f, base := start(t)
+	call(t, http.MethodPut, base+"/_fake/config", `{"withhold_copies":true}`)
+	p := post(t, base, "post")
+	cp := f.Messages(faketelegram.GroupID)[0]
+	s, a := bot(t, base, "sendMessage", fmt.Sprintf(`{"chat_id":-1001000000002,"text":"reply <a href=\"tg://user?id=42\">subscriber</a>",
+		"parse_mode":"HTML","disable_notification":true,"reply_parameters":{"message_id":%d}}`, cp.ID))
+	var sent struct {
+		MessageID       int64 `json:"message_id"`
+		MessageThreadID int64 `json:"message_thread_id"`
+	}
+	_ = json.Unmarshal(a.Result, &sent)
+	if s != http.StatusOK || sent.MessageThreadID != cp.ID {
+		t.Fatalf("reply to the copy = %d %+v", s, a)
+	}
+	n := f.Notifications()
+	if last := n[len(n)-1]; last.Account != faketelegram.AccountMember || last.Chat != faketelegram.GroupID ||
+		last.MessageID != sent.MessageID || last.Sound {
+		t.Fatalf("notifications %+v", n)
+	}
+	for _, x := range n {
+		if x.Account == faketelegram.AccountSubscriber && x.Chat == faketelegram.GroupID {
+			t.Fatalf("subscriber notified in the group: %+v", n)
+		}
+	}
+	// A reply to the reply stays in the Thread.
+	_, a = bot(t, base, "sendMessage", fmt.Sprintf(`{"chat_id":-1001000000002,"text":"next",
+		"reply_parameters":{"message_id":%d}}`, sent.MessageID))
+	_ = json.Unmarshal(a.Result, &sent)
+	if sent.MessageThreadID != cp.ID {
+		t.Fatalf("reply in the thread %+v", a)
+	}
+	// A plain group message is in no Thread.
+	_, a = bot(t, base, "sendMessage", `{"chat_id":-1001000000002,"text":"plain"}`)
+	sent.MessageThreadID = 0
+	_ = json.Unmarshal(a.Result, &sent)
+	if sent.MessageThreadID != 0 {
+		t.Fatalf("plain message %+v", a)
+	}
+
+	s, b, _ := call(t, http.MethodPost, base+"/_fake/comment",
+		fmt.Sprintf(`{"post_id":%d,"from":{"id":7001},"text":"looking"}`, p))
+	var c faketelegram.Message
+	_ = json.Unmarshal([]byte(b), &c)
+	if s != http.StatusOK || c.MessageThreadID != cp.ID || c.From == nil || c.From.ID != 7001 {
+		t.Fatalf("comment = %d %s", s, b)
+	}
+	u := updates(t, base)
+	if len(u) != 1 {
+		t.Fatalf("updates %v", u)
+	}
+	m := messageOf(t, u[0], "message")
+	if m.From.ID != 7001 || m.MessageThreadID != cp.ID || m.ReplyToMessage == nil ||
+		m.ReplyToMessage.MessageID != cp.ID || !m.ReplyToMessage.IsAutomaticForward ||
+		m.ReplyToMessage.ForwardOrigin.MessageID != p || m.Text != "looking" {
+		t.Fatalf("comment update %+v", m)
+	}
+	for _, bad := range []string{`{"post_id":99,"text":"x"}`, `{"post_id":1,"chat":"@nobody","text":"x"}`, `{`} {
+		if s, _, _ := call(t, http.MethodPost, base+"/_fake/comment", bad); s/100 != 4 {
+			t.Errorf("comment %s = %d", bad, s)
+		}
+	}
+}
+
+// F-008: once the copy is deleted, a reply to it fails with "message to be replied not found", and so does a comment.
+func TestDeletedCopyLosesThread(t *testing.T) {
+	f, base := start(t)
+	p := post(t, base, "post")
+	cp := f.Messages(faketelegram.GroupID)[0]
+	path := fmt.Sprintf("%s/_fake/chats/%d/messages/%d", base, faketelegram.GroupID, cp.ID)
+	if s, b, _ := call(t, http.MethodDelete, path, ""); s != http.StatusOK {
+		t.Fatalf("delete = %d %s", s, b)
+	}
+	if s, _, _ := call(t, http.MethodDelete, path, ""); s != http.StatusNotFound {
+		t.Fatalf("second delete = %d", s)
+	}
+	for _, bad := range []string{"/_fake/chats/@nobody/messages/1", "/_fake/chats/@muster_alerts/messages/x"} {
+		if s, _, _ := call(t, http.MethodDelete, base+bad, ""); s/100 != 4 {
+			t.Errorf("delete %s = %d", bad, s)
+		}
+	}
+	s, a := bot(t, base, "sendMessage", fmt.Sprintf(`{"chat_id":-1001000000002,"text":"r",
+		"reply_parameters":{"message_id":%d}}`, cp.ID))
+	if s != http.StatusBadRequest || a.Description != faketelegram.DescriptionReplyNotFound {
+		t.Fatalf("reply to the deleted copy = %d %+v", s, a)
+	}
+	if s, b, _ := call(t, http.MethodPost, base+"/_fake/comment", fmt.Sprintf(`{"post_id":%d,"text":"x"}`, p)); s !=
+		http.StatusBadRequest || !strings.Contains(b, faketelegram.DescriptionReplyNotFound) {
+		t.Fatalf("comment under the deleted copy = %d %s", s, b)
+	}
+	// The edit of the post finds no copy to mirror.
+	updates(t, base)
+	bot(t, base, "editMessageText", fmt.Sprintf(`{"chat_id":-1001000000001,"message_id":%d,"text":"edited"}`, p))
+	if u := updates(t, base); len(u) != 0 {
+		t.Fatalf("edit of a post without its copy %v", u)
+	}
+}
+
+// F-013, F-015: a reply inside the channel is a new post that notifies both accounts and gets a copy of its own, which
+// notifies member with sound even when the post is Quiet. A channel without comments gets no copies.
+func TestReplyInsideChannelIsNewPost(t *testing.T) {
+	f, base := start(t)
+	p := post(t, base, "post")
+	s, _ := bot(t, base, "sendMessage", fmt.Sprintf(`{"chat_id":-1001000000001,"text":"inside","disable_notification":true,
+		"reply_parameters":{"message_id":%d}}`, p))
+	if s != http.StatusOK || len(f.Messages(faketelegram.ChannelID)) != 2 || len(f.Messages(faketelegram.GroupID)) != 2 {
+		t.Fatalf("reply inside the channel = %d, %+v", s, f.Messages(0))
+	}
+	n := f.Notifications()
+	want := []faketelegram.Notification{
+		{Account: "member", Chat: faketelegram.ChannelID, MessageID: 2, Sound: false},
+		{Account: "subscriber", Chat: faketelegram.ChannelID, MessageID: 2, Sound: false},
+		{Account: "member", Chat: faketelegram.GroupID, MessageID: 2, Sound: true},
+	}
+	if fmt.Sprint(n[3:]) != fmt.Sprint(want) {
+		t.Fatalf("notifications %+v", n)
+	}
+	bot(t, base, "sendMessage", `{"chat_id":-1001000000003,"text":"no comments"}`)
+	if len(f.Messages(faketelegram.NoCommentsID)) != 1 || len(f.Messages(0)) != 5 {
+		t.Fatalf("a channel without comments got a copy: %+v", f.Messages(0))
 	}
 }

@@ -61,6 +61,8 @@ type (
 		channel string
 		// mode is the mode of an outgoing webhook, empty for none.
 		mode string
+		// tgChannel and tgGroup are the channel and the discussion group of a Telegram Destination, nil until known.
+		tgChannel, tgGroup *int64
 	}
 	fakeRoute struct {
 		language  string
@@ -170,6 +172,9 @@ type fakeDB struct {
 	membershipLocks []int64
 	// webhookEvents are the events of outgoing webhooks.
 	webhookEvents []*fakeEvent
+	// copies is the Telegram copy buffer, and postLocks the posts whose copy lock was taken, in order.
+	copies    map[copyKey]*fakeCopy
+	postLocks []copyKey
 }
 
 // sqlBool is a boolean of SQL — true, false or NULL — with its three-valued logic, so that the fake meets a NULL where
@@ -241,7 +246,8 @@ func newFakeDB() *fakeDB {
 	return &fakeDB{dests: map[int64]*fakeDest{}, routes: map[int64]fakeRoute{}, routeDests: map[int64][]int64{},
 		groups: map[int64]*fakeGroup{}, buckets: map[bucketKey]*fakeBucket{}, fail: map[string]error{},
 		calls: map[string]int{}, before: map[string]func(){}, details: 90, nextID: 100,
-		connLimits: map[int64][2]int64{}, storms: map[int64]*fakeStorm{}, timers: map[int64]time.Time{}}
+		connLimits: map[int64][2]int64{}, storms: map[int64]*fakeStorm{}, timers: map[int64]time.Time{},
+		copies: map[copyKey]*fakeCopy{}}
 }
 
 func (f *fakeDB) call(name string) error {
@@ -563,7 +569,8 @@ func (f *fakeDB) GetLeasedDelivery(_ context.Context, arg dbgen.GetLeasedDeliver
 		ActualHash: d.actualHash, MessageID: txt(d.messageID), MessageUrl: txt(d.messageURL),
 		PublicationStartedAt: tz(d.started), Attempts: d.attempts, DestinationID: ds.id,
 		DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
-		ConnectionID: nullInt(ds.connection), DestinationHealth: ds.health, GroupCreatedAt: d.updated}
+		ConnectionID: nullInt(ds.connection), DestinationHealth: ds.health, GroupCreatedAt: d.updated,
+		TelegramChannelChatID: nullInt(ds.tgChannel), TelegramDiscussionChatID: nullInt(ds.tgGroup)}
 	if d.storm != 0 {
 		out.StormID = pgtype.Int8{Int64: d.storm, Valid: true}
 		return out, nil
@@ -844,10 +851,12 @@ func (f *fakeDB) GetLeasedReply(_ context.Context, arg dbgen.GetLeasedReplyParam
 	d, ds, g := f.delivery(r.delivery), f.dests[r.dest], f.groups[r.group]
 	return dbgen.GetLeasedReplyRow{ID: r.id, DeliveryID: r.delivery, AlertGroupID: r.group, Event: r.event,
 		EventSeqs: r.seqs, Loudness: r.loudness, Mentions: r.mentions, Fingerprints: r.fingerprints,
-		Attempts: r.attempts, MessageID: txt(d.messageID), ThreadAnchorID: txt(d.anchorID),
-		ThreadChainLastID: txt(d.chainLastID), RepublishedAfterDelete: d.republished, DestinationID: ds.id,
+		Attempts: r.attempts, MessageID: txt(d.messageID), ThreadState: d.threadState, ThreadAnchorID: txt(d.anchorID),
+		ThreadChainLastID: txt(d.chainLastID), RepublishedAfterDelete: d.republished,
+		PublicationStartedAt: tz(d.started), DestinationID: ds.id,
 		DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
-		ConnectionID: nullInt(ds.connection), AlertGroupPublicID: g.publicID, Number: g.number, Title: g.title,
+		ConnectionID: nullInt(ds.connection), TelegramChannelChatID: nullInt(ds.tgChannel),
+		TelegramDiscussionChatID: nullInt(ds.tgGroup), AlertGroupPublicID: g.publicID, Number: g.number, Title: g.title,
 		Status: g.status, Urgent: g.urgent, Language: f.routes[g.route].language}, nil
 }
 

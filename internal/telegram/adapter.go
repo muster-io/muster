@@ -49,9 +49,10 @@ type Targets interface {
 }
 
 // Adapter is the delivery adapter of Telegram Destinations (C-11.FR-7, C-14): Publish and Update of Root messages as
-// channel posts, Reply into the discussion group, called by the delivery worker and the interactive path only, in the
-// client class of their Call; and Check, the Destination check of C-14.FR-14 for the Broken probe. Clock is the real
-// clock of the window in which two 429s of a Connection hold all of it; nil is the system's.
+// channel posts, Reply into the comment Thread in the discussion group, called by the delivery worker and the
+// interactive path only, in the client class of their Call; and Check, the Destination check of C-14.FR-14 for the
+// Broken probe. Clock is the real clock of the window in which two 429s of a Connection hold all of it; nil is the
+// system's.
 type Adapter struct {
 	Targets Targets
 	Clock   clock.Clock
@@ -114,10 +115,12 @@ func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string,
 	return o
 }
 
-// Reply sends m to the discussion group as a message of its own, with the Mentions of a Loud call first and
-// disable_notification on a Quiet one. It is not yet attached to the post's comment Thread: S-066 replies to the
-// post's automatic copy instead.
-func (a *Adapter) Reply(ctx context.Context, c delivery.Call, _ delivery.Root, m delivery.Message) delivery.Outcome {
+// Reply sends m into the Thread of root in the discussion group (C-14.FR-3): a reply to the post's automatic copy while
+// the Thread is attached, which makes it a comment under the post (F-007); a reply to the last link of an unattached
+// chain; or, as the first link of a chain, no reply at all. Muster never replies inside the channel (F-015). The
+// Mentions of a Loud call come first, and only a Loud one carries them (C-12.FR-8); a Quiet one carries
+// disable_notification (C-14.FR-6, F-012). A reply to a copy or link that is gone is refused, as a lost Thread (F-008).
+func (a *Adapter) Reply(ctx context.Context, c delivery.Call, root delivery.Root, m delivery.Message) delivery.Outcome {
 	t, fail := a.target(ctx, c)
 	if fail != nil {
 		return *fail
@@ -125,13 +128,26 @@ func (a *Adapter) Reply(ctx context.Context, c delivery.Call, _ delivery.Root, m
 	if t.GroupID == 0 {
 		return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: errNoGroup}
 	}
+	to := root.ThreadAnchorID
+	if to == "" {
+		to = root.ChainLastID
+	}
+	var reply *replyParameters
+	if to != "" {
+		id, err := strconv.ParseInt(to, 10, 64)
+		if err != nil || id <= 0 {
+			return delivery.Outcome{Kind: delivery.OutcomeUnknown,
+				Error: outbound.Untrusted("the thread message id " + strconv.Quote(to) + " is not a Telegram message id")}
+		}
+		reply = &replyParameters{MessageID: id}
+	}
 	w := writer{plain: c.Plain}
 	mentioned := ""
 	if c.Loudness == groups.Loud {
 		mentioned = mentionText(c.Targets, w)
 	}
 	out := a.message(c, w, m, mentioned)
-	out.ChatID, out.DisableNotification = t.GroupID, c.Loudness != groups.Loud
+	out.ChatID, out.DisableNotification, out.ReplyParameters = t.GroupID, c.Loudness != groups.Loud, reply
 	if len(out.ReplyMarkup.InlineKeyboard) == 0 {
 		out.ReplyMarkup = nil
 	}
