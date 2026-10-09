@@ -37,6 +37,10 @@ const (
 	StaleScanInterval      = 30 * time.Second
 )
 
+// TelegramPollingInterval is how soon the Leader runs the Telegram polling again after it stopped with an error, such
+// as a failed read of the Connections; while it runs, it polls without pause.
+const TelegramPollingInterval = 10 * time.Second
+
 // PruneBatch is the most rows one delete of short-lived pruning removes, so that a large backlog is deleted in short
 // statements that hold their row locks briefly.
 const PruneBatch = 1000
@@ -132,6 +136,9 @@ type Work struct {
 	// ThreadReplyRetention deletes, in batches, the Thread replies of the Organization orgID that are sent, dropped or
 	// not delivered and older than retention.alert_details at now, and returns how many it deleted.
 	ThreadReplyRetention func(ctx context.Context, orgID int64, now time.Time) (int64, error)
+	// TelegramPolling runs the long polling of the Telegram Connections of the Organization orgID until ctx ends
+	// (C-14.FR-1): it stops every poller before it returns, and a failed read of the Connections returns early.
+	TelegramPolling func(ctx context.Context, orgID int64) error
 	// ClockMoved, in development mode, wakes the Heartbeat check, the Stale scan, the Alert Group retention and the
 	// retention of Thread replies when the development clock moved; nil otherwise.
 	ClockMoved *Wakes
@@ -192,8 +199,8 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 // Tasks returns the closed list of Leader tasks (ADR-0007): partition maintenance and retention, the alive mark, the
 // pruning of replica records, the pruning of short-lived state, the ingestion backlog, the retention of the Alerts
 // view, the Heartbeat check, the Stale scan, the count of open Alert Groups, the Alert Group retention, the count of
-// pending deliveries and the retention of Thread replies. Later capabilities add theirs here: Telegram polling, the
-// outgoing heartbeat and the OIDC client secret expiry check. The Keeper calls the result at every leadership, so each one
+// pending deliveries, the retention of Thread replies and the long polling of Telegram Connections. Later capabilities
+// add theirs here: the outgoing heartbeat and the OIDC client secret expiry check. The Keeper calls the result at every leadership, so each one
 // starts with a takeover; the Heartbeat check waits for it, so that it measures the timeouts from the end of a
 // downtime the takeover records (C-07.FR-4).
 func Tasks(w Work) func() []Task {
@@ -234,6 +241,7 @@ func Tasks(w Work) func() []Task {
 			{Name: "delivery_queue", Every: DeliveryQueueInterval, Run: w.deliveryQueue},
 			{Name: "thread_reply_retention", Every: MaintenanceInterval, Wake: replyRetentionWake,
 				Run: w.threadReplyRetention},
+			{Name: "telegram_polling", Every: TelegramPollingInterval, Run: w.telegramPolling},
 		}
 	}
 }
@@ -370,5 +378,25 @@ func (w Work) alertRetention(ctx context.Context) error {
 			errs = append(errs, err)
 		}
 	}
+	return errors.Join(errs...)
+}
+
+// telegramPolling polls the Telegram Connections of every Organization at once until ctx ends, which is when the lock
+// is lost or the process stops. Running it on a frozen old Leader and its successor at once is safe: Telegram answers
+// one poller per bot with 409, and the update offset only rises.
+func (w Work) telegramPolling(ctx context.Context) error {
+	if w.TelegramPolling == nil {
+		return nil
+	}
+	orgs, err := w.Organizations(ctx)
+	if err != nil {
+		return fmt.Errorf("list the organizations to poll telegram for: %w", err)
+	}
+	errs := make([]error, len(orgs))
+	var wg sync.WaitGroup
+	for i, org := range orgs {
+		wg.Go(func() { errs[i] = w.TelegramPolling(ctx, org) })
+	}
+	wg.Wait()
 	return errors.Join(errs...)
 }

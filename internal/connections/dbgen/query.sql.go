@@ -52,8 +52,10 @@ func (q *Queries) FindConnectionByName(ctx context.Context, arg FindConnectionBy
 }
 
 const getConnection = `-- name: GetConnection :one
-SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.bot_token_ciphertext, c.bot_token_key_id,
-       c.bot_token_updated_at, c.bot_user_id, c.bot_username, c.proxy, c.proxy_password_ciphertext,
+SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bot_api_base_url,
+       c.telegram_update_mode, c.telegram_update_offset, c.telegram_webhook_secret_ciphertext,
+       c.telegram_webhook_secret_key_id, c.telegram_webhook_secret_updated_at, c.bot_token_ciphertext,
+       c.bot_token_key_id, c.bot_token_updated_at, c.bot_user_id, c.bot_username, c.proxy, c.proxy_password_ciphertext,
        c.proxy_password_key_id, c.proxy_password_updated_at, c.limiter_limit, c.limiter_per_seconds, c.created_at,
        c.version,
        (SELECT count(*)
@@ -72,25 +74,31 @@ type GetConnectionParams struct {
 }
 
 type GetConnectionRow struct {
-	ID                      int64
-	PublicID                string
-	Type                    string
-	Name                    string
-	MattermostServerUrl     pgtype.Text
-	BotTokenCiphertext      []byte
-	BotTokenKeyID           pgtype.Text
-	BotTokenUpdatedAt       time.Time
-	BotUserID               pgtype.Text
-	BotUsername             pgtype.Text
-	Proxy                   []byte
-	ProxyPasswordCiphertext []byte
-	ProxyPasswordKeyID      pgtype.Text
-	ProxyPasswordUpdatedAt  pgtype.Timestamptz
-	LimiterLimit            int64
-	LimiterPerSeconds       int64
-	CreatedAt               time.Time
-	Version                 int64
-	DestinationCount        int64
+	ID                              int64
+	PublicID                        string
+	Type                            string
+	Name                            string
+	MattermostServerUrl             pgtype.Text
+	TelegramBotApiBaseUrl           pgtype.Text
+	TelegramUpdateMode              pgtype.Text
+	TelegramUpdateOffset            pgtype.Int8
+	TelegramWebhookSecretCiphertext []byte
+	TelegramWebhookSecretKeyID      pgtype.Text
+	TelegramWebhookSecretUpdatedAt  pgtype.Timestamptz
+	BotTokenCiphertext              []byte
+	BotTokenKeyID                   pgtype.Text
+	BotTokenUpdatedAt               time.Time
+	BotUserID                       pgtype.Text
+	BotUsername                     pgtype.Text
+	Proxy                           []byte
+	ProxyPasswordCiphertext         []byte
+	ProxyPasswordKeyID              pgtype.Text
+	ProxyPasswordUpdatedAt          pgtype.Timestamptz
+	LimiterLimit                    int64
+	LimiterPerSeconds               int64
+	CreatedAt                       time.Time
+	Version                         int64
+	DestinationCount                int64
 }
 
 // GetConnection reads a Connection that is not deleted by its public_id, or by its id when public_id is null.
@@ -103,6 +111,12 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (G
 		&i.Type,
 		&i.Name,
 		&i.MattermostServerUrl,
+		&i.TelegramBotApiBaseUrl,
+		&i.TelegramUpdateMode,
+		&i.TelegramUpdateOffset,
+		&i.TelegramWebhookSecretCiphertext,
+		&i.TelegramWebhookSecretKeyID,
+		&i.TelegramWebhookSecretUpdatedAt,
 		&i.BotTokenCiphertext,
 		&i.BotTokenKeyID,
 		&i.BotTokenUpdatedAt,
@@ -183,15 +197,18 @@ func (q *Queries) GetDestinationTarget(ctx context.Context, arg GetDestinationTa
 
 const insertConnection = `-- name: InsertConnection :one
 INSERT INTO connections (
-    org_id, public_id, type, name, mattermost_server_url, bot_token_ciphertext, bot_token_key_id,
-    bot_token_updated_at, proxy, proxy_password_ciphertext, proxy_password_key_id, proxy_password_updated_at,
-    limiter_limit, limiter_per_seconds, created_at, updated_at
+    org_id, public_id, type, name, mattermost_server_url, telegram_bot_api_base_url, telegram_update_mode,
+    telegram_webhook_secret_ciphertext, telegram_webhook_secret_key_id, telegram_webhook_secret_updated_at,
+    bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, proxy, proxy_password_ciphertext,
+    proxy_password_key_id, proxy_password_updated_at, limiter_limit, limiter_per_seconds, created_at, updated_at
 )
 VALUES (
-    $1, $2, 'mattermost', $3, $4, $5, $6,
-    $7::timestamptz, $8, $9,
-    $10, $11, $12, $13,
-    $14::timestamptz, $14::timestamptz
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9,
+    $10, $11, $12,
+    $13::timestamptz, $14, $15,
+    $16, $17, $18, $19,
+    $20::timestamptz, $20::timestamptz
 )
 RETURNING id
 `
@@ -199,8 +216,14 @@ RETURNING id
 type InsertConnectionParams struct {
 	OrgID                   int64
 	PublicID                string
+	Type                    string
 	Name                    string
 	ServerUrl               pgtype.Text
+	BotApiBaseUrl           pgtype.Text
+	UpdateMode              pgtype.Text
+	WebhookSecretCiphertext []byte
+	WebhookSecretKeyID      pgtype.Text
+	WebhookSecretUpdatedAt  pgtype.Timestamptz
 	BotTokenCiphertext      []byte
 	BotTokenKeyID           pgtype.Text
 	BotTokenUpdatedAt       time.Time
@@ -213,13 +236,20 @@ type InsertConnectionParams struct {
 	Now                     time.Time
 }
 
-// InsertConnection creates a Mattermost Connection.
+// InsertConnection creates a Connection: a Mattermost one with its server URL, or a Telegram one with its Bot API base
+// URL, its update mode and, in the webhook mode, its webhook secret token.
 func (q *Queries) InsertConnection(ctx context.Context, arg InsertConnectionParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertConnection,
 		arg.OrgID,
 		arg.PublicID,
+		arg.Type,
 		arg.Name,
 		arg.ServerUrl,
+		arg.BotApiBaseUrl,
+		arg.UpdateMode,
+		arg.WebhookSecretCiphertext,
+		arg.WebhookSecretKeyID,
+		arg.WebhookSecretUpdatedAt,
 		arg.BotTokenCiphertext,
 		arg.BotTokenKeyID,
 		arg.BotTokenUpdatedAt,
@@ -239,8 +269,10 @@ func (q *Queries) InsertConnection(ctx context.Context, arg InsertConnectionPara
 const listConnections = `-- name: ListConnections :many
 
 
-SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.bot_token_ciphertext, c.bot_token_key_id,
-       c.bot_token_updated_at, c.bot_user_id, c.bot_username, c.proxy, c.proxy_password_ciphertext,
+SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bot_api_base_url,
+       c.telegram_update_mode, c.telegram_update_offset, c.telegram_webhook_secret_ciphertext,
+       c.telegram_webhook_secret_key_id, c.telegram_webhook_secret_updated_at, c.bot_token_ciphertext,
+       c.bot_token_key_id, c.bot_token_updated_at, c.bot_user_id, c.bot_username, c.proxy, c.proxy_password_ciphertext,
        c.proxy_password_key_id, c.proxy_password_updated_at, c.limiter_limit, c.limiter_per_seconds, c.created_at,
        c.version,
        (SELECT count(*)
@@ -262,31 +294,38 @@ type ListConnectionsParams struct {
 }
 
 type ListConnectionsRow struct {
-	ID                      int64
-	PublicID                string
-	Type                    string
-	Name                    string
-	MattermostServerUrl     pgtype.Text
-	BotTokenCiphertext      []byte
-	BotTokenKeyID           pgtype.Text
-	BotTokenUpdatedAt       time.Time
-	BotUserID               pgtype.Text
-	BotUsername             pgtype.Text
-	Proxy                   []byte
-	ProxyPasswordCiphertext []byte
-	ProxyPasswordKeyID      pgtype.Text
-	ProxyPasswordUpdatedAt  pgtype.Timestamptz
-	LimiterLimit            int64
-	LimiterPerSeconds       int64
-	CreatedAt               time.Time
-	Version                 int64
-	DestinationCount        int64
+	ID                              int64
+	PublicID                        string
+	Type                            string
+	Name                            string
+	MattermostServerUrl             pgtype.Text
+	TelegramBotApiBaseUrl           pgtype.Text
+	TelegramUpdateMode              pgtype.Text
+	TelegramUpdateOffset            pgtype.Int8
+	TelegramWebhookSecretCiphertext []byte
+	TelegramWebhookSecretKeyID      pgtype.Text
+	TelegramWebhookSecretUpdatedAt  pgtype.Timestamptz
+	BotTokenCiphertext              []byte
+	BotTokenKeyID                   pgtype.Text
+	BotTokenUpdatedAt               time.Time
+	BotUserID                       pgtype.Text
+	BotUsername                     pgtype.Text
+	Proxy                           []byte
+	ProxyPasswordCiphertext         []byte
+	ProxyPasswordKeyID              pgtype.Text
+	ProxyPasswordUpdatedAt          pgtype.Timestamptz
+	LimiterLimit                    int64
+	LimiterPerSeconds               int64
+	CreatedAt                       time.Time
+	Version                         int64
+	DestinationCount                int64
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
-// Connections (C-13.FR-1, FR-6): a messenger server or bot through which Destinations post. The bot token and the
-// proxy password are read as ciphertexts only to build the Connection's client; reads show their status.
+// Connections (C-13.FR-1, FR-6, C-14.FR-1): a messenger server or bot through which Destinations post. The bot token,
+// the proxy password and the Telegram webhook secret token are read as ciphertexts only to build the Connection's
+// client or to check a webhook request; reads show their status.
 // ListConnections reads a page of the Connections that are not deleted, in id order after a cursor, filtered by type,
 // each with the count of its Destinations that are not deleted.
 func (q *Queries) ListConnections(ctx context.Context, arg ListConnectionsParams) ([]ListConnectionsRow, error) {
@@ -309,6 +348,12 @@ func (q *Queries) ListConnections(ctx context.Context, arg ListConnectionsParams
 			&i.Type,
 			&i.Name,
 			&i.MattermostServerUrl,
+			&i.TelegramBotApiBaseUrl,
+			&i.TelegramUpdateMode,
+			&i.TelegramUpdateOffset,
+			&i.TelegramWebhookSecretCiphertext,
+			&i.TelegramWebhookSecretKeyID,
+			&i.TelegramWebhookSecretUpdatedAt,
 			&i.BotTokenCiphertext,
 			&i.BotTokenKeyID,
 			&i.BotTokenUpdatedAt,
@@ -379,6 +424,65 @@ func (q *Queries) ListMattermostDestinations(ctx context.Context, orgID int64) (
 	return items, nil
 }
 
+const listPollingConnections = `-- name: ListPollingConnections :many
+SELECT id, public_id, telegram_bot_api_base_url, telegram_update_offset, bot_token_ciphertext, bot_token_key_id,
+       bot_token_updated_at, proxy, proxy_password_ciphertext, proxy_password_key_id, proxy_password_updated_at,
+       version
+FROM connections
+WHERE org_id = $1 AND type = 'telegram' AND telegram_update_mode = 'long_polling' AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListPollingConnectionsRow struct {
+	ID                      int64
+	PublicID                string
+	TelegramBotApiBaseUrl   pgtype.Text
+	TelegramUpdateOffset    pgtype.Int8
+	BotTokenCiphertext      []byte
+	BotTokenKeyID           pgtype.Text
+	BotTokenUpdatedAt       time.Time
+	Proxy                   []byte
+	ProxyPasswordCiphertext []byte
+	ProxyPasswordKeyID      pgtype.Text
+	ProxyPasswordUpdatedAt  pgtype.Timestamptz
+	Version                 int64
+}
+
+// ListPollingConnections lists the Telegram Connections that are not deleted and are in the long-polling mode, with
+// their secrets as stored and their telegram_update_offset, for the Leader's poller.
+func (q *Queries) ListPollingConnections(ctx context.Context, orgID int64) ([]ListPollingConnectionsRow, error) {
+	rows, err := q.db.Query(ctx, listPollingConnections, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPollingConnectionsRow{}
+	for rows.Next() {
+		var i ListPollingConnectionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.TelegramBotApiBaseUrl,
+			&i.TelegramUpdateOffset,
+			&i.BotTokenCiphertext,
+			&i.BotTokenKeyID,
+			&i.BotTokenUpdatedAt,
+			&i.Proxy,
+			&i.ProxyPasswordCiphertext,
+			&i.ProxyPasswordKeyID,
+			&i.ProxyPasswordUpdatedAt,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockConnection = `-- name: LockConnection :one
 SELECT id, public_id, type, version
 FROM connections
@@ -419,6 +523,28 @@ SELECT pg_advisory_xact_lock($1::bigint)
 func (q *Queries) LockDemo(ctx context.Context, key int64) error {
 	_, err := q.db.Exec(ctx, lockDemo, key)
 	return err
+}
+
+const lockUpdateOffset = `-- name: LockUpdateOffset :one
+SELECT telegram_update_offset
+FROM connections
+WHERE org_id = $1 AND id = $2 AND type = 'telegram' AND deleted_at IS NULL
+FOR NO KEY UPDATE
+`
+
+type LockUpdateOffsetParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// LockUpdateOffset reads telegram_update_offset of a Telegram Connection that is not deleted — the id after the last
+// update handed to the router — and locks it until the transaction ends, so that a second poller or a webhook request
+// with the same update waits for the first and then skips it.
+func (q *Queries) LockUpdateOffset(ctx context.Context, arg LockUpdateOffsetParams) (pgtype.Int8, error) {
+	row := q.db.QueryRow(ctx, lockUpdateOffset, arg.OrgID, arg.ID)
+	var telegram_update_offset pgtype.Int8
+	err := row.Scan(&telegram_update_offset)
+	return telegram_update_offset, err
 }
 
 const markConnectionDeleted = `-- name: MarkConnectionDeleted :exec
@@ -466,26 +592,57 @@ func (q *Queries) SetBotIdentity(ctx context.Context, arg SetBotIdentityParams) 
 	return err
 }
 
+const storeUpdateOffset = `-- name: StoreUpdateOffset :exec
+UPDATE connections
+SET telegram_update_offset = GREATEST(coalesce(telegram_update_offset, $1::bigint), $1::bigint)
+WHERE org_id = $2 AND id = $3 AND type = 'telegram'
+`
+
+type StoreUpdateOffsetParams struct {
+	Next  int64
+	OrgID int64
+	ID    int64
+}
+
+// StoreUpdateOffset raises telegram_update_offset of a Telegram Connection to @next; it never lowers it, so that a
+// poller of a frozen old Leader cannot move it back. It is not a change of the configuration.
+func (q *Queries) StoreUpdateOffset(ctx context.Context, arg StoreUpdateOffsetParams) error {
+	_, err := q.db.Exec(ctx, storeUpdateOffset, arg.Next, arg.OrgID, arg.ID)
+	return err
+}
+
 const updateConnection = `-- name: UpdateConnection :exec
 UPDATE connections
-SET name = $1, mattermost_server_url = $2, bot_token_ciphertext = $3,
-    bot_token_key_id = $4, bot_token_updated_at = $5::timestamptz,
-    bot_user_id = CASE WHEN $6::boolean THEN NULL ELSE bot_user_id END,
-    bot_username = CASE WHEN $6::boolean THEN NULL ELSE bot_username END,
-    proxy = $7, proxy_password_ciphertext = $8,
-    proxy_password_key_id = $9,
-    proxy_password_updated_at = $10, limiter_limit = $11,
-    limiter_per_seconds = $12, updated_at = $13::timestamptz, version = version + 1
-WHERE org_id = $14 AND id = $15
+SET name = $1, mattermost_server_url = $2,
+    telegram_bot_api_base_url = $3, telegram_update_mode = $4,
+    telegram_webhook_secret_ciphertext = $5,
+    telegram_webhook_secret_key_id = $6,
+    telegram_webhook_secret_updated_at = $7,
+    bot_token_ciphertext = $8, bot_token_key_id = $9,
+    bot_token_updated_at = $10::timestamptz,
+    bot_user_id = CASE WHEN $11::boolean THEN NULL ELSE bot_user_id END,
+    bot_username = CASE WHEN $11::boolean THEN NULL ELSE bot_username END,
+    telegram_update_offset = CASE WHEN $12::boolean THEN NULL ELSE telegram_update_offset END,
+    proxy = $13, proxy_password_ciphertext = $14,
+    proxy_password_key_id = $15,
+    proxy_password_updated_at = $16, limiter_limit = $17,
+    limiter_per_seconds = $18, updated_at = $19::timestamptz, version = version + 1
+WHERE org_id = $20 AND id = $21
 `
 
 type UpdateConnectionParams struct {
 	Name                    string
 	ServerUrl               pgtype.Text
+	BotApiBaseUrl           pgtype.Text
+	UpdateMode              pgtype.Text
+	WebhookSecretCiphertext []byte
+	WebhookSecretKeyID      pgtype.Text
+	WebhookSecretUpdatedAt  pgtype.Timestamptz
 	BotTokenCiphertext      []byte
 	BotTokenKeyID           pgtype.Text
 	BotTokenUpdatedAt       time.Time
 	ForgetBot               bool
+	ForgetUpdates           bool
 	Proxy                   []byte
 	ProxyPasswordCiphertext []byte
 	ProxyPasswordKeyID      pgtype.Text
@@ -497,16 +654,23 @@ type UpdateConnectionParams struct {
 	ID                      int64
 }
 
-// UpdateConnection replaces the configured fields of a Mattermost Connection and its secrets as the write path
-// computed them. A changed server URL or bot token forgets the bot the last check learned.
+// UpdateConnection replaces the configured fields of a Connection and its secrets as the write path computed them.
+// A changed server URL, Bot API base URL or bot token forgets the bot the last check learned; a new bot token also
+// forgets telegram_update_offset, since another bot's update ids start elsewhere.
 func (q *Queries) UpdateConnection(ctx context.Context, arg UpdateConnectionParams) error {
 	_, err := q.db.Exec(ctx, updateConnection,
 		arg.Name,
 		arg.ServerUrl,
+		arg.BotApiBaseUrl,
+		arg.UpdateMode,
+		arg.WebhookSecretCiphertext,
+		arg.WebhookSecretKeyID,
+		arg.WebhookSecretUpdatedAt,
 		arg.BotTokenCiphertext,
 		arg.BotTokenKeyID,
 		arg.BotTokenUpdatedAt,
 		arg.ForgetBot,
+		arg.ForgetUpdates,
 		arg.Proxy,
 		arg.ProxyPasswordCiphertext,
 		arg.ProxyPasswordKeyID,

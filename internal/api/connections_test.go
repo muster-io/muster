@@ -45,6 +45,7 @@ type fakeConnections struct {
 	check    connections.CheckResult
 	channels []connections.Channel
 	chanArgs [][2]string
+	baseURLs []*string
 	err      error
 }
 
@@ -80,16 +81,15 @@ func (f *fakeConnections) Get(_ context.Context, id string) (connections.Connect
 func (f *fakeConnections) Create(_ context.Context, r connections.Requester, in connections.Input) (
 	connections.Connection, error) {
 	f.inputs, f.by = append(f.inputs, in), append(f.by, r)
-	if in.Type == connections.TypeTelegram {
-		return connections.Connection{}, &connections.FieldError{Pointer: "/type", Code: connections.CodeUnsupported,
-			Detail: "Telegram Connections are not supported yet."}
-	}
 	if f.err != nil {
 		return connections.Connection{}, f.err
 	}
 	c := connections.Connection{ID: int64(len(f.list) + 1), PublicID: "CNAAAAAAAAAAA9", Type: in.Type, Name: in.Name,
-		ServerURL: in.ServerURL, BotToken: keyring.SecretStatus{Set: true, UpdatedAt: &t0},
-		Limiter: in.Limiter, CreatedAt: t0, Version: 1}
+		ServerURL: in.ServerURL, BotAPIBaseURL: in.BotAPIBaseURL, UpdateMode: in.UpdateMode,
+		BotToken: keyring.SecretStatus{Set: true, UpdatedAt: &t0}, Limiter: in.Limiter, CreatedAt: t0, Version: 1}
+	if in.Type == connections.TypeTelegram {
+		c.Warnings = []string{"base_url_uses_http"}
+	}
 	f.list = append(f.list, c)
 	return c, nil
 }
@@ -133,7 +133,8 @@ func (f *fakeConnections) Delete(_ context.Context, r connections.Requester, id 
 	return nil
 }
 
-func (f *fakeConnections) Check(_ context.Context, id string) (connections.CheckResult, error) {
+func (f *fakeConnections) Check(_ context.Context, id string, baseURL *string) (connections.CheckResult, error) {
+	f.baseURLs = append(f.baseURLs, baseURL)
 	if f.find(id) < 0 {
 		return connections.CheckResult{}, connections.ErrNotFound
 	}
@@ -231,8 +232,8 @@ func TestListConnectionsAPI(t *testing.T) {
 	}
 }
 
-// TestCreateConnectionAPI is createConnection (C-13.FR-1): 201 with ETag and Location, the bot token handed to the
-// service and never answered; a Telegram body reaches the service, which refuses it as unsupported at /type.
+// TestCreateConnectionAPI is createConnection (C-13.FR-1, C-14.FR-1): 201 with ETag and Location, the bot token handed
+// to the service and never answered, for a Mattermost and a Telegram Connection.
 func TestCreateConnectionAPI(t *testing.T) {
 	x, fc := newConnectionsAPI(t)
 	a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections", connectionBody)
@@ -248,12 +249,33 @@ func TestCreateConnectionAPI(t *testing.T) {
 		fc.by[0].Actor.TokenName != "connections" || fc.by[0].Transport != audit.TransportAPI {
 		t.Errorf("input %+v, by %+v", in, fc.by[0])
 	}
-	telegram := `{"type":"telegram","name":"tg","bot_api_base_url":"https://api.telegram.org",` +
-		`"update_mode":"long_polling","bot_token":"x","proxy":{"enabled":false},"limiter":{"limit":30,"per_seconds":1}}`
+	telegram := `{"type":"telegram","name":"tg","bot_api_base_url":"http://127.0.0.1:18081/",` +
+		`"update_mode":"webhook","bot_token":"` + botTokenValue + `","proxy":{"enabled":true,"type":"socks5",` +
+		`"address":"127.0.0.1:18092"},"limiter":{"limit":15,"per_seconds":1}}`
 	a = x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections", telegram)
-	if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity || len(errs) != 1 ||
-		errs[0]["pointer"] != "/type" || errs[0]["code"] != "unsupported" {
+	noToken(t, a)
+	m := a.json(t)
+	if a.status != http.StatusCreated || m["type"] != "telegram" || m["bot_api_base_url"] != "http://127.0.0.1:18081/" ||
+		m["update_mode"] != "webhook" || m["callback_url"] != nil || m["bot_username"] != nil ||
+		m["warnings"].([]any)[0] != "base_url_uses_http" {
 		t.Errorf("telegram = %d %s", a.status, a.body)
+	}
+	if in := fc.inputs[1]; in.Type != connections.TypeTelegram || in.BotAPIBaseURL != "http://127.0.0.1:18081/" ||
+		in.UpdateMode != "webhook" || string(in.BotToken.Value) != botTokenValue || !in.Proxy.Enabled ||
+		in.ServerURL != "" || in.Limiter.Limit != 15 {
+		t.Errorf("telegram input %+v", in)
+	}
+	fc.err = &connections.FieldError{Pointer: "/update_mode", Code: connections.CodeWebhookCallFailed,
+		Detail: "setWebhook failed: Telegram answered 400: Bad Request"}
+	if errs := problemErrors(t, x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections",
+		telegram)); len(errs) != 1 || errs[0]["pointer"] != "/update_mode" || errs[0]["code"] != "webhook_call_failed" {
+		t.Errorf("refused setWebhook = %v", errs)
+	}
+	fc.err = nil
+	withoutToken := strings.Replace(telegram, `"bot_token":"`+botTokenValue+`",`, "", 1)
+	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections", withoutToken); a.status !=
+		http.StatusCreated || fc.inputs[len(fc.inputs)-1].BotToken.Given {
+		t.Errorf("telegram without a token = %d %s", a.status, a.body)
 	}
 	fc.err = connections.ErrNameTaken
 	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections", connectionBody); a.status !=
@@ -395,6 +417,70 @@ func TestCheckConnectionAPI(t *testing.T) {
 	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections/CN000000000000/checks", ""); a.status !=
 		http.StatusNotFound {
 		t.Errorf("unknown = %d", a.status)
+	}
+}
+
+// TestTelegramConnectionAPI covers C-14.FR-1, FR-10 and FR-11 on the API: a Telegram Connection reads with its base
+// URL, update mode and warnings; its check has the three steps, skipped ones without latency, the webhook and the
+// pending updates; an unsaved base_url reaches the service, a null one does not.
+func TestTelegramConnectionAPI(t *testing.T) {
+	x, fc := newConnectionsAPI(t)
+	bot := "muster_dev_bot"
+	fc.list = append(fc.list, connections.Connection{ID: 4, PublicID: "CNAAAAAAAAAAT1", Type: connections.TypeTelegram,
+		Name: "tg", BotAPIBaseURL: "http://127.0.0.1:18081", UpdateMode: "long_polling",
+		Warnings: []string{"base_url_uses_http"}, BotToken: keyring.SecretStatus{Set: true, UpdatedAt: &t0},
+		BotUsername: &bot, Limiter: connections.Limiter{Limit: 15, PerSeconds: 1}, CreatedAt: t0, Version: 2})
+	a := x.as(t, connectionsReader, http.MethodGet, "/api/v1/connections/CNAAAAAAAAAAT1", "")
+	var c gen.TelegramConnection
+	decodeInto(t, a, &c)
+	if a.status != http.StatusOK || c.BotApiBaseUrl != "http://127.0.0.1:18081" || c.UpdateMode != "long_polling" ||
+		len(c.Warnings) != 1 || c.Warnings[0] != "base_url_uses_http" || c.BotUsername.MustGet() != bot ||
+		*c.Etag != `"2"` || !c.BotTokenStatus.Set {
+		t.Fatalf("get = %d %s", a.status, a.body)
+	}
+	a = x.as(t, connectionsReader, http.MethodGet, "/api/v1/connections?type=telegram", "")
+	var list gen.ConnectionList
+	decodeInto(t, a, &list)
+	if kind, _ := list.Items[0].Discriminator(); a.status != http.StatusOK || len(list.Items) != 1 || kind != "telegram" {
+		t.Fatalf("list = %d %s", a.status, a.body)
+	}
+	set, pending := true, int64(4)
+	fc.check = connections.CheckResult{OK: true, BotName: bot, WebhookSet: &set, PendingUpdates: &pending,
+		Steps: []connections.Step{
+			{Name: "dry_probe", OK: true, Latency: 4 * time.Millisecond, Via: "proxy"},
+			{Name: "get_me", OK: true, Latency: 5 * time.Millisecond, Via: "proxy"},
+			{Name: "get_webhook_info", OK: true, Latency: 6 * time.Millisecond, Via: "proxy",
+				Message: "A webhook is set at in.example.org."}}}
+	path := "/api/v1/connections/CNAAAAAAAAAAT1/checks"
+	a = x.as(t, connectionsWriter, http.MethodPost, path, "{}")
+	var res gen.ConnectionCheckResult
+	decodeInto(t, a, &res)
+	if a.status != http.StatusOK || !res.WebhookSet.MustGet() || res.PendingUpdates.MustGet() != 4 ||
+		len(res.Steps) != 3 || *res.Steps[2].Skipped || res.Steps[2].Message.MustGet() != "A webhook is set at in.example.org." ||
+		fc.baseURLs[len(fc.baseURLs)-1] != nil {
+		t.Fatalf("check = %d %s", a.status, a.body)
+	}
+	fc.check = connections.CheckResult{Steps: []connections.Step{
+		{Name: "dry_probe", Latency: time.Millisecond, Via: "direct", Message: "This is not a Bot API."},
+		{Name: "get_me", Skipped: true, Via: "direct"}, {Name: "get_webhook_info", Skipped: true, Via: "direct"}}}
+	a = x.as(t, connectionsWriter, http.MethodPost, path, `{"base_url":"http://127.0.0.1:18081/other/"}`)
+	decodeInto(t, a, &res)
+	if got := fc.baseURLs[len(fc.baseURLs)-1]; a.status != http.StatusOK || got == nil ||
+		*got != "http://127.0.0.1:18081/other/" || !*res.Steps[1].Skipped || !res.Steps[1].LatencyMs.IsNull() ||
+		res.Steps[0].Message.MustGet() != "This is not a Bot API." || !res.WebhookSet.IsNull() ||
+		!res.PendingUpdates.IsNull() {
+		t.Fatalf("unsaved base URL = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, connectionsWriter, http.MethodPost, path, `{"base_url":null}`); a.status != http.StatusOK ||
+		fc.baseURLs[len(fc.baseURLs)-1] != nil {
+		t.Fatalf("null base URL = %d", a.status)
+	}
+	body := `{"type":"telegram","name":"tg-2","bot_api_base_url":"http://127.0.0.1:18081","update_mode":"long_polling",` +
+		`"proxy":{"enabled":false},"limiter":{"limit":15,"per_seconds":1}}`
+	a = x.as(t, connectionsWriter, http.MethodPut, "/api/v1/connections/CNAAAAAAAAAAT1", body, "If-Match", `"2"`)
+	if in := fc.inputs[len(fc.inputs)-1]; a.status != http.StatusOK || in.BotToken.Given || in.Type != "telegram" ||
+		in.UpdateMode != "long_polling" {
+		t.Fatalf("update = %d %s, %+v", a.status, a.body, in)
 	}
 }
 

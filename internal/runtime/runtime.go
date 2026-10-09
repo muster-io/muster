@@ -55,6 +55,7 @@ import (
 	"github.com/muster-io/muster/internal/routing"
 	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/timers"
 	timersdb "github.com/muster-io/muster/internal/timers/dbgen"
 	"github.com/muster-io/muster/internal/tokens"
@@ -449,6 +450,10 @@ type process struct {
 	// button presses answers through and runs Commands with.
 	interactive *delivery.Interactive
 	roles       auth.Roles
+	// updates routes the updates of Telegram Connections, from the Leader's poller or the webhook endpoint, and poller
+	// is the long polling the Leader task telegram_polling runs.
+	updates *telegram.Router
+	poller  *telegram.Poller
 	// devClock is the development clock of `muster dev`, nil outside development mode; clockMoved wakes the
 	// Leader's Heartbeat check and Stale scan when it moves.
 	devClock   *devmode.Clock
@@ -631,13 +636,16 @@ func (p *process) serve(ctx context.Context) error {
 }
 
 // callbacks is the callback mux of the ingest listener: the button presses of Mattermost Connections (C-13.FR-4), on
-// every method, since the callback answers each request 200 with an empty JSON object.
+// every method, since the callback answers each request 200 with an empty JSON object; and the webhook of Telegram
+// Connections in the webhook update mode (C-14.FR-1), on POST.
 func (p *process) callbacks() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(mattermost.CallbackPattern, mattermost.NewCallback(mattermost.CallbackConfig{
 		Connections: p.connections, Bindings: p.delivery, Links: accountlinks.New(p.orgID, p.db.AccountLinksDB()),
 		Commands: p.groups, Roles: p.roles, Keys: p.keyring, Path: p.interactive, Business: p.clocks.Business,
 		PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit, Log: p.log}))
+	mux.Handle(telegram.WebhookPattern, telegram.NewWebhook(telegram.WebhookConfig{Connections: p.connections,
+		Router: p.updates, BodyLimit: ingest.BodyLimit, Log: p.log}))
 	return mux
 }
 
@@ -759,6 +767,10 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			return p.delivery.AbandonConnection(ctx, tx, id)
 		}})
 	p.connections, p.interactive, p.roles = conns, interactive, roles
+	// The updates of Telegram Connections reach one router, from the Leader's poller or from the webhook endpoint; the
+	// adapter (S-042) and Account links (S-051) register their handlers on it.
+	p.updates = &telegram.Router{Offsets: conns, Log: p.log}
+	p.poller = &telegram.Poller{Source: conns, Router: p.updates, Log: p.log}
 	p.destinations = destinations.New(orgID, p.db.DestinationsStore())
 	p.destinations.SetWriter(destinations.WriterConfig{Writer: p.db.DestinationsWriter(), Audit: w,
 		Business: p.clocks.Business,
@@ -773,6 +785,9 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	if p.opts.Development {
 		if err := conns.EnsureDemo(ctx, devmode.ConnectionDemo()); err != nil {
 			return nil, fmt.Errorf("the demo connection: %w", err)
+		}
+		if err := conns.EnsureDemo(ctx, devmode.TelegramDemo()); err != nil {
+			return nil, fmt.Errorf("the demo telegram connection: %w", err)
 		}
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
 			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)
@@ -858,7 +873,13 @@ func (p *process) newKeeper() *leader.Keeper {
 		AlertGroupRetention:  groups.RetentionTask(p.db.GroupsStore()),
 		DeliveryQueue:        p.deliveryQueue,
 		ThreadReplyRetention: p.threadReplyRetention,
-		ClockMoved:           p.clockMoved,
+		TelegramPolling: func(ctx context.Context, orgID int64) error {
+			if orgID != p.orgID {
+				return nil
+			}
+			return p.poller.Run(ctx)
+		},
+		ClockMoved: p.clockMoved,
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
 			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},
@@ -949,6 +970,8 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 			case routing.Hint:
 				p.router.Invalidate()
 				p.routes.InfoChanged()
+			case connections.Hint:
+				p.poller.Wake()
 			}
 		}, func(restored bool) {
 			p.hub.Listening(restored)
@@ -956,6 +979,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 				p.integrations.InfoChanged()
 				p.router.Invalidate()
 				p.routes.InfoChanged()
+				p.poller.Wake()
 				p.loadDevClock(ctx)
 			}
 			p.worker.Wake()

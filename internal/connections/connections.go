@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Package connections holds the Connections of C-13.FR-1 and FR-6: a messenger server or bot that Destinations post
-// through. A Mattermost Connection has a name, the server URL, a bot token (encrypted, write-only), a proxy and its
-// limiter. The package checks a Connection's token, lists the channels its bot sees, and runs the Destination check of
-// a Mattermost channel for the Destination write path, each on the interactive path (C-11.FR-2). A Connection used by
-// a Destination that is not deleted cannot be deleted; deleting one wipes its secrets and abandons the final edits
-// still pending for its deleted Destinations (C-11.FR-14). Every change is recorded in the Audit log and announced
-// with the live hint connection. Telegram Connections arrive with C-14.
+// Package connections holds the Connections of C-13.FR-1, FR-6 and C-14.FR-1: a messenger server or bot that
+// Destinations post through. A Mattermost Connection has a name, the server URL, a bot token (encrypted, write-only), a
+// proxy and its limiter; a Telegram Connection has a name, a bot token, the Bot API base URL, a proxy, its limiter and
+// its update mode, long polling or webhook. The package checks a Connection — the token of a Mattermost one, the steps
+// with the dry probe of a Telegram one — lists the channels a Mattermost bot sees, and runs the Destination check of a
+// Mattermost channel for the Destination write path, each on the interactive path (C-11.FR-2). It sets and deletes the
+// webhook of a Telegram Connection when its update mode changes, and serves the Telegram Connections to the Leader's
+// poller and to the webhook endpoint. A Connection used by a Destination that is not deleted cannot be deleted;
+// deleting one wipes its secrets and abandons the final edits still pending for its deleted Destinations
+// (C-11.FR-14). Every change is recorded in the Audit log and announced with the live hint connection.
 package connections
 
 import (
@@ -39,6 +42,7 @@ import (
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/publicid"
+	"github.com/muster-io/muster/internal/telegram"
 )
 
 // The Connection types.
@@ -67,10 +71,23 @@ const (
 	DefaultPerSeconds = 1
 )
 
+// The default limiter of a Telegram Connection (connection.telegram.limiter): 15 messages per second (P-28).
+const (
+	TelegramDefaultLimit      = 15
+	TelegramDefaultPerSeconds = 1
+)
+
+// The update modes of a Telegram Connection (C-14.FR-1); connection.telegram.update_mode is long polling.
+const (
+	ModeLongPolling = "long_polling"
+	ModeWebhook     = "webhook"
+)
+
 // The secret fields of a Connection, as the Keyring binds them.
 const (
 	fieldBotToken      = "connections.bot_token"
 	fieldProxyPassword = "connections.proxy_password"
+	fieldWebhookSecret = "connections.telegram_webhook_secret"
 )
 
 // The steps of the Connection check.
@@ -98,6 +115,8 @@ var (
 	ErrInUse = errors.New("destinations use the connection")
 	// ErrNotMattermost is a Mattermost operation, such as the channel list, on a Telegram Connection.
 	ErrNotMattermost = errors.New("the connection is not a mattermost connection")
+	// errNotTelegram is a Telegram operation on a Mattermost Connection.
+	errNotTelegram = errors.New("the connection is not a telegram connection")
 )
 
 // MessengerError is a call to the messenger that failed for a reason other than its limiter, such as a channel list
@@ -125,6 +144,9 @@ const (
 	CodeTooLong       = "too_long"
 	CodeTooShort      = "too_short"
 	CodeUnsupported   = "unsupported"
+	// CodeWebhookCallFailed is a save of a Telegram Connection whose setWebhook or deleteWebhook failed; nothing was
+	// saved.
+	CodeWebhookCallFailed = "webhook_call_failed"
 )
 
 // Limiter is a rate limit of Limit calls per PerSeconds.
@@ -133,13 +155,17 @@ type Limiter struct {
 	PerSeconds int64 `json:"per_seconds"`
 }
 
-// Connection is a Connection as the API reads it; its secrets show only their status.
+// Connection is a Connection as the API reads it; its secrets show only their status. ServerURL is a Mattermost
+// Connection's; BotAPIBaseURL, UpdateMode and Warnings are a Telegram Connection's.
 type Connection struct {
 	ID               int64
 	PublicID         string
 	Type             string
 	Name             string
 	ServerURL        string
+	BotAPIBaseURL    string
+	UpdateMode       string
+	Warnings         []string
 	BotToken         keyring.SecretStatus
 	BotUsername      *string
 	BotUserID        *string
@@ -152,14 +178,16 @@ type Connection struct {
 }
 
 // Input is what createConnection and updateConnection write. An omitted bot token keeps the stored one on an update and
-// is required on a creation.
+// is required on a creation. ServerURL is a Mattermost Connection's; BotAPIBaseURL and UpdateMode a Telegram one's.
 type Input struct {
-	Type      string
-	Name      string
-	ServerURL string
-	BotToken  keyring.SecretInput
-	Proxy     proxyconf.Input
-	Limiter   Limiter
+	Type          string
+	Name          string
+	ServerURL     string
+	BotAPIBaseURL string
+	UpdateMode    string
+	BotToken      keyring.SecretInput
+	Proxy         proxyconf.Input
+	Limiter       Limiter
 }
 
 // ListFilter selects a page of Connections, of a type when set, in the order they were created, after the id After.
@@ -194,6 +222,9 @@ type Queries interface {
 	SetBotIdentity(ctx context.Context, arg dbgen.SetBotIdentityParams) error
 	CountConnectionDestinations(ctx context.Context, arg dbgen.CountConnectionDestinationsParams) (int64, error)
 	MarkConnectionDeleted(ctx context.Context, arg dbgen.MarkConnectionDeletedParams) error
+	ListPollingConnections(ctx context.Context, orgID int64) ([]dbgen.ListPollingConnectionsRow, error)
+	LockUpdateOffset(ctx context.Context, arg dbgen.LockUpdateOffsetParams) (pgtype.Int8, error)
+	StoreUpdateOffset(ctx context.Context, arg dbgen.StoreUpdateOffsetParams) error
 	LockDemo(ctx context.Context, key int64) error
 	GetDestinationTarget(ctx context.Context, arg dbgen.GetDestinationTargetParams) (dbgen.GetDestinationTargetRow,
 		error)
@@ -254,11 +285,11 @@ type Config struct {
 	Audit   *audit.Writer
 	// Clocks: the business clock dates the rows, the real clock measures the latency of a check.
 	Clocks clock.Clocks
-	// Network is what the Mattermost clients need: the outbound address policy, the logger and a resolver.
+	// Network is what the Mattermost and Telegram clients need: the outbound address policy, the logger and a resolver.
 	Network mattermost.Network
 	// Interactive is the interactive path, which the checks and the channel list take their limiter tokens from.
 	Interactive Interactive
-	// IngestURL is MUSTER_INGEST_URL, the base of the callback address.
+	// IngestURL is MUSTER_INGEST_URL, the base of the callback address and of the webhook of a Telegram Connection.
 	IngestURL *url.URL
 	Abandon   Abandon
 	Log       *logging.Logger
@@ -269,8 +300,9 @@ type Config struct {
 type Service struct {
 	cfg Config
 
-	mu      sync.Mutex
-	clients map[int64]cachedClient
+	mu        sync.Mutex
+	clients   map[int64]cachedClient
+	tgClients map[int64]cachedTelegram
 }
 
 // cachedClient is the client of a version of a Connection.
@@ -281,7 +313,7 @@ type cachedClient struct {
 
 // New returns the Service of the Organization in cfg.
 func New(cfg Config) *Service {
-	return &Service{cfg: cfg, clients: map[int64]cachedClient{}}
+	return &Service{cfg: cfg, clients: map[int64]cachedClient{}, tgClients: map[int64]cachedTelegram{}}
 }
 
 // CallbackURL is the read-only callback address of the Connection publicID: MUSTER_INGEST_URL followed by
@@ -346,28 +378,29 @@ func (s *Service) row(ctx context.Context, q Queries, publicID string) (dbgen.Ge
 
 // view is what the Audit log diff of a Connection shows; the secrets only as changed or not.
 type view struct {
-	Name      string           `json:"name"`
-	ServerURL string           `json:"server_url"`
-	Proxy     proxyconf.Config `json:"proxy"`
-	Limiter   Limiter          `json:"limiter"`
+	Name          string           `json:"name"`
+	ServerURL     string           `json:"server_url,omitempty"`
+	BotAPIBaseURL string           `json:"bot_api_base_url,omitempty"`
+	UpdateMode    string           `json:"update_mode,omitempty"`
+	Proxy         proxyconf.Config `json:"proxy"`
+	Limiter       Limiter          `json:"limiter"`
 }
 
 func viewOf(c Connection) view {
-	return view{Name: c.Name, ServerURL: c.ServerURL, Proxy: c.Proxy, Limiter: c.Limiter}
+	return view{Name: c.Name, ServerURL: c.ServerURL, BotAPIBaseURL: c.BotAPIBaseURL, UpdateMode: c.UpdateMode,
+		Proxy: c.Proxy, Limiter: c.Limiter}
 }
 
 func resourceOf(c Connection) audit.Resource {
 	return audit.Resource{Type: ResourceConnection, PublicID: c.PublicID, Name: c.Name}
 }
 
-// check validates the fields of in other than its secrets and its proxy; stored is nil on a creation.
+// check validates the fields of in other than its secrets and its proxy, and normalizes them; stored is nil on a
+// creation.
 func check(in *Input, stored *Connection) error {
 	switch {
-	case in.Type == TypeTelegram:
-		return &FieldError{Pointer: "/type", Code: CodeUnsupported,
-			Detail: "Telegram Connections are not supported yet."}
-	case in.Type != TypeMattermost:
-		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The type is not mattermost."}
+	case in.Type != TypeMattermost && in.Type != TypeTelegram:
+		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The type is not mattermost or telegram."}
 	case stored != nil && stored.Type != in.Type:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The type of a Connection cannot change."}
 	}
@@ -379,12 +412,8 @@ func check(in *Input, stored *Connection) error {
 		return &FieldError{Pointer: "/name", Code: CodeTooLong,
 			Detail: fmt.Sprintf("The name is longer than %d characters.", maxNameLength)}
 	}
-	in.ServerURL = strings.TrimSpace(in.ServerURL)
-	u, err := url.Parse(in.ServerURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" ||
-		u.ForceQuery || u.Fragment != "" || strings.Contains(in.ServerURL, "#") {
-		return &FieldError{Pointer: "/server_url", Code: CodeInvalidFormat,
-			Detail: "The server URL is not an absolute http or https URL without user information, query or fragment."}
+	if err := checkAddress(in); err != nil {
+		return err
 	}
 	if in.Limiter.Limit < 1 || in.Limiter.PerSeconds < 1 {
 		return &FieldError{Pointer: "/limiter", Code: CodeInvalidFormat,
@@ -397,9 +426,42 @@ func check(in *Input, stored *Connection) error {
 		return &FieldError{Pointer: "/bot_token", Code: CodeRequired, Detail: "The bot token cannot be cleared."}
 	}
 	// The stored token is sent only to the server it was entered for.
-	if stored != nil && in.ServerURL != stored.ServerURL && !in.BotToken.Given {
+	switch {
+	case stored != nil && in.Type == TypeMattermost && in.ServerURL != stored.ServerURL && !in.BotToken.Given:
 		return &FieldError{Pointer: "/bot_token", Code: CodeRequired,
 			Detail: "A new server URL needs the bot token again."}
+	case stored != nil && in.Type == TypeTelegram && in.BotAPIBaseURL != stored.BotAPIBaseURL && !in.BotToken.Given:
+		return &FieldError{Pointer: "/bot_token", Code: CodeRequired,
+			Detail: "A new Bot API base URL needs the bot token again."}
+	}
+	return nil
+}
+
+// checkAddress validates and normalizes where the Connection of in calls: the server URL of a Mattermost Connection;
+// the Bot API base URL (C-14.FR-10), stored without its trailing slashes, and the update mode of a Telegram one.
+func checkAddress(in *Input) error {
+	if in.Type == TypeTelegram {
+		in.ServerURL = ""
+		base, err := telegram.ParseBaseURL(in.BotAPIBaseURL)
+		if err != nil {
+			return &FieldError{Pointer: "/bot_api_base_url", Code: CodeInvalidFormat,
+				Detail: "The Bot API base URL is not an absolute http or https URL without user information, query or " +
+					"fragment."}
+		}
+		in.BotAPIBaseURL = base
+		if in.UpdateMode != ModeLongPolling && in.UpdateMode != ModeWebhook {
+			return &FieldError{Pointer: "/update_mode", Code: CodeInvalidFormat,
+				Detail: "The update mode is not long_polling or webhook."}
+		}
+		return nil
+	}
+	in.BotAPIBaseURL, in.UpdateMode = "", ""
+	in.ServerURL = strings.TrimSpace(in.ServerURL)
+	u, err := url.Parse(in.ServerURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" ||
+		u.ForceQuery || u.Fragment != "" || strings.Contains(in.ServerURL, "#") {
+		return &FieldError{Pointer: "/server_url", Code: CodeInvalidFormat,
+			Detail: "The server URL is not an absolute http or https URL without user information, query or fragment."}
 	}
 	return nil
 }
@@ -443,8 +505,9 @@ func proxy(in proxyconf.Input, stored proxyconf.Config) (proxyconf.Config, error
 	return p, err
 }
 
-// Create creates a Mattermost Connection (C-13.FR-1); a Telegram one is refused as unsupported until C-14. The bot
-// token is encrypted with the active key and never returned.
+// Create creates a Mattermost Connection (C-13.FR-1) or a Telegram one (C-14.FR-1). The bot token is encrypted with
+// the active key and never returned. A Telegram Connection created in the webhook mode gets a new secret token and its
+// webhook is set before the creation commits; when setWebhook fails, nothing is created.
 func (s *Service) Create(ctx context.Context, r Requester, in Input) (Connection, error) {
 	if err := check(&in, nil); err != nil {
 		return Connection{}, err
@@ -454,11 +517,18 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Connection
 		return Connection{}, err
 	}
 	var created Connection
+	var hooked string
 	err = s.cfg.Store.InTx(ctx, func(q Queries) error {
 		var err error
-		created, err = s.insert(ctx, q, in, p)
+		var secret logging.Secret
+		created, secret, err = s.insert(ctx, q, in, p)
 		if err != nil {
 			return err
+		}
+		if secret != "" {
+			if hooked, err = s.setWebhook(ctx, q, created.PublicID, secret); err != nil {
+				return err
+			}
 		}
 		diff := append(audit.Created(viewOf(created)), audit.Change{Pointer: "/bot_token", SecretChanged: true})
 		if created.ProxyPassword.Set {
@@ -469,38 +539,51 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Connection
 	if err != nil {
 		return Connection{}, err
 	}
+	s.webhookSet(ctx, created.PublicID, hooked)
 	return created, nil
 }
 
-func (s *Service) insert(ctx context.Context, q Queries, in Input, p proxyconf.Config) (Connection, error) {
+// insert stores a new Connection; in the webhook mode it returns the new secret token, which setWebhook registers.
+func (s *Service) insert(ctx context.Context, q Queries, in Input, p proxyconf.Config) (Connection, logging.Secret,
+	error) {
 	now := s.cfg.Clocks.Business.Now().UTC()
 	token, password, _, err := s.secrets(in, keyring.StoredSecret{}, keyring.StoredSecret{}, now)
 	if err != nil {
-		return Connection{}, err
+		return Connection{}, "", err
+	}
+	hook, secret, err := s.webhookSecret(in, nil, keyring.StoredSecret{}, now)
+	if err != nil {
+		return Connection{}, "", err
 	}
 	id := publicid.New(publicid.Connection)
-	if _, err := q.InsertConnection(ctx, dbgen.InsertConnectionParams{OrgID: s.cfg.OrgID, PublicID: id, Name: in.Name,
-		ServerUrl: pgtype.Text{String: in.ServerURL, Valid: true}, BotTokenCiphertext: token.Ciphertext,
-		BotTokenKeyID: nonEmpty(token.KeyID), BotTokenUpdatedAt: now, Proxy: p.JSON(),
-		ProxyPasswordCiphertext: password.Ciphertext, ProxyPasswordKeyID: nonEmpty(password.KeyID),
+	if _, err := q.InsertConnection(ctx, dbgen.InsertConnectionParams{OrgID: s.cfg.OrgID, PublicID: id, Type: in.Type,
+		Name: in.Name, ServerUrl: nonEmpty(in.ServerURL), BotApiBaseUrl: nonEmpty(in.BotAPIBaseURL),
+		UpdateMode: nonEmpty(in.UpdateMode), WebhookSecretCiphertext: hook.Ciphertext,
+		WebhookSecretKeyID: nonEmpty(hook.KeyID), WebhookSecretUpdatedAt: timestamp(hook.UpdatedAt),
+		BotTokenCiphertext: token.Ciphertext, BotTokenKeyID: nonEmpty(token.KeyID), BotTokenUpdatedAt: now,
+		Proxy: p.JSON(), ProxyPasswordCiphertext: password.Ciphertext, ProxyPasswordKeyID: nonEmpty(password.KeyID),
 		ProxyPasswordUpdatedAt: timestamp(password.UpdatedAt), LimiterLimit: in.Limiter.Limit,
 		LimiterPerSeconds: in.Limiter.PerSeconds, Now: now}); err != nil {
-		return Connection{}, fmt.Errorf("create the connection: %w", nameTaken(err))
+		return Connection{}, "", fmt.Errorf("create the connection: %w", nameTaken(err))
 	}
 	row, err := s.row(ctx, q, id)
 	if err != nil {
-		return Connection{}, err
+		return Connection{}, "", err
 	}
-	return connectionOf(row)
+	c, err := connectionOf(row)
+	return c, secret, err
 }
 
 // Update replaces the configured fields of the Connection publicID; a non-nil version must be its current one
-// (If-Match). An omitted bot token or proxy password keeps the stored one, except that a new server URL needs the bot
-// token again, so that the stored one never reaches another server; a new server URL or bot token forgets the bot
-// that the last check found. An update that changes nothing writes nothing.
+// (If-Match). An omitted bot token or proxy password keeps the stored one, except that a new server URL or Bot API base
+// URL needs the bot token again, so that the stored one never reaches another server; a new address or bot token
+// forgets the bot that the last check found. An update that changes nothing writes nothing. A Telegram Connection that
+// enters the webhook mode, or changes its base URL or bot token in it, gets a new secret token and setWebhook; one that
+// leaves it gets deleteWebhook; both run before the update commits, and when they fail nothing is saved.
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Connection,
 	error) {
 	var out Connection
+	var hooked string
 	err := s.cfg.Store.InTx(ctx, func(q Queries) error {
 		id, err := publicid.Parse(publicid.Connection, publicID)
 		if err != nil {
@@ -536,8 +619,14 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if err != nil {
 			return err
 		}
+		hook, secret, err := s.webhookSecret(in, &before, storedHook(row), now)
+		if err != nil {
+			return err
+		}
 		after := before
-		after.Name, after.ServerURL, after.Proxy, after.Limiter = in.Name, in.ServerURL, p, in.Limiter
+		after.Name, after.ServerURL, after.BotAPIBaseURL, after.UpdateMode = in.Name, in.ServerURL, in.BotAPIBaseURL,
+			in.UpdateMode
+		after.Proxy, after.Limiter = p, in.Limiter
 		diff := append(audit.Diff(viewOf(before), viewOf(after)), secretDiff...)
 		if len(diff) == 0 {
 			out = before
@@ -547,13 +636,23 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if token.UpdatedAt != nil {
 			tokenAt = *token.UpdatedAt
 		}
+		// The webhook that is left is the one of the saved bot and base URL, so it goes before the update.
+		if before.UpdateMode == ModeWebhook && in.UpdateMode == ModeLongPolling {
+			if err := s.deleteWebhook(ctx, row); err != nil {
+				return err
+			}
+		}
 		if err := q.UpdateConnection(ctx, dbgen.UpdateConnectionParams{OrgID: s.cfg.OrgID, ID: row.ID, Name: in.Name,
-			ServerUrl: pgtype.Text{String: in.ServerURL, Valid: true}, BotTokenCiphertext: token.Ciphertext,
-			BotTokenKeyID: nonEmpty(token.KeyID), BotTokenUpdatedAt: tokenAt,
-			ForgetBot: in.ServerURL != before.ServerURL || in.BotToken.Given, Proxy: p.JSON(),
-			ProxyPasswordCiphertext: password.Ciphertext, ProxyPasswordKeyID: nonEmpty(password.KeyID),
-			ProxyPasswordUpdatedAt: timestamp(password.UpdatedAt), LimiterLimit: in.Limiter.Limit,
-			LimiterPerSeconds: in.Limiter.PerSeconds, Now: now}); err != nil {
+			ServerUrl: nonEmpty(in.ServerURL), BotApiBaseUrl: nonEmpty(in.BotAPIBaseURL),
+			UpdateMode: nonEmpty(in.UpdateMode), WebhookSecretCiphertext: hook.Ciphertext,
+			WebhookSecretKeyID: nonEmpty(hook.KeyID), WebhookSecretUpdatedAt: timestamp(hook.UpdatedAt),
+			BotTokenCiphertext: token.Ciphertext, BotTokenKeyID: nonEmpty(token.KeyID), BotTokenUpdatedAt: tokenAt,
+			ForgetBot: in.ServerURL != before.ServerURL || in.BotAPIBaseURL != before.BotAPIBaseURL ||
+				in.BotToken.Given,
+			ForgetUpdates: in.BotToken.Given,
+			Proxy:         p.JSON(), ProxyPasswordCiphertext: password.Ciphertext,
+			ProxyPasswordKeyID: nonEmpty(password.KeyID), ProxyPasswordUpdatedAt: timestamp(password.UpdatedAt),
+			LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Now: now}); err != nil {
 			return fmt.Errorf("update the connection %s: %w", id, nameTaken(err))
 		}
 		if row, err = s.row(ctx, q, id); err != nil {
@@ -562,11 +661,17 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if out, err = connectionOf(row); err != nil {
 			return err
 		}
+		if secret != "" {
+			if hooked, err = s.setWebhook(ctx, q, out.PublicID, secret); err != nil {
+				return err
+			}
+		}
 		return s.record(ctx, q, r, ActionUpdated, out, diff)
 	})
 	if err != nil {
 		return Connection{}, err
 	}
+	s.webhookSet(ctx, out.PublicID, hooked)
 	return out, nil
 }
 
@@ -723,37 +828,51 @@ func (s *Service) cachedClient(r dbgen.GetConnectionRow) (*mattermost.Client, er
 	return c, nil
 }
 
-// Step is a step of a Connection check: its latency and path, and when it failed what answered.
+// Step is a step of a Connection check: whether it passed or was skipped, its latency and path, and when it failed
+// what answered.
 type Step struct {
 	Name    string
 	OK      bool
+	Skipped bool
 	Latency time.Duration
 	Via     string
 	Message string
 }
 
-// CheckResult is the result of a Connection check: its steps and the bot's username once the token works.
+// CheckResult is the result of a Connection check: its steps and the bot's username once the token works; for a
+// Telegram Connection, once getWebhookInfo answered, whether a webhook is set and how many updates wait.
 type CheckResult struct {
 	OK      bool
 	Steps   []Step
 	BotName string
 	// Warnings are hints that do not fail the check, such as WarningPressAnswersInThread.
-	Warnings []string
+	Warnings       []string
+	WebhookSet     *bool
+	PendingUpdates *int64
 }
 
 // WarningPressAnswersInThread is the warning of a Connection whose bot may not make ephemeral messages: answers to
 // button presses then show in the Thread of the Root message, not in the channel view (D284, F-063).
 const WarningPressAnswersInThread = "press_answers_in_thread"
 
-// Check runs the Connection check of the Mattermost Connection publicID (C-13.FR-2) on the interactive path, limited
-// by the Connection: GET /api/v4/users/me with the bot token. A token that works records the bot's username and user
-// id on the Connection; a 401 fails with "The bot token is not valid.". No limiter token within the budget is a
-// *delivery.LimitedError. Once the token works, a read of the bot's roles tells whether it may make ephemeral posts;
-// when it may not, the check passes with WarningPressAnswersInThread (D284, F-064); a failed read adds nothing.
-func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, error) {
+// Check runs the Connection check of the Connection publicID on the interactive path, limited by the Connection. A
+// Telegram Connection is checked in steps by checkTelegram, against the unsaved baseURL when it is set. A Mattermost
+// one (C-13.FR-2), which takes no baseURL, is checked with GET /api/v4/users/me with the bot token. A token that works
+// records the bot's username and user id on the Connection; a 401 fails with "The bot token is not valid.". No limiter
+// token within the budget is a *delivery.LimitedError. Once the token works, a read of the bot's roles tells whether
+// it may make ephemeral posts; when it may not, the check passes with WarningPressAnswersInThread (D284, F-064); a
+// failed read adds nothing.
+func (s *Service) Check(ctx context.Context, publicID string, baseURL *string) (CheckResult, error) {
 	row, err := s.row(ctx, s.cfg.Store, publicID)
 	if err != nil {
 		return CheckResult{}, err
+	}
+	if row.Type == TypeTelegram {
+		return s.checkTelegram(ctx, row, baseURL)
+	}
+	if baseURL != nil {
+		return CheckResult{}, &FieldError{Pointer: "/base_url", Code: CodeUnsupported,
+			Detail: "Only a Telegram Connection takes an unsaved base URL."}
 	}
 	c, err := s.client(row)
 	if err != nil {
@@ -904,10 +1023,13 @@ func (s *Service) CheckChannel(ctx context.Context, in destinations.ChannelCheck
 	return destinations.ChannelChecked{ConnectionID: row.ID, Check: res}, nil
 }
 
-// Demo is a demo Connection of `muster dev`: a Mattermost Connection to the fake server.
+// Demo is a demo Connection of `muster dev`: a Mattermost Connection to the fake server, or, with the type telegram, a
+// Telegram one to the fake Bot API in the long-polling mode.
 type Demo struct {
+	Type      string
 	Name      string
 	ServerURL string
+	BaseURL   string
 	BotToken  logging.Secret
 }
 
@@ -928,10 +1050,15 @@ func (s *Service) EnsureDemo(ctx context.Context, d Demo) error {
 		}
 		in := Input{Type: TypeMattermost, Name: d.Name, ServerURL: d.ServerURL, BotToken: keyring.Replace(d.BotToken),
 			Limiter: Limiter{Limit: DefaultLimit, PerSeconds: DefaultPerSeconds}}
+		if d.Type == TypeTelegram {
+			in = Input{Type: TypeTelegram, Name: d.Name, BotAPIBaseURL: d.BaseURL, UpdateMode: ModeLongPolling,
+				BotToken: keyring.Replace(d.BotToken),
+				Limiter:  Limiter{Limit: TelegramDefaultLimit, PerSeconds: TelegramDefaultPerSeconds}}
+		}
 		if err := check(&in, nil); err != nil {
 			return err
 		}
-		c, err := s.insert(ctx, q, in, proxyconf.Config{})
+		c, _, err := s.insert(ctx, q, in, proxyconf.Config{})
 		if err != nil {
 			return err
 		}
@@ -951,8 +1078,14 @@ func connectionOf(r dbgen.GetConnectionRow) (Connection, error) {
 	if err != nil {
 		return Connection{}, err
 	}
+	var warnings []string
+	if r.Type == TypeTelegram {
+		warnings = telegram.BaseURLWarnings(r.TelegramBotApiBaseUrl.String)
+	}
 	return Connection{ID: r.ID, PublicID: r.PublicID, Type: r.Type, Name: r.Name,
-		ServerURL: r.MattermostServerUrl.String, BotToken: storedToken(r).Status(), BotUsername: textOf(r.BotUsername),
+		ServerURL: r.MattermostServerUrl.String, BotAPIBaseURL: r.TelegramBotApiBaseUrl.String,
+		UpdateMode: r.TelegramUpdateMode.String, Warnings: warnings,
+		BotToken: storedToken(r).Status(), BotUsername: textOf(r.BotUsername),
 		BotUserID: textOf(r.BotUserID), Proxy: p, ProxyPassword: storedPassword(r).Status(),
 		Limiter:          Limiter{Limit: r.LimiterLimit, PerSeconds: r.LimiterPerSeconds},
 		DestinationCount: r.DestinationCount, CreatedAt: r.CreatedAt.UTC(), Version: r.Version}, nil
@@ -961,6 +1094,15 @@ func connectionOf(r dbgen.GetConnectionRow) (Connection, error) {
 func storedToken(r dbgen.GetConnectionRow) keyring.StoredSecret {
 	at := r.BotTokenUpdatedAt.UTC()
 	return keyring.StoredSecret{Ciphertext: r.BotTokenCiphertext, KeyID: r.BotTokenKeyID.String, UpdatedAt: &at}
+}
+
+func storedHook(r dbgen.GetConnectionRow) keyring.StoredSecret {
+	s := keyring.StoredSecret{Ciphertext: r.TelegramWebhookSecretCiphertext, KeyID: r.TelegramWebhookSecretKeyID.String}
+	if r.TelegramWebhookSecretUpdatedAt.Valid {
+		at := r.TelegramWebhookSecretUpdatedAt.Time.UTC()
+		s.UpdatedAt = &at
+	}
+	return s
 }
 
 func storedPassword(r dbgen.GetConnectionRow) keyring.StoredSecret {

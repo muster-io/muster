@@ -462,6 +462,43 @@ var MattermostPress = newEvent("mattermost_press", LevelInfo, "C-13",
 		"ephemeral posts.",
 	"connection", "group", "command", "outcome", "answer", "error")
 
+// TelegramPollConflict is logged when getUpdates of a Telegram Connection was refused with 409 (C-14.FR-1, F-018).
+var TelegramPollConflict = newEvent("telegram_poll_conflict", LevelInfo, "C-14",
+	"The long poll of a Telegram Connection was refused with 409 Conflict: another process polls the same bot, or a "+
+		"webhook is set for it. The poller waits backoff_ms, with jitter, and polls again; it is not a delivery "+
+		"outcome and makes nothing Broken. connection is the public_id of the Connection. Lines that keep coming mean "+
+		"that a second installation polls the bot, or that its webhook was set elsewhere: the connection check shows it.",
+	"connection", "backoff_ms")
+
+// TelegramPollFailed is logged when a long poll of a Telegram Connection failed other than with 409 (C-14.FR-1).
+var TelegramPollFailed = newEvent("telegram_poll_failed", LevelWarn, "C-14",
+	"A long poll of a Telegram Connection failed after the retries of the background client class, or an update it "+
+		"brought could not be handed to the router: connection is the public_id of the Connection, error what failed, "+
+		"with the bot token and the path prefix of the base URL masked. The poller backs off and polls again from the "+
+		"stored offset.",
+	"connection", "error")
+
+// TelegramUpdateDropped is logged when an update of a Telegram Connection has no handler (C-14.FR-1, FR-8).
+var TelegramUpdateDropped = newEvent("telegram_update_dropped", LevelInfo, "C-14",
+	"An update of a Telegram Connection reached the update router, which has no handler for its kind and drops it: "+
+		"connection is the public_id of the Connection, kind one of callback_query, chat_message, private_message, "+
+		"my_chat_member or other. Until the handlers of the Telegram adapter and of Account links are registered, "+
+		"presses, messages and /start arrive here.",
+	"connection", "kind")
+
+// TelegramUpdateFailed is logged when the webhook endpoint of a Telegram Connection answered 500 (C-14.FR-1).
+var TelegramUpdateFailed = newEvent("telegram_update_failed", LevelWarn, "C-14",
+	"The webhook endpoint of a Telegram Connection could not look up the Connection or hand the update to the "+
+		"router, usually because the database was unavailable, and answered 500; Telegram sends the update again. "+
+		"connection is the public_id from the path, error what failed.",
+	"connection", "error")
+
+// TelegramWebhookSet is logged when Muster set the webhook of a Telegram Connection (C-14.FR-1).
+var TelegramWebhookSet = newEvent("telegram_webhook_set", LevelInfo, "C-14",
+	"A Telegram Connection was saved in the webhook update mode and setWebhook set its webhook, with a new secret "+
+		"token, at MUSTER_INGEST_URL: connection is the public_id of the Connection, host the host of the webhook's URL.",
+	"connection", "host")
+
 // StormStarted is logged when a Route's new Alert Groups start a Storm (C-11.FR-6).
 var StormStarted = newEvent("storm_started", LevelInfo, "C-11",
 	"The new Alert Groups of a Route exceeded route.storm_threshold within a minute and started a Storm: route is the "+

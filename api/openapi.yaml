@@ -7463,6 +7463,10 @@ components:
         - code: messenger_user_not_found
           description: The Mattermost server has no user with this username; the pointer is `/username`
             (`startMattermostLink`).
+        - code: webhook_call_failed
+          description: Saving a Telegram Connection that enters the webhook update mode, or changes its base URL or bot
+            token in it, called `setWebhook`, or one that leaves it called `deleteWebhook`, and the call failed; nothing
+            was saved. The pointer is `/update_mode`, the detail the step's message.
       - type: unauthenticated
         in: code
         codes:

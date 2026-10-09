@@ -61,9 +61,9 @@ func findings(t *testing.T, svc *connections.Service, q connections.DoctorQuerie
 	return strings.Join(out, "\n")
 }
 
-// TestDoctor is C-02.FR-14: muster doctor checks every Mattermost Connection and Destination that is not deleted, a
-// Telegram one aside, in the background class, and records nothing; a failing step gives its message, and a bot that
-// may not make ephemeral posts the hint that press answers show in the Thread (D284).
+// TestDoctor is C-02.FR-14: muster doctor checks every Connection and Mattermost Destination that is not deleted in the
+// background class, and records nothing; a failing step gives its message — a Telegram Connection's with the step's
+// name — and a bot that may not make ephemeral posts the hint that press answers show in the Thread (D284).
 func TestDoctor(t *testing.T) {
 	e := newEnv(t)
 	mm := e.create(t, "mm")
@@ -84,7 +84,9 @@ func TestDoctor(t *testing.T) {
 
 	got := findings(t, e.svc, e.store)
 	open := "open the bot token of the connection " + broken.PublicID + ": cannot decrypt"
-	want := []string{"connection mm: warning: " + mattermost.HintPressAnswersInThread, "connection broken: " + open, "destination dest-7: ok",
+	want := []string{"connection mm: warning: " + mattermost.HintPressAnswersInThread, "connection broken: " + open,
+		"connection tg-" + telegramID + `: dry_probe: Get "http://127.0.0.1:1/bot0:x/getMe": dial tcp`,
+		"destination dest-7: ok",
 		"destination dest-8: " + mattermost.MessageNotMember, "destination dest-9: its Connection failed its check: " + open,
 		"destination dest-10: its Connection is deleted", "destination dest-11: " + mattermost.MessageOtherTeam}
 	lines := strings.Split(got, "\n")

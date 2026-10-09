@@ -15,7 +15,8 @@ import (
 	"github.com/muster-io/muster/internal/mattermost"
 )
 
-// Connections is what the API needs of internal/connections: Mattermost Connections, their check and their channels.
+// Connections is what the API needs of internal/connections: Mattermost and Telegram Connections, their checks and the
+// channels of a Mattermost one.
 type Connections interface {
 	List(ctx context.Context, f connections.ListFilter) (connections.Page, error)
 	Get(ctx context.Context, publicID string) (connections.Connection, error)
@@ -23,7 +24,7 @@ type Connections interface {
 	Update(ctx context.Context, r connections.Requester, publicID string, version *int64, in connections.Input) (
 		connections.Connection, error)
 	Delete(ctx context.Context, r connections.Requester, publicID string, version *int64) error
-	Check(ctx context.Context, publicID string) (connections.CheckResult, error)
+	Check(ctx context.Context, publicID string, baseURL *string) (connections.CheckResult, error)
 	Channels(ctx context.Context, publicID, teamID, q string) ([]connections.Channel, error)
 	CallbackURL(publicID string) string
 }
@@ -72,7 +73,8 @@ func (s *Server) ListConnections(ctx context.Context, req gen.ListConnectionsReq
 	return out, nil
 }
 
-// CreateConnection is createConnection (C-13.FR-1): a Mattermost Connection; the bot token is write-only.
+// CreateConnection is createConnection (C-13.FR-1, C-14.FR-1): a Mattermost or Telegram Connection; the bot token is
+// write-only.
 func (s *Server) CreateConnection(ctx context.Context, req gen.CreateConnectionRequestObject) (
 	gen.CreateConnectionResponseObject, error) {
 	r, err := connectionRequester(ctx)
@@ -165,11 +167,18 @@ func (s *Server) DeleteConnection(ctx context.Context, req gen.DeleteConnectionR
 	return gen.DeleteConnection204Response{}, nil
 }
 
-// CheckConnection is checkConnection (C-13.FR-2) on the interactive path: the token step with its latency and path,
-// the bot's name once the token works, and the warnings that do not fail the check.
+// CheckConnection is checkConnection (C-13.FR-2, C-14.FR-11) on the interactive path: the steps with their latency and
+// path — the token of a Mattermost Connection; the dry probe, getMe and getWebhookInfo of a Telegram one, only the dry
+// probe with an unsaved base_url — the bot's name once the token works, a Telegram bot's webhook and pending updates,
+// and the warnings that do not fail the check.
 func (s *Server) CheckConnection(ctx context.Context, req gen.CheckConnectionRequestObject) (
 	gen.CheckConnectionResponseObject, error) {
-	res, err := s.connections.Check(ctx, req.ConnectionId)
+	var baseURL *string
+	if req.Body != nil && req.Body.BaseUrl.IsSpecified() && !req.Body.BaseUrl.IsNull() {
+		v := req.Body.BaseUrl.MustGet()
+		baseURL = &v
+	}
+	res, err := s.connections.Check(ctx, req.ConnectionId, baseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -180,8 +189,14 @@ func (s *Server) CheckConnection(ctx context.Context, req gen.CheckConnectionReq
 	}
 	for _, st := range res.Steps {
 		via := gen.ConnectionPath(st.Via)
-		step := gen.ConnectionCheckStep{Name: gen.ConnectionCheckStepName(st.Name), Ok: st.OK, Via: &via}
-		step.LatencyMs.Set(int(st.Latency / time.Millisecond))
+		skipped := st.Skipped
+		step := gen.ConnectionCheckStep{Name: gen.ConnectionCheckStepName(st.Name), Ok: st.OK, Via: &via,
+			Skipped: &skipped}
+		if st.Skipped {
+			step.LatencyMs.SetNull()
+		} else {
+			step.LatencyMs.Set(int(st.Latency / time.Millisecond))
+		}
 		if st.Message != "" {
 			step.Message.Set(st.Message)
 		} else {
@@ -193,6 +208,16 @@ func (s *Server) CheckConnection(ctx context.Context, req gen.CheckConnectionReq
 		out.BotName.Set(res.BotName)
 	} else {
 		out.BotName.SetNull()
+	}
+	if res.WebhookSet != nil {
+		out.WebhookSet.Set(*res.WebhookSet)
+	} else {
+		out.WebhookSet.SetNull()
+	}
+	if res.PendingUpdates != nil {
+		out.PendingUpdates.Set(int(*res.PendingUpdates))
+	} else {
+		out.PendingUpdates.SetNull()
 	}
 	return out, nil
 }
@@ -234,14 +259,18 @@ func channelTypeOf(t string) gen.MattermostChannelType {
 	return gen.MattermostChannelTypeOpen
 }
 
-// connectionInputOf is the Input of a Connection's body; a Telegram body reaches the service, which refuses it.
+// connectionInputOf is the Input of a Connection's body, Mattermost or Telegram.
 func connectionInputOf(body gen.ConnectionInput) (connections.Input, error) {
 	kind, err := body.Discriminator()
 	if err != nil {
 		return connections.Input{}, fieldProblem(http.StatusBadRequest, "/type", fieldInvalidFormat,
 			"The type is not mattermost or telegram.")
 	}
-	if kind != connections.TypeMattermost {
+	switch kind {
+	case connections.TypeTelegram:
+		return telegramInputOf(body)
+	case connections.TypeMattermost:
+	default:
 		return connections.Input{Type: kind}, nil
 	}
 	m, err := body.AsMattermostConnectionInput()
@@ -257,8 +286,28 @@ func connectionInputOf(body gen.ConnectionInput) (connections.Input, error) {
 	return in, nil
 }
 
-// connectionOf is the API form of a Connection: its secrets as their status, and its callback address.
+// telegramInputOf is the Input of a Telegram Connection's body.
+func telegramInputOf(body gen.ConnectionInput) (connections.Input, error) {
+	t, err := body.AsTelegramConnectionInput()
+	if err != nil {
+		return connections.Input{}, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
+			"The body is not a Telegram Connection.")
+	}
+	in := connections.Input{Type: connections.TypeTelegram, Name: t.Name, BotAPIBaseURL: t.BotApiBaseUrl,
+		UpdateMode: string(t.UpdateMode), Proxy: proxyInput(t.Proxy),
+		Limiter: connections.Limiter{Limit: int64(t.Limiter.Limit), PerSeconds: int64(t.Limiter.PerSeconds)}}
+	if t.BotToken != nil {
+		in.BotToken = keyring.Replace(logging.Secret(*t.BotToken))
+	}
+	return in, nil
+}
+
+// connectionOf is the API form of a Connection: its secrets as their status, and the callback address of a Mattermost
+// one or the warnings of a Telegram one.
 func (s *Server) connectionOf(c connections.Connection) (gen.Connection, error) {
+	if c.Type == connections.TypeTelegram {
+		return telegramConnectionOf(c)
+	}
 	tag := etag(c.Version)
 	callback := s.connections.CallbackURL(c.PublicID)
 	m := gen.MattermostConnection{Id: c.PublicID, Type: gen.MattermostConnectionTypeMattermost, Name: c.Name,
@@ -272,6 +321,30 @@ func (s *Server) connectionOf(c connections.Connection) (gen.Connection, error) 
 	}
 	var out gen.Connection
 	if err := out.FromMattermostConnection(m); err != nil {
+		return gen.Connection{}, err
+	}
+	return out, nil
+}
+
+// telegramConnectionOf is the API form of a Telegram Connection.
+func telegramConnectionOf(c connections.Connection) (gen.Connection, error) {
+	tag := etag(c.Version)
+	t := gen.TelegramConnection{Id: c.PublicID, Type: gen.TelegramConnectionTypeTelegram, Name: c.Name,
+		BotApiBaseUrl: c.BotAPIBaseURL, UpdateMode: gen.TelegramUpdateMode(c.UpdateMode),
+		BotTokenStatus: keyStatusOf(c.BotToken), Proxy: proxyOf(c.Proxy, c.ProxyPassword),
+		Limiter:          gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)},
+		DestinationCount: int(c.DestinationCount), Warnings: make([]gen.TelegramConnectionWarnings, 0, len(c.Warnings)),
+		CreatedAt: c.CreatedAt, Etag: &tag}
+	for _, w := range c.Warnings {
+		t.Warnings = append(t.Warnings, gen.TelegramConnectionWarnings(w))
+	}
+	if c.BotUsername != nil {
+		t.BotUsername.Set(*c.BotUsername)
+	} else {
+		t.BotUsername.SetNull()
+	}
+	var out gen.Connection
+	if err := out.FromTelegramConnection(t); err != nil {
 		return gen.Connection{}, err
 	}
 	return out, nil

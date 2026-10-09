@@ -10,9 +10,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/clock"
@@ -24,6 +26,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
+	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
@@ -106,7 +109,7 @@ func setupLiveEnv(t *testing.T, s dbtest.Server) *liveEnv {
 		Log: logger})
 	e := &liveEnv{d: d, orgID: org.ID, log: &log, fake: f}
 	e.conns = connections.New(connections.Config{OrgID: org.ID, Store: connections.NewStore(d.Pool), Keyring: keys,
-		Audit: w, Clocks: clocks, Log: logger,
+		Audit: w, Clocks: clocks, Log: logger, IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081"},
 		Network:     mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}},
 		Interactive: &delivery.Interactive{OrgID: org.ID, Store: delivery.NewStore(d.Pool, d.Pool), Clocks: clocks},
 		Abandon: func(ctx context.Context, tx connectionsdb.DBTX, id int64) (func(context.Context), error) {
@@ -148,7 +151,83 @@ func TestLive(t *testing.T) {
 		t.Run("crud", e.crud)
 		t.Run("deleteConnection", e.deleteConnection)
 		t.Run("demo", e.demo)
+		t.Run("telegram", e.telegram)
 	})
+}
+
+// telegram is C-14.FR-1 on the real store: a Telegram Connection created and switched to the webhook mode and back
+// against the fake Bot API, the poller's list with the stored offset, HandleOnce holding the offset row so that a second
+// router with the same update waits and skips it, and an offset that never goes back.
+func (e *liveEnv) telegram(t *testing.T) {
+	ctx := t.Context()
+	f := faketelegram.New()
+	if err := f.Start(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close(context.WithoutCancel(ctx)) })
+	in := connections.Input{Type: connections.TypeTelegram, Name: "live-tg", BotAPIBaseURL: f.URL() + "/",
+		UpdateMode: connections.ModeWebhook, BotToken: keyring.Replace("777001:live-token"),
+		Limiter: connections.Limiter{Limit: 1000, PerSeconds: 1}}
+	c, err := e.conns.Create(ctx, by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, secret, err := e.conns.Hooked(ctx, c.PublicID); err != nil || string(secret) != f.Webhooks()["777001:live-token"].SecretToken {
+		t.Fatalf("hooked = %v", err)
+	}
+	in.UpdateMode, in.BotToken = connections.ModeLongPolling, keyring.Keep
+	got, err := e.conns.Update(ctx, by, c.PublicID, nil, in)
+	if err != nil || got.UpdateMode != connections.ModeLongPolling || len(f.Webhooks()) != 0 ||
+		e.count(t, `SELECT count(*) FROM connections WHERE id = $1 AND telegram_webhook_secret_ciphertext IS NULL`,
+			c.ID) != 1 {
+		t.Fatalf("back to long polling = %+v, %v", got, err)
+	}
+	list, err := e.conns.Polling(ctx)
+	if err != nil || len(list) != 1 || list[0].ID != c.ID || list[0].Offset != nil {
+		t.Fatalf("polling = %+v, %v", list, err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		_, err := e.conns.HandleOnce(ctx, c.ID, 10, func(context.Context) error {
+			close(entered)
+			<-release
+			return nil
+		})
+		first <- err
+	}()
+	<-entered
+	second := make(chan bool, 1)
+	go func() {
+		ran, _ := e.conns.HandleOnce(ctx, c.ID, 10, func(context.Context) error { return nil })
+		second <- ran
+	}()
+	select {
+	case <-second:
+		t.Fatal("the second router did not wait for the first")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	if <-second {
+		t.Fatal("the same update was handled twice")
+	}
+	if err := connectionsdb.New(e.d.Pool).StoreUpdateOffset(ctx, connectionsdb.StoreUpdateOffsetParams{OrgID: e.orgID,
+		ID: c.ID, Next: 5}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ = e.conns.Polling(ctx)
+	if *list[0].Offset != 11 {
+		t.Fatalf("offset %d", *list[0].Offset)
+	}
+	if err := e.conns.Delete(ctx, by, c.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if ran, err := e.conns.HandleOnce(ctx, c.ID, 20, func(context.Context) error { return nil }); ran || err != nil {
+		t.Fatalf("a deleted Connection = %v %v", ran, err)
+	}
 }
 
 // crud is C-13.FR-1 and FR-2 on the real store: a Connection created, checked, read, listed and updated; a name that
@@ -161,7 +240,7 @@ func (e *liveEnv) crud(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := e.conns.Check(ctx, c.PublicID)
+	res, err := e.conns.Check(ctx, c.PublicID, nil)
 	if err != nil || !res.OK || res.BotName != fakemattermost.BotUsername {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
