@@ -471,6 +471,27 @@ var MattermostPress = newEvent("mattermost_press", LevelInfo, "C-13",
 		"ephemeral posts.",
 	"connection", "group", "command", "outcome", "answer", "error")
 
+// TelegramPress is logged for each button press of a Telegram Connection that was not dropped (C-14.FR-4, FR-5).
+var TelegramPress = newEvent("telegram_press", LevelInfo, "C-14",
+	"A callback_query of a Telegram Connection — a button press — was handled and answered with answerCallbackQuery "+
+		"before the Root message was edited: connection is the public_id of the Connection; group the public_id of "+
+		"the Alert Group and command the Command, once the button data is verified; outcome done or unchanged for a "+
+		"Command that ran; refused, forbidden, not_linked, disabled or not_verified for a press that changed nothing; "+
+		"failed when a read or the Command failed. error, when present, says why the press failed or why its answer "+
+		"was not made — no limiter token within the interactive budget, or Telegram refusing an answer that came too "+
+		"late — masked of the bot token. The update is confirmed whatever the outcome, so that a press never runs "+
+		"twice.",
+	"connection", "group", "command", "outcome", "error")
+
+// TelegramPressDropped is logged when a Telegram button press was dropped as too old (C-14.FR-4, AC-4).
+var TelegramPressDropped = newEvent("telegram_press_dropped", LevelInfo, "C-14",
+	"A button press of a Telegram Connection arrived after the Connection had received no updates for longer than "+
+		"telegram.press_max_age — no successful long poll, or Muster not running — and was dropped without an answer: "+
+		"Telegram kept it during the gap, and acting on it now could undo what people did since. connection is the "+
+		"public_id of the Connection, gap_seconds the gap before the update that carried the press. Nothing changed; "+
+		"the person can press again.",
+	"connection", "gap_seconds")
+
 // TelegramPollConflict is logged when getUpdates of a Telegram Connection was refused with 409 (C-14.FR-1, F-018).
 var TelegramPollConflict = newEvent("telegram_poll_conflict", LevelInfo, "C-14",
 	"The long poll of a Telegram Connection was refused with 409 Conflict: another process polls the same bot, or a "+
@@ -491,8 +512,8 @@ var TelegramPollFailed = newEvent("telegram_poll_failed", LevelWarn, "C-14",
 var TelegramUpdateDropped = newEvent("telegram_update_dropped", LevelInfo, "C-14",
 	"An update of a Telegram Connection reached the update router, which has no handler for its kind and drops it: "+
 		"connection is the public_id of the Connection, kind one of callback_query, chat_message, private_message, "+
-		"my_chat_member or other. Until the handlers of the Telegram adapter and of Account links are registered, "+
-		"presses, messages and /start arrive here.",
+		"my_chat_member or other. Until the handler of Account links is registered, private messages such as /start "+
+		"arrive here.",
 	"connection", "kind")
 
 // TelegramUpdateFailed is logged when the webhook endpoint of a Telegram Connection answered 500 (C-14.FR-1).

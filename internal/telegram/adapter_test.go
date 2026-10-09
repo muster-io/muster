@@ -25,10 +25,18 @@ import (
 
 const groupPage = "http://localhost:8080/alert-groups/AG0000000000A1"
 
-// targets are the Targets of the tests by Destination id; err answers every lookup when set.
+// targets are the Targets of the tests by Destination id; err answers every lookup when set, and awaitErr every wait
+// for the updates of a Connection, which awaited records.
 type targets struct {
-	byID map[int64]Target
-	err  error
+	byID     map[int64]Target
+	err      error
+	awaitErr error
+	awaited  []int64
+}
+
+func (ts *targets) AwaitUpdates(_ context.Context, id int64) error {
+	ts.awaited = append(ts.awaited, id)
+	return ts.awaitErr
 }
 
 func (ts *targets) TelegramTarget(_ context.Context, id int64) (Target, error) {
@@ -265,6 +273,18 @@ func TestUpdateKeepsTheKeyboard(t *testing.T) {
 	if u := e.adapter.Update(t.Context(), call(2), o.MessageID, root(messages.ColourFiring)); u.Kind !=
 		delivery.OutcomeOK {
 		t.Fatalf("update by username = %+v", u)
+	}
+	// C-14.FR-5: each edit first waited for the updates of its Connection, so that a press is answered before it; a
+	// wait that fails edits nothing and is retried.
+	if len(e.targets.awaited) != 5 || e.targets.awaited[0] != 5 {
+		t.Fatalf("awaited %v", e.targets.awaited)
+	}
+	e.targets.awaitErr = errors.New("database down")
+	edits := len(only(t, e.fake).Edits)
+	if u := e.adapter.Update(t.Context(), call(1), o.MessageID, root(messages.ColourAcknowledged)); u.Kind !=
+		delivery.OutcomeTransient || strings.Contains(string(u.Error), "database") ||
+		len(only(t, e.fake).Edits) != edits {
+		t.Fatalf("a failed wait = %+v", u)
 	}
 }
 

@@ -223,7 +223,10 @@ type Queries interface {
 	CountConnectionDestinations(ctx context.Context, arg dbgen.CountConnectionDestinationsParams) (int64, error)
 	MarkConnectionDeleted(ctx context.Context, arg dbgen.MarkConnectionDeletedParams) error
 	ListPollingConnections(ctx context.Context, orgID int64) ([]dbgen.ListPollingConnectionsRow, error)
-	LockUpdateOffset(ctx context.Context, arg dbgen.LockUpdateOffsetParams) (pgtype.Int8, error)
+	LockUpdates(ctx context.Context, arg dbgen.LockUpdatesParams) error
+	AwaitUpdates(ctx context.Context, arg dbgen.AwaitUpdatesParams) error
+	GetUpdateOffset(ctx context.Context, arg dbgen.GetUpdateOffsetParams) (dbgen.GetUpdateOffsetRow, error)
+	GetOutage(ctx context.Context) (dbgen.GetOutageRow, error)
 	StoreUpdateOffset(ctx context.Context, arg dbgen.StoreUpdateOffsetParams) error
 	LockDemo(ctx context.Context, key int64) error
 	GetDestinationTarget(ctx context.Context, arg dbgen.GetDestinationTargetParams) (dbgen.GetDestinationTargetRow,

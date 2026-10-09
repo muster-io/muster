@@ -1277,9 +1277,9 @@ func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error
 // probeTelegram pushes the secrets through a Telegram Connection (C-14.FR-12): the bot token, and the proxy password of
 // a SOCKS5 proxy that refuses it, through its creation, its check, an unsaved base URL, a mode switch whose setWebhook
 // the stand-in refuses, muster doctor with its Destination, the Leader's poller, the adapter's posts, edits, replies and
-// Destination checks, the Destination check of a save and the deleteWebhook of a deletion; the webhook secret token
-// through setWebhook and the webhook endpoint; and the token through a refused connection. The stand-in server echoes
-// the token, the path and the body of each request in its descriptions.
+// Destination checks, the answers to button presses, the Destination check of a save and the deleteWebhook of a
+// deletion; the webhook secret token through setWebhook and the webhook endpoint; and the token through a refused
+// connection. The stand-in server echoes the token, the path and the body of each request in its descriptions.
 func probeTelegram(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
@@ -1394,6 +1394,8 @@ func probeTelegram(ctx context.Context, secrets []string, log io.Writer) error {
 	telegram.NewWebhook(telegram.WebhookConfig{Connections: svc, Router: router, Log: logger}).ServeHTTP(rec, req)
 	errs = append(errs, errors.New(rec.body.String()))
 	errs = append(errs, probeTelegramAdapter(ctx, svc, clocks, c.PublicID))
+	errs = append(errs, probeTelegramPresses(ctx, router, k, clocks, logger, telegram.Conn{ID: store.row.ID,
+		PublicID: c.PublicID, Client: client}))
 	store.row.TelegramUpdateMode = pgtype.Text{String: connections.ModeWebhook, Valid: true}
 	errs = append(errs, svc.Delete(ctx, by, c.PublicID, nil))
 	return errors.Join(errs...)
@@ -1424,6 +1426,52 @@ func probeTelegramAdapter(ctx context.Context, svc *connections.Service, clocks 
 		errs = append(errs, errors.New(st.Message))
 	}
 	return errors.Join(errs...)
+}
+
+// probeTelegramPresses routes Telegram button presses of conn, whose client answers through the stand-in server: one
+// that cannot be verified, one from an account without an Account link and one whose Command is refused, each
+// answered with answerCallbackQuery, which the stand-in refuses with the bot token in its error, and each logged.
+func probeTelegramPresses(ctx context.Context, router *telegram.Router, k *keyring.Keyring, clocks clock.Clocks,
+	logger *logging.Logger, conn telegram.Conn) error {
+	action, _, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectRoot, PublicID: "AGAAAAAAAAAAA1",
+		Command: buttons.CommandAcknowledge})
+	if err != nil {
+		return err
+	}
+	router.Handle(telegram.KindCallbackQuery, (&telegram.Presses{Bindings: probeTGBindings{}, Links: probeTGLinks{},
+		Commands: probeCommands{}, Keys: k, Path: deliverytest.Unlimited(1, clocks), Business: clocks.Business,
+		PublicURL: "http://localhost:8080", Log: logger}).Handle)
+	var errs []error
+	for i, p := range []struct{ from, data string }{{"5001", "x" + action[1:]}, {"6001", action}, {"5001", action}} {
+		u, err := telegram.ParseUpdate(fmt.Appendf(nil, `{"update_id":%d,"callback_query":{"id":"q%d","from":{"id":%s},
+			"message":{"message_id":1,"chat":{"id":-1001000000001,"type":"channel"}},"data":%q}}`, 100+i, i, p.from,
+			p.data))
+		if err != nil {
+			return err
+		}
+		_, err = router.Route(ctx, conn, u)
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// probeTGLinks link the Telegram account 5001 only.
+type probeTGLinks struct{}
+
+func (probeTGLinks) Lookup(ctx context.Context, space, external string) (accountlinks.User, error) {
+	if external == "5001" {
+		external = "u-linked"
+	}
+	return probeLinks{}.Lookup(ctx, space, external)
+}
+
+// probeTGBindings bind every Telegram press to Destination 1.
+type probeTGBindings struct{}
+
+func (probeTGBindings) TelegramPressBinding(context.Context, int64, string, int64, int64) (delivery.Binding, error) {
+	conn := int64(1)
+	return delivery.Binding{Destination: delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1",
+		Type: delivery.TypeTelegram, Connection: &conn}, ChannelID: "-1001000000001", Language: "en"}, nil
 }
 
 // probePresses sends button presses to the callback of the Connection publicID: one that cannot be verified, one from
@@ -1672,8 +1720,17 @@ func (s *probeConnections) ListPollingConnections(context.Context, int64) ([]cdb
 		ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt, Version: r.Version}}, nil
 }
 
-func (s *probeConnections) LockUpdateOffset(context.Context, cdb.LockUpdateOffsetParams) (pgtype.Int8, error) {
-	return pgtype.Int8{}, nil
+func (s *probeConnections) LockUpdates(context.Context, cdb.LockUpdatesParams) error { return nil }
+
+func (s *probeConnections) AwaitUpdates(context.Context, cdb.AwaitUpdatesParams) error { return nil }
+
+func (s *probeConnections) GetUpdateOffset(context.Context, cdb.GetUpdateOffsetParams) (cdb.GetUpdateOffsetRow,
+	error) {
+	return cdb.GetUpdateOffsetRow{}, nil
+}
+
+func (s *probeConnections) GetOutage(context.Context) (cdb.GetOutageRow, error) {
+	return cdb.GetOutageRow{}, nil
 }
 
 func (s *probeConnections) StoreUpdateOffset(context.Context, cdb.StoreUpdateOffsetParams) error {

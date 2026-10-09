@@ -12,6 +12,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const awaitUpdates = `-- name: AwaitUpdates :exec
+SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))
+`
+
+type AwaitUpdatesParams struct {
+	LockClass int32
+	ID        int64
+}
+
+// AwaitUpdates takes and, as its transaction ends at once, releases the update lock of a Telegram Connection shared:
+// it waits until no update of the Connection is being handled, so that an edit of its Root message follows the answer
+// to the press that caused it.
+func (q *Queries) AwaitUpdates(ctx context.Context, arg AwaitUpdatesParams) error {
+	_, err := q.db.Exec(ctx, awaitUpdates, arg.LockClass, arg.ID)
+	return err
+}
+
 const countConnectionDestinations = `-- name: CountConnectionDestinations :one
 SELECT count(*)
 FROM destinations
@@ -195,6 +212,31 @@ func (q *Queries) GetDestinationTarget(ctx context.Context, arg GetDestinationTa
 	return i, err
 }
 
+const getOutage = `-- name: GetOutage :one
+SELECT coalesce((SELECT rs.alive_at FROM runtime_state rs),
+                '0001-01-01 00:00:00+00')::timestamptz AS alive_at,
+       coalesce((SELECT d.started_at FROM downtime_periods d ORDER BY d.ended_at DESC, d.id DESC LIMIT 1),
+                '0001-01-01 00:00:00+00')::timestamptz AS downtime_started_at,
+       coalesce((SELECT d.ended_at FROM downtime_periods d ORDER BY d.ended_at DESC, d.id DESC LIMIT 1),
+                '0001-01-01 00:00:00+00')::timestamptz AS downtime_ended_at
+`
+
+type GetOutageRow struct {
+	AliveAt           time.Time
+	DowntimeStartedAt time.Time
+	DowntimeEndedAt   time.Time
+}
+
+// GetOutage reads, for the age of Telegram presses (C-14.FR-4), when Muster was last known not to run: the Leader's
+// alive mark and the latest downtime period, the zero time for none. All three are installation-wide and on the
+// business clock.
+func (q *Queries) GetOutage(ctx context.Context) (GetOutageRow, error) {
+	row := q.db.QueryRow(ctx, getOutage)
+	var i GetOutageRow
+	err := row.Scan(&i.AliveAt, &i.DowntimeStartedAt, &i.DowntimeEndedAt)
+	return i, err
+}
+
 const getTelegramDestinationTarget = `-- name: GetTelegramDestinationTarget :one
 SELECT d.telegram_channel_id, d.telegram_channel_chat_id, d.telegram_discussion_chat_id, c.id, c.public_id, c.type,
        c.name, c.telegram_bot_api_base_url, c.bot_token_ciphertext, c.bot_token_key_id, c.bot_token_updated_at,
@@ -253,6 +295,32 @@ func (q *Queries) GetTelegramDestinationTarget(ctx context.Context, arg GetTeleg
 		&i.ProxyPasswordUpdatedAt,
 		&i.Version,
 	)
+	return i, err
+}
+
+const getUpdateOffset = `-- name: GetUpdateOffset :one
+SELECT telegram_update_offset, bot_token_updated_at
+FROM connections
+WHERE org_id = $1 AND id = $2 AND type = 'telegram' AND deleted_at IS NULL
+`
+
+type GetUpdateOffsetParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type GetUpdateOffsetRow struct {
+	TelegramUpdateOffset pgtype.Int8
+	BotTokenUpdatedAt    time.Time
+}
+
+// GetUpdateOffset reads telegram_update_offset of a Telegram Connection that is not deleted — the id after the last
+// update handed to the router — and when its bot token was set, without a row lock, under the update lock of the
+// Connection.
+func (q *Queries) GetUpdateOffset(ctx context.Context, arg GetUpdateOffsetParams) (GetUpdateOffsetRow, error) {
+	row := q.db.QueryRow(ctx, getUpdateOffset, arg.OrgID, arg.ID)
+	var i GetUpdateOffsetRow
+	err := row.Scan(&i.TelegramUpdateOffset, &i.BotTokenUpdatedAt)
 	return i, err
 }
 
@@ -629,26 +697,22 @@ func (q *Queries) LockDemo(ctx context.Context, key int64) error {
 	return err
 }
 
-const lockUpdateOffset = `-- name: LockUpdateOffset :one
-SELECT telegram_update_offset
-FROM connections
-WHERE org_id = $1 AND id = $2 AND type = 'telegram' AND deleted_at IS NULL
-FOR NO KEY UPDATE
+const lockUpdates = `-- name: LockUpdates :exec
+SELECT pg_advisory_xact_lock($1::int, hashint8($2::bigint))
 `
 
-type LockUpdateOffsetParams struct {
-	OrgID int64
-	ID    int64
+type LockUpdatesParams struct {
+	LockClass int32
+	ID        int64
 }
 
-// LockUpdateOffset reads telegram_update_offset of a Telegram Connection that is not deleted — the id after the last
-// update handed to the router — and locks it until the transaction ends, so that a second poller or a webhook request
-// with the same update waits for the first and then skips it.
-func (q *Queries) LockUpdateOffset(ctx context.Context, arg LockUpdateOffsetParams) (pgtype.Int8, error) {
-	row := q.db.QueryRow(ctx, lockUpdateOffset, arg.OrgID, arg.ID)
-	var telegram_update_offset pgtype.Int8
-	err := row.Scan(&telegram_update_offset)
-	return telegram_update_offset, err
+// LockUpdates takes, until the transaction ends, the update lock of a Telegram Connection (class
+// db.TelegramUpdateLockClass, keyed by hashint8 of its id), so that a second poller or a webhook request with the same
+// update waits for the first and then skips it. It never locks the connections row, which a save of the Connection
+// holds while setWebhook runs; a collision of the hash only serializes the updates of two Connections.
+func (q *Queries) LockUpdates(ctx context.Context, arg LockUpdatesParams) error {
+	_, err := q.db.Exec(ctx, lockUpdates, arg.LockClass, arg.ID)
+	return err
 }
 
 const markConnectionDeleted = `-- name: MarkConnectionDeleted :exec
@@ -699,19 +763,27 @@ func (q *Queries) SetBotIdentity(ctx context.Context, arg SetBotIdentityParams) 
 const storeUpdateOffset = `-- name: StoreUpdateOffset :exec
 UPDATE connections
 SET telegram_update_offset = GREATEST(coalesce(telegram_update_offset, $1::bigint), $1::bigint)
-WHERE org_id = $2 AND id = $3 AND type = 'telegram'
+WHERE org_id = $2 AND id = $3 AND type = 'telegram' AND bot_token_updated_at = $4::timestamptz
 `
 
 type StoreUpdateOffsetParams struct {
-	Next  int64
-	OrgID int64
-	ID    int64
+	Next           int64
+	OrgID          int64
+	ID             int64
+	TokenUpdatedAt time.Time
 }
 
 // StoreUpdateOffset raises telegram_update_offset of a Telegram Connection to @next; it never lowers it, so that a
-// poller of a frozen old Leader cannot move it back. It is not a change of the configuration.
+// poller of a frozen old Leader cannot move it back. It changes nothing when the bot token was set again since
+// @token_updated_at, which forgot telegram_update_offset: the ids of another bot's updates start elsewhere. It is not
+// a change of the configuration.
 func (q *Queries) StoreUpdateOffset(ctx context.Context, arg StoreUpdateOffsetParams) error {
-	_, err := q.db.Exec(ctx, storeUpdateOffset, arg.Next, arg.OrgID, arg.ID)
+	_, err := q.db.Exec(ctx, storeUpdateOffset,
+		arg.Next,
+		arg.OrgID,
+		arg.ID,
+		arg.TokenUpdatedAt,
+	)
 	return err
 }
 

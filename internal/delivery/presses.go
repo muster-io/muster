@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -62,4 +63,24 @@ func (s *Service) PostDestination(ctx context.Context, connectionID int64, postI
 	}
 	return Destination{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Type: TypeMattermost,
 		Connection: &connectionID}, true, nil
+}
+
+// TelegramPressBinding reads the binding of a press on the message messageID of the chat chatID of the Telegram
+// Connection connectionID that names the Alert Group groupPublicID (C-14.FR-4): the delivery of that Alert Group to a
+// Telegram Destination of the Connection, not deleted, whose channel is chatID and whose Root message is the channel
+// post messageID; ErrNotBound when there is none. Its ChannelID is the chat id in decimal.
+func (s *Service) TelegramPressBinding(ctx context.Context, connectionID int64, groupPublicID string, chatID,
+	messageID int64) (Binding, error) {
+	r, err := s.store.q().GetTelegramPressBinding(ctx, dbgen.GetTelegramPressBindingParams{OrgID: s.orgID,
+		ConnectionID: pgtype.Int8{Int64: connectionID, Valid: true}, ChatID: chatID, GroupPublicID: groupPublicID,
+		MessageID: strconv.FormatInt(messageID, 10)})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Binding{}, ErrNotBound
+	}
+	if err != nil {
+		return Binding{}, fmt.Errorf("read the binding of a press on the alert group %s: %w", groupPublicID, err)
+	}
+	return Binding{Destination: Destination{ID: r.DestinationID, PublicID: r.DestinationPublicID,
+		Name: r.DestinationName, Type: TypeTelegram, Connection: &connectionID},
+		ChannelID: strconv.FormatInt(chatID, 10), Language: r.Language, SnoozeSeconds: r.SnoozeDurationsSeconds}, nil
 }

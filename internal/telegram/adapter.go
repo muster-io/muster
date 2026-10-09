@@ -43,9 +43,11 @@ func (t Target) channel() string {
 }
 
 // Targets find the Target of a Destination by its id, declared by their consumer; *connections.Service implements
-// them. A Destination without one is ErrNoTarget.
+// them. A Destination without one is ErrNoTarget. AwaitUpdates waits until no update of the Connection is being
+// handled, under its update lock.
 type Targets interface {
 	TelegramTarget(ctx context.Context, destinationID int64) (Target, error)
+	AwaitUpdates(ctx context.Context, connectionID int64) error
 }
 
 // Adapter is the delivery adapter of Telegram Destinations (C-11.FR-7, C-14): Publish and Update of Root messages as
@@ -94,7 +96,9 @@ func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Messa
 }
 
 // Update edits the Root message messageID to m, always with the whole keyboard of its new state (C-14.FR-15, F-011),
-// which an empty one removes on purpose. An edit notifies nobody and mentions nobody (F-012).
+// which an empty one removes on purpose. An edit notifies nobody and mentions nobody (F-012). It first waits until no
+// update of the Connection is being handled, so that a press is answered before the edit its Command causes
+// (C-14.FR-5, AC-18): the press handler runs under the same update lock until it has answered.
 func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string, m delivery.Message) delivery.Outcome {
 	t, fail := a.target(ctx, c)
 	if fail != nil {
@@ -104,6 +108,10 @@ func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string,
 	if err != nil || id <= 0 {
 		return delivery.Outcome{Kind: delivery.OutcomeUnknown,
 			Error: outbound.Untrusted("the root message id " + strconv.Quote(messageID) + " is not a Telegram message id")}
+	}
+	if err := a.Targets.AwaitUpdates(ctx, t.ConnectionID); err != nil {
+		return delivery.Outcome{Kind: delivery.OutcomeTransient,
+			Error: "the presses of the connection could not be awaited"}
 	}
 	out := a.message(c, writer{plain: c.Plain}, m, "")
 	out.ChatID, out.MessageID = chatRef(t.channel()), id

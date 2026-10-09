@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/logging"
 )
@@ -47,7 +48,7 @@ func (s *syncBuffer) lines(event string) []map[string]any {
 }
 
 // memOffsets are the stored offsets of the Connections, shared by every poller and router of a test; HandleOnce holds
-// the offset of its Connection locked, as the row lock does.
+// the offset of its Connection locked, as the update lock does.
 type memOffsets struct {
 	mu      sync.Mutex
 	locks   map[int64]*sync.Mutex
@@ -426,5 +427,149 @@ func TestBackoffAndJitter(t *testing.T) {
 	p.wait(t.Context(), time.Millisecond)
 	if time.Since(start) > time.Second {
 		t.Fatal("wait ignored its context")
+	}
+}
+
+// TestPollerGapOfAConnectionAddedLater covers C-14.FR-4: a Connection that enters long polling while a run goes on,
+// such as one switched from the webhook mode, is measured from then, not from the start of the run; one that leaves
+// long polling is forgotten.
+func TestPollerGapOfAConnectionAddedLater(t *testing.T) {
+	e := newPollerEnv(t)
+	business := clock.NewManual(press0)
+	g := &gaps{}
+	p := e.poller(nil, nil)
+	p.Router.Handle(KindPrivateMessage, g.handler)
+	p.Outages, p.Clock = fixedOutages{}, business
+	e.enqueue(t, 1)
+	stop := run(t, p)
+	defer func() { _ = stop() }()
+	eventually(t, "the first update", func() bool { _, ok := g.of(1); return ok })
+	business.Advance(2 * time.Hour)
+	const other = "777002:other-token"
+	second := Polled{Conn: Conn{ID: 2, PublicID: "CNAAAAAAAAAAT2",
+		Client: newClient(t, Settings{BaseURL: e.fake.URL(), Token: other})}, Version: 1}
+	e.source.set(e.conn, second)
+	business.Advance(time.Minute)
+	raw, _ := json.Marshal(map[string]any{"update_id": 50, "message": map[string]any{"message_id": 50,
+		"chat": map[string]any{"id": 42, "type": "private"}, "text": "/start"}})
+	if _, err := e.fake.Enqueue(t.Context(), other, raw); err != nil {
+		t.Fatal(err)
+	}
+	p.Wake()
+	eventually(t, "the update of the added Connection", func() bool { _, ok := g.of(50); return ok })
+	if d, _ := g.of(50); d > time.Minute {
+		t.Errorf("the Connection added later has the gap %v", d)
+	}
+	e.source.set(e.conn)
+	p.Wake()
+	eventually(t, "the Connection to be forgotten", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		_, ok := p.received[2]
+		return !ok
+	})
+}
+
+// fixedOutages answer one Outage, or fail.
+type fixedOutages struct {
+	o   Outage
+	err error
+}
+
+func (f fixedOutages) Outage(context.Context) (Outage, error) { return f.o, f.err }
+
+// gaps records the gap of each update a handler saw.
+type gaps struct {
+	mu  sync.Mutex
+	got map[int64]time.Duration
+}
+
+func (g *gaps) handler(_ context.Context, _ Conn, u Update) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.got == nil {
+		g.got = map[int64]time.Duration{}
+	}
+	g.got[u.UpdateID] = u.Gap
+	return nil
+}
+
+func (g *gaps) of(id int64) (time.Duration, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	d, ok := g.got[id]
+	return d, ok
+}
+
+// TestPollerMeasuresTheGapBeforeEachPoll covers C-14.FR-4 (journal D293): each update carries the business time since
+// the Connection's updates were last received — the end of the last successful poll of this process, or, before the
+// first, the start of the outage just before the run. A full batch passes its gap on to the next poll, so that every
+// update Telegram kept during an outage gets it; a new run of the same process measures from its own last poll.
+func TestPollerMeasuresTheGapBeforeEachPoll(t *testing.T) {
+	e := newPollerEnv(t)
+	business := clock.NewManual(press0)
+	g := &gaps{}
+	outage := fixedOutages{o: Outage{AliveAt: press0, DowntimeStart: press0.Add(-3 * time.Hour),
+		DowntimeEnd: press0.Add(-time.Second)}}
+	poller := func() *Poller {
+		p := e.poller(nil, nil)
+		p.Router.Handle(KindPrivateMessage, g.handler)
+		p.Outages, p.Clock = outage, business
+		return p
+	}
+	ids := make([]int64, 101)
+	for i := range ids {
+		ids[i] = int64(i + 1)
+	}
+	e.enqueue(t, ids...)
+	p := poller()
+	stop := run(t, p)
+	eventually(t, "the kept updates", func() bool { _, ok := g.of(101); return ok })
+	for _, id := range []int64{1, 100, 101} {
+		if d, _ := g.of(id); d != 3*time.Hour {
+			t.Errorf("the kept update %d has the gap %v", id, d)
+		}
+	}
+	business.Advance(10 * time.Minute)
+	e.enqueue(t, 102)
+	eventually(t, "an update after a quiet period", func() bool { _, ok := g.of(102); return ok })
+	if d, _ := g.of(102); d != 10*time.Minute {
+		t.Errorf("after a quiet period the gap is %v", d)
+	}
+	business.Advance(2 * time.Hour)
+	e.enqueue(t, 103)
+	eventually(t, "an update after no poll for 2 h", func() bool { _, ok := g.of(103); return ok })
+	if d, _ := g.of(103); d != 2*time.Hour {
+		t.Errorf("after no successful poll for 2 h the gap is %v", d)
+	}
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	// The polling task runs again in the same process: its last poll counts, not the outage before the first run.
+	business.Advance(time.Minute)
+	e.enqueue(t, 104)
+	stop = run(t, p)
+	eventually(t, "an update of the second run", func() bool { _, ok := g.of(104); return ok })
+	if d, _ := g.of(104); d != time.Minute {
+		t.Errorf("the second run's gap %v", d)
+	}
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	// A run whose Outages fail stops with the error; without Outages a run measures from its start.
+	p.Outages = fixedOutages{err: errors.New("down")}
+	if err := p.Run(t.Context()); err == nil {
+		t.Error("a run without its outage")
+	}
+	fresh := poller()
+	fresh.Outages, fresh.Clock = nil, nil
+	if since, err := fresh.since(t.Context()); err != nil || !since.IsZero() {
+		t.Errorf("since without a Clock = %v, %v", since, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	fresh.Outages = fixedOutages{err: errors.New("down")}
+	if err := fresh.Run(ctx); err != nil {
+		t.Errorf("an ended run = %v", err)
 	}
 }

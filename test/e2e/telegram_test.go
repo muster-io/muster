@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -691,5 +692,217 @@ func TestTelegramThreads(t *testing.T) {
 	})
 	if v := r.Metric(t, `muster_short_lived_rows_pruned_total{table="telegram_post_copies"}`); v != "3" {
 		t.Errorf("pruned metric %q", v)
+	}
+}
+
+// answers are the answers to presses the fake Telegram server recorded.
+func (e *tgd) answers() []faketelegram.Answer {
+	e.t.Helper()
+	var out []faketelegram.Answer
+	decode(e.t, call(e.t, http.MethodGet, e.ftg+"/answers", ""), &out)
+	return out
+}
+
+// press presses the button label of the message id of the channel as the Telegram account from, with extra fields of
+// the press such as `,"pressed_ms_ago":14000`, and returns the answer to it once one is recorded.
+func (e *tgd) press(id int64, from int, label, extra string) faketelegram.Answer {
+	e.t.Helper()
+	before := len(e.answers())
+	e.fake(http.MethodPost, e.ftg+"/press", fmt.Sprintf(`{"chat":%d,"message_id":%d,"from":{"id":%d,"username":"u%d"},
+		"button":%q%s}`, faketelegram.ChannelID, id, from, from, label, extra))
+	eventually(e.t, "the answer to "+label, func() bool { return len(e.answers()) > before })
+	return e.answers()[before]
+}
+
+// keyboardOf waits until the channel post id shows the keyboard want.
+func (e *tgd) keyboardOf(id int64, want ...string) {
+	e.t.Helper()
+	eventually(e.t, fmt.Sprintf("the keyboard %v", want), func() bool {
+		for _, m := range e.messages(faketelegram.ChannelID) {
+			if m.ID == id {
+				return slices.Equal(buttons(e.t, m.ReplyMarkup), want)
+			}
+		}
+		return false
+	})
+}
+
+// lastIndex is the index of the last request to the method of the Bot API, -1 for none.
+func lastIndex(reqs []fakeserver.Request, method string) int {
+	for i := len(reqs) - 1; i >= 0; i-- {
+		if strings.HasSuffix(reqs[i].Path, "/"+method) {
+			return i
+		}
+	}
+	return -1
+}
+
+// setMode switches the demo Telegram Connection to the update mode.
+func (e *tgd) setMode(mode string) {
+	e.t.Helper()
+	c := e.api.json(http.MethodGet, "/api/v1/connections/"+e.conn, "", http.StatusOK)
+	limiter, _ := json.Marshal(c["limiter"])
+	body := fmt.Sprintf(`{"type":"telegram","name":%q,"bot_api_base_url":%q,"update_mode":%q,"proxy":{"enabled":false},
+		"limiter":%s}`, c["name"], c["bot_api_base_url"], mode, limiter)
+	if m := e.api.json(http.MethodPut, "/api/v1/connections/"+e.conn, body, http.StatusOK, "If-Match",
+		c["etag"].(string)); m["update_mode"] != mode {
+		e.t.Fatalf("update %v", m)
+	}
+}
+
+// TestTelegramPresses is S-067 against `muster dev` and the fake Telegram server: a press answered before the Root
+// message is edited (C-14.AC-18, FR-5) by the linked Responder with the Transport telegram (C-14.FR-4, C-10.FR-3), a
+// Snooze for the pressed duration (C-10.FR-6), an account without an Account link (C-14.AC-9, C-10.FR-11), a valid
+// button pressed on another message (C-14.FR-4), answers just before and after the fake's 15-second deadline (F-010),
+// a press in the webhook mode (C-14.AC-11) and a press after the Connection received no updates for longer than
+// telegram.press_max_age (C-14.AC-4).
+func TestTelegramPresses(t *testing.T) {
+	h := Start(t, DevProcess)
+	r := h.Replicas[0]
+	e := newTGD(t, h, r)
+	a := e.create("alerts", "@muster_alerts", 100)
+	if a.status != http.StatusCreated {
+		t.Fatalf("create = %d %s", a.status, a.body)
+	}
+	var created struct {
+		Destination struct {
+			ID string `json:"id"`
+		} `json:"destination"`
+	}
+	decode(t, a, &created)
+	e.route("tg", "tg", []string{created.Destination.ID}, nil)
+	e.api.json(http.MethodPost, "/api/v1/users", `{"name":"bob","login":"bob","role":"responder"}`, http.StatusCreated)
+	h.exec(t, `INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id, username,
+		created_at) SELECT 1, 'AK0000000000T1', u.id, 'telegram', c.id, '5001', 'bob_tg', now() FROM users u,
+		connections c WHERE u.login = 'bob' AND c.name = '`+devmode.TelegramConnectionName+`'`)
+
+	e.group("t1", "CertExpiry")
+	e.alert("t1", "a", `{"team":"tg","cluster":"p1","domain":"a.example.org"}`, "")
+	e.notify("t1", "first notification")
+	g := e.groupOf("p1")
+	eventually(t, "the channel post", func() bool { return len(e.messages(faketelegram.ChannelID)) == 1 })
+	post := e.messages(faketelegram.ChannelID)[0].ID
+	e.keyboardOf(post, "Ack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h")
+
+	// C-14.AC-18, FR-4, C-10.FR-3: the answer first, then the edit with the keyboard of the new state.
+	if got := e.press(post, 5001, "Ack", ""); got.Text != "Done: Acknowledge" || !got.OK {
+		t.Fatalf("answer %+v", got)
+	}
+	e.keyboardOf(post, "Unack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h")
+	reqs := e.requests()
+	if answered, edited := lastIndex(reqs, "answerCallbackQuery"), lastIndex(reqs, "editMessageText"); answered < 0 ||
+		edited < answered {
+		t.Errorf("answerCallbackQuery at %d, editMessageText at %d", answered, edited)
+	}
+	if first := e.timeline(g, "")[0]; first.Event != "acknowledged" || first.Actor.Transport != "telegram" ||
+		first.Actor.Name != "bob" {
+		t.Errorf("timeline %+v", first)
+	}
+
+	// C-10.FR-6: a Snooze button snoozes for its duration.
+	if got := e.press(post, 5001, "Snooze 4 h", ""); got.Text != "Done: Snooze" {
+		t.Errorf("snooze answer %+v", got)
+	}
+	e.keyboardOf(post, "Ack", "Unsnooze", "Resolve")
+	ag := e.alertGroup(g)
+	until, err := time.Parse(time.RFC3339, fmt.Sprint(ag["snooze_until"]))
+	if now := readClock(t, r).Now; ag["status"] != "snoozed" || err != nil ||
+		until.Sub(now) < 4*time.Hour-time.Minute || until.Sub(now) > 4*time.Hour {
+		t.Errorf("after the snooze %v %v", ag["status"], ag["snooze_until"])
+	}
+
+	// C-14.AC-9, C-10.FR-11: an account without an Account link changes nothing.
+	if got := e.press(post, 6001, "Unsnooze", ""); !strings.HasPrefix(got.Text,
+		"Your Telegram account is not linked to Muster. Link it in your profile: http") ||
+		!strings.HasSuffix(got.Text, "/profile") || e.alertGroup(g)["status"] != "snoozed" {
+		t.Errorf("unlinked answer %+v", got)
+	}
+
+	// C-14.FR-4: a valid button pressed on another message changes nothing.
+	if got := e.press(999999, 5001, "Unsnooze", fmt.Sprintf(`,"data_from":%d`, post)); got.Text !=
+		"This button could not be verified; nothing was changed." || e.alertGroup(g)["status"] != "snoozed" {
+		t.Errorf("unbound answer %+v", got)
+	}
+
+	// F-010: a press that arrived 13 s late is answered before the 15-second deadline; one that arrived 16 s late
+	// runs its Command, and Telegram refuses its answer, which the log names without the token.
+	if got := e.press(post, 5001, "Unsnooze", `,"pressed_ms_ago":13000`); !got.OK || got.Text != "Done: Unsnooze" ||
+		got.AfterMs < 13000 || got.AfterMs >= 15000 {
+		t.Errorf("an answer just before the deadline %+v", got)
+	}
+	e.keyboardOf(post, "Ack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h")
+	if got := e.press(post, 5001, "Resolve", `,"pressed_ms_ago":16000`); got.OK ||
+		got.Description != faketelegram.DescriptionQueryTooOld {
+		t.Errorf("an answer after the deadline %+v", got)
+	}
+	eventually(t, "the resolution", func() bool { return e.alertGroup(g)["status"] == "resolved" })
+	waitLog(t, r, "the refused answer", regexp.MustCompile(`"event":"telegram_press","connection":"`+e.conn+
+		`","group":"`+g+`","command":"resolve","outcome":"done","error":"the press was not answered: Telegram `+
+		`answered 400: Bad Request: query is too old`))
+
+	// C-14.AC-11: in the webhook mode a press without the secret token header is refused, and the same press posted
+	// by Telegram with it is processed like a polled one.
+	e.setMode("webhook")
+	e.group("t2", "QueueFull")
+	e.alert("t2", "a", `{"team":"tg","cluster":"p2"}`, "")
+	e.notify("t2", "first notification")
+	g2 := e.groupOf("p2")
+	eventually(t, "the second post", func() bool { return len(e.messages(faketelegram.ChannelID)) == 2 })
+	post2 := e.messages(faketelegram.ChannelID)[1].ID
+	data := ""
+	for _, m := range e.messages(faketelegram.ChannelID) {
+		if m.ID == post2 {
+			var kb struct {
+				InlineKeyboard [][]struct {
+					CallbackData string `json:"callback_data"`
+				} `json:"inline_keyboard"`
+			}
+			_ = json.Unmarshal(m.ReplyMarkup, &kb)
+			data = kb.InlineKeyboard[0][0].CallbackData
+		}
+	}
+	forged := fmt.Sprintf(`{"update_id":777777,"callback_query":{"id":"forged","from":{"id":5001},"message":
+		{"message_id":%d,"chat":{"id":%d,"type":"channel"}},"data":%q}}`, post2, faketelegram.ChannelID, data)
+	if a := call(t, http.MethodPost, r.Ingest+telegram.WebhookPath+e.conn, forged); a.status != http.StatusUnauthorized {
+		t.Errorf("a press without the secret token header = %d", a.status)
+	}
+	if got := e.press(post2, 5001, "Ack", ""); got.Text != "Done: Acknowledge" || !got.OK {
+		t.Errorf("webhook answer %+v", got)
+	}
+	if e.alertGroup(g2)["status"] != "acknowledged" {
+		t.Errorf("after the webhook press %v", e.alertGroup(g2)["status"])
+	}
+	if !slices.ContainsFunc(e.requests(), func(q fakeserver.Request) bool {
+		return strings.HasSuffix(q.Path, "/setWebhook")
+	}) {
+		t.Error("no webhook was set")
+	}
+
+	// C-14.AC-4: back in long polling, a press that arrives after the Connection received no updates for longer than
+	// telegram.press_max_age changes nothing and is logged; the next press is handled.
+	e.setMode("long_polling")
+	e.keyboardOf(post2, "Unack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h")
+	e.press(post2, 5001, "Snooze 4 h", "")
+	e.keyboardOf(post2, "Ack", "Unsnooze", "Resolve")
+	answers := len(e.answers())
+	advance(t, r, 3700)
+	e.fake(http.MethodPost, e.ftg+"/press", fmt.Sprintf(`{"chat":%d,"message_id":%d,"from":{"id":5001},
+		"button":"Unsnooze"}`, faketelegram.ChannelID, post2))
+	waitLog(t, r, "the dropped press", regexp.MustCompile(`"event":"telegram_press_dropped","connection":"`+e.conn+
+		`","gap_seconds":3[67]\d\d`))
+	time.Sleep(time.Second)
+	if len(e.answers()) != answers || e.alertGroup(g2)["status"] != "snoozed" {
+		t.Errorf("the dropped press was answered or changed the Alert Group: %d answers, %v", len(e.answers()),
+			e.alertGroup(g2)["status"])
+	}
+	if got := e.press(post2, 5001, "Unsnooze", ""); got.Text != "Done: Unsnooze" {
+		t.Errorf("the press after the dropped one %+v", got)
+	}
+
+	if strings.Contains(r.Output(), "dev-telegram-token") {
+		t.Error("the bot token reached the log")
+	}
+	if n := strings.Count(r.Output(), `"event":"telegram_press",`); n != 9 {
+		t.Errorf("%d telegram_press lines", n)
 	}
 }

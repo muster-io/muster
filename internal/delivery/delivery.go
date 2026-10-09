@@ -306,6 +306,8 @@ type queries interface {
 	DeleteExpiredReplies(ctx context.Context, arg dbgen.DeleteExpiredRepliesParams) (int64, error)
 	GetPressBinding(ctx context.Context, arg dbgen.GetPressBindingParams) (dbgen.GetPressBindingRow, error)
 	GetPostDestination(ctx context.Context, arg dbgen.GetPostDestinationParams) (dbgen.GetPostDestinationRow, error)
+	GetTelegramPressBinding(ctx context.Context, arg dbgen.GetTelegramPressBindingParams) (
+		dbgen.GetTelegramPressBindingRow, error)
 	outcomeQueries
 	copyQueries
 	webhookEventQueries

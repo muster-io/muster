@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/connections"
+	"github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
@@ -362,11 +363,19 @@ func TestPollingAndHandleOnce(t *testing.T) {
 	if *again[0].Offset != 42 || again[0].Client != list[0].Client {
 		t.Fatalf("again = %+v", again)
 	}
+	// A new bot token saved while a handler runs forgets the offset, and the final write leaves it forgotten.
+	if ran, err := e.svc.HandleOnce(t.Context(), a.ID, 43, func(context.Context) error {
+		r := &e.store.rows[a.ID].row
+		r.BotTokenUpdatedAt, r.TelegramUpdateOffset = r.BotTokenUpdatedAt.Add(time.Second), pgtype.Int8{}
+		return nil
+	}); !ran || err != nil || e.store.rows[a.ID].row.TelegramUpdateOffset.Valid {
+		t.Fatalf("a token saved meanwhile = %v %v, offset %v", ran, err, e.store.rows[a.ID].row.TelegramUpdateOffset)
+	}
 	if ran, err := e.svc.HandleOnce(t.Context(), 999, 1, func(context.Context) error { return nil }); ran ||
 		err != nil {
 		t.Fatalf("an unknown Connection = %v %v", ran, err)
 	}
-	for _, q := range []string{"LockUpdateOffset", "StoreUpdateOffset"} {
+	for _, q := range []string{"LockUpdates", "GetUpdateOffset", "StoreUpdateOffset"} {
 		e.store.fail[q] = errors.New("down")
 		if _, err := e.svc.HandleOnce(t.Context(), a.ID, 50, func(context.Context) error { return nil }); err == nil {
 			t.Errorf("%s failed = nil", q)
@@ -382,6 +391,34 @@ func TestPollingAndHandleOnce(t *testing.T) {
 	e.store.fail["ListPollingConnections"] = errors.New("down")
 	if _, err := e.svc.Polling(t.Context()); err == nil {
 		t.Fatal("a failed list")
+	}
+}
+
+// TestOutage covers the read of the latest outage for the age of presses (C-14.FR-4): the alive mark and the latest
+// downtime period, the zero time for none; and the wait of an edit for the updates of its Connection (C-14.FR-5).
+func TestOutage(t *testing.T) {
+	e := newTGEnv(t)
+	if o, err := e.svc.Outage(t.Context()); err != nil || !o.AliveAt.IsZero() || !o.DowntimeStart.IsZero() ||
+		!o.DowntimeEnd.IsZero() {
+		t.Fatalf("nothing recorded = %+v, %v", o, err)
+	}
+	zero := time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
+	at := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	e.store.outage = dbgen.GetOutageRow{AliveAt: at, DowntimeStartedAt: at.Add(-time.Hour), DowntimeEndedAt: zero}
+	if o, err := e.svc.Outage(t.Context()); err != nil || !o.AliveAt.Equal(at) ||
+		!o.DowntimeStart.Equal(at.Add(-time.Hour)) || !o.DowntimeEnd.IsZero() {
+		t.Fatalf("outage = %+v, %v", o, err)
+	}
+	e.store.fail["GetOutage"] = errors.New("down")
+	if _, err := e.svc.Outage(t.Context()); err == nil {
+		t.Fatal("a failed read")
+	}
+	if err := e.svc.AwaitUpdates(t.Context(), 1); err != nil {
+		t.Fatalf("await = %v", err)
+	}
+	e.store.fail["AwaitUpdates"] = errors.New("down")
+	if err := e.svc.AwaitUpdates(t.Context(), 1); err == nil {
+		t.Fatal("a failed wait")
 	}
 }
 

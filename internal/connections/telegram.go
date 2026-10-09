@@ -281,22 +281,30 @@ func (s *Service) Hooked(ctx context.Context, publicID string) (telegram.Conn, l
 	return telegram.Conn{ID: row.ID, PublicID: row.PublicID, Client: c}, secret, nil
 }
 
-// HandleOnce runs f for the update updateID of the Telegram Connection id unless its stored offset is past it, holding
-// the Connection's offset locked meanwhile, and then raises the offset to updateID+1, all in one transaction
-// (telegram.Offsets): a second poller of a frozen old Leader, or a webhook request with the same update, waits for it
-// and then skips the update. A deleted Connection runs nothing. An error of f stores nothing, so that the update comes
-// again.
+// HandleOnce runs f for the update updateID of the Telegram Connection id unless its stored offset is past it, and then
+// raises the offset to updateID+1, all in one transaction under the Connection's update lock (telegram.Offsets): a
+// transaction advisory lock of the class db.TelegramUpdateLockClass keyed by the Connection, so that a second poller of
+// a frozen old Leader, or a webhook request with the same update, waits for it and then skips the update. The offset
+// is read without a row lock, and the final GREATEST update is the only statement that touches the connections row: a
+// handler runs while a save of the Connection holds the row during setWebhook, and only that final write waits for the
+// save; an edit of a Root message of the Connection waits for the lock too (AwaitUpdates). A save that sets a new bot
+// token while a handler runs forgets the offset, and the final write leaves it forgotten. A deleted Connection runs
+// nothing. An error of f stores nothing, so that the update comes again.
 func (s *Service) HandleOnce(ctx context.Context, id, updateID int64, f func(context.Context) error) (bool, error) {
 	ran := false
 	err := s.cfg.Store.InTx(ctx, func(q Queries) error {
-		o, err := q.LockUpdateOffset(ctx, dbgen.LockUpdateOffsetParams{OrgID: s.cfg.OrgID, ID: id})
+		if err := q.LockUpdates(ctx, dbgen.LockUpdatesParams{LockClass: db.TelegramUpdateLockClass,
+			ID: id}); err != nil {
+			return fmt.Errorf("lock the updates: %w", err)
+		}
+		o, err := q.GetUpdateOffset(ctx, dbgen.GetUpdateOffsetParams{OrgID: s.cfg.OrgID, ID: id})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("lock the update offset: %w", err)
+			return fmt.Errorf("read the update offset: %w", err)
 		}
-		if o.Valid && updateID < o.Int64 {
+		if o.TelegramUpdateOffset.Valid && updateID < o.TelegramUpdateOffset.Int64 {
 			return nil
 		}
 		if err := f(ctx); err != nil {
@@ -304,7 +312,7 @@ func (s *Service) HandleOnce(ctx context.Context, id, updateID int64, f func(con
 		}
 		ran = true
 		if err := q.StoreUpdateOffset(ctx, dbgen.StoreUpdateOffsetParams{OrgID: s.cfg.OrgID, ID: id,
-			Next: updateID + 1}); err != nil {
+			Next: updateID + 1, TokenUpdatedAt: o.BotTokenUpdatedAt}); err != nil {
 			return fmt.Errorf("store the update offset: %w", err)
 		}
 		return nil
@@ -313,6 +321,38 @@ func (s *Service) HandleOnce(ctx context.Context, id, updateID int64, f func(con
 		return false, err
 	}
 	return ran, nil
+}
+
+// AwaitUpdates waits until no update of the Telegram Connection id is being handled (telegram.Targets): it takes its
+// update lock shared in a transaction of its own and releases it at once. The adapter waits so before it edits a
+// Root message, so that a press is answered before the edit its Command causes (C-14.FR-5). It holds no row while it
+// waits.
+func (s *Service) AwaitUpdates(ctx context.Context, id int64) error {
+	if err := s.cfg.Store.InTx(ctx, func(q Queries) error {
+		return q.AwaitUpdates(ctx, dbgen.AwaitUpdatesParams{LockClass: db.TelegramUpdateLockClass, ID: id})
+	}); err != nil {
+		return fmt.Errorf("wait for the updates of the connection %d: %w", id, err)
+	}
+	return nil
+}
+
+// Outage reads when Muster was last known not to run, for the age of presses (telegram.Outages, C-14.FR-4): the
+// Leader's alive mark and the latest downtime period it recorded.
+func (s *Service) Outage(ctx context.Context) (telegram.Outage, error) {
+	r, err := s.cfg.Store.GetOutage(ctx)
+	if err != nil {
+		return telegram.Outage{}, fmt.Errorf("read the latest downtime: %w", err)
+	}
+	return telegram.Outage{AliveAt: zeroless(r.AliveAt), DowntimeStart: zeroless(r.DowntimeStartedAt),
+		DowntimeEnd: zeroless(r.DowntimeEndedAt)}, nil
+}
+
+// zeroless is t, or the zero time.Time for the zero time a query answers for none.
+func zeroless(t time.Time) time.Time {
+	if t.Year() <= 1 {
+		return time.Time{}
+	}
+	return t
 }
 
 func int8Of(v pgtype.Int8) *int64 {

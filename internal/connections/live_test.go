@@ -27,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
+	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
@@ -268,9 +269,14 @@ func (e *liveEnv) telegram(t *testing.T) {
 		ran, _ := e.conns.HandleOnce(ctx, c.ID, 10, func(context.Context) error { return nil })
 		second <- ran
 	}()
+	// An edit of a Root message of the Connection waits for the handler too (C-14.FR-5).
+	awaited := make(chan error, 1)
+	go func() { awaited <- e.conns.AwaitUpdates(ctx, c.ID) }()
 	select {
 	case <-second:
 		t.Fatal("the second router did not wait for the first")
+	case <-awaited:
+		t.Fatal("an edit did not wait for the handler")
 	case <-time.After(200 * time.Millisecond):
 	}
 	close(release)
@@ -280,19 +286,121 @@ func (e *liveEnv) telegram(t *testing.T) {
 	if <-second {
 		t.Fatal("the same update was handled twice")
 	}
+	if err := <-awaited; err != nil {
+		t.Fatal(err)
+	}
+	if err := e.conns.AwaitUpdates(ctx, c.ID); err != nil {
+		t.Fatalf("an edit while no update is handled = %v", err)
+	}
+	var tokenAt time.Time
+	if err := e.d.Pool.QueryRow(ctx, `SELECT bot_token_updated_at FROM connections WHERE id = $1`, c.ID).Scan(
+		&tokenAt); err != nil {
+		t.Fatal(err)
+	}
 	if err := connectionsdb.New(e.d.Pool).StoreUpdateOffset(ctx, connectionsdb.StoreUpdateOffsetParams{OrgID: e.orgID,
-		ID: c.ID, Next: 5}); err != nil {
+		ID: c.ID, Next: 5, TokenUpdatedAt: tokenAt}); err != nil {
 		t.Fatal(err)
 	}
 	list, _ = e.conns.Polling(ctx)
 	if *list[0].Offset != 11 {
 		t.Fatalf("offset %d", *list[0].Offset)
 	}
+	e.saveDuringAnUpdate(t, f, c, in)
+	if o, err := e.conns.Outage(ctx); err != nil || !o.DowntimeEnd.IsZero() {
+		t.Fatalf("outage = %+v, %v", o, err)
+	}
 	if err := e.conns.Delete(ctx, by, c.PublicID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if ran, err := e.conns.HandleOnce(ctx, c.ID, 20, func(context.Context) error { return nil }); ran || err != nil {
 		t.Fatalf("a deleted Connection = %v %v", ran, err)
+	}
+}
+
+// saveDuringAnUpdate is the update lock of the router (journal D289, D292): while a save of the Connection holds its
+// row during a slow setWebhook, a handler runs at once, and only the final offset write waits for the save; a second
+// caller with the same update waits for the lock and then skips the update.
+func (e *liveEnv) saveDuringAnUpdate(t *testing.T, f *faketelegram.Fake, c connections.Connection,
+	in connections.Input) {
+	ctx := t.Context()
+	if err := f.SetFault(fakeserver.Fault{Path: "/bot*/setWebhook", DelayMs: 1500, Times: 1}); err != nil {
+		t.Fatal(err)
+	}
+	in.UpdateMode, in.BotToken = connections.ModeWebhook, keyring.Keep
+	setWebhooks := func() int {
+		n := 0
+		for _, r := range f.Requests() {
+			if strings.HasSuffix(r.Path, "/setWebhook") {
+				n++
+			}
+		}
+		return n
+	}
+	before := setWebhooks()
+	saved := make(chan error, 1)
+	go func() {
+		_, err := e.conns.Update(ctx, by, c.PublicID, nil, in)
+		saved <- err
+	}()
+	waitUntil(t, "the save calling setWebhook", func() bool { return setWebhooks() > before })
+	entered, release := make(chan struct{}), make(chan struct{})
+	first := make(chan bool, 1)
+	go func() {
+		ran, _ := e.conns.HandleOnce(ctx, c.ID, 30, func(context.Context) error {
+			close(entered)
+			<-release
+			return nil
+		})
+		first <- ran
+	}()
+	select {
+	case <-entered:
+	case err := <-saved:
+		t.Fatalf("the save ended before the handler ran: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("the handler waited for the save")
+	}
+	second := make(chan bool, 1)
+	go func() {
+		ran, _ := e.conns.HandleOnce(ctx, c.ID, 30, func(context.Context) error { return nil })
+		second <- ran
+	}()
+	close(release)
+	select {
+	case <-first:
+		t.Fatal("the final offset write did not wait for the save")
+	case <-second:
+		t.Fatal("the second caller did not wait for the first")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if err := <-saved; err != nil {
+		t.Fatal(err)
+	}
+	if !<-first || <-second {
+		t.Fatal("the update was not handled exactly once")
+	}
+	list, err := e.conns.Polling(ctx)
+	if err != nil || len(list) != 0 {
+		t.Fatalf("polling after the save = %+v, %v", list, err)
+	}
+	if e.count(t, `SELECT count(*) FROM connections WHERE id = $1 AND telegram_update_offset = 31`, c.ID) != 1 {
+		t.Fatal("the offset was not raised past the update")
+	}
+	in.UpdateMode = connections.ModeLongPolling
+	if _, err := e.conns.Update(ctx, by, c.PublicID, nil, in); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitUntil waits for cond, up to 5 seconds.
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not happen in time", what)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

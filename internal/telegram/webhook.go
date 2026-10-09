@@ -13,7 +13,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/logging"
 )
 
@@ -52,6 +55,10 @@ type Hooks interface {
 type WebhookConfig struct {
 	Connections Hooks
 	Router      *Router
+	// Outages say whether Muster was not running before this replica started; nil is never.
+	Outages Outages
+	// Clock is the business clock the gaps are measured on; nil measures none.
+	Clock clock.Clock
 	// BodyLimit bounds the body of an update.
 	BodyLimit int64
 	Log       *logging.Logger
@@ -61,12 +68,58 @@ type WebhookConfig struct {
 // exists, is in the webhook mode and the header X-Telegram-Bot-Api-Secret-Token equals its secret token, compared in
 // constant time; otherwise it hands the update to the router and answers 200. A body that is not an update is 400; a
 // router that failed is 500, and Telegram sends the update again.
+//
+// In the webhook mode a quiet period is no gap: Telegram posts each update as it comes. Only Muster not running is
+// (C-14.FR-4, journal D293): an update that reaches this replica before any other of its Connection, within
+// telegram.press_max_age of the replica's start, gets as its gap the outage just before that start, if any — from its
+// start to the replica's start, since the replica could receive from then on. A press dropped for it receives nothing,
+// so that the presses Telegram kept meanwhile are dropped until another update of the Connection arrives.
 func NewWebhook(cfg WebhookConfig) http.Handler {
-	return &webhook{cfg: cfg}
+	h := &webhook{cfg: cfg, received: map[int64]bool{}}
+	h.start = h.now()
+	return h
 }
 
 type webhook struct {
-	cfg WebhookConfig
+	cfg   WebhookConfig
+	start time.Time
+
+	mu       sync.Mutex
+	received map[int64]bool
+}
+
+// now is the business time, the zero time without a Clock.
+func (h *webhook) now() time.Time {
+	if h.cfg.Clock == nil {
+		return time.Time{}
+	}
+	return h.cfg.Clock.Now()
+}
+
+// gap is the gap before the update u of the Connection id: the outage before this replica started, from its start to
+// the replica's start, while the replica has received no update of the Connection and started no longer than
+// PressMaxAge ago; 0 otherwise. An update other than a press dropped for the gap receives the Connection's updates.
+func (h *webhook) gap(ctx context.Context, id int64, u Update) (time.Duration, error) {
+	h.mu.Lock()
+	received := h.received[id]
+	h.mu.Unlock()
+	if received || h.cfg.Outages == nil || h.cfg.Clock == nil || h.now().Sub(h.start) > PressMaxAge {
+		return 0, nil
+	}
+	o, err := h.cfg.Outages.Outage(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var gap time.Duration
+	if since, out := o.quietSince(h.start); out {
+		gap = h.start.Sub(since)
+	}
+	if u.Kind() != KindCallbackQuery || gap <= PressMaxAge {
+		h.mu.Lock()
+		h.received[id] = true
+		h.mu.Unlock()
+	}
+	return gap, nil
 }
 
 func (h *webhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -101,6 +154,10 @@ func (h *webhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	u, err := ParseUpdate(body)
 	if err != nil {
 		writeProblem(w, http.StatusBadRequest, "validation-failed", "Bad request", "The body is not a Telegram update.")
+		return
+	}
+	if u.Gap, err = h.gap(ctx, conn.ID, u); err != nil {
+		h.failed(w, r, conn.PublicID, err)
 		return
 	}
 	if _, err := h.cfg.Router.Route(ctx, conn, u); err != nil {

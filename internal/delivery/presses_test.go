@@ -8,6 +8,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -37,6 +38,28 @@ func (f *fakeDB) GetPressBinding(_ context.Context, arg dbgen.GetPressBindingPar
 			SnoozeDurationsSeconds: slices.Clone(r.snooze)}, nil
 	}
 	return dbgen.GetPressBindingRow{}, pgx.ErrNoRows
+}
+
+func (f *fakeDB) GetTelegramPressBinding(_ context.Context, arg dbgen.GetTelegramPressBindingParams) (
+	dbgen.GetTelegramPressBindingRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetTelegramPressBinding"); err != nil {
+		return dbgen.GetTelegramPressBindingRow{}, err
+	}
+	for _, d := range f.deliveries {
+		ds, g := f.dests[d.dest], f.groups[d.group]
+		if g == nil || ds == nil || d.messageID == nil || *d.messageID != arg.MessageID ||
+			g.publicID != arg.GroupPublicID || ds.typ != delivery.TypeTelegram || ds.deleted ||
+			ds.connection == nil || *ds.connection != arg.ConnectionID.Int64 || ds.tgChannel == nil ||
+			*ds.tgChannel != arg.ChatID {
+			continue
+		}
+		r := f.routes[g.route]
+		return dbgen.GetTelegramPressBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
+			DestinationName: ds.name, Language: r.language, SnoozeDurationsSeconds: slices.Clone(r.snooze)}, nil
+	}
+	return dbgen.GetTelegramPressBindingRow{}, pgx.ErrNoRows
 }
 
 func (f *fakeDB) GetPostDestination(_ context.Context, arg dbgen.GetPostDestinationParams) (
@@ -150,5 +173,47 @@ func TestAnswerOp(t *testing.T) {
 	}
 	if len(e.rec.Calls()) != 0 {
 		t.Errorf("the answer called the adapter: %+v", e.rec.Calls())
+	}
+}
+
+// TestTelegramPressBinding is the binding of C-14.FR-4: a press is bound to the Alert Group's delivery to a Telegram
+// Destination of the Connection whose channel is the chat pressed and whose Root message is the post pressed, with the
+// Route's language and Snooze durations; another chat, another post, another Connection, another Alert Group or a
+// deleted Destination is not bound.
+func TestTelegramPressBinding(t *testing.T) {
+	e := telegramEnv(t)
+	r := e.db.routes[routeID]
+	r.language, r.snooze = "ru", []int64{3600}
+	e.db.routes[routeID] = r
+	post := tgPost
+	e.db.deliveries = append(e.db.deliveries, &fakeDelivery{id: 1, dest: destTG, group: groupID, state: "delivered",
+		messageID: &post})
+	postID, _ := strconv.ParseInt(tgPost, 10, 64)
+	b, err := e.svc.TelegramPressBinding(t.Context(), connID, "AGAAAAAAAAAA21", tgChannel, postID)
+	if err != nil || b.Destination.ID != destTG || b.Destination.PublicID != "DSAAAAAAAAAA13" ||
+		b.Destination.Type != delivery.TypeTelegram || b.Destination.Connection == nil ||
+		*b.Destination.Connection != connID || b.ChannelID != "-1001000000001" || b.Language != "ru" ||
+		!slices.Equal(b.SnoozeSeconds, []int64{3600}) {
+		t.Fatalf("TelegramPressBinding = %+v, %v", b, err)
+	}
+	for _, c := range []struct {
+		conn, chat, post int64
+		group            string
+	}{{connID, tgGroup, postID, "AGAAAAAAAAAA21"}, {connID, tgChannel, postID + 1, "AGAAAAAAAAAA21"},
+		{connID + 1, tgChannel, postID, "AGAAAAAAAAAA21"}, {connID, tgChannel, postID, "AGAAAAAAAAAA99"}} {
+		if _, err := e.svc.TelegramPressBinding(t.Context(), c.conn, c.group, c.chat, c.post); !errors.Is(err,
+			delivery.ErrNotBound) {
+			t.Errorf("TelegramPressBinding(%+v) = %v, want ErrNotBound", c, err)
+		}
+	}
+	e.db.dests[destTG].deleted = true
+	if _, err := e.svc.TelegramPressBinding(t.Context(), connID, "AGAAAAAAAAAA21", tgChannel, postID); !errors.Is(err,
+		delivery.ErrNotBound) {
+		t.Errorf("a deleted Destination = %v", err)
+	}
+	e.db.fail["GetTelegramPressBinding"] = errBoom
+	if _, err := e.svc.TelegramPressBinding(t.Context(), connID, "AGAAAAAAAAAA21", tgChannel, postID); !errors.Is(err,
+		errBoom) {
+		t.Errorf("a failed read = %v", err)
 	}
 }
