@@ -15,10 +15,10 @@ import (
 
 // The kinds of updates the router hands on (C-14.FR-1, FR-8).
 const (
-	// KindCallbackQuery is a button press, which the handler of S-042 processes.
+	// KindCallbackQuery is a button press.
 	KindCallbackQuery = "callback_query"
 	// KindChatMessage is a message, an edit or a post in a channel or a group, such as the automatic copy of a channel
-	// post in its discussion group, which the handler of S-042 processes.
+	// post in its discussion group, which Copies processes.
 	KindChatMessage = "chat_message"
 	// KindPrivateMessage is a message to the bot in a private chat, such as `/start <token>`, which the Account link
 	// handler of S-051 processes.
@@ -135,9 +135,9 @@ type Offsets interface {
 }
 
 // Router is the one entry of updates for both modes (C-14.FR-1): it ignores an update the Connection has already
-// handled, hands each kind to the handler registered for it — the presses and the messages of channels and groups to
-// S-042, private messages to S-051 — and drops a kind without a handler with telegram_update_dropped; then it stores
-// the offset after the update.
+// handled, hands each kind to the handler registered for it — the messages of channels and groups to Copies, the
+// presses and private messages to theirs — and drops a kind without a handler with telegram_update_dropped; then it
+// stores the offset after the update.
 type Router struct {
 	Offsets Offsets
 	Log     *logging.Logger

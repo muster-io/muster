@@ -130,6 +130,62 @@ func (q *Queries) AbandonWebhookEvents(ctx context.Context, arg AbandonWebhookEv
 	return items, nil
 }
 
+const attachCopy = `-- name: AttachCopy :many
+UPDATE deliveries d
+SET thread_state = 'attached', thread_anchor_id = $1::text, thread_chain_last_id = NULL,
+    updated_at = $2::timestamptz
+FROM destinations ds
+WHERE d.org_id = $3 AND ds.org_id = $3 AND ds.id = d.destination_id AND ds.type = 'telegram'
+  AND ds.connection_id = $4::bigint AND ds.telegram_channel_chat_id = $5::bigint
+  AND ds.telegram_discussion_chat_id = $6::bigint AND d.message_id = $7::text
+  AND d.alert_group_id IS NOT NULL AND d.thread_state <> 'attached'
+  AND d.thread_anchor_id IS DISTINCT FROM $1::text
+RETURNING coalesce((SELECT g.public_id
+                    FROM alert_groups g
+                    WHERE g.org_id = $3 AND g.id = d.alert_group_id), '')::text AS alert_group_public_id
+`
+
+type AttachCopyParams struct {
+	CopyMessageID    string
+	Now              time.Time
+	OrgID            int64
+	ConnectionID     int64
+	ChannelChatID    int64
+	DiscussionChatID int64
+	MessageID        string
+}
+
+// AttachCopy attaches to the copy @copy_message_id the Threads of the Alert Group deliveries, to the Telegram
+// Destinations of the Connection with that channel and discussion group, whose Root message is the post @message_id and
+// whose Thread is not attached: a Thread that lost this very copy stays lost. It returns their Alert Groups.
+func (q *Queries) AttachCopy(ctx context.Context, arg AttachCopyParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, attachCopy,
+		arg.CopyMessageID,
+		arg.Now,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.ChannelChatID,
+		arg.DiscussionChatID,
+		arg.MessageID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var alert_group_public_id string
+		if err := rows.Scan(&alert_group_public_id); err != nil {
+			return nil, err
+		}
+		items = append(items, alert_group_public_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const breakDestination = `-- name: BreakDestination :one
 UPDATE destinations
 SET health = 'broken', broken_since = $1::timestamptz, broken_cause = $2::text, broken_reason = $3::text,
@@ -980,7 +1036,8 @@ SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id
        d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
        d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
        ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       ds.type AS destination_type, ds.connection_id, ds.health AS destination_health,
+       ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
+       ds.telegram_discussion_chat_id,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
        coalesce(g.status, '')::text AS group_status, coalesce(g.created_at, d.created_at)::timestamptz AS group_created_at,
        g.resolved_at AS group_resolved_at
@@ -999,39 +1056,41 @@ type GetLeasedDeliveryParams struct {
 }
 
 type GetLeasedDeliveryRow struct {
-	ID                     int64
-	AlertGroupID           int64
-	StormID                pgtype.Int8
-	DesiredVersion         int64
-	DesiredPayload         []byte
-	DesiredHash            []byte
-	DesiredReceivedAt      pgtype.Timestamptz
-	DesiredRetire          bool
-	PublicationLoud        pgtype.Bool
-	LateNote               bool
-	RepublishedAfterDelete bool
-	ActualHash             []byte
-	MessageID              pgtype.Text
-	MessageUrl             pgtype.Text
-	PublicationStartedAt   pgtype.Timestamptz
-	Attempts               int64
-	DestinationID          int64
-	DestinationPublicID    string
-	DestinationName        string
-	DestinationType        string
-	ConnectionID           pgtype.Int8
-	DestinationHealth      string
-	AlertGroupPublicID     string
-	Number                 int64
-	GroupStatus            string
-	GroupCreatedAt         time.Time
-	GroupResolvedAt        pgtype.Timestamptz
+	ID                       int64
+	AlertGroupID             int64
+	StormID                  pgtype.Int8
+	DesiredVersion           int64
+	DesiredPayload           []byte
+	DesiredHash              []byte
+	DesiredReceivedAt        pgtype.Timestamptz
+	DesiredRetire            bool
+	PublicationLoud          pgtype.Bool
+	LateNote                 bool
+	RepublishedAfterDelete   bool
+	ActualHash               []byte
+	MessageID                pgtype.Text
+	MessageUrl               pgtype.Text
+	PublicationStartedAt     pgtype.Timestamptz
+	Attempts                 int64
+	DestinationID            int64
+	DestinationPublicID      string
+	DestinationName          string
+	DestinationType          string
+	ConnectionID             pgtype.Int8
+	DestinationHealth        string
+	TelegramChannelChatID    pgtype.Int8
+	TelegramDiscussionChatID pgtype.Int8
+	AlertGroupPublicID       string
+	Number                   int64
+	GroupStatus              string
+	GroupCreatedAt           time.Time
+	GroupResolvedAt          pgtype.Timestamptz
 }
 
 // GetLeasedDelivery reads, and locks, a delivery whose lease this replica still holds at the real time now: its latest
 // Desired state, whether its next call is the final edit, its actual message, its notes, its Destination with its
-// health and its Alert Group, or its Storm for a Storm summary, whose Alert Group fields are empty. No row when the
-// lease ran out or went to another replica.
+// health and, for Telegram, its channel and discussion group, and its Alert Group, or its Storm for a Storm summary,
+// whose Alert Group fields are empty. No row when the lease ran out or went to another replica.
 func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryParams) (GetLeasedDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, getLeasedDelivery,
 		arg.OrgID,
@@ -1063,6 +1122,8 @@ func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryPa
 		&i.DestinationType,
 		&i.ConnectionID,
 		&i.DestinationHealth,
+		&i.TelegramChannelChatID,
+		&i.TelegramDiscussionChatID,
 		&i.AlertGroupPublicID,
 		&i.Number,
 		&i.GroupStatus,
@@ -1074,9 +1135,10 @@ func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryPa
 
 const getLeasedReply = `-- name: GetLeasedReply :one
 SELECT r.id, r.delivery_id, r.alert_group_id, r.event, r.event_seqs, r.loudness, r.mentions, r.fingerprints,
-       r.attempts, d.message_id, d.thread_anchor_id, d.thread_chain_last_id, d.republished_after_delete,
+       r.attempts, d.message_id, d.thread_state, d.thread_anchor_id, d.thread_chain_last_id, d.republished_after_delete,
+       d.publication_started_at,
        ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       ds.type AS destination_type, ds.connection_id,
+       ds.type AS destination_type, ds.connection_id, ds.telegram_channel_chat_id, ds.telegram_discussion_chat_id,
        g.public_id AS alert_group_public_id, g.number, g.title, g.status, g.urgent,
        rt.language
 FROM thread_replies r
@@ -1096,34 +1158,39 @@ type GetLeasedReplyParams struct {
 }
 
 type GetLeasedReplyRow struct {
-	ID                     int64
-	DeliveryID             int64
-	AlertGroupID           int64
-	Event                  string
-	EventSeqs              []int64
-	Loudness               string
-	Mentions               []string
-	Fingerprints           []string
-	Attempts               int64
-	MessageID              pgtype.Text
-	ThreadAnchorID         pgtype.Text
-	ThreadChainLastID      pgtype.Text
-	RepublishedAfterDelete bool
-	DestinationID          int64
-	DestinationPublicID    string
-	DestinationName        string
-	DestinationType        string
-	ConnectionID           pgtype.Int8
-	AlertGroupPublicID     string
-	Number                 int64
-	Title                  string
-	Status                 string
-	Urgent                 bool
-	Language               string
+	ID                       int64
+	DeliveryID               int64
+	AlertGroupID             int64
+	Event                    string
+	EventSeqs                []int64
+	Loudness                 string
+	Mentions                 []string
+	Fingerprints             []string
+	Attempts                 int64
+	MessageID                pgtype.Text
+	ThreadState              string
+	ThreadAnchorID           pgtype.Text
+	ThreadChainLastID        pgtype.Text
+	RepublishedAfterDelete   bool
+	PublicationStartedAt     pgtype.Timestamptz
+	DestinationID            int64
+	DestinationPublicID      string
+	DestinationName          string
+	DestinationType          string
+	ConnectionID             pgtype.Int8
+	TelegramChannelChatID    pgtype.Int8
+	TelegramDiscussionChatID pgtype.Int8
+	AlertGroupPublicID       string
+	Number                   int64
+	Title                    string
+	Status                   string
+	Urgent                   bool
+	Language                 string
 }
 
 // GetLeasedReply reads, and locks, a Thread reply whose lease this replica still holds at the real time now, with its
-// delivery's Root message, its Destination, its Alert Group and the language of its Route.
+// delivery's Root message, its Thread and the start of its Publication, its Destination with, for Telegram, its
+// channel and discussion group, its Alert Group and the language of its Route.
 func (q *Queries) GetLeasedReply(ctx context.Context, arg GetLeasedReplyParams) (GetLeasedReplyRow, error) {
 	row := q.db.QueryRow(ctx, getLeasedReply,
 		arg.OrgID,
@@ -1143,14 +1210,18 @@ func (q *Queries) GetLeasedReply(ctx context.Context, arg GetLeasedReplyParams) 
 		&i.Fingerprints,
 		&i.Attempts,
 		&i.MessageID,
+		&i.ThreadState,
 		&i.ThreadAnchorID,
 		&i.ThreadChainLastID,
 		&i.RepublishedAfterDelete,
+		&i.PublicationStartedAt,
 		&i.DestinationID,
 		&i.DestinationPublicID,
 		&i.DestinationName,
 		&i.DestinationType,
 		&i.ConnectionID,
+		&i.TelegramChannelChatID,
+		&i.TelegramDiscussionChatID,
 		&i.AlertGroupPublicID,
 		&i.Number,
 		&i.Title,
@@ -1226,6 +1297,38 @@ func (q *Queries) GetLeasedWebhookEvent(ctx context.Context, arg GetLeasedWebhoo
 		&i.AlertGroupPublicID,
 		&i.Number,
 	)
+	return i, err
+}
+
+const getPostCopy = `-- name: GetPostCopy :one
+SELECT discussion_chat_id, copy_message_id
+FROM telegram_post_copies
+WHERE org_id = $1 AND connection_id = $2 AND channel_chat_id = $3
+  AND channel_message_id = $4
+`
+
+type GetPostCopyParams struct {
+	OrgID            int64
+	ConnectionID     int64
+	ChannelChatID    int64
+	ChannelMessageID int64
+}
+
+type GetPostCopyRow struct {
+	DiscussionChatID int64
+	CopyMessageID    int64
+}
+
+// GetPostCopy reads the buffered copy of a channel post: its discussion group and its message id there.
+func (q *Queries) GetPostCopy(ctx context.Context, arg GetPostCopyParams) (GetPostCopyRow, error) {
+	row := q.db.QueryRow(ctx, getPostCopy,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.ChannelChatID,
+		arg.ChannelMessageID,
+	)
+	var i GetPostCopyRow
+	err := row.Scan(&i.DiscussionChatID, &i.CopyMessageID)
 	return i, err
 }
 
@@ -1458,6 +1561,41 @@ func (q *Queries) InsertDeliveryEvent(ctx context.Context, arg InsertDeliveryEve
 		arg.ErrorClass,
 		arg.Error,
 		arg.Detail,
+	)
+	return err
+}
+
+const insertPostCopy = `-- name: InsertPostCopy :exec
+INSERT INTO telegram_post_copies (connection_id, channel_chat_id, channel_message_id, org_id, discussion_chat_id,
+                                  copy_message_id, learned_from, received_at)
+VALUES ($1, $2, $3, $4, $5, $6,
+        $7, $8::timestamptz)
+ON CONFLICT (connection_id, channel_chat_id, channel_message_id) DO NOTHING
+`
+
+type InsertPostCopyParams struct {
+	ConnectionID     int64
+	ChannelChatID    int64
+	ChannelMessageID int64
+	OrgID            int64
+	DiscussionChatID int64
+	CopyMessageID    int64
+	LearnedFrom      string
+	Now              time.Time
+}
+
+// InsertPostCopy buffers the copy of a channel post as learned at @now, the business time; the first copy learned of a
+// post wins.
+func (q *Queries) InsertPostCopy(ctx context.Context, arg InsertPostCopyParams) error {
+	_, err := q.db.Exec(ctx, insertPostCopy,
+		arg.ConnectionID,
+		arg.ChannelChatID,
+		arg.ChannelMessageID,
+		arg.OrgID,
+		arg.DiscussionChatID,
+		arg.CopyMessageID,
+		arg.LearnedFrom,
+		arg.Now,
 	)
 	return err
 }
@@ -1953,9 +2091,9 @@ type ListRouteDestinationsRow struct {
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 // Delivery (C-11, ADR-0005, schema.md §4.11 and §5): the Desired state per Alert Group and Destination, its
-// reconciliation by the delivery worker, Thread replies, the shared limiter buckets and the delivery events. Only this
-// package writes deliveries, thread_replies, rate_limit_buckets and delivery_events. Due times are business times and
-// leases real times; both come from Go.
+// reconciliation by the delivery worker, Thread replies, the shared limiter buckets, the delivery events and the
+// Telegram copy buffer. Only this package writes deliveries, thread_replies, rate_limit_buckets, delivery_events and
+// telegram_post_copies. Due times are business times and leases real times; both come from Go.
 // ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health and the mode of an
 // outgoing webhook, in id order, for Enqueue.
 func (q *Queries) ListRouteDestinations(ctx context.Context, arg ListRouteDestinationsParams) ([]ListRouteDestinationsRow, error) {
@@ -2057,6 +2195,67 @@ func (q *Queries) ListStormSummaries(ctx context.Context, arg ListStormSummaries
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockDeliveryThread = `-- name: LockDeliveryThread :one
+SELECT thread_state, thread_anchor_id, thread_chain_last_id, message_id
+FROM deliveries
+WHERE org_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type LockDeliveryThreadParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type LockDeliveryThreadRow struct {
+	ThreadState       string
+	ThreadAnchorID    pgtype.Text
+	ThreadChainLastID pgtype.Text
+	MessageID         pgtype.Text
+}
+
+// LockDeliveryThread reads, and locks, the Thread of a delivery with the Root message it belongs to.
+func (q *Queries) LockDeliveryThread(ctx context.Context, arg LockDeliveryThreadParams) (LockDeliveryThreadRow, error) {
+	row := q.db.QueryRow(ctx, lockDeliveryThread, arg.OrgID, arg.ID)
+	var i LockDeliveryThreadRow
+	err := row.Scan(
+		&i.ThreadState,
+		&i.ThreadAnchorID,
+		&i.ThreadChainLastID,
+		&i.MessageID,
+	)
+	return i, err
+}
+
+const lockPostCopy = `-- name: LockPostCopy :exec
+
+SELECT pg_advisory_xact_lock($1::int, hashtext(format('%s/%s/%s', $2::bigint,
+                                                                $3::bigint, $4::bigint)))
+`
+
+type LockPostCopyParams struct {
+	LockClass        int32
+	ConnectionID     int64
+	ChannelChatID    int64
+	ChannelMessageID int64
+}
+
+// Telegram comment Threads (C-14.FR-3, schema.md §4.11): the automatic copy of a channel post in the discussion group
+// meets the answer to sendMessage in telegram_post_copies, keyed by the Connection, the channel and the post, in either
+// order and on any replica. Both sides take the lock of the post first, so that whichever comes second attaches the
+// Thread; a Thread reply that waits for the copy looks it up again under the same lock.
+// LockPostCopy takes, until the transaction ends, the lock of the copy of one channel post: learning the copy and
+// recording the Publication of the post serialize on it. A collision of the hash only serializes two posts.
+func (q *Queries) LockPostCopy(ctx context.Context, arg LockPostCopyParams) error {
+	_, err := q.db.Exec(ctx, lockPostCopy,
+		arg.LockClass,
+		arg.ConnectionID,
+		arg.ChannelChatID,
+		arg.ChannelMessageID,
+	)
+	return err
 }
 
 const lockStorm = `-- name: LockStorm :one
@@ -2306,6 +2505,34 @@ SELECT pg_notify($1::text, '')
 func (q *Queries) NotifyDelivery(ctx context.Context, channel string) error {
 	_, err := q.db.Exec(ctx, notifyDelivery, channel)
 	return err
+}
+
+const prunePostCopies = `-- name: PrunePostCopies :execrows
+DELETE FROM telegram_post_copies t
+WHERE t.org_id = $1
+  AND (t.connection_id, t.channel_chat_id, t.channel_message_id) IN (
+      SELECT c.connection_id, c.channel_chat_id, c.channel_message_id
+      FROM telegram_post_copies c
+      WHERE c.org_id = $1 AND c.received_at < $2::timestamptz
+      ORDER BY c.received_at
+      LIMIT $3
+      FOR UPDATE SKIP LOCKED)
+`
+
+type PrunePostCopiesParams struct {
+	OrgID     int64
+	Before    time.Time
+	BatchSize int32
+}
+
+// PrunePostCopies deletes at most @batch_size buffered copies received before @before, skipping rows another
+// transaction holds.
+func (q *Queries) PrunePostCopies(ctx context.Context, arg PrunePostCopiesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, prunePostCopies, arg.OrgID, arg.Before, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const quietStormSummaries = `-- name: QuietStormSummaries :exec
@@ -3442,6 +3669,36 @@ func (q *Queries) SetStormTimer(ctx context.Context, arg SetStormTimerParams) er
 	return err
 }
 
+const setThread = `-- name: SetThread :exec
+UPDATE deliveries
+SET thread_state = $1::text, thread_anchor_id = $2::text,
+    thread_chain_last_id = $3::text, updated_at = $4::timestamptz
+WHERE org_id = $5 AND id = $6
+`
+
+type SetThreadParams struct {
+	ThreadState string
+	AnchorID    pgtype.Text
+	ChainLastID pgtype.Text
+	Now         time.Time
+	OrgID       int64
+	ID          int64
+}
+
+// SetThread sets the Thread of a delivery: its state, the copy it is attached to, or lost, and the last reply of its
+// unattached chain.
+func (q *Queries) SetThread(ctx context.Context, arg SetThreadParams) error {
+	_, err := q.db.Exec(ctx, setThread,
+		arg.ThreadState,
+		arg.AnchorID,
+		arg.ChainLastID,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
 const setThreadBatchUntil = `-- name: SetThreadBatchUntil :exec
 UPDATE deliveries
 SET thread_batch_until = $1::timestamptz, updated_at = $2
@@ -3699,6 +3956,41 @@ func (q *Queries) UpdateBrokenReason(ctx context.Context, arg UpdateBrokenReason
 		arg.ID,
 	)
 	return err
+}
+
+const wakeCopyReplies = `-- name: WakeCopyReplies :execrows
+UPDATE thread_replies r
+SET next_attempt_at = $1::timestamptz
+FROM deliveries d
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+WHERE r.org_id = $2 AND d.org_id = $2 AND d.id = r.delivery_id AND ds.type = 'telegram'
+  AND ds.connection_id = $3::bigint AND ds.telegram_channel_chat_id = $4::bigint
+  AND d.message_id = $5::text AND d.thread_state = 'attached' AND r.state = 'pending'
+  AND r.next_attempt_at > $1::timestamptz AND r.last_error_class IS NULL
+`
+
+type WakeCopyRepliesParams struct {
+	Now           time.Time
+	OrgID         int64
+	ConnectionID  int64
+	ChannelChatID int64
+	MessageID     string
+}
+
+// WakeCopyReplies makes due at @now the Thread replies that wait, without an error, under the post @message_id of the
+// Connection's channel once its Thread is attached, so that they do not wait out telegram.copy_wait.
+func (q *Queries) WakeCopyReplies(ctx context.Context, arg WakeCopyRepliesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, wakeCopyReplies,
+		arg.Now,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.ChannelChatID,
+		arg.MessageID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const wipeDestinationSecrets = `-- name: WipeDestinationSecrets :exec

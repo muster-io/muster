@@ -212,6 +212,11 @@ func TelegramDemo() connections.Demo {
 		BaseURL: "http://" + TelegramAddr, BotToken: logging.Secret(TelegramConnectionBotToken)}
 }
 
+// TelegramCopyDelay is how long after a channel post its automatic copy reaches the bot in `muster dev`, about a
+// quarter of the 4 s measured on the real service (F-005), so that the copy usually arrives after the answer to
+// sendMessage, as there.
+const TelegramCopyDelay = time.Second
+
 // AllowedInternalConnections is what `muster dev` sets as the fake Mattermost's AllowedUntrustedInternalConnections,
 // so that it calls the button presses back at MUSTER_INGEST_URL on loopback (F-022).
 const AllowedInternalConnections = "localhost 127.0.0.1"
@@ -269,6 +274,7 @@ func StartFakes(ctx context.Context, addrs Addresses) (*Fakes, error) {
 		Webhook:      fakewebhook.New(),
 	}
 	f.Mattermost.SetAllowedUntrustedInternalConnections(AllowedInternalConnections)
+	f.Telegram.SetCopyDelay(TelegramCopyDelay)
 	listen := []string{addrs.Alertmanager, addrs.Mattermost, addrs.Telegram, addrs.OIDC, addrs.Webhook}
 	for i, s := range f.servers() {
 		if err := s.Start(ctx, listen[i]); err != nil {

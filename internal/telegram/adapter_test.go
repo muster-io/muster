@@ -167,10 +167,21 @@ func TestPublishRootMessage(t *testing.T) {
 	if kb.InlineKeyboard[0][0].CallbackData != "a-acknowledge0" {
 		t.Fatalf("callback data = %+v", kb)
 	}
-	n := e.fake.Notifications()
+	n := channelNotifications(e.fake)
 	if len(n) != 2 || !n[0].Sound || !n[1].Sound {
 		t.Fatalf("notifications = %+v", n)
 	}
+}
+
+// channelNotifications are the notifications of channel posts, without those of their copies in the group.
+func channelNotifications(f *faketelegram.Fake) []faketelegram.Notification {
+	var out []faketelegram.Notification
+	for _, n := range f.Notifications() {
+		if n.Chat == faketelegram.ChannelID {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // TestPublishQuietAndMentions is C-14.FR-6, C-11.FR-7 and C-12.FR-8: a Quiet post carries disable_notification and
@@ -202,7 +213,7 @@ func TestPublishQuietAndMentions(t *testing.T) {
 		lines[1] != `<a href="tg://user?id=42">Ann &lt;A&gt;</a> Bob@`+"\u200b"+`ops` {
 		t.Fatalf("loud = %+v", msgs[1])
 	}
-	n := e.fake.Notifications()
+	n := channelNotifications(e.fake)
 	if len(n) != 4 || n[0].Sound || !n[2].Sound {
 		t.Fatalf("notifications = %+v", n)
 	}
@@ -237,7 +248,8 @@ func TestUpdateKeepsTheKeyboard(t *testing.T) {
 		}
 	}
 	m := only(t, e.fake)
-	if len(m.Edits) != 3 || len(e.fake.Notifications()) != 2 {
+	// The post notified both accounts and its automatic copy member (F-013); no edit notified anybody.
+	if len(m.Edits) != 3 || len(e.fake.Notifications()) != 3 {
 		t.Fatalf("edits = %+v, notifications %+v", m.Edits, e.fake.Notifications())
 	}
 	for _, ed := range m.Edits {
@@ -294,34 +306,91 @@ func TestLongMessagesFit(t *testing.T) {
 	}
 }
 
-// TestReplyGoesToTheGroup: until S-066, a Thread reply is a plain message in the discussion group, never a reply in
-// the channel (F-015), Quiet with disable_notification, Loud with its Mentions first.
-func TestReplyGoesToTheGroup(t *testing.T) {
+// TestReplyIntoTheThread is C-14.FR-3, C-14.FR-6, C-12.FR-8 and C-14.AC-19: a Thread reply goes to the discussion
+// group, never to the channel (F-015): as a reply to the post's automatic copy while attached, which puts it in the
+// copy's comment Thread (F-007); as a reply to the last link of an unattached chain; or with no reply link as the first
+// link. A Quiet reply carries disable_notification and no Mentions, a Loud one its Mentions first, and either notifies
+// member only (F-014).
+func TestReplyIntoTheThread(t *testing.T) {
 	e := newAdapter(t)
+	if o := e.adapter.Publish(t.Context(), call(1), root(messages.ColourFiring)); o.Kind != delivery.OutcomeOK ||
+		o.MessageID != "1" {
+		t.Fatalf("publish = %+v", o)
+	}
+	cp := e.fake.Messages(faketelegram.GroupID)
+	if len(cp) != 1 || !cp[0].IsAutomaticForward {
+		t.Fatalf("copy %+v", cp)
+	}
+	anchor := fmt.Sprint(cp[0].ID)
 	reply := messages.Message{Kind: messages.KindReply, Language: "en", Colour: messages.ColourFiring,
 		Lines: []string{"New alert: <c.example.org>"}, Buttons: []messages.Button{}}
-	o := e.adapter.Reply(t.Context(), call(1), delivery.Root{MessageID: "1"}, reply)
-	if o.Kind != delivery.OutcomeOK || o.MessageID != "1" || o.MessageURL != "https://t.me/c/1000000002/1" {
+	ann := mentions.Target{Kind: mentions.TargetUser, User: &mentions.User{Name: "Ann", ExternalID: "42"}}
+	quiet := call(1)
+	quiet.Targets = []mentions.Target{ann}
+	o := e.adapter.Reply(t.Context(), quiet, delivery.Root{MessageID: "1", ThreadAnchorID: anchor}, reply)
+	if o.Kind != delivery.OutcomeOK || o.MessageID != "2" || o.MessageURL != "https://t.me/c/1000000002/2" {
 		t.Fatalf("reply = %+v", o)
 	}
-	o = e.adapter.Reply(t.Context(), loud(mentions.Target{Kind: mentions.TargetUser,
-		User: &mentions.User{Name: "Ann", ExternalID: "42"}}), delivery.Root{MessageID: "1"}, reply)
+	o = e.adapter.Reply(t.Context(), loud(ann), delivery.Root{MessageID: "1", ThreadAnchorID: anchor}, reply)
 	if o.Kind != delivery.OutcomeOK {
 		t.Fatal(o)
 	}
 	msgs := e.fake.Messages(faketelegram.GroupID)
-	if len(msgs) != 2 || !msgs[0].DisableNotification || msgs[0].ReplyParameters != nil ||
-		msgs[0].Text != "New alert: &lt;c.example.org&gt;" || msgs[0].ReplyMarkup != nil ||
-		msgs[1].Text != `<a href="tg://user?id=42">Ann</a>`+"\nNew alert: &lt;c.example.org&gt;" ||
-		msgs[1].DisableNotification {
+	if len(msgs) != 3 || !msgs[1].DisableNotification || string(msgs[1].ReplyParameters) != `{"message_id":1}` ||
+		msgs[1].MessageThreadID != cp[0].ID || msgs[1].Text != "New alert: &lt;c.example.org&gt;" ||
+		msgs[1].ReplyMarkup != nil ||
+		msgs[2].Text != `<a href="tg://user?id=42">Ann</a>`+"\nNew alert: &lt;c.example.org&gt;" ||
+		msgs[2].DisableNotification || msgs[2].MessageThreadID != cp[0].ID {
 		t.Fatalf("group = %+v", msgs)
 	}
-	if len(e.fake.Messages(faketelegram.ChannelID)) != 0 {
+	for _, n := range e.fake.Notifications() {
+		if n.Chat == faketelegram.GroupID && n.Account != faketelegram.AccountMember {
+			t.Errorf("a Thread reply notified %s", n.Account)
+		}
+	}
+	// The first link of an unattached chain replies to nothing; the next one to the last link.
+	if o = e.adapter.Reply(t.Context(), call(1), delivery.Root{MessageID: "1"}, reply); o.Kind != delivery.OutcomeOK {
+		t.Fatal(o)
+	}
+	first := o.MessageID
+	if o = e.adapter.Reply(t.Context(), call(1), delivery.Root{MessageID: "1", ChainLastID: first},
+		reply); o.Kind != delivery.OutcomeOK {
+		t.Fatal(o)
+	}
+	msgs = e.fake.Messages(faketelegram.GroupID)
+	if len(msgs) != 5 || msgs[3].ReplyParameters != nil || msgs[3].MessageThreadID != 0 ||
+		string(msgs[4].ReplyParameters) != `{"message_id":`+first+`}` || msgs[4].MessageThreadID != 0 {
+		t.Fatalf("chain = %+v", msgs[3:])
+	}
+	if len(e.fake.Messages(faketelegram.ChannelID)) != 1 {
 		t.Fatal("a reply went to the channel")
 	}
 	if o := e.adapter.Reply(t.Context(), call(2), delivery.Root{MessageID: "1"}, reply); o.Kind !=
 		delivery.OutcomeFatal || string(o.Error) != errNoGroup {
 		t.Fatalf("without a group = %+v", o)
+	}
+	if o := e.adapter.Reply(t.Context(), call(1), delivery.Root{MessageID: "1", ThreadAnchorID: "x"}, reply); o.Kind !=
+		delivery.OutcomeUnknown {
+		t.Fatalf("a copy id that is not Telegram's = %+v", o)
+	}
+}
+
+// TestReplyToDeletedCopy is C-14.AC-16 at the adapter: with the copy deleted, a reply to it is refused with "message to
+// be replied not found", a lost Thread; the same reply without the link goes to the group.
+func TestReplyToDeletedCopy(t *testing.T) {
+	e := newAdapter(t)
+	e.adapter.Publish(t.Context(), call(1), root(messages.ColourFiring))
+	cp := e.fake.Messages(faketelegram.GroupID)[0]
+	if !e.fake.DeleteMessage(faketelegram.GroupID, cp.ID) {
+		t.Fatal("no copy to delete")
+	}
+	reply := messages.Message{Kind: messages.KindReply, Language: "en", Lines: []string{"x"}}
+	o := e.adapter.Reply(t.Context(), call(1), delivery.Root{MessageID: "1", ThreadAnchorID: fmt.Sprint(cp.ID)}, reply)
+	if o.Kind != delivery.OutcomeThreadLost || !strings.Contains(string(o.Error), "message to be replied not found") {
+		t.Fatalf("reply to the deleted copy = %+v", o)
+	}
+	if o = e.adapter.Reply(t.Context(), call(1), delivery.Root{MessageID: "1"}, reply); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("resend = %+v", o)
 	}
 }
 

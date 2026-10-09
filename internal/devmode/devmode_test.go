@@ -392,6 +392,9 @@ func TestStartFakes(t *testing.T) {
 	if get(t, f.Telegram.URL()+"/bot1:x/getMe") != http.StatusOK || len(f.Telegram.Requests()) != 1 {
 		t.Error("the in-process Telegram fake did not record getMe")
 	}
+	if got := f.Telegram.Config().CopyDelayMS; got != devmode.TelegramCopyDelay.Milliseconds() || got != 1000 {
+		t.Errorf("the copy delay of the fake Telegram = %d ms, want 1000", got)
+	}
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.Webhook.URL()+"/hook/auto",
 		strings.NewReader("{}"))
 	if err != nil {

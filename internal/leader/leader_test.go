@@ -793,6 +793,52 @@ func TestShortLivedPruning(t *testing.T) {
 	}
 }
 
+// TestShortLivedPruningOfCopies: the copy buffer of Telegram comment Threads is a short-lived table of delivery,
+// pruned and counted under telegram_post_copies after the tables of the other domains; the task runs when the
+// development clock moves, and running it twice deletes nothing more.
+func TestShortLivedPruningOfCopies(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	var log bytes.Buffer
+	var calls []pruneCall
+	backlog := map[int64]int64{1: 3}
+	before := metrics.ShortLivedRowsPruned.With("telegram_post_copies").Get()
+	moved := &Wakes{}
+	w := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1}, nil },
+		Business:      clock.NewManual(now),
+		Log:           logging.New(&log, logging.LevelInfo),
+		PruneAuth:     []PruneTable{fakeTable("sessions", map[int64]int64{}, &calls, 0)},
+		PruneDelivery: []PruneTable{fakeTable("telegram_post_copies", backlog, &calls, 0)},
+		ClockMoved:    moved,
+	}
+	task := Tasks(w)()[3]
+	if task.Name != "short_lived_pruning" {
+		t.Fatalf("task %s", task.Name)
+	}
+	for range 2 {
+		if err := task.Run(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []pruneCall{{"sessions", 1, now, PruneBatch}, {"telegram_post_copies", 1, now, PruneBatch},
+		{"sessions", 1, now, PruneBatch}, {"telegram_post_copies", 1, now, PruneBatch}}
+	if !slices.Equal(calls, want) || backlog[1] != 0 {
+		t.Fatalf("calls %v, backlog %v", calls, backlog)
+	}
+	if got := metrics.ShortLivedRowsPruned.With("telegram_post_copies").Get() - before; got != 3 {
+		t.Errorf("counted %d", got)
+	}
+	if strings.Count(log.String(), `"event":"short_lived_pruned","table":"telegram_post_copies","rows":3`) != 1 {
+		t.Errorf("log %s", log.String())
+	}
+	moved.Wake()
+	select {
+	case <-task.Wake:
+	default:
+		t.Error("the short-lived pruning was not woken")
+	}
+}
+
 func TestShortLivedPruningFailures(t *testing.T) {
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	var log bytes.Buffer

@@ -16,12 +16,13 @@ files_touched:
   - internal/delivery/query.sql
   - internal/delivery/threads.go
   - internal/delivery/threads_test.go
+  - internal/delivery/worker_test.go
   - internal/devmode/devmode.go
   - internal/devmode/devmode_test.go
+  - internal/fakes/faketelegram/chats.go
   - internal/fakes/faketelegram/copies.go
   - internal/fakes/faketelegram/faketelegram.go
   - internal/fakes/faketelegram/faketelegram_test.go
-  - internal/fakes/faketelegram/updates.go
   - internal/leader/leader_test.go
   - internal/leader/tasks.go
   - internal/metrics/catalogue.go
@@ -29,10 +30,10 @@ files_touched:
   - internal/runtime/runtime_test.go
   - internal/telegram/adapter.go
   - internal/telegram/adapter_test.go
+  - internal/telegram/client.go
   - internal/telegram/copies.go
   - internal/telegram/copies_test.go
   - internal/telegram/updates.go
-  - test/e2e/harness.go
   - test/e2e/telegram_test.go
 acceptance:
   - "[C-14.AC-1, C-14.FR-3, C-01.FR-13] A new Alert Group creates a channel post; a new Alert creates a reply to the post's automatic copy in the discussion group, which the fake server shows as a comment under the post."
@@ -155,13 +156,15 @@ NOTIFY t1 '{"reason":"first notification"}'; sleep 2; G=$(AG 'domain%3D%22a.exam
 POST=$(MSGS $CH '.[0].message_id')
 curl -s -X PUT $FAM/groups/t1/alerts/b -d '{"labels":{"team":"tg","domain":"b.example.org"}}' > /dev/null
 NOTIFY t1 '{"reason":"new alerts added"}'; sleep 1
-MSGS $GR '[.[] | select(.from.id == 123456) | {reply: (.reply_parameters.message_id != null), thread: .message_thread_id != null}] | last'   # {"reply":true,"thread":true}
+MSGS $GR '[.[] | select(.from.id == 123456) | {reply: (.reply_parameters.message_id != null), thread: (.message_thread_id != null)}] | last'   # {"reply":true,"thread":true}
 
-# C-14.AC-15: two edits made the fake send an edited_message for the copy each; none of them changed anything
+# C-14.AC-15: each edit made the fake send an edited_message for the copy; none of them changed anything
 curl -s "${H[@]}" -X POST $API/alert-groups/$G/acknowledge > /dev/null; sleep 1
 curl -s "${H[@]}" -X POST $API/alert-groups/$G/snooze -d '{"until":"2030-01-01T00:00:00Z"}' > /dev/null; sleep 1
 curl -s -b jar "$API/alert-groups/$G/timeline?kind=delivery" | jq -c '[.items[].delivery_event]'   # ["publication"]
-curl -s $FTG/requests | jq '[.[] | select(.path | endswith("/editMessageText"))] | length'          # 2   (Acknowledge and Snooze)
+curl -s $FTG/requests | jq '[.[] | select(.path | endswith("/editMessageText"))] | length'          # 3   (the Alert b, Acknowledge and Snooze)
+COPY=$(MSGS $GR "[.[] | select(.is_automatic_forward and .forward_origin.message_id == $POST)][0].message_id")
+MSGS $GR "[.[] | select(.message_id == $COPY) | .edits | length]"                                  # [3]   (each mirrored on the copy)
 
 # C-14.AC-19, FR-6: every later event went to the group or edited the post; the reply about b was Loud
 MSGS $CH 'length'                                                            # 1
@@ -182,7 +185,6 @@ MSGS $GR '[.[] | select(.from.id == 123456)] | last | .reply_parameters.message_
 curl -s -X PUT $FTG/config -d '{"withhold_copies":false}' > /dev/null
 
 # C-14.AC-16: the copy is deleted; the reply goes unattached, the Destination stays healthy
-COPY=$(MSGS $GR "[.[] | select(.is_automatic_forward and .forward_origin.message_id == $POST)][0].message_id")
 curl -s -X DELETE $FTG/chats/$GR/messages/$COPY
 curl -s "${H[@]}" -X POST $API/alert-groups/$G/unsnooze > /dev/null
 curl -s -X PUT $FAM/groups/t1/alerts/c -d '{"labels":{"team":"tg","domain":"c.example.org"}}' > /dev/null
@@ -220,6 +222,21 @@ None.
   each other at most for that transaction.
 - Split from S-042 together with S-067 before its implementation; S-043 depends on this story for "Thread not
   attached".
+- Corrected in the implementation: the reply link is a field of the client's `sendMessage` request, so
+  `internal/telegram/client.go` is touched; the fake's messages, sends and edits live in
+  `internal/fakes/faketelegram/chats.go`, which gains the senders, the copy fields and the edit of a copy, while
+  `updates.go` needs no change; the unit tests of delivery keep their in-memory database in
+  `internal/delivery/worker_test.go`, whose leased rows now carry the Thread and the Telegram ids; and
+  `test/e2e/harness.go` needs no change, since the e2e test reaches the fake through its control endpoints. The
+  Verification's jq needed parentheses around `.message_thread_id != null`, and the new Alert b edits the post too, so
+  three edits reach the fake before the Snooze is done, each mirrored on the copy.
+- Both sides of the copy buffer take a transaction advisory lock of the post (class `0x6d75_0003`, keyed by the hash of
+  the Connection, the channel and the post) before they read or write: the worker before it records a Telegram
+  Publication, `LearnCopy` before it buffers the copy, and a reply that waits for the copy before it looks it up, so
+  that whichever comes second sees the other. The replies woken by a learned copy are woken after its transaction
+  commits, so that `LearnCopy` never holds the lock while it waits for a reply row a worker holds.
+- `short_lived_pruning` is woken by a move of the development clock, like the retention tasks, so that the
+  Verification's `ADV 90000` prunes the copies without waiting for the hourly run.
 
 ## Coverage
 

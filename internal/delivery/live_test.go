@@ -927,6 +927,8 @@ func TestLive(t *testing.T) {
 			{"claims_choose_once", l.claimsChooseOnce},
 			// S-044.
 			{"webhook_events", l.webhookEvents},
+			// S-066.
+			{"telegram_threads", l.telegramThreads},
 		} {
 			t.Run(sub.name, sub.run)
 		}
@@ -3025,4 +3027,235 @@ func (l *live) webhookEvents(t *testing.T) {
 	if secrets() != 0 {
 		t.Fatal("the secrets outlived the lease")
 	}
+}
+
+// telegramThreads checks Telegram comment Threads on PostgreSQL (C-14.FR-3, AC-2, AC-16): the copy and the
+// Publication meet in telegram_post_copies in every order — the copy first, the copy after, both waiting on the lock
+// of the post at once, and the copy found only by the due Thread reply; a reply waits telegram.copy_wait for the copy,
+// then starts an unattached chain with the thread_not_attached delivery event, and a comment's copy attaches the
+// replies after it; a lost Thread resends without its link and stays healthy; and short-lived pruning deletes the
+// copies after a day.
+func (l *live) telegramThreads(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	ctx := t.Context()
+	const channel, group = int64(-1001000000001), int64(-1001000000002)
+	var conn, dest int64
+	if err := l.d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
+		telegram_bot_api_base_url, telegram_update_mode, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at,
+		limiter_limit, limiter_per_seconds, created_at, updated_at) VALUES ($1, 'CNAAAAAAAAAAT1', 'telegram', 'tg',
+		'https://api.telegram.org', 'long_polling', '\x00', 'k1', $2, 1000, 1, $2, $2) RETURNING id`, l.orgID,
+		t0).Scan(&conn); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.d.Pool.QueryRow(ctx, `INSERT INTO destinations (org_id, public_id, type, name, connection_id,
+		telegram_channel_id, telegram_channel_chat_id, telegram_discussion_chat_id, mentions, limiter_limit,
+		limiter_per_seconds, health, created_at, updated_at) VALUES ($1, 'DSAAAAAAAAAAT1', 'telegram', 'alerts', $2,
+		'@muster_alerts', $3, $4, '{}', 1000, 1, 'healthy', $5, $5) RETURNING id`, l.orgID, conn, channel, group,
+		t0).Scan(&dest); err != nil {
+		t.Fatal(err)
+	}
+	l.attach(t, dest)
+	defer l.exec(t, `DELETE FROM telegram_post_copies`)
+	w := l.worker("tg")
+	w.Adapters[delivery.TypeTelegram] = l.rec
+	learn := func(post, cp int64, from string) error {
+		return l.svc.LearnCopy(ctx, delivery.Copy{ConnectionID: conn, ChannelChatID: channel, PostID: post,
+			DiscussionChatID: group, CopyID: cp, LearnedFrom: from})
+	}
+	posted := func(post string) {
+		l.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{
+			Kind: delivery.OutcomeOK, MessageID: post}})
+	}
+	type thread struct{ state, anchor, chain string }
+	threadOf := func(gid string) thread {
+		t.Helper()
+		var th thread
+		if err := l.d.Pool.QueryRow(ctx, `SELECT d.thread_state, coalesce(d.thread_anchor_id, ''),
+			coalesce(d.thread_chain_last_id, '') FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+			WHERE g.public_id = $1 AND d.destination_id = $2`, gid, dest).Scan(&th.state, &th.anchor,
+			&th.chain); err != nil {
+			t.Fatal(err)
+		}
+		return th
+	}
+	lastReply := func() deliverytest.Call {
+		t.Helper()
+		var last deliverytest.Call
+		for _, c := range l.rec.Calls() {
+			if c.Method == deliverytest.MethodReply {
+				last = c
+			}
+		}
+		return last
+	}
+
+	// The copy before the Publication completes.
+	if err := learn(1001, 9001, delivery.LearnedFromAutomaticForward); err != nil {
+		t.Fatal(err)
+	}
+	posted("1001")
+	l.fire(t, "tg1", "TgFirst/a")
+	g1 := l.group(t, "TgFirst")
+	l.round(t, w)
+	if th := threadOf(g1); th != (thread{"attached", "9001", ""}) {
+		t.Fatalf("copy first: %+v", th)
+	}
+	l.fire(t, "tg1", "TgFirst/a", "TgFirst/b")
+	l.round(t, w)
+	if r := lastReply(); r.Root != (delivery.Root{MessageID: "1001", ThreadAnchorID: "9001"}) {
+		t.Fatalf("reply %+v", r.Root)
+	}
+
+	// The copy after the Publication.
+	posted("1002")
+	l.fire(t, "tg2", "TgSecond/a")
+	g2 := l.group(t, "TgSecond")
+	l.round(t, w)
+	if th := threadOf(g2); th.state != "waiting_for_copy" {
+		t.Fatalf("copy after: %+v", th)
+	}
+	if err := learn(1002, 9002, delivery.LearnedFromAutomaticForward); err != nil {
+		t.Fatal(err)
+	}
+	if th := threadOf(g2); th != (thread{"attached", "9002", ""}) {
+		t.Fatalf("copy after: %+v", th)
+	}
+
+	// Both at once: the lock of the post is held while the worker records the Publication and the update path learns
+	// the copy; whichever goes second attaches the Thread.
+	posted("1003")
+	l.fire(t, "tg3", "TgThird/a")
+	g3 := l.group(t, "TgThird")
+	holder, err := l.d.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_xact_lock($1::int, hashtext(format('%s/%s/%s', $2::bigint,
+		$3::bigint, $4::bigint)))`, int32(0x6d75_0003), conn, channel, int64(1003)); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 2)
+	go func() { _, err := w.Round(ctx); errs <- err }()
+	go func() { errs <- learn(1003, 9003, delivery.LearnedFromAutomaticForward) }()
+	for start := time.Now(); ; {
+		if l.count(t, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`) == 2 {
+			break
+		}
+		if time.Since(start) > 10*time.Second {
+			t.Fatal("the worker and the copy did not both wait for the lock of the post")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if th := threadOf(g3); th != (thread{"attached", "9003", ""}) {
+		t.Fatalf("at once: %+v", th)
+	}
+
+	// Copy wait and the unattached chain (C-14.AC-2): the copy is withheld; the reply waits telegram.copy_wait from
+	// the Publication, then starts a chain, which the next reply follows.
+	posted("1004")
+	l.fire(t, "tg4", "TgFourth/a")
+	g4 := l.group(t, "TgFourth")
+	l.round(t, w)
+	published := l.business.Now()
+	l.fire(t, "tg4", "TgFourth/a", "TgFourth/b")
+	l.round(t, w)
+	if r := lastReply(); r.Root.MessageID == "1004" {
+		t.Fatalf("the reply did not wait for the copy: %+v", r.Root)
+	}
+	var due time.Time
+	if err := l.d.Pool.QueryRow(ctx, `SELECT r.next_attempt_at FROM thread_replies r JOIN deliveries d ON
+		d.id = r.delivery_id WHERE d.message_id = '1004' AND r.state = 'pending'`).Scan(&due); err != nil ||
+		!due.Equal(published.Add(delivery.CopyWait)) {
+		t.Fatalf("due %v, published %v: %v", due, published, err)
+	}
+	l.rec.Script(deliverytest.MethodReply, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		MessageID: "2001"}}, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		MessageID: "2002"}})
+	l.business.Set(due)
+	l.round(t, w)
+	if r := lastReply(); r.Root != (delivery.Root{MessageID: "1004"}) || threadOf(g4) !=
+		(thread{"unattached", "", "2001"}) {
+		t.Fatalf("first link %+v, thread %+v", r.Root, threadOf(g4))
+	}
+	states, err := l.svc.States(ctx, g4)
+	if err != nil || len(states) != 1 || !states[0].ThreadNotAttached {
+		t.Errorf("states %+v %v", states, err)
+	}
+	l.business.Advance(2 * time.Minute)
+	l.fire(t, "tg4", "TgFourth/a", "TgFourth/b", "TgFourth/c")
+	l.round(t, w)
+	if r := lastReply(); r.Root != (delivery.Root{MessageID: "1004", ChainLastID: "2001"}) ||
+		threadOf(g4).chain != "2002" {
+		t.Fatalf("second link %+v", r.Root)
+	}
+	if err := learn(1004, 9004, delivery.LearnedFromComment); err != nil {
+		t.Fatal(err)
+	}
+	l.business.Advance(2 * time.Minute)
+	l.fire(t, "tg4", "TgFourth/a", "TgFourth/b", "TgFourth/c", "TgFourth/d")
+	l.round(t, w)
+	if r := lastReply(); r.Root != (delivery.Root{MessageID: "1004", ThreadAnchorID: "9004"}) {
+		t.Fatalf("after the comment %+v", r.Root)
+	}
+	if n := l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'thread_not_attached'
+		AND destination_id = $1 AND loudness = 'quiet'`, dest); n != 1 {
+		t.Errorf("thread_not_attached events %d", n)
+	}
+
+	// The copy only found by the due reply.
+	posted("1005")
+	l.fire(t, "tg5", "TgFifth/a")
+	g5 := l.group(t, "TgFifth")
+	l.round(t, w)
+	l.exec(t, `INSERT INTO telegram_post_copies (connection_id, channel_chat_id, channel_message_id, org_id,
+		discussion_chat_id, copy_message_id, learned_from, received_at) VALUES ($1, $2, 1005, $3, $4, 9005,
+		'automatic_forward', $5)`, conn, channel, l.orgID, group, l.business.Now())
+	l.fire(t, "tg5", "TgFifth/a", "TgFifth/b")
+	l.round(t, w)
+	if r := lastReply(); r.Root != (delivery.Root{MessageID: "1005", ThreadAnchorID: "9005"}) ||
+		threadOf(g5).state != "attached" {
+		t.Fatalf("looked up by the reply %+v", r.Root)
+	}
+
+	// The lost Thread (C-14.AC-16): the copy of the first post is deleted.
+	l.rec.Script(deliverytest.MethodReply,
+		deliverytest.Failure(delivery.OutcomeThreadLost, "Bad Request: message to be replied not found"),
+		deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, MessageID: "3001"}})
+	l.business.Advance(2 * time.Minute)
+	l.fire(t, "tg1", "TgFirst/a", "TgFirst/b", "TgFirst/c")
+	l.round(t, w)
+	if r := lastReply(); r.Root != (delivery.Root{MessageID: "1001"}) ||
+		threadOf(g1) != (thread{"unattached", "9001", "3001"}) {
+		t.Fatalf("lost %+v, thread %+v", r.Root, threadOf(g1))
+	}
+	if health, _ := l.health(t, dest); health != "healthy" || l.count(t, `SELECT count(*) FROM delivery_events
+		WHERE kind = 'thread_not_attached' AND error LIKE '%message to be replied not found%'`) != 1 {
+		t.Errorf("health %s", health)
+	}
+	if err := learn(1001, 9001, delivery.LearnedFromComment); err != nil || threadOf(g1).state != "unattached" {
+		t.Errorf("the lost copy attached again: %v %+v", err, threadOf(g1))
+	}
+
+	// Pruning: a day later the copies are gone; again, nothing more.
+	if n, err := l.svc.PrunePostCopies(ctx, l.business.Now().Add(delivery.PostCopyRetention+time.Hour), 2); err != nil ||
+		n != 2 {
+		t.Fatalf("pruned %d %v", n, err)
+	}
+	if n, err := l.svc.PrunePostCopies(ctx, l.business.Now().Add(delivery.PostCopyRetention+time.Hour),
+		1000); err != nil || n != 3 || l.count(t, `SELECT count(*) FROM telegram_post_copies`) != 0 {
+		t.Fatalf("pruned %d %v", n, err)
+	}
+	if n, err := l.svc.PrunePostCopies(ctx, l.business.Now().Add(48*time.Hour), 1000); err != nil || n != 0 {
+		t.Fatalf("pruned again %d %v", n, err)
+	}
+	t.Log("copy before, after and at once with the Publication, and found by the reply; the chain after " +
+		"telegram.copy_wait; the comment's copy; the lost Thread; the copies pruned after a day")
 }

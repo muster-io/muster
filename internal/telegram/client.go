@@ -306,13 +306,20 @@ func chatRef(chat string) any {
 // outgoing is a sendMessage or an editMessageText: an edit names its message and has no disable_notification. Link
 // previews are off, so that the link to Muster does not take the room of the message.
 type outgoing struct {
-	ChatID              any             `json:"chat_id"`
-	MessageID           int64           `json:"message_id,omitempty"`
-	Text                string          `json:"text"`
-	ParseMode           string          `json:"parse_mode,omitempty"`
-	ReplyMarkup         *inlineKeyboard `json:"reply_markup,omitempty"`
-	DisableNotification bool            `json:"disable_notification,omitempty"`
-	LinkPreview         linkPreview     `json:"link_preview_options"`
+	ChatID              any              `json:"chat_id"`
+	MessageID           int64            `json:"message_id,omitempty"`
+	Text                string           `json:"text"`
+	ParseMode           string           `json:"parse_mode,omitempty"`
+	ReplyMarkup         *inlineKeyboard  `json:"reply_markup,omitempty"`
+	ReplyParameters     *replyParameters `json:"reply_parameters,omitempty"`
+	DisableNotification bool             `json:"disable_notification,omitempty"`
+	LinkPreview         linkPreview      `json:"link_preview_options"`
+}
+
+// replyParameters make a message a reply to message_id in the same chat; without allow_sending_without_reply, a
+// reply to a message that is gone fails (F-008).
+type replyParameters struct {
+	MessageID int64 `json:"message_id"`
 }
 
 type linkPreview struct {

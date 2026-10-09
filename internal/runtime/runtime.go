@@ -784,9 +784,11 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			return p.delivery.AbandonConnection(ctx, tx, id)
 		}})
 	p.connections, p.interactive, p.roles = conns, interactive, roles
-	// The updates of Telegram Connections reach one router, from the Leader's poller or from the webhook endpoint; the
-	// adapter (S-042) and Account links (S-051) register their handlers on it.
+	// The updates of Telegram Connections reach one router, from the Leader's poller or from the webhook endpoint;
+	// delivery learns the automatic copies of channel posts from the messages of channels and groups, and presses and
+	// Account links register their handlers on it.
 	p.updates = &telegram.Router{Offsets: conns, Log: p.log}
+	p.updates.Handle(telegram.KindChatMessage, telegram.Copies{Learner: p.delivery}.Handle)
 	p.poller = &telegram.Poller{Source: conns, Router: p.updates, Log: p.log}
 	p.destinations = destinations.New(orgID, p.db.DestinationsStore())
 	p.destinations.SetWriter(destinations.WriterConfig{Writer: p.db.DestinationsWriter(), Audit: w,
@@ -914,6 +916,9 @@ func (p *process) newKeeper() *leader.Keeper {
 		PruneOIDC: []leader.PruneTable{
 			{Name: "oidc_auth_requests", Delete: oidc.NewPruner(p.db.OIDCPruner()).AuthRequests},
 		},
+		PruneDelivery: []leader.PruneTable{
+			{Name: "telegram_post_copies", Delete: p.prunePostCopies},
+		},
 	}))
 }
 
@@ -924,6 +929,14 @@ func (p *process) deliveryQueue(ctx context.Context, orgID int64) error {
 		return nil
 	}
 	return errors.Join(p.delivery.ExportQueue(ctx), p.delivery.ExportBroken(ctx), p.delivery.ExportStorms(ctx))
+}
+
+// prunePostCopies deletes the buffered copies of Telegram posts of the Organization orgID, for short-lived pruning.
+func (p *process) prunePostCopies(ctx context.Context, orgID int64, now time.Time, limit int32) (int64, error) {
+	if orgID != p.orgID {
+		return 0, nil
+	}
+	return p.delivery.PrunePostCopies(ctx, now, limit)
 }
 
 // threadReplyRetention is the Leader task thread_reply_retention for the Organization orgID.

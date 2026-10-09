@@ -7,10 +7,12 @@
 // (F-018); setWebhook, deleteWebhook and getWebhookInfo keep a webhook per bot, to which the queued updates are posted
 // with the secret token header. getChat, getChatMember, sendMessage and editMessageText work on the chats of chats.go:
 // two channels and a discussion group, the bot's rights in them, the messages the bot sent with their keyboards and
-// edits, the budget of sends and edits per chat and the notifications of two accounts. Every other method is recorded
-// and answered 501. The control endpoints under /_fake/ change the configuration (a path prefix, an HTML mode that
-// stands for a web server that is not a Bot API, revoked tokens), queue updates, end a running long poll with 409, and
-// change and list the chats, the bot's rights, the messages and the notifications.
+// edits, the budget of sends and edits per chat and the notifications of two accounts; copies.go adds the automatic
+// copies of channel posts in the discussion group, their edits, people's comments and deleted messages. Every other
+// method is recorded and answered 501. The control endpoints under /_fake/ change the configuration (a path prefix, an
+// HTML mode that stands for a web server that is not a Bot API, revoked tokens, the delay of copies and withholding
+// them), queue updates, end a running long poll with 409, post comments, delete messages, and change and list the
+// chats, the bot's rights, the messages and the notifications.
 package faketelegram
 
 import (
@@ -61,12 +63,21 @@ type Config struct {
 	Mode string `json:"mode"`
 	// RevokedTokens are refused with 401 on every method.
 	RevokedTokens []string `json:"revoked_tokens"`
+	// CopyDelayMS is how long after a channel post its automatic copy arrives in the discussion group (F-005): 0 makes
+	// it before the answer to sendMessage.
+	CopyDelayMS int64 `json:"copy_delay_ms"`
+	// WithholdCopies keeps the updates of new automatic copies, and of their edits, from the bot, as when the bot is
+	// not an admin of the discussion group (F-003); the copies exist all the same. It is read when a copy arrives,
+	// copy_delay_ms after its post.
+	WithholdCopies bool `json:"withhold_copies"`
 }
 
 type configPatch struct {
-	PathPrefix    *string   `json:"path_prefix"`
-	Mode          *string   `json:"mode"`
-	RevokedTokens *[]string `json:"revoked_tokens"`
+	PathPrefix     *string   `json:"path_prefix"`
+	Mode           *string   `json:"mode"`
+	RevokedTokens  *[]string `json:"revoked_tokens"`
+	CopyDelayMS    *int64    `json:"copy_delay_ms"`
+	WithholdCopies *bool     `json:"withhold_copies"`
 }
 
 // Fake is the fake Telegram Bot API server.
@@ -143,10 +154,22 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if p.CopyDelayMS != nil && *p.CopyDelayMS < 0 {
+		fakeserver.WriteError(w, http.StatusBadRequest, "copy_delay_ms is 0 or more")
+		return
+	}
 	if err := f.SetConfig(p.PathPrefix, p.Mode, p.RevokedTokens); err != nil {
 		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	f.mu.Lock()
+	if p.CopyDelayMS != nil {
+		f.config.CopyDelayMS = *p.CopyDelayMS
+	}
+	if p.WithholdCopies != nil {
+		f.config.WithholdCopies = *p.WithholdCopies
+	}
+	f.mu.Unlock()
 	fakeserver.WriteJSON(w, http.StatusOK, f.Config())
 }
 
@@ -232,9 +255,9 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	case "getchatmember":
 		f.getChatMember(w, p)
 	case "sendmessage":
-		f.sendMessage(w, p)
+		f.sendMessage(r.Context(), w, token, p)
 	case "editmessagetext":
-		f.editMessageText(w, p)
+		f.editMessageText(r.Context(), w, p)
 	default:
 		writeFailure(w, http.StatusNotImplemented,
 			"Not Implemented: method "+method+" is not implemented by the fake Telegram server")

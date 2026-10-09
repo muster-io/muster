@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
@@ -361,3 +362,90 @@ func TestMentionTargets(t *testing.T) {
 }
 
 var errBoomMention = fmt.Errorf("no users")
+
+// TestCopyWaitAndUnattachedChain is C-14.AC-2 and C-11.FR-16: with the copy withheld, the reply waits
+// telegram.copy_wait from the Publication, then goes to the discussion group as the first link of a chain; the Thread
+// is unattached with one thread_not_attached delivery event and the alert-group hint; the next reply follows the
+// chain; a comment's copy attaches the replies after it.
+func TestCopyWaitAndUnattachedChain(t *testing.T) {
+	e := telegramEnv(t)
+	d := e.publish(t)
+	e.newAlerts(t, 2, "fp2")
+	e.round(t)
+	if len(e.replies()) != 0 {
+		t.Fatal("the reply did not wait for the copy")
+	}
+	e.business.Set(business0.Add(delivery.CopyWait))
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		MessageID: "601"}}, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, MessageID: "602"}})
+	hints := len(e.db.hints)
+	e.round(t)
+	r := e.replies()
+	if len(r) != 1 || r[0].Root != (delivery.Root{MessageID: tgPost}) {
+		t.Fatalf("first link %+v", r)
+	}
+	if d.threadState != "unattached" || str(d.chainLastID) != "601" || e.threadEvents() != 1 ||
+		!slices.ContainsFunc(e.db.hints[hints:], func(h db.Hint) bool { return h.ID == "AGAAAAAAAAAA21" }) {
+		t.Fatalf("thread %s %s events %d hints %v", d.threadState, str(d.chainLastID), e.threadEvents(), e.db.hints)
+	}
+	ev := e.db.events[len(e.db.events)-1]
+	if ev.Kind != "thread_not_attached" || ev.Loudness != "quiet" || ev.AlertGroupID.Int64 != groupID ||
+		ev.DestinationID != destTG || ev.Error.Valid {
+		t.Errorf("event %+v", ev)
+	}
+	states, err := e.svc.States(t.Context(), "AGAAAAAAAAAA21")
+	if err != nil || len(states) != 1 || !states[0].ThreadNotAttached || states[0].State != "delivered" {
+		t.Errorf("states %+v %v", states, err)
+	}
+	e.business.Set(business0.Add(2 * delivery.CopyWait))
+	e.newAlerts(t, 3, "fp3")
+	e.round(t)
+	r = e.replies()
+	if len(r) != 2 || r[1].Root != (delivery.Root{MessageID: tgPost, ChainLastID: "601"}) ||
+		str(d.chainLastID) != "602" || e.threadEvents() != 1 {
+		t.Fatalf("second link %+v, chain %s", r, str(d.chainLastID))
+	}
+	e.learn(t, tgCopy, delivery.LearnedFromComment)
+	if d.threadState != "attached" || d.chainLastID != nil {
+		t.Fatalf("after the comment %s", d.threadState)
+	}
+	e.business.Set(business0.Add(4 * delivery.CopyWait))
+	e.newAlerts(t, 4, "fp4")
+	e.round(t)
+	if r = e.replies(); len(r) != 3 || r[2].Root.ThreadAnchorID != "9001" || r[2].Root.ChainLastID != "" {
+		t.Fatalf("attached reply %+v", r)
+	}
+}
+
+// TestChainLinkWhileCopyArrives: a chain link sent while the copy is learned leaves the attached Thread alone.
+func TestChainLinkWhileCopyArrives(t *testing.T) {
+	e := telegramEnv(t)
+	d := e.publish(t)
+	e.business.Set(business0.Add(delivery.CopyWait))
+	e.newAlerts(t, 2, "fp2")
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		MessageID: "601"}, Then: func() { e.learn(t, tgCopy, delivery.LearnedFromAutomaticForward) }})
+	e.round(t)
+	if d.threadState != "attached" || str(d.anchorID) != "9001" || e.threadEvents() != 0 {
+		t.Fatalf("thread %s %s events %d", d.threadState, str(d.anchorID), e.threadEvents())
+	}
+}
+
+// TestChainLinkOfRepublishedRoot: a chain link under a Root message that was published again while it was sent
+// leaves the new Root message's Thread alone.
+func TestChainLinkOfRepublishedRoot(t *testing.T) {
+	e := telegramEnv(t)
+	d := e.publish(t)
+	e.business.Set(business0.Add(delivery.CopyWait))
+	e.newAlerts(t, 2, "fp2")
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		MessageID: "601"}, Then: func() {
+		e.db.mu.Lock()
+		d.messageID, d.threadState = at2("502"), "waiting_for_copy"
+		e.db.mu.Unlock()
+	}})
+	e.round(t)
+	if d.threadState != "waiting_for_copy" || d.chainLastID != nil || e.threadEvents() != 0 {
+		t.Fatalf("thread %s %s events %d", d.threadState, str(d.chainLastID), e.threadEvents())
+	}
+}

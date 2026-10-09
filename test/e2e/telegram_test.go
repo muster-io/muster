@@ -64,6 +64,19 @@ func (e *tgd) messages(chat int64) []faketelegram.Message {
 	return out
 }
 
+// botReplies are the bot's messages in the discussion group: its Thread replies, without the automatic copies and the
+// comments.
+func (e *tgd) botReplies() []faketelegram.Message {
+	e.t.Helper()
+	var out []faketelegram.Message
+	for _, m := range e.messages(faketelegram.GroupID) {
+		if m.From != nil && m.From.ID == faketelegram.BotID {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // notifications are the notifications of channel posts; Thread replies in the discussion group are left out.
 func (e *tgd) notifications() []faketelegram.Notification {
 	e.t.Helper()
@@ -231,15 +244,13 @@ func TestTelegram(t *testing.T) {
 	if hl := e.health(dest); hl.State != "healthy" {
 		t.Errorf("health after the republication %+v", hl)
 	}
-	// Until S-066, a Thread reply is a plain message in the discussion group, never in the channel (F-015).
+	// A Thread reply goes to the discussion group, never to the channel (F-015).
 	e.alert("t1", "b", `{"team":"tg","cluster":"a","domain":"b.example.org"}`, "")
 	e.notify("t1", "new alerts added")
 	advance(t, r, 61)
-	eventually(t, "the Thread reply in the discussion group", func() bool {
-		return len(e.messages(faketelegram.GroupID)) > 0
-	})
-	if reply := e.messages(faketelegram.GroupID)[0]; reply.ReplyParameters != nil ||
-		!strings.Contains(reply.Text, "b.example.org") || len(e.messages(faketelegram.ChannelID)) != 2 {
+	eventually(t, "the Thread reply in the discussion group", func() bool { return len(e.botReplies()) > 0 })
+	if reply := e.botReplies()[0]; !strings.Contains(reply.Text, "b.example.org") ||
+		len(e.messages(faketelegram.ChannelID)) != 2 {
 		t.Errorf("thread reply %+v", reply)
 	}
 
@@ -252,6 +263,11 @@ func TestTelegram(t *testing.T) {
 	e.notify("t3", "first notification")
 	hl := e.waitHealth(dest, "broken")
 	t.Logf("broken: %s", *hl.Reason)
+	// The synthetic Snapshot of MusterDestinationBroken, stored with the Broken state, is processed first, so that the
+	// resolution below is the Snapshot that notify waits for.
+	eventually(t, "the internal alert's snapshot", func() bool {
+		return h.count(t, `SELECT count(*) FROM stored_snapshots WHERE state = 'pending'`) == 0
+	})
 	e.alert("t3", "a", `{"team":"tg","cluster":"q1"}`, `,"status":"resolved"`)
 	e.notify("t3", "all alerts resolved")
 	advance(t, r, 300)
@@ -400,5 +416,280 @@ func TestTelegramChatBudget(t *testing.T) {
 	}
 	if b := buttons(t, fake.Messages(faketelegram.ChannelID)[0].ReplyMarkup); len(b) == 0 || b[0] != "Unack" {
 		t.Errorf("keyboard after the wait %v", b)
+	}
+}
+
+// copyOf is the automatic copy of the channel post in the discussion group, nil before it arrived.
+func (e *tgd) copyOf(post int64) *faketelegram.Message {
+	e.t.Helper()
+	for _, m := range e.messages(faketelegram.GroupID) {
+		if m.IsAutomaticForward && m.ForwardOrigin != nil && m.ForwardOrigin.MessageID == post {
+			return &m
+		}
+	}
+	return nil
+}
+
+// threadNotAttached is thread_not_attached of the delivery state of the Alert Group in its one Destination.
+func (e *tgd) threadNotAttached(g string) bool {
+	e.t.Helper()
+	var page struct {
+		Items []struct {
+			ThreadNotAttached bool `json:"thread_not_attached"`
+		} `json:"items"`
+	}
+	decode(e.t, e.api.do(http.MethodGet, "/api/v1/alert-groups/"+g+"/deliveries", ""), &page)
+	if len(page.Items) != 1 {
+		e.t.Fatalf("deliveries %+v", page.Items)
+	}
+	return page.Items[0].ThreadNotAttached
+}
+
+// threadState is the Thread of the delivery whose Root message is the channel post.
+func (e *tgd) threadState(post int64) string {
+	e.t.Helper()
+	states := map[string]int64{}
+	for _, s := range []string{"none", "waiting_for_copy", "attached", "unattached"} {
+		states[s] = e.h.count(e.t, fmt.Sprintf(`SELECT count(*) FROM deliveries WHERE message_id = '%d'
+			AND thread_state = '%s'`, post, s))
+		if states[s] == 1 {
+			return s
+		}
+	}
+	return fmt.Sprint(states)
+}
+
+// replyTo is the message a message replies to, 0 for none.
+func replyTo(m faketelegram.Message) int64 {
+	var rp struct {
+		MessageID int64 `json:"message_id"`
+	}
+	_ = json.Unmarshal(m.ReplyParameters, &rp)
+	return rp.MessageID
+}
+
+// pendingUpdates are the updates of the demo Connection's bot that the fake has not handed over yet.
+func (e *tgd) pendingUpdates() float64 {
+	e.t.Helper()
+	var info struct {
+		Result struct {
+			Pending float64 `json:"pending_update_count"`
+		} `json:"result"`
+	}
+	decode(e.t, call(e.t, http.MethodGet, e.h.Fakes.Telegram+"/bot"+devmode.TelegramConnectionBotToken+
+		"/getWebhookInfo", ""), &info)
+	return info.Result.Pending
+}
+
+// TestTelegramThreads is S-066 against `muster dev` and the fake Telegram server: Thread replies attach to the
+// automatic copy of the post (C-14.AC-1), in either order of copy and Publication (C-14.FR-3); the copy's edit_date and
+// its edited_message change nothing (C-14.AC-15); the channel carries only the Root message (C-14.AC-19); Quiet and
+// Loud replies (C-14.FR-6); a withheld copy makes the replies wait telegram.copy_wait and go unattached until a
+// comment teaches the copy (C-14.AC-2); a deleted copy loses the Thread (C-14.AC-16); the copies notify member with
+// sound and Thread replies member only (F-013, F-014); and short-lived pruning deletes the copies after a day.
+func TestTelegramThreads(t *testing.T) {
+	h := Start(t, DevProcess)
+	r := h.Replicas[0]
+	e := newTGD(t, h, r)
+	a := e.create("alerts", "@muster_alerts", 100)
+	if a.status != http.StatusCreated {
+		t.Fatalf("create = %d %s", a.status, a.body)
+	}
+	var created struct {
+		Destination struct {
+			ID string `json:"id"`
+		} `json:"destination"`
+	}
+	decode(t, a, &created)
+	dest := created.Destination.ID
+	e.route("tg", "tg", []string{dest}, nil)
+
+	// C-14.AC-1, C-01.FR-13: the post, its automatic copy a second later, after the answer to sendMessage, and a
+	// reply about a new Alert to the copy, in its comment Thread.
+	e.group("t1", "CertExpiry")
+	e.alert("t1", "a", `{"team":"tg","cluster":"t1","domain":"a.example.org"}`, "")
+	e.notify("t1", "first notification")
+	g := e.groupOf("t1")
+	eventually(t, "the channel post", func() bool { return len(e.messages(faketelegram.ChannelID)) == 1 })
+	post := e.messages(faketelegram.ChannelID)[0].ID
+	eventually(t, "the copy to attach the Thread", func() bool { return e.threadState(post) == "attached" })
+	cp := e.copyOf(post)
+	if cp == nil || cp.From == nil || cp.From.ID != faketelegram.TelegramUserID || cp.EditDate != cp.Date ||
+		cp.ReplyMarkup != nil {
+		t.Fatalf("copy %+v", cp)
+	}
+	e.alert("t1", "b", `{"team":"tg","cluster":"t1","domain":"b.example.org"}`, "")
+	e.notify("t1", "new alerts added")
+	eventually(t, "the reply to the copy", func() bool { return len(e.botReplies()) == 1 })
+	reply := e.botReplies()[0]
+	if replyTo(reply) != cp.ID || reply.MessageThreadID != cp.ID || !strings.Contains(reply.Text, "b.example.org") ||
+		reply.DisableNotification {
+		t.Fatalf("reply %+v", reply)
+	}
+
+	// F-013, F-014: the copy notified member with sound; the Thread reply notified member only.
+	var all []faketelegram.Notification
+	decode(t, call(t, http.MethodGet, e.ftg+"/notifications", ""), &all)
+	var ofCopy, ofReply []faketelegram.Notification
+	for _, n := range all {
+		switch {
+		case n.Chat == faketelegram.GroupID && n.MessageID == cp.ID:
+			ofCopy = append(ofCopy, n)
+		case n.Chat == faketelegram.GroupID && n.MessageID == reply.ID:
+			ofReply = append(ofReply, n)
+		}
+	}
+	if len(ofCopy) != 1 || ofCopy[0].Account != faketelegram.AccountMember || !ofCopy[0].Sound ||
+		len(ofReply) != 1 || ofReply[0].Account != faketelegram.AccountMember {
+		t.Errorf("notifications of the copy %+v and of the reply %+v", ofCopy, ofReply)
+	}
+
+	// C-14.AC-15: each edit of the post makes an edited_message update for the copy, which changes nothing: the
+	// Acknowledge, the new Alert and the Snooze make three edits and no more, and no delivery event; C-14.FR-6: a new
+	// Alert while acknowledged is a Quiet reply.
+	edits0 := len(e.messages(faketelegram.ChannelID)[0].Edits)
+	e.command(g, "acknowledge")
+	eventually(t, "the edit to acknowledged", func() bool {
+		return len(e.messages(faketelegram.ChannelID)[0].Edits) == edits0+1
+	})
+	e.alert("t1", "c", `{"team":"tg","cluster":"t1","domain":"c.example.org"}`, "")
+	e.notify("t1", "new alerts added")
+	advance(t, r, 61)
+	eventually(t, "the Quiet reply", func() bool { return len(e.botReplies()) == 2 })
+	if q := e.botReplies()[1]; !q.DisableNotification || replyTo(q) != cp.ID {
+		t.Errorf("quiet reply %+v", q)
+	}
+	e.api.json(http.MethodPost, "/api/v1/alert-groups/"+g+"/snooze", `{"until":"2030-01-01T00:00:00Z"}`, http.StatusOK)
+	eventually(t, "the edit to snoozed and the edited copies handled", func() bool {
+		return len(e.messages(faketelegram.ChannelID)[0].Edits) == edits0+3 &&
+			len(e.copyOf(post).Edits) == edits0+3 && e.pendingUpdates() == 0
+	})
+	advance(t, r, 5)
+	edits := 0
+	for _, q := range e.requests() {
+		if strings.HasSuffix(q.Path, "/editMessageText") {
+			edits++
+		}
+	}
+	if got := deliveryEvents(e.timeline(g, "&kind=delivery")); edits != edits0+3 ||
+		len(e.messages(faketelegram.ChannelID)[0].Edits) != edits0+3 || strings.Join(got, ",") != "publication" {
+		t.Errorf("edits %d of %d, delivery events %v", edits, edits0+3, got)
+	}
+	if strings.Contains(r.Output(), `"event":"telegram_update_dropped"`) {
+		t.Error("a chat message was dropped as unhandled")
+	}
+
+	// C-14.AC-19: the channel holds the one Root message; everything else went to the group.
+	if n := len(e.messages(faketelegram.ChannelID)); n != 1 {
+		t.Errorf("%d channel posts", n)
+	}
+
+	// C-14.AC-2: the copy is withheld; the reply waits telegram.copy_wait, then goes unattached; after a person's
+	// comment the next reply attaches to the copy.
+	e.fake(http.MethodPut, e.ftg+"/config", `{"withhold_copies":true}`)
+	e.group("t2", "DiskSlow")
+	e.alert("t2", "a", `{"team":"tg","cluster":"t2","disk":"sda"}`, "")
+	e.notify("t2", "first notification")
+	g2 := e.groupOf("t2")
+	eventually(t, "the second post", func() bool { return len(e.messages(faketelegram.ChannelID)) == 2 })
+	p2 := e.messages(faketelegram.ChannelID)[1].ID
+	eventually(t, "the withheld copy", func() bool { return e.copyOf(p2) != nil })
+	if s := e.threadState(p2); s != "waiting_for_copy" {
+		t.Fatalf("thread %s", s)
+	}
+	replies := len(e.botReplies())
+	e.alert("t2", "b", `{"team":"tg","cluster":"t2","disk":"sdb"}`, "")
+	e.notify("t2", "new alerts added")
+	if len(e.botReplies()) != replies || e.threadNotAttached(g2) {
+		t.Fatal("the reply did not wait for the copy")
+	}
+	advance(t, r, 61)
+	eventually(t, "the unattached reply", func() bool { return len(e.botReplies()) == replies+1 })
+	first := e.botReplies()[replies]
+	if first.ReplyParameters != nil || first.MessageThreadID != 0 || !e.threadNotAttached(g2) {
+		t.Fatalf("first link %+v", first)
+	}
+	if got := deliveryEvents(e.timeline(g2, "&kind=delivery")); !slices.Contains(got, "thread_not_attached") {
+		t.Errorf("delivery events %v", got)
+	}
+	e.fake(http.MethodPost, e.ftg+"/comment", fmt.Sprintf(`{"post_id":%d,"from":{"id":7001},"text":"looking"}`, p2))
+	eventually(t, "the comment to attach the Thread", func() bool { return e.threadState(p2) == "attached" })
+	if e.threadNotAttached(g2) {
+		t.Error("still not attached after the comment")
+	}
+	e.alert("t2", "c", `{"team":"tg","cluster":"t2","disk":"sdc"}`, "")
+	e.notify("t2", "new alerts added")
+	advance(t, r, 61)
+	eventually(t, "the attached reply", func() bool { return len(e.botReplies()) == replies+2 })
+	if att := e.botReplies()[replies+1]; replyTo(att) != e.copyOf(p2).ID {
+		t.Fatalf("after the comment %+v", att)
+	}
+	e.fake(http.MethodPut, e.ftg+"/config", `{"withhold_copies":false}`)
+
+	// C-14.FR-3: a copy that arrives before the answer to sendMessage attaches the Thread as well.
+	e.fake(http.MethodPut, e.ftg+"/config", `{"copy_delay_ms":0}`)
+	e.group("t3", "QueueFull")
+	e.alert("t3", "a", `{"team":"tg","cluster":"t3","queue":"q1"}`, "")
+	e.notify("t3", "first notification")
+	eventually(t, "the third post", func() bool { return len(e.messages(faketelegram.ChannelID)) == 3 })
+	p3 := e.messages(faketelegram.ChannelID)[2].ID
+	eventually(t, "the early copy to attach the Thread", func() bool { return e.threadState(p3) == "attached" })
+	e.fake(http.MethodPut, e.ftg+"/config", fmt.Sprintf(`{"copy_delay_ms":%d}`, devmode.TelegramCopyDelay.Milliseconds()))
+
+	// C-14.AC-16: the copy of the first post is deleted; the next reply is refused, sent again without the link, the
+	// Thread is not attached with a thread_not_attached delivery event and the Destination stays healthy; the reply
+	// after it follows the chain.
+	e.fake(http.MethodDelete, fmt.Sprintf("%s/chats/%d/messages/%d", e.ftg, faketelegram.GroupID, cp.ID), "")
+	e.command(g, "unsnooze")
+	replies = len(e.botReplies())
+	e.alert("t1", "d", `{"team":"tg","cluster":"t1","domain":"d.example.org"}`, "")
+	e.notify("t1", "new alerts added")
+	advance(t, r, 61)
+	eventually(t, "the reply after the lost Thread", func() bool {
+		for _, m := range e.botReplies()[replies:] {
+			if strings.Contains(m.Text, "d.example.org") {
+				return true
+			}
+		}
+		return false
+	})
+	var lost faketelegram.Message
+	for _, m := range e.botReplies()[replies:] {
+		if strings.Contains(m.Text, "d.example.org") {
+			lost = m
+		}
+	}
+	refused := 0
+	for _, q := range e.requests() {
+		if strings.HasSuffix(q.Path, "/sendMessage") && q.Status == http.StatusBadRequest &&
+			strings.Contains(q.Body, fmt.Sprintf(`"reply_parameters":{"message_id":%d}`, cp.ID)) {
+			refused++
+		}
+	}
+	tl := e.timeline(g, "&kind=delivery")
+	if lost.ReplyParameters != nil || refused != 1 || !e.threadNotAttached(g) || len(tl) == 0 ||
+		tl[0].DeliveryEvent != "thread_not_attached" || e.health(dest).State != "healthy" {
+		t.Fatalf("lost thread: reply %+v, refused %d, events %v, health %+v", lost, refused, deliveryEvents(tl),
+			e.health(dest))
+	}
+	replies = len(e.botReplies())
+	e.alert("t1", "e", `{"team":"tg","cluster":"t1","domain":"e.example.org"}`, "")
+	e.notify("t1", "new alerts added")
+	advance(t, r, 61)
+	eventually(t, "the next link of the chain", func() bool { return len(e.botReplies()) > replies })
+	if next := e.botReplies()[len(e.botReplies())-1]; replyTo(next) == 0 || replyTo(next) == cp.ID {
+		t.Errorf("after the lost Thread %+v", next)
+	}
+
+	// Short-lived pruning: a day later the copies are gone and counted.
+	if n := h.count(t, `SELECT count(*) FROM telegram_post_copies`); n != 3 {
+		t.Errorf("%d copies buffered", n)
+	}
+	advance(t, r, 90000)
+	eventually(t, "the copies to be pruned", func() bool {
+		return h.count(t, `SELECT count(*) FROM telegram_post_copies`) == 0
+	})
+	if v := r.Metric(t, `muster_short_lived_rows_pruned_total{table="telegram_post_copies"}`); v != "3" {
+		t.Errorf("pruned metric %q", v)
 	}
 }

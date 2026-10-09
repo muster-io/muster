@@ -5,9 +5,9 @@
 // Destination, which the dispatcher's re-render step sets through Enqueue; the delivery worker, which brings the
 // actual message to the latest Desired state with one call per change, Urgent first and within the limiters of the
 // Destination and its Connection; Thread replies with the Thread batching window; the interactive path for calls a
-// person waits for; and the delivery events. Only this package writes deliveries, thread_replies,
-// rate_limit_buckets and delivery_events, and only its worker, its Thread replies and its interactive path call the
-// messenger adapters (lint 3).
+// person waits for; the delivery events; and the Telegram copy buffer of comment Threads. Only this package writes
+// deliveries, thread_replies, rate_limit_buckets, delivery_events and telegram_post_copies, and only its worker, its
+// Thread replies and its interactive path call the messenger adapters (lint 3).
 package delivery
 
 import (
@@ -39,8 +39,8 @@ const Channel = "muster_delivery"
 // The built-in settings of delivery (defaults.md): delivery.interactive_budget, delivery.thread_alerts_listed,
 // delivery.transient_backoff from its first step up to its longest wait, the attempt and time budgets of
 // delivery.transient_budget, delivery.broken_probe_interval, delivery.storm_calm_period, the minute over which the new
-// Alert Groups of a Route are counted against route.storm_threshold, and the wait of a lost Thread until S-042 gives
-// it its rule.
+// Alert Groups of a Route are counted against route.storm_threshold, and the wait before a Thread reply that Telegram
+// refused even without its reply link is attempted again.
 const (
 	InteractiveBudget       = 5 * time.Second
 	ThreadAlertsListed      = 10
@@ -173,7 +173,8 @@ func (w *Worker) targets(ctx context.Context, db mentions.DBTX, org int64, d Des
 }
 
 // Root is the Root message a Thread reply goes under: its message id and, in Telegram, the automatic copy in the
-// discussion group and the last reply of a Thread that is not attached.
+// discussion group while the Thread is attached to it, or the last reply of a Thread that is not attached; neither
+// for the first reply of an unattached chain.
 type Root struct {
 	MessageID      string
 	ThreadAnchorID string
@@ -306,6 +307,7 @@ type queries interface {
 	GetPressBinding(ctx context.Context, arg dbgen.GetPressBindingParams) (dbgen.GetPressBindingRow, error)
 	GetPostDestination(ctx context.Context, arg dbgen.GetPostDestinationParams) (dbgen.GetPostDestinationRow, error)
 	outcomeQueries
+	copyQueries
 	webhookEventQueries
 	brokenQueries
 	stormQueries
