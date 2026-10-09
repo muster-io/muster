@@ -153,7 +153,9 @@ Other lifecycle values:
 | `connection.telegram.update_mode` | long polling | Connection | C-14 | decided |
 | `connection.telegram.bot_api_base_url` | `https://api.telegram.org` | Connection | C-14 | decided |
 | `telegram.copy_wait` | 60 s for the automatic copy of a post | built in | C-14 | P-30 |
-| `telegram.press_max_age` | presses older than 1 h are dropped | built in | C-14 | decided |
+| `telegram.press_max_age` | 1 h: a press is dropped, unanswered, and logged when the update that carries it arrives after a gap longer than this in which the Connection received no updates — no successful long poll, or, in webhook mode, Muster not running; Telegram does not say when a press was made (C-14.FR-4) | built in | C-14 | decided |
+| `telegram.press_edit_delay` | 500 ms: an edit of a Telegram Root message that comes due while an update of its Connection is being handled, such as a press not answered yet, is tried again this much later instead of waiting for it, so that the answer still goes first (C-14.FR-5); the wait is not an attempt, records no error and takes no limiter token | built in | C-14 | P-51 |
+| `telegram.parallel_updates` | 2 Telegram updates handled at the same time per replica, over all its Connections and both update modes; each holds a connection of the main pool for its update lock while its handler takes one more at a time, so at most 4 of the default 10 (`pool_max_conns` of `MUSTER_DATABASE_URL`), next to the half that `processing.parallel_groups` may take | built in | C-14 | P-52 |
 | `destination.webhook.limiter` | 5 requests/s | Destination | C-15 | decided |
 
 ## Account links

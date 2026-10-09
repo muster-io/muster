@@ -100,6 +100,8 @@ export interface DestinationKind<V> {
   defaultLimiter: Limiter;
   /** The hint under the limiter. */
   limiterHint: (t: TFunction) => string;
+  /** The help text of the Mention choices, when the type's differs from the chat-wide one of Mattermost. */
+  mentionsHint?: (t: TFunction) => string;
   values: (d: Destination | undefined) => V;
   /** The checks the server repeats on the type's fields, as codes by pointer. */
   check: (v: V) => Record<string, string>;
@@ -422,6 +424,7 @@ export function DestinationForm<V>({
               value={values.mentions}
               everyone={kind.everyone}
               groups={kind.groups}
+              everyoneHint={kind.mentionsHint?.(t)}
               errors={mentionErrors}
               disabled={readOnly}
               onChange={(next) => change("mentions", next, ["/mentions"])}

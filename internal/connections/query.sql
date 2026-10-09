@@ -170,16 +170,12 @@ ORDER BY id;
 
 -- LockUpdates takes, until the transaction ends, the update lock of a Telegram Connection (class
 -- db.TelegramUpdateLockClass, keyed by hashint8 of its id), so that a second poller or a webhook request with the same
--- update waits for the first and then skips it. It never locks the connections row, which a save of the Connection
--- holds while setWebhook runs; a collision of the hash only serializes the updates of two Connections.
+-- update waits for the first and then skips it; the delivery worker tries it shared, without waiting, before an edit of
+-- a Root message of the Connection (delivery's TryShareUpdateLock). It never locks the connections row, which a save
+-- of the Connection holds while setWebhook runs; a collision of the hash only serializes the updates of two
+-- Connections.
 -- name: LockUpdates :exec
 SELECT pg_advisory_xact_lock(@lock_class::int, hashint8(@id::bigint));
-
--- AwaitUpdates takes and, as its transaction ends at once, releases the update lock of a Telegram Connection shared:
--- it waits until no update of the Connection is being handled, so that an edit of its Root message follows the answer
--- to the press that caused it.
--- name: AwaitUpdates :exec
-SELECT pg_advisory_xact_lock_shared(@lock_class::int, hashint8(@id::bigint));
 
 -- GetUpdateOffset reads telegram_update_offset of a Telegram Connection that is not deleted — the id after the last
 -- update handed to the router — and when its bot token was set, without a row lock, under the update lock of the

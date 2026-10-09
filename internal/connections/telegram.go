@@ -287,7 +287,8 @@ func (s *Service) Hooked(ctx context.Context, publicID string) (telegram.Conn, l
 // a frozen old Leader, or a webhook request with the same update, waits for it and then skips the update. The offset
 // is read without a row lock, and the final GREATEST update is the only statement that touches the connections row: a
 // handler runs while a save of the Connection holds the row during setWebhook, and only that final write waits for the
-// save; an edit of a Root message of the Connection waits for the lock too (AwaitUpdates). A save that sets a new bot
+// save; the delivery worker reschedules an edit of a Root message of the Connection while the lock is held. A save
+// that sets a new bot
 // token while a handler runs forgets the offset, and the final write leaves it forgotten. A deleted Connection runs
 // nothing. An error of f stores nothing, so that the update comes again.
 func (s *Service) HandleOnce(ctx context.Context, id, updateID int64, f func(context.Context) error) (bool, error) {
@@ -321,19 +322,6 @@ func (s *Service) HandleOnce(ctx context.Context, id, updateID int64, f func(con
 		return false, err
 	}
 	return ran, nil
-}
-
-// AwaitUpdates waits until no update of the Telegram Connection id is being handled (telegram.Targets): it takes its
-// update lock shared in a transaction of its own and releases it at once. The adapter waits so before it edits a
-// Root message, so that a press is answered before the edit its Command causes (C-14.FR-5). It holds no row while it
-// waits.
-func (s *Service) AwaitUpdates(ctx context.Context, id int64) error {
-	if err := s.cfg.Store.InTx(ctx, func(q Queries) error {
-		return q.AwaitUpdates(ctx, dbgen.AwaitUpdatesParams{LockClass: db.TelegramUpdateLockClass, ID: id})
-	}); err != nil {
-		return fmt.Errorf("wait for the updates of the connection %d: %w", id, err)
-	}
-	return nil
 }
 
 // Outage reads when Muster was last known not to run, for the age of presses (telegram.Outages, C-14.FR-4): the

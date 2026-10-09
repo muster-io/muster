@@ -308,6 +308,8 @@ export interface MentionSettingsFieldProps {
   everyone: readonly MentionSettingEveryone[];
   /** Whether the type takes messenger groups. */
   groups: boolean;
+  /** The help text of the choices, already translated; the chat-wide one of Mattermost by default. */
+  everyoneHint?: string;
   /** Error texts by kind, already translated. */
   errors?: Partial<Record<MentionKind, string>>;
   disabled?: boolean;
@@ -319,6 +321,7 @@ export function MentionSettingsField({
   onChange,
   everyone,
   groups,
+  everyoneHint,
   errors = {},
   disabled = false,
 }: MentionSettingsFieldProps) {
@@ -330,7 +333,7 @@ export function MentionSettingsField({
       <legend className="mb-2 text-base font-semibold">{t("mentions.title")}</legend>
       <p className="text-sm text-muted-foreground">{t("mentions.hint")}</p>
       <p id={`${id}-everyone-hint`} className="sr-only">
-        {t("mentions.everyoneHint")}
+        {everyoneHint ?? t("mentions.everyoneHint")}
       </p>
       <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {MENTION_KINDS.map((kind) => (

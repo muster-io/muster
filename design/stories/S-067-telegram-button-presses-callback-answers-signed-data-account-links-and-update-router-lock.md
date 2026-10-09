@@ -16,9 +16,12 @@ files_touched:
   - internal/connections/telegram_test.go
   - internal/db/checks.go
   - internal/delivery/delivery.go
+  - internal/delivery/live_test.go
   - internal/delivery/presses.go
   - internal/delivery/presses_test.go
   - internal/delivery/query.sql
+  - internal/delivery/worker.go
+  - internal/delivery/worker_test.go
   - internal/fakes/faketelegram/faketelegram.go
   - internal/fakes/faketelegram/faketelegram_test.go
   - internal/fakes/faketelegram/presses.go
@@ -37,6 +40,8 @@ files_touched:
   - internal/telegram/webhook.go
   - internal/telegram/webhook_test.go
   - test/e2e/telegram_test.go
+  - design/prd/l1/defaults.md
+  - design/prd/L1.md
 acceptance:
   - "[C-14.AC-18, C-14.FR-5] A press is answered with `answerCallbackQuery` (at most 200 characters) before the Root message is edited."
   - "[C-14.AC-9, C-10.FR-11] A press from a Telegram account without an Account link changes nothing and is answered \"Your Telegram account is not linked to Muster. Link it in your profile: {link}\"."
@@ -45,6 +50,8 @@ acceptance:
   - "[C-14.AC-11] In webhook mode a press posted with the right secret token header is processed like a polled one."
   - "[C-01.FR-13] The fake Telegram server creates presses on channel posts and on comments (F-009) and refuses an answer after `answer_deadline_ms` (F-010); `faketelegram_test.go` checks both facts."
   - "The update router takes a transaction advisory lock keyed by the Connection instead of locking its `connections` row: while a save of the Connection holds the row, a handler runs and a second poller or webhook request with the same update waits and then skips it; only the final offset write waits for the save."
+  - "[C-14.FR-5, D295] While a press holds the update lock of its Connection, the delivery worker does not wait: an edit of a Root message of the Connection is rescheduled `telegram.press_edit_delay` later, with no call, attempt, error or limiter token, and the round goes on; the edit goes out once the press released the lock."
+  - "[D295] A process handles at most `telegram.parallel_updates` updates at a time; the answer to a press takes a token of the Connection's limiter only."
 verify: "make ci test-integration e2e"
 operator_attention: false
 issue: 179
@@ -63,6 +70,8 @@ issue: 179
 - The answer texts in English and Russian.
 - The update router lock: a transaction advisory lock keyed by the Connection in place of `FOR NO KEY UPDATE` on its
   `connections` row.
+- Follow-ups accepted in D295: the edit that a press causes is rescheduled instead of waiting for the press; a cap on
+  the updates a process handles at a time; press answers on the Connection's limiter only.
 - The fake Telegram server's presses (`/_fake/press`), answers and the answer deadline.
 
 **OUT**
@@ -75,20 +84,29 @@ issue: 179
 ## Contracts
 
 - **Presses** (C-14.FR-4, FR-5; `internal/telegram/presses.go`): the handler of `telegram.KindCallbackQuery`. A
-  `callback_query` is answered at once through `delivery.Interactive` on the Connection's and the Destination's
-  limiters with `answerCallbackQuery` (`text` at most 200 characters), before any edit — Telegram refuses an answer
-  after about 15 seconds (F-010). The data is verified with `internal/buttons` (at most 64 bytes: the compact action
+  `callback_query` is answered at once through `delivery.Interactive` on the Connection's limiter only with
+  `answerCallbackQuery` (`text` at most 200 characters), before any edit — Telegram refuses an answer after about 15
+  seconds (F-010). An answer posts nothing to the channel, so it spends no token of the Destination's limiter (D295),
+  and a `429` on an answer holds the whole Connection. The data is verified with `internal/buttons` (at most 64 bytes: the compact action
   id, the key id and the signature of S-036); `message.chat.id` and `message.message_id` must be the Root message's
   channel post of a Telegram Destination of the Connection (`delivery.TelegramPressBinding`, by the Destination's
   `telegram_channel_chat_id` and `deliveries.message_id`), or, from S-049, a Thread reply's message in the discussion
   group (F-009). A press that cannot be verified or bound is answered "This button could not be verified; nothing was
   changed." on the Connection's limiter and changes nothing.
-- **Answer before the edit** (C-14.FR-5, AC-18): the handler runs the Command and answers within `HandleOnce`, under
-  the Connection's update lock, and the adapter's `Update` first waits until no update of the Connection is being
-  handled (`connections.Service.AwaitUpdates`: the same advisory lock taken shared in a transaction of its own and
-  released at once). The edit that the Command's re-render wakes therefore follows the answer, on any replica, and the
-  wait holds no row: the worker calls the adapter outside its transactions. Without a limiter token within
-  `delivery.interactive_budget` the Command has run all the same, unanswered, and `telegram_press` names why.
+- **Answer before the edit** (C-14.FR-5, AC-18, D295): the handler runs the Command and answers within `HandleOnce`,
+  under the Connection's update lock. The delivery worker, after it has read the Desired state of an edit of a Telegram
+  Root message, tries the same lock shared without waiting (`pg_try_advisory_xact_lock_shared`, delivery's
+  `TryShareUpdateLock`, before it takes limiter tokens): while an update of the Connection is being handled it
+  reschedules the edit `telegram.press_edit_delay` later — not an attempt, no error, no token — and goes on with the
+  rest of its round. The Command commits its Desired state while its handler holds the lock, until the press is
+  answered, so an edit that finds the lock free carries a state from before the press or one whose press was
+  answered: the edit follows the answer on any replica, and a slow press never holds the worker. The adapter's
+  `Update` never waits. Without a limiter token within `delivery.interactive_budget` the Command has run all the
+  same, unanswered, and `telegram_press` names why.
+- **Concurrent updates** (D295; `internal/telegram/updates.go`): the router handles at most
+  `telegram.parallel_updates` updates at a time per process, over all its Connections and both update modes; the others
+  wait for a slot, and one whose context ends while it waits is left unconfirmed. An update being routed holds a
+  connection of the main pool for its update lock while its handler takes one more at a time.
 - **Press age** (C-14.FR-4, C-14.AC-4): a press older than `telegram.press_max_age` is dropped without an answer and
   logged `telegram_press_dropped` (INFO: `connection`, `gap_seconds`). A `callback_query` carries no press time, so a
   press counts as too old when the Connection had received no updates — no successful long poll, or, in webhook mode,
@@ -146,7 +164,8 @@ issue: 179
   - `answerCallbackQuery` fails with `400 query is too old and response timeout expired or query ID is invalid` after
     `answer_deadline_ms` (default 15,000) (F-010); answers (`GET /_fake/answers`) and edits are recorded with their
     times.
-- **Defaults**: `telegram.press_max_age`.
+- **Defaults**: `telegram.press_max_age`; `telegram.press_edit_delay` (P-51) and `telegram.parallel_updates` (P-52),
+  from D295.
 
 ## Steps
 
@@ -229,11 +248,16 @@ from an unlinked account and see the short answer on the button.
 
 - Suggested commit: `feat(telegram): add button presses with callback answers and the update router lock`.
 - `operator_attention: false` — open question 1 was settled in D293.
-- Known limits of the update lock, left for later: an edit of a Telegram Root message waits in the adapter while a
-  press of its Connection is handled, and the delivery worker of a replica handles one delivery at a time, so a slow
-  press (a limiter wait of up to `delivery.interactive_budget`, a slow `answerCallbackQuery`, or a final offset write
-  behind a save during `setWebhook`) holds that replica's deliveries meanwhile; and each update being routed holds one
-  pool connection while its handler takes more, so many Connections routing at once can wait on the pool.
+- Known limits of the update lock as first shipped, resolved in a follow-up (D295): an edit of a Telegram Root message
+  waited in the adapter while a press of its Connection was handled, and the delivery worker of a replica handles one
+  delivery at a time, so a slow press (a limiter wait of up to `delivery.interactive_budget`, a slow
+  `answerCallbackQuery`, or a final offset write behind a save during `setWebhook`) held that replica's deliveries for
+  up to about 25 seconds; the edit is now rescheduled after `telegram.press_edit_delay` instead. And each update being
+  routed holds one pool connection while its handler takes more, so many Connections routing at once could wait on the
+  pool; `telegram.parallel_updates` now caps them at 2 per process: at most 4 connections of the default 10, next to
+  the 5 that the processing lanes may take. In the same follow-up, press answers stopped spending a token of the
+  Destination's limiter (10 per minute), since they post nothing to the channel. The Russian answer "Готово:
+  Подтвердить" stays as it is (D295).
 - In the webhook mode, Telegram posts the updates it kept during an outage one at a time; a replica drops the presses
   among them until another update of the Connection reaches it, so a kept comment or channel message between two kept
   presses lets the second through. Telling the kept updates apart for certain would need the time of each update,

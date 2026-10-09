@@ -282,10 +282,11 @@ func (w *Worker) deliver(ctx context.Context, org, id int64) {
 }
 
 // prepare re-reads a claimed delivery in a short transaction, while its lease is still held: a delivery whose actual
-// message already shows the Desired state is delivered with no call; one without tokens waits until they are due plus
-// TokenMargin; otherwise the tokens are taken, the lease is renewed for the call and, before a Publication, a possible
-// duplicate and the start of the Publication are recorded and its notes added. ok says whether to call; logs are the
-// lines to log now that it committed.
+// message already shows the Desired state is delivered with no call; an edit of a Telegram Root message while a press
+// of its Connection is being handled waits TelegramPressEditDelay, taking no token; one without tokens waits until they
+// are due plus TokenMargin; otherwise the tokens are taken, the lease is renewed for the call and, before a
+// Publication, a possible duplicate and the start of the Publication are recorded and its notes added. ok says whether
+// to call; logs are the lines to log now that it committed.
 func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, after, error) {
 	var a attempt
 	var logs after
@@ -319,6 +320,16 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 				return fmt.Errorf("mark the delivery delivered: %w", err)
 			}
 			return hintGroup(ctx, q, org, row.AlertGroupPublicID)
+		}
+		if busy, err := pressPending(ctx, q, row); err != nil || busy {
+			if err != nil {
+				return err
+			}
+			if err := q.RescheduleDelivery(ctx, dbgen.RescheduleDeliveryParams{OrgID: org, ID: id,
+				Owner: w.Lease.Owner, At: now.Add(TelegramPressEditDelay), Now: now}); err != nil {
+				return fmt.Errorf("reschedule the delivery: %w", err)
+			}
+			return nil
 		}
 		d := Destination{ID: row.DestinationID, PublicID: row.DestinationPublicID, Name: row.DestinationName,
 			Type: row.DestinationType, Connection: int8Of(row.ConnectionID)}
@@ -367,6 +378,23 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 		return nil
 	})
 	return a, ok, logs, err
+}
+
+// pressPending reports whether the leased delivery row is an edit of a Telegram Root message while an update of its
+// Connection is being handled, such as a press not answered yet (C-14.FR-5, AC-18). It tries the Connection's update
+// lock shared, without waiting, after the Desired state was read: a press's Command commits that state while its
+// handler holds the lock, until the press is answered, so an edit that finds the lock free carries either a state from
+// before the press or one whose press was answered. The shared lock is held until the transaction ends.
+func pressPending(ctx context.Context, q queries, row dbgen.GetLeasedDeliveryRow) (bool, error) {
+	if !row.MessageID.Valid || row.DestinationType != TypeTelegram || !row.ConnectionID.Valid {
+		return false, nil
+	}
+	free, err := q.TryShareUpdateLock(ctx, dbgen.TryShareUpdateLockParams{LockClass: db.TelegramUpdateLockClass,
+		ConnectionID: row.ConnectionID.Int64})
+	if err != nil {
+		return false, fmt.Errorf("try the update lock of the connection: %w", err)
+	}
+	return !free, nil
 }
 
 // publicationLoudness is the loudness and Mentions of a first Publication: Loud with new_alert_group when it comes

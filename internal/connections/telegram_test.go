@@ -413,13 +413,6 @@ func TestOutage(t *testing.T) {
 	if _, err := e.svc.Outage(t.Context()); err == nil {
 		t.Fatal("a failed read")
 	}
-	if err := e.svc.AwaitUpdates(t.Context(), 1); err != nil {
-		t.Fatalf("await = %v", err)
-	}
-	e.store.fail["AwaitUpdates"] = errors.New("down")
-	if err := e.svc.AwaitUpdates(t.Context(), 1); err == nil {
-		t.Fatal("a failed wait")
-	}
 }
 
 // TestTelegramEnsureDemo: `muster dev` ensures "Dev Telegram" in the long-polling mode once.

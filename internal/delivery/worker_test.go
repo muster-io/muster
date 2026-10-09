@@ -175,6 +175,10 @@ type fakeDB struct {
 	// copies is the Telegram copy buffer, and postLocks the posts whose copy lock was taken, in order.
 	copies    map[copyKey]*fakeCopy
 	postLocks []copyKey
+	// busyConns are the Connections whose update lock a press holds, and updateLocks the Connections whose update lock
+	// the worker tried, in order.
+	busyConns   map[int64]bool
+	updateLocks []int64
 }
 
 // sqlBool is a boolean of SQL — true, false or NULL — with its three-valued logic, so that the fake meets a NULL where
@@ -627,6 +631,19 @@ func (f *fakeDB) RescheduleDelivery(_ context.Context, arg dbgen.RescheduleDeliv
 		d.next, d.owner, d.until = arg.At, "", time.Time{}
 	}
 	return nil
+}
+
+func (f *fakeDB) TryShareUpdateLock(_ context.Context, arg dbgen.TryShareUpdateLockParams) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("TryShareUpdateLock"); err != nil {
+		return false, err
+	}
+	if arg.LockClass != db.TelegramUpdateLockClass {
+		return false, errors.New("the wrong lock class")
+	}
+	f.updateLocks = append(f.updateLocks, arg.ConnectionID)
+	return !f.busyConns[arg.ConnectionID], nil
 }
 
 func (f *fakeDB) StartPublication(_ context.Context, arg dbgen.StartPublicationParams) error {
@@ -2046,5 +2063,64 @@ func TestRecordEvent(t *testing.T) {
 	}
 	if delivery.NewStore(e.begin, nil) == nil {
 		t.Error("no store")
+	}
+}
+
+// TestEditWaitsForPress covers C-14.FR-5 and AC-18 with D295: an edit of a Telegram Root message that comes due while
+// a press of its Connection is being handled is not made and does not wait; it is rescheduled
+// telegram.press_edit_delay later, without an attempt, an error, a delivery_attempt line or a limiter token, as often
+// as the press still runs, and goes out once the press has been answered and released the lock. A Publication, which
+// a press cannot have caused, never tries the lock.
+func TestEditWaitsForPress(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].typ = delivery.TypeTelegram
+	e.w.Adapters[delivery.TypeTelegram] = e.rec
+	e.db.busyConns = map[int64]bool{connID: true}
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	e.round(t)
+	d := e.only(t)
+	if e.rec.Count(deliverytest.MethodPublish) != 1 || d.state != "delivered" || len(e.db.updateLocks) != 0 {
+		t.Fatalf("publication %+v, locks tried %v", d, e.db.updateLocks)
+	}
+	tokens := func() [2]float64 {
+		return [2]float64{e.db.buckets[bucketKey{"destination", destMM}].tokens,
+			e.db.buckets[bucketKey{"connection", connID}].tokens}
+	}
+	before := tokens()
+	e.log.Reset()
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System,
+		groups.Recorded{Seq: 2, Event: groups.EventAcknowledged, Loudness: groups.Quiet})
+	for i := range 2 {
+		now := e.business.Now()
+		e.round(t)
+		if e.rec.Count(deliverytest.MethodUpdate) != 0 || d.state != "pending" || d.attempts != 0 ||
+			d.errorClass != nil || d.lastError != nil || d.owner != "" ||
+			!d.next.Equal(now.Add(delivery.TelegramPressEditDelay)) {
+			t.Fatalf("round %d during the press: %+v", i, d)
+		}
+		if tokens() != before || strings.Contains(e.log.String(), `"event":"delivery_attempt"`) {
+			t.Fatalf("round %d spent tokens %v → %v or logged an attempt: %s", i, before, tokens(), e.log)
+		}
+		// Not due again before the delay.
+		e.round(t)
+		if len(e.db.updateLocks) != i+1 || e.db.updateLocks[i] != connID {
+			t.Fatalf("locks tried %v", e.db.updateLocks)
+		}
+		e.business.Advance(delivery.TelegramPressEditDelay)
+	}
+	delete(e.db.busyConns, connID)
+	e.round(t)
+	if calls := e.rec.Calls(); e.rec.Count(deliverytest.MethodUpdate) != 1 ||
+		calls[len(calls)-1].MessageID != *d.messageID || d.state != "delivered" || d.attempts != 0 {
+		t.Fatalf("after the press: %+v", d)
+	}
+	e.db.busyConns[connID] = true
+	e.enqueue(t, e.group(groups.StatusResolved, "a"), groups.System,
+		groups.Recorded{Seq: 3, Event: groups.EventResolved, Loudness: groups.Quiet})
+	e.db.fail["TryShareUpdateLock"] = errBoom
+	e.round(t)
+	if e.rec.Count(deliverytest.MethodUpdate) != 1 || !strings.Contains(e.log.String(),
+		`"event":"delivery_work_failed"`) || !strings.Contains(e.log.String(), "try the update lock") {
+		t.Fatalf("a failed try: %s", e.log)
 	}
 }

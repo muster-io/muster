@@ -929,6 +929,8 @@ func TestLive(t *testing.T) {
 			{"webhook_events", l.webhookEvents},
 			// S-066.
 			{"telegram_threads", l.telegramThreads},
+			// The follow-ups of S-067.
+			{"telegram_press_lock", l.telegramPressLock},
 		} {
 			t.Run(sub.name, sub.run)
 		}
@@ -3258,4 +3260,98 @@ func (l *live) telegramThreads(t *testing.T) {
 	}
 	t.Log("copy before, after and at once with the Publication, and found by the reply; the chain after " +
 		"telegram.copy_wait; the comment's copy; the lost Thread; the copies pruned after a day")
+}
+
+// telegramPressLock is C-14.FR-5 and AC-18 on PostgreSQL with D295: while a press holds the update lock of a Telegram
+// Connection, the worker does not wait for it. An edit of a Root message of the Connection is rescheduled
+// telegram.press_edit_delay later, with no call, no attempt, no error and no limiter token, as long as the press runs,
+// and the round goes on: a Publication to the same Destination goes out meanwhile. Once the press released the lock,
+// that is once it has been answered, the edit goes out.
+func (l *live) telegramPressLock(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	ctx := t.Context()
+	var conn, dest int64
+	if err := l.d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
+		telegram_bot_api_base_url, telegram_update_mode, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at,
+		limiter_limit, limiter_per_seconds, created_at, updated_at) VALUES ($1, 'CNAAAAAAAAAAT2', 'telegram', 'tg-press',
+		'https://api.telegram.org', 'long_polling', '\x00', 'k1', $2, 1000, 1, $2, $2) RETURNING id`, l.orgID,
+		t0).Scan(&conn); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.d.Pool.QueryRow(ctx, `INSERT INTO destinations (org_id, public_id, type, name, connection_id,
+		telegram_channel_id, telegram_channel_chat_id, telegram_discussion_chat_id, mentions, limiter_limit,
+		limiter_per_seconds, health, created_at, updated_at) VALUES ($1, 'DSAAAAAAAAAAT2', 'telegram', 'press', $2,
+		'@muster_press', -1001000000011, -1001000000012, '{}', 1000, 1, 'healthy', $3, $3) RETURNING id`, l.orgID,
+		conn, t0).Scan(&dest); err != nil {
+		t.Fatal(err)
+	}
+	l.attach(t, dest)
+	w := l.worker("tgp")
+	w.Adapters[delivery.TypeTelegram] = l.rec
+	l.fire(t, "tp1", "TgPress/a")
+	g1 := l.group(t, "TgPress")
+	l.round(t, w)
+	if l.rec.Count(deliverytest.MethodPublish) != 1 {
+		t.Fatalf("calls %+v", l.rec.Calls())
+	}
+	holder, err := l.d.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashint8($2::bigint))`,
+		db.TelegramUpdateLockClass, conn); err != nil {
+		t.Fatal(err)
+	}
+	l.ack(t, g1)
+	l.fire(t, "tp2", "TgPressSecond/a")
+	tokens := func() string {
+		t.Helper()
+		var s string
+		if err := l.d.Pool.QueryRow(ctx, `SELECT string_agg(subject_kind || '=' || tokens::text, ',' ORDER BY
+			subject_kind) FROM rate_limit_buckets WHERE (subject_kind = 'destination' AND subject_id = $1) OR
+			(subject_kind = 'connection' AND subject_id = $2)`, dest, conn).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	now := l.business.Now()
+	done := make(chan error, 1)
+	go func() { _, err := w.Round(ctx); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the round waited for the press")
+	}
+	var due time.Time
+	if err := l.d.Pool.QueryRow(ctx, `SELECT d.next_attempt_at FROM deliveries d JOIN alert_groups g ON
+		g.id = d.alert_group_id WHERE g.public_id = $1 AND d.destination_id = $2`, g1, dest).Scan(&due); err != nil {
+		t.Fatal(err)
+	}
+	r := l.row(t, g1, dest)
+	if l.rec.Count(deliverytest.MethodUpdate) != 0 || l.rec.Count(deliverytest.MethodPublish) != 2 ||
+		r.state != "pending" || r.attempts != 0 || r.firstFailed || r.lastErrorClass != "" ||
+		!due.Equal(now.Add(delivery.TelegramPressEditDelay)) {
+		t.Fatalf("during the press: %+v, due %v (now %v), calls %+v", r, due, now, l.rec.Calls())
+	}
+	spent := tokens()
+	l.business.Advance(delivery.TelegramPressEditDelay)
+	l.round(t, w)
+	if l.rec.Count(deliverytest.MethodUpdate) != 0 || tokens() != spent || l.row(t, g1, dest).attempts != 0 {
+		t.Fatalf("the edit was made, or spent tokens, while the press held the lock: %s → %s", spent, tokens())
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	l.business.Advance(delivery.TelegramPressEditDelay)
+	l.round(t, w)
+	if r := l.row(t, g1, dest); l.rec.Count(deliverytest.MethodUpdate) != 1 || r.state != "delivered" ||
+		r.attempts != 0 {
+		t.Fatalf("after the press: %+v", r)
+	}
+	t.Log("an edit during a press was rescheduled telegram.press_edit_delay later without a token or an attempt, " +
+		"a Publication went out meanwhile, and the edit followed the press")
 }

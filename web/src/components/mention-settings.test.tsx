@@ -32,12 +32,14 @@ const USERS = [
 function Harness({
   everyone,
   groups,
+  everyoneHint,
   onChange,
   initial = defaultMentions(),
   errors,
 }: {
   everyone: readonly MentionSettingEveryone[];
   groups: boolean;
+  everyoneHint?: string;
   onChange: (v: MentionSettings) => void;
   initial?: MentionSettings;
   errors?: Partial<Record<(typeof MENTION_KINDS)[number], string>>;
@@ -49,6 +51,7 @@ function Harness({
       value={value}
       everyone={everyone}
       groups={groups}
+      everyoneHint={everyoneHint}
       errors={errors}
       onChange={(next) => {
         setValue(next);
@@ -134,6 +137,11 @@ describe("the Mention section", () => {
     const select = page.getByLabelText("New Alerts", { exact: true });
     const options = optionTexts(select);
     expect(options).toEqual(["Nobody", "@channel", "@all", "@here"]);
+    await expect
+      .element(select)
+      .toHaveAccessibleDescription(
+        "Whom in the chat to mention as a whole: nobody, @channel, @all or @here. Chosen users and groups are mentioned as well.",
+      );
     await userEvent.selectOptions(select, "@here");
     expect(last(onChange).new_alerts).toEqual({ everyone: "here", user_ids: [], groups: [] });
     expect(last(onChange).new_alert_group.everyone).toBe("none");
@@ -171,8 +179,17 @@ describe("the Mention section", () => {
   });
 
   test("offers only nobody and users for Telegram, which has no chat-wide mention and no groups", async () => {
-    await renderSection({ everyone: [], groups: false });
+    await renderSection({
+      everyone: [],
+      groups: false,
+      everyoneHint: i18n.t("mentions.everyoneHintTelegram"),
+    });
     await expect.element(page.getByLabelText("New Alert Group", { exact: true })).toBeDisabled();
+    await expect
+      .element(page.getByLabelText("New Alert Group", { exact: true }))
+      .toHaveAccessibleDescription(
+        "Telegram has no mention of the whole chat and no groups: only the chosen users are mentioned, through their linked Telegram accounts.",
+      );
     await expect
       .element(page.getByLabelText("Group to mention for New Alert Group", { exact: true }))
       .not.toBeInTheDocument();

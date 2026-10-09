@@ -1722,8 +1722,6 @@ func (s *probeConnections) ListPollingConnections(context.Context, int64) ([]cdb
 
 func (s *probeConnections) LockUpdates(context.Context, cdb.LockUpdatesParams) error { return nil }
 
-func (s *probeConnections) AwaitUpdates(context.Context, cdb.AwaitUpdatesParams) error { return nil }
-
 func (s *probeConnections) GetUpdateOffset(context.Context, cdb.GetUpdateOffsetParams) (cdb.GetUpdateOffsetRow,
 	error) {
 	return cdb.GetUpdateOffsetRow{}, nil

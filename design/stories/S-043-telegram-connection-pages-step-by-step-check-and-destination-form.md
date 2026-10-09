@@ -15,6 +15,9 @@ files_touched:
   - web/src/components/telegram-destination-fields.tsx
   - web/src/components/telegram-destination-fields.test.tsx
   - web/src/components/destination-check.tsx
+  - web/src/components/destination-form.tsx
+  - web/src/components/mention-settings.tsx
+  - web/src/components/mention-settings.test.tsx
   - web/src/routes/connections.new.tsx
   - web/src/routes/connections.$connectionId.tsx
   - web/src/routes/destinations.new.tsx
@@ -73,7 +76,9 @@ issue: 43
   (`@username` or chat id) only, with the help text "Enable comments on the channel and make the bot an admin of the
   channel and of its discussion group."; after saving, the page shows "Discussion group: {title} ({id})" and "Channel:
   {title}" read-only. `destination_check_failed` shows each failing check's text next to "Channel". The Mention section
-  of S-064 offers no "everyone" choice and no groups for Telegram.
+  of S-064 offers no "everyone" choice and no groups for Telegram, and its help text says so (C-12.FR-8): "Telegram has
+  no mention of the whole chat and no groups: only the chosen users are mentioned, through their linked Telegram
+  accounts." instead of the chat-wide choices of Mattermost.
 - **Check** (`destination-check.tsx`): the names of the Telegram checks — `channel_exists` "Channel exists",
   `discussion_group` "Discussion group", `bot_rights_channel` "Bot rights in the channel", `bot_rights_group` "Bot rights
   in the discussion group".
@@ -125,6 +130,9 @@ None.
 - Suggested commit: `feat(web): add telegram connection pages and the telegram destination form`.
 - The form never sends the token anywhere but the saved base URL: the unsaved-address rule is enforced by the API; the
   page only explains it.
+- Follow-up (D295): the Mention section first showed Mattermost's help text on the Telegram Destination page ("nobody,
+  @channel, @all or @here… Chosen users and groups"); a Destination type may now give its own (`mentionsHint` of its
+  kind), and Telegram's names only chosen users.
 
 ## Coverage
 

@@ -178,6 +178,7 @@ export const TELEGRAM_KIND: DestinationKind<TelegramFieldValues> = {
   groups: false,
   defaultLimiter: DEFAULT_TELEGRAM_DESTINATION_LIMITER,
   limiterHint: (t) => t("destinations.telegram.limiterHint"),
+  mentionsHint: (t) => t("mentions.everyoneHintTelegram"),
   values: telegramValues,
   check: (v) => {
     const errors: Record<string, string> = {};

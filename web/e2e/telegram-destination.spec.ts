@@ -214,6 +214,10 @@ test("creates a Telegram Destination with the channel only, and checks it", asyn
   await expect(
     page.getByTestId("telegram-fields").getByLabel("Channel", { exact: true }),
   ).toHaveValue("@muster_alerts");
+  // The Mentions section speaks of Telegram: no chat-wide mention and no groups (S-043, C-12.FR-8).
+  await expect(page.getByLabel("New Alert Group", { exact: true })).toHaveAccessibleDescription(
+    "Telegram has no mention of the whole chat and no groups: only the chosen users are mentioned, through their linked Telegram accounts.",
+  );
 
   // 7. "Check" → the four Telegram checks, all ok → "Check passed".
   await page.getByRole("button", { name: "Check", exact: true }).click();
@@ -347,6 +351,11 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expect(
     page.getByTestId("telegram-fields").getByLabel("Канал", { exact: true }),
   ).toHaveAttribute("placeholder", "@username или id чата");
+  await expect(
+    page.getByLabel("Новая группа алертов", { exact: true }),
+  ).toHaveAccessibleDescription(
+    "В Telegram нет упоминания всего чата и групп: упоминаются только выбранные пользователи — через их привязанные аккаунты Telegram.",
+  );
   await page.getByRole("button", { name: "Проверить", exact: true }).click();
   await expect(page.getByTestId("destination-check-summary")).toHaveText("Проверка пройдена");
   await expect(page.getByTestId("destination-check-item")).toHaveText([
