@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -18,9 +19,12 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/destinations/dbgen"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/publicid"
+	"github.com/muster-io/muster/internal/webhooks"
 )
 
 // The Destination types.
@@ -63,11 +67,13 @@ var (
 )
 
 // FieldError is a field of a request that is not valid, at a JSON pointer of the request body, with a stable code of
-// the validation-failed problem.
+// the validation-failed problem and, for a request template, the 1-based line and column of its error when known.
 type FieldError struct {
 	Pointer string
 	Code    string
 	Detail  string
+	Line    int
+	Column  int
 }
 
 func (e *FieldError) Error() string { return e.Pointer + ": " + e.Detail }
@@ -107,15 +113,23 @@ type MattermostInput struct {
 	ChannelID  string
 }
 
-// Input is what createDestination and updateDestination write: the common fields and those of its type. Only the
-// Mattermost type has its write path yet; Telegram and outgoing webhook answer unsupported at /type until S-042 and
-// S-044.
+// WebhookInput are the fields of an outgoing webhook Destination (C-15.FR-1): its mode, the request of the events
+// mode and its proxy. Only the mode events is written yet; template and both answer unsupported at /mode until S-045.
+type WebhookInput struct {
+	Mode   string
+	Events *webhooks.EventsConfig
+	Proxy  proxyconf.Input
+}
+
+// Input is what createDestination and updateDestination write: the common fields and those of its type. Telegram
+// answers unsupported at /type until S-042.
 type Input struct {
 	Type       string
 	Name       string
 	Mentions   mentions.Settings
 	Limiter    Limiter
 	Mattermost *MattermostInput
+	Webhook    *WebhookInput
 }
 
 // ChannelCheck is the Destination check of a Mattermost channel through the Connection Connection (public_id): of the
@@ -152,30 +166,58 @@ type Healthy func(ctx context.Context, destinationID int64) error
 
 // writeQueries are the queries of a save of a Destination.
 type writeQueries interface {
+	InsertWebhookDestination(ctx context.Context, arg dbgen.InsertWebhookDestinationParams) (int64, error)
+	UpdateWebhookDestination(ctx context.Context, arg dbgen.UpdateWebhookDestinationParams) error
 	LockMattermostConnection(ctx context.Context, arg dbgen.LockMattermostConnectionParams) (int64, error)
 	InsertMattermostDestination(ctx context.Context, arg dbgen.InsertMattermostDestinationParams) (int64, error)
 	UpdateMattermostDestination(ctx context.Context, arg dbgen.UpdateMattermostDestinationParams) error
 }
 
-// view is what the Audit log diff of a saved Destination shows.
+// view is what the Audit log diff of a saved Destination shows: never a secret, whose change is marked apart.
 type view struct {
-	Name       string            `json:"name"`
-	Connection *string           `json:"connection_id,omitempty"`
-	TeamID     *string           `json:"team_id,omitempty"`
-	ChannelID  *string           `json:"channel_id,omitempty"`
-	Mentions   mentions.Settings `json:"mentions"`
-	Limiter    Limiter           `json:"limiter"`
+	Name       string                 `json:"name"`
+	Connection *string                `json:"connection_id,omitempty"`
+	TeamID     *string                `json:"team_id,omitempty"`
+	ChannelID  *string                `json:"channel_id,omitempty"`
+	Mode       *string                `json:"mode,omitempty"`
+	Events     *webhooks.EventsConfig `json:"events,omitempty"`
+	Proxy      *proxyconf.Config      `json:"proxy,omitempty"`
+	Mentions   mentions.Settings      `json:"mentions"`
+	Limiter    Limiter                `json:"limiter"`
 }
 
 func viewOf(d Destination) (view, error) {
 	v := view{Name: d.Name, Connection: d.Connection, TeamID: d.MattermostTeamID, ChannelID: d.MattermostChannelID,
-		Limiter: Limiter{Limit: d.LimiterLimit, PerSeconds: d.LimiterPerSeconds}}
+		Mode: d.WebhookMode, Limiter: Limiter{Limit: d.LimiterLimit, PerSeconds: d.LimiterPerSeconds}}
 	if len(d.Mentions) > 0 {
 		if err := json.Unmarshal(d.Mentions, &v.Mentions); err != nil {
 			return view{}, fmt.Errorf("read the mention settings of %s: %w", d.PublicID, err)
 		}
 	}
+	if len(d.EventsConfig) > 0 {
+		c, err := webhooks.ParseEventsConfig(d.EventsConfig)
+		if err != nil {
+			return view{}, err
+		}
+		v.Events = &c
+	}
+	if d.Type == TypeWebhook {
+		p := proxyOf(d.Proxy)
+		v.Proxy = &p
+	}
 	return v, nil
+}
+
+// proxyOf is the stored proxy object of a Destination as read.
+func proxyOf(p Proxy) proxyconf.Config {
+	c := proxyconf.Config{Enabled: p.Enabled, Username: p.Username}
+	if p.Type != nil {
+		c.Type = *p.Type
+	}
+	if p.Address != nil {
+		c.Address = *p.Address
+	}
+	return c
 }
 
 // validate checks the common fields of in and the fields of its type, before the Destination check; stored is nil on a
@@ -184,22 +226,22 @@ func (s *Service) validate(ctx context.Context, in *Input, stored *Destination) 
 	switch {
 	case stored != nil && stored.Type != in.Type:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The type of a Destination cannot change."}
-	case in.Type == TypeTelegram || in.Type == TypeWebhook:
+	case in.Type == TypeTelegram:
 		return &FieldError{Pointer: "/type", Code: CodeUnsupported,
 			Detail: "Saving this type of Destination is not supported yet."}
+	case in.Type == TypeWebhook && in.Webhook != nil:
+		if err := validateCommon(in); err != nil {
+			return err
+		}
+		if err := s.validateWebhook(in.Webhook); err != nil {
+			return err
+		}
+		return s.writer.Mentions.Validate(ctx, in.Type, in.Mentions)
 	case in.Type != TypeMattermost || in.Mattermost == nil:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The type is not mattermost."}
 	}
-	in.Name = strings.TrimSpace(in.Name)
-	switch {
-	case in.Name == "":
-		return &FieldError{Pointer: "/name", Code: CodeRequired, Detail: "The name is empty."}
-	case utf8.RuneCountInString(in.Name) > maxNameLength:
-		return &FieldError{Pointer: "/name", Code: CodeTooLong,
-			Detail: fmt.Sprintf("The name is longer than %d characters.", maxNameLength)}
-	case in.Limiter.Limit < 1 || in.Limiter.PerSeconds < 1:
-		return &FieldError{Pointer: "/limiter", Code: CodeInvalidFormat,
-			Detail: "The limiter needs a limit and a period of at least 1."}
+	if err := validateCommon(in); err != nil {
+		return err
 	}
 	m := in.Mattermost
 	m.TeamID, m.ChannelID = strings.TrimSpace(m.TeamID), strings.TrimSpace(m.ChannelID)
@@ -215,6 +257,219 @@ func (s *Service) validate(ctx context.Context, in *Input, stored *Destination) 
 	}
 	m.Connection = conn
 	return s.writer.Mentions.Validate(ctx, in.Type, in.Mentions)
+}
+
+// validateCommon checks the name and the limiter of in, trimming the name.
+func validateCommon(in *Input) error {
+	in.Name = strings.TrimSpace(in.Name)
+	switch {
+	case in.Name == "":
+		return &FieldError{Pointer: "/name", Code: CodeRequired, Detail: "The name is empty."}
+	case utf8.RuneCountInString(in.Name) > maxNameLength:
+		return &FieldError{Pointer: "/name", Code: CodeTooLong,
+			Detail: fmt.Sprintf("The name is longer than %d characters.", maxNameLength)}
+	case in.Limiter.Limit < 1 || in.Limiter.PerSeconds < 1:
+		return &FieldError{Pointer: "/limiter", Code: CodeInvalidFormat,
+			Detail: "The limiter needs a limit and a period of at least 1."}
+	}
+	return nil
+}
+
+// validateWebhook checks the fields of an outgoing webhook (C-15.FR-1): the mode events with its request, parsed and
+// run on a dry run in the template sandbox; the other modes are not supported until S-045.
+func (s *Service) validateWebhook(w *WebhookInput) error {
+	switch {
+	case w.Mode == webhooks.ModeTemplate || w.Mode == webhooks.ModeBoth:
+		return &FieldError{Pointer: "/mode", Code: CodeUnsupported,
+			Detail: "The modes template and both are not supported yet."}
+	case w.Mode != webhooks.ModeEvents:
+		return &FieldError{Pointer: "/mode", Code: CodeInvalidFormat, Detail: "The mode is not events."}
+	case w.Events == nil:
+		return &FieldError{Pointer: "/events", Code: CodeRequired, Detail: "The mode events needs its request."}
+	}
+	if err := webhooks.Validate(s.writer.Templates, "/events", w.Events); err != nil {
+		if fe, ok := errors.AsType[*webhooks.FieldError](err); ok {
+			return &FieldError{Pointer: fe.Pointer, Code: fe.Code, Detail: fe.Detail, Line: fe.Line, Column: fe.Column}
+		}
+		return err
+	}
+	return nil
+}
+
+// webhookSecrets are what a save of an outgoing webhook stores beside its fields: the proxy object after the input,
+// the proxy password and whether the input gave one, and the Audit log changes of the secrets.
+type webhookSecrets struct {
+	proxy    proxyconf.Config
+	password keyring.StoredSecret
+	given    bool
+	diff     []audit.Change
+}
+
+// applyWebhook applies the proxy of w to the stored one, passwordSet telling whether a password is stored.
+func (s *Service) applyWebhook(w *WebhookInput, stored proxyconf.Config, passwordSet bool, now time.Time) (
+	webhookSecrets, error) {
+	p, err := w.Proxy.Apply(stored)
+	if fe, ok := errors.AsType[*proxyconf.FieldError](err); ok {
+		return webhookSecrets{}, &FieldError{Pointer: "/proxy" + fe.Pointer, Code: fe.Code, Detail: fe.Detail}
+	}
+	if err != nil {
+		return webhookSecrets{}, err
+	}
+	var current keyring.StoredSecret
+	if passwordSet {
+		current.Ciphertext = []byte{1} // only whether it is set matters: a kept password is not written
+	}
+	password, changed, err := s.writer.Keyring.ApplySecret(webhooks.FieldProxyPassword, current, w.Proxy.Password,
+		now)
+	if errors.Is(err, keyring.ErrEmptySecret) {
+		return webhookSecrets{}, &FieldError{Pointer: "/proxy/password", Code: CodeRequired,
+			Detail: "The proxy password is empty; send null to clear it."}
+	}
+	if err != nil {
+		return webhookSecrets{}, err
+	}
+	out := webhookSecrets{proxy: p, password: password, given: w.Proxy.Password.Given}
+	if changed {
+		out.diff = append(out.diff, audit.Change{Pointer: "/proxy/password", SecretChanged: true})
+	}
+	return out, nil
+}
+
+// createWebhook creates an outgoing webhook Destination (C-15.FR-1, FR-5) with its first Signing secret, which the
+// Destination returned carries once. It is recorded as destination.created.
+func (s *Service) createWebhook(ctx context.Context, r Requester, in Input) (Destination, error) {
+	now := s.writer.Business.Now().UTC()
+	sec, err := s.applyWebhook(in.Webhook, proxyconf.Config{}, false, now)
+	if err != nil {
+		return Destination{}, err
+	}
+	secret := webhooks.NewSigningSecret()
+	signing, _, err := s.writer.Keyring.ApplySecret(webhooks.FieldSigningSecret, keyring.StoredSecret{},
+		keyring.Replace(secret), now)
+	if err != nil {
+		return Destination{}, err
+	}
+	set, err := json.Marshal(in.Mentions)
+	if err != nil {
+		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
+	}
+	mode := in.Webhook.Mode
+	d := Destination{PublicID: publicid.New(publicid.Destination), Type: in.Type, Name: in.Name, WebhookMode: &mode,
+		EventsConfig: in.Webhook.Events.JSON(), Proxy: proxyRead(sec.proxy, sec.password),
+		SigningSecret: SigningSecret{Set: true, UpdatedAt: &now}, SigningSecretOnce: secret, Mentions: set,
+		LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"},
+		Routes: []RouteRef{}, CreatedAt: now, Version: 1}
+	after, err := viewOf(d)
+	if err != nil {
+		return Destination{}, err
+	}
+	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+		p := dbgen.InsertWebhookDestinationParams{OrgID: s.orgID, PublicID: d.PublicID, Name: d.Name,
+			WebhookMode: text(d.WebhookMode), WebhookEventsConfig: d.EventsConfig, Proxy: sec.proxy.JSON(),
+			SigningSecretCiphertext: signing.Ciphertext, SigningSecretKeyID: nonEmpty(signing.KeyID), Now: now,
+			Mentions: set, LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds}
+		if sec.password.Set() {
+			p.ProxyPasswordCiphertext, p.ProxyPasswordKeyID = sec.password.Ciphertext, nonEmpty(sec.password.KeyID)
+			p.ProxyPasswordUpdatedAt = pgtype.Timestamptz{Time: now, Valid: true}
+		}
+		id, err := q.InsertWebhookDestination(ctx, p)
+		if err != nil {
+			return fmt.Errorf("create the destination: %w", nameTaken(err))
+		}
+		d.ID = id
+		return s.record(ctx, q, r, ActionCreated, d, append(audit.Created(after), sec.diff...))
+	})
+	if err != nil {
+		return Destination{}, err
+	}
+	return d, nil
+}
+
+// updateWebhook replaces the configured fields of the outgoing webhook before, already validated; its Signing secrets
+// and Secrets change through their own operations. An update that changes nothing writes nothing.
+func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destination, in Input) (Destination,
+	error) {
+	now := s.writer.Business.Now().UTC()
+	sec, err := s.applyWebhook(in.Webhook, proxyOf(before.Proxy), before.Proxy.PasswordSet, now)
+	if err != nil {
+		return Destination{}, err
+	}
+	set, err := json.Marshal(in.Mentions)
+	if err != nil {
+		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
+	}
+	d := before
+	mode := in.Webhook.Mode
+	d.Name, d.WebhookMode, d.EventsConfig, d.Mentions = in.Name, &mode, in.Webhook.Events.JSON(), set
+	d.LimiterLimit, d.LimiterPerSeconds = in.Limiter.Limit, in.Limiter.PerSeconds
+	d.Proxy = proxyRead(sec.proxy, sec.password)
+	if !sec.given {
+		d.Proxy.PasswordSet, d.Proxy.PasswordUpdatedAt = before.Proxy.PasswordSet, before.Proxy.PasswordUpdatedAt
+	}
+	old, err := viewOf(before)
+	if err != nil {
+		return Destination{}, err
+	}
+	after, err := viewOf(d)
+	if err != nil {
+		return Destination{}, err
+	}
+	diff := append(audit.Diff(old, after), sec.diff...)
+	if len(diff) == 0 && !sec.given {
+		return d, nil
+	}
+	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+		lock, err := q.LockDestination(ctx, dbgen.LockDestinationParams{OrgID: s.orgID, PublicID: before.PublicID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lock the destination %s: %w", before.PublicID, err)
+		}
+		if lock.Version != before.Version {
+			return ErrVersionMismatch
+		}
+		p := dbgen.UpdateWebhookDestinationParams{Name: d.Name, WebhookMode: text(d.WebhookMode),
+			WebhookEventsConfig: d.EventsConfig, Proxy: sec.proxy.JSON(), PasswordGiven: sec.given, Now: now,
+			Mentions: set, LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, OrgID: s.orgID,
+			ID: before.ID}
+		if sec.password.Set() {
+			p.ProxyPasswordCiphertext, p.ProxyPasswordKeyID = sec.password.Ciphertext, nonEmpty(sec.password.KeyID)
+		}
+		if err := q.UpdateWebhookDestination(ctx, p); err != nil {
+			return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
+		}
+		d.Version++
+		if len(diff) == 0 {
+			return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: d.PublicID})
+		}
+		return s.record(ctx, q, r, ActionUpdated, d, diff)
+	})
+	if err != nil {
+		return Destination{}, err
+	}
+	return d, nil
+}
+
+// proxyRead is the proxy of an outgoing webhook as read after a save.
+func proxyRead(c proxyconf.Config, password keyring.StoredSecret) Proxy {
+	p := Proxy{Enabled: c.Enabled, Username: c.Username, PasswordSet: password.Set(), PasswordUpdatedAt: password.UpdatedAt}
+	if c.Type != "" {
+		t := c.Type
+		p.Type = &t
+	}
+	if c.Address != "" {
+		a := c.Address
+		p.Address = &a
+	}
+	return p
+}
+
+func nonEmpty(s string) pgtype.Text {
+	if s == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: s, Valid: true}
 }
 
 func unknownConnection() *FieldError {
@@ -251,11 +506,15 @@ func (s *Service) check(ctx context.Context, in Input, destinationID *int64) (Ch
 }
 
 // Create creates a Mattermost Destination (C-13.FR-2, FR-3, C-11.FR-18) once its Destination check passed on the
-// interactive path; the check reads the names of its team and channel, which the Destination keeps. Other types are
-// refused as unsupported. It is recorded as destination.created.
+// interactive path; the check reads the names of its team and channel, which the Destination keeps. An outgoing webhook
+// in the events mode has no check: it is created with its first Signing secret (C-15.FR-1, FR-5). Telegram is refused
+// as unsupported. It is recorded as destination.created.
 func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destination, error) {
 	if err := s.validate(ctx, &in, nil); err != nil {
 		return Destination{}, err
+	}
+	if in.Type == TypeWebhook {
+		return s.createWebhook(ctx, r, in)
 	}
 	checked, err := s.check(ctx, in, nil)
 	if err != nil {
@@ -311,6 +570,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	}
 	if err := s.validate(ctx, &in, &before); err != nil {
 		return Destination{}, err
+	}
+	if in.Type == TypeWebhook {
+		return s.updateWebhook(ctx, r, before, in)
 	}
 	checked, err := s.check(ctx, in, &before.ID)
 	if err != nil {

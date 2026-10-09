@@ -6,10 +6,10 @@
 -- package writes deliveries, thread_replies, rate_limit_buckets and delivery_events. Due times are business times and
 -- leases real times; both come from Go.
 
--- ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health, in id order, for
--- Enqueue.
+-- ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health and the mode of an
+-- outgoing webhook, in id order, for Enqueue.
 -- name: ListRouteDestinations :many
-SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health
+SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health, d.webhook_mode
 FROM route_destinations rd
 JOIN destinations d ON d.org_id = rd.org_id AND d.id = rd.destination_id
 WHERE rd.org_id = @org_id AND rd.route_id = @route_id AND d.deleted_at IS NULL
@@ -502,7 +502,7 @@ SET state = 'not_delivered', last_error_class = @error_class::text, last_error =
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text
 RETURNING id;
 
--- NextDeliveryWork is when the next delivery, Thread reply or Broken probe can be claimed: the earliest due time of
+-- NextDeliveryWork is when the next delivery, Thread reply, outgoing webhook event or Broken probe can be claimed: the earliest due time of
 -- free work on the business clock, and the earliest end of a lease still held on the real clock; each the zero time
 -- when there is none. A Broken Destination marked for its next due delivery wakes the worker when that one is due;
 -- deliveries a Storm holds, and those of a deleted Destination other than its final edits, are not work.
@@ -532,6 +532,16 @@ WITH due AS (
                       FROM thread_replies p
                       WHERE p.org_id = y.org_id AND p.delivery_id = y.delivery_id AND p.state = 'pending'
                         AND p.id < y.id)
+    UNION ALL
+    SELECT e.next_attempt_at, e.lease_until
+    FROM webhook_events e
+    JOIN destinations ds ON ds.org_id = e.org_id AND ds.id = e.destination_id
+    WHERE e.org_id = @org_id AND e.state = 'pending' AND ds.deleted_at IS NULL
+      AND (ds.health = 'healthy' OR ds.next_probe_at = 'infinity')
+      AND NOT EXISTS (SELECT 1
+                      FROM webhook_events p
+                      WHERE p.org_id = e.org_id AND p.destination_id = e.destination_id
+                        AND p.alert_group_id = e.alert_group_id AND p.state = 'pending' AND p.sequence < e.sequence)
 )
 SELECT coalesce(min(at) FILTER (WHERE lease_until IS NULL OR lease_until <= @now::timestamptz),
                 '0001-01-01 00:00:00+00')::timestamptz AS free_at,
@@ -564,7 +574,7 @@ WHERE d.org_id = @org_id AND d.alert_group_id = @alert_group_id::bigint
 ORDER BY ds.name, ds.id;
 
 -- ClaimBrokenProbes claims the Broken Destinations whose probe is due (C-11.FR-9, schema.md §5): next_probe_at has
--- passed, or it is marked 'infinity' and one of its deliveries came due. Moving next_probe_at to @next_probe is the
+-- passed, or it is marked 'infinity' and one of its deliveries or outgoing webhook events came due. Moving next_probe_at to @next_probe is the
 -- lease; another claimer skips the rows this one locked. A deleted Destination is probed only while a final edit of
 -- it waits.
 -- name: ClaimBrokenProbes :many
@@ -578,11 +588,16 @@ WITH due AS MATERIALIZED (
                       WHERE p.org_id = x.org_id AND p.destination_id = x.id AND p.state = 'pending'))
       AND (x.next_probe_at <= @due::timestamptz
            OR (x.next_probe_at = 'infinity'
-               AND EXISTS (SELECT 1
-                           FROM deliveries w
-                           WHERE w.org_id = x.org_id AND w.destination_id = x.id AND w.state = 'pending'
-                             AND w.held_by_storm_id IS NULL AND w.next_attempt_at <= @due::timestamptz
-                             AND (w.lease_until IS NULL OR w.lease_until <= @now::timestamptz))))
+               AND (EXISTS (SELECT 1
+                            FROM deliveries w
+                            WHERE w.org_id = x.org_id AND w.destination_id = x.id AND w.state = 'pending'
+                              AND w.held_by_storm_id IS NULL AND w.next_attempt_at <= @due::timestamptz
+                              AND (w.lease_until IS NULL OR w.lease_until <= @now::timestamptz))
+                    OR EXISTS (SELECT 1
+                               FROM webhook_events e
+                               WHERE e.org_id = x.org_id AND e.destination_id = x.id AND e.state = 'pending'
+                                 AND e.next_attempt_at <= @due::timestamptz
+                                 AND (e.lease_until IS NULL OR e.lease_until <= @now::timestamptz)))))
     ORDER BY x.next_probe_at, x.id
     LIMIT @lim
     FOR UPDATE OF x SKIP LOCKED
@@ -722,8 +737,8 @@ SELECT public_id, health
 FROM destinations
 WHERE org_id = @org_id AND deleted_at IS NULL;
 
--- CountDeliveryQueues counts, per Destination that is not deleted, its pending deliveries that no Storm holds and its
--- Thread replies due at @now, for muster_delivery_queue.
+-- CountDeliveryQueues counts, per Destination that is not deleted, its pending deliveries that no Storm holds, its
+-- Thread replies due at @now and its pending outgoing webhook events, for muster_delivery_queue.
 -- name: CountDeliveryQueues :many
 SELECT ds.public_id,
        ((SELECT count(*)
@@ -733,7 +748,10 @@ SELECT ds.public_id,
        + (SELECT count(*)
           FROM thread_replies r
           WHERE r.org_id = ds.org_id AND r.destination_id = ds.id AND r.state IN ('collecting', 'pending')
-            AND r.next_attempt_at <= @now::timestamptz))::bigint AS queued
+            AND r.next_attempt_at <= @now::timestamptz)
+       + (SELECT count(*)
+          FROM webhook_events e
+          WHERE e.org_id = ds.org_id AND e.destination_id = ds.id AND e.state = 'pending'))::bigint AS queued
 FROM destinations ds
 WHERE ds.org_id = @org_id AND ds.deleted_at IS NULL;
 
@@ -1032,17 +1050,28 @@ SELECT public_id, health
 FROM destinations
 WHERE org_id = @org_id AND id = @id;
 
--- WipeDestinationSecrets wipes the secrets of a deleted Destination once none of its deliveries is pending: the
--- Signing secrets, the proxy password and its named Secrets (C-11.FR-14); the delete of the named Secrets runs whether
--- or not the update reads it. It changes nothing otherwise, and nothing the second time.
+-- WipeDestinationSecrets wipes the secrets of a deleted Destination once none of its deliveries is pending and no call
+-- of it — a delivery or an outgoing webhook event — holds a lease at the real time @now, because a call in flight
+-- still makes its final edit or signs its request with them: the Signing secrets, the proxy password and its named
+-- Secrets (C-11.FR-14, C-15.FR-12); the delete of the named Secrets runs whether or not the update reads it. It
+-- changes nothing otherwise, and nothing the second time. @id null wipes every deleted Destination of the
+-- Organization that qualifies, which the retention of outgoing webhook events runs for a call whose replica stopped.
 -- name: WipeDestinationSecrets :exec
 WITH gone AS (
     SELECT x.id
     FROM destinations x
-    WHERE x.org_id = @org_id AND x.id = @id AND x.deleted_at IS NOT NULL
+    WHERE x.org_id = @org_id AND (sqlc.narg('id')::bigint IS NULL OR x.id = sqlc.narg('id')::bigint)
+      AND x.deleted_at IS NOT NULL
+      AND (x.signing_secret_ciphertext IS NOT NULL OR x.previous_signing_secret_ciphertext IS NOT NULL
+           OR x.proxy_password_ciphertext IS NOT NULL
+           OR EXISTS (SELECT 1 FROM destination_secrets n WHERE n.org_id = x.org_id AND n.destination_id = x.id))
       AND NOT EXISTS (SELECT 1
                       FROM deliveries p
-                      WHERE p.org_id = x.org_id AND p.destination_id = x.id AND p.state = 'pending')
+                      WHERE p.org_id = x.org_id AND p.destination_id = x.id
+                        AND (p.state = 'pending' OR p.lease_until > @now::timestamptz))
+      AND NOT EXISTS (SELECT 1
+                      FROM webhook_events e
+                      WHERE e.org_id = x.org_id AND e.destination_id = x.id AND e.lease_until > @now::timestamptz)
 ), secrets AS (
     DELETE FROM destination_secrets s
     USING gone
@@ -1116,3 +1145,166 @@ WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'm
               WHERE d.org_id = @org_id AND d.destination_id = ds.id AND d.message_id = @message_id::text)
 ORDER BY ds.id
 LIMIT 1;
+
+-- Outgoing webhook events (C-15.FR-2, schema.md §4.11 and §5): one row per lifecycle event and events-mode
+-- Destination, sent in order per Alert Group — only the head event of an Alert Group and Destination is claimed — at
+-- least once and never collapsed.
+
+-- InsertWebhookEvent queues one lifecycle event of an Alert Group for an events-mode Destination, due now, with its
+-- body rendered now; the event is queued once whatever the retries of the change.
+-- name: InsertWebhookEvent :exec
+INSERT INTO webhook_events (org_id, destination_id, alert_group_id, sequence, webhook_id, event, notify, occurred_at,
+                            body, state, next_attempt_at, received_at, created_at)
+VALUES (@org_id, @destination_id, @alert_group_id, @sequence, @webhook_id, @event, @notify, @now::timestamptz, @body,
+        'pending', @now::timestamptz, sqlc.narg('received_at')::timestamptz, @now::timestamptz)
+ON CONFLICT (destination_id, alert_group_id, sequence) DO NOTHING;
+
+-- ClaimDueWebhookEvents leases the due head events of the healthy Destinations that are not deleted: the pending event
+-- with the lowest sequence of its Alert Group and Destination, whose lease is free or ran out; the next one waits until
+-- it is delivered or Not delivered, while the events of other Alert Groups go on. The choice is a materialized CTE,
+-- run once, as in ClaimDueDeliveries.
+-- name: ClaimDueWebhookEvents :many
+WITH due AS MATERIALIZED (
+    SELECT x.id
+    FROM webhook_events x
+    JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
+    WHERE x.org_id = @org_id AND x.state = 'pending' AND x.next_attempt_at <= @due::timestamptz
+      AND (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AND ds.health = 'healthy'
+      AND ds.deleted_at IS NULL
+      AND NOT EXISTS (SELECT 1
+                      FROM webhook_events p
+                      WHERE p.org_id = x.org_id AND p.destination_id = x.destination_id
+                        AND p.alert_group_id = x.alert_group_id AND p.state = 'pending' AND p.sequence < x.sequence)
+    ORDER BY x.next_attempt_at, x.id
+    LIMIT @lim
+    FOR UPDATE OF x SKIP LOCKED
+)
+UPDATE webhook_events e
+SET lease_owner = @owner::text, lease_until = @lease_until::timestamptz
+FROM due
+WHERE e.org_id = @org_id AND e.id = due.id
+RETURNING e.id, e.next_attempt_at;
+
+-- GetLeasedWebhookEvent reads, and locks, a pending event whose lease this replica still holds at the real time now,
+-- with its Destination and its Alert Group. No row when the lease ran out, went to another replica, or the event
+-- ended meanwhile.
+-- name: GetLeasedWebhookEvent :one
+SELECT e.id, e.alert_group_id, e.sequence, e.webhook_id, e.event, e.body, e.attempts, e.received_at,
+       ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       ds.type AS destination_type, ds.health AS destination_health, g.public_id AS alert_group_public_id, g.number
+FROM webhook_events e
+JOIN destinations ds ON ds.org_id = e.org_id AND ds.id = e.destination_id
+JOIN alert_groups g ON g.org_id = e.org_id AND g.id = e.alert_group_id
+WHERE e.org_id = @org_id AND e.id = @id AND e.state = 'pending' AND e.lease_owner = @owner::text
+  AND e.lease_until > @now::timestamptz
+FOR UPDATE OF e;
+
+-- RenewWebhookEventLease extends the lease of an event this replica holds before its call.
+-- name: RenewWebhookEventLease :exec
+UPDATE webhook_events
+SET lease_until = @lease_until::timestamptz
+WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
+
+-- RescheduleWebhookEvent releases an event that waits for its limiter token until @at, without failing it.
+-- name: RescheduleWebhookEvent :exec
+UPDATE webhook_events
+SET next_attempt_at = @at, lease_owner = NULL, lease_until = NULL
+WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
+
+-- RecordWebhookEventDelivered records an event the endpoint accepted. No row when the lease went to another replica or
+-- the event ended meanwhile, because its Destination was deleted.
+-- name: RecordWebhookEventDelivered :one
+UPDATE webhook_events
+SET state = 'delivered', delivered_at = @now::timestamptz, last_error_class = NULL, last_error = NULL,
+    lease_owner = NULL, lease_until = NULL
+WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text AND state = 'pending'
+RETURNING id;
+
+-- RecordWebhookEventRetry records an outcome of an event that is retried at @at with the same webhook-id and body; a
+-- Transient error is @counted against the budget. No row when the lease went to another replica or the event ended.
+-- name: RecordWebhookEventRetry :one
+UPDATE webhook_events
+SET next_attempt_at  = @at,
+    attempts         = attempts + CASE WHEN @counted::boolean THEN 1 ELSE 0 END,
+    first_failed_at  = CASE WHEN @counted::boolean THEN coalesce(first_failed_at, @now::timestamptz) ELSE first_failed_at END,
+    last_error_class = sqlc.narg('error_class')::text,
+    last_error       = sqlc.narg('error')::text,
+    lease_owner      = NULL,
+    lease_until      = NULL
+WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text AND state = 'pending'
+RETURNING attempts, first_failed_at;
+
+-- RecordWebhookEventNotDelivered ends an event as Not delivered with the error class and the masked error; the next
+-- event of its Alert Group follows. No row when the lease went to another replica or the event ended.
+-- name: RecordWebhookEventNotDelivered :one
+UPDATE webhook_events
+SET state = 'not_delivered', last_error_class = @error_class::text, last_error = @error::text, lease_owner = NULL,
+    lease_until = NULL
+WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text AND state = 'pending'
+RETURNING id;
+
+-- ReleaseWebhookEventLease gives up the lease this replica holds on an event that ended before or while its call was
+-- made, because its Destination was deleted, and returns the Destination, whose secrets may now be wiped. No row when
+-- the lease is not this replica's.
+-- name: ReleaseWebhookEventLease :one
+UPDATE webhook_events
+SET lease_owner = NULL, lease_until = NULL
+WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text
+RETURNING destination_id;
+
+-- LeaseOldestWaitingEvent is the probe's event: among the head events of the Destination's Alert Groups, the oldest
+-- one that is due at @due — so that a Retry-After is kept — else the oldest one, leased to this replica when its lease
+-- is free. No row when nothing waits; free is false when it is leased elsewhere.
+-- name: LeaseOldestWaitingEvent :one
+WITH oldest AS (
+    SELECT x.id, (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AS free
+    FROM webhook_events x
+    WHERE x.org_id = @org_id AND x.destination_id = @destination_id AND x.state = 'pending'
+      AND NOT EXISTS (SELECT 1
+                      FROM webhook_events p
+                      WHERE p.org_id = x.org_id AND p.destination_id = x.destination_id
+                        AND p.alert_group_id = x.alert_group_id AND p.state = 'pending' AND p.sequence < x.sequence)
+    ORDER BY (x.next_attempt_at <= @due::timestamptz) DESC, x.id
+    LIMIT 1
+    FOR UPDATE OF x
+), leased AS (
+    UPDATE webhook_events e
+    SET lease_owner = @owner::text, lease_until = @lease_until::timestamptz
+    FROM oldest o
+    WHERE e.org_id = @org_id AND e.id = o.id AND o.free
+    RETURNING e.id
+)
+SELECT o.id, o.free::boolean AS free
+FROM oldest o;
+
+-- AbandonWebhookEvents ends the pending events of a deleted Destination as Not delivered with @error (C-15.FR-12), in
+-- the transaction that deletes it, with what their delivery events and log lines name. A lease in flight stays, so
+-- that the secrets wait for its call.
+-- name: AbandonWebhookEvents :many
+UPDATE webhook_events e
+SET state = 'not_delivered', last_error_class = 'unknown', last_error = @error::text
+FROM alert_groups g
+WHERE e.org_id = @org_id AND e.destination_id = @destination_id AND e.state = 'pending' AND g.org_id = @org_id
+  AND g.id = e.alert_group_id
+RETURNING e.alert_group_id, e.event, g.public_id AS alert_group_public_id;
+
+-- ResetWebhookEventBudgets gives the pending events of a recovered Destination a fresh Transient budget and makes
+-- those that waited for a backoff due now; a Retry-After still in the future is kept.
+-- name: ResetWebhookEventBudgets :exec
+UPDATE webhook_events
+SET attempts         = 0,
+    first_failed_at  = NULL,
+    next_attempt_at  = CASE WHEN last_error_class = 'retry_after' THEN next_attempt_at
+                            ELSE least(next_attempt_at, @now::timestamptz) END
+WHERE org_id = @org_id AND destination_id = @destination_id AND state = 'pending';
+
+-- DeleteExpiredWebhookEvents deletes at most @batch_size events that are delivered or Not delivered and were created
+-- before @cutoff, skipping rows another transaction holds.
+-- name: DeleteExpiredWebhookEvents :execrows
+DELETE FROM webhook_events t
+WHERE t.org_id = @org_id AND t.id IN (SELECT e.id
+                                      FROM webhook_events e
+                                      WHERE e.org_id = @org_id AND e.state <> 'pending' AND e.created_at < @cutoff
+                                      ORDER BY e.created_at, e.id
+                                      LIMIT @batch_size
+                                      FOR UPDATE SKIP LOCKED);

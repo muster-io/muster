@@ -9,7 +9,9 @@
   [`0003_alert_groups_firing_again_after_on_delete`](../../internal/db/migrations/0003_alert_groups_firing_again_after_on_delete.up.sql)
   (`alert_groups.firing_again_after_id` `ON DELETE SET NULL`, S-029) and
   [`0004_thread_replies_pending_index`](../../internal/db/migrations/0004_thread_replies_pending_index.up.sql)
-  (`thread_replies_pending_idx`, S-065), in `internal/db/migrations/` — golang-migrate
+  (`thread_replies_pending_idx`, S-065) and
+  [`0005_webhook_events_received_at`](../../internal/db/migrations/0005_webhook_events_received_at.up.sql)
+  (`webhook_events.received_at`, S-044), in `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
   ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md))
@@ -978,7 +980,9 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7; [ADR-0005](../adr/0005-delivery-
 - **`webhook_events`** — the events-mode queue of outgoing webhooks: one row per lifecycle event and Destination, with
   `sequence` (the Alert Group's `event_seq`: it grows with every lifecycle event, may have gaps on one Destination and
   does not start at 1 for a Destination added to the Route later), `webhook_id` (unique, kept across retries), `notify`,
-  `occurred_at` and the version 1 `body` rendered when the event was queued, so it carries the state at that moment.
+  `occurred_at` and the version 1 `body` rendered when the event was queued, so it carries the state at that moment;
+  `received_at` (migration 0005) is the receipt time of the Stored Snapshot behind the change, null for Commands and
+  timers, from which the call that delivers the event observes `muster_delivery_latency_seconds`.
   `UNIQUE (destination_id, alert_group_id, sequence)`; only the head event of an Alert Group and Destination is
   attempted, the next waits until it is `delivered` or `not_delivered` (at least once, in order, never collapsed). Not
   subject to Storms and never dropped while the Destination is Broken, with no age limit.

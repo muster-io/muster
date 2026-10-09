@@ -59,12 +59,15 @@ import (
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/runtime"
 	"github.com/muster-io/muster/internal/telegram"
+	"github.com/muster-io/muster/internal/templates"
 	"github.com/muster-io/muster/internal/tokens"
 	tokdb "github.com/muster-io/muster/internal/tokens/dbgen"
 	"github.com/muster-io/muster/internal/totp"
 	tdb "github.com/muster-io/muster/internal/totp/dbgen"
 	"github.com/muster-io/muster/internal/users"
 	udb "github.com/muster-io/muster/internal/users/dbgen"
+	"github.com/muster-io/muster/internal/webhooks"
+	whdb "github.com/muster-io/muster/internal/webhooks/dbgen"
 )
 
 const (
@@ -98,6 +101,7 @@ var registry = []Probe{
 	{Name: "heartbeat", Run: probeHeartbeat},
 	{Name: "mattermost_connections", Run: probeMattermost},
 	{Name: "telegram_connections", Run: probeTelegram},
+	{Name: "outgoing_webhooks", Run: probeWebhooks},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -1691,3 +1695,165 @@ func errorTexts(err error, depth int) []string {
 	}
 	return texts
 }
+
+// probeWebhooks pushes the secrets through an outgoing webhook (C-15.FR-10, FR-5): two of them as named Secrets read
+// by the URL and a header, the third as the password of a SOCKS5 proxy that refuses it; through their list, events
+// that the stand-in answers with 400 echoing the request, a redirect whose target carries them, request templates
+// that fail on them, and the refused proxy. Neither the log nor the outcomes, which delivery shows as the Timeline
+// error, may carry them.
+func probeWebhooks(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/redirect") {
+				w.Header().Set("Location", "http://elsewhere.example.org/?k="+secrets[0]+"&o="+secrets[1])
+				w.WriteHeader(http.StatusFound)
+				return
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprintf(w, "refused %s %s", r.URL.RawQuery, r.Header.Get("Authorization")) //nolint:gosec // G705: a stand-in server that echoes the secrets on purpose
+		})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	socks, err := fakeproxy.Start(ctx, fakeproxy.SOCKS5, "127.0.0.1:0", fakeproxy.Options{Username: "muster",
+		Password: "other"})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = socks.Close() }()
+	password, _, err := k.ApplySecret(webhooks.FieldProxyPassword, keyring.StoredSecret{},
+		keyring.Replace(logging.Secret(secrets[2])), now)
+	if err != nil {
+		return err
+	}
+	store := &probeWebhookStore{secrets: map[string]keyring.StoredSecret{}, row: whdb.GetTargetRow{ID: 1,
+		PublicID: "DSAAAAAAAAAAA1", WebhookMode: pgtype.Text{String: webhooks.ModeEvents, Valid: true},
+		Proxy: []byte(`{"enabled":false}`), ProxyPasswordCiphertext: password.Ciphertext,
+		ProxyPasswordKeyID: pgtype.Text{String: password.KeyID, Valid: true}}}
+	svc := webhooks.New(1, webhooks.Config{Store: store, Writer: store, Keyring: k,
+		Audit: audit.NewWriter(logger, clock.NewManual(now)), Business: clock.NewManual(now),
+		PublicURL: "http://localhost:8080"})
+	by := webhooks.Requester{Actor: audit.System, Transport: audit.TransportAPI}
+	var errs []error
+	_, _, err = svc.GenerateSigningSecret(ctx, by, "DSAAAAAAAAAAA1")
+	errs = append(errs, err)
+	for i, name := range []string{"token", "other"} {
+		_, _, err := svc.SetSecret(ctx, by, "DSAAAAAAAAAAA1", nil, name, logging.Secret(secrets[i]))
+		errs = append(errs, err)
+	}
+	list, err := svc.ListSecrets(ctx, "DSAAAAAAAAAAA1")
+	errs = append(errs, err, fmt.Errorf("%+v", list))
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	a := &webhooks.Adapter{Service: svc, Sandbox: templates.New(clock.NewManual(now), clock.Real{}),
+		Network: webhooks.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}}}
+	base := "http://" + ln.Addr().String()
+	for _, c := range []struct{ url, header, proxy string }{
+		{base + "/hook?k={{ .Secrets.token }}", "Bearer {{ .Secrets.other }}", `{"enabled":false}`},
+		{base + "/redirect?k={{ .Secrets.token }}", "x", `{"enabled":false}`},
+		{base + "/hook/{{ printf \"%d\" .Secrets.token }}{{ len 3 }}", "x", `{"enabled":false}`},
+		{base + "/hook", "{{ .Secrets.other }}{{ index .Secrets .Secrets.token }}{{ len 3 }}", `{"enabled":false}`},
+		{base + "/hook?k={{ .Secrets.token }}", "{{ .Secrets.other }}",
+			`{"enabled":true,"type":"socks5","address":"` + socks.Addr() + `","username":"muster"}`},
+	} {
+		cfg, _ := json.Marshal(webhooks.EventsConfig{URL: c.url, Headers: []webhooks.Header{{Name: "Authorization",
+			Value: c.header}}})
+		store.row.WebhookEventsConfig, store.row.Proxy = cfg, []byte(c.proxy)
+		out := a.SendEvent(ctx, delivery.EventCall{Class: outbound.ClassDelivery,
+			Destination: delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1", Type: webhooks.TypeWebhook},
+			WebhookID:   "msg_probe", Body: []byte(`{}`)})
+		errs = append(errs, errors.New(string(out.Kind)+": "+string(out.Error)))
+	}
+	return errors.Join(errs...)
+}
+
+// probeWebhookStore is the one outgoing webhook of probeWebhooks in memory.
+type probeWebhookStore struct {
+	webhooks.TxQueries
+	row     whdb.GetTargetRow
+	version int64
+	secrets map[string]keyring.StoredSecret
+}
+
+func (s *probeWebhookStore) InTx(_ context.Context, f func(webhooks.TxQueries) error) error {
+	return f(s)
+}
+
+func (s *probeWebhookStore) GetWebhookDestination(context.Context, whdb.GetWebhookDestinationParams) (
+	whdb.GetWebhookDestinationRow, error) {
+	return whdb.GetWebhookDestinationRow{ID: 1, PublicID: s.row.PublicID, Name: "probe", Type: webhooks.TypeWebhook,
+		Version: s.version, SigningSecretSet: s.row.SigningSecretCiphertext != nil}, nil
+}
+
+func (s *probeWebhookStore) LockWebhookDestination(context.Context, whdb.LockWebhookDestinationParams) (
+	whdb.LockWebhookDestinationRow, error) {
+	return whdb.LockWebhookDestinationRow{ID: 1, PublicID: s.row.PublicID, Name: "probe", Type: webhooks.TypeWebhook,
+		Version: s.version, SigningSecretCiphertext: s.row.SigningSecretCiphertext,
+		SigningSecretKeyID: s.row.SigningSecretKeyID}, nil
+}
+
+func (s *probeWebhookStore) ListSecrets(context.Context, whdb.ListSecretsParams) ([]whdb.ListSecretsRow, error) {
+	var out []whdb.ListSecretsRow
+	for name, v := range s.secrets {
+		out = append(out, whdb.ListSecretsRow{Name: name, ValueUpdatedAt: *v.UpdatedAt})
+	}
+	return out, nil
+}
+
+func (s *probeWebhookStore) GetTarget(context.Context, whdb.GetTargetParams) (whdb.GetTargetRow, error) {
+	return s.row, nil
+}
+
+func (s *probeWebhookStore) ListSecretValues(context.Context, whdb.ListSecretValuesParams) (
+	[]whdb.ListSecretValuesRow, error) {
+	var out []whdb.ListSecretValuesRow
+	for name, v := range s.secrets {
+		out = append(out, whdb.ListSecretValuesRow{Name: name, ValueCiphertext: v.Ciphertext, ValueKeyID: v.KeyID})
+	}
+	return out, nil
+}
+
+func (s *probeWebhookStore) BumpDestinationVersion(context.Context, whdb.BumpDestinationVersionParams) (int64,
+	error) {
+	s.version++
+	return s.version, nil
+}
+
+func (s *probeWebhookStore) UpsertSecret(_ context.Context, a whdb.UpsertSecretParams) error {
+	at := a.Now
+	s.secrets[a.Name] = keyring.StoredSecret{Ciphertext: a.ValueCiphertext, KeyID: a.ValueKeyID, UpdatedAt: &at}
+	return nil
+}
+
+func (s *probeWebhookStore) RotateSigningSecret(_ context.Context, a whdb.RotateSigningSecretParams) (int64, error) {
+	s.row.SigningSecretCiphertext, s.row.SigningSecretKeyID = a.Ciphertext, a.KeyID
+	s.row.PreviousSigningSecretCiphertext, s.row.PreviousSigningSecretKeyID = a.PreviousCiphertext, a.PreviousKeyID
+	s.version++
+	return s.version, nil
+}
+
+func (s *probeWebhookStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
+	return nil
+}
+
+func (s *probeWebhookStore) Notify(context.Context, db.Hint) error { return nil }

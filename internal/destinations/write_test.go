@@ -19,9 +19,14 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations/dbgen"
+	"github.com/muster-io/muster/internal/keyring"
+	keyringdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/proxyconf"
+	"github.com/muster-io/muster/internal/templates"
+	"github.com/muster-io/muster/internal/webhooks"
 )
 
 // The deletion's fake answers the queries of a save as a database without Mattermost Connections would.
@@ -39,6 +44,14 @@ func (f *fakeWriter) UpdateMattermostDestination(context.Context, dbgen.UpdateMa
 	return errBoom
 }
 
+func (f *fakeWriter) InsertWebhookDestination(context.Context, dbgen.InsertWebhookDestinationParams) (int64, error) {
+	return 0, errBoom
+}
+
+func (f *fakeWriter) UpdateWebhookDestination(context.Context, dbgen.UpdateWebhookDestinationParams) error {
+	return errBoom
+}
+
 // saveWriter is the database of the saves in memory: the Mattermost Connections that are not deleted, the inserted
 // and updated rows, the versions the locks read, the Audit log and the hints.
 type saveWriter struct {
@@ -46,6 +59,8 @@ type saveWriter struct {
 	versions map[string]int64
 	inserted []dbgen.InsertMattermostDestinationParams
 	updated  []dbgen.UpdateMattermostDestinationParams
+	hooks    []dbgen.InsertWebhookDestinationParams
+	hookSets []dbgen.UpdateWebhookDestinationParams
 	audit    []auditdb.InsertAuditEntryParams
 	hints    []db.Hint
 	fail     map[string]error
@@ -95,6 +110,23 @@ func (w *saveWriter) UpdateMattermostDestination(_ context.Context, arg dbgen.Up
 		return err
 	}
 	w.updated = append(w.updated, arg)
+	return nil
+}
+
+func (w *saveWriter) InsertWebhookDestination(_ context.Context, arg dbgen.InsertWebhookDestinationParams) (int64,
+	error) {
+	if err := w.fail["InsertWebhookDestination"]; err != nil {
+		return 0, err
+	}
+	w.hooks = append(w.hooks, arg)
+	return int64(20 + len(w.hooks)), nil
+}
+
+func (w *saveWriter) UpdateWebhookDestination(_ context.Context, arg dbgen.UpdateWebhookDestinationParams) error {
+	if err := w.fail["UpdateWebhookDestination"]; err != nil {
+		return err
+	}
+	w.hookSets = append(w.hookSets, arg)
 	return nil
 }
 
@@ -158,14 +190,15 @@ func (fakeMentions) Validate(_ context.Context, _ string, set mentions.Settings)
 func newSaver(t *testing.T) (*Service, *fakeStore, *saveWriter, *fakeChecker, *[]int64) {
 	t.Helper()
 	store := newStore()
-	w := &saveWriter{conns: map[int64]bool{5: true}, versions: map[string]int64{"DSAAAAAAAAAAA1": 2},
-		fail: map[string]error{}}
+	w := &saveWriter{conns: map[int64]bool{5: true}, versions: map[string]int64{"DSAAAAAAAAAAA1": 2,
+		"DSAAAAAAAAAAA3": 4}, fail: map[string]error{}}
 	checker := &fakeChecker{}
 	var healed []int64
 	s := New(1, store)
 	logger := logging.New(&bytes.Buffer{}, logging.LevelInfo)
 	s.SetWriter(WriterConfig{Writer: w, Audit: audit.NewWriter(logger, clock.NewManual(t0)),
-		Business: clock.NewManual(t0), Mentions: fakeMentions{}, Mattermost: checker,
+		Business: clock.NewManual(t0), Mentions: fakeMentions{}, Mattermost: checker, Keyring: activeKeyring(t),
+		Templates: templates.New(clock.NewManual(t0), clock.Real{}),
 		Healthy: func(_ context.Context, id int64) error {
 			healed = append(healed, id)
 			if id == 99 {
@@ -439,3 +472,200 @@ func errorAsField(err error) bool {
 }
 
 func stringsContain(s, sub string) bool { return bytes.Contains([]byte(s), []byte(sub)) }
+
+// keyState is keyring_state in memory.
+type keyState struct {
+	keyring.Store
+	row *keyringdb.GetKeyringStateRow
+}
+
+func (s *keyState) GetKeyringState(context.Context) (keyringdb.GetKeyringStateRow, error) {
+	if s.row == nil {
+		return keyringdb.GetKeyringStateRow{}, pgx.ErrNoRows
+	}
+	return *s.row, nil
+}
+
+func (s *keyState) CreateKeyringState(_ context.Context, p keyringdb.CreateKeyringStateParams) (int64, error) {
+	s.row = &keyringdb.GetKeyringStateRow{ActiveKeyID: p.ActiveKeyID, CanaryKeyID: p.ActiveKeyID,
+		CanaryCiphertext: p.CanaryCiphertext}
+	return 1, nil
+}
+
+// activeKeyring is a Keyring of one key, active.
+func activeKeyring(t *testing.T) *keyring.Keyring {
+	t.Helper()
+	k, err := keyring.New([][]byte{bytes.Repeat([]byte{'w'}, keyring.KeySize)}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := k.Establish(t.Context(), &keyState{}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Open(t.Context(), logging.New(&bytes.Buffer{}, logging.LevelInfo), st); err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+func webhookInput(name, url string, headers ...webhooks.Header) Input {
+	in := mattermostInput(name, "")
+	in.Type, in.Mattermost = TypeWebhook, nil
+	in.Webhook = &WebhookInput{Mode: webhooks.ModeEvents, Events: &webhooks.EventsConfig{URL: url, Headers: headers}}
+	return in
+}
+
+// TestCreateWebhook is createDestination of type webhook in the mode events (C-15.FR-1, FR-5, C-11.FR-18,
+// C-01.FR-13): no Destination check; the request, the proxy with its password, the Mention settings and the limiter
+// are stored with the first Signing secret, encrypted, which the Destination returned carries once; the creation is
+// recorded with the password marked changed, never its value.
+func TestCreateWebhook(t *testing.T) {
+	s, _, w, checker, _ := newSaver(t)
+	in := webhookInput(" auto ", " http://127.0.0.1:18093/hook/auto ",
+		webhooks.Header{Name: "Authorization", Value: "Bearer {{ .Secrets.token }}"})
+	user, typ, addr := "u", "http", "proxy:3128"
+	in.Webhook.Proxy = proxyconf.Input{Enabled: true, Type: &typ, Address: &addr, UsernameSet: true, Username: &user,
+		Password: keyring.Replace("proxy-pass")}
+	d, err := s.Create(t.Context(), saver, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(checker.calls) != 0 || len(w.hooks) != 1 {
+		t.Fatalf("checks %d, inserts %d", len(checker.calls), len(w.hooks))
+	}
+	got := w.hooks[0]
+	if got.Name != "auto" || got.WebhookMode.String != "events" ||
+		string(got.WebhookEventsConfig) != `{"url":"http://127.0.0.1:18093/hook/auto","headers":[{"name":"Authorization","value":"Bearer {{ .Secrets.token }}"}]}` ||
+		string(got.Proxy) != `{"enabled":true,"type":"http","address":"proxy:3128","username":"u"}` ||
+		len(got.ProxyPasswordCiphertext) == 0 || !got.ProxyPasswordUpdatedAt.Valid || got.LimiterLimit != 5 {
+		t.Fatalf("insert %+v", got)
+	}
+	k := s.writer.Keyring
+	plain, err := k.OpenSecret(webhooks.FieldSigningSecret, keyring.StoredSecret{Ciphertext: got.SigningSecretCiphertext,
+		KeyID: got.SigningSecretKeyID.String})
+	if err != nil || plain != d.SigningSecretOnce || !stringsContain(string(plain), webhooks.SigningSecretPrefix) {
+		t.Fatalf("signing secret %v", err)
+	}
+	if d.ID != 21 || !d.SigningSecret.Set || !d.Proxy.PasswordSet || *d.WebhookMode != "events" {
+		t.Errorf("destination %+v", d)
+	}
+	if len(w.audit) != 1 || w.audit[0].Action != ActionCreated || stringsContain(string(w.audit[0].Diff), "proxy-pass") ||
+		!stringsContain(string(w.audit[0].Diff), "/proxy/password") || stringsContain(string(w.audit[0].Diff),
+		string(d.SigningSecretOnce)) {
+		t.Errorf("audit %+v", w.audit)
+	}
+	w.fail["InsertWebhookDestination"] = errBoom
+	if _, err := s.Create(t.Context(), saver, webhookInput("b", "https://example.org")); !errors.Is(err, errBoom) {
+		t.Errorf("insert failed = %v", err)
+	}
+}
+
+// TestCreateWebhookRefusals: the modes template and both are not supported yet; the request of the events mode is
+// required, and its URL and headers are parsed and run on a dry run, a template error naming its line and column; the
+// proxy and its password follow their rules.
+func TestCreateWebhookRefusals(t *testing.T) {
+	s, _, w, _, _ := newSaver(t)
+	for name, c := range map[string]struct {
+		mut     func(in *Input)
+		pointer string
+		code    string
+	}{
+		"template":     {func(in *Input) { in.Webhook.Mode = webhooks.ModeTemplate }, "/mode", CodeUnsupported},
+		"both":         {func(in *Input) { in.Webhook.Mode = webhooks.ModeBoth }, "/mode", CodeUnsupported},
+		"bad mode":     {func(in *Input) { in.Webhook.Mode = "x" }, "/mode", CodeInvalidFormat},
+		"no request":   {func(in *Input) { in.Webhook.Events = nil }, "/events", CodeRequired},
+		"no url":       {func(in *Input) { in.Webhook.Events.URL = " " }, "/events/url", CodeRequired},
+		"syntax":       {func(in *Input) { in.Webhook.Events.URL = "https://x/{{ .Secrets.a " }, "/events/url", templates.CodeSyntax},
+		"not http":     {func(in *Input) { in.Webhook.Events.URL = "ftp://x" }, "/events/url", CodeInvalidFormat},
+		"empty name":   {func(in *Input) { in.Name = "" }, "/name", CodeRequired},
+		"proxy":        {func(in *Input) { in.Webhook.Proxy.Enabled = true }, "/proxy/type", CodeRequired},
+		"empty secret": {func(in *Input) { in.Webhook.Proxy.Password = keyring.Replace("") }, "/proxy/password", CodeRequired},
+		"reserved header": {func(in *Input) {
+			in.Webhook.Events.Headers = []webhooks.Header{{Name: "webhook-id", Value: "x"}}
+		}, "/events/headers/0/name", webhooks.CodeReserved},
+	} {
+		in := webhookInput("x", "https://example.org/hook")
+		c.mut(&in)
+		_, err := s.Create(t.Context(), saver, in)
+		fe, ok := errors.AsType[*FieldError](err)
+		if !ok || fe.Pointer != c.pointer || fe.Code != c.code {
+			t.Errorf("%s = %v", name, err)
+		}
+	}
+	in := webhookInput("x", "https://x/\n{{ nofunc }}")
+	_, err := s.Create(t.Context(), saver, in)
+	if fe, ok := errors.AsType[*FieldError](err); !ok || fe.Line != 2 || fe.Column != 4 {
+		t.Errorf("position = %+v", err)
+	}
+	if len(w.hooks) != 0 {
+		t.Fatalf("a refused save inserted %+v", w.hooks)
+	}
+}
+
+// TestUpdateWebhook is updateDestination of an outgoing webhook: the request, the proxy, the Mention settings and the
+// limiter are replaced with the diff recorded; a password left out is kept, null clears it; the type cannot change, a
+// stale If-Match and an unchanged save write nothing.
+func TestUpdateWebhook(t *testing.T) {
+	s, store, w, _, _ := newSaver(t)
+	ctx := t.Context()
+	in := webhookInput("hook", "https://example.org/v2")
+	addr := "proxy:3128"
+	in.Webhook.Proxy = proxyconf.Input{Enabled: true, Address: &addr}
+	d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", new(int64(4)), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(w.hookSets) != 1 || w.hookSets[0].PasswordGiven || w.hookSets[0].ID != 3 ||
+		string(w.hookSets[0].Proxy) != `{"enabled":true,"type":"http","address":"proxy:3128","username":"u"}` ||
+		d.Version != 5 || !d.Proxy.PasswordSet {
+		t.Fatalf("update %+v, destination %+v", w.hookSets, d)
+	}
+	if len(w.audit) != 1 || !stringsContain(string(w.audit[0].Diff), "/events/url") {
+		t.Errorf("audit %+v", w.audit)
+	}
+	in.Webhook.Events.URL = "https://example.org"
+	set, _ := json.Marshal(in.Mentions)
+	store.rows[2].Mentions, store.rows[2].LimiterLimit, store.rows[2].LimiterPerSeconds = set, 5, 1
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, in); err != nil || len(w.hookSets) != 1 {
+		t.Fatalf("unchanged save wrote %d (%v)", len(w.hookSets), err)
+	}
+	in.Webhook.Proxy.Password = keyring.Clear
+	if d, err = s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, in); err != nil || len(w.hookSets) != 2 ||
+		!w.hookSets[1].PasswordGiven || w.hookSets[1].ProxyPasswordCiphertext != nil || d.Proxy.PasswordSet {
+		t.Fatalf("clear %+v (%v)", w.hookSets, err)
+	}
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", new(int64(9)), in); !errors.Is(err, ErrVersionMismatch) {
+		t.Errorf("stale = %v", err)
+	}
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, in); !errorAsField(err) {
+		t.Errorf("type changed = %v", err)
+	}
+	in.Webhook.Events.URL = "https://example.org/v3"
+	w.versions["DSAAAAAAAAAAA3"] = 7
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, in); !errors.Is(err, ErrVersionMismatch) {
+		t.Errorf("raced = %v", err)
+	}
+	w.versions["DSAAAAAAAAAAA3"] = 4
+	w.fail["UpdateWebhookDestination"] = errBoom
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, in); !errors.Is(err, errBoom) {
+		t.Errorf("update failed = %v", err)
+	}
+	w.fail["LockDestination"] = errBoom
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, in); !errors.Is(err, errBoom) {
+		t.Errorf("lock failed = %v", err)
+	}
+	delete(w.versions, "DSAAAAAAAAAAA3")
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, in); !errors.Is(err, ErrNotFound) {
+		t.Errorf("gone = %v", err)
+	}
+	in.Webhook.Proxy.Password = keyring.Replace("")
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, in); !errorAsField(err) {
+		t.Errorf("empty password = %v", err)
+	}
+	in = webhookInput("hook", "https://example.org/v2")
+	in.Webhook.Proxy = proxyconf.Input{Enabled: true, Address: new("no-port")}
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, in); !errorAsField(err) {
+		t.Errorf("bad proxy = %v", err)
+	}
+}

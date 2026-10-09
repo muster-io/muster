@@ -201,6 +201,7 @@ type Config struct {
 	Directory    UserDirectory
 	Connections  Connections
 	Destinations Destinations
+	Webhooks     Webhooks
 	Deliveries   Deliveries
 	Templates    Templates
 	Links        Links
@@ -234,6 +235,7 @@ type Server struct {
 	directory      UserDirectory
 	connections    Connections
 	destinations   Destinations
+	webhooks       Webhooks
 	deliveries     Deliveries
 	templates      Templates
 	links          Links
@@ -283,7 +285,9 @@ var implemented = map[string]bool{
 	"GetLinkRule": true, "UpdateLinkRule": true, "DeleteLinkRule": true,
 	"ListConnections": true, "CreateConnection": true, "GetConnection": true, "UpdateConnection": true,
 	"DeleteConnection": true, "CheckConnection": true, "ListConnectionChannels": true, "CreateDestination": true,
-	"UpdateDestination": true, "CheckDestination": true,
+	"UpdateDestination": true, "CheckDestination": true, "ListDestinationSecrets": true, "SetDestinationSecret": true,
+	"DeleteDestinationSecret": true, "GetSigningSecret": true, "GenerateSigningSecret": true,
+	"RetirePreviousSigningSecret": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -313,7 +317,7 @@ func New(cfg Config) (*Server, error) {
 		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, oidc: cfg.OIDC, tokens: cfg.Tokens,
 		integrations: cfg.Integrations, snapshots: cfg.Snapshots, alerts: cfg.Alerts, routes: cfg.Routes,
 		alertGroups: cfg.AlertGroups, commands: cfg.Commands, directory: cfg.Directory,
-		connections: cfg.Connections, destinations: cfg.Destinations, deliveries: cfg.Deliveries, templates: cfg.Templates, links: cfg.Links,
+		connections: cfg.Connections, destinations: cfg.Destinations, webhooks: cfg.Webhooks, deliveries: cfg.Deliveries, templates: cfg.Templates, links: cfg.Links,
 		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}

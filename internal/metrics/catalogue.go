@@ -377,12 +377,13 @@ var DeliveryAttempts = newCounter(Definition{
 	Capability: "C-11",
 })
 
-// DeliveryLatency observes, at the call that delivers a change caused by a Snapshot, the time since its receipt.
+// DeliveryLatency observes, at the call that delivers a change or an outgoing webhook event caused by a Snapshot, the
+// time since its receipt.
 var DeliveryLatency = newHistogram(Definition{
 	Name: "muster_delivery_latency_seconds",
-	Help: "Time from the receipt of the Snapshot behind a change of a Root message to the messenger API call that " +
-		"delivered it, by Destination; changes made by Commands or timers are not observed. The service-level " +
-		"indicator of NFR-2.",
+	Help: "Time from the receipt of the Snapshot behind a change of a Root message, or behind an event of an outgoing " +
+		"webhook, to the API call that delivered it, by Destination; changes made by Commands or timers are not " +
+		"observed. The service-level indicator of NFR-2.",
 	Labels:     []Label{entity("destination")},
 	Buckets:    []float64{0.25, 0.5, 1, 2, 3, 5, 10, 30, 60, 300, 900},
 	Capability: "C-11",

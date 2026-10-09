@@ -269,7 +269,7 @@ func get(t *testing.T, url string, headers ...string) int {
 }
 
 var anyPort = devmode.Addresses{Alertmanager: "127.0.0.1:0", Mattermost: "127.0.0.1:0", Telegram: "127.0.0.1:0",
-	OIDC: "127.0.0.1:0", HTTPProxy: "127.0.0.1:0", SOCKSProxy: "127.0.0.1:0"}
+	OIDC: "127.0.0.1:0", Webhook: "127.0.0.1:0", HTTPProxy: "127.0.0.1:0", SOCKSProxy: "127.0.0.1:0"}
 
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
@@ -285,13 +285,14 @@ func TestRun(t *testing.T) {
 		})
 	}()
 
-	got := waitFor(t, out, 6, done)
+	got := waitFor(t, out, 7, done)
 	<-served
 	re := regexp.MustCompile(`^muster dev: fake Alertmanager (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake Mattermost (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake OIDC (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake HTTP proxy (127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake SOCKS5 proxy (127\.0\.0\.1:\d+)\n` +
+		`muster dev: fake webhook receiver (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake Telegram (http://127\.0\.0\.1:\d+)\n$`)
 	m := re.FindStringSubmatch(got)
 	if m == nil {
@@ -305,7 +306,8 @@ func TestRun(t *testing.T) {
 			t.Errorf("GET %s/_fake/requests = %d", proxy, status)
 		}
 	}
-	m = []string{m[0], m[1], m[2], m[6], m[3]} // the fake servers: Alertmanager, Mattermost, Telegram, OIDC
+	// the fake servers: Alertmanager, Mattermost, Telegram, OIDC, webhook receiver
+	m = []string{m[0], m[1], m[2], m[7], m[3], m[6]}
 	for _, base := range m[1:] {
 		if status := get(t, base+"/_fake/requests"); status != http.StatusOK {
 			t.Errorf("GET %s/_fake/requests = %d", base, status)
@@ -370,7 +372,7 @@ func TestRunServeFails(t *testing.T) {
 	if !errors.Is(err, failed) {
 		t.Errorf("Run = %v, want the error of serve", err)
 	}
-	if len(fakes) != 4 {
+	if len(fakes) != 5 {
 		t.Fatalf("the fake servers were not running while serving: %q", out.String())
 	}
 	for _, base := range fakes {
@@ -390,11 +392,24 @@ func TestStartFakes(t *testing.T) {
 	if get(t, f.Telegram.URL()+"/bot1:x/getMe") != http.StatusOK || len(f.Telegram.Requests()) != 1 {
 		t.Error("the in-process Telegram fake did not record getMe")
 	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.Webhook.URL()+"/hook/auto",
+		strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(f.Webhook.Received("auto")) != 1 {
+		t.Error("the in-process webhook fake did not record the request")
+	}
 	if err := f.Close(t.Context()); err != nil {
 		t.Errorf("Close: %v", err)
 	}
 	want := devmode.Addresses{Alertmanager: "127.0.0.1:19093", Mattermost: "127.0.0.1:18065", Telegram: "127.0.0.1:18081",
-		OIDC: "127.0.0.1:18090", HTTPProxy: "127.0.0.1:18091", SOCKSProxy: "127.0.0.1:18092"}
+		OIDC: "127.0.0.1:18090", Webhook: "127.0.0.1:18093", HTTPProxy: "127.0.0.1:18091", SOCKSProxy: "127.0.0.1:18092"}
 	if devmode.FakeAddresses() != want {
 		t.Errorf("FakeAddresses() = %+v, want %+v", devmode.FakeAddresses(), want)
 	}

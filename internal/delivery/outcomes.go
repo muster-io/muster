@@ -131,7 +131,7 @@ func (w *Worker) record(ctx context.Context, q queries, org int64, a attempt, c 
 			return true, err
 		}
 	}
-	return true, wipeSecrets(ctx, q, org, a.destination.ID)
+	return true, wipeSecrets(ctx, q, org, a.destination.ID, w.Lease.Clocks.Real.Now().UTC())
 }
 
 func (w *Worker) recordOutcome(ctx context.Context, q queries, org int64, a attempt, c Call, out Outcome,

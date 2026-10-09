@@ -103,11 +103,13 @@ const (
 	OutcomeGone OutcomeKind = "gone"
 	// OutcomeThreadLost is a Thread the messenger refuses replies to.
 	OutcomeThreadLost OutcomeKind = "thread_lost"
+	// OutcomeTemplateError is a request of an outgoing webhook whose template failed: nothing was sent (C-15.FR-7).
+	OutcomeTemplateError OutcomeKind = "template_error"
 )
 
 // Outcomes are every outcome an adapter may answer with.
 var Outcomes = []OutcomeKind{OutcomeOK, OutcomeRetryAfter, OutcomeTransient, OutcomeFatal, OutcomeUnknown,
-	OutcomeMarkupRejected, OutcomeGone, OutcomeThreadLost}
+	OutcomeMarkupRejected, OutcomeGone, OutcomeThreadLost, OutcomeTemplateError}
 
 // Scope is what a RetryAfter holds: the Destination, or every Destination of its Connection.
 type Scope string
@@ -119,7 +121,8 @@ const (
 )
 
 // Outcome is what an adapter call ended with. An ok Publication or Thread reply names its message; a RetryAfter the
-// exact delay and its scope; a failure carries the provider's error text, masked of secrets and untrusted.
+// exact delay and its scope; a failure carries the provider's error text, masked of secrets and untrusted. Status is
+// the HTTP status of the answer of an outgoing webhook, 0 without one.
 type Outcome struct {
 	Kind       OutcomeKind
 	MessageID  string
@@ -127,6 +130,7 @@ type Outcome struct {
 	RetryAfter time.Duration
 	Scope      Scope
 	Error      outbound.Untrusted
+	Status     int
 }
 
 // Call is one adapter call: its client class (ADR-0015) — delivery for the worker, interactive for the interactive
@@ -195,10 +199,52 @@ type Checker interface {
 // Adapters are the adapters by Destination type, wired in the runtime.
 type Adapters map[string]Adapter
 
+// EventCall is one events-mode request of an outgoing webhook (C-15.FR-2): its client class, its Destination, the
+// webhook-id of its event, kept across retries, and the body rendered when the event was queued.
+type EventCall struct {
+	Class       outbound.Class
+	Destination Destination
+	WebhookID   string
+	Body        []byte
+}
+
+// EventSender sends the events-mode requests of outgoing webhooks (C-15.FR-2, FR-6), declared here by its consumer;
+// *webhooks.Adapter implements it. Only the worker's events path and the Broken probe call it.
+type EventSender interface {
+	SendEvent(ctx context.Context, c EventCall) Outcome
+}
+
+// EventSource is a change of an Alert Group as the bodies of its events carry it: the Alert Group after the change, its
+// Route and the actor of the change.
+type EventSource struct {
+	Group         *groups.Group
+	RoutePublicID string
+	RouteName     string
+	Actor         groups.Actor
+}
+
+// EventBody is one lifecycle event of a change for one events-mode Destination: the event, whether it is Loud, its
+// Mentions in that Destination and when it happened.
+type EventBody struct {
+	Event      groups.Recorded
+	Notify     bool
+	Mentions   []mentions.Target
+	OccurredAt time.Time
+}
+
+// BodyFunc renders the version 1 body of one event of a change.
+type BodyFunc func(e EventBody) ([]byte, error)
+
+// EventBodies reads, through the transaction of a change, what the bodies of its events carry and returns the
+// function that renders each (C-15.FR-2), declared here by its consumer; *webhooks.Service implements it.
+type EventBodies interface {
+	EventBodies(ctx context.Context, tx groups.DBTX, in EventSource) (BodyFunc, error)
+}
+
 // errorClass is the last_error_class of an outcome, empty for those that have none.
 func errorClass(k OutcomeKind) string {
 	switch k {
-	case OutcomeRetryAfter, OutcomeTransient, OutcomeFatal, OutcomeUnknown:
+	case OutcomeRetryAfter, OutcomeTransient, OutcomeFatal, OutcomeUnknown, OutcomeTemplateError:
 		return string(k)
 	case OutcomeOK, OutcomeMarkupRejected, OutcomeGone, OutcomeThreadLost:
 	}
@@ -211,7 +257,8 @@ func metricOutcome(k OutcomeKind) string {
 	switch k {
 	case OutcomeOK:
 		return "delivered"
-	case OutcomeRetryAfter, OutcomeTransient, OutcomeFatal, OutcomeUnknown, OutcomeMarkupRejected:
+	case OutcomeRetryAfter, OutcomeTransient, OutcomeFatal, OutcomeUnknown, OutcomeMarkupRejected,
+		OutcomeTemplateError:
 		return string(k)
 	case OutcomeGone, OutcomeThreadLost:
 	}
@@ -259,6 +306,7 @@ type queries interface {
 	GetPressBinding(ctx context.Context, arg dbgen.GetPressBindingParams) (dbgen.GetPressBindingRow, error)
 	GetPostDestination(ctx context.Context, arg dbgen.GetPostDestinationParams) (dbgen.GetPostDestinationRow, error)
 	outcomeQueries
+	webhookEventQueries
 	brokenQueries
 	stormQueries
 	membershipQueries
@@ -317,6 +365,13 @@ type Config struct {
 	Log      *logging.Logger
 	// RunbookBase is MUSTER_RUNBOOK_BASE_URL, the base of the runbook_url of MusterDestinationBroken.
 	RunbookBase string
+	// Real is the real clock, against which the leases of calls in flight are compared before the secrets of a deleted
+	// Destination are wiped; nil is the system's.
+	Real clock.Clock
+	// Bodies renders the bodies of outgoing webhook events and Mentions resolves their Mentions; without Bodies no
+	// event is queued.
+	Bodies   EventBodies
+	Mentions Mentioner
 }
 
 // Service is the delivery of an Organization: Enqueue for the dispatcher, the delivery state of Alert Groups, the
@@ -329,12 +384,20 @@ type Service struct {
 	renderer Renderer
 	log      *logging.Logger
 	internal *internalalerts.Raiser
+	real     clock.Clock
+	bodies   EventBodies
+	mentions Mentioner
 }
 
 // New returns the Service of the Organization in cfg.
 func New(cfg Config) *Service {
+	var realClock clock.Clock = clock.Real{}
+	if cfg.Real != nil {
+		realClock = cfg.Real
+	}
 	return &Service{orgID: cfg.OrgID, store: cfg.Store, clock: cfg.Business, renderer: cfg.Renderer, log: cfg.Log,
-		internal: internalalerts.NewRaiser(cfg.OrgID, cfg.RunbookBase)}
+		internal: internalalerts.NewRaiser(cfg.OrgID, cfg.RunbookBase), real: realClock, bodies: cfg.Bodies,
+		mentions: cfg.Mentions}
 }
 
 // ErrNotFound is an Alert Group that does not exist in the Organization.

@@ -240,8 +240,13 @@ func (f *fakeDB) WipeDestinationSecrets(_ context.Context, arg dbgen.WipeDestina
 	if err := f.call("WipeDestinationSecrets"); err != nil {
 		return err
 	}
-	if ds := f.dests[arg.ID]; ds.deleted && !f.pendingOf(ds.id) {
-		ds.secrets, ds.named = 0, 0
+	for _, ds := range f.dests {
+		if arg.ID.Valid && ds.id != arg.ID.Int64 {
+			continue
+		}
+		if ds.deleted && !f.pendingOf(ds.id) && !f.leasedOf(ds.id, arg.Now) {
+			ds.secrets, ds.named = 0, 0
+		}
 	}
 	return nil
 }

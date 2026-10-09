@@ -59,6 +59,8 @@ type (
 		secrets, named int
 		// channel is the Mattermost channel.
 		channel string
+		// mode is the mode of an outgoing webhook, empty for none.
+		mode string
 	}
 	fakeRoute struct {
 		language  string
@@ -166,6 +168,8 @@ type fakeDB struct {
 	timersNotified int
 	// membershipLocks are the Routes whose membership lock Enqueue took shared, in order.
 	membershipLocks []int64
+	// webhookEvents are the events of outgoing webhooks.
+	webhookEvents []*fakeEvent
 }
 
 // sqlBool is a boolean of SQL — true, false or NULL — with its three-valued logic, so that the fake meets a NULL where
@@ -315,7 +319,8 @@ func (f *fakeDB) ListRouteDestinations(_ context.Context, arg dbgen.ListRouteDes
 	for _, id := range f.routeDests[arg.RouteID] {
 		if d := f.dests[id]; d != nil && !d.deleted {
 			out = append(out, dbgen.ListRouteDestinationsRow{ID: d.id, PublicID: d.publicID, Name: d.name,
-				Type: d.typ, ConnectionID: nullInt(d.connection), Health: d.health})
+				Type: d.typ, ConnectionID: nullInt(d.connection), Health: d.health,
+				WebhookMode: pgtype.Text{String: d.mode, Valid: d.mode != ""}})
 		}
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListRouteDestinationsRow) int { return cmp.Compare(a.ID, b.ID) })
@@ -927,6 +932,7 @@ func (f *fakeDB) NextDeliveryWork(_ context.Context, arg dbgen.NextDeliveryWorkP
 			add(r.next, r.owner, r.until)
 		}
 	}
+	f.eventWork(add)
 	return out, nil
 }
 
@@ -1001,6 +1007,7 @@ func (f *fakeDB) CountDeliveryQueues(_ context.Context, arg dbgen.CountDeliveryQ
 				n++
 			}
 		}
+		n += f.pendingEvents(ds.id)
 		out = append(out, dbgen.CountDeliveryQueuesRow{PublicID: ds.publicID, Queued: n})
 	}
 	return out, nil
@@ -1185,10 +1192,10 @@ func (f *fakeDB) ClaimBrokenProbes(_ context.Context, arg dbgen.ClaimBrokenProbe
 		if ds.health != "broken" || (ds.deleted && !f.pendingOf(ds.id)) {
 			continue
 		}
-		waiting := ds.probeOnNext && slices.ContainsFunc(f.deliveries, func(d *fakeDelivery) bool {
+		waiting := ds.probeOnNext && (slices.ContainsFunc(f.deliveries, func(d *fakeDelivery) bool {
 			return d.dest == ds.id && d.state == "pending" && d.heldBy == 0 && !d.next.After(arg.Due) &&
 				(d.owner == "" || !d.until.After(arg.Now))
-		})
+		}) || f.eventDue(ds.id, arg.Due, arg.Now))
 		if waiting || (!ds.probeOnNext && !ds.nextProbe.After(arg.Due)) {
 			due = append(due, ds)
 		}

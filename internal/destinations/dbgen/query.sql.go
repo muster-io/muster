@@ -172,6 +172,65 @@ func (q *Queries) InsertMattermostDestination(ctx context.Context, arg InsertMat
 	return id, err
 }
 
+const insertWebhookDestination = `-- name: InsertWebhookDestination :one
+INSERT INTO destinations (
+    org_id, public_id, type, name, webhook_mode, webhook_events_config, proxy, proxy_password_ciphertext,
+    proxy_password_key_id, proxy_password_updated_at, signing_secret_ciphertext, signing_secret_key_id,
+    signing_secret_updated_at, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at
+)
+VALUES (
+    $1, $2, 'webhook', $3, $4, $5, $6,
+    $7::bytea, $8::text,
+    $9::timestamptz, $10, $11,
+    $12::timestamptz, $13, $14, $15, 'healthy', $12::timestamptz,
+    $12::timestamptz
+)
+RETURNING id
+`
+
+type InsertWebhookDestinationParams struct {
+	OrgID                   int64
+	PublicID                string
+	Name                    string
+	WebhookMode             pgtype.Text
+	WebhookEventsConfig     []byte
+	Proxy                   []byte
+	ProxyPasswordCiphertext []byte
+	ProxyPasswordKeyID      pgtype.Text
+	ProxyPasswordUpdatedAt  pgtype.Timestamptz
+	SigningSecretCiphertext []byte
+	SigningSecretKeyID      pgtype.Text
+	Now                     time.Time
+	Mentions                []byte
+	LimiterLimit            int64
+	LimiterPerSeconds       int64
+}
+
+// InsertWebhookDestination creates a healthy outgoing webhook Destination with its request, its proxy and the
+// password of the proxy, and its first Signing secret (C-15.FR-1, FR-5).
+func (q *Queries) InsertWebhookDestination(ctx context.Context, arg InsertWebhookDestinationParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertWebhookDestination,
+		arg.OrgID,
+		arg.PublicID,
+		arg.Name,
+		arg.WebhookMode,
+		arg.WebhookEventsConfig,
+		arg.Proxy,
+		arg.ProxyPasswordCiphertext,
+		arg.ProxyPasswordKeyID,
+		arg.ProxyPasswordUpdatedAt,
+		arg.SigningSecretCiphertext,
+		arg.SigningSecretKeyID,
+		arg.Now,
+		arg.Mentions,
+		arg.LimiterLimit,
+		arg.LimiterPerSeconds,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const listDestinationInfo = `-- name: ListDestinationInfo :many
 SELECT public_id, name
 FROM destinations
@@ -541,6 +600,58 @@ func (q *Queries) UpdateMattermostDestination(ctx context.Context, arg UpdateMat
 		arg.LimiterLimit,
 		arg.LimiterPerSeconds,
 		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
+const updateWebhookDestination = `-- name: UpdateWebhookDestination :exec
+UPDATE destinations
+SET name = $1, webhook_mode = $2, webhook_events_config = $3, proxy = $4,
+    proxy_password_ciphertext = CASE WHEN $5::boolean THEN $6::bytea
+                                     ELSE proxy_password_ciphertext END,
+    proxy_password_key_id     = CASE WHEN $5::boolean THEN $7::text
+                                     ELSE proxy_password_key_id END,
+    proxy_password_updated_at = CASE WHEN $5::boolean THEN $8::timestamptz
+                                     ELSE proxy_password_updated_at END,
+    mentions = $9, limiter_limit = $10, limiter_per_seconds = $11,
+    updated_at = $8::timestamptz, version = version + 1
+WHERE org_id = $12 AND id = $13 AND type = 'webhook'
+`
+
+type UpdateWebhookDestinationParams struct {
+	Name                    string
+	WebhookMode             pgtype.Text
+	WebhookEventsConfig     []byte
+	Proxy                   []byte
+	PasswordGiven           bool
+	ProxyPasswordCiphertext []byte
+	ProxyPasswordKeyID      pgtype.Text
+	Now                     time.Time
+	Mentions                []byte
+	LimiterLimit            int64
+	LimiterPerSeconds       int64
+	OrgID                   int64
+	ID                      int64
+}
+
+// UpdateWebhookDestination replaces the configured fields of an outgoing webhook Destination; the password of its
+// proxy changes only when @password_given, to the value given or to none. Its Signing secrets, Secrets and health are
+// left alone.
+func (q *Queries) UpdateWebhookDestination(ctx context.Context, arg UpdateWebhookDestinationParams) error {
+	_, err := q.db.Exec(ctx, updateWebhookDestination,
+		arg.Name,
+		arg.WebhookMode,
+		arg.WebhookEventsConfig,
+		arg.Proxy,
+		arg.PasswordGiven,
+		arg.ProxyPasswordCiphertext,
+		arg.ProxyPasswordKeyID,
+		arg.Now,
+		arg.Mentions,
+		arg.LimiterLimit,
+		arg.LimiterPerSeconds,
 		arg.OrgID,
 		arg.ID,
 	)

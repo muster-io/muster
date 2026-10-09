@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/muster-io/muster/internal/destinations/dbgen"
+	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
 )
@@ -97,6 +98,9 @@ type Destination struct {
 	TemplateConfig json.RawMessage
 	Proxy          Proxy
 	SigningSecret  SigningSecret
+
+	// SigningSecretOnce is the first Signing secret of an outgoing webhook, set only by Create, which returns it once.
+	SigningSecretOnce logging.Secret
 
 	Mentions          json.RawMessage
 	LimiterLimit      int64

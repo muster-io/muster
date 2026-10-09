@@ -59,7 +59,8 @@ type Request struct {
 }
 
 // Fault is a scripted answer for the requests to a path. With a Status, a fault waits DelayMs and answers that status
-// with Body, as ContentType when it is set and otherwise as JSON when Body is valid JSON and as text when it is not.
+// with Body, as ContentType when it is set and otherwise as JSON when Body is valid JSON and as text when it is not,
+// and with the Location header when Location is set.
 // Without a Status, the fake answers as usual, but the answer is held for DelayMs after the fake made it: what the
 // request changed is done even when the client gives up waiting.
 //
@@ -74,6 +75,7 @@ type Fault struct {
 	DelayMs           int    `json:"delay_ms"`
 	Body              string `json:"body"`
 	ContentType       string `json:"content_type"`
+	Location          string `json:"location"`
 	Times             int    `json:"times"`
 }
 
@@ -98,8 +100,8 @@ func (f Fault) Validate() error {
 		return errors.New("times must not be negative")
 	case f.Status == 0 && f.DelayMs == 0:
 		return errors.New("a fault needs a status or a delay_ms")
-	case f.Status == 0 && (f.RetryAfterSeconds != 0 || f.Body != "" || f.ContentType != ""):
-		return errors.New("retry_after_seconds, body and content_type need a status")
+	case f.Status == 0 && (f.RetryAfterSeconds != 0 || f.Body != "" || f.ContentType != "" || f.Location != ""):
+		return errors.New("retry_after_seconds, body, content_type and location need a status")
 	}
 	return nil
 }
@@ -487,6 +489,9 @@ type readCloser struct {
 func writeFault(w http.ResponseWriter, f Fault) {
 	if f.RetryAfterSeconds > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(f.RetryAfterSeconds))
+	}
+	if f.Location != "" {
+		w.Header().Set("Location", f.Location)
 	}
 	if f.Status == http.StatusNoContent || f.Status == http.StatusNotModified {
 		w.WriteHeader(f.Status)

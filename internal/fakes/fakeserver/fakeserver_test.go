@@ -252,6 +252,28 @@ func TestFaultAnswers(t *testing.T) {
 	}
 }
 
+func TestFaultLocation(t *testing.T) {
+	s, _ := start(t)
+	setFault(t, s, `{"path":"/hook","status":302,"location":"http://elsewhere.example.org/x","times":1}`)
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, s.URL()+"/hook", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Close = true // no idle connection is left for the server's Close to wait for
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "http://elsewhere.example.org/x" {
+		t.Errorf("answer = %d, Location %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	if r := do(t, http.MethodPost, s.URL()+"/hook", "{}"); r.status != http.StatusOK || r.header.Get("Location") != "" {
+		t.Errorf("after the fault: %d, Location %q", r.status, r.header.Get("Location"))
+	}
+}
+
 func TestFaultReplaceAndReset(t *testing.T) {
 	s, _ := start(t)
 	setFault(t, s, `{"path":"/p","status":500}`)
@@ -478,6 +500,7 @@ func TestFaultValidation(t *testing.T) {
 		{"negative delay", `{"path":"/a","delay_ms":-5}`, "delay_ms must not be negative"},
 		{"nothing to do", `{"path":"/a"}`, "needs a status or a delay_ms"},
 		{"body without status", `{"path":"/a","delay_ms":5,"body":"x"}`, "need a status"},
+		{"location without status", `{"path":"/a","delay_ms":5,"location":"http://x.example.org/"}`, "need a status"},
 	}
 	s, _ := start(t)
 	for _, tt := range tests {

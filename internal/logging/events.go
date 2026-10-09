@@ -447,6 +447,15 @@ var DeliveryNotDelivered = newEvent("delivery_not_delivered", LevelWarn, "C-11",
 		"change of the Alert Group starts a new delivery.",
 	"destination", "group", "kind", "error_class")
 
+// WebhookEventNotDelivered is logged when an event of an outgoing webhook ends as Not delivered (C-15.FR-6).
+var WebhookEventNotDelivered = newEvent("webhook_event_not_delivered", LevelWarn, "C-15",
+	"An event of an outgoing webhook in the events mode ended as Not delivered after an answer that is not retried "+
+		"and does not make the Destination Broken — 400, 413, 422, a redirect, which is never followed, or another "+
+		"unknown answer — or because its request template failed: destination is the public_id of the Destination, "+
+		"group the public_id of the Alert Group, lifecycle_event the lifecycle event and status the HTTP status of "+
+		"the answer, empty without one. The next event of the Alert Group follows.",
+	"destination", "group", "lifecycle_event", "status")
+
 // MattermostPress is logged for each request to the callback of Mattermost button presses (C-13.FR-4).
 var MattermostPress = newEvent("mattermost_press", LevelInfo, "C-13",
 	"The callback of a Mattermost Connection received a button press and answered 200 with a JSON object, never "+

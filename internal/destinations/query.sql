@@ -113,3 +113,36 @@ SET name = @name, connection_id = @connection_id, mattermost_team_id = @team_id,
     mentions = @mentions, limiter_limit = @limiter_limit, limiter_per_seconds = @limiter_per_seconds,
     updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id;
+
+-- InsertWebhookDestination creates a healthy outgoing webhook Destination with its request, its proxy and the
+-- password of the proxy, and its first Signing secret (C-15.FR-1, FR-5).
+-- name: InsertWebhookDestination :one
+INSERT INTO destinations (
+    org_id, public_id, type, name, webhook_mode, webhook_events_config, proxy, proxy_password_ciphertext,
+    proxy_password_key_id, proxy_password_updated_at, signing_secret_ciphertext, signing_secret_key_id,
+    signing_secret_updated_at, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at
+)
+VALUES (
+    @org_id, @public_id, 'webhook', @name, @webhook_mode, @webhook_events_config, @proxy,
+    sqlc.narg('proxy_password_ciphertext')::bytea, sqlc.narg('proxy_password_key_id')::text,
+    sqlc.narg('proxy_password_updated_at')::timestamptz, @signing_secret_ciphertext, @signing_secret_key_id,
+    @now::timestamptz, @mentions, @limiter_limit, @limiter_per_seconds, 'healthy', @now::timestamptz,
+    @now::timestamptz
+)
+RETURNING id;
+
+-- UpdateWebhookDestination replaces the configured fields of an outgoing webhook Destination; the password of its
+-- proxy changes only when @password_given, to the value given or to none. Its Signing secrets, Secrets and health are
+-- left alone.
+-- name: UpdateWebhookDestination :exec
+UPDATE destinations
+SET name = @name, webhook_mode = @webhook_mode, webhook_events_config = @webhook_events_config, proxy = @proxy,
+    proxy_password_ciphertext = CASE WHEN @password_given::boolean THEN sqlc.narg('proxy_password_ciphertext')::bytea
+                                     ELSE proxy_password_ciphertext END,
+    proxy_password_key_id     = CASE WHEN @password_given::boolean THEN sqlc.narg('proxy_password_key_id')::text
+                                     ELSE proxy_password_key_id END,
+    proxy_password_updated_at = CASE WHEN @password_given::boolean THEN @now::timestamptz
+                                     ELSE proxy_password_updated_at END,
+    mentions = @mentions, limiter_limit = @limiter_limit, limiter_per_seconds = @limiter_per_seconds,
+    updated_at = @now::timestamptz, version = version + 1
+WHERE org_id = @org_id AND id = @id AND type = 'webhook';
