@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -450,9 +451,17 @@ func TestUpdateMattermost(t *testing.T) {
 		new(*CheckFailedError)) {
 		t.Errorf("refused = %v", err)
 	}
+	var renamed []string
+	s.writer.Renamed = func(_ context.Context, _ dbgen.DBTX, publicID, name string) error {
+		renamed = append(renamed, publicID+"="+name)
+		return nil
+	}
 	d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", new(int64(2)), mattermostInput("ops-renamed", "chan"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Equal(renamed, []string{"DSAAAAAAAAAAA1=ops-renamed"}) {
+		t.Errorf("rename hook = %v", renamed)
 	}
 	last := checker.calls[len(checker.calls)-1]
 	if last.Destination == nil || *last.Destination != 1 {
@@ -695,6 +704,32 @@ func TestCreateWebhookRefusals(t *testing.T) {
 	}
 	if len(w.hooks) != 0 {
 		t.Fatalf("a refused save inserted %+v", w.hooks)
+	}
+}
+
+// TestUpdateRenameHook: a save that changes the name of a Destination of any type runs the rename hook in the
+// transaction of the save; a save that keeps the name does not; a failing hook fails the save.
+func TestUpdateRenameHook(t *testing.T) {
+	s, _, w, _, _ := newSaver(t)
+	ctx := t.Context()
+	var renamed []string
+	s.writer.Renamed = func(_ context.Context, _ dbgen.DBTX, publicID, name string) error {
+		renamed = append(renamed, publicID+"="+name)
+		return nil
+	}
+	w.versions["DSAAAAAAAAAAA2"] = 1
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA3", nil, webhookInput("hook-2", "https://example.org/v2")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("alerts-2", "@muster_alerts")); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(renamed, []string{"DSAAAAAAAAAAA3=hook-2", "DSAAAAAAAAAAA2=alerts-2"}) {
+		t.Errorf("rename hook = %v", renamed)
+	}
+	s.writer.Renamed = func(context.Context, dbgen.DBTX, string, string) error { return errBoom }
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, mattermostInput("ops-3", "chan")); !errors.Is(err, errBoom) {
+		t.Errorf("failing hook = %v", err)
 	}
 }
 

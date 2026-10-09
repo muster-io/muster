@@ -45,6 +45,10 @@ type Requester struct {
 // edits of its open Root messages, and the wipe of its secrets once none is pending (C-11.FR-14).
 type Retire func(ctx context.Context, tx dbgen.DBTX, destinationID int64) error
 
+// Renamed is the hook that delivery runs in the transaction tx that renamed the Destination publicID to name: every
+// Internal alert about it takes the new name, as the same firing.
+type Renamed func(ctx context.Context, tx dbgen.DBTX, publicID, name string) error
+
 // Routes is the hook that routing runs in the transaction tx that deletes the Destination destinationID, before it
 // leaves its Routes: each of them gets a new version and its hint, and its membership lock, so that no Alert Group of
 // it is rendered for the Destination meanwhile.
@@ -92,7 +96,7 @@ func (q txQueries) Notify(ctx context.Context, h db.Hint) error { return db.Noti
 func (q txQueries) DB() dbgen.DBTX { return q.tx }
 
 // WriterConfig is what the changes of Destinations need: the Writer, the Audit log, the business clock that dates the
-// changes, routing's Routes hook and delivery's Retire hook; and for the saves, the validation of Mention settings, the
+// changes, routing's Routes hook and delivery's Retire and Renamed hooks; and for the saves, the validation of Mention settings, the
 // Destination checks of the Mattermost and Telegram types and delivery's end of a Broken state, and for outgoing
 // webhooks the Keyring that encrypts their secrets and the template sandbox that checks their request.
 type WriterConfig struct {
@@ -101,6 +105,7 @@ type WriterConfig struct {
 	Business   clock.Clock
 	Routes     Routes
 	Retire     Retire
+	Renamed    Renamed
 	Mentions   MentionValidator
 	Mattermost MattermostChecker
 	Telegram   TelegramChecker

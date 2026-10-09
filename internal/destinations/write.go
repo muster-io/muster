@@ -479,6 +479,9 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 			return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 		}
 		d.Version++
+		if err := s.renamed(ctx, q, before, d); err != nil {
+			return err
+		}
 		if len(diff) == 0 {
 			return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: d.PublicID})
 		}
@@ -488,6 +491,18 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 		return Destination{}, err
 	}
 	return d, nil
+}
+
+// renamed gives the Internal alerts about the Destination its new name, in the transaction of the rename; a save
+// that keeps the name does nothing.
+func (s *Service) renamed(ctx context.Context, q TxQueries, before, after Destination) error {
+	if before.Name == after.Name || s.writer.Renamed == nil {
+		return nil
+	}
+	if err := s.writer.Renamed(ctx, q.DB(), after.PublicID, after.Name); err != nil {
+		return fmt.Errorf("rename the internal alerts of %s: %w", after.PublicID, err)
+	}
+	return nil
 }
 
 // proxyRead is the proxy of an outgoing webhook as read after a save.
@@ -674,6 +689,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
+			if err := s.renamed(ctx, q, before, d); err != nil {
+				return err
+			}
 			if len(diff) == 0 {
 				return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: d.PublicID})
 			}
@@ -971,6 +989,9 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
+			if err := s.renamed(ctx, q, before, d); err != nil {
+				return err
+			}
 			if len(diff) == 0 {
 				return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: d.PublicID})
 			}

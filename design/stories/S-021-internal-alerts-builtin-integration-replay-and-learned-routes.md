@@ -116,6 +116,9 @@ issue: 21
   time). Rename (C-06.AC-11): `updateIntegration` that changes the name raises again every open Internal alert carrying
   `integration=<id>`, with the new `integration_name`, and every one whose raise still waits for processing; processing
   reads the Integration's name for a raise under a key-share lock, so a rename in progress is never missed.
+  The same holds for any entity: `updateDestination` that changes the name does it for `destination=<id>` and `destination_name`
+  in its own transaction (delivery's rename hook), so every Internal alert that carries a name label keeps the fingerprint
+  and shows the current name.
 - **Deletion** (C-05.FR-8, C-06.FR-16, ADR-0003): `deleteIntegration` also inserts, in its transaction, an internal
   Stored Snapshot of the deleted Integration that marks the deletion. The worker keeps processing a deleted
   Integration's pending Snapshots in order; the marker resolves every Alert of the Integration that still fires with the

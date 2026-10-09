@@ -895,6 +895,7 @@ func TestLive(t *testing.T) {
 			{"duplicate_after_crash", l.duplicateAfterCrash},
 			{"transient_budget", l.transientBudget},
 			{"fatal_is_broken", l.fatalIsBroken},
+			{"rename_keeps_broken_alert", l.renameKeepsBrokenAlert},
 			{"recovery_current_state", l.recoveryCurrentState},
 			{"unknown_not_delivered", l.unknownNotDelivered},
 			{"late_publication_retry_after", l.lateRetryAfter},
@@ -1593,6 +1594,54 @@ func (l *live) fatalIsBroken(t *testing.T) {
 		t.Fatalf("after a fatal outcome: %d calls, %s %q", len(l.rec.Calls()), health, reason)
 	}
 	t.Logf("one fatal outcome → broken at once (%s), the delivery waits (pending); no further call", reason)
+}
+
+// renameKeepsBrokenAlert: the rename hook of the Destinations gives the firing MusterDestinationBroken the new
+// destination_name as the same Alert, with the same fingerprint and no second Alert, and the alert still fires.
+func (l *live) renameKeepsBrokenAlert(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeFatal, "channel not found"))
+	l.fire(t, "rn", "Rename/a")
+	l.round(t, l.a)
+	read := func() (n int64, fingerprint, name, status string) {
+		t.Helper()
+		l.process(t)
+		n = l.count(t, `SELECT count(*) FROM alerts WHERE labels->>'alertname' = 'MusterDestinationBroken' AND
+			labels->>'destination' = 'DSAAAAAAAAAAA1'`)
+		err := l.d.Pool.QueryRow(t.Context(), `SELECT fingerprint, labels->>'destination_name', status FROM alerts
+			WHERE labels->>'alertname' = 'MusterDestinationBroken' AND labels->>'destination' = 'DSAAAAAAAAAAA1'
+			ORDER BY id DESC LIMIT 1`).Scan(&fingerprint, &name, &status)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n, fingerprint, name, status
+	}
+	var destName string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT name FROM destinations WHERE id = $1`, l.dests[0]).Scan(
+		&destName); err != nil {
+		t.Fatal(err)
+	}
+	_, fingerprint, before, firing := read()
+	if firing != "firing" {
+		t.Fatalf("MusterDestinationBroken %q before the rename", firing)
+	}
+	err := pgx.BeginFunc(t.Context(), l.d.Pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE destinations SET name = 'renamed' WHERE id = $1`,
+			l.dests[0]); err != nil {
+			return err
+		}
+		return l.svc.DestinationRenamed(t.Context(), tx, "DSAAAAAAAAAAA1", "renamed")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, after, name, status := read()
+	l.exec(t, `UPDATE destinations SET name = $2 WHERE id = $1`, l.dests[0], destName)
+	if n != 1 || after != fingerprint || name != "renamed" || status != "firing" || before == "renamed" {
+		t.Fatalf("after the rename: %d alerts, fingerprint %s (was %s), name %q (was %q), %s", n, after, fingerprint,
+			name, before, status)
+	}
+	t.Logf("rename: destination_name %q → %q, one Alert, fingerprint %s kept, still firing", before, name, after)
 }
 
 // recoveryCurrentState is C-11.AC-7.
