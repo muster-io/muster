@@ -45,6 +45,8 @@ type Call struct {
 	Targets []mentions.Target
 	// Plain is a call without markup, after the messenger rejected the markup.
 	Plain bool
+	// Webhook is what a request of an outgoing webhook in the template mode reads, nil for a messenger.
+	Webhook *delivery.WebhookCall
 	// Answered is the outcome the recorder answered with.
 	Answered delivery.Outcome
 }
@@ -172,19 +174,21 @@ func (r *Recorder) answer(ctx context.Context, c Call) delivery.Outcome {
 // Publish records a new Root message.
 func (r *Recorder) Publish(ctx context.Context, c delivery.Call, m delivery.Message) delivery.Outcome {
 	return r.answer(ctx, Call{Method: MethodPublish, Class: c.Class, Destination: c.Destination, Message: m,
-		Loudness: c.Loudness, Mentions: c.Mentions, Targets: c.Targets, Plain: c.Plain})
+		Loudness: c.Loudness, Mentions: c.Mentions, Targets: c.Targets, Plain: c.Plain, Webhook: c.Webhook})
 }
 
 // Update records an edit of the message messageID.
 func (r *Recorder) Update(ctx context.Context, c delivery.Call, messageID string, m delivery.Message) delivery.Outcome {
 	return r.answer(ctx, Call{Method: MethodUpdate, Class: c.Class, Destination: c.Destination, MessageID: messageID,
-		Message: m, Loudness: c.Loudness, Mentions: c.Mentions, Targets: c.Targets, Plain: c.Plain})
+		Message: m, Loudness: c.Loudness, Mentions: c.Mentions, Targets: c.Targets, Plain: c.Plain,
+		Webhook: c.Webhook})
 }
 
 // Reply records a Thread reply under root.
 func (r *Recorder) Reply(ctx context.Context, c delivery.Call, root delivery.Root, m delivery.Message) delivery.Outcome {
 	return r.answer(ctx, Call{Method: MethodReply, Class: c.Class, Destination: c.Destination,
-		MessageID: root.MessageID, Root: root, Message: m, Loudness: c.Loudness, Mentions: c.Mentions, Targets: c.Targets, Plain: c.Plain})
+		MessageID: root.MessageID, Root: root, Message: m, Loudness: c.Loudness, Mentions: c.Mentions, Targets: c.Targets,
+		Plain: c.Plain, Webhook: c.Webhook})
 }
 
 // Check records a Destination check.

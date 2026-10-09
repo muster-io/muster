@@ -303,7 +303,7 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 			return fmt.Errorf("read the delivery: %w", err)
 		}
 		now := w.Lease.Clocks.Business.Now().UTC()
-		if row.DesiredRetire && !row.MessageID.Valid {
+		if row.DesiredRetire && unpublished(row) {
 			// Its Destination left before its Root message was ever published there.
 			if err := q.WithholdLeased(ctx, dbgen.WithholdLeasedParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 				Now: now}); err != nil {
@@ -351,7 +351,7 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 		if row.DesiredRetire {
 			msg = messages.FinalEdit(msg, w.link(row.AlertGroupPublicID))
 		}
-		a = attempt{row: row, destination: d, publication: !row.MessageID.Valid, message: msg, at: now}
+		a = attempt{row: row, destination: d, publication: unpublished(row), message: msg, at: now}
 		if err := q.RenewDeliveryLease(ctx, dbgen.RenewDeliveryLeaseParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 			LeaseUntil: realNow.Add(w.Lease.Duration)}); err != nil {
 			return fmt.Errorf("renew the lease of the delivery: %w", err)
@@ -397,6 +397,13 @@ func pressPending(ctx context.Context, q queries, row dbgen.GetLeasedDeliveryRow
 	return !free, nil
 }
 
+// unpublished reports whether the Root message of a leased delivery does not exist yet: published_at is not set
+// (D277), or — for a messenger, whose Publication always names its message — the message id is not set, as a replica
+// of an earlier version leaves a Root message it forgets for a republication while it upgrades.
+func unpublished(row dbgen.GetLeasedDeliveryRow) bool {
+	return !row.PublishedAt.Valid || (!sendsRequests(row.DestinationType) && !row.MessageID.Valid)
+}
+
 // publicationLoudness is the loudness and Mentions of a first Publication: Loud with new_alert_group when it comes
 // from `created`, a recovery finds its Alert Group firing or it is a Storm summary; Quiet otherwise — in a Destination
 // added to the Route, after a Storm, late, published again after a deletion, or recovered while not firing
@@ -421,6 +428,14 @@ func (w *Worker) call(ctx context.Context, org int64, a attempt) error {
 	if a.publication {
 		c.Loudness, c.Mentions = publicationLoudness(a.row.PublicationLoud, a.row.StormID.Valid)
 		c.Targets = a.targets
+	}
+	if sendsRequests(a.destination.Type) {
+		c.Webhook = &WebhookCall{State: a.row.DesiredPayload, Response: responseValues(a.row.ResponseValues),
+			ThreadOpened: a.row.ThreadOpened}
+		if a.row.DesiredRetire {
+			c.Webhook.Final = messages.T(requestState(a.row.DesiredPayload).Language, "notice.final",
+				messages.Args{"link": w.link(a.row.AlertGroupPublicID)})
+		}
 	}
 	start := w.Lease.Clocks.Real.Now()
 	out := w.send(ctx, a, c)

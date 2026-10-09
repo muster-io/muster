@@ -152,12 +152,14 @@ WHERE org_id = @org_id AND id = @id AND type = 'telegram';
 -- password of the proxy, and its first Signing secret (C-15.FR-1, FR-5).
 -- name: InsertWebhookDestination :one
 INSERT INTO destinations (
-    org_id, public_id, type, name, webhook_mode, webhook_events_config, proxy, proxy_password_ciphertext,
+    org_id, public_id, type, name, webhook_mode, webhook_events_config, webhook_template_config, proxy,
+    proxy_password_ciphertext,
     proxy_password_key_id, proxy_password_updated_at, signing_secret_ciphertext, signing_secret_key_id,
     signing_secret_updated_at, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at
 )
 VALUES (
-    @org_id, @public_id, 'webhook', @name, @webhook_mode, @webhook_events_config, @proxy,
+    @org_id, @public_id, 'webhook', @name, @webhook_mode, sqlc.narg('webhook_events_config')::jsonb,
+    sqlc.narg('webhook_template_config')::jsonb, @proxy,
     sqlc.narg('proxy_password_ciphertext')::bytea, sqlc.narg('proxy_password_key_id')::text,
     sqlc.narg('proxy_password_updated_at')::timestamptz, @signing_secret_ciphertext, @signing_secret_key_id,
     @now::timestamptz, @mentions, @limiter_limit, @limiter_per_seconds, 'healthy', @now::timestamptz,
@@ -170,7 +172,8 @@ RETURNING id;
 -- left alone.
 -- name: UpdateWebhookDestination :exec
 UPDATE destinations
-SET name = @name, webhook_mode = @webhook_mode, webhook_events_config = @webhook_events_config, proxy = @proxy,
+SET name = @name, webhook_mode = @webhook_mode, webhook_events_config = sqlc.narg('webhook_events_config')::jsonb,
+    webhook_template_config = sqlc.narg('webhook_template_config')::jsonb, proxy = @proxy,
     proxy_password_ciphertext = CASE WHEN @password_given::boolean THEN sqlc.narg('proxy_password_ciphertext')::bytea
                                      ELSE proxy_password_ciphertext END,
     proxy_password_key_id     = CASE WHEN @password_given::boolean THEN sqlc.narg('proxy_password_key_id')::text

@@ -5,19 +5,28 @@ package webhooks
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/templates"
 )
@@ -329,5 +338,260 @@ func TestMapping(t *testing.T) {
 	}
 	if out := outcomeOf(outbound.Result{}, errBoom, nil); out.Kind != delivery.OutcomeTransient {
 		t.Errorf("other error %+v", out)
+	}
+}
+
+// templateCall is a call of the template mode to the outgoing webhook 1 for the Alert Group #7 Disk in the status,
+// with the values extracted so far.
+func templateCall(status string, response map[string]string, loud bool) delivery.Call {
+	st, _ := json.Marshal(delivery.RequestState{Language: "en", Group: &templates.Data{Status: status,
+		AlertGroup: templates.AlertGroup{Number: 7, Title: "Disk", Status: status}}})
+	c := delivery.Call{Class: outbound.ClassDelivery, Loudness: groups.Quiet,
+		Destination: delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1", Type: TypeWebhook},
+		Webhook:     &delivery.WebhookCall{State: st, Response: response}}
+	if loud {
+		c.Loudness = groups.Loud
+		c.Targets = []mentions.Target{{Kind: mentions.TargetUser, User: &mentions.User{PublicID: "SRA", Name: "Alice",
+			Login: "alice"}}}
+	}
+	return c
+}
+
+// templateMode puts the outgoing webhook 1 in the mode both with the request templates of a chat with two-step
+// threads at the endpoint.
+func (e *adapterEnv) templateMode(c TemplateConfig) {
+	_ = ValidateTemplate(sandbox(), "/template", &c, t0) // normalizes, as a save does
+	e.f.dests[0].mode, e.f.dests[0].template = ModeBoth, string(c.JSON())
+}
+
+// TestTemplateRequests is C-15.FR-3, AC-3 and FR-11 against a local endpoint: "create" posts the body rendered with the
+// Alert Group, the Secret in its header and the Mention as plain text, signed, and extracts $.data.id as the message
+// id; "update" uses it in its URL; a reply runs "open thread" once, adds its value and posts the event and its
+// loudness; once the thread is open, only the reply goes; the final edit reads .Final.
+func TestTemplateRequests(t *testing.T) {
+	e := newAdapterEnv(t)
+	e.templateMode(chatConfig(e.url))
+	e.ep.answers = []answer{{status: 200, body: `{"data":{"id":"m1"}}`}}
+	out := e.a.Publish(t.Context(), templateCall("firing", nil, true), delivery.Message{})
+	if out.Kind != delivery.OutcomeOK || out.MessageID != "m1" || out.Values["id"] != "m1" || len(out.Missing) != 0 ||
+		!out.Rendered || out.Request != RequestCreate {
+		t.Fatalf("create %+v", out)
+	}
+	r := e.ep.reqs[0]
+	if r.Method != http.MethodPost || r.URL.Path != "/chat/ops/messages" ||
+		r.Header.Get("Authorization") != "Bearer s3cr3t-token-value" ||
+		r.Header.Get("Content-Type") != "application/json" || !strings.HasPrefix(r.Header.Get(HeaderID), "msg_") ||
+		string(e.ep.bodies[0]) != `{"text":"#7 Disk","who":"@alice"}` ||
+		!Verify(e.signing, r.Header.Get(HeaderID), r.Header.Get(HeaderTimestamp), e.ep.bodies[0],
+			r.Header.Get(HeaderSignature)) {
+		t.Fatalf("create request %s %v %s", r.URL, r.Header, e.ep.bodies[0])
+	}
+	up := templateCall("acknowledged", map[string]string{"id": "m1"}, false)
+	if out := e.a.Update(t.Context(), up, "m1", delivery.Message{}); out.Kind != delivery.OutcomeOK ||
+		e.ep.reqs[1].Method != http.MethodPut || e.ep.reqs[1].URL.Path != "/chat/ops/messages/m1" ||
+		string(e.ep.bodies[1]) != `{"text":"acknowledged","final":""}` {
+		t.Fatalf("update %+v %s %s", out, e.ep.reqs[1].URL, e.ep.bodies[1])
+	}
+	up.Webhook.Final = "No longer updated here"
+	e.a.Update(t.Context(), up, "m1", delivery.Message{})
+	if string(e.ep.bodies[2]) != `{"text":"acknowledged","final":"No longer updated here"}` {
+		t.Errorf("final edit %s", e.ep.bodies[2])
+	}
+	reply := templateCall("firing", map[string]string{"id": "m1"}, true)
+	reply.Webhook.Event = "alerts_added"
+	e.ep.answers = []answer{{status: 200, body: `{"thread":{"id":"t1"}}`}}
+	out = e.a.Reply(t.Context(), reply, delivery.Root{}, delivery.Message{})
+	if out.Kind != delivery.OutcomeOK || !out.ThreadOpened || out.Values["thread"] != "t1" ||
+		e.ep.reqs[3].URL.Path != "/chat/ops/threads" || string(e.ep.bodies[3]) != `{"root":"m1"}` ||
+		e.ep.reqs[4].URL.Path != "/chat/ops/threads/t1/messages" ||
+		string(e.ep.bodies[4]) != `{"text":"alerts_added true"}` {
+		t.Fatalf("first reply %+v", out)
+	}
+	reply.Webhook.Response["thread"], reply.Webhook.ThreadOpened = "t1", true
+	if out := e.a.Reply(t.Context(), reply, delivery.Root{}, delivery.Message{}); out.Kind != delivery.OutcomeOK ||
+		out.ThreadOpened || len(e.ep.reqs) != 6 || e.ep.reqs[5].URL.Path != "/chat/ops/threads/t1/messages" {
+		t.Fatalf("second reply %+v, %d requests", out, len(e.ep.reqs))
+	}
+	if strings.Contains(e.log.String(), "s3cr3t") {
+		t.Error("the secret reached a log line")
+	}
+}
+
+// TestTemplateFailures is C-15.FR-4 and FR-7: a rule that finds nothing leaves "create" delivered with the rule
+// missing and no message id; a later request that reads the value fails as a template error before anything is sent,
+// with no Secret in its error; "open thread" that fails sends no reply; a Destination without "reply in thread" sends
+// nothing; one without request templates, gone or unreadable cannot be called.
+func TestTemplateFailures(t *testing.T) {
+	e := newAdapterEnv(t)
+	c := chatConfig(e.url)
+	c.Create.Extract[0].Path = "$.nothing.here"
+	e.templateMode(c)
+	out := e.a.Publish(t.Context(), templateCall("firing", nil, false), delivery.Message{})
+	if out.Kind != delivery.OutcomeOK || out.MessageID != "" || !slices.Equal(out.Missing, []string{"id"}) {
+		t.Fatalf("create without the value %+v", out)
+	}
+	out = e.a.Update(t.Context(), templateCall("acknowledged", map[string]string{}, false), "", delivery.Message{})
+	if out.Kind != delivery.OutcomeTemplateError || out.Rendered || out.Request != RequestUpdate ||
+		!strings.Contains(string(out.Error), "the value id is missing") || len(e.ep.reqs) != 1 {
+		t.Fatalf("update without the value %+v", out)
+	}
+	c = chatConfig(e.url)
+	c.Create.Headers[0].Value = "{{ .Secrets.token }} {{ .Secrets.gone }}"
+	e.templateMode(c)
+	out = e.a.Publish(t.Context(), templateCall("firing", nil, false), delivery.Message{})
+	if out.Kind != delivery.OutcomeTemplateError || strings.Contains(string(out.Error), "s3cr3t") ||
+		!strings.Contains(string(out.Error), "the Secret gone is not set") {
+		t.Errorf("missing secret %+v", out)
+	}
+	e.templateMode(chatConfig(e.url))
+	e.ep.answers = []answer{{status: 404}}
+	reply := templateCall("firing", map[string]string{"id": "m1"}, false)
+	if out := e.a.Reply(t.Context(), reply, delivery.Root{}, delivery.Message{}); out.Kind != delivery.OutcomeFatal ||
+		out.ThreadOpened || out.Request != RequestOpenThread || len(e.ep.reqs) != 2 {
+		t.Errorf("open thread failed %+v", out)
+	}
+	c = chatConfig(e.url)
+	c.ReplyInThread = nil
+	e.templateMode(c)
+	if out := e.a.Reply(t.Context(), reply, delivery.Root{}, delivery.Message{}); out.Kind != delivery.OutcomeOK ||
+		len(e.ep.reqs) != 2 {
+		t.Errorf("no reply template %+v", out)
+	}
+	e.f.dests[0].mode = ModeEvents
+	if out := e.a.Publish(t.Context(), reply, delivery.Message{}); out.Kind != delivery.OutcomeUnknown {
+		t.Errorf("events mode %+v", out)
+	}
+	e.f.dests[0].mode, e.f.dests[0].template = ModeTemplate, "["
+	if out := e.a.Publish(t.Context(), reply, delivery.Message{}); out.Kind != delivery.OutcomeTransient {
+		t.Errorf("broken templates %+v", out)
+	}
+	reply.Destination.ID = 9
+	if out := e.a.Update(t.Context(), reply, "", delivery.Message{}); out.Kind != delivery.OutcomeFatal {
+		t.Errorf("gone %+v", out)
+	}
+	if e.a.LengthLimit() != templates.OutputCap {
+		t.Error("length limit")
+	}
+	e.templateMode(chatConfig(e.url))
+	reply.Destination.ID = 1
+	e.f.dests[0].signing, e.f.dests[0].previous = keyring.StoredSecret{}, keyring.StoredSecret{}
+	if out := e.a.Publish(t.Context(), reply, delivery.Message{}); out.Kind != delivery.OutcomeFatal {
+		t.Errorf("no signing secret %+v", out)
+	}
+}
+
+// TestTemplateStorm is C-15.FR-3 and C-11.FR-6: a Storm summary renders .Storm and no Alert Group; a template that
+// reads the Alert Group of a summary is a template error.
+func TestTemplateStorm(t *testing.T) {
+	e := newAdapterEnv(t)
+	c := chatConfig(e.url)
+	c.Create.Body = str(`{"text":{{ if .Storm }}{{ printf "Storm on %s: %d (%d Urgent) %s %v" .Storm.Route ` +
+		`.Storm.AlertGroupCount .Storm.UrgentCount .Storm.URL .Storm.Final | toJson }}{{ else }}"#{{ .AlertGroup.Number }}"` +
+		`{{ end }}}`)
+	e.templateMode(c)
+	st, _ := json.Marshal(delivery.RequestState{Storm: &delivery.StormState{Route: "db", AlertGroupCount: 30,
+		UrgentCount: 2, URL: "https://muster.example.org/alert-groups?route=RT1"}})
+	call := templateCall("firing", nil, true)
+	call.Webhook.State = st
+	if out := e.a.Publish(t.Context(), call, delivery.Message{}); out.Kind != delivery.OutcomeOK ||
+		string(e.ep.bodies[0]) != `{"text":"Storm on db: 30 (2 Urgent) https://muster.example.org/alert-groups?route=RT1 false"}` {
+		t.Fatalf("summary %+v %s", out, e.ep.bodies)
+	}
+	if out := e.a.Update(t.Context(), call, "m1", delivery.Message{}); out.Kind != delivery.OutcomeTemplateError {
+		t.Errorf("an update that reads the Alert Group of a summary %+v", out)
+	}
+}
+
+// configDB serves GetTemplateConfig with raw, or fails with err.
+type configDB struct {
+	raw []byte
+	err error
+}
+
+func (configDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
+}
+
+func (configDB) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, errBoom }
+
+func (d configDB) QueryRow(context.Context, string, ...any) pgx.Row { return configRow(d) }
+
+type configRow configDB
+
+func (r configRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	*(dest[0].(*[]byte)) = r.raw
+	return nil
+}
+
+// TestDesired is the Desired state of the template mode (C-15.FR-3, ADR-0005): the hash of the rendered "update"
+// request, the same whatever the Secrets and the values extracted, another for a change it shows and none for a change
+// it does not; one that fails hashes the state; without request templates, the state.
+func TestDesired(t *testing.T) {
+	e := newAdapterEnv(t)
+	c := chatConfig(e.url)
+	raw := c.JSON()
+	state := func(status, summary string) delivery.RequestState {
+		return delivery.RequestState{Group: &templates.Data{Status: status, CommonAnnotations: templates.KV{"s": summary},
+			AlertGroup: templates.AlertGroup{Number: 7, Status: status}}}
+	}
+	hash := func(db configDB, st delivery.RequestState) []byte {
+		t.Helper()
+		h, err := e.a.Desired(t.Context(), db, 1, st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	firing := hash(configDB{raw: raw}, state("firing", "a"))
+	if !bytes.Equal(firing, hash(configDB{raw: raw}, state("firing", "b"))) {
+		t.Error("a change the update does not show changed the hash")
+	}
+	if bytes.Equal(firing, hash(configDB{raw: raw}, state("acknowledged", "a"))) {
+		t.Error("a change the update shows kept the hash")
+	}
+	c.Update.Body = str("{{ len 3 }}")
+	broken := hash(configDB{raw: c.JSON()}, state("firing", "a"))
+	if bytes.Equal(broken, hash(configDB{raw: c.JSON()}, state("firing", "b"))) || bytes.Equal(broken, firing) {
+		t.Error("a failing update hashes its state")
+	}
+	if bytes.Equal(hash(configDB{}, state("firing", "a")), hash(configDB{}, state("firing", "b"))) {
+		t.Error("without templates the state is hashed")
+	}
+	if _, err := e.a.Desired(t.Context(), configDB{err: errBoom}, 1, state("firing", "a")); err == nil {
+		t.Error("a failed read was ignored")
+	}
+	if _, err := e.a.Desired(t.Context(), configDB{raw: []byte("[")}, 1, state("firing", "a")); err == nil {
+		t.Error("broken templates were ignored")
+	}
+	if h, err := e.a.Desired(t.Context(), configDB{err: pgx.ErrNoRows}, 1, state("firing", "a")); err != nil ||
+		len(h) == 0 {
+		t.Errorf("a destination without a row %v", err)
+	}
+}
+
+// TestPreviewRequest is C-12.FR-4: a request template renders with the sample, its Secrets as [redacted], the values
+// it reads as example-<name> and the Mentions of the example; a template that fails, or reads .Secrets other than by
+// name, is an error with its position.
+func TestPreviewRequest(t *testing.T) {
+	e := newAdapterEnv(t)
+	sample := templates.Data{AlertGroup: templates.AlertGroup{Number: 4, StartedAt: t0}}
+	out, err := e.a.PreviewRequest(`Bearer {{ .Secrets.token }} for #{{ .AlertGroup.Number }} {{ .Response.id }} `+
+		`{{ range .Mentions }}{{ mention . }} {{ end }}{{ .Event }}`, sample)
+	if err != nil || out != "Bearer [redacted] for #4 example-id @all oncall @alice alerts_added" {
+		t.Errorf("preview %q %v", out, err)
+	}
+	for src, code := range map[string]string{"{{ .Secrets }}": templates.CodeSyntax, "{{ nope }}": templates.CodeUnknownFunction,
+		"{{ len 3 }}": templates.CodeSyntax} {
+		_, err := e.a.PreviewRequest(src, sample)
+		var te *templates.Error
+		if !errors.As(err, &te) || te.Code != code || te.Line != 1 {
+			t.Errorf("%s: %+v", src, err)
+		}
+	}
+	if _, err := e.a.PreviewRequest("{{ .Response.x", sample); err == nil {
+		t.Error("a broken template rendered")
 	}
 }

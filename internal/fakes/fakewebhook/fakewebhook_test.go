@@ -250,3 +250,52 @@ func TestBadSecrets(t *testing.T) {
 		}
 	}
 }
+
+// TestChat: the fake chat posts and edits messages, answers each with its id, takes replies in one step under a
+// message and in two steps through a thread, refuses an unknown message or thread with 404, keeps chats apart by name,
+// lists them and empties one.
+func TestChat(t *testing.T) {
+	base := start(t)
+	ok := func(method, path, body, want string) {
+		t.Helper()
+		if status, _, got := call(t, method, base+path, body); status != http.StatusOK || strings.TrimSpace(got) != want {
+			t.Errorf("%s %s = %d %s, want %s", method, path, status, got, want)
+		}
+	}
+	ok(http.MethodPost, "/chat/ops/messages", `{"text":"#1 firing"}`, `{"data":{"id":"m1"}}`)
+	ok(http.MethodPost, "/chat/ops/messages", `plain text`, `{"data":{"id":"m2"}}`)
+	ok(http.MethodPut, "/chat/ops/messages/m1", `{"text":"#1 acknowledged"}`, `{"data":{"id":"m1"}}`)
+	ok(http.MethodPost, "/chat/ops/messages/m1/replies", `{"text":"one step"}`, `{"data":{"id":"r1"}}`)
+	ok(http.MethodPost, "/chat/ops/threads", `{"root":"m2"}`, `{"thread":{"id":"t1"}}`)
+	ok(http.MethodPost, "/chat/ops/threads/t1/messages", `{"text":"two steps"}`, `{"data":{"id":"r2"}}`)
+	ok(http.MethodPost, "/chat/other/messages", `{"text":"x"}`, `{"data":{"id":"m1"}}`)
+	for _, path := range []string{"/chat/ops/messages/m9", "/chat/ops/messages/m9/replies",
+		"/chat/ops/threads/t9/messages"} {
+		method := http.MethodPost
+		if !strings.HasSuffix(path, "s") {
+			method = http.MethodPut
+		}
+		if status, _, _ := call(t, method, base+path, `{}`); status != http.StatusNotFound {
+			t.Errorf("%s %s = %d", method, path, status)
+		}
+	}
+	_, _, body := call(t, http.MethodGet, base+"/_fake/chat/ops", "")
+	var c fakewebhook.Chat
+	if err := json.Unmarshal([]byte(body), &c); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Messages) != 2 || c.Messages[0].Text != "#1 firing" || c.Messages[1].Text != "plain text" ||
+		len(c.Messages[0].Replies) != 1 || c.Messages[0].Replies[0].Text != "one step" ||
+		len(c.Edits) != 1 || c.Edits[0].ID != "m1" || c.Edits[0].Text != "#1 acknowledged" ||
+		len(c.Threads) != 1 || string(c.Threads[0].Body) != `{"root":"m2"}` ||
+		len(c.Threads[0].Messages) != 1 || c.Threads[0].Messages[0].Text != "two steps" {
+		t.Errorf("chat %s", body)
+	}
+	if status, _, _ := call(t, http.MethodDelete, base+"/_fake/chat/ops", ""); status != http.StatusNoContent {
+		t.Errorf("reset = %d", status)
+	}
+	if _, _, body := call(t, http.MethodGet, base+"/_fake/chat/ops", ""); strings.TrimSpace(body) !=
+		`{"messages":[],"edits":[],"threads":[]}` {
+		t.Errorf("after the reset %s", body)
+	}
+}

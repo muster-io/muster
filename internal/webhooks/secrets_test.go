@@ -37,7 +37,7 @@ type fakeDest struct {
 	publicID, name, typ      string
 	version                  int64
 	mode                     string
-	events                   string
+	events, template         string
 	proxy                    string
 	password                 keyring.StoredSecret
 	signing, previous        keyring.StoredSecret
@@ -132,6 +132,9 @@ func (f *fakeDB) GetTarget(_ context.Context, arg dbgen.GetTargetParams) (dbgen.
 		PreviousSigningSecretKeyID: text(d.previous.KeyID)}
 	if d.events != "" {
 		row.WebhookEventsConfig = []byte(d.events)
+	}
+	if d.template != "" {
+		row.WebhookTemplateConfig = []byte(d.template)
 	}
 	return row, nil
 }

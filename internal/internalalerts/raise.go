@@ -105,9 +105,49 @@ func (r *Raiser) Raise(ctx context.Context, q Store, now time.Time, d *Definitio
 // severity, the entity's id and name, the Extra labels and, for one that carries the Static labels of its
 // Integration, those in extra; its own labels win over a Static label of the same name.
 func (d *Definition) AlertLabels(e Entity, extra map[string]string) map[string]string {
+	return d.alertLabels(d.Entity, d.NameLabel, e, extra)
+}
+
+// RaiseFor raises the Internal alert d about the entity e of the kind entity, which is d's Entity or its OrEntity.
+func (r *Raiser) RaiseFor(ctx context.Context, q Store, now time.Time, d *Definition, entity string, e Entity,
+	extra map[string]string) error {
+	if entity != d.OrEntity || entity == "" {
+		return r.Raise(ctx, q, now, d, e, extra)
+	}
+	return r.raise(ctx, q, now, d, d.alertLabels(d.OrEntity, d.OrNameLabel, e, extra), now)
+}
+
+// ResolveFor resolves the Internal alert d about the entity of the kind entity whose id is entityID, at now.
+func (r *Raiser) ResolveFor(ctx context.Context, q Store, now time.Time, d *Definition, entity, entityID string) error {
+	if entity != d.OrEntity || entity == "" {
+		return r.Resolve(ctx, q, now, d, entityID)
+	}
+	labels := map[string]string{"alertname": d.Name, "severity": d.Severity, entity: entityID}
+	builtin, err := r.builtin(ctx, q)
+	if err != nil {
+		return err
+	}
+	return r.insert(ctx, q, builtin, now, webhookOf(d, StatusResolved, labels, map[string]string{}, now))
+}
+
+// about reports whether d may be about entities of the kind entity, and the label of their name.
+func (d *Definition) about(entity string) (string, bool) {
+	if entity == "" {
+		return "", false
+	}
+	switch entity {
+	case d.Entity:
+		return d.NameLabel, true
+	case d.OrEntity:
+		return d.OrNameLabel, true
+	}
+	return "", false
+}
+
+func (d *Definition) alertLabels(entity, nameLabel string, e Entity, extra map[string]string) map[string]string {
 	labels := map[string]string{"alertname": d.Name, "severity": d.Severity}
-	if d.Entity != "" {
-		labels[d.Entity], labels[d.NameLabel] = e.ID, e.Name
+	if entity != "" {
+		labels[entity], labels[nameLabel] = e.ID, e.Name
 	}
 	for _, l := range d.Extra {
 		labels[l] = extra[l]
@@ -125,13 +165,16 @@ func (d *Definition) AlertLabels(e Entity, extra map[string]string) map[string]s
 // raise writes the synthetic Stored Snapshot of a firing Internal alert with the labels, firing since startsAt.
 func (r *Raiser) raise(ctx context.Context, q Store, now time.Time, d *Definition, labels map[string]string,
 	startsAt time.Time) error {
-	name := ""
+	name, summary, description := "", d.Summary, d.Description
 	if d.NameLabel != "" {
 		name = labels[d.NameLabel]
 	}
+	if d.OrEntity != "" && labels[d.OrEntity] != "" {
+		name, summary, description = labels[d.OrNameLabel], d.OrSummary, d.OrDescription
+	}
 	annotations := map[string]string{
-		"summary":     strings.ReplaceAll(d.Summary, "{name}", name),
-		"description": strings.ReplaceAll(d.Description, "{name}", name),
+		"summary":     strings.ReplaceAll(summary, "{name}", name),
+		"description": strings.ReplaceAll(description, "{name}", name),
 		"runbook_url": r.base + "/" + d.Runbook(),
 	}
 	builtin, err := r.builtin(ctx, q)
@@ -167,11 +210,15 @@ func (r *Raiser) Renamed(ctx context.Context, q Store, now time.Time, entity, id
 	for _, fp := range slices.Sorted(maps.Keys(open)) {
 		f := open[fp]
 		d := Lookup(f.labels["alertname"])
-		if d == nil || d.Entity != entity || f.labels[d.NameLabel] == name {
+		if d == nil {
+			continue
+		}
+		nameLabel, ok := d.about(entity)
+		if !ok || f.labels[nameLabel] == name {
 			continue
 		}
 		labels := maps.Clone(f.labels)
-		labels[d.NameLabel] = name
+		labels[nameLabel] = name
 		if err := r.raise(ctx, q, now, d, labels, f.startsAt); err != nil {
 			return err
 		}
@@ -188,10 +235,13 @@ func (r *Raiser) ResolveAbout(ctx context.Context, q Store, now time.Time, entit
 	}
 	for _, fp := range slices.Sorted(maps.Keys(open)) {
 		d := Lookup(open[fp].labels["alertname"])
-		if d == nil || d.Entity != entity {
+		if d == nil {
 			continue
 		}
-		if err := r.Resolve(ctx, q, now, d, id); err != nil {
+		if _, ok := d.about(entity); !ok {
+			continue
+		}
+		if err := r.ResolveFor(ctx, q, now, d, entity, id); err != nil {
 			return err
 		}
 	}
@@ -287,6 +337,9 @@ func Fingerprint(d *Definition, labels map[string]string) string {
 	ids := map[string]string{"alertname": d.Name}
 	if d.Entity != "" {
 		ids[d.Entity] = labels[d.Entity]
+	}
+	if d.OrEntity != "" && labels[d.OrEntity] != "" {
+		ids[d.OrEntity] = labels[d.OrEntity]
 	}
 	h := fnv.New64a()
 	for _, name := range slices.Sorted(maps.Keys(ids)) {

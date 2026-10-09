@@ -11,7 +11,9 @@
   [`0004_thread_replies_pending_index`](../../internal/db/migrations/0004_thread_replies_pending_index.up.sql)
   (`thread_replies_pending_idx`, S-065) and
   [`0005_webhook_events_received_at`](../../internal/db/migrations/0005_webhook_events_received_at.up.sql)
-  (`webhook_events.received_at`, S-044), in `internal/db/migrations/` — golang-migrate
+  (`webhook_events.received_at`, S-044) and
+  [`0006_deliveries_published_at`](../../internal/db/migrations/0006_deliveries_published_at.up.sql)
+  (`deliveries.published_at` marks a Root message that exists, S-045), in `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
   ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md))
@@ -944,16 +946,20 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7; [ADR-0005](../adr/0005-delivery-
 - **`deliveries`** — the desired state per Alert Group × Destination (or Storm summary × Destination: exactly one of
   `alert_group_id`, `storm_id`), the main delivery table:
   - *desired state*: `desired_version` (incremented by every re-render), `desired_text`, `desired_payload` (buttons,
-    colour, or the rendered webhook request), `desired_hash`, `desired_button_key_id`, `desired_retire` (the next call
+    colour, or for an outgoing webhook in template mode the data its request templates read), `desired_hash` (for that
+    webhook, the hash of the rendered "update" request with its Secrets and extracted values left out), `desired_button_key_id`, `desired_retire` (the next call
     is the final "no longer updated here" edit), `desired_received_at` (the receipt time of the oldest Snapshot whose
     change the actual message does not show yet — null when only Commands or timers changed it; the adapter call
     observes `muster_delivery_latency_seconds` from it and a delivered version clears it), `publication_loud`,
     `late_note`;
   - *actual message*: `actual_version`, `actual_hash`, `actual_button_key_id`, `message_id`, `message_url`; for outgoing
-    webhooks in template mode `response_values` — the dictionary of values extracted from responses (`.Response`) —
-    and `thread_opened`;
+    webhooks in template mode `response_values` — the dictionary of values extracted from responses (`.Response`),
+    replaced by each "create" and added to by "open thread" — and `thread_opened`, reset by each "create";
   - *Publication*: `publication_started_at` is the marker recorded before the API call (a retry after it publishes
-    again and records a possible duplicate), `published_at`, `publications`, `possible_duplicate`,
+    again and records a possible duplicate), `published_at` (set by the call that published the current Root
+    message and cleared with it when the message is forgotten for a republication; it, not `message_id`, tells a
+    published Root message — an outgoing webhook in template mode may publish with no id to extract; migration 0006),
+    `publications`, `possible_duplicate`,
     `republished_after_delete` (a deleted Root message is republished once);
   - *Thread*: `thread_state` (`none`, `waiting_for_copy`, `attached`, `unattached`), the Telegram `thread_anchor_id`
     (the automatic copy) and `thread_chain_last_id`, and `thread_batch_until`, the open Thread batching window;

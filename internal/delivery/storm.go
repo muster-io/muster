@@ -130,12 +130,17 @@ type stormRoute struct {
 // summaries a new Storm needs; an update of what it shows is a Quiet edit.
 func (s *Service) renderSummaries(ctx context.Context, q queries, st *storm, route stormRoute,
 	dests []dbgen.ListRouteDestinationsRow, now time.Time) error {
-	msg := encode(s.renderer.Storm(route.publicID, route.name, route.language, st.count, st.urgent))
+	m := s.renderer.Storm(route.publicID, route.name, route.language, st.count, st.urgent)
 	for _, d := range dests {
 		row, err := q.EnsureStormSummary(ctx, dbgen.EnsureStormSummaryParams{OrgID: s.orgID, DestinationID: d.ID,
 			StormID: pgtype.Int8{Int64: st.id, Valid: true}, Now: now})
 		if err != nil {
 			return fmt.Errorf("create the storm summary in %s: %w", d.PublicID, err)
+		}
+		msg, err := s.summaryOf(ctx, q.DB(), d.ID, d.Type, route.language, m, StormState{Route: route.name,
+			AlertGroupCount: st.count, UrgentCount: st.urgent})
+		if err != nil {
+			return fmt.Errorf("render the storm summary in %s: %w", d.PublicID, err)
 		}
 		if err := s.setSummary(ctx, q, row.ID, row.DesiredHash, msg, now); err != nil {
 			return err
@@ -210,12 +215,18 @@ func (s *Service) endStorm(ctx context.Context, q queries, st dbgen.LockStormRow
 	if err != nil {
 		return nil, fmt.Errorf("list the summaries of the storm %d: %w", st.ID, err)
 	}
-	msg := encode(s.renderer.StormOver(st.RoutePublicID, st.RouteLanguage, open))
+	m := s.renderer.StormOver(st.RoutePublicID, st.RouteLanguage, open)
 	if err := q.QuietStormSummaries(ctx, dbgen.QuietStormSummariesParams{OrgID: s.orgID, StormID: st.ID,
 		Now: now}); err != nil {
 		return nil, fmt.Errorf("make the unpublished summaries of the storm %d quiet: %w", st.ID, err)
 	}
 	for _, sm := range summaries {
+		msg, err := s.summaryOf(ctx, q.DB(), sm.DestinationID, sm.DestinationType, st.RouteLanguage, m,
+			StormState{Route: st.RouteName, AlertGroupCount: st.AlertGroupCount, UrgentCount: st.UrgentCount,
+				Final: true})
+		if err != nil {
+			return nil, fmt.Errorf("render the final storm summary %d: %w", sm.ID, err)
+		}
 		if err := s.setSummary(ctx, q, sm.ID, sm.DesiredHash, msg, now); err != nil {
 			return nil, err
 		}

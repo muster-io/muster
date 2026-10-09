@@ -754,9 +754,12 @@ func (w *capWriter) Write(p []byte) (int, error) {
 }
 
 // Env is what one execution reads besides its data: Lookup reads one cell of a Lookup table, the empty string for a
-// missing table, key or column (C-12.FR-9); nil reads nothing.
+// missing table, key or column (C-12.FR-9); nil reads nothing. Mention, when set, stands for `mention` in the
+// execution: an outgoing webhook renders a Mention target of its data as plain text instead of a trusted token
+// (C-15.FR-11).
 type Env struct {
-	Lookup func(table, key, column string) (string, error)
+	Lookup  func(table, key, column string) (string, error)
+	Mention func(target any) (string, error)
 }
 
 // Execute runs the template on data with a fresh budget and returns its output. Any failure is an Error with the
@@ -780,6 +783,9 @@ func (t *Template) ExecuteIn(env Env, data any) (out string, err error) {
 	}
 	if env.Lookup != nil {
 		fm["lookup"] = bounded("lookup", env.Lookup)
+	}
+	if env.Mention != nil {
+		fm["mention"] = bounded("mention", env.Mention)
 	}
 	tmpl.Funcs(execFuncs(b)).Funcs(fm)
 	var w capWriter

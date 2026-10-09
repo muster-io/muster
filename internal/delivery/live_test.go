@@ -42,8 +42,10 @@ import (
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
 	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
+	"github.com/muster-io/muster/internal/templates"
 	"github.com/muster-io/muster/internal/timers"
 	timersdb "github.com/muster-io/muster/internal/timers/dbgen"
+	"github.com/muster-io/muster/internal/webhooks"
 )
 
 func TestMain(m *testing.M) {
@@ -927,6 +929,8 @@ func TestLive(t *testing.T) {
 			{"claims_choose_once", l.claimsChooseOnce},
 			// S-044.
 			{"webhook_events", l.webhookEvents},
+			// S-045.
+			{"template_mode", l.templateMode},
 			// S-066.
 			{"telegram_threads", l.telegramThreads},
 			// The follow-ups of S-067.
@@ -3354,4 +3358,109 @@ func (l *live) telegramPressLock(t *testing.T) {
 	}
 	t.Log("an edit during a press was rescheduled telegram.press_edit_delay later without a token or an attempt, " +
 		"a Publication went out meanwhile, and the edit followed the press")
+}
+
+// templateMode checks the template mode of outgoing webhooks on PostgreSQL (C-15.FR-3, FR-4, FR-7, D277): a "create"
+// that extracts no message id still publishes, so the next change is an update; the rule that found nothing is a
+// template_value_missing entry of the Timeline, written through groups; the Desired state is the hash of the rendered
+// "update" request; a template error sets the Destination's template error and MusterTemplateError and ends the
+// delivery as template_error, and the next request that renders clears them; the values a "create" and an
+// "open thread" extracted are stored, and a reply carries them.
+func (l *live) templateMode(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	ctx := t.Context()
+	cfg := `{"create":{"method":"POST","url":"http://127.0.0.1/m","headers":[],"body":"{{ .AlertGroup.Number }}",` +
+		`"extract":[{"name":"id","path":"$.data.id"}]},"update":{"method":"PUT",` +
+		`"url":"http://127.0.0.1/m/{{ .AlertGroup.Status }}","headers":[],"body":null,"extract":[]},` +
+		`"open_thread":{"method":"POST","url":"http://127.0.0.1/t","headers":[],"body":null,` +
+		`"extract":[{"name":"thread","path":"$.thread.id"}]},"reply_in_thread":{"method":"POST",` +
+		`"url":"http://127.0.0.1/r","headers":[],"body":null,"extract":[]}}`
+	var dest int64
+	if err := l.d.Pool.QueryRow(ctx, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode,
+		webhook_template_config, signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions,
+		limiter_limit, limiter_per_seconds, health, created_at, updated_at)
+		VALUES ($1, 'DSAAAAAAAAAATM', 'webhook', 'chat', 'template', $3, '\x01', 'k1', $2, '{}', 1000, 1, 'healthy',
+		$2, $2) RETURNING id`, l.orgID, l.business.Now(), cfg).Scan(&dest); err != nil {
+		t.Fatal(err)
+	}
+	l.attach(t, dest)
+	requests := &webhooks.Adapter{Service: webhooks.New(l.orgID, webhooks.Config{}),
+		Sandbox: templates.New(l.business, clock.Real{})}
+	svc := delivery.New(delivery.Config{OrgID: l.orgID, Store: delivery.NewStore(l.d.Pool, l.d.Pool),
+		Business: l.business, Real: l.real, Log: l.logger, Renderer: delivery.MessageRenderer{Renderer: l.renderer},
+		Requests: requests})
+	l.groups.SetRerender(svc.Enqueue)
+	defer l.groups.SetRerender(l.svc.Enqueue)
+	w := l.worker("r1")
+	w.Adapters[delivery.TypeWebhook] = l.rec
+
+	// A create whose rule found nothing: published, the missing value in the Timeline. (The recorder names every new
+	// message; the end-to-end test sends a create that returns no id through the real adapter.)
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		Missing: []string{"id"}, Rendered: true, Request: "create"}})
+	l.fire(t, "tm-a", "TmAlpha")
+	alpha := l.group(t, "TmAlpha")
+	l.round(t, w)
+	var published bool
+	var values string
+	if err := l.d.Pool.QueryRow(ctx, `SELECT d.published_at IS NOT NULL, d.response_values::text
+		FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id WHERE g.public_id = $1`, alpha).Scan(
+		&published, &values); err != nil || !published || values != "{}" || l.state(t, alpha, dest) != "delivered" {
+		t.Fatalf("published: %v %s %v", published, values, err)
+	}
+	if n := l.count(t, `SELECT count(*) FROM timeline_entries e JOIN alert_groups g ON g.id = e.alert_group_id
+		WHERE g.public_id = $1 AND e.kind = 'system' AND e.system_event = 'template_value_missing' AND e.detail = 'id'
+		AND e.actor_kind = 'system'`, alpha); n != 1 {
+		t.Errorf("template_value_missing entries %d", n)
+	}
+	// An Acknowledge changes the rendered update: one update, never a second create.
+	l.ack(t, alpha)
+	l.round(t, w)
+	if got := methods(to(l.rec.Calls(), "DSAAAAAAAAAATM")); got != "publish,update" {
+		t.Fatalf("calls %s", got)
+	}
+	// A template error: not delivered as template_error, the Destination's state and MusterTemplateError.
+	l.rec.Script(deliverytest.MethodUpdate, deliverytest.Answer{Outcome: delivery.Outcome{
+		Kind: delivery.OutcomeTemplateError, Request: "update",
+		Error: "the request template failed: update/url: the value id is missing: no response gave it"}})
+	l.resolve(t, alpha)
+	l.round(t, w)
+	var class, templateError string
+	if err := l.d.Pool.QueryRow(ctx, `SELECT d.last_error_class, ds.template_error FROM deliveries d
+		JOIN destinations ds ON ds.id = d.destination_id JOIN alert_groups g ON g.id = d.alert_group_id
+		WHERE g.public_id = $1`, alpha).Scan(&class, &templateError); err != nil || class != "template_error" ||
+		!strings.Contains(templateError, "the value id is missing") || l.state(t, alpha, dest) != "not_delivered" {
+		t.Fatalf("template error %s %q %v", class, templateError, err)
+	}
+	l.process(t)
+	if n := l.count(t, `SELECT count(*) FROM alerts WHERE labels->>'alertname' = 'MusterTemplateError'
+		AND labels->>'destination' = 'DSAAAAAAAAAATM' AND labels->>'destination_name' = 'chat'
+		AND labels->>'template' = 'webhook_request' AND status = 'firing'`); n != 1 {
+		t.Errorf("MusterTemplateError firing %d", n)
+	}
+	// A create that renders clears the error; its value is stored, and the first reply opens the thread once.
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		MessageID: "m9", Values: map[string]string{"id": "m9"}, Rendered: true, Request: "create"}})
+	l.rec.Script(deliverytest.MethodReply, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		ThreadOpened: true, Values: map[string]string{"thread": "t1"}, Rendered: true}})
+	l.fire(t, "tm-b", "TmBeta/a")
+	beta := l.group(t, "TmBeta")
+	l.round(t, w)
+	l.fire(t, "tm-b", "TmBeta/a", "TmBeta/b")
+	l.round(t, w)
+	replies := only(to(l.rec.Calls(), "DSAAAAAAAAAATM"), deliverytest.MethodReply)
+	var opened bool
+	if err := l.d.Pool.QueryRow(ctx, `SELECT d.thread_opened, d.response_values::text, coalesce(ds.template_error, '')
+		FROM deliveries d JOIN destinations ds ON ds.id = d.destination_id JOIN alert_groups g ON g.id = d.alert_group_id
+		WHERE g.public_id = $1`, beta).Scan(&opened, &values, &templateError); err != nil || !opened ||
+		values != `{"id": "m9", "thread": "t1"}` || templateError != "" || len(replies) != 1 ||
+		replies[0].Webhook.Response["id"] != "m9" || replies[0].Webhook.Event != "alerts_added" {
+		t.Fatalf("thread %v %s %q %+v %v", opened, values, templateError, replies, err)
+	}
+	l.process(t)
+	if n := l.count(t, `SELECT count(*) FROM alerts WHERE labels->>'alertname' = 'MusterTemplateError'
+		AND labels->>'destination' = 'DSAAAAAAAAAATM' AND status = 'firing'`); n != 0 {
+		t.Errorf("MusterTemplateError still firing %d", n)
+	}
+	l.exec(t, `DELETE FROM route_destinations WHERE destination_id = $1`, dest)
 }

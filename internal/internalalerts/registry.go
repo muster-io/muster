@@ -41,6 +41,13 @@ type Definition struct {
 	Entity    string
 	NameLabel string
 	Extra     []string
+	// OrEntity is the other entity it may be about instead, OrNameLabel the label of that entity's name, and OrSummary
+	// and OrDescription its annotations then: MusterTemplateError is about a Route or about a Destination. An alert
+	// about one carries no label of the other.
+	OrEntity      string
+	OrNameLabel   string
+	OrSummary     string
+	OrDescription string
 	// StaticLabels adds the Static labels of the Integration it is about; the labels above win over a Static label
 	// of the same name.
 	StaticLabels bool
@@ -63,6 +70,9 @@ func (d *Definition) Labels() []string {
 	out := []string{}
 	if d.Entity != "" {
 		out = append(out, d.Entity, d.NameLabel)
+	}
+	if d.OrEntity != "" {
+		out = append(out, d.OrEntity, d.OrNameLabel)
 	}
 	return append(out, d.Extra...)
 }
@@ -181,6 +191,20 @@ func Definitions() ([]*Definition, error) {
 		if len(slices.Compact(slices.Sorted(slices.Values(labels)))) != len(labels) {
 			errs = append(errs, fmt.Errorf("internal alert %q: a label is listed twice", d.Name))
 		}
+		switch d.OrEntity {
+		case "":
+			if d.OrNameLabel != "" || d.OrSummary != "" || d.OrDescription != "" {
+				errs = append(errs, fmt.Errorf("internal alert %q: texts of another entity without one", d.Name))
+			}
+		case EntityIntegration, EntityRoute, EntityDestination:
+			if d.OrEntity == d.Entity || d.Entity == "" || d.OrNameLabel != d.OrEntity+"_name" ||
+				strings.TrimSpace(d.OrSummary) == "" || strings.TrimSpace(d.OrDescription) == "" {
+				errs = append(errs, fmt.Errorf("internal alert %q: the other entity %s needs its name label %s_name "+
+					"and its texts", d.Name, d.OrEntity, d.OrEntity))
+			}
+		default:
+			errs = append(errs, fmt.Errorf("internal alert %q: unknown entity %q", d.Name, d.OrEntity))
+		}
 		if d.StaticLabels && d.Entity != EntityIntegration {
 			errs = append(errs, fmt.Errorf("internal alert %q: Static labels need the integration entity", d.Name))
 		}
@@ -195,18 +219,26 @@ func Definitions() ([]*Definition, error) {
 	return out, errors.Join(errs...)
 }
 
-// TemplateError is raised while a template of a Route keeps failing (C-12.FR-6, ADR-0012).
+// TemplateError is raised while a template of a Route keeps failing (C-12.FR-6, ADR-0012), or a request template of
+// an outgoing webhook (C-15.FR-7).
 var TemplateError = register(&Definition{
-	Name:      "MusterTemplateError",
-	Severity:  SeverityWarning,
-	Entity:    EntityRoute,
-	NameLabel: "route_name",
-	Extra:     []string{"template"},
-	Condition: "A template of a Route failed while rendering a message, so its messages use the Fallback template. It " +
-		"resolves when the template renders again or a new template is saved.",
+	Name:        "MusterTemplateError",
+	Severity:    SeverityWarning,
+	Entity:      EntityRoute,
+	NameLabel:   "route_name",
+	OrEntity:    EntityDestination,
+	OrNameLabel: "destination_name",
+	Extra:       []string{"template"},
+	Condition: "A template of a Route failed while rendering a message, so its messages use the Fallback template; or a " +
+		"request template of an outgoing webhook Destination failed, so that request was not sent. It resolves when " +
+		"the template renders again or, for a Route, a new template is saved.",
 	Summary: "A template of Route {name} keeps failing",
 	Description: "A message template of Route {name} failed while rendering, so its messages show every label in the " +
 		"Fallback template instead. The Route page shows the error with its line and column; fix the template in the " +
 		"Route's Message settings.",
+	OrSummary: "A request template of Destination {name} keeps failing",
+	OrDescription: "A request template of the outgoing webhook Destination {name} failed while rendering, so that " +
+		"request was not sent and its delivery is Not delivered. The Destination page shows the error with its line " +
+		"and column; fix the request templates of the Destination.",
 	Capability: "C-12",
 })

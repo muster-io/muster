@@ -128,7 +128,7 @@ func TestLifecycleRows(t *testing.T) {
 			}
 			for _, r := range replies {
 				if r.Loudness != row.Loudness || !slices.Equal(r.Mentions, want) || r.MessageID != "m1" ||
-					!strings.Contains(r.Message.Text(), string(row.Event)) {
+					!strings.Contains(textOf(r), string(row.Event)) {
 					t.Errorf("reply %+v", r)
 				}
 			}

@@ -227,16 +227,18 @@ func (q *Queries) InsertTelegramDestination(ctx context.Context, arg InsertTeleg
 
 const insertWebhookDestination = `-- name: InsertWebhookDestination :one
 INSERT INTO destinations (
-    org_id, public_id, type, name, webhook_mode, webhook_events_config, proxy, proxy_password_ciphertext,
+    org_id, public_id, type, name, webhook_mode, webhook_events_config, webhook_template_config, proxy,
+    proxy_password_ciphertext,
     proxy_password_key_id, proxy_password_updated_at, signing_secret_ciphertext, signing_secret_key_id,
     signing_secret_updated_at, mentions, limiter_limit, limiter_per_seconds, health, created_at, updated_at
 )
 VALUES (
-    $1, $2, 'webhook', $3, $4, $5, $6,
-    $7::bytea, $8::text,
-    $9::timestamptz, $10, $11,
-    $12::timestamptz, $13, $14, $15, 'healthy', $12::timestamptz,
-    $12::timestamptz
+    $1, $2, 'webhook', $3, $4, $5::jsonb,
+    $6::jsonb, $7,
+    $8::bytea, $9::text,
+    $10::timestamptz, $11, $12,
+    $13::timestamptz, $14, $15, $16, 'healthy', $13::timestamptz,
+    $13::timestamptz
 )
 RETURNING id
 `
@@ -247,6 +249,7 @@ type InsertWebhookDestinationParams struct {
 	Name                    string
 	WebhookMode             pgtype.Text
 	WebhookEventsConfig     []byte
+	WebhookTemplateConfig   []byte
 	Proxy                   []byte
 	ProxyPasswordCiphertext []byte
 	ProxyPasswordKeyID      pgtype.Text
@@ -268,6 +271,7 @@ func (q *Queries) InsertWebhookDestination(ctx context.Context, arg InsertWebhoo
 		arg.Name,
 		arg.WebhookMode,
 		arg.WebhookEventsConfig,
+		arg.WebhookTemplateConfig,
 		arg.Proxy,
 		arg.ProxyPasswordCiphertext,
 		arg.ProxyPasswordKeyID,
@@ -729,22 +733,24 @@ func (q *Queries) UpdateTelegramDestination(ctx context.Context, arg UpdateTeleg
 
 const updateWebhookDestination = `-- name: UpdateWebhookDestination :exec
 UPDATE destinations
-SET name = $1, webhook_mode = $2, webhook_events_config = $3, proxy = $4,
-    proxy_password_ciphertext = CASE WHEN $5::boolean THEN $6::bytea
+SET name = $1, webhook_mode = $2, webhook_events_config = $3::jsonb,
+    webhook_template_config = $4::jsonb, proxy = $5,
+    proxy_password_ciphertext = CASE WHEN $6::boolean THEN $7::bytea
                                      ELSE proxy_password_ciphertext END,
-    proxy_password_key_id     = CASE WHEN $5::boolean THEN $7::text
+    proxy_password_key_id     = CASE WHEN $6::boolean THEN $8::text
                                      ELSE proxy_password_key_id END,
-    proxy_password_updated_at = CASE WHEN $5::boolean THEN $8::timestamptz
+    proxy_password_updated_at = CASE WHEN $6::boolean THEN $9::timestamptz
                                      ELSE proxy_password_updated_at END,
-    mentions = $9, limiter_limit = $10, limiter_per_seconds = $11,
-    updated_at = $8::timestamptz, version = version + 1
-WHERE org_id = $12 AND id = $13 AND type = 'webhook'
+    mentions = $10, limiter_limit = $11, limiter_per_seconds = $12,
+    updated_at = $9::timestamptz, version = version + 1
+WHERE org_id = $13 AND id = $14 AND type = 'webhook'
 `
 
 type UpdateWebhookDestinationParams struct {
 	Name                    string
 	WebhookMode             pgtype.Text
 	WebhookEventsConfig     []byte
+	WebhookTemplateConfig   []byte
 	Proxy                   []byte
 	PasswordGiven           bool
 	ProxyPasswordCiphertext []byte
@@ -765,6 +771,7 @@ func (q *Queries) UpdateWebhookDestination(ctx context.Context, arg UpdateWebhoo
 		arg.Name,
 		arg.WebhookMode,
 		arg.WebhookEventsConfig,
+		arg.WebhookTemplateConfig,
 		arg.Proxy,
 		arg.PasswordGiven,
 		arg.ProxyPasswordCiphertext,

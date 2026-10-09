@@ -4,14 +4,20 @@
 package delivery_test
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/logging"
 )
 
 // pending is an env whose Alert Group waits for its first Publication, with a limiter that never runs dry and the
@@ -231,7 +237,7 @@ func TestMarkupRejected(t *testing.T) {
 	e.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeMarkupRejected, "can't parse"))
 	e.round(t)
 	calls := e.rec.Calls()
-	if len(calls) != 2 || calls[0].Plain || !calls[1].Plain || calls[1].Message.Text() != calls[0].Message.Text() ||
+	if len(calls) != 2 || calls[0].Plain || !calls[1].Plain || textOf(calls[1]) != textOf(calls[0]) ||
 		calls[1].Loudness != groups.Loud || d.state != "delivered" {
 		t.Fatalf("calls %+v, delivery %+v", calls, d)
 	}
@@ -486,7 +492,7 @@ func TestRecordAfterTheRowEnded(t *testing.T) {
 		e.round(t)
 		last := e.rec.Calls()[len(e.rec.Calls())-1]
 		if d.state != "retired" || last.Method != deliverytest.MethodUpdate ||
-			!strings.Contains(last.Message.Text(), "No longer updated here") || mm.secrets != 0 {
+			!strings.Contains(textOf(last), "No longer updated here") || mm.secrets != 0 {
 			t.Errorf("final edit %+v, secrets %d, last %+v", d, mm.secrets, last)
 		}
 	})
@@ -623,5 +629,199 @@ func TestThreadLostMarkupRejected(t *testing.T) {
 	r := e.replies()
 	if len(r) != 3 || !r[2].Plain || r[2].Root != (delivery.Root{MessageID: tgPost}) || str(d.chainLastID) != "801" {
 		t.Fatalf("replies %+v", r)
+	}
+}
+
+// fakeRequests renders the "update" request of a template-mode outgoing webhook as the status of its Alert Group, so
+// that a change of another field makes no call, and fails when told to.
+type fakeRequests struct{ err error }
+
+func (r fakeRequests) Desired(_ context.Context, _ dbgen.DBTX, _ int64, st delivery.RequestState) ([]byte,
+	error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	key := "storm"
+	if st.Group != nil {
+		key = st.Group.AlertGroup.Status
+	}
+	sum := sha256.Sum256([]byte(key))
+	return sum[:], nil
+}
+
+// webhookEnv is an env whose Route delivers only to the outgoing webhook 12 in the template mode, with fakeRequests.
+func webhookEnv(t *testing.T) *env {
+	t.Helper()
+	e := memberEnv(t)
+	e.db.dests[destWH].mode = "template"
+	e.db.routeDests[routeID] = []int64{destWH}
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Renderer: stubRenderer{},
+		Requests: fakeRequests{}, Log: logging.New(e.log, logging.LevelInfo)})
+	return e
+}
+
+// TestTemplateMode is C-15.FR-3, FR-4 and FR-7 through the recorder: "create" carries the Desired state and stores the
+// values it extracted, a missing one recorded in the Timeline through groups and logged; an update carries the values,
+// and one whose template fails ends Not delivered as template_error with the Destination's template error,
+// MusterTemplateError about the Destination and the webhook_template_failed line, until the next request that renders
+// clears them; a reply carries its event, records "open thread" whatever came after it, and one that fails is
+// template_error too; a Destination without "reply in thread" queues no reply; the final edit carries .Final.
+func TestTemplateMode(t *testing.T) {
+	e := webhookEnv(t)
+	e.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		MessageID: "m1", Values: map[string]string{"id": "m1"}, Missing: []string{"url"}, Rendered: true,
+		Request: "create"}})
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	e.round(t)
+	d := e.only(t)
+	c := e.rec.Calls()[0]
+	var st delivery.RequestState
+	if c.Method != deliverytest.MethodPublish || c.Webhook == nil || json.Unmarshal(c.Webhook.State, &st) != nil ||
+		st.Group == nil || st.Group.AlertGroup.Number != 7 || len(c.Webhook.Response) != 0 ||
+		c.Loudness != groups.Loud || d.publishedAt == nil || d.responseValues["id"] != "m1" || *d.messageID != "m1" {
+		t.Fatalf("create %+v, delivery %+v", c, d)
+	}
+	if len(e.db.system) != 1 || e.db.system[0].System != groups.SystemTemplateValueMissing ||
+		e.db.system[0].Detail != "url" || e.db.system[0].AlertGroupID != groupID ||
+		!strings.Contains(e.log.String(), `"event":"webhook_value_missing"`) {
+		t.Errorf("missing value %+v %s", e.db.system, e.log.String())
+	}
+
+	// The same status renders the same update: no call.
+	e.enqueue(t, e.group(groups.StatusFiring, "b"), groups.System,
+		groups.Recorded{Seq: 2, Event: groups.EventAnnotationsChanged, Loudness: groups.Quiet})
+	e.round(t)
+	if len(e.rec.Calls()) != 1 {
+		t.Fatalf("an unchanged update was sent: %+v", e.rec.Calls())
+	}
+
+	e.rec.Script(deliverytest.MethodUpdate, deliverytest.Answer{Outcome: delivery.Outcome{
+		Kind: delivery.OutcomeTemplateError, Error: "the request template failed: update/url: the value x is missing",
+		Request: "update"}})
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "b"), groups.System,
+		groups.Recorded{Seq: 3, Event: groups.EventAcknowledged, Loudness: groups.Quiet})
+	e.round(t)
+	ds := e.db.dests[destWH]
+	if c := e.rec.Calls()[1]; c.Method != deliverytest.MethodUpdate || c.Webhook.Response["id"] != "m1" {
+		t.Errorf("update %+v", c)
+	}
+	if d.state != "not_delivered" || *d.errorClass != "template_error" || ds.templateError == nil ||
+		!strings.Contains(e.log.String(), `"event":"webhook_template_failed"`) ||
+		!strings.Contains(e.log.String(), `"request":"update"`) {
+		t.Fatalf("template error %+v %+v %s", d, ds, e.log.String())
+	}
+	raised := e.db.internal[len(e.db.internal)-1]
+	if raised.name != "MusterTemplateError" || raised.status != "firing" || raised.labels["destination"] !=
+		"DSAAAAAAAAAA12" || raised.labels["destination_name"] != "hook" || raised.labels["template"] !=
+		"webhook_request" || raised.labels["route"] != "" {
+		t.Errorf("raised %+v", raised)
+	}
+	if kinds := e.eventKinds(); kinds[len(kinds)-1] != "not_delivered" ||
+		e.db.events[len(e.db.events)-1].ErrorClass.String != "template_error" {
+		t.Errorf("events %v", kinds)
+	}
+	e.rec.Script(deliverytest.MethodUpdate, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		Rendered: true, Request: "update"}})
+	e.enqueue(t, e.group(groups.StatusSnoozed, "b"), groups.System,
+		groups.Recorded{Seq: 4, Event: groups.EventSnoozed, Loudness: groups.Quiet})
+	e.round(t)
+	if resolved := e.db.internal[len(e.db.internal)-1]; ds.templateError != nil || d.state != "delivered" ||
+		resolved.status != "resolved" || resolved.labels["destination"] != "DSAAAAAAAAAA12" {
+		t.Fatalf("recovered %+v %+v", ds, resolved)
+	}
+
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		ThreadOpened: true, Values: map[string]string{"thread": "t1"}, Missing: []string{"x"}, Rendered: true}},
+		deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeTemplateError, Error: "boom",
+			ThreadOpened: true, Values: map[string]string{"other": "o"}}})
+	e.enqueue(t, e.group(groups.StatusFiring, "b"), groups.System, alertsAdded(5, groups.StatusFiring, "fp2"))
+	e.round(t)
+	rc := e.replies()
+	if len(rc) != 1 || rc[0].Webhook == nil || rc[0].Webhook.Event != "alerts_added" ||
+		rc[0].Webhook.Response["id"] != "m1" || rc[0].Webhook.ThreadOpened || !d.threadOpened ||
+		d.responseValues["thread"] != "t1" || d.responseValues["id"] != "m1" || len(e.db.system) != 2 {
+		t.Fatalf("reply %+v, delivery %+v", rc, d)
+	}
+	e.business.Advance(2 * time.Minute)
+	e.enqueue(t, e.group(groups.StatusFiring, "b"), groups.System,
+		groups.Recorded{Seq: 6, Event: groups.EventTakeover, Loudness: groups.Loud})
+	e.round(t)
+	last := e.db.replies[len(e.db.replies)-1]
+	if rc := e.replies(); len(rc) != 2 || !rc[1].Webhook.ThreadOpened || last.state != "not_delivered" ||
+		*last.errorClass != "template_error" || d.responseValues["other"] != "o" {
+		t.Errorf("failed reply %+v %+v", rc, last)
+	}
+
+	ds.noReplies = true
+	e.enqueue(t, e.group(groups.StatusFiring, "b"), groups.System,
+		groups.Recorded{Seq: 7, Event: groups.EventTakeover, Loudness: groups.Loud})
+	if len(e.db.replies) != 2 {
+		t.Errorf("a reply was queued without reply in thread: %d", len(e.db.replies))
+	}
+
+	e.db.routeDests[routeID] = nil
+	ds.deleted = true
+	failing := "the request template failed"
+	ds.templateError = &failing
+	if err := e.svc.RetireDestination(t.Context(), nil, destWH); err != nil {
+		t.Fatal(err)
+	}
+	if last := e.db.internal[len(e.db.internal)-1]; last.status != "resolved" || last.name != "MusterTemplateError" ||
+		last.labels["destination"] != "DSAAAAAAAAAA12" {
+		t.Errorf("the template error of the deleted destination %+v", last)
+	}
+	e.round(t)
+	calls := e.callsTo(destWH)
+	if f := calls[len(calls)-1]; f.Method != deliverytest.MethodUpdate || f.Webhook.Final != finalText("AGAAAAAAAAAA21") {
+		t.Errorf("final edit %+v", f)
+	}
+}
+
+// TestTemplateModeStorm is C-15.FR-3 and C-11.FR-6: the Storm summary of a template-mode Destination carries .Storm
+// with the Route, the counts and the link, and its final state Final; a Desired state that cannot be rendered fails the
+// change.
+func TestTemplateModeStorm(t *testing.T) {
+	e := webhookEnv(t)
+	e.db.routes[routeID] = fakeRoute{language: "en", window: 60, publicID: "RTAAAAAAAAAAA1", name: "payments",
+		threshold: 0}
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	var summary *fakeDelivery
+	for _, d := range e.db.deliveries {
+		if d.storm != 0 {
+			summary = d
+		}
+	}
+	var st delivery.RequestState
+	if summary == nil || json.Unmarshal(summary.payload, &st) != nil || st.Storm == nil || st.Group != nil ||
+		st.Storm.Route != "payments" || st.Storm.AlertGroupCount != 1 || st.Storm.Final {
+		t.Fatalf("summary %+v", summary)
+	}
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Renderer: stubRenderer{},
+		Requests: fakeRequests{err: errBoom}, Log: logging.New(e.log, logging.LevelInfo)})
+	err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusAcknowledged, "a"),
+		Actor: groups.System, Events: []groups.Recorded{{Seq: 2, Event: groups.EventAcknowledged,
+			Loudness: groups.Quiet}}})
+	if !errors.Is(err, errBoom) {
+		t.Errorf("a failing render = %v", err)
+	}
+}
+
+// TestPublishedDuringUpgrade: a messenger's Root message that a replica of an earlier version forgot for a
+// republication — no message id, published_at still set — is published again, never edited without an id; an "open
+// thread" recorded for a Root message published again meanwhile is left alone.
+func TestPublishedDuringUpgrade(t *testing.T) {
+	e, d := pending(t)
+	e.round(t)
+	d.messageID, d.state, d.next = nil, "pending", e.business.Now()
+	d.version++
+	d.hash = []byte("changed")
+	e.round(t)
+	if calls := e.rec.Calls(); len(calls) != 2 || calls[1].Method != deliverytest.MethodPublish {
+		t.Fatalf("calls %+v", calls)
+	}
+	stale := e.business.Now().Add(-time.Hour)
+	if err := e.db.RecordThreadOpened(t.Context(), dbgen.RecordThreadOpenedParams{ID: d.id,
+		ResponseValues: []byte(`{"thread":"old"}`), PublishedAt: stale}); err != nil || d.threadOpened {
+		t.Errorf("a stale open thread was recorded: %v %+v", err, d)
 	}
 }

@@ -35,8 +35,21 @@ const (
 	SampleExample        = "example"
 )
 
-// The kinds a preview takes until outgoing webhooks (S-045) bring theirs; link_rule needs the links of the Renderer.
-var previewKinds = []string{TemplateRootMessage, TemplateLine, TemplateAckTimeoutNotice, TemplateLinkRule}
+// The kinds a preview takes; link_rule needs the links of the Renderer, webhook_request its RequestPreviewer.
+var previewKinds = []string{TemplateRootMessage, TemplateLine, TemplateAckTimeoutNotice, TemplateLinkRule,
+	TemplateWebhookRequest}
+
+// RequestPreviewer renders one request template of an outgoing webhook against the template data of a sample, alert
+// data unescaped and its Secrets masked (C-12.FR-4, C-15.FR-10), declared by its consumer; *webhooks.Adapter
+// implements it. A template that fails is a *templates.Error.
+type RequestPreviewer interface {
+	PreviewRequest(src string, sample templates.Data) (string, error)
+}
+
+// SetRequests sets what previews the request templates of outgoing webhooks, before any preview.
+func (r *Renderer) SetRequests(p RequestPreviewer) {
+	r.requests = p
+}
 
 // ErrUnsupportedKind is a preview of a kind of template this build does not render.
 var ErrUnsupportedKind = errors.New("the kind of template has no preview yet")
@@ -82,7 +95,8 @@ type settings struct {
 // with Valid false, never an error.
 func (r *Renderer) Preview(ctx context.Context, req PreviewRequest) (PreviewResult, error) {
 	db := r.db
-	if !slices.Contains(previewKinds, req.Kind) || (req.Kind == TemplateLinkRule && r.links == nil) {
+	if !slices.Contains(previewKinds, req.Kind) || (req.Kind == TemplateLinkRule && r.links == nil) ||
+		(req.Kind == TemplateWebhookRequest && r.requests == nil) {
 		return PreviewResult{}, ErrUnsupportedKind
 	}
 	format := cmp.Or(req.Format, MarkupMarkdown)
@@ -102,7 +116,7 @@ func (r *Renderer) Preview(ctx context.Context, req PreviewRequest) (PreviewResu
 	}
 	lang := language(cmp.Or(req.Language, set.route.Language))
 	res := PreviewResult{Format: format, Source: req.Template}
-	builtin := req.Template == ""
+	builtin := req.Template == "" && req.Kind != TemplateWebhookRequest
 	if builtin {
 		res.Source = BuiltinSource(req.Kind, lang)
 	}
@@ -134,8 +148,11 @@ func (r *Renderer) Preview(ctx context.Context, req PreviewRequest) (PreviewResu
 			samples, res.Sample = []*Source{r.example(set)}, SampleExample
 		}
 	}
-	if req.Kind == TemplateLinkRule {
+	switch req.Kind {
+	case TemplateLinkRule:
 		return r.previewLink(ctx, res, samples), nil
+	case TemplateWebhookRequest:
+		return r.previewRequest(res, samples), nil
 	}
 	tmpl := &res.Source
 	if builtin {
@@ -169,6 +186,24 @@ func (r *Renderer) previewLink(ctx context.Context, res PreviewResult, samples [
 	res.Format = ""
 	for i, s := range samples {
 		out, err := r.links.RenderURL(ctx, r.db, res.Source, r.linkInput(s))
+		if err != nil {
+			res.Errors, res.Output = []*templates.Error{sandboxError(err)}, ""
+			return res
+		}
+		if i == 0 {
+			res.Output = out
+		}
+	}
+	res.Valid = true
+	return res
+}
+
+// previewRequest renders the request template of an outgoing webhook against the samples, as its requests render it:
+// the output against the first, which has no markup, with its Secrets as [redacted] (C-12.FR-4).
+func (r *Renderer) previewRequest(res PreviewResult, samples []*Source) PreviewResult {
+	res.Format = ""
+	for i, s := range samples {
+		out, err := r.requests.PreviewRequest(res.Source, r.data(s))
 		if err != nil {
 			res.Errors, res.Output = []*templates.Error{sandboxError(err)}, ""
 			return res

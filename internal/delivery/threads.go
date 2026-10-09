@@ -127,9 +127,14 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		if len(row.EventSeqs) > 0 {
 			seq = row.EventSeqs[0]
 		}
-		msg, err := w.Renderer.Reply(ctx, tx, ReplyView{Event: groups.Event(row.Event), Seq: seq,
-			Fingerprints: row.Fingerprints, Language: row.Language, Listed: ThreadAlertsListed}, g)
-		if err != nil {
+		var msg Message
+		var webhook *WebhookCall
+		if sendsRequests(d.Type) {
+			// The request templates render the Alert Group's latest Desired state and the event the reply carries.
+			webhook = &WebhookCall{State: row.DesiredPayload, Response: responseValues(row.ResponseValues),
+				ThreadOpened: row.ThreadOpened, Event: row.Event}
+		} else if msg, err = w.Renderer.Reply(ctx, tx, ReplyView{Event: groups.Event(row.Event), Seq: seq,
+			Fingerprints: row.Fingerprints, Language: row.Language, Listed: ThreadAlertsListed}, g); err != nil {
 			return fmt.Errorf("render the thread reply: %w", err)
 		}
 		targets, err := w.targets(ctx, tx, org, d, row.AlertGroupID, seq, groups.Loudness(row.Loudness), mentions)
@@ -138,7 +143,7 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		}
 		a = replyAttempt{row: row, destination: d,
 			call: Call{Class: outbound.ClassDelivery, Destination: d, Loudness: groups.Loudness(row.Loudness),
-				Mentions: mentions, Targets: targets},
+				Mentions: mentions, Targets: targets, Webhook: webhook},
 			message: msg, root: root, chain: chain, anchor: root.ThreadAnchorID}
 		ok = true
 		return nil

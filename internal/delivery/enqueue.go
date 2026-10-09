@@ -286,13 +286,17 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 			r.Fallback(groups.TemplateFailure{Template: f.Template, Detail: f.Detail()})
 		}
 	}
-	how := enqueueing{created: created, moved: moved, replies: replies, now: now, window: window, roots: roots}
+	how := enqueueing{created: created, moved: moved, replies: replies, now: now, window: window, roots: roots, tx: tx}
 	if st != nil && !g.Urgent {
 		how.heldBy = &st.id
 	}
 	for _, d := range dests {
 		dst := Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name, Type: d.Type, Connection: int8Of(d.ConnectionID)}
-		if err := s.enqueue(ctx, q, r, dst, d.Health == healthBroken, how); err != nil {
+		h := how
+		if sendsRequests(d.Type) && !d.WebhookReplies {
+			h.replies = nil // an outgoing webhook without a "reply in thread" request has no Thread
+		}
+		if err := s.enqueue(ctx, q, r, dst, d.Health == healthBroken, h); err != nil {
 			return err
 		}
 	}
@@ -323,7 +327,8 @@ type reply struct {
 }
 
 // enqueueing is how a rendering reaches each Destination: its Root messages by markup, whether the Alert Group was
-// created or moved, the Storm that holds a new one, its Thread replies, the time and the Thread batching window.
+// created or moved, the Storm that holds a new one, its Thread replies, the time, the Thread batching window and the
+// transaction of the change, which the request of an outgoing webhook is rendered through.
 type enqueueing struct {
 	roots          Roots
 	created, moved bool
@@ -331,6 +336,7 @@ type enqueueing struct {
 	replies        []reply
 	now            time.Time
 	window         time.Duration
+	tx             dbgen.DBTX
 }
 
 // enqueue sets the Desired state of the Alert Group in one Destination and queues its Thread replies; while the
@@ -370,7 +376,10 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 		}
 		held = false
 	}
-	msg := encodeRoot(how.roots.Messages[markupOf(d.Type)])
+	msg, err := s.desiredOf(ctx, how.tx, d, how.roots)
+	if err != nil {
+		return fmt.Errorf("render the request of alert group #%d in %s: %w", g.Number, d.PublicID, err)
+	}
 	if !bytes.Equal(row.DesiredHash, msg.hash) {
 		var received pgtype.Timestamptz
 		if r.ReceivedAt != nil {

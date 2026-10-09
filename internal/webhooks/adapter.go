@@ -5,11 +5,13 @@ package webhooks
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base32"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,8 +21,12 @@ import (
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
+	deliverydb "github.com/muster-io/muster/internal/delivery/dbgen"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/templates"
@@ -43,11 +49,14 @@ type Network struct {
 	Resolver outbound.Resolver
 }
 
-// Adapter sends the events-mode requests of outgoing webhooks for delivery (C-15.FR-2, FR-5, FR-6, FR-8): it renders
-// the URL and the headers with the Destination's Secrets, signs the body with every Signing secret that still signs,
-// sends it through internal/outbound with the Destination's proxy in the client class of the call, and maps the answer
-// to a delivery outcome. Every secret of the Destination is registered for redaction, so no error it returns carries
-// one.
+// Adapter sends the requests of outgoing webhooks for delivery (C-15.FR-2, FR-3, FR-5, FR-6, FR-8): the events-mode
+// requests, and in the template mode "create", "update", "open thread" and "reply in thread" as the adapter of the
+// Destination type webhook, which delivery reconciles like a messenger's (ADR-0005). It renders the request templates
+// with the Destination's Secrets in the sandbox, signs the body with every Signing secret that still signs, sends it
+// through internal/outbound with the Destination's proxy in the client class of the call, maps the answer to a delivery
+// outcome and extracts the values of the response. Every secret of the Destination is registered for redaction, so no
+// error it returns carries one. It also renders the Desired state of the template mode and previews request
+// templates.
 type Adapter struct {
 	Service *Service
 	Network Network
@@ -56,7 +65,11 @@ type Adapter struct {
 	clients map[clientKey]cachedClient
 }
 
-var _ delivery.EventSender = (*Adapter)(nil)
+var (
+	_ delivery.EventSender = (*Adapter)(nil)
+	_ delivery.Adapter     = (*Adapter)(nil)
+	_ delivery.Requests    = (*Adapter)(nil)
+)
 
 type clientKey struct {
 	destination int64
@@ -72,6 +85,7 @@ type cachedClient struct {
 // target is an outgoing webhook as a request needs it, with its secrets opened.
 type target struct {
 	events   *EventsConfig
+	template *TemplateConfig
 	proxy    proxyconf.Config
 	password logging.Secret
 	signing  []logging.Secret
@@ -107,6 +121,14 @@ func (s *Service) target(ctx context.Context, destinationID int64) (target, erro
 			return target{}, err
 		}
 		t.events = &c
+	}
+	if (row.WebhookMode.String == ModeTemplate || row.WebhookMode.String == ModeBoth) &&
+		len(row.WebhookTemplateConfig) > 0 {
+		c, err := ParseTemplateConfig(row.WebhookTemplateConfig)
+		if err != nil {
+			return target{}, err
+		}
+		t.template = &c
 	}
 	if t.proxy, err = proxyconf.Parse(row.Proxy); err != nil {
 		return target{}, err
@@ -169,7 +191,7 @@ func (a *Adapter) SendEvent(ctx context.Context, c delivery.EventCall) delivery.
 		err = errors.New("url: the URL is not an absolute http or https URL")
 	}
 	if err != nil {
-		return templateFailure(red, err)
+		return templateFailure(red, RequestEvents, err)
 	}
 	header := http.Header{}
 	for i, h := range t.events.Headers {
@@ -179,7 +201,7 @@ func (a *Adapter) SendEvent(ctx context.Context, c delivery.EventCall) delivery.
 			err = errors.New(name + ": the header value contains a line break or a NUL")
 		}
 		if err != nil {
-			return templateFailure(red, err)
+			return templateFailure(red, RequestEvents, err)
 		}
 		header[h.Name] = []string{v}
 	}
@@ -198,13 +220,19 @@ func (a *Adapter) SendEvent(ctx context.Context, c delivery.EventCall) delivery.
 	}
 	res, err := client.Do(ctx, outbound.Request{Method: http.MethodPost, URL: target, Header: header, Body: c.Body,
 		Mapping: Mapping})
-	return outcomeOf(res, err, red)
+	out := outcomeOf(res, err, red)
+	out.Rendered, out.Request = true, RequestEvents
+	return out
 }
 
-// render runs the request template src of the target with its Secrets; a Secret it reads that the Destination does
-// not have is an error.
+// render runs the request template src of the events mode of the target with its Secrets; a Secret it reads that the
+// Destination does not have, or a read of .Secrets other than by a literal name, is an error.
 func (a *Adapter) render(t target, name, src string) (string, error) {
-	for _, ref := range SecretRefs(src) {
+	refs, _, err := checkRefs(name, src)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", name, errBareReference)
+	}
+	for _, ref := range refs {
 		if _, ok := t.secrets[ref]; !ok {
 			return "", fmt.Errorf("%s: the Secret %s is not set", name, ref)
 		}
@@ -220,9 +248,9 @@ func (a *Adapter) render(t target, name, src string) (string, error) {
 	return out, nil
 }
 
-// templateFailure is the outcome of a request whose template failed, its error redacted of the secrets.
-func templateFailure(red redactor, err error) delivery.Outcome {
-	return delivery.Outcome{Kind: delivery.OutcomeTemplateError,
+// templateFailure is the outcome of the request name whose template failed, its error redacted of the secrets.
+func templateFailure(red redactor, name string, err error) delivery.Outcome {
+	return delivery.Outcome{Kind: delivery.OutcomeTemplateError, Request: name,
 		Error: outbound.Untrusted(red.redact("the request template failed: " + err.Error()))}
 }
 
@@ -311,8 +339,214 @@ func outcomeOf(res outbound.Result, err error, red redactor) delivery.Outcome {
 	return out
 }
 
-// validURL reports whether a rendered URL is an absolute http or https URL.
-func validURL(s string) bool {
-	u, err := url.Parse(s)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+// Publish sends "create" of the template mode for a new Root message or Storm summary (C-15.FR-3): Loud with its
+// Mention targets as delivery decided; the values its extraction rules find are returned, the first rule's as the
+// message id. The Message is not used: the request templates render the Desired state of the call.
+func (a *Adapter) Publish(ctx context.Context, c delivery.Call, _ delivery.Message) delivery.Outcome {
+	t, out, ok := a.templateTarget(ctx, c)
+	if !ok {
+		return out
+	}
+	return a.send(ctx, c, t, RequestCreate, a.data(c, t))
+}
+
+// Update sends "update" of the template mode with the latest Desired state, so that changes made while a request was
+// pending collapse into it; the final edit carries `.Final`.
+func (a *Adapter) Update(ctx context.Context, c delivery.Call, _ string, _ delivery.Message) delivery.Outcome {
+	t, out, ok := a.templateTarget(ctx, c)
+	if !ok {
+		return out
+	}
+	return a.send(ctx, c, t, RequestUpdate, a.data(c, t))
+}
+
+// Reply sends "reply in thread" of the template mode for a lifecycle event whose messenger form is a Thread reply, with
+// the latest Desired state; "open thread", when the Destination has one, runs first once per Root message and adds the
+// values it extracts, which the reply reads. A failure of "open thread" is the outcome and sends no reply; once it ran,
+// the outcome says so whatever the reply came to. Without "reply in thread" nothing is sent.
+func (a *Adapter) Reply(ctx context.Context, c delivery.Call, _ delivery.Root, _ delivery.Message) delivery.Outcome {
+	t, out, ok := a.templateTarget(ctx, c)
+	if !ok {
+		return out
+	}
+	if t.template.ReplyInThread == nil {
+		return delivery.Outcome{Kind: delivery.OutcomeOK}
+	}
+	d := a.data(c, t)
+	var opened *delivery.Outcome
+	if t.template.OpenThread != nil && !c.Webhook.ThreadOpened {
+		o := a.send(ctx, c, t, RequestOpenThread, d)
+		if o.Kind != delivery.OutcomeOK {
+			return o
+		}
+		for k, v := range o.Values {
+			d.Response[k] = v
+		}
+		opened = &o
+	}
+	out = a.send(ctx, c, t, RequestReplyInThread, d)
+	if opened != nil {
+		out.ThreadOpened, out.Values, out.Missing = true, opened.Values, opened.Missing
+	}
+	return out
+}
+
+// LengthLimit is the longest output of a template: the receiver's own limits are unknown.
+func (a *Adapter) LengthLimit() int { return templates.OutputCap }
+
+// templateTarget reads the outgoing webhook of a template-mode call; ok is false with the outcome of a call that cannot
+// be made: no such Destination, settings that cannot be read, or no request templates.
+func (a *Adapter) templateTarget(ctx context.Context, c delivery.Call) (target, delivery.Outcome, bool) {
+	t, err := a.Service.target(ctx, c.Destination.ID)
+	switch {
+	case errors.Is(err, errNoTarget):
+		return t, delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(errNoTarget.Error())}, false
+	case err != nil:
+		return t, delivery.Outcome{Kind: delivery.OutcomeTransient,
+			Error: "the settings of the destination could not be read"}, false
+	case t.template == nil || c.Webhook == nil:
+		return t, delivery.Outcome{Kind: delivery.OutcomeUnknown,
+			Error: "the destination has no request templates of the template mode"}, false
+	}
+	return t, delivery.Outcome{}, true
+}
+
+// data is what the request templates of a call read: its Desired state, the values extracted so far, the lifecycle
+// event of a Thread reply, whether it is Loud, its Mention targets, the Destination's Secrets and the final edit's
+// text.
+func (a *Adapter) data(c delivery.Call, t target) RequestData {
+	var st delivery.RequestState
+	_ = json.Unmarshal(c.Webhook.State, &st) // a delivery of an outgoing webhook stores a RequestState
+	d := dataOf(st)
+	for k, v := range c.Webhook.Response {
+		d.Response[k] = v
+	}
+	d.Event, d.Final, d.Secrets = c.Webhook.Event, c.Webhook.Final, t.secrets
+	d.Notify = c.Loudness == groups.Loud
+	if d.Notify {
+		d.Mentions = mentionsOf(c.Targets)
+	}
+	return d
+}
+
+// send renders the request name of the target with the data d and sends it, signed, through internal/outbound; a
+// template that fails sends nothing and is a template error. A delivered "create" or "open thread" extracts the values
+// of its rules from the response.
+func (a *Adapter) send(ctx context.Context, c delivery.Call, t target, name string, d RequestData) delivery.Outcome {
+	rt := t.template.request(name)
+	red := newRedactor(t.all())
+	start := a.Network.Real.Now()
+	b, err := renderer{sandbox: a.Sandbox}.request(name, *rt, d)
+	metrics.TemplateRenderDuration.With(messages.TemplateWebhookRequest).Update(
+		a.Network.Real.Now().Sub(start).Seconds())
+	if err != nil {
+		return templateFailure(red, name, err)
+	}
+	header := http.Header{}
+	for _, h := range b.header {
+		header.Set(h[0], h[1])
+	}
+	if len(b.body) > 0 && header.Get("Content-Type") == "" {
+		header.Set("Content-Type", "application/json")
+	}
+	id, at := newRequestID(), a.Network.Real.Now()
+	sig, err := Sign(t.signing, id, at, b.body)
+	if err != nil {
+		return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(err.Error()), Request: name}
+	}
+	header[HeaderID] = []string{id}
+	header[HeaderTimestamp] = []string{strconv.FormatInt(at.Unix(), 10)}
+	header[HeaderSignature] = []string{sig}
+	client, err := a.client(c.Destination.ID, c.Class, t)
+	if err != nil {
+		return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(red.redact(err.Error())),
+			Request: name}
+	}
+	res, err := client.Do(ctx, outbound.Request{Method: b.method, URL: b.url, Header: header, Body: b.body,
+		Mapping: Mapping})
+	out := outcomeOf(res, err, red)
+	out.Rendered, out.Request = true, name
+	if out.Kind == delivery.OutcomeOK && len(rt.Extract) > 0 {
+		out.Values, out.Missing = extract(res.Body, rt.Extract)
+		if name == RequestCreate {
+			out.MessageID = out.Values[rt.Extract[0].Name]
+		}
+	}
+	return out
+}
+
+// newRequestID is the webhook-id of a request of the template mode: msg_ and 26 random characters, new for each
+// request, since the template mode reconciles to the latest state instead of retrying one request.
+func newRequestID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b) // crypto/rand.Read never fails
+	return "msg_" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b))
+}
+
+// Desired renders, reading the Destination destinationID through db, the "update" request of its template mode for the
+// Desired state st and returns its hash (delivery.Requests): the Secrets as [redacted] and the extracted values as
+// example-<name>, so that neither a new Secret nor a new value changes it. A request that does not render hashes the
+// state and the error, so that each new state makes the call that fails; one without request templates, the state.
+func (a *Adapter) Desired(ctx context.Context, db deliverydb.DBTX, destinationID int64, st delivery.RequestState) (
+	[]byte, error) {
+	state, err := json.Marshal(st)
+	if err != nil {
+		return nil, fmt.Errorf("encode the request state: %w", err)
+	}
+	raw, err := dbgen.New(db).GetTemplateConfig(ctx, dbgen.GetTemplateConfigParams{OrgID: a.Service.orgID,
+		ID: destinationID})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("read the request templates of destination %d: %w", destinationID, err)
+	}
+	h := sha256.New()
+	if len(raw) == 0 {
+		h.Write(state)
+		return h.Sum(nil), nil
+	}
+	c, err := ParseTemplateConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+	d := dataOf(st)
+	d.Final = ""
+	b, renderErr := renderer{sandbox: a.Sandbox, fill: masked}.request(RequestUpdate, c.Update, d)
+	if renderErr != nil {
+		// The call renders it again and fails as a template error; the hash only makes each state call.
+		h.Write([]byte("error\x00" + renderErr.Error() + "\x00"))
+		h.Write(state)
+		return h.Sum(nil), nil //nolint:nilerr // a request that fails to render is a state to hash, not an error here
+	}
+	h.Write([]byte(b.method + "\x00" + b.url + "\x00"))
+	for _, kv := range b.header {
+		h.Write([]byte(kv[0] + "\x00" + kv[1] + "\x00"))
+	}
+	h.Write(b.body)
+	return h.Sum(nil), nil
+}
+
+// PreviewRequest renders one request template src with the template data of a sample (previewTemplate of the kind
+// webhook_request, C-12.FR-4): as a Loud message with a Mention of each kind, its Secrets as [redacted] and the
+// extracted values it reads as example-<name>. A template that fails is the *templates.Error of its position.
+func (a *Adapter) PreviewRequest(src string, sample templates.Data) (string, error) {
+	start := a.Network.Real.Now()
+	defer func() {
+		metrics.TemplateRenderDuration.With(messages.TemplateWebhookRequest).Update(
+			a.Network.Real.Now().Sub(start).Seconds())
+	}()
+	d := dataOf(delivery.RequestState{Group: &sample})
+	ex := exampleData(sample.AlertGroup.StartedAt, RequestReplyInThread)
+	d.Notify, d.Mentions, d.Event = true, ex.Mentions, ex.Event
+	out, err := renderer{sandbox: a.Sandbox, fill: masked}.field("webhook_request", src, d)
+	if err != nil {
+		var fe *FieldError
+		var te *templates.Error
+		switch {
+		case errors.As(err, &fe):
+			return "", &templates.Error{Code: templates.CodeSyntax, Line: fe.Line, Column: fe.Column, Detail: fe.Detail}
+		case errors.As(err, &te):
+			return "", te
+		}
+		return "", &templates.Error{Code: templates.CodeSyntax, Detail: err.Error()}
+	}
+	return out, nil
 }
