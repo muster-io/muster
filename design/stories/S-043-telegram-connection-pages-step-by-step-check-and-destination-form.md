@@ -10,13 +10,15 @@ files_touched:
   - web/src/components/telegram-connection-fields.tsx
   - web/src/components/telegram-connection-fields.test.tsx
   - web/src/components/connection-form.tsx
+  - web/src/components/connection-form.test.tsx
   - web/src/components/connection-check.tsx
   - web/src/components/telegram-destination-fields.tsx
-  - web/src/components/destination-form.tsx
+  - web/src/components/telegram-destination-fields.test.tsx
   - web/src/components/destination-check.tsx
-  - web/src/components/alert-group-deliveries.tsx
   - web/src/routes/connections.new.tsx
+  - web/src/routes/connections.$connectionId.tsx
   - web/src/routes/destinations.new.tsx
+  - web/src/routes/destinations.$destinationId.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/e2e/telegram-connection.spec.ts
@@ -63,9 +65,10 @@ issue: 43
   `422` at `/bot_api_base_url` shows its message next to the field.
 - **Step-by-step check** (`connection-check.tsx`): a row per `ConnectionCheckStep` with the names "Dry probe without the
   token", "getMe" (with "Bot: @{bot_name}"), "getWebhookInfo" (with the pending updates), ok or the step's message,
-  `latency_ms` and `via`; `webhook_set: true` adds "A webhook is set: long polling fails with 409 while it stays.".
-  While the base URL field differs from the saved value, the button sends `{"base_url": <field>}` and shows the skipped
-  steps as "Skipped: save the address first".
+  `latency_ms` and `via`; `webhook_set: true` in the long-polling mode adds "A webhook is set: long polling fails with
+  409 while it stays." (in the webhook mode Muster set the webhook itself). While the base URL field differs from the
+  saved value, the button sends `{"base_url": <field>}` and shows the skipped steps as "Skipped: save the address
+  first"; steps skipped after a failed step of the saved address read "Skipped: an earlier step failed".
 - **Destination form, Telegram** (`telegram-destination-fields.tsx`): Connection (Telegram Connections) and "Channel"
   (`@username` or chat id) only, with the help text "Enable comments on the channel and make the bot an admin of the
   channel and of its discussion group."; after saving, the page shows "Discussion group: {title} ({id})" and "Channel:
@@ -74,15 +77,15 @@ issue: 43
 - **Check** (`destination-check.tsx`): the names of the Telegram checks — `channel_exists` "Channel exists",
   `discussion_group` "Discussion group", `bot_rights_channel` "Bot rights in the channel", `bot_rights_group` "Bot rights
   in the discussion group".
-- **Delivery section** (`alert-group-deliveries.tsx`): `thread_not_attached` shows "Thread not attached to the Root
-  message" next to the state.
+- **Delivery section** (`alert-group-deliveries.tsx`, from S-064 unchanged): `thread_not_attached` shows "Thread not
+  attached to the Root message" next to the state.
 
 ## Steps
 
 1. Add the Telegram Connection fields, the hint, the warning and the step-by-step check. Check:
    `telegram-connection-fields.test.tsx` and Playwright steps 1 to 4.
 2. Add the Telegram Destination fields and check names. Check: steps 5 to 7.
-3. Add "Thread not attached to the Root message". Check: step 8.
+3. Check "Thread not attached to the Root message", which S-064 already shows for every type. Check: step 8.
 
 ## Verification
 

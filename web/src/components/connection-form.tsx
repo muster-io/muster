@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The form of a Mattermost Connection (C-13.FR-1): its name, the server URL, the write-only bot token, the proxy form
-// and the limiter. The bot token is never shown: a read gives only whether it is set and when it changed, and a save
-// sends it only when it was replaced. The stored token is sent only to the server it was entered for, so a new server
-// URL needs the token again. Without connections:write the form only shows the Connection. The delete dialog refuses a
-// Connection that Destinations use (in_use).
+// The form of a Connection (C-13.FR-1, C-14.FR-1): its name, where it calls — the server URL of Mattermost, or the
+// Bot API base URL and the update mode of Telegram in their type slot — the write-only bot token, the proxy form and
+// the limiter. The bot token is never shown: a read gives only whether it is set and when it changed, and a save sends it
+// only when it was replaced. The stored token is sent only to the address it was entered for, so a new server URL or
+// base URL needs the token again. Without connections:write the form only shows the Connection. The delete dialog
+// refuses a Connection that Destinations use (in_use).
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
 import { useEffect, useRef, useState } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -19,7 +20,7 @@ import {
   getGetConnectionQueryKey,
   getListConnectionsQueryKey,
 } from "../api/gen/endpoints/connections/connections";
-import type { MattermostConnection, MattermostConnectionInput } from "../api/gen/model";
+import type { Connection, ConnectionInput, TelegramUpdateMode } from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
 import {
   LimiterField,
@@ -37,6 +38,13 @@ import {
   proxyValues,
 } from "./proxy-form";
 import { KEEP_SECRET, type SecretChange, SecretField } from "./secret-field";
+import {
+  DEFAULT_BOT_API_BASE_URL,
+  DEFAULT_UPDATE_MODE,
+  TelegramConnectionFields,
+  isBaseUrl,
+  normalizeBaseUrl,
+} from "./telegram-connection-fields";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -55,36 +63,67 @@ import { Label } from "./ui/label";
 const ID = "connection";
 const NAME_MAX = 200;
 
+export type ConnectionType = Connection["type"];
+
 /** The limiter of a new Mattermost Connection: connection.mattermost.limiter, 5 requests per second. */
 export const DEFAULT_MATTERMOST_LIMITER = { limit: 5, per_seconds: 1 } as const;
 
+/** The limiter of a new Telegram Connection: connection.telegram.limiter, 15 messages per second. */
+export const DEFAULT_TELEGRAM_LIMITER = { limit: 15, per_seconds: 1 } as const;
+
 export interface ConnectionValues {
+  type: ConnectionType;
   name: string;
+  /** Mattermost. */
   server_url: string;
+  /** Telegram. */
+  bot_api_base_url: string;
+  /** Telegram. */
+  update_mode: TelegramUpdateMode;
   bot_token: SecretChange;
   proxy: ProxyValues;
   limiter: LimiterValues;
 }
 
-export function connectionValues(c: MattermostConnection | undefined): ConnectionValues {
+/** The values of a stored Connection, or of a new one of the type. */
+export function connectionValues(
+  c: Connection | undefined,
+  type: ConnectionType = c?.type ?? "mattermost",
+): ConnectionValues {
+  const telegram = c?.type === "telegram" ? c : undefined;
   return {
+    type,
     name: c?.name ?? "",
-    server_url: c?.server_url ?? "",
+    server_url: c?.type === "mattermost" ? c.server_url : "",
+    bot_api_base_url: telegram?.bot_api_base_url ?? DEFAULT_BOT_API_BASE_URL,
+    update_mode: telegram?.update_mode ?? DEFAULT_UPDATE_MODE,
     bot_token: KEEP_SECRET,
     proxy: proxyValues(c?.proxy),
-    limiter: limiterValues(c?.limiter ?? DEFAULT_MATTERMOST_LIMITER),
+    limiter: limiterValues(
+      c?.limiter ?? (type === "telegram" ? DEFAULT_TELEGRAM_LIMITER : DEFAULT_MATTERMOST_LIMITER),
+    ),
   };
 }
 
 /** The request of a save: the bot token only when it was replaced, so that an update keeps the stored one. */
-export function connectionInput(v: ConnectionValues): MattermostConnectionInput {
-  const input: MattermostConnectionInput = {
-    type: "mattermost",
-    name: v.name.trim(),
-    server_url: v.server_url.trim(),
-    proxy: proxyInput(v.proxy),
-    limiter: limiterInput(v.limiter),
-  };
+export function connectionInput(v: ConnectionValues): ConnectionInput {
+  const input: ConnectionInput =
+    v.type === "telegram"
+      ? {
+          type: "telegram",
+          name: v.name.trim(),
+          bot_api_base_url: v.bot_api_base_url.trim(),
+          update_mode: v.update_mode,
+          proxy: proxyInput(v.proxy),
+          limiter: limiterInput(v.limiter),
+        }
+      : {
+          type: "mattermost",
+          name: v.name.trim(),
+          server_url: v.server_url.trim(),
+          proxy: proxyInput(v.proxy),
+          limiter: limiterInput(v.limiter),
+        };
   if (v.bot_token.mode === "replace") {
     input.bot_token = v.bot_token.value;
   }
@@ -110,16 +149,32 @@ export function isServerUrl(text: string): boolean {
   }
 }
 
+/** Whether the address in the form differs from the stored one, so that the stored token is not sent there. */
+export function addressChanged(v: ConnectionValues, stored: Connection | undefined): boolean {
+  if (stored === undefined) {
+    return false;
+  }
+  return stored.type === "telegram"
+    ? normalizeBaseUrl(v.bot_api_base_url) !== stored.bot_api_base_url
+    : v.server_url.trim() !== stored.server_url;
+}
+
 /** Field errors by JSON pointer, such as "/server_url" or "/proxy/address", with their codes. */
 export type ConnectionErrors = Record<string, string>;
 
-/** The code of a bot token that a new server URL needs again. */
+/** The code of a bot token that a new server URL or base URL needs again. */
 export const TOKEN_FOR_NEW_SERVER = "token_for_new_server";
+
+/** The code of a Bot API base URL that breaks the rules of C-14.FR-10. */
+export const BASE_URL_FORMAT = "base_url_format";
+
+/** The code of a save that setWebhook or deleteWebhook refused; its detail is the step's message. */
+export const WEBHOOK_CALL_FAILED = "webhook_call_failed";
 
 /** The checks the server repeats, before the form is sent; stored is the Connection of an edit. */
 export function connectionErrors(
   v: ConnectionValues,
-  stored: MattermostConnection | undefined,
+  stored: Connection | undefined,
 ): ConnectionErrors {
   const errors: ConnectionErrors = {};
   const name = v.name.trim();
@@ -128,7 +183,13 @@ export function connectionErrors(
   } else if (Array.from(name).length > NAME_MAX) {
     errors["/name"] = "too_long";
   }
-  if (v.server_url.trim() === "") {
+  if (v.type === "telegram") {
+    if (v.bot_api_base_url.trim() === "") {
+      errors["/bot_api_base_url"] = "required";
+    } else if (!isBaseUrl(v.bot_api_base_url)) {
+      errors["/bot_api_base_url"] = BASE_URL_FORMAT;
+    }
+  } else if (v.server_url.trim() === "") {
     errors["/server_url"] = "required";
   } else if (!isServerUrl(v.server_url)) {
     errors["/server_url"] = "invalid_format";
@@ -139,7 +200,7 @@ export function connectionErrors(
     }
   } else if (stored === undefined) {
     errors["/bot_token"] = "required";
-  } else if (v.server_url.trim() !== stored.server_url) {
+  } else if (addressChanged(v, stored)) {
     errors["/bot_token"] = TOKEN_FOR_NEW_SERVER;
   }
   for (const [field, code] of Object.entries(proxyErrors(v.proxy))) {
@@ -152,8 +213,8 @@ export function connectionErrors(
 }
 
 /**
- * The field errors of a refused save by pointer. The server names the whole limiter as /limiter, and a bot token that
- * a new server URL needs as /bot_token required, which the form explains.
+ * The field errors of a refused save by pointer. The server names the whole limiter as /limiter, a bot token that a
+ * new address needs as /bot_token required, which the form explains, and a base URL it refuses as invalid_format.
  */
 export function serverErrors(err: unknown, serverUrlChanged: boolean): ConnectionErrors {
   if (!isApiError(err)) {
@@ -169,6 +230,8 @@ export function serverErrors(err: unknown, serverUrlChanged: boolean): Connectio
       errors["/limiter/per_seconds"] = item.code;
     } else if (item.pointer === "/bot_token" && item.code === "required" && serverUrlChanged) {
       errors["/bot_token"] = TOKEN_FOR_NEW_SERVER;
+    } else if (item.pointer === "/bot_api_base_url" && item.code === "invalid_format") {
+      errors["/bot_api_base_url"] = BASE_URL_FORMAT;
     } else {
       errors[item.pointer] = item.code;
     }
@@ -176,12 +239,31 @@ export function serverErrors(err: unknown, serverUrlChanged: boolean): Connectio
   return errors;
 }
 
-export function connectionErrorText(t: TFunction, code: string): string {
+/** The messages of a refused save that the form shows with their codes: a failed webhook call, by pointer. */
+export function serverDetails(err: unknown): Record<string, string> {
+  const details: Record<string, string> = {};
+  if (isApiError(err)) {
+    for (const item of err.errors ?? []) {
+      if (item.code === WEBHOOK_CALL_FAILED && item.detail !== undefined && item.detail !== "") {
+        details[item.pointer] = item.detail;
+      }
+    }
+  }
+  return details;
+}
+
+export function connectionErrorText(t: TFunction, code: string, detail?: string): string {
   switch (code) {
     case "name_taken":
       return t("connections.errors.nameTaken");
     case TOKEN_FOR_NEW_SERVER:
       return t("connections.errors.tokenForNewServer");
+    case BASE_URL_FORMAT:
+      return t("connections.errors.baseUrlFormat");
+    case WEBHOOK_CALL_FAILED:
+      return detail === undefined
+        ? t("connections.errors.webhookCallFailedNoDetail")
+        : t("connections.errors.webhookCallFailed", { detail });
     default:
       return fieldErrorText(t, code);
   }
@@ -189,22 +271,26 @@ export function connectionErrorText(t: TFunction, code: string): string {
 
 /** The pointers of the fields that show their errors themselves. */
 const SHOWN =
-  /^\/(name|server_url|bot_token|limiter\/(limit|per_seconds)|proxy\/(type|address|username|password))$/;
+  /^\/(name|server_url|bot_api_base_url|update_mode|bot_token|limiter\/(limit|per_seconds)|proxy\/(type|address|username|password))$/;
 
 function isOutdated(err: unknown): boolean {
   return isStale(err) || (isApiError(err) && err.status === 428);
 }
 
 export interface ConnectionFormProps {
+  /** The type of a new Connection; an edit takes the type of the stored one. */
+  type?: ConnectionType;
   /** The stored Connection of an edit. */
-  connection?: MattermostConnection;
+  connection?: Connection;
   readOnly?: boolean;
   submitLabel: string;
   /**
    * Sends the request; the form shows a refusal. An edit resolves with the saved Connection, which the form then shows
    * without being mounted again, so that the focus stays on "Save".
    */
-  save: (input: MattermostConnectionInput) => Promise<MattermostConnection | undefined>;
+  save: (input: ConnectionInput) => Promise<Connection | undefined>;
+  /** The Bot API base URL in the form of a Telegram Connection, as it is typed: the check explains an unsaved one. */
+  onBaseUrlChange?: (value: string) => void;
   /** A newer version of the Connection was read; a save would be refused. */
   stale?: boolean;
   onReload?: () => void;
@@ -215,6 +301,7 @@ export interface ConnectionFormProps {
 }
 
 export function ConnectionForm({
+  type,
   connection,
   readOnly = false,
   submitLabel,
@@ -224,11 +311,20 @@ export function ConnectionForm({
   onDirtyChange,
   saved = false,
   onCancel,
+  onBaseUrlChange,
 }: ConnectionFormProps) {
   const { t } = useTranslation();
-  const [defaultValues] = useState(() => connectionValues(connection));
+  const [defaultValues] = useState(() => connectionValues(connection, type ?? connection?.type));
   const form = useForm<ConnectionValues>({ defaultValues });
+  const kind = defaultValues.type;
   const [errors, setErrors] = useState<ConnectionErrors>({});
+  const [details, setDetails] = useState<Record<string, string>>({});
+  const baseUrl = useWatch({ control: form.control, name: "bot_api_base_url" });
+  useEffect(() => {
+    if (kind === "telegram") {
+      onBaseUrlChange?.(baseUrl);
+    }
+  }, [kind, baseUrl, onBaseUrlChange]);
   const formElement = useRef<HTMLFormElement>(null);
   const [focusRequest, setFocusRequest] = useState(0);
   // The refusal of the last save was shown on the fields; it is not shown again as a whole once they are edited.
@@ -276,8 +372,7 @@ export function ConnectionForm({
   };
 
   const submit = useMutation({
-    mutationFn: ({ input }: { input: MattermostConnectionInput; serverUrlChanged: boolean }) =>
-      save(input),
+    mutationFn: ({ input }: { input: ConnectionInput; serverUrlChanged: boolean }) => save(input),
     onMutate: () => setFieldHandled(false),
     onSuccess: (updated) => {
       if (updated !== undefined) {
@@ -287,6 +382,7 @@ export function ConnectionForm({
     onError: (err, { serverUrlChanged }) => {
       const found = serverErrors(err, serverUrlChanged);
       if (Object.keys(found).length > 0) {
+        setDetails(serverDetails(err));
         showErrors(found);
         setFieldHandled(true);
       }
@@ -294,7 +390,9 @@ export function ConnectionForm({
   });
 
   const err = (pointer: string) =>
-    errors[pointer] === undefined ? undefined : connectionErrorText(t, errors[pointer]);
+    errors[pointer] === undefined
+      ? undefined
+      : connectionErrorText(t, errors[pointer], details[pointer]);
   const proxyFieldErrors: Partial<Record<ProxyField, string>> = {};
   for (const field of ["type", "address", "username", "password"] as const) {
     const text = err(`/proxy/${field}`);
@@ -358,8 +456,7 @@ export function ConnectionForm({
         if (Object.keys(found).length === 0) {
           submit.mutate({
             input: connectionInput(values),
-            serverUrlChanged:
-              connection !== undefined && values.server_url.trim() !== connection.server_url,
+            serverUrlChanged: addressChanged(values, connection),
           });
         }
       })}
@@ -373,17 +470,22 @@ export function ConnectionForm({
         <Card>
           <CardHeader>
             <CardTitle>
-              <h2>{t("connections.form.mattermost")}</h2>
+              <h2>
+                {kind === "telegram"
+                  ? t("connections.form.telegram")
+                  : t("connections.form.mattermost")}
+              </h2>
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="grid gap-4 md:grid-cols-2">
               {text("name", t("connections.fields.name"))}
-              {text(
-                "server_url",
-                t("connections.fields.serverUrl"),
-                t("connections.form.serverUrlHint"),
-              )}
+              {kind === "mattermost" &&
+                text(
+                  "server_url",
+                  t("connections.fields.serverUrl"),
+                  t("connections.form.serverUrlHint"),
+                )}
               <Controller
                 control={form.control}
                 name="bot_token"
@@ -400,6 +502,40 @@ export function ConnectionForm({
                 )}
               />
             </div>
+            {kind === "telegram" && (
+              <Controller
+                control={form.control}
+                name="bot_api_base_url"
+                render={({ field: base }) => (
+                  <Controller
+                    control={form.control}
+                    name="update_mode"
+                    render={({ field: mode }) => (
+                      <TelegramConnectionFields
+                        id={ID}
+                        baseUrl={base.value}
+                        onBaseUrlChange={base.onChange}
+                        updateMode={mode.value}
+                        onUpdateModeChange={mode.onChange}
+                        errors={{
+                          baseUrl: err("/bot_api_base_url"),
+                          updateMode: err("/update_mode"),
+                        }}
+                        disabled={readOnly}
+                        saved={
+                          connection?.type === "telegram"
+                            ? {
+                                baseUrl: connection.bot_api_base_url,
+                                warnings: connection.warnings,
+                              }
+                            : undefined
+                        }
+                      />
+                    )}
+                  />
+                )}
+              />
+            )}
             <Controller
               control={form.control}
               name="limiter"
@@ -407,7 +543,11 @@ export function ConnectionForm({
                 <LimiterField
                   id={`${ID}-limiter`}
                   value={field.value}
-                  hint={t("connections.form.limiterHint")}
+                  hint={
+                    kind === "telegram"
+                      ? t("connections.telegram.limiterHint")
+                      : t("connections.form.limiterHint")
+                  }
                   errors={limiterFieldErrors}
                   disabled={readOnly}
                   onChange={field.onChange}
@@ -459,7 +599,7 @@ export function ConnectionForm({
           )}
           {otherError && (
             <Alert variant="destructive">
-              <AlertDescription className="text-current">
+              <AlertDescription className="text-current" data-testid="connection-error">
                 {problemText(t, submit.error)}
               </AlertDescription>
             </Alert>
@@ -471,7 +611,8 @@ export function ConnectionForm({
                 <ul className="mt-1 list-disc pl-5">
                   {unshown.map(([pointer, code]) => (
                     <li key={pointer}>
-                      <span className="font-mono">{pointer}</span>: {connectionErrorText(t, code)}
+                      <span className="font-mono">{pointer}</span>:{" "}
+                      {connectionErrorText(t, code, details[pointer])}
                     </li>
                   ))}
                 </ul>
@@ -518,7 +659,7 @@ function isInUse(err: unknown): boolean {
 }
 
 /** "Delete" with its dialog; a Connection that Destinations use is refused and the dialog says by how many. */
-export function ConnectionDeleteDialog({ connection }: { connection: MattermostConnection }) {
+export function ConnectionDeleteDialog({ connection }: { connection: Connection }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();

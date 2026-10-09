@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// A Destination (C-13.FR-9, FR-10; C-11.FR-9): its health with the Broken banner, its Routes, and its form, read-only
-// without destinations:write; "Check" with destinations:test for the types that have a Destination check, and
+// A Destination (C-13.FR-9, FR-10; C-11.FR-9; C-14.FR-2, FR-14): its health with the Broken banner, its Routes, and its
+// form — Mattermost or Telegram, which shows the channel and the discussion group it found — read-only without
+// destinations:write; "Check" with destinations:test for the types that have a Destination check, and
 // "Delete" with destinations:write. The form keeps the version it was read at and sends it as If-Match: when the
 // Destination changes elsewhere an untouched form takes the new version and says so, and a form with changes keeps
 // them, and its save is refused (412) with the offer to reload. Health comes and goes without a reload: from the
@@ -22,12 +23,17 @@ import {
   updateDestination,
   useGetDestination,
 } from "../api/gen/endpoints/destinations/destinations";
-import type { Destination, MattermostDestination } from "../api/gen/model";
+import type { Destination, MattermostDestination, TelegramDestination } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { DestinationCheck } from "../components/destination-check";
-import { DestinationDeleteDialog, DestinationForm } from "../components/destination-form";
+import {
+  type DestinationKind,
+  DestinationDeleteDialog,
+  DestinationForm,
+} from "../components/destination-form";
 import { BrokenBanner, HealthBadge, destinationTypeName } from "../components/destination-health";
 import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
+import { TELEGRAM_KIND } from "../components/telegram-destination-fields";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
 import { problemText } from "../lib/api";
@@ -37,8 +43,11 @@ export const Route = createFileRoute("/destinations/$destinationId")({
   component: DestinationPage,
 });
 
-function isMattermost(d: Destination): d is MattermostDestination {
-  return d.type === "mattermost";
+/** The types whose form is on this page. */
+type Editable = MattermostDestination | TelegramDestination;
+
+function isEditable(d: Destination): d is Editable {
+  return d.type === "mattermost" || d.type === "telegram";
 }
 
 /** The types with a Destination check; the outgoing webhook has none. */
@@ -51,7 +60,7 @@ function versionOf(d: Destination): string {
   return d.etag;
 }
 
-function EditForm({ current }: { current: MattermostDestination }) {
+function EditForm<V>({ current, kind }: { current: Editable; kind: DestinationKind<V> }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const canWrite = useCan("destinations:write");
@@ -88,7 +97,7 @@ function EditForm({ current }: { current: MattermostDestination }) {
       {canTest && hasCheck(current) && <DestinationCheck destination={current} dirty={dirty} />}
       <DestinationForm
         key={formKey}
-        kind={MATTERMOST_KIND}
+        kind={kind}
         destination={base}
         readOnly={!canWrite}
         submitLabel={t("common.save")}
@@ -108,7 +117,7 @@ function EditForm({ current }: { current: MattermostDestination }) {
             queryClient.setQueryData(getGetDestinationQueryKey(updated.id), updated);
             void queryClient.invalidateQueries({ queryKey: getListDestinationsQueryKey() });
             void queryClient.invalidateQueries({ queryKey: getListConnectionsQueryKey() });
-            if (!isMattermost(updated)) {
+            if (!isEditable(updated)) {
               return undefined;
             }
             setDirty(false);
@@ -125,7 +134,7 @@ function EditForm({ current }: { current: MattermostDestination }) {
           queryClient
             .fetchQuery({ ...getGetDestinationQueryOptions(base.id), staleTime: 0 })
             .then((fresh) => {
-              if (isMattermost(fresh)) {
+              if (isEditable(fresh)) {
                 setDirty(false);
                 setReplaced(false);
                 setSaved(false);
@@ -216,8 +225,10 @@ function DestinationView({ destinationId }: { destinationId: string }) {
             <BrokenBanner health={destination.health} />
           </div>
           <RoutesOf destination={destination} />
-          {isMattermost(destination) ? (
-            <EditForm current={destination} />
+          {destination.type === "mattermost" ? (
+            <EditForm current={destination} kind={MATTERMOST_KIND} />
+          ) : destination.type === "telegram" ? (
+            <EditForm current={destination} kind={TELEGRAM_KIND} />
           ) : (
             <p className="text-sm text-muted-foreground">{t("destinations.edit.unsupported")}</p>
           )}

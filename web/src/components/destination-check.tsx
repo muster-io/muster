@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Check" of a Destination (C-13.FR-10, C-13.AC-8): the Destination check through the interactive path, each check
-// with "ok" or its message, and "Check passed" or "Check failed". A passing check ends the Broken state: the page takes
-// the health of the result at once, and the destination hint confirms it. A busy messenger answers 503 with
-// Retry-After: "The messenger is busy; try again in N s."
+// "Check" of a Destination (C-13.FR-10, C-13.AC-8; C-14.FR-14): the Destination check through the interactive path,
+// each check with "ok" or its message — for Telegram "Channel exists", "Discussion group", "Bot rights in the channel"
+// and "Bot rights in the discussion group" — and "Check passed" or "Check failed". A passing check ends the Broken
+// state: the page takes the health of the result at once, and the destination hint confirms it. A busy messenger
+// answers 503 with Retry-After: "The messenger is busy; try again in N s."
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";

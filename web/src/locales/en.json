@@ -420,6 +420,7 @@
       "title": "Button presses"
     },
     "check": {
+      "bot": "Bot: {{bot}}",
       "busy": "The messenger is busy; try again in {{seconds}} s.",
       "connectedAs": "Connected as {{bot}}",
       "direct": "direct",
@@ -429,23 +430,30 @@
       "latency": "{{ms}} ms",
       "ok": "ok",
       "passed": "The check passed.",
+      "pendingUpdates_one": "{{count}} pending update",
+      "pendingUpdates_other": "{{count}} pending updates",
+      "probePassed": "The address answers as a Bot API. Save it to check the bot token there.",
       "running": "Checking…",
-      "skipped": "skipped",
+      "skippedEarlier": "Skipped: an earlier step failed",
+      "skippedUnsaved": "Skipped: save the address first",
       "start": "Check connection",
       "steps": {
-        "dryProbe": "Address",
+        "dryProbe": "Dry probe without the token",
         "getMe": "getMe",
         "getWebhookInfo": "getWebhookInfo",
         "token": "Token"
       },
       "stepsLabel": "Steps of the check",
+      "telegramHint": "Checks the Bot API step by step: a dry probe without the token, then getMe and getWebhookInfo with the saved token.",
       "title": "Connection check",
       "unknownError": "No details.",
       "unsaved": "The check uses the saved settings: save your changes first.",
+      "unsavedAddress": "The address is not saved: the check makes only the dry probe against it, without the token.",
       "viaProxy": "through the proxy",
       "warnings": {
         "pressAnswersInThread": "The bot may not make ephemeral messages, so answers to button presses show in the Thread of the Root message. Give the bot the <code>create_post_ephemeral</code> permission, for example the system admin role, to show them in the channel."
-      }
+      },
+      "webhookSet": "A webhook is set: long polling fails with 409 while it stays."
     },
     "create": {
       "start": "Create connection",
@@ -463,32 +471,48 @@
     "edit": {
       "bot": "Bot: {{bot}}",
       "botUnknown": "Bot: known after the first successful check.",
-      "title": "Connection",
-      "unsupported": "Connections of this type cannot be changed here yet."
+      "title": "Connection"
     },
     "errors": {
+      "baseUrlFormat": "Enter an absolute http or https URL without user information, query or fragment, such as https://api.telegram.org. A path prefix is allowed.",
       "changedElsewhere": "This Connection was changed elsewhere.",
       "nameTaken": "Another Connection has this name.",
       "stale": "Someone else changed this Connection. Reload to see the changes.",
-      "tokenForNewServer": "Enter the bot token again: the stored token is sent only to the server it was entered for."
+      "tokenForNewServer": "Enter the bot token again: the stored token is sent only to the server it was entered for.",
+      "webhookCallFailed": "Telegram refused the webhook change, and nothing was saved: {{detail}}",
+      "webhookCallFailedNoDetail": "Telegram refused the webhook change, and nothing was saved."
     },
     "fields": {
+      "botApiBaseUrl": "Bot API base URL",
       "botToken": "Bot token",
       "destinations": "Destinations",
       "name": "Name",
       "serverUrl": "Server URL",
-      "type": "Type"
+      "type": "Type",
+      "updateMode": "Update mode"
     },
     "form": {
       "fixErrors": "Fix the marked fields and save again.",
       "limiterHint": "At most this many requests go to the Mattermost server through this Connection. Mattermost's own rate limit, when an admin turns it on, allows 10 requests per second per client address, which the Connections of this installation to the same server usually share.",
       "mattermost": "Mattermost",
       "readOnly": "You can view this Connection but not change it.",
-      "serverUrlHint": "The address of the Mattermost server, such as https://mattermost.example.org."
+      "serverUrlHint": "The address of the Mattermost server, such as https://mattermost.example.org.",
+      "telegram": "Telegram"
     },
-    "hint": "How Muster reaches messengers: a bot account on a Mattermost server.",
+    "hint": "How Muster reaches messengers: a bot account on a Mattermost server, or a Telegram bot.",
     "list": {
       "empty": "No Connections yet."
+    },
+    "telegram": {
+      "baseUrlHint": "A self-hosted Bot API server keeps the bot on that server only. Do not call api.telegram.org with this token from anywhere else: even getMe moves the bot back to Telegram's cloud, and presses and comments start to go missing without an error.",
+      "httpWarning": "The bot token travels in clear text over http. Use https unless this path is a private network or a tunnel.",
+      "limiterHint": "At most this many requests go to the Bot API through this Connection. Each Telegram Destination also has its own limit per chat.",
+      "longPollingHint": "The Leader asks Telegram for updates; Muster needs no public address. Only one process may poll a bot: give each installation its own bot.",
+      "modes": {
+        "longPolling": "Long polling",
+        "webhook": "Webhook"
+      },
+      "webhookHint": "Telegram posts each update to Muster's Ingestion URL (MUSTER_INGEST_URL), which it must reach over HTTPS. Saving in this mode sets the webhook; leaving the mode or deleting the Connection removes it."
     },
     "title": "Connections"
   },
@@ -516,9 +540,9 @@
       "itemFailed": "failed",
       "items": {
         "botInChannel": "Bot in the channel",
-        "botRightsChannel": "Bot's rights in the channel",
-        "botRightsGroup": "Bot's rights in the discussion group",
-        "channelExists": "Channel",
+        "botRightsChannel": "Bot rights in the channel",
+        "botRightsGroup": "Bot rights in the discussion group",
+        "channelExists": "Channel exists",
         "discussionGroup": "Discussion group",
         "token": "Token"
       },
@@ -595,6 +619,19 @@
     },
     "page": {
       "noRoutes": "No Route sends here yet."
+    },
+    "telegram": {
+      "channel": "Channel",
+      "channelFound": "Channel:",
+      "channelHint": "Enable comments on the channel and make the bot an admin of the channel and of its discussion group.",
+      "channelPlaceholder": "@username or chat id",
+      "chooseConnection": "Choose a Connection",
+      "connection": "Connection",
+      "discussionGroup": "Discussion group:",
+      "discussionGroupUnknown": "found by the next check",
+      "discussionGroupValue": "{{title}} ({{id}})",
+      "limiterHint": "At most this many sends and edits go to the channel and its discussion group together: Telegram counts both against one budget per chat.",
+      "noConnections": "There is no Telegram Connection yet: create one under Connections first."
     },
     "title": "Destinations",
     "types": {

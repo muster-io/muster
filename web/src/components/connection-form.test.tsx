@@ -22,7 +22,7 @@ import { render } from "vitest-browser-react";
 import type {
   ConnectionCheckResult,
   MattermostConnection,
-  MattermostConnectionInput,
+  ConnectionInput,
   Permission,
   Session,
 } from "../api/gen/model";
@@ -106,7 +106,7 @@ function providers(children: ReactNode, permissions: Permission[]) {
 const WRITE: Permission[] = ["connections:read", "connections:write"];
 
 async function renderForm(
-  save: (input: MattermostConnectionInput) => Promise<MattermostConnection | undefined>,
+  save: (input: ConnectionInput) => Promise<MattermostConnection | undefined>,
   options: { connection?: MattermostConnection; readOnly?: boolean } = {},
 ) {
   return render(
@@ -239,7 +239,7 @@ describe("the checks before a save", () => {
 
 describe("ConnectionForm", () => {
   test("shows the bot token only as set, and sends it only after Replace", async () => {
-    const save = vi.fn((_input: MattermostConnectionInput) => Promise.resolve(undefined));
+    const save = vi.fn((_input: ConnectionInput) => Promise.resolve(undefined));
     await renderForm(save, { connection: CONNECTION });
     const status = page.getByTestId("secret-connection-bot-token-status");
     await expect.element(status).toBeVisible();
@@ -258,7 +258,7 @@ describe("ConnectionForm", () => {
   });
 
   test("creates a Connection with the name, the server URL, the bot token and the limiter", async () => {
-    const save = vi.fn((_input: MattermostConnectionInput) => Promise.resolve(undefined));
+    const save = vi.fn((_input: ConnectionInput) => Promise.resolve(undefined));
     await renderForm(save);
     await page.getByRole("button", { name: "Save" }).click();
     await expect.element(page.getByLabelText("Name")).toHaveFocus();

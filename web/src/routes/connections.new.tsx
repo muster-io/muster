@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Create connection" (C-13.FR-1): the choice of the messenger, then its form; the new Connection's page opens after it
-// is created, with its callback address and "Check connection". Telegram joins the choice with its own form (C-14).
+// "Create connection" (C-13.FR-1, C-14.FR-1): the choice of the messenger, then its form; the new Connection's page
+// opens after it is created, with "Check connection" and, for Mattermost, its callback address.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -16,7 +16,7 @@ import {
   getListConnectionsQueryKey,
 } from "../api/gen/endpoints/connections/connections";
 import { RequirePermission } from "../components/app-shell";
-import { ConnectionForm } from "../components/connection-form";
+import { ConnectionForm, type ConnectionType } from "../components/connection-form";
 import { buttonVariants } from "../components/ui/button";
 
 export const Route = createFileRoute("/connections/new")({
@@ -24,17 +24,16 @@ export const Route = createFileRoute("/connections/new")({
   component: NewConnectionPage,
 });
 
-type ConnectionKind = "mattermost";
-
-const KINDS: readonly { kind: ConnectionKind; name: string }[] = [
+const KINDS: readonly { kind: ConnectionType; name: string }[] = [
   { kind: "mattermost", name: "Mattermost" },
+  { kind: "telegram", name: "Telegram" },
 ];
 
 function NewConnection() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [kind, setKind] = useState<ConnectionKind>();
+  const [kind, setKind] = useState<ConnectionType>();
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -68,8 +67,11 @@ function NewConnection() {
           ))}
         </div>
       </fieldset>
-      {kind === "mattermost" && (
+      {kind !== undefined && (
         <ConnectionForm
+          // A form per messenger: switching starts from the other's defaults.
+          key={kind}
+          type={kind}
           submitLabel={t("common.save")}
           save={async (input) => {
             const created = await createConnection(input);
