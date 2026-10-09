@@ -191,8 +191,10 @@ func (i *Interactive) Do(ctx context.Context, s Subject, op Op) (Outcome, error)
 	if s.Destination == nil {
 		d = Destination{Connection: s.Connection}
 	}
-	err := i.Store.inTx(ctx, func(q queries) error {
-		return holdBucket(ctx, q, i.OrgID, d, out, i.Clocks.Business.Now().UTC().Add(out.RetryAfter))
+	// The call was made: the end of ctx, such as the budget of a Destination test, must not lose its RetryAfter.
+	hold := context.WithoutCancel(ctx)
+	err := i.Store.inTx(hold, func(q queries) error {
+		return holdBucket(hold, q, i.OrgID, d, out, i.Clocks.Business.Now().UTC().Add(out.RetryAfter))
 	})
 	return out, err
 }

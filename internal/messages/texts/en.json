@@ -42,6 +42,7 @@
   "press.notLinked": "Your Mattermost account is not linked to Muster. Link it in your profile: {link}",
   "press.notVerified": "This button could not be verified; nothing was changed.",
   "press.telegramNotLinked": "Your Telegram account is not linked to Muster. Link it in your profile: {link}",
+  "press.test": "This is a test message; nothing was changed",
   "reason.gone": "the alerts are gone from Alertmanager",
   "reason.integration_deleted": "the Integration was deleted",
   "reason.resolved": "all alerts resolved",
@@ -69,5 +70,6 @@
   "storm.over_one": "Storm over: {count} Alert Group still open",
   "storm.over_other": "Storm over: {count} Alert Groups still open",
   "storm.urgent_one": "{count} urgent",
-  "storm.urgent_other": "{count} urgent"
+  "storm.urgent_other": "{count} urgent",
+  "test.mark": "🧪 Test message"
 }

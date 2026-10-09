@@ -1607,6 +1607,40 @@ func (q *Queries) GetTelegramPressBinding(ctx context.Context, arg GetTelegramPr
 	return i, err
 }
 
+const getTestDestination = `-- name: GetTestDestination :one
+SELECT ds.id, ds.public_id, ds.name
+FROM destinations ds
+WHERE ds.org_id = $1 AND ds.connection_id = $2 AND ds.type = 'mattermost' AND ds.deleted_at IS NULL
+  AND ds.public_id = $3::text AND ds.mattermost_channel_id = $4::text
+`
+
+type GetTestDestinationParams struct {
+	OrgID        int64
+	ConnectionID pgtype.Int8
+	PublicID     string
+	ChannelID    string
+}
+
+type GetTestDestinationRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+}
+
+// GetTestDestination reads the Mattermost Destination public_id of the Connection, not deleted, whose channel is
+// channel_id: the Destination whose test message a person pressed (C-16.FR-3).
+func (q *Queries) GetTestDestination(ctx context.Context, arg GetTestDestinationParams) (GetTestDestinationRow, error) {
+	row := q.db.QueryRow(ctx, getTestDestination,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.PublicID,
+		arg.ChannelID,
+	)
+	var i GetTestDestinationRow
+	err := row.Scan(&i.ID, &i.PublicID, &i.Name)
+	return i, err
+}
+
 const holdBucket = `-- name: HoldBucket :exec
 UPDATE rate_limit_buckets
 SET tokens = 1, refilled_at = $1
@@ -2626,6 +2660,29 @@ SELECT pg_notify($1::text, '')
 func (q *Queries) NotifyDelivery(ctx context.Context, channel string) error {
 	_, err := q.db.Exec(ctx, notifyDelivery, channel)
 	return err
+}
+
+const probeBrokenNow = `-- name: ProbeBrokenNow :execrows
+UPDATE destinations
+SET next_probe_at = $1::timestamptz
+WHERE org_id = $2 AND id = $3 AND health = 'broken' AND deleted_at IS NULL
+`
+
+type ProbeBrokenNowParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+}
+
+// ProbeBrokenNow makes the probe of a Broken Destination due at once after a person saved it, so that a configuration
+// fixed by the save does not wait for delivery.broken_probe_interval (C-11.FR-9). A healthy or deleted Destination is
+// left as it is.
+func (q *Queries) ProbeBrokenNow(ctx context.Context, arg ProbeBrokenNowParams) (int64, error) {
+	result, err := q.db.Exec(ctx, probeBrokenNow, arg.Now, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const prunePostCopies = `-- name: PrunePostCopies :execrows

@@ -303,8 +303,8 @@ func password(u *url.Userinfo) string {
 	return p
 }
 
-// redactor replaces the secret values of a request with [redacted] in a text, verbatim and in the escaped forms a URL
-// gives them, longer values first.
+// redactor replaces the secret values of a request with [redacted] in a text, verbatim, in the escaped forms a URL
+// gives them and as a JSON string escapes them, such as in an answer that echoes them, longer values first.
 type redactor []string
 
 func newRedactor(secrets []logging.Secret) redactor {
@@ -314,7 +314,9 @@ func newRedactor(secrets []logging.Secret) redactor {
 			continue
 		}
 		raw := string(s)
-		for _, f := range []string{raw, url.PathEscape(raw), url.QueryEscape(raw)} {
+		quoted, _ := json.Marshal(raw) // a string always encodes
+		for _, f := range []string{raw, url.PathEscape(raw), url.QueryEscape(raw),
+			strings.TrimSuffix(strings.TrimPrefix(string(quoted), `"`), `"`)} {
 			if !slices.Contains(forms, f) {
 				forms = append(forms, f)
 			}

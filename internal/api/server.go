@@ -287,7 +287,7 @@ var implemented = map[string]bool{
 	"DeleteConnection": true, "CheckConnection": true, "ListConnectionChannels": true, "CreateDestination": true,
 	"UpdateDestination": true, "CheckDestination": true, "ListDestinationSecrets": true, "SetDestinationSecret": true,
 	"DeleteDestinationSecret": true, "GetSigningSecret": true, "GenerateSigningSecret": true,
-	"RetirePreviousSigningSecret": true,
+	"RetirePreviousSigningSecret": true, "TestDestination": true, "PreviewDestination": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how

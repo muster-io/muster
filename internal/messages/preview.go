@@ -442,6 +442,11 @@ func commonOf(alerts templates.Alerts) templates.KV {
 // example is the built-in example of a dry run without Stored Snapshots: two firing Alerts of one rule in a
 // production cluster, ten minutes old.
 func (r *Renderer) example(set settings) *Source {
+	return r.exampleOf(set, "checkout-1", "checkout-2")
+}
+
+// exampleOf is the built-in example with one firing Alert per pod.
+func (r *Renderer) exampleOf(set settings, pods ...string) *Source {
 	now := r.business.Now().UTC()
 	alert := func(pod string) templates.Alert {
 		return templates.Alert{Status: templates.StatusFiring,
@@ -453,7 +458,10 @@ func (r *Renderer) example(set settings) *Source {
 			StartsAt: now.Add(-10 * time.Minute), GeneratorURL: "https://prometheus.example.org/graph",
 			Fingerprint: "example-" + pod}
 	}
-	alerts := templates.Alerts{alert("checkout-1"), alert("checkout-2")}
+	alerts := make(templates.Alerts, 0, len(pods))
+	for _, pod := range pods {
+		alerts = append(alerts, alert(pod))
+	}
 	return r.sampleSource(templates.Data{Status: templates.StatusFiring, Alerts: alerts,
 		GroupLabels:       templates.KV{"alertname": "HighErrorRate"},
 		CommonLabels:      commonOf(alerts),

@@ -36,6 +36,8 @@ type Target struct {
 	TeamID             string
 	TeamName           string
 	ChannelID          string
+	// BotUserID is the user id of the Connection's bot once a check learned it, empty before.
+	BotUserID string
 }
 
 // Targets find the Target of a Destination by its id, declared by their consumer; *connections.Service implements

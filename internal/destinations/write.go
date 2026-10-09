@@ -198,6 +198,10 @@ type MentionValidator interface {
 // person (C-13.FR-10): delivery's MarkHealthy.
 type Healthy func(ctx context.Context, destinationID int64) error
 
+// Probe makes the probe of the Destination destinationID due at once when it is Broken, after a person saved it:
+// delivery's ProbeNow.
+type Probe func(ctx context.Context, destinationID int64) error
+
 // writeQueries are the queries of a save of a Destination.
 type writeQueries interface {
 	InsertWebhookDestination(ctx context.Context, arg dbgen.InsertWebhookDestinationParams) (int64, error)
@@ -461,7 +465,8 @@ func (s *Service) createWebhook(ctx context.Context, r Requester, in Input) (Des
 }
 
 // updateWebhook replaces the configured fields of the outgoing webhook before, already validated; its Signing secrets
-// and Secrets change through their own operations. An update that changes nothing writes nothing.
+// and Secrets change through their own operations. An update that changes nothing writes nothing. Saving a Broken one
+// makes its probe due at once, changed or not.
 func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destination, in Input) (Destination,
 	error) {
 	now := s.writer.Business.Now().UTC()
@@ -492,7 +497,7 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 	}
 	diff := append(audit.Diff(old, after), sec.diff...)
 	if len(diff) == 0 && !sec.given {
-		return d, nil
+		return d, s.probe(ctx, before)
 	}
 	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
 		lock, err := q.LockDestination(ctx, dbgen.LockDestinationParams{OrgID: s.orgID, PublicID: before.PublicID})
@@ -528,7 +533,19 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 	if err != nil {
 		return Destination{}, err
 	}
-	return d, nil
+	return d, s.probe(ctx, before)
+}
+
+// probe makes the probe of the outgoing webhook before due at once when it was Broken: an outgoing webhook has no
+// Destination check that a save could run, and the save may have fixed it, such as its URL.
+func (s *Service) probe(ctx context.Context, before Destination) error {
+	if before.Health.State != healthBroken || s.writer.Probe == nil {
+		return nil
+	}
+	if err := s.writer.Probe(ctx, before.ID); err != nil {
+		return fmt.Errorf("probe destination %s: %w", before.PublicID, err)
+	}
+	return nil
 }
 
 // renamed gives the Internal alerts about the Destination its new name, in the transaction of the rename; a save

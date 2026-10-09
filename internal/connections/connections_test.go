@@ -1183,6 +1183,11 @@ func TestCheckChannel(t *testing.T) {
 		*e.path.subjects[0].Connection != c.ID {
 		t.Fatalf("check = %+v, %v, %+v", res, err, e.path.subjects)
 	}
+	// The check learns the bot, which the callback tells a press of a test message by, once (C-16.FR-3).
+	if len(e.store.bots) != 1 || e.store.bots[0].BotUserID.String != fakemattermost.BotUserID ||
+		res.Check.Bot.ID != fakemattermost.BotUserID {
+		t.Errorf("bot = %+v %+v", e.store.bots, res.Check.Bot)
+	}
 	e.path.subjects = nil
 	dest := int64(42)
 	res, err = e.svc.CheckChannel(ctx, destinations.ChannelCheck{Connection: c.PublicID, Destination: &dest,
@@ -1200,6 +1205,16 @@ func TestCheckChannel(t *testing.T) {
 			t.Errorf("connection %s = %v", id, err)
 		}
 	}
+	if len(e.store.bots) != 1 {
+		t.Errorf("the same bot was recorded again: %+v", e.store.bots)
+	}
+	e.store.rows[c.ID].row.BotUserID = pgtype.Text{}
+	e.store.fail["SetBotIdentity"] = errors.New("down")
+	if _, err := e.svc.CheckChannel(ctx, destinations.ChannelCheck{Connection: c.PublicID,
+		TeamID: fakemattermost.TeamID, ChannelID: fakemattermost.ChannelAlerts}); err == nil {
+		t.Error("a failed record of the bot")
+	}
+	delete(e.store.fail, "SetBotIdentity")
 	e.path.limited = true
 	if _, err := e.svc.CheckChannel(ctx, destinations.ChannelCheck{Connection: c.PublicID,
 		TeamID: fakemattermost.TeamID, ChannelID: fakemattermost.ChannelAlerts}); !isLimited(err) {

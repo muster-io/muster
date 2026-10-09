@@ -155,6 +155,8 @@ type Result struct {
 	NotJSON     bool
 	Network     string
 	Detail      string
+	// Body is the answer as received, which only a Destination test shows, masked (C-16.FR-2).
+	Body []byte
 }
 
 // OK reports whether the call succeeded.
@@ -404,6 +406,7 @@ func (c *Client) call(ctx context.Context, k clientKey, httpMethod, method strin
 	res, err := oc.Do(ctx, outbound.Request{Method: httpMethod, URL: "/bot" + string(c.settings.Token) + "/" + method,
 		Header: header, Body: data, Mapping: mapping, ClassifyBody: classifyBody})
 	r := resultOf(res, err)
+	r.Body = res.Body
 	if !r.OK() || out == nil {
 		return r
 	}

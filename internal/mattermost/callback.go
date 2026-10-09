@@ -31,11 +31,13 @@ const CallbackPattern = CallbackPath + "{connection_id}"
 // ErrNoConnection is a callback for a Connection that is unknown, deleted or not a Mattermost one.
 var ErrNoConnection = errors.New("no such mattermost connection")
 
-// Connection is a Mattermost Connection as the callback of its button presses needs it.
+// Connection is a Mattermost Connection as the callback of its button presses needs it: BotUserID is the user id of
+// its bot, which a Connection check learns, empty before one did.
 type Connection struct {
-	ID       int64
-	PublicID string
-	Client   *Client
+	ID        int64
+	PublicID  string
+	BotUserID string
+	Client    *Client
 }
 
 // Connections find the Connection of a callback; *connections.Service implements it.
@@ -47,6 +49,8 @@ type Connections interface {
 type Bindings interface {
 	PressBinding(ctx context.Context, connectionID int64, groupPublicID, postID string) (delivery.Binding, error)
 	PostDestination(ctx context.Context, connectionID int64, postID, channelID string) (delivery.Destination, bool,
+		error)
+	TestDestination(ctx context.Context, connectionID int64, publicID, channelID string) (delivery.Destination, bool,
 		error)
 }
 
@@ -85,7 +89,10 @@ type CallbackConfig struct {
 	PublicURL string
 	// BodyLimit is ingest.body_limit; zero takes ingest.BodyLimit.
 	BodyLimit int64
-	Log       *logging.Logger
+	// TestPresses tell the Destination test waiting on any replica that the bot's own press of its test message
+	// arrived (C-16.FR-3); nil tells nobody.
+	TestPresses TestPresses
+	Log         *logging.Logger
 }
 
 // How the person who pressed was answered, as mattermost_press logs it (D284): an ephemeral post in the channel, or
@@ -109,6 +116,10 @@ const (
 	outcomeInvalidRequest    = "invalid_request"
 	outcomeUnknownConnection = "unknown_connection"
 	outcomeFailed            = "failed"
+	// outcomeTest is a press of a test message by a person, answered that nothing changed; outcomeTestPress the bot's
+	// own press of it during a Destination test, answered with nothing (C-16.FR-3).
+	outcomeTest      = "test"
+	outcomeTestPress = "test_press"
 )
 
 // errUnverifiable is a verified action id that names no Command of its Route: a Snooze duration that no longer exists.
@@ -217,6 +228,9 @@ func (h *pressHandler) handle(ctx context.Context, w http.ResponseWriter, r *htt
 	}
 	p := press{connection: conn.PublicID}
 	a, err := buttons.Verify(h.cfg.Keys, req.Context.Action, req.Context.KeyID)
+	if err == nil && a.Subject == buttons.SubjectTest {
+		return h.testPress(ctx, p, conn, req, a)
+	}
 	if err != nil || a.Subject != buttons.SubjectRoot {
 		return h.notVerified(ctx, p, conn, req)
 	}
@@ -282,6 +296,36 @@ func (h *pressHandler) dispatch(ctx context.Context, c groups.Caller, a buttons.
 		return h.cfg.Commands.Snooze(ctx, c, a.PublicID, groups.SnoozeEnd{Until: &until})
 	}
 	return groups.Result{}, errUnverifiable
+}
+
+// testPress handles a press of a test message, whose verified action id names the Destination under test and changes
+// nothing (C-16.FR-3). The bot's own press during the test is answered with nothing and, with the nonce of its test,
+// tells the waiting test that presses reach Muster. A person who pressed is answered privately that it is a test
+// message, limited by that Destination, when it is a Destination of the Connection in the channel of the press;
+// otherwise the press is not verified and gets the empty answer.
+func (h *pressHandler) testPress(ctx context.Context, p press, conn Connection, req pressRequest,
+	a buttons.Action) press {
+	p.command = a.Command
+	if conn.BotUserID != "" && req.UserID == conn.BotUserID {
+		p.outcome = outcomeTestPress
+		if req.Context.Test != "" && h.cfg.TestPresses != nil {
+			if err := h.cfg.TestPresses.Pressed(ctx, req.Context.Test); err != nil {
+				p.err = err.Error()
+			}
+		}
+		return p
+	}
+	d, ok, err := h.cfg.Bindings.TestDestination(ctx, conn.ID, a.PublicID, req.ChannelID)
+	switch {
+	case err != nil:
+		p.outcome, p.err = outcomeFailed, err.Error()
+		return p
+	case !ok:
+		p.outcome = outcomeNotVerified
+		return p
+	}
+	p.outcome = outcomeTest
+	return h.answer(ctx, p, conn, d, req, messages.T(messages.LanguageEnglish, "press.test", nil), nil)
 }
 
 // notVerified refuses a press whose action id or binding does not hold. It is answered only on a post that Muster

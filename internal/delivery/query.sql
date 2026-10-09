@@ -708,6 +708,14 @@ UPDATE destinations
 SET next_probe_at = 'infinity'
 WHERE org_id = @org_id AND id = @id AND health = 'broken';
 
+-- ProbeBrokenNow makes the probe of a Broken Destination due at once after a person saved it, so that a configuration
+-- fixed by the save does not wait for delivery.broken_probe_interval (C-11.FR-9). A healthy or deleted Destination is
+-- left as it is.
+-- name: ProbeBrokenNow :execrows
+UPDATE destinations
+SET next_probe_at = @now::timestamptz
+WHERE org_id = @org_id AND id = @id AND health = 'broken' AND deleted_at IS NULL;
+
 -- BreakDestination makes a healthy Destination Broken (C-11.FR-9, FR-18), probed first at @next_probe. No row when it
 -- is Broken already.
 -- name: BreakDestination :one
@@ -1228,6 +1236,14 @@ WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'm
               WHERE d.org_id = @org_id AND d.destination_id = ds.id AND d.message_id = @message_id::text)
 ORDER BY ds.id
 LIMIT 1;
+
+-- GetTestDestination reads the Mattermost Destination public_id of the Connection, not deleted, whose channel is
+-- channel_id: the Destination whose test message a person pressed (C-16.FR-3).
+-- name: GetTestDestination :one
+SELECT ds.id, ds.public_id, ds.name
+FROM destinations ds
+WHERE ds.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'mattermost' AND ds.deleted_at IS NULL
+  AND ds.public_id = @public_id::text AND ds.mattermost_channel_id = @channel_id::text;
 
 -- Telegram comment Threads (C-14.FR-3, schema.md §4.11): the automatic copy of a channel post in the discussion group
 -- meets the answer to sendMessage in telegram_post_copies, keyed by the Connection, the channel and the post, in either

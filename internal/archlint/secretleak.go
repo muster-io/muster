@@ -1419,6 +1419,8 @@ func probeTelegramAdapter(ctx context.Context, svc *connections.Service, clocks 
 	}
 	o := a.Check(ctx, delivery.Call{Class: outbound.ClassDelivery, Destination: dest})
 	errs = append(errs, errors.New(string(o.Error)))
+	errs = append(errs, probeTester(ctx, &telegram.Tester{Adapter: a, Path: path, Renderer: probeRenderer(clocks),
+		Real: clocks.Real}, dest))
 	res, err := svc.CheckTelegramChannel(ctx, destinations.TelegramChannelCheck{Connection: publicID,
 		Destination: &dest.ID, ChannelID: "@probe"})
 	errs = append(errs, err, errors.New(string(res.Check.Outcome.Error)))
@@ -1526,6 +1528,11 @@ func probeAdapter(ctx context.Context, svc *connections.Service, store *probeCon
 	}
 	o := a.Check(ctx, delivery.Call{Class: outbound.ClassDelivery, Destination: dest})
 	errs = append(errs, errors.New(string(o.Error)))
+	// A Destination test and a preview (C-16.FR-2): the token never shows in their requests, responses or errors.
+	tester := &mattermost.Tester{Adapter: a, Path: path, Renderer: probeRenderer(clocks),
+		Waits:  &mattermost.PressWaits{Notify: func(context.Context, string, string) error { return nil }},
+		Budget: time.Second, Real: clocks.Real}
+	errs = append(errs, probeTester(ctx, tester, dest))
 	found, err := svc.Doctor(ctx, store, 5*time.Second)
 	errs = append(errs, err)
 	for _, f := range found {
@@ -1544,6 +1551,12 @@ func (probeBindings) PressBinding(context.Context, int64, string, string) (deliv
 }
 
 func (probeBindings) PostDestination(context.Context, int64, string, string) (delivery.Destination, bool, error) {
+	conn := int64(1)
+	return delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1", Type: delivery.TypeMattermost,
+		Connection: &conn}, true, nil
+}
+
+func (probeBindings) TestDestination(context.Context, int64, string, string) (delivery.Destination, bool, error) {
 	conn := int64(1)
 	return delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1", Type: delivery.TypeMattermost,
 		Connection: &conn}, true, nil
@@ -1937,8 +1950,44 @@ func probeWebhooks(ctx context.Context, secrets []string, log io.Writer) error {
 			out, err := path.Do(ctx, delivery.Subject{Destination: &dest}, delivery.WebhookOp(op, w))
 			errs = append(errs, err, errors.New(string(out.Kind)+": "+string(out.Error)))
 		}
+		// A Destination test and a preview in the mode both (C-16.FR-2, C-15.FR-10): the test event and "create"
+		// against the stand-in that echoes the secrets, and every request rendered.
+		cfg, _ := json.Marshal(webhooks.EventsConfig{URL: base + "/hook?k={{ .Secrets.token }}",
+			Headers: []webhooks.Header{{Name: "Authorization", Value: "Bearer {{ .Secrets.other }}"}}})
+		store.row.WebhookEventsConfig = cfg
+		clocks := clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}}
+		errs = append(errs, probeTester(ctx, &webhooks.Tester{Adapter: a, Path: path, Data: probeRenderer(clocks),
+			Budget: time.Second}, dest))
 	}
 	return errors.Join(errs...)
+}
+
+// probeRenderer is the renderer of the messages of the probes, without a database.
+func probeRenderer(clocks clock.Clocks) *messages.Renderer {
+	return messages.New(messages.Config{OrgID: 1, PublicURL: "http://localhost:8080", Business: clocks.Business,
+		Real: clocks.Real, Log: logging.New(io.Discard, logging.LevelInfo)})
+}
+
+// destinationTester is the test and the preview of a Destination type.
+type destinationTester interface {
+	Test(ctx context.Context, in delivery.TestInput) ([]delivery.TestStep, error)
+	Preview(ctx context.Context, in delivery.TestInput) ([]delivery.PreviewItem, error)
+}
+
+// probeTester runs the test and the preview of dest with an Alert Group of one firing Alert, and returns everything
+// they show, as JSON, and their errors.
+func probeTester(ctx context.Context, t destinationTester, dest delivery.Destination) error {
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	in := delivery.TestInput{Destination: dest, Actor: groups.System, Source: &messages.Source{Number: 1,
+		Title: "probe", Status: messages.ColourFiring, TimeZone: "UTC", StartedAt: now,
+		Route: messages.RouteRef{Name: "probe", Language: "en", SnoozeDurations: []int64{3600}}, TotalAlerts: 1,
+		Alerts: []messages.SourceAlert{{Fingerprint: "f1", Labels: map[string]string{"alertname": "Probe"},
+			StartsAt: now, Firing: true}}}}
+	steps, err := t.Test(ctx, in)
+	shown, _ := json.Marshal(steps)
+	items, perr := t.Preview(ctx, in)
+	previewed, _ := json.Marshal(items)
+	return errors.Join(err, perr, errors.New(string(shown)), errors.New(string(previewed)))
 }
 
 // probeWebhookStore is the one outgoing webhook of probeWebhooks in memory.

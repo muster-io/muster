@@ -116,6 +116,9 @@ type fakeBindings struct {
 	bound        map[bindingKey]delivery.Binding
 	posts        map[postKey]delivery.Destination
 	err, postErr error
+	// tests are the Destinations whose test messages may be pressed, by public_id and channel.
+	tests   map[postKey]delivery.Destination
+	testErr error
 }
 
 func (f *fakeBindings) PressBinding(_ context.Context, conn int64, group, post string) (delivery.Binding, error) {

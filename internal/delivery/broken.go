@@ -44,6 +44,7 @@ type brokenQueries interface {
 	ClaimBrokenProbes(ctx context.Context, arg dbgen.ClaimBrokenProbesParams) ([]dbgen.ClaimBrokenProbesRow, error)
 	LeaseOldestWaiting(ctx context.Context, arg dbgen.LeaseOldestWaitingParams) (dbgen.LeaseOldestWaitingRow, error)
 	MarkProbeOnNextDelivery(ctx context.Context, arg dbgen.MarkProbeOnNextDeliveryParams) error
+	ProbeBrokenNow(ctx context.Context, arg dbgen.ProbeBrokenNowParams) (int64, error)
 	BreakDestination(ctx context.Context, arg dbgen.BreakDestinationParams) (dbgen.BreakDestinationRow, error)
 	UpdateBrokenReason(ctx context.Context, arg dbgen.UpdateBrokenReasonParams) error
 	MarkDestinationHealthy(ctx context.Context, arg dbgen.MarkDestinationHealthyParams) (
@@ -175,6 +176,27 @@ func (s *Service) MarkHealthy(ctx context.Context, tx dbgen.DBTX, destinationID 
 func (s *Service) EndBroken(ctx context.Context, destinationID int64) error {
 	_, err := s.MarkHealthy(ctx, nil, destinationID)
 	return err
+}
+
+// ProbeNow makes the probe of the Destination destinationID due at once when it is Broken, and wakes the delivery
+// workers, after a person saved it: a configuration that the save fixed, such as the URL of an outgoing webhook, ends
+// the Broken state with the next probe instead of after delivery.broken_probe_interval. A healthy Destination is left
+// as it is.
+func (s *Service) ProbeNow(ctx context.Context, destinationID int64) error {
+	return s.store.inTx(ctx, func(q queries) error {
+		n, err := q.ProbeBrokenNow(ctx, dbgen.ProbeBrokenNowParams{OrgID: s.orgID, ID: destinationID,
+			Now: s.clock.Now().UTC()})
+		if err != nil {
+			return fmt.Errorf("probe destination %d at once: %w", destinationID, err)
+		}
+		if n == 0 {
+			return nil
+		}
+		if err := q.NotifyDelivery(ctx, Channel); err != nil {
+			return fmt.Errorf("wake the delivery workers: %w", err)
+		}
+		return nil
+	})
 }
 
 // probe claims the Broken Destinations of the Organization whose probe is due, Batch at a time, and probes each.

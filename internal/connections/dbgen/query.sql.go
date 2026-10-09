@@ -138,7 +138,7 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (G
 const getDestinationTarget = `-- name: GetDestinationTarget :one
 SELECT d.mattermost_team_id, d.mattermost_team_name, d.mattermost_channel_id, c.id, c.public_id, c.type, c.name,
        c.mattermost_server_url, c.bot_token_ciphertext, c.bot_token_key_id, c.bot_token_updated_at, c.proxy,
-       c.proxy_password_ciphertext, c.proxy_password_key_id, c.proxy_password_updated_at, c.version
+       c.proxy_password_ciphertext, c.proxy_password_key_id, c.proxy_password_updated_at, c.version, c.bot_user_id
 FROM destinations d
 JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
 WHERE d.org_id = $1 AND d.id = $2 AND d.type = 'mattermost' AND c.deleted_at IS NULL
@@ -166,6 +166,7 @@ type GetDestinationTargetRow struct {
 	ProxyPasswordKeyID      pgtype.Text
 	ProxyPasswordUpdatedAt  pgtype.Timestamptz
 	Version                 int64
+	BotUserID               pgtype.Text
 }
 
 // GetDestinationTarget reads where a Mattermost Destination posts — its team and channel — with the Connection it
@@ -191,6 +192,7 @@ func (q *Queries) GetDestinationTarget(ctx context.Context, arg GetDestinationTa
 		&i.ProxyPasswordKeyID,
 		&i.ProxyPasswordUpdatedAt,
 		&i.Version,
+		&i.BotUserID,
 	)
 	return i, err
 }

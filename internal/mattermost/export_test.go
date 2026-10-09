@@ -6,6 +6,7 @@ package mattermost
 import (
 	"context"
 
+	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
@@ -17,3 +18,6 @@ func (c *Client) EphemeralPost(ctx context.Context, class outbound.Class, userID
 
 // PressAnswer lets the tests of the package decode the answer to a press as the callback encodes it.
 type PressAnswer = pressAnswer
+
+// NewTestPublisher is the publisher of a test message, which only publishes.
+func NewTestPublisher() delivery.Adapter { return &testPublisher{} }
