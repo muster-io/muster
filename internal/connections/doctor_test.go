@@ -41,6 +41,22 @@ func (s *memStore) ListMattermostDestinations(_ context.Context, org int64) ([]d
 	return out, nil
 }
 
+// ListTelegramDestinations names each Destination of tgTargets tg-dest-<id>.
+func (s *memStore) ListTelegramDestinations(_ context.Context, org int64) ([]dbgen.ListTelegramDestinationsRow,
+	error) {
+	if err := s.fail["ListTelegramDestinations"]; err != nil || org != 1 {
+		return nil, err
+	}
+	var out []dbgen.ListTelegramDestinationsRow
+	for _, id := range slices.Sorted(maps.Keys(s.tgTargets)) {
+		d := s.tgTargets[id]
+		out = append(out, dbgen.ListTelegramDestinationsRow{ID: id, PublicID: fmt.Sprintf("DS%012d", id),
+			Name: fmt.Sprintf("tg-dest-%d", id), ConnectionID: pgtype.Int8{Int64: d.connection, Valid: true},
+			TelegramChannelID: pgtype.Text{String: d.channel, Valid: true}})
+	}
+	return out, nil
+}
+
 func findings(t *testing.T, svc *connections.Service, q connections.DoctorQueries) string {
 	t.Helper()
 	found, err := svc.Doctor(t.Context(), q, 1500*time.Millisecond)
@@ -136,7 +152,7 @@ func TestDoctor(t *testing.T) {
 		t.Error("the bot token reached the log")
 	}
 
-	for _, name := range []string{"ListConnections", "ListMattermostDestinations"} {
+	for _, name := range []string{"ListConnections", "ListMattermostDestinations", "ListTelegramDestinations"} {
 		e.store.fail[name] = errors.New("down")
 		if _, err := e.svc.Doctor(t.Context(), e.store, time.Second); err == nil || !strings.Contains(err.Error(), "down") {
 			t.Errorf("%s failing = %v", name, err)

@@ -5,9 +5,12 @@
 // like the Bot API: getMe answers its bot for any token but the dry probe's `0:x` and the revoked ones, which get 401;
 // getUpdates long-polls a queue of updates per bot, and a second poller on the same token ends the first with 409
 // (F-018); setWebhook, deleteWebhook and getWebhookInfo keep a webhook per bot, to which the queued updates are posted
-// with the secret token header. Every other method is recorded and answered 501. The control endpoints under /_fake/
-// change the configuration (a path prefix, an HTML mode that stands for a web server that is not a Bot API, revoked
-// tokens), queue updates and end a running long poll with 409.
+// with the secret token header. getChat, getChatMember, sendMessage and editMessageText work on the chats of chats.go:
+// two channels and a discussion group, the bot's rights in them, the messages the bot sent with their keyboards and
+// edits, the budget of sends and edits per chat and the notifications of two accounts. Every other method is recorded
+// and answered 501. The control endpoints under /_fake/ change the configuration (a path prefix, an HTML mode that
+// stands for a web server that is not a Bot API, revoked tokens), queue updates, end a running long poll with 409, and
+// change and list the chats, the bot's rights, the messages and the notifications.
 package faketelegram
 
 import (
@@ -75,11 +78,13 @@ type Fake struct {
 	mu     sync.Mutex
 	config Config
 	bots   map[string]*bot
+
+	chats *chats
 }
 
 // New returns the fake with no prefix, in the Bot API mode.
 func New() *Fake {
-	f := &Fake{config: Config{Mode: ModeBotAPI, RevokedTokens: []string{}}, bots: map[string]*bot{},
+	f := &Fake{config: Config{Mode: ModeBotAPI, RevokedTokens: []string{}}, bots: map[string]*bot{}, chats: newChats(),
 		client: &http.Client{Timeout: webhookTimeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	f.Server = fakeserver.New("Telegram", http.HandlerFunc(f.serve))
@@ -92,6 +97,7 @@ func New() *Fake {
 	f.HandleControl("GET /_fake/webhooks", func(w http.ResponseWriter, _ *http.Request) {
 		fakeserver.WriteJSON(w, http.StatusOK, f.Webhooks())
 	})
+	f.handleChats()
 	return f
 }
 
@@ -221,6 +227,14 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		f.deleteWebhook(w, token, p)
 	case "getwebhookinfo":
 		writeOK(w, f.webhookInfo(token))
+	case "getchat":
+		f.getChat(w, p)
+	case "getchatmember":
+		f.getChatMember(w, p)
+	case "sendmessage":
+		f.sendMessage(w, p)
+	case "editmessagetext":
+		f.editMessageText(w, p)
 	default:
 		writeFailure(w, http.StatusNotImplemented,
 			"Not Implemented: method "+method+" is not implemented by the fake Telegram server")

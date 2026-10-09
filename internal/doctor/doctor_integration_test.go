@@ -18,6 +18,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
+	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
@@ -133,7 +134,8 @@ func TestIntegrationDoctor(t *testing.T) {
 			t.Errorf("the doctor changed the database:\nbefore %s\nafter  %s", before, after)
 		}
 
-		// The Mattermost Connections and Destinations of the Organization, one line each, still without a write.
+		// The Mattermost and Telegram Connections and Destinations of the Organization, one line each, still without a
+		// write.
 		st, err := keyring.NewStore(d.Pool).GetKeyringState(t.Context())
 		if err != nil {
 			t.Fatal(err)
@@ -147,6 +149,11 @@ func TestIntegrationDoctor(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = fake.Close(context.WithoutCancel(t.Context())) }()
+		tg := faketelegram.New()
+		if err := tg.Start(t.Context(), "127.0.0.1:0"); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tg.Close(context.WithoutCancel(t.Context())) }()
 		now := time.Now()
 		if err := organization.Ensure(t.Context(), organization.NewStore(d.Pool),
 			logging.New(&bytes.Buffer{}, logging.LevelInfo), now); err != nil {
@@ -174,17 +181,33 @@ func TestIntegrationDoctor(t *testing.T) {
 				SELECT org_id, $1, 'mattermost', $2, id, $3, $4, '{}', 5, 1, 'healthy', $5, $5 FROM connections`,
 				ds[0], ds[1], fakemattermost.TeamID, ds[2], now)
 		}
+		tgCiphertext, tgKeyID, err := k.Encrypt("connections.bot_token", []byte("777001:doctor-integration-tg"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		exec(`INSERT INTO connections (org_id, public_id, type, name, telegram_bot_api_base_url, telegram_update_mode,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
+			updated_at)
+			SELECT id, 'CNAAAAAAAAAAT1', 'telegram', 'Dev Telegram', $1, 'long_polling', $2, $3, $4, 15, 1, $4, $4
+			FROM organizations`, tg.URL(), tgCiphertext, tgKeyID, now)
+		exec(`INSERT INTO destinations (org_id, public_id, type, name, connection_id, telegram_channel_id, mentions,
+			limiter_limit, limiter_per_seconds, health, created_at, updated_at)
+			SELECT org_id, 'DSAAAAAAAAAAA3', 'telegram', 'tg-alerts', id, '@muster_alerts', '{}', 10, 60, 'healthy', $1,
+				$1
+			FROM connections WHERE type = 'telegram'`, now)
 		before = fingerprint(t, d)
 		out.Reset()
 		ok, err = Run(t.Context(), Options{Environ: append(env, "MUSTER_SECRET_KEYS="+key), Out: &out})
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("muster doctor with a Mattermost Connection:\n%s", out.String())
+		t.Logf("muster doctor with a Mattermost and a Telegram Connection:\n%s", out.String())
 		want := "WARN connection Dev Mattermost: " + mattermost.HintPressAnswersInThread + "\n" +
+			"OK   connection Dev Telegram: ok\n" +
 			"OK   destination alerts: ok\n" +
-			"FAIL destination no-bot: The bot is not a member of this channel.\n"
-		if ok || !strings.HasSuffix(out.String(), want) || strings.Count(out.String(), "\n") != 11 {
+			"FAIL destination no-bot: The bot is not a member of this channel.\n" +
+			"OK   destination tg-alerts: ok\n"
+		if ok || !strings.HasSuffix(out.String(), want) || strings.Count(out.String(), "\n") != 13 {
 			t.Errorf("ok %v, output:\n%s", ok, out.String())
 		}
 		if after := fingerprint(t, d); after != before {

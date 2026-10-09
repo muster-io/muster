@@ -23,8 +23,9 @@ type user struct {
 	id                    int64
 	publicID, name, login string
 	deleted               bool
-	// links are the usernames by identity space.
-	links map[string]string
+	// links are the usernames by identity space, and externals the messenger's user ids.
+	links     map[string]string
+	externals map[string]string
 }
 
 // fakeQueries is the database of the package in memory.
@@ -75,7 +76,7 @@ func (f *fakeQueries) ListMentionUsers(_ context.Context, arg dbgen.ListMentionU
 			continue
 		}
 		out = append(out, dbgen.ListMentionUsersRow{ID: u.id, PublicID: u.publicID, Name: u.name, Login: u.login,
-			Username: u.links[arg.IdentitySpace]})
+			Username: u.links[arg.IdentitySpace], ExternalID: u.externals[arg.IdentitySpace]})
 	}
 	return out, nil
 }
@@ -109,7 +110,8 @@ const (
 func newFake() *fakeQueries {
 	return &fakeQueries{users: []user{
 		{id: 1, publicID: alice, name: "Alice Smith", login: "alice",
-			links: map[string]string{"telegram": "alice_tg", "mattermost:3": "alice.mm"}},
+			links:     map[string]string{"telegram": "alice_tg", "mattermost:3": "alice.mm"},
+			externals: map[string]string{"telegram": "4242", "mattermost:3": "u-alice"}},
 		{id: 2, publicID: bob, name: "Bob Jones", login: "bob"},
 		{id: 3, publicID: carol, name: "Carol", login: "carol", links: map[string]string{"mattermost:9": "carol"}},
 		{id: 4, publicID: gone, name: "deleted-user-4", login: "gone", deleted: true},
@@ -334,5 +336,20 @@ func TestNames(t *testing.T) {
 	f.fail["ListFooterUsernames"] = errors.New("boom")
 	if _, err := s.FooterNames(t.Context(), nil, 5); err == nil {
 		t.Error("a failing read")
+	}
+}
+
+// TestResolveExternalID: a User target carries the messenger's user id of the Account link in the Destination's
+// identity space, which Telegram mentions a user by (C-12.FR-8); a User without a link has none.
+func TestResolveExternalID(t *testing.T) {
+	f := newFake()
+	s := newService(f)
+	set := nobody()
+	set[KindNewAlerts] = Setting{Everyone: EveryoneNone, UserIDs: []string{alice, bob}}
+	f.settings[20] = settingsJSON(t, set)
+	got, err := s.Resolve(t.Context(), nil, orgID, Request{DestinationID: 20, DestinationType: TypeTelegram,
+		AlertGroupID: 5, Mentions: []string{KindNewAlerts}})
+	if err != nil || len(got) != 2 || got[0].User.ExternalID != "4242" || got[1].User.ExternalID != "" {
+		t.Fatalf("targets = %+v, %v", got, err)
 	}
 }

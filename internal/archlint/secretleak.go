@@ -1276,9 +1276,10 @@ func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error
 
 // probeTelegram pushes the secrets through a Telegram Connection (C-14.FR-12): the bot token, and the proxy password of
 // a SOCKS5 proxy that refuses it, through its creation, its check, an unsaved base URL, a mode switch whose setWebhook
-// the stand-in refuses, muster doctor and the Leader's poller; the webhook secret token through setWebhook and the
-// webhook endpoint; and the token through a refused connection. The stand-in server echoes the token, the path and the
-// body of each request in its descriptions.
+// the stand-in refuses, muster doctor with its Destination, the Leader's poller, the adapter's posts, edits, replies and
+// Destination checks, the Destination check of a save and the deleteWebhook of a deletion; the webhook secret token
+// through setWebhook and the webhook endpoint; and the token through a refused connection. The stand-in server echoes
+// the token, the path and the body of each request in its descriptions.
 func probeTelegram(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
@@ -1392,6 +1393,36 @@ func probeTelegram(ctx context.Context, secrets []string, log io.Writer) error {
 	req.Header.Set(telegram.SecretTokenHeader, secrets[2])
 	telegram.NewWebhook(telegram.WebhookConfig{Connections: svc, Router: router, Log: logger}).ServeHTTP(rec, req)
 	errs = append(errs, errors.New(rec.body.String()))
+	errs = append(errs, probeTelegramAdapter(ctx, svc, clocks, c.PublicID))
+	store.row.TelegramUpdateMode = pgtype.Text{String: connections.ModeWebhook, Valid: true}
+	errs = append(errs, svc.Delete(ctx, by, c.PublicID, nil))
+	return errors.Join(errs...)
+}
+
+// probeTelegramAdapter publishes, edits and replies through the Telegram adapter to the Destination 1 of the
+// Connection publicID on the interactive path, as lint 3 allows, checks it in the delivery class as the Broken probe
+// does and through the Connection as a save does; it returns the text of every outcome and step.
+func probeTelegramAdapter(ctx context.Context, svc *connections.Service, clocks clock.Clocks, publicID string) error {
+	a := &telegram.Adapter{Targets: svc, Clock: clocks.Real}
+	conn := int64(1)
+	dest := delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1", Type: delivery.TypeTelegram, Connection: &conn}
+	m := delivery.Message{Kind: messages.KindRoot, Language: "en", Colour: "firing", Heading: &messages.Heading{
+		Number: 1, Title: "probe", URL: "http://localhost:8080/alert-groups/AGAAAAAAAAAAA1"}}
+	path := deliverytest.Unlimited(1, clocks)
+	var errs []error
+	for _, op := range []delivery.Op{delivery.PublishOp(a, m), delivery.UpdateOp(a, "1", m),
+		delivery.ReplyOp(a, delivery.Root{MessageID: "1"}, m), delivery.CheckOp(a)} {
+		o, err := path.Do(ctx, delivery.Subject{Destination: &dest}, op)
+		errs = append(errs, err, errors.New(string(o.Error)))
+	}
+	o := a.Check(ctx, delivery.Call{Class: outbound.ClassDelivery, Destination: dest})
+	errs = append(errs, errors.New(string(o.Error)))
+	res, err := svc.CheckTelegramChannel(ctx, destinations.TelegramChannelCheck{Connection: publicID,
+		Destination: &dest.ID, ChannelID: "@probe"})
+	errs = append(errs, err, errors.New(string(res.Check.Outcome.Error)))
+	for _, st := range res.Check.Steps {
+		errs = append(errs, errors.New(st.Message))
+	}
 	return errors.Join(errs...)
 }
 
@@ -1565,6 +1596,41 @@ func (s *probeConnections) GetDestinationTarget(context.Context, cdb.GetDestinat
 		BotTokenKeyID: r.BotTokenKeyID, BotTokenUpdatedAt: r.BotTokenUpdatedAt, Proxy: r.Proxy,
 		ProxyPasswordCiphertext: r.ProxyPasswordCiphertext, ProxyPasswordKeyID: r.ProxyPasswordKeyID,
 		ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt, Version: r.Version}, nil
+}
+
+// GetTelegramDestinationTarget is the Destination 1 of the Connection, on the channel @probe whose ids are known.
+func (s *probeConnections) GetTelegramDestinationTarget(context.Context, cdb.GetTelegramDestinationTargetParams) (
+	cdb.GetTelegramDestinationTargetRow, error) {
+	if s.row == nil {
+		return cdb.GetTelegramDestinationTargetRow{}, pgx.ErrNoRows
+	}
+	r := s.row
+	return cdb.GetTelegramDestinationTargetRow{TelegramChannelID: pgtype.Text{String: "@probe", Valid: true},
+		TelegramChannelChatID:    pgtype.Int8{Int64: -1001000000001, Valid: true},
+		TelegramDiscussionChatID: pgtype.Int8{Int64: -1001000000002, Valid: true}, ID: r.ID, PublicID: r.PublicID,
+		Type: r.Type, Name: r.Name, TelegramBotApiBaseUrl: r.TelegramBotApiBaseUrl,
+		BotTokenCiphertext: r.BotTokenCiphertext, BotTokenKeyID: r.BotTokenKeyID, BotTokenUpdatedAt: r.BotTokenUpdatedAt,
+		Proxy: r.Proxy, ProxyPasswordCiphertext: r.ProxyPasswordCiphertext, ProxyPasswordKeyID: r.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt, Version: r.Version}, nil
+}
+
+// ListTelegramDestinations lists the Destination 1 of the Connection on @probe for muster doctor.
+func (s *probeConnections) ListTelegramDestinations(context.Context, int64) ([]cdb.ListTelegramDestinationsRow,
+	error) {
+	return []cdb.ListTelegramDestinationsRow{{ID: 1, PublicID: "DSAAAAAAAAAAA1", Name: "probe",
+		ConnectionID: pgtype.Int8{Int64: 1, Valid: true}, TelegramChannelID: pgtype.Text{String: "@probe",
+			Valid: true}}}, nil
+}
+
+// CountConnectionDestinations finds no Destination, so that the Connection can be deleted.
+func (s *probeConnections) CountConnectionDestinations(context.Context, cdb.CountConnectionDestinationsParams) (int64,
+	error) {
+	return 0, nil
+}
+
+// MarkConnectionDeleted keeps the row: the probe's deletion only runs to its deleteWebhook.
+func (s *probeConnections) MarkConnectionDeleted(context.Context, cdb.MarkConnectionDeletedParams) error {
+	return nil
 }
 
 // ListConnections lists the Connection for muster doctor.

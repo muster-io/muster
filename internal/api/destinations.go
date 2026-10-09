@@ -19,8 +19,7 @@ import (
 )
 
 // Destinations is what the API needs of internal/destinations: reading Destinations of every type with their health
-// and Routes, the Destinations of Routes, saving a Mattermost Destination, its Destination check, and deleting a
-// Destination.
+// and Routes, the Destinations of Routes, saving a Destination, its Destination check, and deleting a Destination.
 type Destinations interface {
 	List(ctx context.Context, f destinations.ListFilter) (destinations.Page, error)
 	Get(ctx context.Context, publicID string) (destinations.Destination, error)
@@ -119,8 +118,8 @@ func destinationRequester(ctx context.Context) (destinations.Requester, error) {
 	return destinations.Requester{Actor: id.Actor(), Transport: id.Transport, Address: clientAddress(ctx)}, nil
 }
 
-// CreateDestination is createDestination (C-13.FR-2, FR-3): a Mattermost Destination, saved once its Destination check
-// passed on the interactive path; the other types answer unsupported until their stories.
+// CreateDestination is createDestination (C-13.FR-2, FR-3, C-14.FR-2): a Mattermost or Telegram Destination, saved
+// once its Destination check passed on the interactive path, or an outgoing webhook.
 func (s *Server) CreateDestination(ctx context.Context, req gen.CreateDestinationRequestObject) (
 	gen.CreateDestinationResponseObject, error) {
 	r, err := destinationRequester(ctx)
@@ -152,8 +151,8 @@ func (s *Server) CreateDestination(ctx context.Context, req gen.CreateDestinatio
 		Headers: gen.CreateDestination201ResponseHeaders{ETag: &tag, Location: &location}}, nil
 }
 
-// UpdateDestination is updateDestination, with If-Match: saving a Mattermost Destination runs its Destination check
-// as createDestination does.
+// UpdateDestination is updateDestination, with If-Match: saving a Mattermost or Telegram Destination runs its
+// Destination check as createDestination does.
 func (s *Server) UpdateDestination(ctx context.Context, req gen.UpdateDestinationRequestObject) (
 	gen.UpdateDestinationResponseObject, error) {
 	r, err := destinationRequester(ctx)
@@ -187,7 +186,7 @@ func (s *Server) UpdateDestination(ctx context.Context, req gen.UpdateDestinatio
 		nil
 }
 
-// CheckDestination is checkDestination (C-13.FR-10) on the interactive path: each check with its result, and the
+// CheckDestination is checkDestination (C-13.FR-10, C-14.FR-14) on the interactive path: each check with its result, and the
 // health after it; a passing check ends a Broken state.
 func (s *Server) CheckDestination(ctx context.Context, req gen.CheckDestinationRequestObject) (
 	gen.CheckDestinationResponseObject, error) {
@@ -220,18 +219,20 @@ func templateProblem(err error) error {
 	return err
 }
 
-// destinationInputOf is the Input of a Destination's body; the types without a write path yet reach the service with
-// their type only, which refuses them.
+// destinationInputOf is the Input of a Destination's body, by its type.
 func destinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
 	kind, err := body.Discriminator()
 	if err != nil {
 		return destinations.Input{}, fieldProblem(http.StatusBadRequest, "/type", fieldInvalidFormat,
 			"The type is not mattermost, telegram or webhook.")
 	}
-	if kind == delivery.TypeWebhook {
+	switch kind {
+	case delivery.TypeWebhook:
 		return webhookInputOf(body)
-	}
-	if kind != delivery.TypeMattermost {
+	case delivery.TypeTelegram:
+		return telegramDestinationInputOf(body)
+	case delivery.TypeMattermost:
+	default:
 		return destinations.Input{Type: kind}, nil
 	}
 	m, err := body.AsMattermostDestinationInput()
@@ -247,6 +248,22 @@ func destinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
 		Limiter: destinations.Limiter{Limit: int64(m.Limiter.Limit), PerSeconds: int64(m.Limiter.PerSeconds)},
 		Mattermost: &destinations.MattermostInput{Connection: m.ConnectionId, TeamID: m.TeamId,
 			ChannelID: m.ChannelId}}, nil
+}
+
+// telegramDestinationInputOf is the Input of a Telegram Destination's body: its Connection and its channel (C-14.FR-2).
+func telegramDestinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
+	t, err := body.AsTelegramDestinationInput()
+	if err != nil {
+		return destinations.Input{}, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
+			"The body is not a Telegram Destination.")
+	}
+	set, err := mentionSettingsOf(t.Mentions)
+	if err != nil {
+		return destinations.Input{}, err
+	}
+	return destinations.Input{Type: delivery.TypeTelegram, Name: t.Name, Mentions: set,
+		Limiter:  destinations.Limiter{Limit: int64(t.Limiter.Limit), PerSeconds: int64(t.Limiter.PerSeconds)},
+		Telegram: &destinations.TelegramInput{Connection: t.ConnectionId, ChannelID: t.ChannelId}}, nil
 }
 
 // webhookInputOf is the Input of an outgoing webhook's body: its mode, the request of the events mode and its proxy.

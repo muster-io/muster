@@ -5,6 +5,7 @@ package faketelegram_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -316,8 +317,8 @@ func waitFor(t *testing.T, cond func() bool) {
 
 func TestUnknownMethodsAndPaths(t *testing.T) {
 	_, base := start(t)
-	if s, _, _ := call(t, http.MethodPost, base+"/bot"+token+"/sendMessage", `{}`); s != http.StatusNotImplemented {
-		t.Fatalf("sendMessage = %d", s)
+	if s, _, _ := call(t, http.MethodPost, base+"/bot"+token+"/sendPhoto", `{}`); s != http.StatusNotImplemented {
+		t.Fatalf("sendPhoto = %d", s)
 	}
 	if s, _, _ := call(t, http.MethodDelete, base+"/bot"+token+"/getMe", ""); s != http.StatusNotFound {
 		t.Fatalf("DELETE = %d", s)
@@ -328,5 +329,285 @@ func TestUnknownMethodsAndPaths(t *testing.T) {
 	if s, _, _ := call(t, http.MethodPost, base+"/_fake/updates", `{"token":"","update":{}}`); s !=
 		http.StatusBadRequest {
 		t.Fatalf("update without token = %d", s)
+	}
+}
+
+// bot calls method of the Bot API with a JSON body.
+func bot(t *testing.T, base, method, body string) (int, answer) {
+	t.Helper()
+	status, _, a := call(t, http.MethodPost, base+"/bot"+token+"/"+method, body)
+	return status, a
+}
+
+func member(t *testing.T, base string, chat int64, status string, post, edit bool) {
+	t.Helper()
+	body, _ := json.Marshal(faketelegram.Member{Status: status, CanPostMessages: post, CanEditMessages: edit})
+	if s, b, _ := call(t, http.MethodPut, fmt.Sprintf("%s/_fake/chats/%d/members/%d", base, chat, faketelegram.BotID),
+		string(body)); s != http.StatusOK {
+		t.Fatalf("set member = %d %s", s, b)
+	}
+}
+
+// F-001: a bot joins a channel only as an admin; added without rights, its status stays left.
+func TestBotJoinsChannelOnlyAsAdmin(t *testing.T) {
+	_, base := start(t)
+	var m struct {
+		Status          string `json:"status"`
+		CanPostMessages bool   `json:"can_post_messages"`
+		CanEditMessages bool   `json:"can_edit_messages"`
+	}
+	read := func() {
+		t.Helper()
+		status, a := bot(t, base, "getChatMember", fmt.Sprintf(`{"chat_id":"@muster_alerts","user_id":%d}`,
+			faketelegram.BotID))
+		if status != http.StatusOK || json.Unmarshal(a.Result, &m) != nil {
+			t.Fatalf("getChatMember = %d %+v", status, a)
+		}
+	}
+	read()
+	if m.Status != faketelegram.StatusAdministrator || !m.CanPostMessages || !m.CanEditMessages {
+		t.Fatalf("default = %+v", m)
+	}
+	member(t, base, faketelegram.ChannelID, faketelegram.StatusLeft, false, false)
+	read()
+	if m.Status != faketelegram.StatusLeft {
+		t.Fatalf("without admin rights = %+v", m)
+	}
+	if s, a := bot(t, base, "sendMessage", `{"chat_id":-1001000000001,"text":"x"}`); s != http.StatusForbidden ||
+		a.Description != "Forbidden: bot is not a member of the channel chat" {
+		t.Fatalf("send while left = %d %+v", s, a)
+	}
+	member(t, base, faketelegram.ChannelID, faketelegram.StatusAdministrator, false, true)
+	if s, a := bot(t, base, "sendMessage", `{"chat_id":-1001000000001,"text":"x"}`); s != http.StatusBadRequest ||
+		a.Description != faketelegram.DescriptionNeedAdmin {
+		t.Fatalf("send without can_post_messages = %d %+v", s, a)
+	}
+}
+
+// F-002: getChat names linked_chat_id only for a channel with comments enabled.
+func TestLinkedChatOnlyWithComments(t *testing.T) {
+	_, base := start(t)
+	var ch faketelegram.Chat
+	get := func(chat string) {
+		t.Helper()
+		status, a := bot(t, base, "getChat", `{"chat_id":`+chat+`}`)
+		ch = faketelegram.Chat{}
+		if status != http.StatusOK || json.Unmarshal(a.Result, &ch) != nil {
+			t.Fatalf("getChat %s = %d %+v", chat, status, a)
+		}
+	}
+	get(`"@muster_alerts"`)
+	if ch.ID != faketelegram.ChannelID || ch.Type != "channel" || ch.LinkedChatID != faketelegram.GroupID {
+		t.Fatalf("channel = %+v", ch)
+	}
+	get(`"@no_comments"`)
+	if ch.ID != faketelegram.NoCommentsID || ch.LinkedChatID != 0 {
+		t.Fatalf("channel without comments = %+v", ch)
+	}
+	get("-1001000000002")
+	if ch.Title != faketelegram.GroupTitle || ch.Type != "supergroup" {
+		t.Fatalf("group = %+v", ch)
+	}
+	if s, b, _ := call(t, http.MethodPut, base+"/_fake/chats/@no_comments", `{"linked_chat_id":-1001000000002}`); s !=
+		http.StatusOK {
+		t.Fatalf("enable comments = %d %s", s, b)
+	}
+	get(`"@no_comments"`)
+	if ch.LinkedChatID != faketelegram.GroupID {
+		t.Fatalf("after enabling comments = %+v", ch)
+	}
+	get(`"@muster_alerts"`)
+	if ch.LinkedChatID != 0 {
+		t.Fatalf("the group moved to the other channel, yet = %+v", ch)
+	}
+	if s, a := bot(t, base, "getChat", `{"chat_id":"@nobody"}`); s != http.StatusBadRequest ||
+		a.Description != faketelegram.DescriptionChatNotFound {
+		t.Fatalf("unknown chat = %d %+v", s, a)
+	}
+}
+
+// F-003: a bot outside the discussion group gets 403 from getChatMember there.
+func TestBotOutsideGroupIsForbidden(t *testing.T) {
+	_, base := start(t)
+	member(t, base, faketelegram.GroupID, faketelegram.StatusLeft, false, false)
+	s, a := bot(t, base, "getChatMember", fmt.Sprintf(`{"chat_id":-1001000000002,"user_id":%d}`, faketelegram.BotID))
+	if s != http.StatusForbidden || a.Description != "Forbidden: bot is not a member of the supergroup chat" {
+		t.Fatalf("getChatMember outside the group = %d %+v", s, a)
+	}
+	member(t, base, faketelegram.GroupID, faketelegram.StatusMember, false, false)
+	s, a = bot(t, base, "getChatMember", fmt.Sprintf(`{"chat_id":-1001000000002,"user_id":%d}`, faketelegram.BotID))
+	if s != http.StatusOK || !strings.Contains(string(a.Result), `"status":"member"`) {
+		t.Fatalf("getChatMember as a member = %d %+v", s, a)
+	}
+}
+
+const keyboard = `{"inline_keyboard":[[{"text":"Ack","callback_data":"a"}]]}`
+
+// F-011 and F-017: an edit without reply_markup removes the keyboard; an edit that changes nothing is refused.
+func TestEditsAndKeyboards(t *testing.T) {
+	f, base := start(t)
+	s, a := bot(t, base, "sendMessage", `{"chat_id":"@muster_alerts","text":"<b>one</b>","parse_mode":"HTML",
+		"reply_markup":`+keyboard+`}`)
+	if s != http.StatusOK {
+		t.Fatalf("send = %d %+v", s, a)
+	}
+	edit := func(body string) (int, answer) {
+		return bot(t, base, "editMessageText", `{"chat_id":-1001000000001,"message_id":1,`+body+`}`)
+	}
+	if s, a := edit(`"text":"<b>one</b>","parse_mode":"HTML","reply_markup":` + keyboard); s != http.StatusBadRequest ||
+		a.Description != faketelegram.DescriptionNotModified {
+		t.Fatalf("unchanged edit = %d %+v", s, a)
+	}
+	if s, a := edit(`"text":"<b>two</b>","parse_mode":"HTML","reply_markup":` + keyboard); s != http.StatusOK {
+		t.Fatalf("edit with keyboard = %d %+v", s, a)
+	}
+	if s, a := edit(`"text":"<b>three</b>","parse_mode":"HTML"`); s != http.StatusOK {
+		t.Fatalf("edit without keyboard = %d %+v", s, a)
+	}
+	msgs := f.Messages(faketelegram.ChannelID)
+	if len(msgs) != 1 || len(msgs[0].Edits) != 2 || msgs[0].Text != "<b>three</b>" || msgs[0].ReplyMarkup != nil ||
+		msgs[0].Edits[0].ReplyMarkup == nil {
+		t.Fatalf("messages = %+v", msgs)
+	}
+	if s, a := bot(t, base, "editMessageText", `{"chat_id":-1001000000001,"message_id":9,"text":"x"}`); s !=
+		http.StatusBadRequest || a.Description != faketelegram.DescriptionEditNotFound {
+		t.Fatalf("edit of a missing message = %d %+v", s, a)
+	}
+	member(t, base, faketelegram.ChannelID, faketelegram.StatusAdministrator, true, false)
+	if s, a := edit(`"text":"four"`); s != http.StatusBadRequest || a.Description != faketelegram.DescriptionNeedAdmin {
+		t.Fatalf("edit without can_edit_messages = %d %+v", s, a)
+	}
+}
+
+// F-012: a channel post notifies both accounts, without sound with disable_notification; an edit notifies nobody.
+func TestNotificationsOfChannelPosts(t *testing.T) {
+	f, base := start(t)
+	bot(t, base, "sendMessage", `{"chat_id":-1001000000001,"text":"loud"}`)
+	bot(t, base, "sendMessage", `{"chat_id":-1001000000001,"text":"quiet","disable_notification":true}`)
+	bot(t, base, "editMessageText", `{"chat_id":-1001000000001,"message_id":1,"text":"edited"}`)
+	bot(t, base, "sendMessage", `{"chat_id":-1001000000002,"text":"group"}`)
+	want := []faketelegram.Notification{
+		{Account: "member", Chat: faketelegram.ChannelID, MessageID: 1, Sound: true},
+		{Account: "subscriber", Chat: faketelegram.ChannelID, MessageID: 1, Sound: true},
+		{Account: "member", Chat: faketelegram.ChannelID, MessageID: 2, Sound: false},
+		{Account: "subscriber", Chat: faketelegram.ChannelID, MessageID: 2, Sound: false},
+		{Account: "member", Chat: faketelegram.GroupID, MessageID: 1, Sound: true},
+	}
+	if got := f.Notifications(); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("notifications = %+v", got)
+	}
+	_, body, _ := call(t, http.MethodGet, base+"/_fake/notifications", "")
+	if !strings.Contains(body, `"account":"subscriber"`) {
+		t.Fatalf("GET notifications = %s", body)
+	}
+}
+
+// F-016: sends and edits share a budget of 20 per minute per chat; the 21st answers 429 with the exact retry_after.
+func TestChatBudget(t *testing.T) {
+	f, base := start(t)
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	f.SetClock(func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return now
+	})
+	advance := func(d time.Duration) {
+		mu.Lock()
+		now = now.Add(d)
+		mu.Unlock()
+	}
+	for i := range 20 {
+		method, body := "sendMessage", `{"chat_id":-1001000000002,"text":"m`+fmt.Sprint(i)+`"}`
+		if i%2 == 1 {
+			method, body = "editMessageText", `{"chat_id":-1001000000002,"message_id":1,"text":"e`+fmt.Sprint(i)+`"}`
+		}
+		if s, a := bot(t, base, method, body); s != http.StatusOK {
+			t.Fatalf("call %d = %d %+v", i+1, s, a)
+		}
+		advance(1500 * time.Millisecond)
+	}
+	_, body, a := call(t, http.MethodPost, base+"/bot"+token+"/sendMessage",
+		`{"chat_id":-1001000000002,"text":"over"}`)
+	var p struct {
+		Parameters struct {
+			RetryAfter int `json:"retry_after"`
+		} `json:"parameters"`
+	}
+	_ = json.Unmarshal([]byte(body), &p)
+	if a.ErrorCode != http.StatusTooManyRequests || p.Parameters.RetryAfter != 30 ||
+		a.Description != "Too Many Requests: retry after 30" {
+		t.Fatalf("21st call = %s", body)
+	}
+	if s, _ := bot(t, base, "sendMessage", `{"chat_id":-1001000000001,"text":"other chat"}`); s != http.StatusOK {
+		t.Fatalf("another chat has its own budget: %d", s)
+	}
+	advance(30 * time.Second)
+	if s, a := bot(t, base, "sendMessage", `{"chat_id":-1001000000002,"text":"again"}`); s != http.StatusOK {
+		t.Fatalf("after retry_after = %d %+v", s, a)
+	}
+}
+
+// Telegram HTML is parsed: a known tag that is not closed, an unknown tag and a bare entity are refused; the length
+// counts the visible text; callback_data is at most 64 bytes.
+func TestMessageContent(t *testing.T) {
+	_, base := start(t)
+	for body, want := range map[string]string{
+		`"text":"<b>x","parse_mode":"HTML"`:             `Bad Request: can't parse entities: can't find end tag`,
+		`"text":"<table>x</table>","parse_mode":"HTML"`: `Bad Request: can't parse entities: unsupported start tag`,
+		`"text":"a & b","parse_mode":"HTML"`:            `Bad Request: can't parse entities: unsupported entity`,
+		`"text":"a > b","parse_mode":"HTML"`:            `Bad Request: can't parse entities: character '>'`,
+		`"text":"<b>x</i>","parse_mode":"HTML"`:         `Bad Request: can't parse entities: unmatched end tag`,
+		`"text":"<b></b>","parse_mode":"HTML"`:          faketelegram.DescriptionTextEmpty,
+		`"text":"` + strings.Repeat("x", 4097) + `"`:    faketelegram.DescriptionTooLong,
+		`"text":"x","reply_markup":{"inline_keyboard":[[{"text":"a","callback_data":"` + strings.Repeat("d", 65) + `"}]]}`: faketelegram.DescriptionButtonData,
+	} {
+		if s, a := bot(t, base, "sendMessage", `{"chat_id":-1001000000001,`+body+`}`); s != http.StatusBadRequest ||
+			!strings.HasPrefix(a.Description, want) {
+			t.Errorf("%.60s = %d %q, want %q", body, s, a.Description, want)
+		}
+	}
+	long := strings.Repeat("&lt;", 4096)
+	if s, a := bot(t, base, "sendMessage", `{"chat_id":-1001000000001,"text":"<blockquote expandable>`+long+
+		`</blockquote>","parse_mode":"HTML"}`); s != http.StatusOK {
+		t.Fatalf("4,096 visible characters = %d %+v", s, a)
+	}
+	if s, a := bot(t, base, "sendMessage", `{"chat_id":-1001000000001,"text":"&#64;&#x40; <a href=\"x\">y</a>",
+		"parse_mode":"HTML","reply_parameters":{"message_id":7}}`); s != http.StatusBadRequest ||
+		a.Description != faketelegram.DescriptionReplyNotFound {
+		t.Fatalf("reply to a missing message = %d %+v", s, a)
+	}
+}
+
+// The control endpoints list messages by chat and refuse what they cannot apply.
+func TestChatControl(t *testing.T) {
+	_, base := start(t)
+	bot(t, base, "sendMessage", `{"chat_id":-1001000000001,"text":"p","disable_notification":true,
+		"reply_markup":`+keyboard+`}`)
+	_, body, _ := call(t, http.MethodGet, base+"/_fake/messages?chat=@muster_alerts", "")
+	var msgs []faketelegram.Message
+	if err := json.Unmarshal([]byte(body), &msgs); err != nil || len(msgs) != 1 || !msgs[0].DisableNotification ||
+		!strings.Contains(string(msgs[0].ReplyMarkup), `"Ack"`) {
+		t.Fatalf("messages = %s", body)
+	}
+	_, body, _ = call(t, http.MethodGet, base+"/_fake/messages", "")
+	if !strings.Contains(body, `"text":"p"`) {
+		t.Fatalf("all messages = %s", body)
+	}
+	_, body, _ = call(t, http.MethodGet, base+"/_fake/chats", "")
+	if !strings.Contains(body, faketelegram.GroupTitle) {
+		t.Fatalf("chats = %s", body)
+	}
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodGet, "/_fake/messages?chat=@nobody", ""},
+		{http.MethodPut, "/_fake/chats/@nobody", `{"linked_chat_id":0}`},
+		{http.MethodPut, "/_fake/chats/-1/members/1", `{"status":"member"}`},
+		{http.MethodPut, "/_fake/chats/@muster_alerts/members/1", `{"status":"owner"}`},
+		{http.MethodPut, "/_fake/chats/@muster_alerts/members/x", `{"status":"member"}`},
+		{http.MethodPut, "/_fake/chats/@muster_alerts/members/1", `{`},
+	} {
+		if s, _, _ := call(t, c.method, base+c.path, c.body); s/100 != 4 {
+			t.Errorf("%s %s = %d", c.method, c.path, s)
+		}
 	}
 }

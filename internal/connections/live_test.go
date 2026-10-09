@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -31,10 +32,12 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/routing"
+	"github.com/muster-io/muster/internal/telegram"
 )
 
 func TestMain(m *testing.M) {
@@ -117,7 +120,7 @@ func setupLiveEnv(t *testing.T, s dbtest.Server) *liveEnv {
 		}})
 	e.dests = destinations.New(org.ID, destinations.NewStore(d.Pool))
 	e.dests.SetWriter(destinations.WriterConfig{Writer: destinations.NewWriter(d.Pool), Audit: w, Business: business,
-		Mentions: mentions.New(org.ID, d.Pool), Mattermost: e.conns})
+		Mentions: mentions.New(org.ID, d.Pool), Mattermost: e.conns, Telegram: e.conns})
 	return e
 }
 
@@ -152,7 +155,70 @@ func TestLive(t *testing.T) {
 		t.Run("deleteConnection", e.deleteConnection)
 		t.Run("demo", e.demo)
 		t.Run("telegram", e.telegram)
+		t.Run("telegramDestinations", e.telegramDestinations)
 	})
+}
+
+// telegramDestinations is C-14.FR-2 and FR-14 on the real store: a Telegram Destination saved from its channel alone
+// stores what its check found, the adapter's Target and muster doctor read it, a post goes to the channel, and its
+// Connection cannot be deleted while it exists.
+func (e *liveEnv) telegramDestinations(t *testing.T) {
+	ctx := t.Context()
+	f := faketelegram.New()
+	if err := f.Start(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close(context.WithoutCancel(ctx)) })
+	c, err := e.conns.Create(ctx, by, connections.Input{Type: connections.TypeTelegram, Name: "live-tg-dest",
+		BotAPIBaseURL: f.URL(), UpdateMode: connections.ModeLongPolling, BotToken: keyring.Replace("777001:live-dest"),
+		Limiter: connections.Limiter{Limit: 1000, PerSeconds: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dby := destinations.Requester{Actor: by.Actor, Transport: by.Transport}
+	in := destinations.Input{Type: destinations.TypeTelegram, Name: "live-tg", Mentions: quiet(),
+		Limiter:  destinations.Limiter{Limit: 10, PerSeconds: 60},
+		Telegram: &destinations.TelegramInput{Connection: c.PublicID, ChannelID: "@no_comments"}}
+	if _, err := e.dests.Create(ctx, dby, in); !errors.As(err, new(*destinations.CheckFailedError)) {
+		t.Fatalf("no comments = %v", err)
+	}
+	in.Telegram.ChannelID = "@muster_alerts"
+	d, err := e.dests.Create(ctx, dby, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.dests.Get(ctx, d.PublicID)
+	if err != nil || *got.TelegramDiscussionGroupID != "-1001000000002" ||
+		*got.TelegramDiscussionGroupTitle != faketelegram.GroupTitle || *got.TelegramChannelID != "@muster_alerts" ||
+		e.count(t, `SELECT count(*) FROM destinations WHERE id = $1 AND telegram_channel_chat_id = $2`, d.ID,
+			faketelegram.ChannelID) != 1 {
+		t.Fatalf("stored %+v, %v", got, err)
+	}
+	in.Name = "live-tg-renamed"
+	if _, err := e.dests.Update(ctx, dby, d.PublicID, nil, in); err != nil {
+		t.Fatal(err)
+	}
+	target, err := e.conns.TelegramTarget(ctx, d.ID)
+	if err != nil || target.ChannelID != faketelegram.ChannelID || target.GroupID != faketelegram.GroupID {
+		t.Fatalf("target %+v, %v", target, err)
+	}
+	a := &telegram.Adapter{Targets: e.conns}
+	call := delivery.Call{Class: outbound.ClassDelivery, Destination: delivery.Destination{ID: d.ID,
+		Type: delivery.TypeTelegram}}
+	if o := a.Publish(ctx, call, messages.Message{Language: "en", Colour: messages.ColourFiring,
+		Heading: &messages.Heading{Number: 1, Title: "live"}, Buttons: []messages.Button{}}); o.Kind !=
+		delivery.OutcomeOK || len(f.Messages(faketelegram.ChannelID)) != 1 {
+		t.Fatalf("publish = %+v", o)
+	}
+	found, err := e.conns.Doctor(ctx, connectionsdb.New(e.d.Pool), 2*time.Second)
+	if err != nil || !slices.ContainsFunc(found, func(f connections.Finding) bool {
+		return f.Kind == connections.FindingDestination && f.Name == "live-tg-renamed" && f.OK()
+	}) {
+		t.Fatalf("doctor = %+v, %v", found, err)
+	}
+	if err := e.conns.Delete(ctx, by, c.PublicID, nil); !errors.Is(err, connections.ErrInUse) {
+		t.Fatalf("delete in use = %v", err)
+	}
 }
 
 // telegram is C-14.FR-1 on the real store: a Telegram Connection created and switched to the webhook mode and back

@@ -70,8 +70,17 @@ type memStore struct {
 	fail      map[string]error
 	tx        int
 	committed int
-	// targets are the Mattermost Destinations by id, as GetDestinationTarget reads them.
-	targets map[int64]memTarget
+	// targets are the Mattermost Destinations by id, as GetDestinationTarget reads them, and tgTargets the Telegram
+	// ones, as GetTelegramDestinationTarget reads them.
+	targets   map[int64]memTarget
+	tgTargets map[int64]memTGTarget
+}
+
+// memTGTarget is a Telegram Destination: its Connection, its channel as entered and the ids its check learned.
+type memTGTarget struct {
+	connection         int64
+	channel            string
+	channelID, groupID int64
 }
 
 // memTarget is a Mattermost Destination: its Connection, team and channel.
@@ -82,7 +91,7 @@ type memTarget struct {
 
 func newMemStore() *memStore {
 	return &memStore{rows: map[int64]*memRow{}, dests: map[int64]int64{}, fail: map[string]error{},
-		targets: map[int64]memTarget{}}
+		targets: map[int64]memTarget{}, tgTargets: map[int64]memTGTarget{}}
 }
 
 // txHandle stands for the transaction that the Abandon hook writes through.
@@ -336,6 +345,26 @@ func (s *memStore) GetDestinationTarget(_ context.Context, a dbgen.GetDestinatio
 		Type: c.Type, Name: c.Name, MattermostServerUrl: c.MattermostServerUrl, BotTokenCiphertext: c.BotTokenCiphertext,
 		BotTokenKeyID: c.BotTokenKeyID, BotTokenUpdatedAt: c.BotTokenUpdatedAt, Proxy: c.Proxy,
 		ProxyPasswordCiphertext: c.ProxyPasswordCiphertext, ProxyPasswordKeyID: c.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: c.ProxyPasswordUpdatedAt, Version: c.Version}, nil
+}
+
+func (s *memStore) GetTelegramDestinationTarget(_ context.Context, a dbgen.GetTelegramDestinationTargetParams) (
+	dbgen.GetTelegramDestinationTargetRow, error) {
+	if err := s.fail["GetTelegramDestinationTarget"]; err != nil {
+		return dbgen.GetTelegramDestinationTargetRow{}, err
+	}
+	d, ok := s.tgTargets[a.DestinationID]
+	r := s.rows[d.connection]
+	if !ok || r == nil || r.deleted || a.OrgID != 1 {
+		return dbgen.GetTelegramDestinationTargetRow{}, pgx.ErrNoRows
+	}
+	c := r.row
+	return dbgen.GetTelegramDestinationTargetRow{TelegramChannelID: pgtype.Text{String: d.channel, Valid: true},
+		TelegramChannelChatID:    pgtype.Int8{Int64: d.channelID, Valid: d.channelID != 0},
+		TelegramDiscussionChatID: pgtype.Int8{Int64: d.groupID, Valid: d.groupID != 0}, ID: c.ID,
+		PublicID: c.PublicID, Type: c.Type, Name: c.Name, TelegramBotApiBaseUrl: c.TelegramBotApiBaseUrl,
+		BotTokenCiphertext: c.BotTokenCiphertext, BotTokenKeyID: c.BotTokenKeyID, BotTokenUpdatedAt: c.BotTokenUpdatedAt,
+		Proxy: c.Proxy, ProxyPasswordCiphertext: c.ProxyPasswordCiphertext, ProxyPasswordKeyID: c.ProxyPasswordKeyID,
 		ProxyPasswordUpdatedAt: c.ProxyPasswordUpdatedAt, Version: c.Version}, nil
 }
 

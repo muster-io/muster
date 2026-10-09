@@ -138,6 +138,26 @@ FROM destinations
 WHERE org_id = @org_id AND type = 'mattermost' AND deleted_at IS NULL
 ORDER BY id;
 
+-- GetTelegramDestinationTarget reads where a Telegram Destination sends — its channel as entered and the ids of the
+-- channel and of its discussion group that its Destination check learned — with the Connection it sends through and
+-- that Connection's secrets as stored. A deleted Destination is read too, since its final edit still runs; its
+-- Connection must not be deleted.
+-- name: GetTelegramDestinationTarget :one
+SELECT d.telegram_channel_id, d.telegram_channel_chat_id, d.telegram_discussion_chat_id, c.id, c.public_id, c.type,
+       c.name, c.telegram_bot_api_base_url, c.bot_token_ciphertext, c.bot_token_key_id, c.bot_token_updated_at,
+       c.proxy, c.proxy_password_ciphertext, c.proxy_password_key_id, c.proxy_password_updated_at, c.version
+FROM destinations d
+JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+WHERE d.org_id = @org_id AND d.id = @destination_id AND d.type = 'telegram' AND c.deleted_at IS NULL;
+
+-- ListTelegramDestinations lists the Telegram Destinations that are not deleted, in id order, with their Connection
+-- and channel, for muster doctor.
+-- name: ListTelegramDestinations :many
+SELECT id, public_id, name, connection_id, telegram_channel_id
+FROM destinations
+WHERE org_id = @org_id AND type = 'telegram' AND deleted_at IS NULL
+ORDER BY id;
+
 -- ListPollingConnections lists the Telegram Connections that are not deleted and are in the long-polling mode, with
 -- their secrets as stored and their telegram_update_offset, for the Leader's poller.
 -- name: ListPollingConnections :many

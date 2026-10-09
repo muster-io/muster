@@ -1,7 +1,7 @@
 # Verified facts
 
 - Status: Living document
-- Date: 2026-10-08
+- Date: 2026-10-09
 
 External behaviour that Muster's design relies on and that was checked against the real system rather than taken from
 its documentation: how Telegram, Mattermost and Alertmanager actually behave. Each fact has a stable id `F-NNN`, never
@@ -105,6 +105,16 @@ chat. — _2026-10-03 · bursts against the group · Bot API 10.3_ · Used in C-
 **F-017. Editing one channel post fast.** 19 edits of one channel post passed within about 28 s, one every 1.6 s; the
 20th got `429` with `retry_after` 14. An edit that changes nothing fails with `400 message is not modified`. —
 _2026-10-03 · edits in a loop · Bot API 10.3_ · Used in C-11.FR-1, C-14.FR-7.
+
+**F-065. A bot edits its own messages at any age.** The bot edited 48 of 48 of its own messages that were 124 to 144
+hours old — in the channel and in the discussion group, with and without an inline keyboard. The TDLib source agrees:
+`td/telegram/MessagesManager.cpp` sets `has_edit_time_limit = !(is_bot && m->is_outgoing)`, which exempts a bot's
+outgoing messages from the edit time limit. The 48-hour limit of the
+[Bot API documentation](https://core.telegram.org/bots/api) applies to `deleteMessage` in groups and to business
+messages not sent by the bot. `400 Bad Request: Message can't be edited`, which Telegram also answers for forwarded
+messages, reply keyboards and other users' messages, therefore does not mean that a Root message is too old: Muster
+classifies it as gone. — _2026-10-09 · a live test with the test bot, and the TDLib source · cloud Bot API_ · Used in
+C-14.FR-7, L1 open question 3.
 
 **F-018. A second poller interrupts the first.** A second `getUpdates` on the same token ends the long poll already
 running with `409 Conflict: terminated by other getUpdates request`; after that the two pollers take turns. —
@@ -409,10 +419,6 @@ snippet with and without the catch-all; Alertmanager routing documentation_ · U
 
 ## Pending
 
-- **Editing old messages (Telegram).** Whether the bot can still edit a channel post, and its own message in the
-  discussion group, 48 hours and 7 days after sending it, with and without an inline keyboard. A post sent on 2026-10-03
-  is edited after 2026-10-05 and again after 2026-10-10. If edits stop working, long-lived Root messages need
-  republishing ([L1 open question 3](prd/L1.md#51-test-environment-facts)).
 - **Mattermost.** How the client shows buttons on Thread replies, which the server accepts (F-055,
   [L1 open question 6](prd/L1.md#51-test-environment-facts)), and how phones are notified
   ([question 4](prd/L1.md#51-test-environment-facts)): the test server had push notifications off. Whether a bot

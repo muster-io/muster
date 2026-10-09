@@ -60,6 +60,7 @@ import (
 	"github.com/muster-io/muster/internal/routing"
 	rdb "github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/timers"
 	timersdb "github.com/muster-io/muster/internal/timers/dbgen"
 	"github.com/muster-io/muster/internal/tokens"
@@ -1663,7 +1664,8 @@ func TestConfigureWorker(t *testing.T) {
 	ingestURL, _ := url.Parse("https://ingest.example.org")
 	business := clock.NewManual(time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC))
 	log := logging.New(io.Discard, logging.LevelInfo)
-	p := &process{orgID: 1, db: &fakeDB{}, log: log, clocks: clock.Clocks{Business: business, Real: business},
+	realClock := clock.NewManual(time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC))
+	p := &process{orgID: 1, db: &fakeDB{}, log: log, clocks: clock.Clocks{Business: business, Real: realClock},
 		cfg:     config.Config{PublicURL: public, IngestURL: ingestURL, RunbookBaseURL: public},
 		replica: keyring.NewRecorder(nil, nil, business, log, "r-1", "host", "v1"),
 		worker:  &ingest.Worker{Log: log}, timers: &timers.Worker{Log: log}, deliverer: &delivery.Worker{Log: log},
@@ -1675,6 +1677,10 @@ func TestConfigureWorker(t *testing.T) {
 	if !ok || a.PublicURL != "https://muster.example.org" || a.IngestURL != "https://ingest.example.org" ||
 		a.Targets != mattermost.Targets(p.connections) {
 		t.Fatalf("adapters = %+v", p.deliverer.Adapters)
+	}
+	if tg, ok := p.deliverer.Adapters[delivery.TypeTelegram].(*telegram.Adapter); !ok ||
+		tg.Targets != telegram.Targets(p.connections) || tg.Clock != realClock {
+		t.Fatalf("telegram adapter = %+v", p.deliverer.Adapters[delivery.TypeTelegram])
 	}
 	id := int64(9)
 	for name, h := range p.timers.Handlers {

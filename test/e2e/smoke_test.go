@@ -93,14 +93,14 @@ func TestDevModeFakes(t *testing.T) {
 		if paths := recordedPaths(t, h.Fakes.Telegram); !slices.Contains(paths, "/bot123:abc/getMe") {
 			t.Errorf("recorded paths %v, want /bot123:abc/getMe among them", paths)
 		}
-		a := call(t, http.MethodPost, h.Fakes.Telegram+"/bot123:abc/sendMessage", `{"chat_id":1,"text":"hi"}`)
+		a := call(t, http.MethodPost, h.Fakes.Telegram+"/bot123:abc/sendPhoto", `{"chat_id":1,"photo":"x"}`)
 		var e struct {
 			OK        bool `json:"ok"`
 			ErrorCode int  `json:"error_code"`
 		}
 		decode(t, a, &e)
 		if a.status != http.StatusNotImplemented || e.OK || e.ErrorCode != http.StatusNotImplemented {
-			t.Errorf("sendMessage = %d %s, want 501 with ok false and error_code 501", a.status, a.body)
+			t.Errorf("sendPhoto = %d %s, want 501 with ok false and error_code 501", a.status, a.body)
 		}
 	})
 

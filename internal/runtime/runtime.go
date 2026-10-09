@@ -773,7 +773,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, routeID int64, added, removed []int64) error {
 		return p.delivery.RouteDestinationsChanged(ctx, tx, routeID, added, removed)
 	})
-	// Connections and Mattermost Destinations check their bot on the interactive path, which takes the tokens of the
+	// Connections and Mattermost and Telegram Destinations check their bot on the interactive path, which takes the tokens of the
 	// same limiters as the delivery worker (C-11.FR-2).
 	interactive := &delivery.Interactive{OrgID: orgID, Store: p.db.DeliveryStore(), Clocks: p.clocks}
 	conns := connections.New(connections.Config{OrgID: orgID, Store: p.db.ConnectionsStore(), Keyring: p.keyring,
@@ -797,7 +797,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Retire: func(ctx context.Context, tx destinationsdb.DBTX, id int64) error {
 			return p.delivery.RetireDestination(ctx, tx, id)
 		},
-		Mentions: p.mentions, Mattermost: conns,
+		Mentions: p.mentions, Mattermost: conns, Telegram: conns,
 		Healthy: p.delivery.EndBroken, Keyring: p.keyring, Templates: p.sandbox})
 	if p.opts.Development {
 		if err := conns.EnsureDemo(ctx, devmode.ConnectionDemo()); err != nil {
@@ -1078,7 +1078,8 @@ func (p *process) configureWorker() {
 	p.deliverer.Lease = db.Lease{Owner: p.replica.ID(), Duration: delivery.Lease, Clocks: p.clocks}
 	p.deliverer.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
 	p.deliverer.Adapters = delivery.Adapters{delivery.TypeMattermost: &mattermost.Adapter{Targets: p.connections,
-		PublicURL: p.cfg.PublicURL.String(), IngestURL: p.cfg.IngestURL.String(), Version: buildinfo.Version}}
+		PublicURL: p.cfg.PublicURL.String(), IngestURL: p.cfg.IngestURL.String(), Version: buildinfo.Version},
+		delivery.TypeTelegram: &telegram.Adapter{Targets: p.connections, Clock: p.clocks.Real}}
 	p.deliverer.RunbookBase = p.cfg.RunbookBaseURL.String()
 	p.deliverer.PublicURL = p.cfg.PublicURL.String()
 	p.deliverer.Renderer = delivery.MessageRenderer{Renderer: p.renderer}
