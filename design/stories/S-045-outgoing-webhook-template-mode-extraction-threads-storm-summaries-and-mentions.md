@@ -206,6 +206,9 @@ None.
 - Suggested commit: `feat(webhooks): add the outgoing webhook template mode with extraction and threads`.
 - The Desired state of a template-mode delivery is the rendered "update" request, so a template that does not change
   its output for a change of status makes no call, as for a messenger whose text did not change.
+- The template forms `{{ with .Secrets }}…{{ end }}` and variables such as `$s := .Secrets` are not detected as Secret
+  references today. A missing Secret read that way renders empty instead of failing, and in the URL it can raise a false
+  `literal_credential` warning. This story either recognises these forms or refuses them on save.
 
 ## Coverage
 

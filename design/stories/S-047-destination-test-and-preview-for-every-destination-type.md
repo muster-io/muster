@@ -200,6 +200,8 @@ None.
 - Suggested commit: `feat(destinations): add destination tests and previews for every type`.
 - The press check reaches Muster through the ingest listener, possibly on another replica; `NOTIFY test_press` is how
   the waiting test learns of it without a table.
+- Saving a Broken Destination, for example an outgoing webhook after its URL was fixed, runs the probe at once instead of
+  waiting for the next probe interval.
 
 ## Coverage
 

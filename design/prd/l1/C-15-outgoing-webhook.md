@@ -45,7 +45,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   names and fields they do not know. Every event carries the current state of the Alert Group. The event `test` is sent
   only by a Destination test (C-16.FR-1): it carries an example or recent Alert Group with `test: true` and belongs to
   no Alert Group's order. Events mode is not subject to Storms: during a Storm every event is sent, `created` of the
-  Alert Groups the Storm summary stands for included. Events that came due while the Destination was Broken are sent in
+  Alert Groups the Storm summary stands for included. The event `moved_to_default_route` goes only to the outgoing
+  webhooks of the Default route: the webhook of the Route the Alert Group leaves gets no event for the move. Events that
+  came due while the Destination was Broken are sent in
   order after it recovers, none dropped and with no age limit. New event names and new fields are added
   within `version` 1; removing a field or changing its meaning needs a new `version`. The URL and headers are templates
   that may use Secrets. The schema is part of the API specification.
