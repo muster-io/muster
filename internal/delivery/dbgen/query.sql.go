@@ -3986,6 +3986,27 @@ func (q *Queries) TakeTokens(ctx context.Context, arg TakeTokensParams) (TakeTok
 	return i, err
 }
 
+const tryShareUpdateLock = `-- name: TryShareUpdateLock :one
+SELECT pg_try_advisory_xact_lock_shared($1::int, hashint8($2::bigint))::boolean AS free
+`
+
+type TryShareUpdateLockParams struct {
+	LockClass    int32
+	ConnectionID int64
+}
+
+// TryShareUpdateLock tries to take, until the transaction ends, the update lock of a Telegram Connection shared,
+// without waiting (connections' LockUpdates, class db.TelegramUpdateLockClass, keyed by hashint8 of its id): false
+// while an update of the Connection is being handled, such as a press that has not been answered yet. The worker
+// tries it after reading the Desired state of an edit of a Telegram Root message, so that the edit a press's Command
+// caused never goes out before the press's answer (C-14.FR-5, AC-18), and reschedules the edit instead of waiting.
+func (q *Queries) TryShareUpdateLock(ctx context.Context, arg TryShareUpdateLockParams) (bool, error) {
+	row := q.db.QueryRow(ctx, tryShareUpdateLock, arg.LockClass, arg.ConnectionID)
+	var free bool
+	err := row.Scan(&free)
+	return free, err
+}
+
 const updateBrokenReason = `-- name: UpdateBrokenReason :exec
 UPDATE destinations
 SET broken_reason = $1::text, broken_cause = coalesce($2::text, broken_cause)

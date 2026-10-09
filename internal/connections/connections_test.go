@@ -313,13 +313,6 @@ func (s *memStore) LockUpdates(_ context.Context, a dbgen.LockUpdatesParams) err
 	return s.fail["LockUpdates"]
 }
 
-func (s *memStore) AwaitUpdates(_ context.Context, a dbgen.AwaitUpdatesParams) error {
-	if a.LockClass != db.TelegramUpdateLockClass {
-		return errors.New("the wrong lock class")
-	}
-	return s.fail["AwaitUpdates"]
-}
-
 func (s *memStore) GetOutage(context.Context) (dbgen.GetOutageRow, error) {
 	if err := s.fail["GetOutage"]; err != nil {
 		return dbgen.GetOutageRow{}, err

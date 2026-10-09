@@ -53,6 +53,12 @@ const (
 	StormWindow             = time.Minute
 )
 
+// TelegramPressEditDelay is telegram.press_edit_delay (P-51): an edit of a Telegram Root message that comes due while
+// an update of its Connection is being handled — a press not answered yet — is tried again this much later, instead of
+// waiting for the press, so that a slow press never holds the worker and its answer still goes out before the edit
+// (C-14.FR-5, AC-18). The wait is not an attempt, records no error and takes no limiter token.
+const TelegramPressEditDelay = 500 * time.Millisecond
+
 // The defaults of the worker: the lease of a claimed row, renewed before its call, which it outlasts; the rows one
 // claim takes, few, so that Urgent work that comes due meanwhile waits behind few calls; the margin after the time its
 // tokens are due that a delivery without a token, or after a RetryAfter, waits, so that the interactive path takes the
@@ -284,6 +290,7 @@ type queries interface {
 	RenewDeliveryLease(ctx context.Context, arg dbgen.RenewDeliveryLeaseParams) error
 	MarkDelivered(ctx context.Context, arg dbgen.MarkDeliveredParams) error
 	RescheduleDelivery(ctx context.Context, arg dbgen.RescheduleDeliveryParams) error
+	TryShareUpdateLock(ctx context.Context, arg dbgen.TryShareUpdateLockParams) (bool, error)
 	StartPublication(ctx context.Context, arg dbgen.StartPublicationParams) error
 	RecordDelivered(ctx context.Context, arg dbgen.RecordDeliveredParams) (string, error)
 	RecordDeliveryRetry(ctx context.Context, arg dbgen.RecordDeliveryRetryParams) (dbgen.RecordDeliveryRetryRow, error)

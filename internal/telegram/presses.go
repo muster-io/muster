@@ -127,8 +127,9 @@ type pressed struct {
 // the press is answered with answerCallbackQuery — "Done: {command}", the refusal, or for an account without a link
 // the link to the profile — cut to MaxAnswerLength characters, in the language of the Route. The Root message is
 // edited through delivery, never here, and only after the answer: the handler runs under the Connection's update
-// lock, which the adapter awaits before an edit. The update is confirmed whatever the press led to, so that a press
-// never runs twice; only a cancelled context leaves it unconfirmed.
+// lock, which the delivery worker tries before an edit, rescheduling the edit while it is held. The update is
+// confirmed whatever the press led to, so that a press never runs twice; only a cancelled context leaves it
+// unconfirmed.
 func (p *Presses) Handle(ctx context.Context, c Conn, u Update) error {
 	q := u.CallbackQuery
 	if q == nil || q.ID == "" {
@@ -164,12 +165,10 @@ func (p *Presses) handle(ctx context.Context, c Conn, q *CallbackQuery) pressed 
 	}
 	if err != nil {
 		r.outcome, r.err = outcomeFailed, err
-		p.answer(ctx, c, q, delivery.Subject{Connection: &c.ID}, &r,
-			messages.T(messages.LanguageEnglish, "press.failed", nil))
+		p.answer(ctx, c, q, &r, messages.T(messages.LanguageEnglish, "press.failed", nil))
 		return r
 	}
-	text := p.run(ctx, q, a, b, &r)
-	p.answer(ctx, c, q, delivery.Subject{Destination: &b.Destination}, &r, text)
+	p.answer(ctx, c, q, &r, p.run(ctx, q, a, b, &r))
 	return r
 }
 
@@ -234,21 +233,28 @@ func (p *Presses) dispatch(ctx context.Context, c groups.Caller, a buttons.Actio
 	return groups.Result{}, errUnverifiable
 }
 
-// notVerified answers a press whose data or binding does not hold, limited by the Connection: it changes nothing.
+// notVerified answers a press whose data or binding does not hold: it changes nothing.
 func (p *Presses) notVerified(ctx context.Context, c Conn, q *CallbackQuery, r pressed) pressed {
 	r.outcome = outcomeNotVerified
-	p.answer(ctx, c, q, delivery.Subject{Connection: &c.ID}, &r,
-		messages.T(messages.LanguageEnglish, "press.notVerified", nil))
+	p.answer(ctx, c, q, &r, messages.T(messages.LanguageEnglish, "press.notVerified", nil))
 	return r
 }
 
 // answer answers the press q with text, cut to MaxAnswerLength characters, through the interactive path, limited by
-// s; an answer that failed, Telegram's refusal of a late one included, is r's error.
-func (p *Presses) answer(ctx context.Context, c Conn, q *CallbackQuery, s delivery.Subject, r *pressed, text string) {
+// the Connection's limiter only: an answer posts nothing to the channel, so it spends no token of the Destination's
+// (C-14.FR-5, D295), and a RetryAfter it gets holds the Connection. An answer that failed, Telegram's refusal of a
+// late one included, is r's error.
+func (p *Presses) answer(ctx context.Context, c Conn, q *CallbackQuery, r *pressed, text string) {
 	text = cut(text, MaxAnswerLength)
-	out, err := p.Path.Do(ctx, s, delivery.AnswerOp(func(ctx context.Context, call delivery.Call) delivery.Outcome {
-		return c.Client.answerCallbackQuery(ctx, call.Class, q.ID, text).Outcome
-	}))
+	id := c.ID
+	out, err := p.Path.Do(ctx, delivery.Subject{Connection: &id}, delivery.AnswerOp(
+		func(ctx context.Context, call delivery.Call) delivery.Outcome {
+			o := c.Client.answerCallbackQuery(ctx, call.Class, q.ID, text).Outcome
+			if o.Kind == delivery.OutcomeRetryAfter {
+				o.Scope = delivery.ScopeConnection
+			}
+			return o
+		}))
 	switch {
 	case err != nil:
 		r.err = errors.Join(r.err, errors.New("the press was not answered: "+err.Error()))

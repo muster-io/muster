@@ -982,6 +982,7 @@
       "unsupported": "This messenger does not support this mention."
     },
     "everyoneHint": "Whom in the chat to mention as a whole: nobody, @channel, @all or @here. Chosen users and groups are mentioned as well.",
+    "everyoneHintTelegram": "Telegram has no mention of the whole chat and no groups: only the chosen users are mentioned, through their linked Telegram accounts.",
     "groupPlaceholder": "Mattermost group",
     "hint": "Whom the message of each kind of Loud event mentions in this Destination.",
     "kinds": {

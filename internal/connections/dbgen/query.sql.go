@@ -12,23 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const awaitUpdates = `-- name: AwaitUpdates :exec
-SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))
-`
-
-type AwaitUpdatesParams struct {
-	LockClass int32
-	ID        int64
-}
-
-// AwaitUpdates takes and, as its transaction ends at once, releases the update lock of a Telegram Connection shared:
-// it waits until no update of the Connection is being handled, so that an edit of its Root message follows the answer
-// to the press that caused it.
-func (q *Queries) AwaitUpdates(ctx context.Context, arg AwaitUpdatesParams) error {
-	_, err := q.db.Exec(ctx, awaitUpdates, arg.LockClass, arg.ID)
-	return err
-}
-
 const countConnectionDestinations = `-- name: CountConnectionDestinations :one
 SELECT count(*)
 FROM destinations
@@ -708,8 +691,10 @@ type LockUpdatesParams struct {
 
 // LockUpdates takes, until the transaction ends, the update lock of a Telegram Connection (class
 // db.TelegramUpdateLockClass, keyed by hashint8 of its id), so that a second poller or a webhook request with the same
-// update waits for the first and then skips it. It never locks the connections row, which a save of the Connection
-// holds while setWebhook runs; a collision of the hash only serializes the updates of two Connections.
+// update waits for the first and then skips it; the delivery worker tries it shared, without waiting, before an edit of
+// a Root message of the Connection (delivery's TryShareUpdateLock). It never locks the connections row, which a save
+// of the Connection holds while setWebhook runs; a collision of the hash only serializes the updates of two
+// Connections.
 func (q *Queries) LockUpdates(ctx context.Context, arg LockUpdatesParams) error {
 	_, err := q.db.Exec(ctx, lockUpdates, arg.LockClass, arg.ID)
 	return err

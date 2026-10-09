@@ -182,6 +182,14 @@ UPDATE deliveries
 SET next_attempt_at = @at, lease_owner = NULL, lease_until = NULL, updated_at = @now
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 
+-- TryShareUpdateLock tries to take, until the transaction ends, the update lock of a Telegram Connection shared,
+-- without waiting (connections' LockUpdates, class db.TelegramUpdateLockClass, keyed by hashint8 of its id): false
+-- while an update of the Connection is being handled, such as a press that has not been answered yet. The worker
+-- tries it after reading the Desired state of an edit of a Telegram Root message, so that the edit a press's Command
+-- caused never goes out before the press's answer (C-14.FR-5, AC-18), and reschedules the edit instead of waiting.
+-- name: TryShareUpdateLock :one
+SELECT pg_try_advisory_xact_lock_shared(@lock_class::int, hashint8(@connection_id::bigint))::boolean AS free;
+
 -- StartPublication records, before the call, that a Publication started; a retry after it publishes again.
 -- name: StartPublication :exec
 UPDATE deliveries

@@ -126,8 +126,8 @@ type Conn struct {
 // Handler processes the updates of one kind. An error leaves the update unconfirmed, so that it comes again: with long
 // polling at the next poll, with a webhook when Telegram retries it. A handler runs under the Connection's update lock
 // — a transaction advisory lock keyed by the Connection, not its connections row — so it may run while a save of the
-// Connection holds that row; it must be short, since the next update of the Connection and every edit of its Root
-// messages wait for it.
+// Connection holds that row; it must be short, since the next update of the Connection waits for it and every edit of
+// its Root messages is rescheduled until it ends.
 type Handler func(ctx context.Context, c Conn, u Update) error
 
 // Offsets keep the offset of each Connection's updates, connections.telegram_update_offset: the id after the last
@@ -140,16 +140,25 @@ type Offsets interface {
 	HandleOnce(ctx context.Context, id, updateID int64, f func(ctx context.Context) error) (bool, error)
 }
 
+// ParallelUpdates is telegram.parallel_updates (P-52): the most updates one process routes at a time, over all its
+// Telegram Connections and both update modes; the others wait for a slot. An update being routed holds a connection of
+// the main pool for its update lock while its handler takes one more at a time, so two take at most four of the
+// default ten (pool_max_conns), next to the half of the pool that the processing lanes may take.
+const ParallelUpdates = 2
+
 // Router is the one entry of updates for both modes (C-14.FR-1): it ignores an update the Connection has already
 // handled, hands each kind to the handler registered for it — the messages of channels and groups to Copies, the
 // presses and private messages to theirs — and drops a kind without a handler with telegram_update_dropped; then it
-// stores the offset after the update.
+// stores the offset after the update. It routes at most ParallelUpdates updates at a time.
 type Router struct {
 	Offsets Offsets
 	Log     *logging.Logger
 
 	mu       sync.RWMutex
 	handlers map[string]Handler
+
+	slotsOnce sync.Once
+	slots     chan struct{}
 }
 
 // Handle registers h for the updates of kind, replacing an earlier handler.
@@ -168,10 +177,28 @@ func (r *Router) handler(kind string) Handler {
 	return r.handlers[kind]
 }
 
-// Route hands u of the Connection c on and reports whether it was new. An update before the stored offset was handled
-// already and changes nothing. A handler's error stores no offset, so that the update comes again.
+// slot waits until fewer than ParallelUpdates updates are being routed, or ctx ends, and returns the release of the
+// slot it took.
+func (r *Router) slot(ctx context.Context) (func(), error) {
+	r.slotsOnce.Do(func() { r.slots = make(chan struct{}, ParallelUpdates) })
+	select {
+	case r.slots <- struct{}{}:
+		return func() { <-r.slots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// Route hands u of the Connection c on and reports whether it was new, once a slot of ParallelUpdates is free. An
+// update before the stored offset was handled already and changes nothing. A handler's error stores no offset, so that
+// the update comes again.
 func (r *Router) Route(ctx context.Context, c Conn, u Update) (bool, error) {
 	kind := u.Kind()
+	release, err := r.slot(ctx)
+	if err != nil {
+		return false, fmt.Errorf("route the %s update %d of the connection %s: %w", kind, u.UpdateID, c.PublicID, err)
+	}
+	defer release()
 	ran, err := r.Offsets.HandleOnce(ctx, c.ID, u.UpdateID, func(ctx context.Context) error {
 		if h := r.handler(kind); h != nil {
 			return h(ctx, c, u)

@@ -210,6 +210,15 @@ describe("DestinationForm with the Telegram fields", () => {
     for (const select of everyone) {
       expect([...select.options].map((o) => o.value)).toEqual(["none"]);
     }
+    // The help text of the Mention choices is Telegram's: no chat-wide mention and no groups (S-043, C-12.FR-8).
+    await expect
+      .element(page.getByLabelText("New Alert Group", { exact: true }))
+      .toHaveAccessibleDescription(
+        "Telegram has no mention of the whole chat and no groups: only the chosen users are mentioned, through their linked Telegram accounts.",
+      );
+    expect(
+      document.getElementById("destination-mentions-everyone-hint")?.textContent,
+    ).not.toContain("@channel");
     await expect.element(page.getByLabelText("Requests")).toHaveValue("10");
     await expect.element(page.getByLabelText("Period in seconds")).toHaveValue("60");
 
@@ -302,6 +311,11 @@ describe("DestinationForm with the Telegram fields", () => {
     await expect
       .element(page.getByTestId("telegram-discussion-group"))
       .toHaveTextContent("Группа обсуждения: Muster alerts Chat (-1001000000002)");
+    await expect
+      .element(page.getByLabelText("Новая группа алертов", { exact: true }))
+      .toHaveAccessibleDescription(
+        "В Telegram нет упоминания всего чата и групп: упоминаются только выбранные пользователи — через их привязанные аккаунты Telegram.",
+      );
   });
 });
 

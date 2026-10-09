@@ -165,11 +165,12 @@ func (f *pressCommands) Unsnooze(_ context.Context, c groups.Caller, id string) 
 	return f.run(ran{command: "unsnooze", group: id, caller: c})
 }
 
-// recordingPath is the interactive path of the tests: it records the subject of each answer and answers as
-// deliverytest.Unlimited, or fails with err.
+// recordingPath is the interactive path of the tests: it records the subject and the outcome of each answer and
+// answers as deliverytest.Unlimited, or fails with err.
 type recordingPath struct {
 	path     *delivery.Interactive
 	subjects []delivery.Subject
+	outcomes []delivery.Outcome
 	err      error
 }
 
@@ -178,7 +179,9 @@ func (a *recordingPath) Do(ctx context.Context, s delivery.Subject, op delivery.
 	if a.err != nil {
 		return delivery.Outcome{}, a.err
 	}
-	return a.path.Do(ctx, s, op)
+	out, err := a.path.Do(ctx, s, op)
+	a.outcomes = append(a.outcomes, out)
+	return out, err
 }
 
 type pressEnv struct {
@@ -334,7 +337,8 @@ func (e *pressEnv) last(t *testing.T, event string) map[string]any {
 
 // TestPressRunsTheCommandAndAnswersFirst covers C-14.FR-4, FR-5, AC-18 and C-10.FR-3: a press from a linked account
 // runs the Command as its User with the Transport telegram and is answered "Done: {command}" through the interactive
-// path, limited by the Destination, once the Command ran and before anything else; telegram_press logs it.
+// path, limited by the Connection alone (D295), once the Command ran and before anything else; telegram_press logs
+// it.
 func TestPressRunsTheCommandAndAnswersFirst(t *testing.T) {
 	e := newPressEnv(t)
 	var answersAtCommand int
@@ -351,8 +355,8 @@ func TestPressRunsTheCommandAndAnswersFirst(t *testing.T) {
 	if e.links.space != accountlinks.SpaceTelegram || e.links.external != "5001" {
 		t.Errorf("lookup in %s of %s", e.links.space, e.links.external)
 	}
-	if len(e.path.subjects) != 1 || e.path.subjects[0].Destination == nil ||
-		e.path.subjects[0].Destination.ID != pressDest.ID {
+	if len(e.path.subjects) != 1 || e.path.subjects[0].Destination != nil || e.path.subjects[0].Connection == nil ||
+		*e.path.subjects[0].Connection != pressConn {
 		t.Errorf("answered on %+v", e.path.subjects)
 	}
 	l := e.last(t, "telegram_press")
@@ -612,5 +616,34 @@ func TestQuietSince(t *testing.T) {
 		if !since.Equal(c.since) || out != c.out {
 			t.Errorf("%s: %v %v, want %v %v", c.name, since, out, c.since, c.out)
 		}
+	}
+}
+
+// TestPressAnswerSpendsOnlyTheConnection covers C-14.FR-5 with D295: an answer posts nothing to the channel, so every
+// answer — done, not linked, refused or not verified — is limited by the Connection alone and spends no token of the
+// Destination; a 429 on an answer holds the whole Connection, since Telegram limits answers per bot, not per chat.
+func TestPressAnswerSpendsOnlyTheConnection(t *testing.T) {
+	e := newPressEnv(t)
+	e.pressAs(t, bobTG, "Ack")
+	e.pressAs(t, 6001, "Ack")
+	e.commands.err = &groups.RefusedError{Code: groups.CodeAlreadyResolved, Message: "already resolved"}
+	e.pressAs(t, bobTG, "Resolve")
+	e.commands.err = nil
+	e.handle(t, e.press(t, fmt.Sprintf(`{"chat":%d,"message_id":999999,"data_from":%d,"from":{"id":%d},"button":"Ack"}`,
+		faketelegram.ChannelID, e.post, bobTG)))
+	if len(e.path.subjects) != 4 {
+		t.Fatalf("answers %+v", e.path.subjects)
+	}
+	for i, s := range e.path.subjects {
+		if s.Destination != nil || s.Connection == nil || *s.Connection != pressConn {
+			t.Errorf("answer %d limited by %+v", i, s)
+		}
+	}
+	fault(t, e.fake, "answerCallbackQuery", 429,
+		`{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 7","parameters":{"retry_after":7}}`, 1)
+	e.pressAs(t, bobTG, "Ack")
+	if o := e.path.outcomes[len(e.path.outcomes)-1]; o.Kind != delivery.OutcomeRetryAfter ||
+		o.Scope != delivery.ScopeConnection || o.RetryAfter != 7*time.Second {
+		t.Errorf("a 429 on an answer = %+v", o)
 	}
 }

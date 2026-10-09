@@ -269,15 +269,24 @@ func (e *liveEnv) telegram(t *testing.T) {
 		ran, _ := e.conns.HandleOnce(ctx, c.ID, 10, func(context.Context) error { return nil })
 		second <- ran
 	}()
-	// An edit of a Root message of the Connection waits for the handler too (C-14.FR-5).
-	awaited := make(chan error, 1)
-	go func() { awaited <- e.conns.AwaitUpdates(ctx, c.ID) }()
+	// The delivery worker's try of the update lock, shared and without waiting, finds it busy while the handler runs
+	// and free after it (C-14.FR-5).
+	free := func() bool {
+		t.Helper()
+		var ok bool
+		if err := e.d.Pool.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock_shared($1::int, hashint8($2::bigint))`,
+			db.TelegramUpdateLockClass, c.ID).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
 	select {
 	case <-second:
 		t.Fatal("the second router did not wait for the first")
-	case <-awaited:
-		t.Fatal("an edit did not wait for the handler")
 	case <-time.After(200 * time.Millisecond):
+	}
+	if free() {
+		t.Fatal("the update lock is free while a handler runs")
 	}
 	close(release)
 	if err := <-first; err != nil {
@@ -286,11 +295,8 @@ func (e *liveEnv) telegram(t *testing.T) {
 	if <-second {
 		t.Fatal("the same update was handled twice")
 	}
-	if err := <-awaited; err != nil {
-		t.Fatal(err)
-	}
-	if err := e.conns.AwaitUpdates(ctx, c.ID); err != nil {
-		t.Fatalf("an edit while no update is handled = %v", err)
+	if !free() {
+		t.Fatal("the update lock is busy while no update is handled")
 	}
 	var tokenAt time.Time
 	if err := e.d.Pool.QueryRow(ctx, `SELECT bot_token_updated_at FROM connections WHERE id = $1`, c.ID).Scan(

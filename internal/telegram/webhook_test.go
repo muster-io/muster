@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -142,6 +144,59 @@ func TestNewSecret(t *testing.T) {
 	b, _ := NewSecret()
 	if len(a) != 43 || a == b || strings.Trim(string(a), "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") != "" {
 		t.Fatalf("secrets %q %q", a, b)
+	}
+}
+
+// TestRouterCapsParallelUpdates covers telegram.parallel_updates (P-52): one process routes at most ParallelUpdates
+// updates at a time, over all its Connections; the next waits for a slot and runs once one is released, and an update
+// whose context ends while it waits runs nothing.
+func TestRouterCapsParallelUpdates(t *testing.T) {
+	r := &Router{Offsets: &memOffsets{}, Log: logging.New(&syncBuffer{}, logging.LevelInfo)}
+	entered, release := make(chan int64, 4), make(chan struct{})
+	var mu sync.Mutex
+	running, most := 0, 0
+	r.Handle(KindCallbackQuery, func(_ context.Context, c Conn, _ Update) error {
+		mu.Lock()
+		running++
+		most = max(most, running)
+		mu.Unlock()
+		entered <- c.ID
+		<-release
+		mu.Lock()
+		running--
+		mu.Unlock()
+		return nil
+	})
+	u, _ := ParseUpdate([]byte(`{"update_id":1,"callback_query":{"id":"q","from":{"id":1}}}`))
+	done := make(chan error, ParallelUpdates+1)
+	for id := range int64(ParallelUpdates + 1) {
+		go func() {
+			_, err := r.Route(t.Context(), Conn{ID: id + 1, PublicID: "CNAAAAAAAAAAT" + strconv.FormatInt(id+1, 10)}, u)
+			done <- err
+		}()
+	}
+	for range ParallelUpdates {
+		<-entered
+	}
+	select {
+	case id := <-entered:
+		t.Fatalf("the update of connection %d ran past the cap", id)
+	case <-time.After(100 * time.Millisecond):
+	}
+	waiting, cancel := context.WithCancel(t.Context())
+	cancel()
+	if ran, err := r.Route(waiting, Conn{ID: 9, PublicID: "CNAAAAAAAAAAT9"}, u); ran || !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled wait = %v %v", ran, err)
+	}
+	close(release)
+	<-entered
+	for range ParallelUpdates + 1 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if most != ParallelUpdates {
+		t.Fatalf("at most %d updates at a time, want %d", most, ParallelUpdates)
 	}
 }
 

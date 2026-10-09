@@ -44,8 +44,9 @@ const RouteMembershipLockClass int32 = 0x6d75_0002
 
 // TelegramUpdateLockClass is the first key of the transaction advisory lock of a Telegram Connection's updates, whose
 // second key is hashint8 of the Connection's id: the update router holds it while a handler runs, so that a second
-// poller or a webhook request with the same update waits and then skips it. The class 0x6d75_0003 is delivery's lock of
-// a channel post's copy.
+// poller or a webhook request with the same update waits and then skips it, and the delivery worker tries it shared,
+// without waiting, before an edit of a Root message of the Connection. The class 0x6d75_0003 is delivery's lock of a
+// channel post's copy.
 const TelegramUpdateLockClass int32 = 0x6d75_0004
 
 // querier is what the checks need of the main pool or of a connection.
