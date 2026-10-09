@@ -22,6 +22,8 @@ files_touched:
   - internal/telegram/presses_test.go
   - internal/destinations/write.go
   - internal/destinations/write_test.go
+  - internal/connections/connections.go
+  - internal/connections/connections_test.go
   - internal/delivery/threads.go
   - internal/api/alertgroups.go
   - internal/doctor/doctor.go
@@ -350,6 +352,14 @@ the automatic copy (P-30) and, if measured, the bot-wide rate (P-28) in the pull
   point, so the order never matters.
 - P-28 and P-30 stay provisional: only the test environment can confirm them.
 - `operator_attention: true` — the operator runs the edit tests of the Pending list and settles open question 1.
+- The update router of S-041 holds the Connection's `telegram_update_offset` row locked while a handler runs, and a
+  save of the Connection holds the same row during `setWebhook`, which can take up to 10 seconds. If the handlers of
+  this story can run long (a button press that waits for a command, a Destination check), the story moves the update
+  offset to a row of its own or takes an advisory lock for the handler, so that a save and a poller never wait for each
+  other.
+- Deleting a Telegram Connection in the webhook update mode leaves its webhook set at Telegram, which then answers
+  every update with 401 for good. The delete calls `deleteWebhook` as a best effort: it neither blocks nor fails the
+  delete, and the outcome (done, or the error Telegram returned) is logged with a registered log event.
 
 ## Coverage
 
