@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Create destination" (C-13.FR-9, C-14.FR-2): the choice of the type, then its form; the new Destination's page opens
-// after it is saved. Mattermost and Telegram are here; the outgoing webhook (C-15) joins the choice with its own fields.
+// "Create destination" (C-13.FR-9, C-14.FR-2, C-15.FR-1): the choice of the type — Mattermost, Telegram or outgoing
+// webhook — then its form; the new Destination's page opens after it is saved. Creating an outgoing webhook first shows
+// its Signing secret once (C-15.FR-5): the value is kept in this page's state only, never in the query cache, and the
+// page of the Destination opens when the dialog closes.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -22,21 +24,27 @@ import { RequirePermission } from "../components/app-shell";
 import { DestinationForm } from "../components/destination-form";
 import { destinationTypeName } from "../components/destination-health";
 import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
+import { SigningSecretDialog } from "../components/signing-secret-dialog";
 import { TELEGRAM_KIND } from "../components/telegram-destination-fields";
 import { buttonVariants } from "../components/ui/button";
+import { WEBHOOK_KIND } from "../components/webhook-destination-fields";
 
 export const Route = createFileRoute("/destinations/new")({
   staticData: { shell: true },
   component: NewDestinationPage,
 });
 
-const TYPES: readonly DestinationType[] = ["mattermost", "telegram"];
+const TYPES: readonly DestinationType[] = ["mattermost", "telegram", "webhook"];
 
 function NewDestination() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [type, setType] = useState<DestinationType>();
+  // The Signing secret of a created outgoing webhook, until its dialog closes.
+  const [signing, setSigning] = useState<{ destinationId: string; secret: string } | null>(null);
+  const open = (destinationId: string) =>
+    navigate({ to: "/destinations/$destinationId", params: { destinationId } });
   const save = async (input: DestinationInput): Promise<Destination | undefined> => {
     const created = await createDestination(input);
     queryClient.setQueryData(
@@ -46,10 +54,11 @@ function NewDestination() {
     void queryClient.invalidateQueries({ queryKey: getListDestinationsQueryKey() });
     void queryClient.invalidateQueries({ queryKey: getListConnectionsQueryKey() });
     void queryClient.invalidateQueries({ queryKey: getListRouteSuggestionsQueryKey() });
-    await navigate({
-      to: "/destinations/$destinationId",
-      params: { destinationId: created.destination.id },
-    });
+    if (created.signing_secret) {
+      setSigning({ destinationId: created.destination.id, secret: created.signing_secret });
+    } else {
+      await open(created.destination.id);
+    }
     return undefined;
   };
   const cancel = () => void navigate({ to: "/destinations" });
@@ -102,6 +111,24 @@ function NewDestination() {
           onCancel={cancel}
         />
       )}
+      {type === "webhook" && (
+        <DestinationForm
+          kind={WEBHOOK_KIND}
+          submitLabel={t("common.save")}
+          save={save}
+          onCancel={cancel}
+        />
+      )}
+      <SigningSecretDialog
+        secret={signing?.secret ?? null}
+        onClose={() => {
+          const id = signing?.destinationId;
+          setSigning(null);
+          if (id !== undefined) {
+            void open(id);
+          }
+        }}
+      />
     </div>
   );
 }

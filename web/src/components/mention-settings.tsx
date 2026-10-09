@@ -149,6 +149,7 @@ function KindRow({
   users,
   error,
   disabled,
+  groupPlaceholder,
 }: {
   id: string;
   kind: MentionKind;
@@ -159,6 +160,7 @@ function KindRow({
   users: readonly UserRef[];
   error?: string;
   disabled: boolean;
+  groupPlaceholder?: string;
 }) {
   const { t } = useTranslation();
   const [group, setGroup] = useState("");
@@ -269,7 +271,7 @@ function KindRow({
             autoComplete="off"
             spellCheck={false}
             className="min-w-0 flex-1"
-            placeholder={t("mentions.groupPlaceholder")}
+            placeholder={groupPlaceholder ?? t("mentions.groupPlaceholder")}
             aria-label={t("mentions.addGroupTo", { kind: name })}
             aria-invalid={groupProblem}
             aria-describedby={message === undefined ? undefined : `${base}-error`}
@@ -313,6 +315,8 @@ export interface MentionSettingsFieldProps {
   /** Error texts by kind, already translated. */
   errors?: Partial<Record<MentionKind, string>>;
   disabled?: boolean;
+  /** The placeholder of a group's name, already translated; a Mattermost group by default. */
+  groupPlaceholder?: string;
 }
 
 export function MentionSettingsField({
@@ -324,6 +328,7 @@ export function MentionSettingsField({
   everyoneHint,
   errors = {},
   disabled = false,
+  groupPlaceholder,
 }: MentionSettingsFieldProps) {
   const { t } = useTranslation();
   const directory = useDirectory(true);
@@ -348,6 +353,7 @@ export function MentionSettingsField({
             users={users}
             error={errors[kind]}
             disabled={disabled}
+            groupPlaceholder={groupPlaceholder}
           />
         ))}
       </div>

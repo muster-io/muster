@@ -563,11 +563,13 @@
     "delete": {
       "action": "Delete",
       "description": "Muster stops sending here, and the Destination leaves every Route. Open Root messages get one final edit, \"No longer updated here\". This cannot be undone.",
-      "title": "Delete Destination {{name}}?"
+      "title": "Delete Destination {{name}}?",
+      "webhookBoth": "Muster stops sending here, and the Destination leaves every Route. Queued events will not be sent. Open messages get a last update, then the secrets are deleted. This cannot be undone.",
+      "webhookEvents": "Muster stops sending here, and the Destination leaves every Route. Queued events will not be sent. The Signing secret and the Secrets are deleted now. This cannot be undone.",
+      "webhookTemplate": "Muster stops sending here, and the Destination leaves every Route. Open messages get a last update, then the secrets are deleted. This cannot be undone."
     },
     "edit": {
-      "title": "Destination",
-      "unsupported": "Destinations of this type cannot be changed here yet."
+      "title": "Destination"
     },
     "errors": {
       "changedElsewhere": "This Destination was changed elsewhere.",
@@ -620,6 +622,42 @@
     "page": {
       "noRoutes": "No Route sends here yet."
     },
+    "secrets": {
+      "add": "Add secret",
+      "empty": "No Secrets yet.",
+      "hint": "Values stored encrypted and never shown again. The URL, headers and body read a Secret by its name, such as {{ref}}.",
+      "name": "Name",
+      "nameInvalid": "Start with a letter or an underscore, then letters, digits and underscores.",
+      "nameTaken": "A Secret with this name exists: replace its value instead.",
+      "referenceHint": "Reference it as {{ref}}.",
+      "remove": "Remove",
+      "removeHint": "Templates that read {{ref}} fail until a Secret with this name is set again.",
+      "removeNamed": "Remove {{name}}",
+      "removeTitle": "Remove the Secret {{name}}?",
+      "replaceNamed": "Replace {{name}}",
+      "replaceTitle": "New value of {{name}}",
+      "stale": "The Secrets changed meanwhile. Reload to see them.",
+      "title": "Secrets",
+      "value": "Value",
+      "valueTooLong": "The value is too long.",
+      "writeOnly": "The value is never shown again once saved."
+    },
+    "signing": {
+      "confirmHint": "Muster makes a new secret and shows it once. Requests carry signatures with the new and the previous secret until you retire the previous one.",
+      "confirmTitle": "Regenerate the Signing secret?",
+      "dialogHint": "Give this secret to the receiver to verify the signatures of the requests.",
+      "dialogTitle": "Signing secret",
+      "hint": "Muster signs every request with this secret in the webhook-signature header; the receiver verifies it.",
+      "notSet": "Signing secret: not set",
+      "once": "You will not see this secret again.",
+      "previousActive": "The previous secret still signs, since {{date}}.",
+      "regenerate": "Regenerate",
+      "retire": "Retire previous secret",
+      "set": "Signing secret: set",
+      "setChanged": "Signing secret: set, changed {{time}}",
+      "title": "Signing secret",
+      "value": "Secret"
+    },
     "telegram": {
       "channel": "Channel",
       "channelFound": "Channel:",
@@ -636,6 +674,68 @@
     "title": "Destinations",
     "types": {
       "webhook": "Outgoing webhook"
+    },
+    "webhook": {
+      "addHeader": "Add header",
+      "addRequest": "Add “{{request}}”",
+      "body": "Body",
+      "bodyHint": "A template. An empty body sends none.",
+      "bodyOf": "Body of {{request}}",
+      "errors": {
+        "headerName": "Enter a valid header name that no other header of this request has.",
+        "jsonPath": "Enter a valid JSONPath, such as $.data.id.",
+        "lineBreak": "The header value must not contain a line break.",
+        "missingValue": "No extraction rule this request may read gives {{ref}}: add it to “Create” (or to “Open thread” for “Reply in thread”).",
+        "reference": "Read a Secret as {{secret}} and an extracted value as {{response}}: other uses of .Secrets and .Response are refused.",
+        "reservedHeader": "Muster sets this header itself.",
+        "ruleName": "Start with a letter or an underscore, then letters, digits and underscores; no other rule may have this name.",
+        "url": "Enter an absolute http or https URL; it must stay one once its templates are filled in."
+      },
+      "eventsTitle": "Events request",
+      "eventsUrlHint": "A template that may read Secrets, such as {{ref}}. Muster signs every request with the Signing secret.",
+      "extract": {
+        "add": "Add rule",
+        "hint": "Each rule keeps a value of the JSON response by its JSONPath. Read it as {{ref}}.",
+        "name": "Name of rule {{number}}",
+        "none": "No extraction rules.",
+        "path": "JSONPath of rule {{number}}",
+        "remove": "Remove rule {{number}}",
+        "title": "Extraction rules"
+      },
+      "headerName": "Name of header {{number}}",
+      "headers": "Headers",
+      "headerValue": "Value of header {{number}}",
+      "limiterHint": "At most this many requests go to the endpoint for this Destination.",
+      "literalCredential": "Store credentials as Secrets: this value is shown to everyone who can read Destinations.",
+      "method": "Method",
+      "mode": "Mode",
+      "modeHints": {
+        "both": "Sends the events and the requests of the templates.",
+        "events": "One signed POST per lifecycle event of every Alert Group, in order, as versioned JSON.",
+        "template": "Requests built from templates create a message, update it and reply in its thread, in any chat with a REST API."
+      },
+      "modes": {
+        "both": "Both",
+        "events": "Events",
+        "template": "Template"
+      },
+      "noHeaders": "No headers.",
+      "removeHeader": "Remove header {{number}}",
+      "requestHints": {
+        "create": "Posts the message of a new Alert Group. Its extraction rules keep values of the response for the later requests.",
+        "openThread": "Runs once, before the first reply in thread, for chats that need a thread created first. Its extraction rules add values.",
+        "replyInThread": "Carries the events that a messenger shows as Thread replies.",
+        "update": "Edits the message with the current state of the Alert Group; it reads the extracted values as {{ref}}."
+      },
+      "requests": {
+        "create": "Create",
+        "openThread": "Open thread",
+        "replyInThread": "Reply in thread",
+        "update": "Update"
+      },
+      "templateHint": "The URL, headers and body are templates that see the Alert Group, its Alerts, the event, .Notify, .Mentions, the extracted values and the Secrets, such as {{ref}}.",
+      "templateTitle": "Requests",
+      "url": "URL"
     }
   },
   "duration": {
@@ -983,7 +1083,9 @@
     },
     "everyoneHint": "Whom in the chat to mention as a whole: nobody, @channel, @all or @here. Chosen users and groups are mentioned as well.",
     "everyoneHintTelegram": "Telegram has no mention of the whole chat and no groups: only the chosen users are mentioned, through their linked Telegram accounts.",
+    "everyoneHintWebhook": "Muster sends mentions as data the receiver formats: everyone, groups by name and users with their login. Chosen users and groups are mentioned as well.",
     "groupPlaceholder": "Mattermost group",
+    "groupPlaceholderWebhook": "Group name",
     "hint": "Whom the message of each kind of Loud event mentions in this Destination.",
     "kinds": {
       "ackTimeout": "Ack timeout notice",

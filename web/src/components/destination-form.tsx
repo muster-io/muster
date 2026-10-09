@@ -2,24 +2,16 @@
 // Copyright The Muster Authors
 
 // The form of a Destination (C-13.FR-9, FR-2; C-12.FR-8), shared by every type: the name, the type's fields in a slot
-// (Mattermost here; Telegram and the outgoing webhook add theirs), the Mention section and the limiter. Saving a
-// Mattermost or Telegram Destination runs its Destination check, and a failing check is refused with
-// destination_check_failed at the field it concerns and the check's message, which the form shows there. Without
-// destinations:write the form only shows the Destination. The delete dialog says what deleting does: the Destination
-// leaves its Routes and its open Root messages get one final edit.
+// (Mattermost, Telegram or the outgoing webhook), the Mention section and the limiter. Saving a Mattermost or Telegram
+// Destination runs its Destination check, and a failing check is refused with destination_check_failed at the field it
+// concerns and the check's message, which the form shows there; a template of an outgoing webhook that fails is
+// refused at its field with its line and column. Without destinations:write the form only shows the Destination.
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { useMutation } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import {
-  deleteDestination,
-  getGetDestinationQueryKey,
-  getListDestinationsQueryKey,
-} from "../api/gen/endpoints/destinations/destinations";
-import { getListConnectionsQueryKey } from "../api/gen/endpoints/connections/connections";
 import type {
   Destination,
   DestinationInput,
@@ -47,25 +39,21 @@ import {
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
 const ID = "destination";
 const NAME_MAX = 200;
 
-/** A refusal of a field: its code and, for a failing Destination check, the check's message. */
+/**
+ * A refusal of a field: its code; for a failing Destination check, the check's message; for a template, the server's
+ * detail and the 1-based line and column of the error.
+ */
 export interface FieldProblem {
   code: string;
   detail?: string;
+  line?: number;
+  column?: number;
 }
 
 /** Field problems by JSON pointer, such as "/name", "/channel_id" or "/mentions/new_alerts/everyone". */
@@ -79,6 +67,8 @@ export interface TypeFieldsProps<V> {
   onChange: (next: V) => void;
   /** The texts of the problems of the type's fields, by pointer. */
   errors: Record<string, string>;
+  /** The problems of the type's fields as refused, by pointer, for fields that show them with their own texts. */
+  problems: DestinationErrors;
   disabled: boolean;
   /** The stored Destination of an edit. */
   destination?: Destination;
@@ -102,6 +92,8 @@ export interface DestinationKind<V> {
   limiterHint: (t: TFunction) => string;
   /** The help text of the Mention choices, when the type's differs from the chat-wide one of Mattermost. */
   mentionsHint?: (t: TFunction) => string;
+  /** The placeholder of a group's name, when the type's groups are not Mattermost's. */
+  groupPlaceholder?: (t: TFunction) => string;
   values: (d: Destination | undefined) => V;
   /** The checks the server repeats on the type's fields, as codes by pointer. */
   check: (v: V) => Record<string, string>;
@@ -110,8 +102,16 @@ export interface DestinationKind<V> {
     common: { name: string; mentions: MentionSettings; limiter: Limiter },
     v: V,
   ) => DestinationInput;
-  /** The pointers of the type's fields, which show their problems themselves. */
+  /**
+   * The pointers of the type's fields, which show their problems themselves; a pointer also takes every pointer below
+   * it, such as /events for /events/headers/0/value.
+   */
   pointers: readonly string[];
+  /**
+   * Whether a change of the type's values touches the field at a pointer, whose problem then goes away; without it
+   * every change of the type's values clears all their problems.
+   */
+  changed?: (previous: V, next: V, pointer: string) => boolean;
   Fields: ComponentType<TypeFieldsProps<V>>;
 }
 
@@ -122,6 +122,11 @@ interface Values<V> {
   fields: V;
 }
 
+/** Whether a pointer is one of the type's fields or below one. */
+function isTypePointer(pointers: readonly string[], pointer: string): boolean {
+  return pointers.some((p) => pointer === p || pointer.startsWith(`${p}/`));
+}
+
 function valuesOf<V>(kind: DestinationKind<V>, d: Destination | undefined): Values<V> {
   return {
     name: d?.name ?? "",
@@ -129,6 +134,42 @@ function valuesOf<V>(kind: DestinationKind<V>, d: Destination | undefined): Valu
     limiter: limiterValues(d?.limiter ?? kind.defaultLimiter),
     fields: kind.values(d),
   };
+}
+
+/** A write-only proxy password is not a value of the form; only its status tells that another save changed it. */
+function proxyPassword(d: Destination): unknown {
+  return d.type === "webhook" ? d.proxy.password_status : undefined;
+}
+
+/**
+ * Whether two versions of a Destination hold the same settings, the values of the form: a change of the Secrets or
+ * the Signing secret gives a Destination a new version and leaves its settings as they were.
+ */
+export function sameSettings<V>(kind: DestinationKind<V>, a: Destination, b: Destination): boolean {
+  return (
+    JSON.stringify(valuesOf(kind, a)) === JSON.stringify(valuesOf(kind, b)) &&
+    JSON.stringify(proxyPassword(a)) === JSON.stringify(proxyPassword(b))
+  );
+}
+
+/**
+ * What a form read at version base does when version current of its Destination arrives: "adopt" it silently when
+ * only the Secrets or the Signing secret changed, so that the next save sends it; "replace" an untouched form with it;
+ * "keep" a form with changes, whose save is then refused (412); or nothing ("same") when the version is the form's.
+ */
+export function versionAction<V>(
+  kind: DestinationKind<V>,
+  current: Destination,
+  base: Destination,
+  dirty: boolean,
+): "same" | "adopt" | "replace" | "keep" {
+  if (current.etag === base.etag) {
+    return "same";
+  }
+  if (sameSettings(kind, current, base)) {
+    return "adopt";
+  }
+  return dirty ? "keep" : "replace";
 }
 
 /** The checks the server repeats, before the form is sent. */
@@ -159,8 +200,16 @@ export function serverErrors(err: unknown): DestinationErrors {
   }
   const errors: DestinationErrors = {};
   for (const item of err.errors ?? []) {
-    const problem: FieldProblem =
-      item.detail === undefined ? { code: item.code } : { code: item.code, detail: item.detail };
+    const problem: FieldProblem = { code: item.code };
+    if (item.detail !== undefined) {
+      problem.detail = item.detail;
+    }
+    if (item.line !== undefined) {
+      problem.line = item.line;
+    }
+    if (item.column !== undefined) {
+      problem.column = item.column;
+    }
     if (item.pointer === "/limiter") {
       errors["/limiter/limit"] = problem;
       errors["/limiter/per_seconds"] = problem;
@@ -256,7 +305,9 @@ export function DestinationForm<V>({
   // After a refused save, the focus goes to the first marked field.
   useEffect(() => {
     if (focusRequest > 0) {
-      formElement.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+      formElement.current
+        ?.querySelector<HTMLElement>('[aria-invalid="true"], [data-focus-problem="true"]')
+        ?.focus();
     }
   }, [focusRequest]);
 
@@ -300,10 +351,11 @@ export function DestinationForm<V>({
     return problem === undefined ? undefined : destinationErrorText(t, pointer, problem);
   };
   const typeErrors: Record<string, string> = {};
-  for (const pointer of kind.pointers) {
-    const message = text(pointer);
-    if (message !== undefined) {
-      typeErrors[pointer] = message;
+  const typeProblems: DestinationErrors = {};
+  for (const [pointer, problem] of Object.entries(errors)) {
+    if (isTypePointer(kind.pointers, pointer)) {
+      typeErrors[pointer] = destinationErrorText(t, pointer, problem);
+      typeProblems[pointer] = problem;
     }
   }
   const mentionErrors: Partial<Record<MentionKind, string>> = {};
@@ -322,7 +374,7 @@ export function DestinationForm<V>({
   }
   const shown = (pointer: string) =>
     pointer === "/name" ||
-    kind.pointers.includes(pointer) ||
+    isTypePointer(kind.pointers, pointer) ||
     mentionKindOf(pointer) !== undefined ||
     pointer === "/limiter/limit" ||
     pointer === "/limiter/per_seconds";
@@ -370,8 +422,20 @@ export function DestinationForm<V>({
             <kind.Fields
               id={`${ID}-type`}
               value={values.fields}
-              onChange={(next) => change("fields", next, [...kind.pointers])}
+              onChange={(next) => {
+                const changed = kind.changed;
+                const cleared =
+                  changed === undefined
+                    ? [...kind.pointers]
+                    : Object.keys(errors).filter(
+                        (pointer) =>
+                          isTypePointer(kind.pointers, pointer) &&
+                          changed(values.fields, next, pointer),
+                      );
+                change("fields", next, cleared);
+              }}
               errors={typeErrors}
+              problems={typeProblems}
               disabled={readOnly}
               destination={destination}
               suggest={({ name, limiter }) => {
@@ -425,6 +489,7 @@ export function DestinationForm<V>({
               everyone={kind.everyone}
               groups={kind.groups}
               everyoneHint={kind.mentionsHint?.(t)}
+              groupPlaceholder={kind.groupPlaceholder?.(t)}
               errors={mentionErrors}
               disabled={readOnly}
               onChange={(next) => change("mentions", next, ["/mentions"])}
@@ -499,93 +564,5 @@ export function DestinationForm<V>({
         </div>
       )}
     </form>
-  );
-}
-
-const CANCEL_ID = "destination-delete-cancel";
-
-/**
- * "Delete" with its dialog. Deleting is always allowed: the Destination leaves every Route and its open Root messages
- * get one final edit; a Destination changed since it was read is refused (412) and read again.
- */
-export function DestinationDeleteDialog({ destination }: { destination: Destination }) {
-  const { t } = useTranslation();
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
-  const remove = useMutation({
-    mutationFn: () =>
-      deleteDestination(destination.id, { headers: { "If-Match": destination.etag } }),
-    onSuccess: async () => {
-      await navigate({ to: "/destinations" });
-      queryClient.removeQueries({ queryKey: getGetDestinationQueryKey(destination.id) });
-      void queryClient.invalidateQueries({ queryKey: getListDestinationsQueryKey() });
-      void queryClient.invalidateQueries({ queryKey: getListConnectionsQueryKey() });
-    },
-    onError: (err) => {
-      if (isStale(err)) {
-        void queryClient.invalidateQueries({ queryKey: getGetDestinationQueryKey(destination.id) });
-      }
-    },
-  });
-  return (
-    <>
-      <Button
-        variant="destructive"
-        onClick={() => {
-          remove.reset();
-          setOpen(true);
-        }}
-      >
-        {t("destinations.delete.action")}
-      </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent closeLabel={t("common.close")}>
-          <DialogHeader>
-            <DialogTitle className="pr-8 break-words">
-              {t("destinations.delete.title", { name: destination.name })}
-            </DialogTitle>
-            <DialogDescription>{t("destinations.delete.description")}</DialogDescription>
-          </DialogHeader>
-          {remove.isError && (
-            <Alert variant="destructive">
-              <AlertDescription
-                className="flex flex-wrap items-center gap-3 text-current"
-                data-testid="destination-delete-error"
-              >
-                {isStale(remove.error) ? (
-                  <>
-                    <span>{t("destinations.errors.stale")}</span>
-                    {/* The page has read the newer version; the dialog closes to show it. */}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setOpen(false)}
-                    >
-                      {t("common.reload")}
-                    </Button>
-                  </>
-                ) : (
-                  problemText(t, remove.error)
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" id={CANCEL_ID} />}>
-              {t("common.cancel")}
-            </DialogClose>
-            <Button
-              variant="destructive"
-              disabled={remove.isPending}
-              onClick={() => remove.mutate()}
-            >
-              {t("destinations.delete.action")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
   );
 }

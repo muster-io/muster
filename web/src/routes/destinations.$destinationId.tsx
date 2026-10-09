@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// A Destination (C-13.FR-9, FR-10; C-11.FR-9; C-14.FR-2, FR-14): its health with the Broken banner, its Routes, and its
-// form — Mattermost or Telegram, which shows the channel and the discussion group it found — read-only without
-// destinations:write; "Check" with destinations:test for the types that have a Destination check, and
-// "Delete" with destinations:write. The form keeps the version it was read at and sends it as If-Match: when the
-// Destination changes elsewhere an untouched form takes the new version and says so, and a form with changes keeps
-// them, and its save is refused (412) with the offer to reload. Health comes and goes without a reload: from the
+// A Destination (C-13.FR-9, FR-10; C-11.FR-9; C-14.FR-2, FR-14; C-15.FR-1, FR-5, FR-10): its health with the Broken
+// banner, its Routes, and its form — Mattermost, Telegram, which shows the channel and the discussion group it found,
+// or the outgoing webhook, followed by its Secrets and its Signing secret — read-only without destinations:write;
+// "Check" with destinations:test for the types that have a Destination check, and "Delete" with destinations:write.
+// The form keeps the version it was read at and sends it as If-Match: when the Destination changes elsewhere an
+// untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
+// with the offer to reload. A new version with the same settings — a Secret or the Signing secret changed — becomes the
+// form's version without a word, whether the form has changes or not. Health comes and goes without a reload: from the
 // destination hint, and at once from a check's result.
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -23,19 +25,28 @@ import {
   updateDestination,
   useGetDestination,
 } from "../api/gen/endpoints/destinations/destinations";
-import type { Destination, MattermostDestination, TelegramDestination } from "../api/gen/model";
+import type {
+  Destination,
+  MattermostDestination,
+  TelegramDestination,
+  WebhookDestination,
+} from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { DestinationCheck } from "../components/destination-check";
+import { DestinationDeleteDialog } from "../components/destination-delete-dialog";
 import {
   type DestinationKind,
-  DestinationDeleteDialog,
   DestinationForm,
+  versionAction,
 } from "../components/destination-form";
+import { DestinationSecrets, refreshWebhook } from "../components/destination-secrets";
 import { BrokenBanner, HealthBadge, destinationTypeName } from "../components/destination-health";
 import { MATTERMOST_KIND } from "../components/mattermost-destination-fields";
+import { SigningSecret } from "../components/signing-secret";
 import { TELEGRAM_KIND } from "../components/telegram-destination-fields";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
+import { WEBHOOK_KIND } from "../components/webhook-destination-fields";
 import { problemText } from "../lib/api";
 
 export const Route = createFileRoute("/destinations/$destinationId")({
@@ -44,10 +55,10 @@ export const Route = createFileRoute("/destinations/$destinationId")({
 });
 
 /** The types whose form is on this page. */
-type Editable = MattermostDestination | TelegramDestination;
+type Editable = MattermostDestination | TelegramDestination | WebhookDestination;
 
 function isEditable(d: Destination): d is Editable {
-  return d.type === "mattermost" || d.type === "telegram";
+  return d.type === "mattermost" || d.type === "telegram" || d.type === "webhook";
 }
 
 /** The types with a Destination check; the outgoing webhook has none. */
@@ -73,8 +84,12 @@ function EditForm<V>({ current, kind }: { current: Editable; kind: DestinationKi
   const [reloadError, setReloadError] = useState<unknown>(null);
   // The form is mounted again only for a version it did not save itself: a newer one or a reload.
   const [formKey, setFormKey] = useState(0);
-  // A newer version (another Admin, another tab) replaces an untouched form, which says so.
-  if (versionOf(current) !== versionOf(base) && !dirty && !saving) {
+  // A newer version with the same settings — its Secrets or its Signing secret changed — is the form's version from now
+  // on, changes or not; another newer version (another Admin, another tab) replaces an untouched form, which says so.
+  const action = saving ? "same" : versionAction(kind, current, base, dirty);
+  if (action === "adopt") {
+    setBase(current);
+  } else if (action === "replace") {
     setBase(current);
     setReplaced(true);
     setSaved(false);
@@ -117,6 +132,10 @@ function EditForm<V>({ current, kind }: { current: Editable; kind: DestinationKi
             queryClient.setQueryData(getGetDestinationQueryKey(updated.id), updated);
             void queryClient.invalidateQueries({ queryKey: getListDestinationsQueryKey() });
             void queryClient.invalidateQueries({ queryKey: getListConnectionsQueryKey() });
+            if (updated.type === "webhook") {
+              // The new version is the ETag of the Secrets too.
+              refreshWebhook(queryClient, updated.id);
+            }
             if (!isEditable(updated)) {
               return undefined;
             }
@@ -230,7 +249,11 @@ function DestinationView({ destinationId }: { destinationId: string }) {
           ) : destination.type === "telegram" ? (
             <EditForm current={destination} kind={TELEGRAM_KIND} />
           ) : (
-            <p className="text-sm text-muted-foreground">{t("destinations.edit.unsupported")}</p>
+            <>
+              <EditForm current={destination} kind={WEBHOOK_KIND} />
+              <DestinationSecrets destinationId={destination.id} />
+              <SigningSecret destination={destination} />
+            </>
           )}
         </>
       )}

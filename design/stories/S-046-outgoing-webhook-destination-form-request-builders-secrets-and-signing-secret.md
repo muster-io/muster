@@ -17,7 +17,9 @@ files_touched:
   - web/src/components/signing-secret.tsx
   - web/src/components/signing-secret-dialog.tsx
   - web/src/components/destination-form.tsx
+  - web/src/components/destination-form.test.tsx
   - web/src/components/destination-delete-dialog.tsx
+  - web/src/components/mention-settings.tsx
   - web/src/routes/destinations.new.tsx
   - web/src/routes/destinations.$destinationId.tsx
   - web/src/locales/en.json
@@ -72,8 +74,16 @@ issue: 46
   set" with `updated_at`, "Regenerate" (confirmation, then the same dialog with the new secret), and while
   `previous_active_since` is set the warning "The previous secret still signs, since {date}." with "Retire previous
   secret".
-- **Delete dialog** (`destination-delete-dialog.tsx`): the text depends on `mode` as in the acceptance; for messenger
-  Destinations it says "Open messages get a last update \"No longer updated here\", then the Destination is removed."
+- **Delete dialog** (`destination-delete-dialog.tsx`, moved out of `destination-form.tsx`, so the import in
+  `destination-form.test.tsx` follows it): the text depends on `mode` as in the acceptance, and in mode `both` says
+  both; messenger Destinations keep the text of S-064, "Open Root messages get one final edit, \"No longer updated
+  here\"."
+- **Settings versions**: setting or removing a Secret, regenerating or retiring the Signing secret gives the
+  Destination a new version, which is also the ETag of its Secrets. The page re-reads the Destination and its Secrets
+  after each, and a new version whose settings equal the form's becomes the form's version silently, so that the next
+  save is not refused with `412`.
+- **Mentions**: the group name placeholder of the Mention section is "Group name" for an outgoing webhook, not
+  "Mattermost group" (`mention-settings.tsx`).
 
 ## Steps
 
@@ -91,9 +101,10 @@ Run `make dev`, sign in as `admin@example.org` / `muster-dev-password`; the fake
    and no "Check".
 2. "Template" → "Create": POST `http://127.0.0.1:18093/chat/ops/messages`, body `{"text": {{ .AlertGroup.Title | toJson }}}`,
    extraction rule `id` = `$.data.id`; "Update": PUT `http://127.0.0.1:18093/chat/ops/messages/{{ .Response.id }}` with
-   `{{ .Nope }` as body → "Save" → the body of "Update" is marked with the template error and its line and column →
-   fix the body → "Save" → the dialog "You will not see this secret again." with a secret starting `whsec_` → "Copy" →
-   "Close".
+   `{{ .Nope }` as body → "Save" → the body of "Update" is marked with the template error at its line (text/template
+   gives no column for an action that is never closed) → `{{ .Nope }}` → "Save" → marked at its line and column (the
+   dry run cannot read the field) → fix the body → "Save" → the dialog "You will not see this secret again." with a
+   secret starting `whsec_` → "Copy" → "Close".
 3. Secrets → "Add secret" → name `token`, value `s3cr3t` → "Save" → the list shows "token" "Set" and a date, and no
    value anywhere on the page.
 4. "Events" → header `Authorization` = `Bearer abc` → "Save" → at that header: "Store credentials as Secrets: this
