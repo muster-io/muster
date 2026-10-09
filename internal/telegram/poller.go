@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/logging"
 )
 
@@ -25,6 +26,9 @@ const (
 	conflictCap  = time.Minute
 	// emptyPause is the wait after a poll that brought no update.
 	emptyPause = time.Second
+	// fullBatch is the most updates a getUpdates answers without a limit: a poll that brought as many may have left
+	// more waiting.
+	fullBatch = 100
 )
 
 // Polled is a Telegram Connection in the long-polling mode: its client, its version, which restarts its poller when
@@ -48,12 +52,28 @@ type Source interface {
 // and logs telegram_poll_conflict (F-018); any other failure logs telegram_poll_failed and backs off. Neither is a
 // delivery outcome or makes anything Broken. Running it on two replicas at once is safe: Telegram answers one of the
 // pollers 409, and the router handles an update once.
+//
+// It keeps in memory, per Connection, when its updates were last received — the end of the last successful poll — and
+// gives each update the gap before the poll that brought it (C-14.FR-4, journal D293): a poll that failed receives
+// nothing, and a full batch, which may have left more waiting, passes its gap on to the next poll. A Connection that
+// a run polls from its first listing on, and that this process has not polled yet, is measured from the start of the
+// run, or from the start of the outage just before it that the Outages name: the updates Telegram kept while Muster
+// was not running arrive after that gap. A Connection that enters long polling later in a run is measured from then,
+// and one that leaves it is forgotten. Without a Clock no gap is measured.
 type Poller struct {
 	Source Source
 	Router *Router
 	Log    *logging.Logger
+	// Outages say whether Muster was not running before a run starts; nil is never.
+	Outages Outages
+	// Clock is the business clock the gaps are measured on; nil measures none.
+	Clock clock.Clock
 	// Every is how often the Connections are read again without a wake; 0 is ReadInterval.
 	Every time.Duration
+
+	// received is when the updates of each Connection were last received by a poll of this process.
+	mu       sync.Mutex
+	received map[int64]time.Time
 
 	// sleep waits for d unless ctx ends first and jitter spreads a back-off; tests replace both.
 	sleep  func(ctx context.Context, d time.Duration) bool
@@ -102,7 +122,14 @@ func (p *Poller) Run(ctx context.Context) error {
 	if every <= 0 {
 		every = ReadInterval
 	}
-	for {
+	since, err := p.since(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	for first := true; ; first = false {
 		list, err := p.Source.Polling(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -118,17 +145,24 @@ func (p *Poller) Run(ctx context.Context) error {
 			if c, ok := want[id]; !ok || c.Version != w.version {
 				stop(id)
 			}
+			if _, ok := want[id]; !ok {
+				p.forget(id)
+			}
 		}
 		for id, c := range want {
 			if _, ok := running[id]; ok {
 				continue
+			}
+			last := p.lastReceived(c.ID, since)
+			if !first {
+				last = p.receivedOr(c.ID, p.now())
 			}
 			wctx, cancel := context.WithCancel(ctx)
 			w := &worker{version: c.Version, cancel: cancel, done: make(chan struct{})}
 			running[id] = w
 			go func() {
 				defer close(w.done)
-				p.poll(wctx, c)
+				p.poll(wctx, c, last)
 			}()
 		}
 		t := time.NewTimer(every)
@@ -143,8 +177,70 @@ func (p *Poller) Run(ctx context.Context) error {
 	}
 }
 
-// poll is the loop of one Connection until ctx ends.
-func (p *Poller) poll(ctx context.Context, c Polled) {
+// since is when the updates of a Connection that this process has not polled yet were last received, read when a run
+// starts: now, or the start of the outage just before now.
+func (p *Poller) since(ctx context.Context) (time.Time, error) {
+	now := p.now()
+	if p.Outages == nil || p.Clock == nil {
+		return now, nil
+	}
+	o, err := p.Outages.Outage(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	since, _ := o.quietSince(now)
+	return since, nil
+}
+
+// lastReceived is when the updates of the Connection id were last received: by a poll of this process, when it is
+// later than since, or since.
+func (p *Poller) lastReceived(id int64, since time.Time) time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if t, ok := p.received[id]; ok && t.After(since) {
+		return t
+	}
+	return since
+}
+
+// receivedOr is when the updates of the Connection id were last received by a poll of this process, which a worker
+// restarted for a new version of the Connection keeps, or t.
+func (p *Poller) receivedOr(id int64, t time.Time) time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if r, ok := p.received[id]; ok {
+		return r
+	}
+	return t
+}
+
+// forget drops what this process knows of the updates of the Connection id, which left long polling.
+func (p *Poller) forget(id int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.received, id)
+}
+
+// receive records that the updates of the Connection id were received at t.
+func (p *Poller) receive(id int64, t time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.received == nil {
+		p.received = map[int64]time.Time{}
+	}
+	p.received[id] = t
+}
+
+// now is the business time, the zero time without a Clock.
+func (p *Poller) now() time.Time {
+	if p.Clock == nil {
+		return time.Time{}
+	}
+	return p.Clock.Now()
+}
+
+// poll is the loop of one Connection until ctx ends; last is when its updates were last received.
+func (p *Poller) poll(ctx context.Context, c Polled, last time.Time) {
 	offset := c.Offset
 	var failures, conflicts int
 	for ctx.Err() == nil {
@@ -154,6 +250,7 @@ func (p *Poller) poll(ctx context.Context, c Polled) {
 		if ctx.Err() != nil {
 			return
 		}
+		end := p.now()
 		if r.Conflict() {
 			conflicts++
 			failures = 0
@@ -173,8 +270,10 @@ func (p *Poller) poll(ctx context.Context, c Polled) {
 			// A Bot API holds an empty long poll for its timeout; one that answers at once must not make a tight loop.
 			p.wait(ctx, emptyPause)
 		}
+		gap := max(end.Sub(last), 0)
 		routed := true
 		for _, u := range updates {
+			u.Gap = gap
 			if _, err := p.Router.Route(ctx, c.Conn, u); err != nil {
 				if ctx.Err() != nil {
 					return
@@ -189,6 +288,10 @@ func (p *Poller) poll(ctx context.Context, c Polled) {
 		}
 		if routed {
 			failures = 0
+			if len(updates) < fullBatch {
+				last = end
+				p.receive(c.ID, end)
+			}
 		}
 	}
 }

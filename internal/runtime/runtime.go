@@ -656,7 +656,7 @@ func (p *process) callbacks() http.Handler {
 		Commands: p.groups, Roles: p.roles, Keys: p.keyring, Path: p.interactive, Business: p.clocks.Business,
 		PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit, Log: p.log}))
 	mux.Handle(telegram.WebhookPattern, telegram.NewWebhook(telegram.WebhookConfig{Connections: p.connections,
-		Router: p.updates, BodyLimit: ingest.BodyLimit, Log: p.log}))
+		Router: p.updates, Outages: p.connections, Clock: p.clocks.Business, BodyLimit: ingest.BodyLimit, Log: p.log}))
 	return mux
 }
 
@@ -789,7 +789,11 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	// Account links register their handlers on it.
 	p.updates = &telegram.Router{Offsets: conns, Log: p.log}
 	p.updates.Handle(telegram.KindChatMessage, telegram.Copies{Learner: p.delivery}.Handle)
-	p.poller = &telegram.Poller{Source: conns, Router: p.updates, Log: p.log}
+	p.updates.Handle(telegram.KindCallbackQuery, (&telegram.Presses{Bindings: p.delivery,
+		Links: accountlinks.New(orgID, p.db.AccountLinksDB()), Commands: p.groups, Roles: roles, Keys: p.keyring,
+		Path: interactive, Business: p.clocks.Business, PublicURL: p.cfg.PublicURL.String(), Log: p.log}).Handle)
+	p.poller = &telegram.Poller{Source: conns, Router: p.updates, Outages: conns, Clock: p.clocks.Business,
+		Log: p.log}
 	p.destinations = destinations.New(orgID, p.db.DestinationsStore())
 	p.destinations.SetWriter(destinations.WriterConfig{Writer: p.db.DestinationsWriter(), Audit: w,
 		Business: p.clocks.Business,

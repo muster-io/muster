@@ -6,11 +6,14 @@ package telegram
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/logging"
 )
 
@@ -173,5 +176,73 @@ func TestRouterHandlers(t *testing.T) {
 	}
 	if log.String() != "" {
 		t.Fatalf("logged %s", log)
+	}
+}
+
+// TestWebhookGapAfterAnOutage covers C-14.FR-4 in the webhook mode (journal D293): a quiet period is no gap; an update
+// that reaches a replica before any other of its Connection, within telegram.press_max_age of the replica's start,
+// gets as its gap the outage before that start, up to the replica's start: a short outage leaves later presses alone. A press dropped for it receives nothing, so that the
+// next kept press gets the gap too, until another update arrives; a failed read of the outage is a 500.
+func TestWebhookGapAfterAnOutage(t *testing.T) {
+	business := clock.NewManual(press0)
+	g := &gaps{}
+	r := &Router{Offsets: &memOffsets{}, Log: logging.New(&syncBuffer{}, logging.LevelInfo)}
+	r.Handle(KindCallbackQuery, g.handler)
+	r.Handle(KindPrivateMessage, g.handler)
+	conn := Conn{ID: 1, PublicID: "CNAAAAAAAAAAT1"}
+	cfg := WebhookConfig{Connections: hooks{conn: conn, secret: "s3cr3t_hook"}, Router: r, Clock: business,
+		Outages: fixedOutages{o: Outage{AliveAt: press0, DowntimeStart: press0.Add(-3 * time.Hour),
+			DowntimeEnd: press0.Add(-time.Second)}}, Log: logging.New(&syncBuffer{}, logging.LevelInfo)}
+	h := NewWebhook(cfg)
+	pressAt := func(h http.Handler, id int64) time.Duration {
+		t.Helper()
+		body := fmt.Sprintf(`{"update_id":%d,"callback_query":{"id":"q%d","from":{"id":5001},"data":"x"}}`, id, id)
+		if rec := post(t, h, WebhookPath+conn.PublicID, "s3cr3t_hook", body); rec.Code != http.StatusOK {
+			t.Fatalf("press %d = %d %s", id, rec.Code, rec.Body)
+		}
+		d, _ := g.of(id)
+		return d
+	}
+	business.Advance(time.Minute)
+	if d := pressAt(h, 1); d != 3*time.Hour {
+		t.Errorf("the first kept press has the gap %v", d)
+	}
+	if d := pressAt(h, 2); d != 3*time.Hour {
+		t.Errorf("the second kept press has the gap %v", d)
+	}
+	if rec := post(t, h, WebhookPath+conn.PublicID, "s3cr3t_hook", strings.ReplaceAll(privateUpdate, "9001",
+		"3")); rec.Code != http.StatusOK {
+		t.Fatalf("message = %d", rec.Code)
+	}
+	business.Advance(30 * time.Minute)
+	if d := pressAt(h, 4); d != 0 {
+		t.Errorf("a press after another update has the gap %v", d)
+	}
+	// A replica that started long after the outage, or one without an outage, sees no gap.
+	late := NewWebhook(cfg)
+	business.Advance(PressMaxAge + time.Second)
+	if d := pressAt(late, 5); d != 0 {
+		t.Errorf("a replica running for over an hour sees the gap %v", d)
+	}
+	short := cfg
+	short.Outages = fixedOutages{o: Outage{AliveAt: business.Now(), DowntimeStart: business.Now().Add(-20 * time.Minute),
+		DowntimeEnd: business.Now().Add(-time.Second)}}
+	recovered := NewWebhook(short)
+	business.Advance(41 * time.Minute)
+	if d := pressAt(recovered, 9); d != 20*time.Minute {
+		t.Errorf("a press 41 min after a 20-min outage has the gap %v", d)
+	}
+	cfg.Outages = fixedOutages{}
+	if d := pressAt(NewWebhook(cfg), 6); d != 0 {
+		t.Errorf("without an outage the gap is %v", d)
+	}
+	cfg.Outages = fixedOutages{err: errors.New("down")}
+	if rec := post(t, NewWebhook(cfg), WebhookPath+conn.PublicID, "s3cr3t_hook",
+		`{"update_id":7,"callback_query":{"id":"q7","from":{"id":5001}}}`); rec.Code != http.StatusInternalServerError {
+		t.Errorf("a failed outage read = %d", rec.Code)
+	}
+	cfg.Outages, cfg.Clock = nil, nil
+	if d := pressAt(NewWebhook(cfg), 8); d != 0 {
+		t.Errorf("without Outages the gap is %v", d)
 	}
 }

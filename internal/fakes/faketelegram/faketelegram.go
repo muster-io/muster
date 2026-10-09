@@ -8,11 +8,12 @@
 // with the secret token header. getChat, getChatMember, sendMessage and editMessageText work on the chats of chats.go:
 // two channels and a discussion group, the bot's rights in them, the messages the bot sent with their keyboards and
 // edits, the budget of sends and edits per chat and the notifications of two accounts; copies.go adds the automatic
-// copies of channel posts in the discussion group, their edits, people's comments and deleted messages. Every other
+// copies of channel posts in the discussion group, their edits, people's comments and deleted messages; presses.go
+// adds button presses and answerCallbackQuery with its deadline. Every other
 // method is recorded and answered 501. The control endpoints under /_fake/ change the configuration (a path prefix, an
 // HTML mode that stands for a web server that is not a Bot API, revoked tokens, the delay of copies and withholding
-// them), queue updates, end a running long poll with 409, post comments, delete messages, and change and list the
-// chats, the bot's rights, the messages and the notifications.
+// them, the answer deadline), queue updates, end a running long poll with 409, post comments, press buttons, delete
+// messages, and change and list the chats, the bot's rights, the messages, the notifications and the answers.
 package faketelegram
 
 import (
@@ -70,14 +71,17 @@ type Config struct {
 	// not an admin of the discussion group (F-003); the copies exist all the same. It is read when a copy arrives,
 	// copy_delay_ms after its post.
 	WithholdCopies bool `json:"withhold_copies"`
+	// AnswerDeadlineMS is how long after a press answerCallbackQuery is accepted (F-010).
+	AnswerDeadlineMS int64 `json:"answer_deadline_ms"`
 }
 
 type configPatch struct {
-	PathPrefix     *string   `json:"path_prefix"`
-	Mode           *string   `json:"mode"`
-	RevokedTokens  *[]string `json:"revoked_tokens"`
-	CopyDelayMS    *int64    `json:"copy_delay_ms"`
-	WithholdCopies *bool     `json:"withhold_copies"`
+	PathPrefix       *string   `json:"path_prefix"`
+	Mode             *string   `json:"mode"`
+	RevokedTokens    *[]string `json:"revoked_tokens"`
+	CopyDelayMS      *int64    `json:"copy_delay_ms"`
+	WithholdCopies   *bool     `json:"withhold_copies"`
+	AnswerDeadlineMS *int64    `json:"answer_deadline_ms"`
 }
 
 // Fake is the fake Telegram Bot API server.
@@ -91,11 +95,19 @@ type Fake struct {
 	bots   map[string]*bot
 
 	chats *chats
+
+	// presses wait for their answers, by callback_query id; pressed counts them; answers are every
+	// answerCallbackQuery.
+	presses map[string]*press
+	pressed int64
+	answers []Answer
 }
 
 // New returns the fake with no prefix, in the Bot API mode.
 func New() *Fake {
-	f := &Fake{config: Config{Mode: ModeBotAPI, RevokedTokens: []string{}}, bots: map[string]*bot{}, chats: newChats(),
+	f := &Fake{config: Config{Mode: ModeBotAPI, RevokedTokens: []string{},
+		AnswerDeadlineMS: DefaultAnswerDeadline.Milliseconds()}, bots: map[string]*bot{}, chats: newChats(),
+		presses: map[string]*press{}, answers: []Answer{},
 		client: &http.Client{Timeout: webhookTimeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	f.Server = fakeserver.New("Telegram", http.HandlerFunc(f.serve))
@@ -109,6 +121,7 @@ func New() *Fake {
 		fakeserver.WriteJSON(w, http.StatusOK, f.Webhooks())
 	})
 	f.handleChats()
+	f.handlePresses()
 	return f
 }
 
@@ -158,6 +171,10 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 		fakeserver.WriteError(w, http.StatusBadRequest, "copy_delay_ms is 0 or more")
 		return
 	}
+	if p.AnswerDeadlineMS != nil && *p.AnswerDeadlineMS < 1 {
+		fakeserver.WriteError(w, http.StatusBadRequest, "answer_deadline_ms is 1 or more")
+		return
+	}
 	if err := f.SetConfig(p.PathPrefix, p.Mode, p.RevokedTokens); err != nil {
 		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -168,6 +185,9 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.WithholdCopies != nil {
 		f.config.WithholdCopies = *p.WithholdCopies
+	}
+	if p.AnswerDeadlineMS != nil {
+		f.config.AnswerDeadlineMS = *p.AnswerDeadlineMS
 	}
 	f.mu.Unlock()
 	fakeserver.WriteJSON(w, http.StatusOK, f.Config())
@@ -258,6 +278,8 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		f.sendMessage(r.Context(), w, token, p)
 	case "editmessagetext":
 		f.editMessageText(r.Context(), w, p)
+	case "answercallbackquery":
+		f.answerCallbackQuery(w, p)
 	default:
 		writeFailure(w, http.StatusNotImplemented,
 			"Not Implemented: method "+method+" is not implemented by the fake Telegram server")

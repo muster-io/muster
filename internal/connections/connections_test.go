@@ -74,6 +74,8 @@ type memStore struct {
 	// ones, as GetTelegramDestinationTarget reads them.
 	targets   map[int64]memTarget
 	tgTargets map[int64]memTGTarget
+	// outage is what GetOutage reads.
+	outage dbgen.GetOutageRow
 }
 
 // memTGTarget is a Telegram Destination: its Connection, its channel as entered and the ids its check learned.
@@ -304,15 +306,38 @@ func (s *memStore) ListPollingConnections(_ context.Context, org int64) ([]dbgen
 	return out, nil
 }
 
-func (s *memStore) LockUpdateOffset(_ context.Context, a dbgen.LockUpdateOffsetParams) (pgtype.Int8, error) {
-	if err := s.fail["LockUpdateOffset"]; err != nil {
-		return pgtype.Int8{}, err
+func (s *memStore) LockUpdates(_ context.Context, a dbgen.LockUpdatesParams) error {
+	if a.LockClass != db.TelegramUpdateLockClass {
+		return errors.New("the wrong lock class")
+	}
+	return s.fail["LockUpdates"]
+}
+
+func (s *memStore) AwaitUpdates(_ context.Context, a dbgen.AwaitUpdatesParams) error {
+	if a.LockClass != db.TelegramUpdateLockClass {
+		return errors.New("the wrong lock class")
+	}
+	return s.fail["AwaitUpdates"]
+}
+
+func (s *memStore) GetOutage(context.Context) (dbgen.GetOutageRow, error) {
+	if err := s.fail["GetOutage"]; err != nil {
+		return dbgen.GetOutageRow{}, err
+	}
+	return s.outage, nil
+}
+
+func (s *memStore) GetUpdateOffset(_ context.Context, a dbgen.GetUpdateOffsetParams) (dbgen.GetUpdateOffsetRow,
+	error) {
+	if err := s.fail["GetUpdateOffset"]; err != nil {
+		return dbgen.GetUpdateOffsetRow{}, err
 	}
 	r := s.rows[a.ID]
 	if r == nil || r.deleted || r.row.Type != connections.TypeTelegram || a.OrgID != 1 {
-		return pgtype.Int8{}, pgx.ErrNoRows
+		return dbgen.GetUpdateOffsetRow{}, pgx.ErrNoRows
 	}
-	return r.row.TelegramUpdateOffset, nil
+	return dbgen.GetUpdateOffsetRow{TelegramUpdateOffset: r.row.TelegramUpdateOffset,
+		BotTokenUpdatedAt: r.row.BotTokenUpdatedAt}, nil
 }
 
 func (s *memStore) StoreUpdateOffset(_ context.Context, a dbgen.StoreUpdateOffsetParams) error {
@@ -320,6 +345,9 @@ func (s *memStore) StoreUpdateOffset(_ context.Context, a dbgen.StoreUpdateOffse
 		return err
 	}
 	r := &s.rows[a.ID].row
+	if !r.BotTokenUpdatedAt.Equal(a.TokenUpdatedAt) {
+		return nil
+	}
 	if !r.TelegramUpdateOffset.Valid || r.TelegramUpdateOffset.Int64 < a.Next {
 		r.TelegramUpdateOffset = pgtype.Int8{Int64: a.Next, Valid: true}
 	}

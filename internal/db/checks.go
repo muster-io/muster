@@ -42,6 +42,12 @@ const (
 // the Route shared (delivery). The two-key advisory locks do not overlap the one-key locks above.
 const RouteMembershipLockClass int32 = 0x6d75_0002
 
+// TelegramUpdateLockClass is the first key of the transaction advisory lock of a Telegram Connection's updates, whose
+// second key is hashint8 of the Connection's id: the update router holds it while a handler runs, so that a second
+// poller or a webhook request with the same update waits and then skips it. The class 0x6d75_0003 is delivery's lock of
+// a channel post's copy.
+const TelegramUpdateLockClass int32 = 0x6d75_0004
+
 // querier is what the checks need of the main pool or of a connection.
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)

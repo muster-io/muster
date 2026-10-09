@@ -1498,6 +1498,59 @@ func (q *Queries) GetStormRankTime(ctx context.Context, arg GetStormRankTimePara
 	return created_at, err
 }
 
+const getTelegramPressBinding = `-- name: GetTelegramPressBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name, r.language,
+       r.snooze_durations_seconds
+FROM deliveries d
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE d.org_id = $1 AND ds.connection_id = $2 AND ds.type = 'telegram' AND ds.deleted_at IS NULL
+  AND ds.telegram_channel_chat_id = $3::bigint AND g.public_id = $4
+  AND d.message_id = $5::text
+ORDER BY d.id
+LIMIT 1
+`
+
+type GetTelegramPressBindingParams struct {
+	OrgID         int64
+	ConnectionID  pgtype.Int8
+	ChatID        int64
+	GroupPublicID string
+	MessageID     string
+}
+
+type GetTelegramPressBindingRow struct {
+	DestinationID          int64
+	DestinationPublicID    string
+	DestinationName        string
+	Language               string
+	SnoozeDurationsSeconds []int64
+}
+
+// GetTelegramPressBinding reads what a press on the channel post message_id of the chat chat_id that names the Alert
+// Group group_public_id is bound to (C-14.FR-4): the delivery of that Alert Group to a Telegram Destination of the
+// Connection that is not deleted, whose channel is chat_id and whose Root message is message_id, with the Route's
+// language and Snooze durations.
+func (q *Queries) GetTelegramPressBinding(ctx context.Context, arg GetTelegramPressBindingParams) (GetTelegramPressBindingRow, error) {
+	row := q.db.QueryRow(ctx, getTelegramPressBinding,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.ChatID,
+		arg.GroupPublicID,
+		arg.MessageID,
+	)
+	var i GetTelegramPressBindingRow
+	err := row.Scan(
+		&i.DestinationID,
+		&i.DestinationPublicID,
+		&i.DestinationName,
+		&i.Language,
+		&i.SnoozeDurationsSeconds,
+	)
+	return i, err
+}
+
 const holdBucket = `-- name: HoldBucket :exec
 UPDATE rate_limit_buckets
 SET tokens = 1, refilled_at = $1

@@ -168,18 +168,43 @@ FROM connections
 WHERE org_id = @org_id AND type = 'telegram' AND telegram_update_mode = 'long_polling' AND deleted_at IS NULL
 ORDER BY id;
 
--- LockUpdateOffset reads telegram_update_offset of a Telegram Connection that is not deleted — the id after the last
--- update handed to the router — and locks it until the transaction ends, so that a second poller or a webhook request
--- with the same update waits for the first and then skips it.
--- name: LockUpdateOffset :one
-SELECT telegram_update_offset
+-- LockUpdates takes, until the transaction ends, the update lock of a Telegram Connection (class
+-- db.TelegramUpdateLockClass, keyed by hashint8 of its id), so that a second poller or a webhook request with the same
+-- update waits for the first and then skips it. It never locks the connections row, which a save of the Connection
+-- holds while setWebhook runs; a collision of the hash only serializes the updates of two Connections.
+-- name: LockUpdates :exec
+SELECT pg_advisory_xact_lock(@lock_class::int, hashint8(@id::bigint));
+
+-- AwaitUpdates takes and, as its transaction ends at once, releases the update lock of a Telegram Connection shared:
+-- it waits until no update of the Connection is being handled, so that an edit of its Root message follows the answer
+-- to the press that caused it.
+-- name: AwaitUpdates :exec
+SELECT pg_advisory_xact_lock_shared(@lock_class::int, hashint8(@id::bigint));
+
+-- GetUpdateOffset reads telegram_update_offset of a Telegram Connection that is not deleted — the id after the last
+-- update handed to the router — and when its bot token was set, without a row lock, under the update lock of the
+-- Connection.
+-- name: GetUpdateOffset :one
+SELECT telegram_update_offset, bot_token_updated_at
 FROM connections
-WHERE org_id = @org_id AND id = @id AND type = 'telegram' AND deleted_at IS NULL
-FOR NO KEY UPDATE;
+WHERE org_id = @org_id AND id = @id AND type = 'telegram' AND deleted_at IS NULL;
 
 -- StoreUpdateOffset raises telegram_update_offset of a Telegram Connection to @next; it never lowers it, so that a
--- poller of a frozen old Leader cannot move it back. It is not a change of the configuration.
+-- poller of a frozen old Leader cannot move it back. It changes nothing when the bot token was set again since
+-- @token_updated_at, which forgot telegram_update_offset: the ids of another bot's updates start elsewhere. It is not
+-- a change of the configuration.
 -- name: StoreUpdateOffset :exec
 UPDATE connections
 SET telegram_update_offset = GREATEST(coalesce(telegram_update_offset, @next::bigint), @next::bigint)
-WHERE org_id = @org_id AND id = @id AND type = 'telegram';
+WHERE org_id = @org_id AND id = @id AND type = 'telegram' AND bot_token_updated_at = @token_updated_at::timestamptz;
+
+-- GetOutage reads, for the age of Telegram presses (C-14.FR-4), when Muster was last known not to run: the Leader's
+-- alive mark and the latest downtime period, the zero time for none. All three are installation-wide and on the
+-- business clock.
+-- name: GetOutage :one
+SELECT coalesce((SELECT rs.alive_at FROM runtime_state rs),
+                '0001-01-01 00:00:00+00')::timestamptz AS alive_at,
+       coalesce((SELECT d.started_at FROM downtime_periods d ORDER BY d.ended_at DESC, d.id DESC LIMIT 1),
+                '0001-01-01 00:00:00+00')::timestamptz AS downtime_started_at,
+       coalesce((SELECT d.ended_at FROM downtime_periods d ORDER BY d.ended_at DESC, d.id DESC LIMIT 1),
+                '0001-01-01 00:00:00+00')::timestamptz AS downtime_ended_at;

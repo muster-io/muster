@@ -905,3 +905,186 @@ func TestReplyInsideChannelIsNewPost(t *testing.T) {
 		t.Fatalf("a channel without comments got a copy: %+v", f.Messages(0))
 	}
 }
+
+// pressUpdate is the callback_query of an update.
+type pressUpdate struct {
+	ID   string `json:"id"`
+	From struct {
+		ID       int64  `json:"id"`
+		Username string `json:"username"`
+	} `json:"from"`
+	Message struct {
+		MessageID       int64 `json:"message_id"`
+		MessageThreadID int64 `json:"message_thread_id"`
+		Chat            struct {
+			ID   int64  `json:"id"`
+			Type string `json:"type"`
+		} `json:"chat"`
+	} `json:"message"`
+	ChatInstance string `json:"chat_instance"`
+	Data         string `json:"data"`
+}
+
+func pressOf(t *testing.T, u map[string]json.RawMessage) pressUpdate {
+	t.Helper()
+	var q pressUpdate
+	if err := json.Unmarshal(u["callback_query"], &q); err != nil || u["callback_query"] == nil {
+		t.Fatalf("no callback_query in %v", u)
+	}
+	return q
+}
+
+func press(t *testing.T, base, body string) (int, faketelegram.Pressed) {
+	t.Helper()
+	s, b, _ := call(t, http.MethodPost, base+"/_fake/press", body)
+	var p faketelegram.Pressed
+	_ = json.Unmarshal([]byte(b), &p)
+	return s, p
+}
+
+// F-009: a press on a channel post's button arrives as a callback_query from the person, with the post in the channel
+// and the button's data; a press on a bot's reply in a comment Thread carries the discussion group and
+// message_thread_id. data_from presses a valid button on the wrong message, and data a forged one.
+func TestPressesOnPostsAndComments(t *testing.T) {
+	f, base := start(t)
+	p := post(t, base, "post")
+	cp := messageOf(t, updates(t, base)[0], "message")
+	s, a := bot(t, base, "sendMessage", fmt.Sprintf(`{"chat_id":-1001000000002,"text":"reminder",
+		"reply_parameters":{"message_id":%d},"reply_markup":{"inline_keyboard":[[{"text":"Still on it","callback_data":"k"}]]}}`,
+		cp.MessageID))
+	var reply struct {
+		MessageID int64 `json:"message_id"`
+	}
+	_ = json.Unmarshal(a.Result, &reply)
+	if s != http.StatusOK {
+		t.Fatalf("reply = %d %+v", s, a)
+	}
+
+	s, pr := press(t, base, fmt.Sprintf(`{"chat":-1001000000001,"message_id":%d,"from":{"id":5001,"username":"bob_tg"},
+		"button":"Ack"}`, p))
+	if s != http.StatusOK || pr.CallbackQueryID == "" || pr.UpdateID == 0 {
+		t.Fatalf("press = %d %+v", s, pr)
+	}
+	u := updates(t, base)
+	if len(u) != 1 {
+		t.Fatalf("updates %v", u)
+	}
+	q := pressOf(t, u[0])
+	if q.ID != pr.CallbackQueryID || q.From.ID != 5001 || q.From.Username != "bob_tg" || q.Message.MessageID != p ||
+		q.Message.Chat.ID != faketelegram.ChannelID || q.Message.Chat.Type != "channel" || q.Data != "a" ||
+		q.Message.MessageThreadID != 0 || q.ChatInstance == "" {
+		t.Fatalf("press on the post %+v", q)
+	}
+
+	press(t, base, fmt.Sprintf(`{"chat":"-1001000000002","message_id":%d,"from":{"id":5001},"button":"Still on it"}`,
+		reply.MessageID))
+	q = pressOf(t, updates(t, base)[0])
+	if q.Message.Chat.ID != faketelegram.GroupID || q.Message.Chat.Type != "supergroup" ||
+		q.Message.MessageThreadID != cp.MessageID || q.Data != "k" {
+		t.Fatalf("press on the comment %+v", q)
+	}
+
+	press(t, base, fmt.Sprintf(`{"chat":-1001000000001,"message_id":999999,"from":{"id":5001},"button":"Ack",
+		"data_from":%d}`, p))
+	q = pressOf(t, updates(t, base)[0])
+	if q.Message.MessageID != 999999 || q.Message.Chat.ID != faketelegram.ChannelID || q.Data != "a" {
+		t.Fatalf("press with data_from %+v", q)
+	}
+	press(t, base, fmt.Sprintf(`{"chat":"@muster_alerts","message_id":%d,"from":{"id":5001},"button":"x","data":"forged"}`,
+		p))
+	if q = pressOf(t, updates(t, base)[0]); q.Data != "forged" {
+		t.Fatalf("forged press %+v", q)
+	}
+	for _, bad := range []string{
+		fmt.Sprintf(`{"chat":-1001000000001,"message_id":%d,"from":{"id":5001},"button":"Nope"}`, p),
+		fmt.Sprintf(`{"chat":-1001000000001,"message_id":%d,"button":"Ack"}`, p),
+		`{"chat":-1001000000001,"message_id":424242,"from":{"id":5001},"button":"Ack"}`,
+		`{"chat":"@nobody","message_id":1,"from":{"id":5001},"button":"Ack"}`,
+		fmt.Sprintf(`{"chat":-1001000000001,"message_id":%d,"from":{"id":5001},"button":"Ack","pressed_ms_ago":-1}`, p),
+		`{`,
+	} {
+		if s, _ := press(t, base, bad); s/100 != 4 {
+			t.Errorf("press %s = %d", bad, s)
+		}
+	}
+	if len(f.Answers()) != 0 {
+		t.Fatalf("answers %+v", f.Answers())
+	}
+}
+
+// F-010: a press is answered once, with at most 200 characters, within the answer deadline (15 s by default); a later
+// answer fails with "query is too old and response timeout expired or query ID is invalid". Every answer is recorded
+// with its time after the press.
+func TestAnswerDeadline(t *testing.T) {
+	f, base := start(t)
+	if f.Config().AnswerDeadlineMS != 15000 {
+		t.Fatalf("default deadline %d", f.Config().AnswerDeadlineMS)
+	}
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	f.SetClock(func() time.Time { return now })
+	p := post(t, base, "post")
+	pressAt := func(agoMs int64) string {
+		_, pr := press(t, base, fmt.Sprintf(`{"chat":-1001000000001,"message_id":%d,"from":{"id":5001},"button":"Ack",
+			"pressed_ms_ago":%d}`, p, agoMs))
+		return pr.CallbackQueryID
+	}
+	answer := func(id, text string) (int, answer) {
+		b, _ := json.Marshal(map[string]string{"callback_query_id": id, "text": text})
+		return bot(t, base, "answerCallbackQuery", string(b))
+	}
+
+	early := pressAt(14_900)
+	if s, a := answer(early, "Done: Acknowledge"); s != http.StatusOK || !a.OK {
+		t.Fatalf("answer just before the deadline = %d %+v", s, a)
+	}
+	if s, a := answer(early, "again"); s != http.StatusBadRequest || a.Description != faketelegram.DescriptionQueryTooOld {
+		t.Fatalf("second answer = %d %+v", s, a)
+	}
+	late := pressAt(15_001)
+	if s, a := answer(late, "late"); s != http.StatusBadRequest || a.Description != faketelegram.DescriptionQueryTooOld {
+		t.Fatalf("answer after the deadline = %d %+v", s, a)
+	}
+	fresh := pressAt(0)
+	if s, a := answer(fresh, strings.Repeat("я", 201)); s != http.StatusBadRequest ||
+		a.Description != faketelegram.DescriptionAnswerTooLong {
+		t.Fatalf("long answer = %d %+v", s, a)
+	}
+	if s, a := answer(fresh, strings.Repeat("я", 200)); s != http.StatusOK || !a.OK {
+		t.Fatalf("answer of 200 characters = %d %+v", s, a)
+	}
+	if s, _ := answer("unknown", "x"); s != http.StatusBadRequest {
+		t.Fatalf("unknown query = %d", s)
+	}
+	if s, _ := answer("", "x"); s != http.StatusBadRequest {
+		t.Fatalf("no query = %d", s)
+	}
+
+	_, b, _ := call(t, http.MethodGet, base+"/_fake/answers", "")
+	var got []faketelegram.Answer
+	if err := json.Unmarshal([]byte(b), &got); err != nil || len(got) != 7 {
+		t.Fatalf("answers %s", b)
+	}
+	if !got[0].OK || got[0].Text != "Done: Acknowledge" || got[0].AfterMs != 14_900 || got[0].AtMs != now.UnixMilli() ||
+		got[1].OK || got[2].OK || got[2].AfterMs != 15_001 || got[3].OK || !got[4].OK {
+		t.Fatalf("answers %+v", got)
+	}
+
+	if s, b, _ := call(t, http.MethodPut, base+"/_fake/config", `{"answer_deadline_ms":100}`); s != http.StatusOK ||
+		!strings.Contains(b, `"answer_deadline_ms":100`) {
+		t.Fatalf("config = %d %s", s, b)
+	}
+	if s, a := answer(pressAt(101), "x"); s != http.StatusBadRequest || a.OK {
+		t.Fatalf("answer after a short deadline = %d %+v", s, a)
+	}
+	if s, _, _ := call(t, http.MethodPut, base+"/_fake/config", `{"answer_deadline_ms":0}`); s != http.StatusBadRequest {
+		t.Fatalf("a zero deadline = %d", s)
+	}
+	f.SetAnswerDeadline(0)
+	if f.Config().AnswerDeadlineMS != 15000 {
+		t.Fatalf("deadline %d", f.Config().AnswerDeadlineMS)
+	}
+	f.SetAnswerDeadline(time.Second)
+	if s, _ := answer(pressAt(999), "x"); s != http.StatusOK {
+		t.Fatalf("answer within a deadline of 1 s = %d", s)
+	}
+}

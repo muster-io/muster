@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/muster-io/muster/internal/logging"
 )
@@ -62,6 +63,9 @@ type Update struct {
 	CallbackQuery *CallbackQuery  `json:"callback_query,omitempty"`
 	MyChatMember  json.RawMessage `json:"my_chat_member,omitempty"`
 	Raw           json.RawMessage `json:"-"`
+	// Gap is how long the Connection had received no updates before the poll or the webhook request that brought this
+	// one, as far as this replica knows (C-14.FR-4): a press after a gap longer than telegram.press_max_age is dropped.
+	Gap time.Duration `json:"-"`
 }
 
 // errNoUpdateID is an update without update_id.
@@ -120,17 +124,19 @@ type Conn struct {
 }
 
 // Handler processes the updates of one kind. An error leaves the update unconfirmed, so that it comes again: with long
-// polling at the next poll, with a webhook when Telegram retries it. A handler runs while the Connection's offset is
-// locked — the connections row, FOR NO KEY UPDATE — so it must be short, must not lock that row itself and must not
-// wait for a save of the Connection, which takes the same lock.
+// polling at the next poll, with a webhook when Telegram retries it. A handler runs under the Connection's update lock
+// — a transaction advisory lock keyed by the Connection, not its connections row — so it may run while a save of the
+// Connection holds that row; it must be short, since the next update of the Connection and every edit of its Root
+// messages wait for it.
 type Handler func(ctx context.Context, c Conn, u Update) error
 
 // Offsets keep the offset of each Connection's updates, connections.telegram_update_offset: the id after the last
 // update handed to the router. Both update modes share it, so that an update is handled once.
 type Offsets interface {
 	// HandleOnce runs f for the update updateID of the Connection id unless the stored offset is past it, holding the
-	// offset locked meanwhile, so that a second poller or a webhook request with the same update waits and then skips
-	// it; once f succeeded it raises the offset to updateID+1. It reports whether f ran. An error of f stores nothing.
+	// Connection's update lock meanwhile, so that a second poller or a webhook request with the same update waits and
+	// then skips it; once f succeeded it raises the offset to updateID+1. It reports whether f ran. An error of f
+	// stores nothing.
 	HandleOnce(ctx context.Context, id, updateID int64, f func(ctx context.Context) error) (bool, error)
 }
 

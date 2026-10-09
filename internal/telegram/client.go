@@ -356,6 +356,14 @@ func (c *Client) editMessageText(ctx context.Context, class outbound.Class, m ou
 	return out, c.call(ctx, clientKey{class: class}, http.MethodPost, "editMessageText", m, &out)
 }
 
+// answerCallbackQuery answers the press id with text, which the person who pressed sees on the button (C-14.FR-5);
+// Telegram refuses it about 15 seconds after the press (F-010). Only the press handler calls it, inside the answer of
+// the interactive path.
+func (c *Client) answerCallbackQuery(ctx context.Context, class outbound.Class, id, text string) Result {
+	return c.call(ctx, clientKey{class: class}, http.MethodPost, "answerCallbackQuery",
+		map[string]any{"callback_query_id": id, "text": text}, nil)
+}
+
 // DryProbe is `GET <base>/bot0:x/getMe` without the token (C-14.FR-11): a Bot API answers it 401 with a JSON body.
 // The Result is the raw answer, which the check names; a 429 is Transient, never a RetryAfter.
 func (c *Client) DryProbe(ctx context.Context, class outbound.Class) Result {

@@ -1137,6 +1137,23 @@ WHERE d.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'ma
 ORDER BY d.id
 LIMIT 1;
 
+-- GetTelegramPressBinding reads what a press on the channel post message_id of the chat chat_id that names the Alert
+-- Group group_public_id is bound to (C-14.FR-4): the delivery of that Alert Group to a Telegram Destination of the
+-- Connection that is not deleted, whose channel is chat_id and whose Root message is message_id, with the Route's
+-- language and Snooze durations.
+-- name: GetTelegramPressBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name, r.language,
+       r.snooze_durations_seconds
+FROM deliveries d
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE d.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'telegram' AND ds.deleted_at IS NULL
+  AND ds.telegram_channel_chat_id = @chat_id::bigint AND g.public_id = @group_public_id
+  AND d.message_id = @message_id::text
+ORDER BY d.id
+LIMIT 1;
+
 -- GetPostDestination reads the Mattermost Destination of the Connection, not deleted, whose channel is channel_id and
 -- to which some delivery posted message_id.
 -- name: GetPostDestination :one
