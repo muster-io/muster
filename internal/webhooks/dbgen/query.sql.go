@@ -103,7 +103,8 @@ func (q *Queries) GetBodyUser(ctx context.Context, arg GetBodyUserParams) (GetBo
 }
 
 const getTarget = `-- name: GetTarget :one
-SELECT id, public_id, webhook_mode, webhook_events_config, proxy, proxy_password_ciphertext, proxy_password_key_id,
+SELECT id, public_id, webhook_mode, webhook_events_config, webhook_template_config, proxy, proxy_password_ciphertext,
+       proxy_password_key_id,
        signing_secret_ciphertext, signing_secret_key_id, previous_signing_secret_ciphertext,
        previous_signing_secret_key_id
 FROM destinations
@@ -120,6 +121,7 @@ type GetTargetRow struct {
 	PublicID                        string
 	WebhookMode                     pgtype.Text
 	WebhookEventsConfig             []byte
+	WebhookTemplateConfig           []byte
 	Proxy                           []byte
 	ProxyPasswordCiphertext         []byte
 	ProxyPasswordKeyID              pgtype.Text
@@ -129,7 +131,7 @@ type GetTargetRow struct {
 	PreviousSigningSecretKeyID      pgtype.Text
 }
 
-// GetTarget reads what an events-mode request of an outgoing webhook needs, deleted or not: a call in flight when it
+// GetTarget reads what a request of an outgoing webhook needs, in either mode, deleted or not: a call in flight when it
 // was deleted still signs with its secrets, which delivery wipes once no call of it holds a lease.
 func (q *Queries) GetTarget(ctx context.Context, arg GetTargetParams) (GetTargetRow, error) {
 	row := q.db.QueryRow(ctx, getTarget, arg.OrgID, arg.ID)
@@ -139,6 +141,7 @@ func (q *Queries) GetTarget(ctx context.Context, arg GetTargetParams) (GetTarget
 		&i.PublicID,
 		&i.WebhookMode,
 		&i.WebhookEventsConfig,
+		&i.WebhookTemplateConfig,
 		&i.Proxy,
 		&i.ProxyPasswordCiphertext,
 		&i.ProxyPasswordKeyID,
@@ -148,6 +151,26 @@ func (q *Queries) GetTarget(ctx context.Context, arg GetTargetParams) (GetTarget
 		&i.PreviousSigningSecretKeyID,
 	)
 	return i, err
+}
+
+const getTemplateConfig = `-- name: GetTemplateConfig :one
+SELECT webhook_template_config
+FROM destinations
+WHERE org_id = $1 AND id = $2 AND type = 'webhook'
+`
+
+type GetTemplateConfigParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// GetTemplateConfig reads the request templates of an outgoing webhook, deleted or not, through the transaction of a
+// change, to render the Desired state of its template mode; null in the events mode.
+func (q *Queries) GetTemplateConfig(ctx context.Context, arg GetTemplateConfigParams) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getTemplateConfig, arg.OrgID, arg.ID)
+	var webhook_template_config []byte
+	err := row.Scan(&webhook_template_config)
+	return webhook_template_config, err
 }
 
 const getWebhookDestination = `-- name: GetWebhookDestination :one

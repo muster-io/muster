@@ -309,9 +309,15 @@ func (w *Worker) callEvent(ctx context.Context, org int64, a eventAttempt) error
 // false when the lease went to another replica or the event ended meanwhile, whose lease it then gives up.
 func (w *Worker) recordEvent(ctx context.Context, q queries, org int64, a eventAttempt, out Outcome,
 	logs *after) (bool, error) {
-	recorded, err := w.recordEventOutcome(ctx, q, org, a, out, w.Lease.Clocks.Business.Now().UTC(), logs)
-	if err != nil || recorded {
+	now := w.Lease.Clocks.Business.Now().UTC()
+	recorded, err := w.recordEventOutcome(ctx, q, org, a, out, now, logs)
+	if err != nil {
 		return recorded, err
+	}
+	if recorded {
+		// A request template of the events mode that failed, or rendered again, settles the template error too.
+		group := a.row.AlertGroupID
+		return true, w.settleRequest(ctx, q, org, a.destination, &group, a.row.AlertGroupPublicID, out, now, logs)
 	}
 	return false, w.releaseEvent(ctx, q, org, a.row.ID, w.Lease.Clocks.Real.Now().UTC())
 }

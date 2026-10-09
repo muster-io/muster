@@ -70,12 +70,20 @@ SET previous_signing_secret_ciphertext = NULL, previous_signing_secret_key_id = 
 WHERE org_id = @org_id AND id = @id AND previous_signing_secret_ciphertext IS NOT NULL
 RETURNING version;
 
--- GetTarget reads what an events-mode request of an outgoing webhook needs, deleted or not: a call in flight when it
+-- GetTarget reads what a request of an outgoing webhook needs, in either mode, deleted or not: a call in flight when it
 -- was deleted still signs with its secrets, which delivery wipes once no call of it holds a lease.
 -- name: GetTarget :one
-SELECT id, public_id, webhook_mode, webhook_events_config, proxy, proxy_password_ciphertext, proxy_password_key_id,
+SELECT id, public_id, webhook_mode, webhook_events_config, webhook_template_config, proxy, proxy_password_ciphertext,
+       proxy_password_key_id,
        signing_secret_ciphertext, signing_secret_key_id, previous_signing_secret_ciphertext,
        previous_signing_secret_key_id
+FROM destinations
+WHERE org_id = @org_id AND id = @id AND type = 'webhook';
+
+-- GetTemplateConfig reads the request templates of an outgoing webhook, deleted or not, through the transaction of a
+-- change, to render the Desired state of its template mode; null in the events mode.
+-- name: GetTemplateConfig :one
+SELECT webhook_template_config
 FROM destinations
 WHERE org_id = @org_id AND id = @id AND type = 'webhook';
 

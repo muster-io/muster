@@ -18,7 +18,6 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/internalalerts"
-	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
@@ -159,7 +158,7 @@ func (s *Service) publishRoute(ctx context.Context, tx dbgen.DBTX, q queries, ro
 			if g.Held {
 				heldBy = &st.id
 			}
-			if err := s.join(ctx, q, view, dst, roots[i].Messages[markupOf(dst.Type)], heldBy, now); err != nil {
+			if err := s.join(ctx, tx, q, view, dst, roots[i], heldBy, now); err != nil {
 				return err
 			}
 		}
@@ -174,7 +173,7 @@ func (s *Service) publishRoute(ctx context.Context, tx dbgen.DBTX, q queries, ro
 // join makes the delivery of an open Alert Group current in a Destination that joined its Route: a Quiet
 // Publication, held by the Storm heldBy when one holds the Alert Group, or an edit of a Root message whose final edit
 // still waited.
-func (s *Service) join(ctx context.Context, q queries, g GroupView, d Destination, rd messages.Rendered,
+func (s *Service) join(ctx context.Context, tx dbgen.DBTX, q queries, g GroupView, d Destination, roots Roots,
 	heldBy *int64, now time.Time) error {
 	groupID := g.ID
 	loud := deliveryEvent(DeliveryAddedDestination).loud(g.Status == groups.StatusFiring)
@@ -190,7 +189,10 @@ func (s *Service) join(ctx context.Context, q queries, g GroupView, d Destinatio
 			return fmt.Errorf("publish alert group #%d in %s again: %w", g.Number, d.PublicID, err)
 		}
 	}
-	msg := encodeRoot(rd)
+	msg, err := s.desiredOf(ctx, tx, d, roots)
+	if err != nil {
+		return fmt.Errorf("render the request of alert group #%d in %s: %w", g.Number, d.PublicID, err)
+	}
 	if bytes.Equal(row.DesiredHash, msg.hash) {
 		return nil
 	}
@@ -261,6 +263,12 @@ func (s *Service) RetireDestination(ctx context.Context, tx dbgen.DBTX, destinat
 			return fmt.Errorf("resolve MusterDestinationBroken of %s: %w", st.PublicID, err)
 		}
 	}
+	if st.TemplateErrorSet {
+		if err := s.internal.ResolveFor(ctx, q, now, internalalerts.TemplateError, internalalerts.EntityDestination,
+			st.PublicID); err != nil {
+			return fmt.Errorf("resolve MusterTemplateError of %s: %w", st.PublicID, err)
+		}
+	}
 	if err := s.abandonEvents(ctx, q, destinationID, now); err != nil {
 		return err
 	}
@@ -304,7 +312,7 @@ func (s *Service) AbandonConnection(ctx context.Context, tx dbgen.DBTX, connecti
 			ErrorClass: string(OutcomeUnknown), Error: outbound.Untrusted(connectionDeleted)}); err != nil {
 			return nil, err
 		}
-		logs.add(notDeliveredLine(r.DestinationPublicID, r.AlertGroupPublicID, abandonedKind(r)))
+		logs.add(notDeliveredLine(r.DestinationPublicID, r.AlertGroupPublicID, abandonedKind(r), string(OutcomeUnknown)))
 	}
 	dests, err := q.ListDeletedDestinationsOfConnection(ctx, dbgen.ListDeletedDestinationsOfConnectionParams{
 		OrgID: s.orgID, ConnectionID: conn})

@@ -455,8 +455,11 @@ type process struct {
 	mentions     *mentions.Service
 	destinations *destinations.Service
 	webhooks     *webhooks.Service
-	sandbox      *templates.Sandbox
-	connections  *connections.Service
+	// requests sends the requests of outgoing webhooks in both modes, renders the Desired state of the template mode
+	// and previews request templates.
+	requests    *webhooks.Adapter
+	sandbox     *templates.Sandbox
+	connections *connections.Service
 	// interactive is the interactive path and roles the Permissions of each Role, which the callback of Mattermost
 	// button presses answers through and runs Commands with.
 	interactive *delivery.Interactive
@@ -763,11 +766,16 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.sandbox = templates.New(p.clocks.Business, p.clocks.Real)
 	p.webhooks = webhooks.New(orgID, webhooks.Config{Store: p.db.WebhooksStore(), Writer: p.db.WebhooksWriter(),
 		Keyring: p.keyring, Audit: w, Business: p.clocks.Business, PublicURL: p.cfg.PublicURL.String()})
-	// The dispatcher's re-render step sets the Desired state of each Root message and queues the events of outgoing
-	// webhooks (ADR-0005).
+	p.requests = &webhooks.Adapter{Service: p.webhooks, Sandbox: p.sandbox,
+		Network: webhooks.Network{Policy: organization.NewOutboundPolicies(p.db.OrganizationStore(), orgID,
+			p.clocks.Real), Log: p.log, Real: p.clocks.Real}}
+	p.renderer.SetRequests(p.requests)
+	// The dispatcher's re-render step sets the Desired state of each Root message — the rendered "update" request of an
+	// outgoing webhook in the template mode — and queues the events of outgoing webhooks (ADR-0005).
 	p.delivery = delivery.New(delivery.Config{OrgID: orgID, Store: p.db.DeliveryStore(), Business: p.clocks.Business,
 		Renderer: delivery.MessageRenderer{Renderer: p.renderer}, Log: p.log,
-		RunbookBase: p.cfg.RunbookBaseURL.String(), Real: p.clocks.Real, Bodies: p.webhooks, Mentions: p.mentions})
+		RunbookBase: p.cfg.RunbookBaseURL.String(), Real: p.clocks.Real, Bodies: p.webhooks, Mentions: p.mentions,
+		Requests: p.requests})
 	p.groups.SetRerender(p.delivery.Enqueue)
 	// Destinations added to or removed from a Route, or deleted, publish there or get their final edit (C-11.FR-14).
 	p.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, routeID int64, added, removed []int64) error {
@@ -1096,14 +1104,13 @@ func (p *process) configureWorker() {
 	p.deliverer.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
 	p.deliverer.Adapters = delivery.Adapters{delivery.TypeMattermost: &mattermost.Adapter{Targets: p.connections,
 		PublicURL: p.cfg.PublicURL.String(), IngestURL: p.cfg.IngestURL.String(), Version: buildinfo.Version},
-		delivery.TypeTelegram: &telegram.Adapter{Targets: p.connections, Clock: p.clocks.Real}}
+		delivery.TypeTelegram: &telegram.Adapter{Targets: p.connections, Clock: p.clocks.Real},
+		delivery.TypeWebhook:  p.requests}
 	p.deliverer.RunbookBase = p.cfg.RunbookBaseURL.String()
 	p.deliverer.PublicURL = p.cfg.PublicURL.String()
 	p.deliverer.Renderer = delivery.MessageRenderer{Renderer: p.renderer}
 	p.deliverer.Mentions = p.mentions
-	p.deliverer.Events = &webhooks.Adapter{Service: p.webhooks, Sandbox: p.sandbox,
-		Network: webhooks.Network{Policy: organization.NewOutboundPolicies(p.db.OrganizationStore(), p.orgID,
-			p.clocks.Real), Log: p.log, Real: p.clocks.Real}}
+	p.deliverer.Events = p.requests
 	p.timers.Handlers = map[string]timers.Handler{
 		delivery.TimerStormCalmCheck: func(ctx context.Context, tx timersdb.DBTX, org int64, t timers.Timer) (
 			func(context.Context), error) {

@@ -171,17 +171,21 @@ func validHeaderName(name string) bool {
 	return name != "" && http.CanonicalHeaderKey(name) != ""
 }
 
-// dryRun parses src and runs it with a placeholder for every Secret it reads, as Validate does.
+// dryRun parses src and runs it with a placeholder for every Secret it reads, as Validate does; a read of .Secrets
+// other than by a literal name is refused (D291).
 func dryRun(s *templates.Sandbox, pointer, src string) (string, error) {
 	if len(src) > maxTemplateLength {
 		return "", &FieldError{Pointer: pointer, Code: CodeTooLong,
 			Detail: fmt.Sprintf("The template is longer than %d bytes.", maxTemplateLength)}
 	}
+	refs, pos, err := refsIn(src, fieldSecrets)
+	if err != nil {
+		return "", bareError(pointer, src, pos)
+	}
 	t, err := s.Parse(pointer, src)
 	if err != nil {
 		return "", templateError(pointer, err)
 	}
-	refs := SecretRefs(src)
 	values := make(map[string]string, len(refs))
 	for _, name := range refs {
 		values[name] = "example-" + name
@@ -205,38 +209,14 @@ func templateError(pointer string, err error) *FieldError {
 
 // Data is what the request templates of the events mode read: the Destination's Secrets, by name.
 type Data struct {
-	Secrets map[string]string
+	Secrets SecretValues
 }
 
-// SecretRefs are the names of the Secrets src reads as `.Secrets.<name>`, sorted and without duplicates; a template
-// that does not parse reads none.
+// SecretRefs are the names of the Secrets src reads as `.Secrets.<name>`, `$.Secrets.<name>` or
+// `index .Secrets "<name>"`, sorted and without duplicates; a template that does not parse reads none.
 func SecretRefs(src string) []string {
-	trees, err := parseSkipping(src)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, t := range trees {
-		if t.Root == nil {
-			continue
-		}
-		walk(t.Root, func(n parse.Node) {
-			if f, ok := n.(*parse.FieldNode); ok && len(f.Ident) >= 2 && f.Ident[0] == "Secrets" {
-				out = append(out, f.Ident[1])
-			}
-			// index .Secrets "name"
-			if c, ok := n.(*parse.CommandNode); ok && len(c.Args) >= 3 {
-				id, isIdent := c.Args[0].(*parse.IdentifierNode)
-				f, isField := c.Args[1].(*parse.FieldNode)
-				name, isString := c.Args[2].(*parse.StringNode)
-				if isIdent && id.Ident == "index" && isField && len(f.Ident) == 1 && f.Ident[0] == "Secrets" && isString {
-					out = append(out, name.Text)
-				}
-			}
-		})
-	}
-	slices.Sort(out)
-	return slices.Compact(out)
+	names, _, _ := refsIn(src, fieldSecrets)
+	return names
 }
 
 // parseSkipping parses src without checking the names of the functions it calls.
@@ -246,50 +226,6 @@ func parseSkipping(src string) (map[string]*parse.Tree, error) {
 	t.Mode = parse.SkipFuncCheck
 	_, err := t.Parse(src, "", "", trees)
 	return trees, err
-}
-
-// walk calls f on n and every node below it.
-func walk(n parse.Node, f func(parse.Node)) {
-	if n == nil {
-		return
-	}
-	f(n)
-	switch x := n.(type) {
-	case *parse.ListNode:
-		if x == nil {
-			return
-		}
-		for _, c := range x.Nodes {
-			walk(c, f)
-		}
-	case *parse.ActionNode:
-		walk(x.Pipe, f)
-	case *parse.PipeNode:
-		if x == nil {
-			return
-		}
-		for _, c := range x.Cmds {
-			walk(c, f)
-		}
-	case *parse.CommandNode:
-		for _, a := range x.Args {
-			walk(a, f)
-		}
-	case *parse.IfNode:
-		walk(x.Pipe, f)
-		walk(x.List, f)
-		walk(x.ElseList, f)
-	case *parse.RangeNode:
-		walk(x.Pipe, f)
-		walk(x.List, f)
-		walk(x.ElseList, f)
-	case *parse.WithNode:
-		walk(x.Pipe, f)
-		walk(x.List, f)
-		walk(x.ElseList, f)
-	case *parse.TemplateNode:
-		walk(x.Pipe, f)
-	}
 }
 
 // Warning is a DestinationWarning of an outgoing webhook that its request templates give: a literal credential at the
@@ -335,13 +271,7 @@ func literalInURL(src string) bool {
 			b.Write(tn.Text)
 			continue
 		}
-		readsSecret := false
-		walk(n, func(m parse.Node) {
-			if f, ok := m.(*parse.FieldNode); ok && len(f.Ident) >= 2 && f.Ident[0] == "Secrets" {
-				readsSecret = true
-			}
-		})
-		if readsSecret {
+		if len(SecretRefs(n.String())) > 0 {
 			b.WriteString("SECRETREF")
 		} else {
 			b.WriteString("x")

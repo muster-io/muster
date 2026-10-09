@@ -96,7 +96,7 @@ func TestRegistry(t *testing.T) {
 		t.Errorf("registry %v", defs)
 	}
 	if d := TemplateError; d.Severity != SeverityWarning || d.Capability != "C-12" ||
-		!slices.Equal(d.Labels(), []string{"route", "route_name", "template"}) {
+		!slices.Equal(d.Labels(), []string{"route", "route_name", "destination", "destination_name", "template"}) {
 		t.Errorf("MusterTemplateError = %+v", d)
 	}
 	if d := DestinationBroken; d.Severity != SeverityCritical || d.StaticLabels || d.Capability != "C-11" ||
@@ -303,6 +303,68 @@ func TestRenamed(t *testing.T) {
 	q.fail["ListOpenInternalAlerts"] = errors.New("down")
 	if err := r.Renamed(t.Context(), q, t0, EntityIntegration, "NTA", "x"); err == nil {
 		t.Error("a failed read was ignored")
+	}
+}
+
+// TestTemplateErrorOfDestination: MusterTemplateError about an outgoing webhook carries the Destination's labels and
+// texts and no Route label, its fingerprint is not that of a Route with the same id, and it follows a rename and the
+// deletion of the Destination; the other entity of another alert falls back to its own.
+func TestTemplateErrorOfDestination(t *testing.T) {
+	q := newFake()
+	r := NewRaiser(1, "https://docs.example.org")
+	ctx := t.Context()
+	e := Entity{ID: "DSA", Name: "chat"}
+	if err := r.RaiseFor(ctx, q, t0, TemplateError, EntityDestination, e,
+		map[string]string{"template": "webhook_request"}); err != nil {
+		t.Fatal(err)
+	}
+	a := q.read(t, 0).Alerts[0]
+	if a.Labels["destination"] != "DSA" || a.Labels["destination_name"] != "chat" || a.Labels["template"] !=
+		"webhook_request" || a.Labels["route"] != "" || a.Labels["route_name"] != "" ||
+		a.Annotations["summary"] != "A request template of Destination chat keeps failing" ||
+		a.Fingerprint == Fingerprint(TemplateError, map[string]string{"route": "DSA"}) {
+		t.Errorf("raise %+v", a)
+	}
+	if err := r.ResolveFor(ctx, q, t0, TemplateError, EntityDestination, "DSA"); err != nil {
+		t.Fatal(err)
+	}
+	if res := q.read(t, 1).Alerts[0]; res.Fingerprint != a.Fingerprint || res.Status != StatusResolved {
+		t.Errorf("resolve %+v", res)
+	}
+	if err := r.RaiseFor(ctx, q, t0, TemplateError, EntityRoute, Entity{ID: "RTA", Name: "r"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ResolveFor(ctx, q, t0, TemplateError, EntityRoute, "RTA"); err != nil {
+		t.Fatal(err)
+	}
+	if a, res := q.read(t, 2).Alerts[0], q.read(t, 3).Alerts[0]; a.Labels["route"] != "RTA" ||
+		a.Labels["destination"] != "" || res.Fingerprint != a.Fingerprint ||
+		a.Fingerprint != Fingerprint(TemplateError, map[string]string{"route": "RTA"}) {
+		t.Errorf("route raise %+v, resolve %+v", a, res)
+	}
+	q.open = []dbgen.ListOpenInternalAlertsRow{{Fingerprint: "f", StartsAt: t0,
+		Labels: []byte(`{"alertname":"MusterTemplateError","destination":"DSA","destination_name":"chat"}`)}}
+	if err := r.Renamed(ctx, q, t0, EntityDestination, "DSA", "chat-2"); err != nil {
+		t.Fatal(err)
+	}
+	if a := q.read(t, 4).Alerts[0]; a.Labels["destination_name"] != "chat-2" ||
+		a.Annotations["summary"] != "A request template of Destination chat-2 keeps failing" {
+		t.Errorf("renamed %+v", a)
+	}
+	if err := r.ResolveAbout(ctx, q, t0, EntityDestination, "DSA"); err != nil {
+		t.Fatal(err)
+	}
+	if res := q.read(t, 5).Alerts[0]; res.Status != StatusResolved || res.Labels["destination"] != "DSA" {
+		t.Errorf("deleted %+v", res)
+	}
+	if err := r.ResolveAbout(ctx, q, t0, EntityIntegration, "DSA"); err != nil || len(q.bodies) != 6 {
+		t.Errorf("another entity: %v, %d", err, len(q.bodies))
+	}
+	if err := r.RaiseFor(ctx, q, t0, DestinationBroken, EntityRoute, e, nil); err != nil {
+		t.Fatal(err)
+	}
+	if a := q.read(t, 6).Alerts[0]; a.Labels["destination"] != "DSA" {
+		t.Errorf("an alert without another entity %+v", a)
 	}
 }
 

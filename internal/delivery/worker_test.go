@@ -63,6 +63,10 @@ type (
 		mode string
 		// tgChannel and tgGroup are the channel and the discussion group of a Telegram Destination, nil until known.
 		tgChannel, tgGroup *int64
+		// templateError is the template error of an outgoing webhook, nil for none; noReplies an outgoing webhook
+		// without "reply in thread".
+		templateError *string
+		noReplies     bool
 	}
 	fakeRoute struct {
 		language  string
@@ -111,6 +115,9 @@ type (
 		// heldBy is held_by_storm_id and storm the storm_id of a Storm summary, 0 for none.
 		heldBy, storm int64
 		desiredRetire bool
+		// responseValues are the values an outgoing webhook extracted, and threadOpened that "open thread" ran.
+		responseValues map[string]string
+		threadOpened   bool
 	}
 	fakeReply struct {
 		id, delivery, group, dest int64
@@ -170,8 +177,9 @@ type fakeDB struct {
 	timersNotified int
 	// membershipLocks are the Routes whose membership lock Enqueue took shared, in order.
 	membershipLocks []int64
-	// webhookEvents are the events of outgoing webhooks.
+	// webhookEvents are the events of outgoing webhooks, and system the system entries delivery recorded.
 	webhookEvents []*fakeEvent
+	system        []groups.SystemEntry
 	// copies is the Telegram copy buffer, and postLocks the posts whose copy lock was taken, in order.
 	copies    map[copyKey]*fakeCopy
 	postLocks []copyKey
@@ -330,7 +338,8 @@ func (f *fakeDB) ListRouteDestinations(_ context.Context, arg dbgen.ListRouteDes
 		if d := f.dests[id]; d != nil && !d.deleted {
 			out = append(out, dbgen.ListRouteDestinationsRow{ID: d.id, PublicID: d.publicID, Name: d.name,
 				Type: d.typ, ConnectionID: nullInt(d.connection), Health: d.health,
-				WebhookMode: pgtype.Text{String: d.mode, Valid: d.mode != ""}})
+				WebhookMode:    pgtype.Text{String: d.mode, Valid: d.mode != ""},
+				WebhookReplies: d.typ == delivery.TypeWebhook && !d.noReplies})
 		}
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListRouteDestinationsRow) int { return cmp.Compare(a.ID, b.ID) })
@@ -402,7 +411,7 @@ func (f *fakeDB) SetDesired(_ context.Context, arg dbgen.SetDesiredParams) (stri
 	if d.receivedAt == nil && arg.ReceivedAt.Valid {
 		d.receivedAt = at(arg.ReceivedAt.Time)
 	}
-	if arg.Open && (d.state == "withheld" || (d.lateNote && d.messageID == nil)) {
+	if arg.Open && (d.state == "withheld" || (d.lateNote && d.publishedAt == nil)) {
 		d.loud = pgtype.Bool{Bool: arg.Firing, Valid: true}
 	}
 	if arg.Open {
@@ -571,6 +580,7 @@ func (f *fakeDB) GetLeasedDelivery(_ context.Context, arg dbgen.GetLeasedDeliver
 		DesiredPayload: d.payload, DesiredHash: d.hash, DesiredReceivedAt: tz(d.receivedAt), PublicationLoud: d.loud,
 		LateNote: d.lateNote, RepublishedAfterDelete: d.republished, DesiredRetire: d.desiredRetire,
 		ActualHash: d.actualHash, MessageID: txt(d.messageID), MessageUrl: txt(d.messageURL),
+		PublishedAt: tz(d.publishedAt), ResponseValues: valuesOf(d.responseValues), ThreadOpened: d.threadOpened,
 		PublicationStartedAt: tz(d.started), Attempts: d.attempts, DestinationID: ds.id,
 		DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
 		ConnectionID: nullInt(ds.connection), DestinationHealth: ds.health, GroupCreatedAt: d.updated,
@@ -669,7 +679,7 @@ func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredPar
 		return "", pgx.ErrNoRows
 	}
 	ended := endedRow(d)
-	raced := ended && d.messageID == nil && arg.MessageID.Valid
+	raced := ended && d.publishedAt == nil && arg.Published
 	g := f.groups[d.group]
 	left := f.dests[d.dest].deleted || g == nil || !slices.Contains(f.routeDests[g.route], d.dest)
 	// desired_retire = d.desired_retire OR (f.raced AND d.storm_id IS NULL AND f.left_destination)
@@ -690,6 +700,8 @@ func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredPar
 			d.publishedAt = at(arg.Now)
 		}
 		d.publications++
+		d.responseValues, d.threadOpened = map[string]string{}, false
+		_ = json.Unmarshal(arg.ResponseValues, &d.responseValues)
 	}
 	d.lastDelivered = at(arg.Now)
 	d.receivedAt = nil
@@ -727,7 +739,7 @@ func (f *fakeDB) RecordDeliveryRetry(_ context.Context, arg dbgen.RecordDelivery
 			d.firstFailed = at(arg.Now)
 		}
 	}
-	if d.messageID == nil {
+	if d.publishedAt == nil {
 		d.started = nil
 	}
 	d.next, d.errorClass, d.lastError, d.owner, d.until = arg.At, strOf(arg.ErrorClass), strOf(arg.Error), "",
@@ -833,7 +845,7 @@ func (f *fakeDB) ClaimDueReplies(_ context.Context, arg dbgen.ClaimDueRepliesPar
 	for _, r := range f.replies {
 		d := f.delivery(r.delivery)
 		if (r.state != "collecting" && r.state != "pending") || r.next.After(arg.Due) ||
-			(r.owner != "" && r.until.After(arg.Now)) || d.messageID == nil || !f.healthy(r.dest) {
+			(r.owner != "" && r.until.After(arg.Now)) || d.publishedAt == nil || !f.healthy(r.dest) {
 			continue
 		}
 		if slices.ContainsFunc(f.replies, func(p *fakeReply) bool {
@@ -874,8 +886,84 @@ func (f *fakeDB) GetLeasedReply(_ context.Context, arg dbgen.GetLeasedReplyParam
 		DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
 		ConnectionID: nullInt(ds.connection), TelegramChannelChatID: nullInt(ds.tgChannel),
 		TelegramDiscussionChatID: nullInt(ds.tgGroup), AlertGroupPublicID: g.publicID, Number: g.number, Title: g.title,
-		Status: g.status, Urgent: g.urgent, Language: f.routes[g.route].language}, nil
+		Status: g.status, Urgent: g.urgent, Language: f.routes[g.route].language, DesiredPayload: d.payload,
+		PublishedAt:    tz(d.publishedAt),
+		ResponseValues: valuesOf(d.responseValues), ThreadOpened: d.threadOpened}, nil
 }
+
+// valuesOf is the JSON object of extracted values as a column holds it.
+func valuesOf(values map[string]string) []byte {
+	if values == nil {
+		values = map[string]string{}
+	}
+	b, _ := json.Marshal(values)
+	return b
+}
+
+func (f *fakeDB) RecordThreadOpened(_ context.Context, arg dbgen.RecordThreadOpenedParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RecordThreadOpened"); err != nil {
+		return err
+	}
+	d := f.delivery(arg.ID)
+	if d.publishedAt == nil || !d.publishedAt.Equal(arg.PublishedAt) {
+		return nil
+	}
+	if d.responseValues == nil {
+		d.responseValues = map[string]string{}
+	}
+	added := map[string]string{}
+	_ = json.Unmarshal(arg.ResponseValues, &added)
+	for k, v := range added {
+		d.responseValues[k] = v
+	}
+	d.threadOpened, d.updated = true, arg.Now
+	return nil
+}
+
+func (f *fakeDB) SetDestinationTemplateError(_ context.Context, arg dbgen.SetDestinationTemplateErrorParams) (
+	[]dbgen.SetDestinationTemplateErrorRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("SetDestinationTemplateError"); err != nil {
+		return nil, err
+	}
+	ds := f.dests[arg.ID]
+	if ds.templateError != nil {
+		return nil, nil
+	}
+	text := arg.Error
+	ds.templateError = &text
+	return []dbgen.SetDestinationTemplateErrorRow{{PublicID: ds.publicID, Name: ds.name}}, nil
+}
+
+func (f *fakeDB) ClearDestinationTemplateError(_ context.Context, arg dbgen.ClearDestinationTemplateErrorParams) (
+	[]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ClearDestinationTemplateError"); err != nil {
+		return nil, err
+	}
+	ds := f.dests[arg.ID]
+	if ds.templateError == nil {
+		return nil, nil
+	}
+	ds.templateError = nil
+	return []string{ds.publicID}, nil
+}
+
+func (f *fakeDB) RecordSystemEntry(_ context.Context, e groups.SystemEntry) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RecordSystemEntry"); err != nil {
+		return err
+	}
+	f.system = append(f.system, e)
+	return nil
+}
+
+func (f *fakeDB) DB() dbgen.DBTX { return nil }
 
 func (f *fakeDB) RescheduleReply(_ context.Context, arg dbgen.RescheduleReplyParams) error {
 	f.mu.Lock()
@@ -951,7 +1039,7 @@ func (f *fakeDB) NextDeliveryWork(_ context.Context, arg dbgen.NextDeliveryWorkP
 		}
 	}
 	for _, r := range f.replies {
-		if (r.state == "collecting" || r.state == "pending") && f.delivery(r.delivery).messageID != nil &&
+		if (r.state == "collecting" || r.state == "pending") && f.delivery(r.delivery).publishedAt != nil &&
 			f.healthy(r.dest) && !slices.ContainsFunc(f.replies, func(p *fakeReply) bool {
 			return p.delivery == r.delivery && p.state == "pending" && p.id < r.id
 		}) {
@@ -1073,7 +1161,7 @@ func (f *fakeDB) RecordNotDelivered(_ context.Context, arg dbgen.RecordNotDelive
 	if d.owner != arg.Owner {
 		return 0, pgx.ErrNoRows
 	}
-	if d.messageID == nil {
+	if d.publishedAt == nil {
 		d.started = nil
 	}
 	if !endedRow(d) {
@@ -1144,6 +1232,7 @@ func (f *fakeDB) ResetForRepublish(_ context.Context, arg dbgen.ResetForRepublis
 		return 0, nil
 	}
 	d.messageID, d.messageURL, d.actualVersion, d.actualHash, d.started = nil, nil, 0, nil, nil
+	d.publishedAt, d.responseValues, d.threadOpened = nil, nil, false
 	d.threadState, d.anchorID, d.chainLastID, d.republished = "none", nil, nil, true
 	d.loud, d.lateNote, d.state, d.attempts, d.firstFailed = pgtype.Bool{Bool: false, Valid: true}, false, "pending",
 		0, nil
@@ -1186,7 +1275,7 @@ func (f *fakeDB) SettleResolvedPublication(_ context.Context, arg dbgen.SettleRe
 		return err
 	}
 	d := f.delivery(arg.ID)
-	if d.state != "pending" || d.messageID != nil || d.heldBy != 0 || d.storm != 0 {
+	if d.state != "pending" || d.publishedAt != nil || d.heldBy != 0 || d.storm != 0 {
 		return nil
 	}
 	health := f.dests[d.dest].health
@@ -1272,7 +1361,7 @@ func (f *fakeDB) LeaseOldestWaiting(_ context.Context, arg dbgen.LeaseOldestWait
 	free := oldest.owner == "" || !oldest.until.After(arg.Now)
 	if free {
 		oldest.owner, oldest.until = arg.Owner, arg.LeaseUntil
-		if g := f.groups[oldest.group]; oldest.messageID == nil && oldest.storm == 0 && g != nil {
+		if g := f.groups[oldest.group]; oldest.publishedAt == nil && oldest.storm == 0 && g != nil {
 			oldest.loud, oldest.lateNote = pgtype.Bool{Bool: g.status == "firing", Valid: true}, false
 		}
 	}
@@ -1377,7 +1466,7 @@ func (f *fakeDB) DropDueReplies(_ context.Context, arg dbgen.DropDueRepliesParam
 // their Alert Group is resolved.
 func (f *fakeDB) unpublished(dest int64, f2 func(d *fakeDelivery, resolved bool)) {
 	for _, d := range f.deliveries {
-		if g := f.groups[d.group]; d.dest == dest && d.state == "pending" && d.messageID == nil && d.heldBy == 0 &&
+		if g := f.groups[d.group]; d.dest == dest && d.state == "pending" && d.publishedAt == nil && d.heldBy == 0 &&
 			d.storm == 0 && g != nil {
 			f2(d, g.status == "resolved")
 		}
@@ -1420,7 +1509,7 @@ func (f *fakeDB) RecoverPublished(_ context.Context, arg dbgen.RecoverPublishedP
 		return err
 	}
 	for _, d := range f.deliveries {
-		if d.dest == arg.DestinationID && d.state == "pending" && d.messageID != nil && d.heldBy == 0 {
+		if d.dest == arg.DestinationID && d.state == "pending" && d.publishedAt != nil && d.heldBy == 0 {
 			d.next, d.updated = arg.Now, arg.Now
 		}
 	}
@@ -1669,11 +1758,11 @@ func TestPublishAndCollapse(t *testing.T) {
 		t.Fatalf("calls %+v", calls)
 	}
 	if c := calls[0]; c.Loudness != groups.Loud || !slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) ||
-		c.Class != "delivery" || !strings.Contains(c.Message.Text(), "#7 disk full") || len(c.Message.Buttons) != 3 {
+		c.Class != "delivery" || !strings.Contains(textOf(c), "#7 disk full") || len(c.Message.Buttons) != 3 {
 		t.Errorf("publication %+v", c)
 	}
 	if c := calls[1]; c.MessageID != "p1" || c.Loudness != groups.Quiet || len(c.Mentions) != 0 ||
-		!strings.Contains(c.Message.Text(), "Acknowledged") || c.Message.Buttons[0].Command != "unacknowledge" {
+		!strings.Contains(textOf(c), "Acknowledged") || c.Message.Buttons[0].Command != "unacknowledge" {
 		t.Errorf("update %+v", c)
 	}
 	if d.state != "delivered" || d.actualVersion != 2 || *d.messageID != "p1" || *d.messageURL !=
@@ -1750,7 +1839,7 @@ func TestUrgentFirst(t *testing.T) {
 	e.db.buckets = map[bucketKey]*fakeBucket{}
 	e.round(t)
 	calls := e.rec.Calls()
-	if len(calls) != 2 || !strings.HasPrefix(calls[0].Message.Text(), "#13 ") {
+	if len(calls) != 2 || !strings.HasPrefix(textOf(calls[0]), "#13 ") {
 		t.Fatalf("calls %+v", calls)
 	}
 	waiting := 0

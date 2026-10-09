@@ -309,4 +309,9 @@ func TestInteractiveAdapterOps(t *testing.T) {
 	if calls[1].MessageID != "m1" || calls[2].MessageID != "m1" {
 		t.Errorf("the edit and the reply name m1: %+v %+v", calls[1], calls[2])
 	}
+	w := &delivery.WebhookCall{Event: "alerts_added"}
+	if _, err := in.Do(t.Context(), delivery.Subject{Destination: &dest}, delivery.WebhookOp(delivery.PublishOp(e.rec,
+		m), w)); err != nil || e.rec.Calls()[4].Webhook != w {
+		t.Errorf("a webhook op %v %+v", err, e.rec.Calls())
+	}
 }

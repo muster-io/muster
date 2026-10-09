@@ -27,8 +27,10 @@ Create a Destination of type `webhook` with the mode `events`:
 ```
 
 - The **URL** and the **header values** are Go templates. They can read the Destination's Secrets as
-  `{{ .Secrets.<name> }}` and nothing else. They are parsed and run on a dry run when you save; an error names the
-  field, its line and its column.
+  `{{ .Secrets.<name> }}` (or `{{ $.Secrets.<name> }}`, or `{{ index .Secrets "<name>" }}`) and nothing else; any
+  other use of `.Secrets`, such as `{{ with .Secrets }}` or `{{ $s := .Secrets }}`, is refused, because Muster could
+  not check that the Secret exists. They are parsed and run on a dry run when you save; an error names the field, its
+  line and its column.
 - Muster sets `Content-Type`, `webhook-id`, `webhook-timestamp` and `webhook-signature` itself; a header template may
   not name them.
 - The **proxy** is the Destination's own; the requests never read `HTTP_PROXY` or `HTTPS_PROXY`.

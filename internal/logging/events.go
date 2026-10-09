@@ -456,6 +456,26 @@ var WebhookEventNotDelivered = newEvent("webhook_event_not_delivered", LevelWarn
 		"the answer, empty without one. The next event of the Alert Group follows.",
 	"destination", "group", "lifecycle_event", "status")
 
+// WebhookTemplateFailed is logged when a request template of an outgoing webhook failed, so the request was not sent
+// (C-15.FR-7, ADR-0012).
+var WebhookTemplateFailed = newEvent("webhook_template_failed", LevelWarn, "C-15",
+	"A request template of an outgoing webhook failed, so that request was not sent and its delivery, Thread reply or "+
+		"event ended as Not delivered with no fallback body: destination is the public_id of the Destination, group "+
+		"the public_id of the Alert Group, empty for a Storm summary, request the request — create, update, "+
+		"open_thread, reply_in_thread or events — and error what failed, with its line and column and every Secret "+
+		"masked. The Destination shows a template error and MusterTemplateError fires until one of its requests "+
+		"renders again. Logged once the outcome is recorded.",
+	"destination", "group", "request", "error")
+
+// WebhookValueMissing is logged when an extraction rule of an outgoing webhook found nothing in a response
+// (C-15.FR-4).
+var WebhookValueMissing = newEvent("webhook_value_missing", LevelWarn, "C-15",
+	"An extraction rule of the \"create\" or \"open thread\" request of an outgoing webhook found nothing in the "+
+		"response: destination is the public_id of the Destination, group the public_id of the Alert Group and rule "+
+		"the name of the rule. The request counts as delivered and the Timeline records template_value_missing; a "+
+		"later request that reads the value fails as a template error. Logged once the outcome is recorded.",
+	"destination", "group", "rule")
+
 // MattermostPress is logged for each request to the callback of Mattermost button presses (C-13.FR-4).
 var MattermostPress = newEvent("mattermost_press", LevelInfo, "C-13",
 	"The callback of a Mattermost Connection received a button press and answered 200 with a JSON object, never "+

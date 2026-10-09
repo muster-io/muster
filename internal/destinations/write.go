@@ -124,11 +124,13 @@ type TelegramInput struct {
 }
 
 // WebhookInput are the fields of an outgoing webhook Destination (C-15.FR-1): its mode, the request of the events
-// mode and its proxy. Only the mode events is written yet; template and both answer unsupported at /mode until S-045.
+// mode, the requests of the template mode and its proxy. Only the requests of the mode are stored: the events request
+// in the modes events and both, the request templates in the modes template and both.
 type WebhookInput struct {
-	Mode   string
-	Events *webhooks.EventsConfig
-	Proxy  proxyconf.Input
+	Mode     string
+	Events   *webhooks.EventsConfig
+	Template *webhooks.TemplateConfig
+	Proxy    proxyconf.Input
 }
 
 // Input is what createDestination and updateDestination write: the common fields and those of its type.
@@ -210,15 +212,16 @@ type writeQueries interface {
 
 // view is what the Audit log diff of a saved Destination shows: never a secret, whose change is marked apart.
 type view struct {
-	Name       string                 `json:"name"`
-	Connection *string                `json:"connection_id,omitempty"`
-	TeamID     *string                `json:"team_id,omitempty"`
-	ChannelID  *string                `json:"channel_id,omitempty"`
-	Mode       *string                `json:"mode,omitempty"`
-	Events     *webhooks.EventsConfig `json:"events,omitempty"`
-	Proxy      *proxyconf.Config      `json:"proxy,omitempty"`
-	Mentions   mentions.Settings      `json:"mentions"`
-	Limiter    Limiter                `json:"limiter"`
+	Name       string                   `json:"name"`
+	Connection *string                  `json:"connection_id,omitempty"`
+	TeamID     *string                  `json:"team_id,omitempty"`
+	ChannelID  *string                  `json:"channel_id,omitempty"`
+	Mode       *string                  `json:"mode,omitempty"`
+	Events     *webhooks.EventsConfig   `json:"events,omitempty"`
+	Template   *webhooks.TemplateConfig `json:"template,omitempty"`
+	Proxy      *proxyconf.Config        `json:"proxy,omitempty"`
+	Mentions   mentions.Settings        `json:"mentions"`
+	Limiter    Limiter                  `json:"limiter"`
 }
 
 func viewOf(d Destination) (view, error) {
@@ -238,6 +241,13 @@ func viewOf(d Destination) (view, error) {
 			return view{}, err
 		}
 		v.Events = &c
+	}
+	if len(d.TemplateConfig) > 0 {
+		c, err := webhooks.ParseTemplateConfig(d.TemplateConfig)
+		if err != nil {
+			return view{}, err
+		}
+		v.Template = &c
 	}
 	if d.Type == TypeWebhook {
 		p := proxyOf(d.Proxy)
@@ -314,25 +324,50 @@ func validateCommon(in *Input) error {
 	return nil
 }
 
-// validateWebhook checks the fields of an outgoing webhook (C-15.FR-1): the mode events with its request, parsed and
-// run on a dry run in the template sandbox; the other modes are not supported until S-045.
+// validateWebhook checks the fields of an outgoing webhook (C-15.FR-1, FR-3): its mode, and the requests the mode
+// sends — the events request in the modes events and both, the request templates in the modes template and both —
+// parsed and run on a dry run in the template sandbox. The requests of the other mode are dropped.
 func (s *Service) validateWebhook(w *WebhookInput) error {
+	events := w.Mode == webhooks.ModeEvents || w.Mode == webhooks.ModeBoth
+	template := w.Mode == webhooks.ModeTemplate || w.Mode == webhooks.ModeBoth
 	switch {
-	case w.Mode == webhooks.ModeTemplate || w.Mode == webhooks.ModeBoth:
-		return &FieldError{Pointer: "/mode", Code: CodeUnsupported,
-			Detail: "The modes template and both are not supported yet."}
-	case w.Mode != webhooks.ModeEvents:
-		return &FieldError{Pointer: "/mode", Code: CodeInvalidFormat, Detail: "The mode is not events."}
-	case w.Events == nil:
-		return &FieldError{Pointer: "/events", Code: CodeRequired, Detail: "The mode events needs its request."}
+	case !events && !template:
+		return &FieldError{Pointer: "/mode", Code: CodeInvalidFormat, Detail: "The mode is events, template or both."}
+	case events && w.Events == nil:
+		return &FieldError{Pointer: "/events", Code: CodeRequired, Detail: "The mode needs the events request."}
+	case template && w.Template == nil:
+		return &FieldError{Pointer: "/template", Code: CodeRequired, Detail: "The mode needs the request templates."}
 	}
-	if err := webhooks.Validate(s.writer.Templates, "/events", w.Events); err != nil {
-		if fe, ok := errors.AsType[*webhooks.FieldError](err); ok {
-			return &FieldError{Pointer: fe.Pointer, Code: fe.Code, Detail: fe.Detail, Line: fe.Line, Column: fe.Column}
-		}
-		return err
+	if !events {
+		w.Events = nil
 	}
-	return nil
+	if !template {
+		w.Template = nil
+	}
+	var err error
+	if events {
+		err = webhooks.Validate(s.writer.Templates, "/events", w.Events)
+	}
+	if err == nil && template {
+		err = webhooks.ValidateTemplate(s.writer.Templates, "/template", w.Template,
+			s.writer.Business.Now().UTC())
+	}
+	if fe, ok := errors.AsType[*webhooks.FieldError](err); ok {
+		return &FieldError{Pointer: fe.Pointer, Code: fe.Code, Detail: fe.Detail, Line: fe.Line, Column: fe.Column}
+	}
+	return err
+}
+
+// webhookConfigs are the stored requests of w: the events request and the request templates, nil for those its mode
+// does not send.
+func webhookConfigs(w *WebhookInput) (events, template json.RawMessage) {
+	if w.Events != nil {
+		events = w.Events.JSON()
+	}
+	if w.Template != nil {
+		template = w.Template.JSON()
+	}
+	return events, template
 }
 
 // webhookSecrets are what a save of an outgoing webhook stores beside its fields: the proxy object after the input,
@@ -393,8 +428,9 @@ func (s *Service) createWebhook(ctx context.Context, r Requester, in Input) (Des
 		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
 	}
 	mode := in.Webhook.Mode
+	events, template := webhookConfigs(in.Webhook)
 	d := Destination{PublicID: publicid.New(publicid.Destination), Type: in.Type, Name: in.Name, WebhookMode: &mode,
-		EventsConfig: in.Webhook.Events.JSON(), Proxy: proxyRead(sec.proxy, sec.password),
+		EventsConfig: events, TemplateConfig: template, Proxy: proxyRead(sec.proxy, sec.password),
 		SigningSecret: SigningSecret{Set: true, UpdatedAt: &now}, SigningSecretOnce: secret, Mentions: set,
 		LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"},
 		Routes: []RouteRef{}, CreatedAt: now, Version: 1}
@@ -404,8 +440,8 @@ func (s *Service) createWebhook(ctx context.Context, r Requester, in Input) (Des
 	}
 	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
 		p := dbgen.InsertWebhookDestinationParams{OrgID: s.orgID, PublicID: d.PublicID, Name: d.Name,
-			WebhookMode: text(d.WebhookMode), WebhookEventsConfig: d.EventsConfig, Proxy: sec.proxy.JSON(),
-			SigningSecretCiphertext: signing.Ciphertext, SigningSecretKeyID: nonEmpty(signing.KeyID), Now: now,
+			WebhookMode: text(d.WebhookMode), WebhookEventsConfig: d.EventsConfig,
+			WebhookTemplateConfig: d.TemplateConfig, Proxy: sec.proxy.JSON(), SigningSecretCiphertext: signing.Ciphertext, SigningSecretKeyID: nonEmpty(signing.KeyID), Now: now,
 			Mentions: set, LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds}
 		if sec.password.Set() {
 			p.ProxyPasswordCiphertext, p.ProxyPasswordKeyID = sec.password.Ciphertext, nonEmpty(sec.password.KeyID)
@@ -439,7 +475,8 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 	}
 	d := before
 	mode := in.Webhook.Mode
-	d.Name, d.WebhookMode, d.EventsConfig, d.Mentions = in.Name, &mode, in.Webhook.Events.JSON(), set
+	d.Name, d.WebhookMode, d.Mentions = in.Name, &mode, set
+	d.EventsConfig, d.TemplateConfig = webhookConfigs(in.Webhook)
 	d.LimiterLimit, d.LimiterPerSeconds = in.Limiter.Limit, in.Limiter.PerSeconds
 	d.Proxy = proxyRead(sec.proxy, sec.password)
 	if !sec.given {
@@ -469,7 +506,8 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 			return ErrVersionMismatch
 		}
 		p := dbgen.UpdateWebhookDestinationParams{Name: d.Name, WebhookMode: text(d.WebhookMode),
-			WebhookEventsConfig: d.EventsConfig, Proxy: sec.proxy.JSON(), PasswordGiven: sec.given, Now: now,
+			WebhookEventsConfig: d.EventsConfig, WebhookTemplateConfig: d.TemplateConfig, Proxy: sec.proxy.JSON(),
+			PasswordGiven: sec.given, Now: now,
 			Mentions: set, LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, OrgID: s.orgID,
 			ID: before.ID}
 		if sec.password.Set() {

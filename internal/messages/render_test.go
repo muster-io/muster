@@ -11,6 +11,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -848,7 +849,34 @@ func TestLinksMentionsAndFooters(t *testing.T) {
 		ErrUnsupportedKind) {
 		t.Errorf("no links: %v", err)
 	}
+	// The preview of an outgoing webhook request template renders the data unescaped through the RequestPreviewer.
+	if _, err := r.Preview(ctx, PreviewRequest{Kind: TemplateWebhookRequest, Template: "x"}); !errors.Is(err,
+		ErrUnsupportedKind) {
+		t.Errorf("no request previewer: %v", err)
+	}
+	fl.fail = nil
+	r.SetRequests(fakeRequests{})
+	res, err = r.Preview(ctx, PreviewRequest{Kind: TemplateWebhookRequest, Template: "#{{ .AlertGroup.Number }}"})
+	if err != nil || !res.Valid || res.Output != "#{{ .AlertGroup.Number }}|1|HighErrorRate" || res.Format != "" ||
+		res.Source != "#{{ .AlertGroup.Number }}" {
+		t.Errorf("request preview %+v %v", res, err)
+	}
+	res, _ = r.Preview(ctx, PreviewRequest{Kind: TemplateWebhookRequest, Template: "fail"})
+	if res.Valid || len(res.Errors) != 1 || res.Errors[0].Line != 3 {
+		t.Errorf("failing request preview %+v", res)
+	}
 	if Neutralize(Neutralize("a@b @@")) != "a@\u200bb @\u200b@\u200b" {
 		t.Error("neutralizing twice changes nothing")
 	}
+}
+
+// fakeRequests previews a request template as its source, the sample's number and its first Alert's alertname, raw;
+// "fail" fails at line 3.
+type fakeRequests struct{}
+
+func (fakeRequests) PreviewRequest(src string, d templates.Data) (string, error) {
+	if src == "fail" {
+		return "", &templates.Error{Code: templates.CodeSyntax, Line: 3, Detail: "failed"}
+	}
+	return src + "|" + strconv.FormatInt(d.AlertGroup.Number, 10) + "|" + d.Alerts[0].Labels["alertname"], nil
 }

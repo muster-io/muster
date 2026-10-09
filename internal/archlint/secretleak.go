@@ -1905,6 +1905,39 @@ func probeWebhooks(ctx context.Context, secrets []string, log io.Writer) error {
 			WebhookID:   "msg_probe", Body: []byte(`{}`)})
 		errs = append(errs, errors.New(string(out.Kind)+": "+string(out.Error)))
 	}
+	// The template mode (C-15.FR-3, FR-7): the requests read the Secrets in their URLs, headers and bodies; the
+	// stand-in echoes them, a redirect carries them, and templates fail on them or on a value that is missing.
+	body := func(s string) *string { return &s }
+	store.row.WebhookMode, store.row.Proxy = pgtype.Text{String: webhooks.ModeBoth, Valid: true},
+		[]byte(`{"enabled":false}`)
+	auth := []webhooks.Header{{Name: "Authorization", Value: "Bearer {{ .Secrets.other }}"}}
+	for _, c := range []webhooks.TemplateConfig{
+		{Create: webhooks.RequestTemplate{Method: http.MethodPost, URL: base + "/hook?k={{ .Secrets.token }}",
+			Headers: auth, Body: body(`{"k":"{{ .Secrets.token }}"}`)},
+			Update: webhooks.RequestTemplate{Method: http.MethodPut, URL: base + "/redirect?k={{ .Secrets.token }}",
+				Headers: auth},
+			OpenThread: &webhooks.RequestTemplate{Method: http.MethodPost,
+				URL: base + "/hook/{{ .Secrets.other }}{{ .Response.missing }}"},
+			ReplyInThread: &webhooks.RequestTemplate{Method: http.MethodPost, URL: base + "/hook"}},
+		{Create: webhooks.RequestTemplate{Method: http.MethodPost, URL: base + "/hook",
+			Body: body(`{{ printf "%d" .Secrets.token }}{{ len 3 }}`)},
+			Update: webhooks.RequestTemplate{Method: http.MethodPut, URL: base + "/hook",
+				Headers: []webhooks.Header{{Name: "X", Value: "{{ .Secrets.other }}{{ index .Secrets .Secrets.token }}"}}},
+			ReplyInThread: &webhooks.RequestTemplate{Method: http.MethodPost,
+				URL: base + "/hook/{{ .Secrets.token }}/{{ .Secrets.nope }}"}},
+	} {
+		store.row.WebhookTemplateConfig = c.JSON()
+		state, _ := json.Marshal(delivery.RequestState{Group: &templates.Data{AlertGroup: templates.AlertGroup{
+			Number: 1}}})
+		w := &delivery.WebhookCall{State: state, Response: map[string]string{"id": "m1"}}
+		dest := delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1", Type: webhooks.TypeWebhook}
+		path := deliverytest.Unlimited(1, clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}})
+		for _, op := range []delivery.Op{delivery.PublishOp(a, delivery.Message{}),
+			delivery.UpdateOp(a, "m1", delivery.Message{}), delivery.ReplyOp(a, delivery.Root{}, delivery.Message{})} {
+			out, err := path.Do(ctx, delivery.Subject{Destination: &dest}, delivery.WebhookOp(op, w))
+			errs = append(errs, err, errors.New(string(out.Kind)+": "+string(out.Error)))
+		}
+	}
 	return errors.Join(errs...)
 }
 

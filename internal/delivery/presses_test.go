@@ -95,7 +95,7 @@ func TestPressBinding(t *testing.T) {
 	e.db.routes[routeID] = r
 	post := "post-1"
 	e.db.deliveries = append(e.db.deliveries, &fakeDelivery{id: 1, dest: destMM, group: groupID, state: "delivered",
-		messageID: &post})
+		messageID: &post, publishedAt: at(business0)})
 	b, err := e.svc.PressBinding(t.Context(), connID, "AGAAAAAAAAAA21", "post-1")
 	if err != nil || b.Destination.ID != destMM || b.Destination.PublicID != "DSAAAAAAAAAA11" ||
 		b.Destination.Name != "ops" || b.Destination.Type != delivery.TypeMattermost || b.Destination.Connection == nil ||
@@ -130,7 +130,7 @@ func TestPostDestination(t *testing.T) {
 	e.db.dests[destMM].channel = "ch-alerts"
 	post := "post-1"
 	e.db.deliveries = append(e.db.deliveries, &fakeDelivery{id: 1, dest: destMM, group: groupID, state: "delivered",
-		messageID: &post}, &fakeDelivery{id: 2, dest: destMM, group: groupID, state: "pending"})
+		messageID: &post, publishedAt: at(business0)}, &fakeDelivery{id: 2, dest: destMM, group: groupID, state: "pending"})
 	d, ok, err := e.svc.PostDestination(t.Context(), connID, "post-1", "ch-alerts")
 	if err != nil || !ok || d.ID != destMM || d.PublicID != "DSAAAAAAAAAA11" || d.Type != delivery.TypeMattermost ||
 		d.Connection == nil || *d.Connection != connID {
@@ -187,7 +187,7 @@ func TestTelegramPressBinding(t *testing.T) {
 	e.db.routes[routeID] = r
 	post := tgPost
 	e.db.deliveries = append(e.db.deliveries, &fakeDelivery{id: 1, dest: destTG, group: groupID, state: "delivered",
-		messageID: &post})
+		messageID: &post, publishedAt: at(business0)})
 	postID, _ := strconv.ParseInt(tgPost, 10, 64)
 	b, err := e.svc.TelegramPressBinding(t.Context(), connID, "AGAAAAAAAAAA21", tgChannel, postID)
 	if err != nil || b.Destination.ID != destTG || b.Destination.PublicID != "DSAAAAAAAAAA13" ||

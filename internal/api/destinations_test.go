@@ -779,6 +779,53 @@ func TestWebhookDestinationWarnings(t *testing.T) {
 	}
 }
 
+// templateBody is an outgoing webhook in the mode both whose requests post to a chat with two-step threads.
+const templateBody = `{"type":"webhook","name":"chat","mode":"both","events":{"url":"https://x/hook","headers":[]},` +
+	`"template":{"create":{"method":"POST","url":"https://x/chat/ops/messages","headers":[],"body":"{\"t\":1}",` +
+	`"extract":[{"name":"id","path":"$.data.id"}]},"update":{"method":"PUT","url":"https://x/m/{{ .Response.id }}",` +
+	`"headers":[{"name":"Authorization","value":"Bearer abc"}],"body":null},` +
+	`"open_thread":{"method":"POST","url":"https://x/threads","headers":[]},` +
+	`"reply_in_thread":{"method":"POST","url":"https://x/threads/{{ .Response.thread }}","headers":[],` +
+	`"extract":[]}},"proxy":{"enabled":false},"mentions":` + noMentions + `,"limiter":{"limit":5,"per_seconds":1}}`
+
+// TestTemplateWebhookDestinationAPI is createDestination of an outgoing webhook in the mode both (C-15.FR-1, FR-3):
+// every request reaches the service with its method, URL, headers, body — none when null or absent — and extraction
+// rules; as read, the requests come back with a literal credential of any request warned at its field, and the
+// template error state with fallback not_sent (C-15.FR-7).
+func TestTemplateWebhookDestinationAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	if a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", templateBody); a.status !=
+		http.StatusCreated {
+		t.Fatalf("create = %d %s", a.status, a.body)
+	}
+	tc := fd.saved[0].Webhook.Template
+	if tc == nil || tc.Create.Method != http.MethodPost || tc.Create.Body == nil || *tc.Create.Body != `{"t":1}` ||
+		tc.Create.Extract[0] != (webhooks.ExtractionRule{Name: "id", Path: "$.data.id"}) || tc.Update.Body != nil ||
+		tc.Update.Headers[0].Value != "Bearer abc" || tc.OpenThread == nil || tc.OpenThread.Body != nil ||
+		len(tc.OpenThread.Extract) != 0 || tc.ReplyInThread == nil ||
+		tc.ReplyInThread.URL != "https://x/threads/{{ .Response.thread }}" {
+		t.Fatalf("template %+v", tc)
+	}
+	fd.list[2].WebhookMode = ptr("template")
+	fd.list[2].EventsConfig = nil
+	fd.list[2].TemplateConfig = tc.JSON()
+	fd.list[2].TemplateError = &destinations.TemplateError{Since: t0, Error: "update/url: the value id is missing"}
+	a := x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/"+webhookID, "")
+	var d gen.Destination
+	decodeInto(t, a, &d)
+	w, err := d.AsWebhookDestination()
+	if err != nil || w.Template == nil || w.Template.Create.Url != "https://x/chat/ops/messages" ||
+		w.Template.OpenThread == nil || w.TemplateError == nil || w.TemplateError.Fallback != gen.NotSent ||
+		w.Warnings[len(w.Warnings)-1].Field.MustGet() != "/template/update/headers/0/value" {
+		t.Fatalf("read %+v (%v): %s", w, err, a.body)
+	}
+	fd.list[2].TemplateConfig = json.RawMessage(`{"create":1}`)
+	if a := x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/"+webhookID, ""); a.status !=
+		http.StatusInternalServerError {
+		t.Errorf("broken templates = %d", a.status)
+	}
+}
+
 // TestDestinationSecretsAPI is listDestinationSecrets, setDestinationSecret and deleteDestinationSecret (C-15.FR-10):
 // values are write-only; the ETag is the version of the Secrets and If-Match guards the changes; another type is 409
 // not_webhook_destination; readers list but do not change them.
@@ -906,5 +953,19 @@ func TestTelegramDestinationAPI(t *testing.T) {
 	if a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
 		strings.Replace(body, `"channel_id":"@muster_alerts",`, "", 1)); a.status != http.StatusBadRequest {
 		t.Errorf("without a channel = %d %s", a.status, a.body)
+	}
+}
+
+// TestWebhookRequestPreviewAPI (C-12.FR-4): a request template's preview has no built-in source and no markup.
+func TestWebhookRequestPreviewAPI(t *testing.T) {
+	x, _ := newLinksAPI(t)
+	fake := &fakeTemplates{}
+	x.srv.templates = fake
+	a := x.as(t, linksWriter, http.MethodPost, "/api/v1/template-previews",
+		`{"kind":"webhook_request","template":"Bearer {{ .Secrets.token }}"}`)
+	m := a.json(t)
+	if a.status != http.StatusOK || m["valid"] != true || m["source"] != nil || fake.reqs[0].Kind != "webhook_request" ||
+		fake.reqs[0].Template != "Bearer {{ .Secrets.token }}" {
+		t.Errorf("preview = %d %s", a.status, a.body)
 	}
 }
