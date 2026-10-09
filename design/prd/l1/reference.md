@@ -84,7 +84,7 @@ included, is a link in the post, never a button (C-13.FR-3).
 | Root message and Alert Group page | Reopen count > 0 | "🔁 Reopened ×N" | C-09, C-12 |
 | Snooze dialog | no end chosen | "This Alert Group stays snoozed until someone unsnoozes it." | C-10 |
 | Destination and its Routes | Broken | "Broken since HH:MM: {reason}. Muster tries again every {interval}." — the reason is the error, or "unavailable after repeated failures: {last error}" | C-11, C-13 |
-| Alert Group page, delivery state | as applicable | "Not delivered: {error}" · "Waiting: {Destination} is Broken" · "Deleted in the messenger" · "Thread not attached to the post" · "Possible duplicate" · "Not posted: resolved during a Storm or while the Destination was Broken" · "No longer updated here" | C-11, C-13 |
+| Alert Group page, delivery state | as applicable | "Not delivered: {error}" · "Waiting: {Destination} is Broken" · "Deleted in the messenger" · "Thread not attached to the Root message" · "Possible duplicate" · "Not posted: resolved during a Storm or while the Destination was Broken" · "No longer updated here" | C-11, C-13 |
 | Root message | delivered late | "Delivered late: started HH:MM, resolved HH:MM while this Destination was unavailable." | C-11, C-12 |
 | Root message | republished after deletion | "The previous message was deleted at HH:MM." | C-11, C-12 |
 | Root message | Destination removed from the Route | "No longer updated here; current state in Muster: {link}" | C-11, C-12 |

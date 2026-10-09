@@ -36,7 +36,8 @@ type membershipQueries interface {
 	ListOpenGroupsOfRoute(ctx context.Context, arg dbgen.ListOpenGroupsOfRouteParams) (
 		[]dbgen.ListOpenGroupsOfRouteRow, error)
 	RejoinDelivery(ctx context.Context, arg dbgen.RejoinDeliveryParams) (int64, error)
-	RetireRouteDeliveries(ctx context.Context, arg dbgen.RetireRouteDeliveriesParams) ([]int64, error)
+	RetireRouteDeliveries(ctx context.Context, arg dbgen.RetireRouteDeliveriesParams) (
+		[]dbgen.RetireRouteDeliveriesRow, error)
 	RetireGroupDeliveries(ctx context.Context, arg dbgen.RetireGroupDeliveriesParams) ([]int64, error)
 	RetireDestinationDeliveries(ctx context.Context, arg dbgen.RetireDestinationDeliveriesParams) ([]int64, error)
 	SettleDestinationLeftovers(ctx context.Context, arg dbgen.SettleDestinationLeftoversParams) error
@@ -60,8 +61,8 @@ func (w *Worker) link(publicID string) string {
 // RouteDestinationsChanged is the membership hook of the Routes (C-11.FR-14), in the transaction tx of the Route's
 // change, which holds the Route's membership lock: the Destinations added to the Route routeID publish its open Alert
 // Groups Quietly — during a Storm they get its Storm summary and hold the Alert Groups it holds — and those removed
-// give their open Root messages the final edit and retire the summary of an active Storm. It wakes the delivery
-// workers once tx commits.
+// give their open Root messages the final edit and retire the summary of an active Storm, with the alert-group hint of
+// each Alert Group whose delivery that retires or withholds. It wakes the delivery workers once tx commits.
 func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, routeID int64, added,
 	removed []int64) error {
 	if len(added) == 0 && len(removed) == 0 {
@@ -70,10 +71,17 @@ func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, r
 	q := s.store.queries(tx)
 	now := s.clock.Now().UTC()
 	for _, d := range removed {
-		ids, err := q.RetireRouteDeliveries(ctx, dbgen.RetireRouteDeliveriesParams{OrgID: s.orgID, RouteID: routeID,
+		rows, err := q.RetireRouteDeliveries(ctx, dbgen.RetireRouteDeliveriesParams{OrgID: s.orgID, RouteID: routeID,
 			DestinationID: d, Now: now})
 		if err != nil {
 			return fmt.Errorf("retire the deliveries of route %d in destination %d: %w", routeID, d, err)
+		}
+		ids := make([]int64, 0, len(rows))
+		for _, r := range rows {
+			ids = append(ids, r.ID)
+			if err := hintGroup(ctx, q, s.orgID, r.PublicID); err != nil {
+				return err
+			}
 		}
 		if err := s.dropReplies(ctx, q, ids); err != nil {
 			return err

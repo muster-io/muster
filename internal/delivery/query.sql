@@ -662,6 +662,14 @@ UPDATE deliveries d
 SET attempts = 0, first_failed_at = NULL
 WHERE d.org_id = @org_id AND d.destination_id = @destination_id AND d.state = 'pending';
 
+-- ListPendingGroups lists the Alert Groups with a pending delivery to a Destination, whose delivery state a change of
+-- its health turns into waiting or back, for their alert-group hints.
+-- name: ListPendingGroups :many
+SELECT DISTINCT g.public_id
+FROM deliveries d
+JOIN alert_groups g ON g.org_id = @org_id AND g.id = d.alert_group_id
+WHERE d.org_id = @org_id AND d.destination_id = @destination_id AND d.state = 'pending';
+
 -- MarkDestinationHealthy ends the Broken state of a Destination and tells whether it is deleted. No row when it is
 -- healthy already.
 -- name: MarkDestinationHealthy :one
@@ -843,13 +851,15 @@ FROM alert_groups g
 WHERE d.org_id = @org_id AND d.held_by_storm_id = @storm_id::bigint AND g.org_id = @org_id
   AND g.id = d.alert_group_id AND g.status <> 'resolved';
 
--- WithholdHeldResolved withholds the Alert Groups a Storm held that resolved meanwhile: never published.
--- name: WithholdHeldResolved :exec
+-- WithholdHeldResolved withholds the Alert Groups a Storm held that resolved meanwhile: never published. It returns
+-- their public_ids, once per delivery, for their alert-group hints.
+-- name: WithholdHeldResolved :many
 UPDATE deliveries d
 SET held_by_storm_id = NULL, state = 'withheld', updated_at = @now
 FROM alert_groups g
 WHERE d.org_id = @org_id AND d.held_by_storm_id = @storm_id::bigint AND d.state = 'pending' AND g.org_id = @org_id
-  AND g.id = d.alert_group_id AND g.status = 'resolved';
+  AND g.id = d.alert_group_id AND g.status = 'resolved'
+RETURNING g.public_id;
 
 -- QuietStormSummaries makes the Storm summaries of a Storm that were never published Quiet: a summary first published
 -- after its Storm ended announces nothing new.
@@ -932,6 +942,7 @@ WHERE org_id = @org_id AND alert_group_id = @alert_group_id::bigint AND destinat
 
 -- RetireRouteDeliveries gives the deliveries of the open Alert Groups of a Route in a Destination that left it their
 -- final edit (C-11.FR-14): a published Root message is edited once more, and one never published there is withheld.
+-- It returns each delivery with the public_id of its Alert Group, for the alert-group hints.
 -- name: RetireRouteDeliveries :many
 UPDATE deliveries d
 SET state            = CASE WHEN d.message_id IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
@@ -943,7 +954,7 @@ FROM alert_groups g
 WHERE d.org_id = @org_id AND d.destination_id = @destination_id AND g.org_id = @org_id AND g.id = d.alert_group_id
   AND g.route_id = @route_id AND g.status <> 'resolved'
   AND d.state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
-RETURNING d.id;
+RETURNING d.id, g.public_id;
 
 -- RetireGroupDeliveries gives the deliveries of an Alert Group in the Destinations other than @keep their final edit:
 -- it moved to a Route they are not Destinations of (C-09.FR-19).

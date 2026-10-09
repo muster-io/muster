@@ -92,18 +92,19 @@ func (f *fakeDB) RejoinDelivery(_ context.Context, arg dbgen.RejoinDeliveryParam
 	return 0, nil
 }
 
-func (f *fakeDB) RetireRouteDeliveries(_ context.Context, arg dbgen.RetireRouteDeliveriesParams) ([]int64, error) {
+func (f *fakeDB) RetireRouteDeliveries(_ context.Context, arg dbgen.RetireRouteDeliveriesParams) (
+	[]dbgen.RetireRouteDeliveriesRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.call("RetireRouteDeliveries"); err != nil {
 		return nil, err
 	}
-	var out []int64
+	var out []dbgen.RetireRouteDeliveriesRow
 	for _, d := range f.deliveries {
 		if d.dest == arg.DestinationID && d.storm == 0 && f.open(d.group) && f.groups[d.group].route == arg.RouteID &&
 			!terminal(d) {
 			retire(d, arg.Now)
-			out = append(out, d.id)
+			out = append(out, dbgen.RetireRouteDeliveriesRow{ID: d.id, PublicID: f.groups[d.group].publicID})
 		}
 	}
 	return out, nil

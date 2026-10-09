@@ -229,18 +229,20 @@ func (f *fakeDB) ReleaseHeldOpen(_ context.Context, arg dbgen.ReleaseHeldOpenPar
 	return nil
 }
 
-func (f *fakeDB) WithholdHeldResolved(_ context.Context, arg dbgen.WithholdHeldResolvedParams) error {
+func (f *fakeDB) WithholdHeldResolved(_ context.Context, arg dbgen.WithholdHeldResolvedParams) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.call("WithholdHeldResolved"); err != nil {
-		return err
+		return nil, err
 	}
+	var out []string
 	f.held(arg.StormID, func(d *fakeDelivery, resolved bool) {
 		if resolved && d.state == "pending" {
 			d.heldBy, d.state, d.updated = 0, "withheld", arg.Now
+			out = append(out, f.groups[d.group].publicID)
 		}
 	})
-	return nil
+	return out, nil
 }
 
 func (f *fakeDB) EndStorm(_ context.Context, arg dbgen.EndStormParams) error {

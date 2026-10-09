@@ -120,10 +120,9 @@ issue: 138
   `/policy/thread_batching_window_seconds` and `/policy/storm_threshold`, which S-035 records in the Route's diff.
 - **Delivery section** (`alert-group-deliveries.tsx`): one row per item of `listAlertGroupDeliveries` with the
   Destination's name and health and the state texts of
-  [reference.md](../prd/l1/reference.md#banners-warnings-and-notices), with "Thread not attached to the Root message"
-  for the reference's "Thread not attached to the post" (CONTEXT.md lists "Post" under _Avoid_); "Delivered" links to
-  `message_url` in a new tab; `error` is untrusted text. Refreshed by the `alert-group` hint, and read again every few
-  seconds while a delivery is `pending`, because the end of a delivery sends no hint of its own.
+  [reference.md](../prd/l1/reference.md#banners-warnings-and-notices); "Delivered" links to `message_url` in a new
+  tab; `error` is untrusted text. Refreshed by the `alert-group` hint, which the delivery worker also sends when a
+  delivery ends or starts or stops waiting for a Broken Destination, so nothing polls.
 - **Delivery problem** (`alert-group-filters.tsx`, `alert-group-table.tsx`, `alert-group-search.ts`): the filter
   "Delivery problem" (`delivery_problem=true`) in the URL and the counts; rows with `delivery_problem` carry a mark with
   the tooltip "Delivery problem: open the Alert Group to see which Destination", also shown in the row's details for

@@ -51,7 +51,7 @@ type stormQueries interface {
 	SetStormCalmSince(ctx context.Context, arg dbgen.SetStormCalmSinceParams) error
 	CountHeldOpen(ctx context.Context, arg dbgen.CountHeldOpenParams) (int64, error)
 	ReleaseHeldOpen(ctx context.Context, arg dbgen.ReleaseHeldOpenParams) error
-	WithholdHeldResolved(ctx context.Context, arg dbgen.WithholdHeldResolvedParams) error
+	WithholdHeldResolved(ctx context.Context, arg dbgen.WithholdHeldResolvedParams) ([]string, error)
 	EndStorm(ctx context.Context, arg dbgen.EndStormParams) error
 	QuietStormSummaries(ctx context.Context, arg dbgen.QuietStormSummariesParams) error
 	GetActiveStorm(ctx context.Context, arg dbgen.GetActiveStormParams) (dbgen.GetActiveStormRow, error)
@@ -224,9 +224,15 @@ func (s *Service) endStorm(ctx context.Context, q queries, st dbgen.LockStormRow
 		Loud: deliveryEvent(DeliveryAfterStorm).loud(true), Now: now}); err != nil {
 		return nil, fmt.Errorf("publish the open alert groups of the storm %d: %w", st.ID, err)
 	}
-	if err := q.WithholdHeldResolved(ctx, dbgen.WithholdHeldResolvedParams{OrgID: s.orgID, StormID: st.ID,
-		Now: now}); err != nil {
+	withheld, err := q.WithholdHeldResolved(ctx, dbgen.WithholdHeldResolvedParams{OrgID: s.orgID, StormID: st.ID,
+		Now: now})
+	if err != nil {
 		return nil, fmt.Errorf("withhold the resolved alert groups of the storm %d: %w", st.ID, err)
+	}
+	for _, g := range withheld {
+		if err := hintGroup(ctx, q, s.orgID, g); err != nil {
+			return nil, err
+		}
 	}
 	if err := q.EndStorm(ctx, dbgen.EndStormParams{OrgID: s.orgID, ID: st.ID, Now: now,
 		CalmSince: pgtype.Timestamptz{Time: calm, Valid: true}}); err != nil {

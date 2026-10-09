@@ -1409,6 +1409,22 @@ func (f *fakeDB) ListDestinationHealth(_ context.Context, _ int64) ([]dbgen.List
 	return out, nil
 }
 
+func (f *fakeDB) ListPendingGroups(_ context.Context, arg dbgen.ListPendingGroupsParams) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListPendingGroups"); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, d := range f.deliveries {
+		if g := f.groups[d.group]; g != nil && d.dest == arg.DestinationID && d.state == "pending" &&
+			!slices.Contains(out, g.publicID) {
+			out = append(out, g.publicID)
+		}
+	}
+	return out, nil
+}
+
 // The built-in Integration of the fake, which the synthetic Snapshots of Internal alerts belong to.
 const builtinID = 100
 
