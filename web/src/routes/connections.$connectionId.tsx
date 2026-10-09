@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// A Connection (C-13.FR-1, FR-2, FR-13): its form, read-only without connections:write; for Mattermost the callback
-// address with its hint; "Check connection" and "Delete" with connections:write. The form keeps the version it was
+// A Connection (C-13.FR-1, FR-2, FR-13; C-14.FR-1, FR-11): its form, read-only without connections:write; for
+// Mattermost the callback address with its hint; "Check connection" and "Delete" with connections:write. A
+// Telegram Connection's check takes the base URL in the form: an unsaved one gets only the dry probe, without the
+// token. The form keeps the version it was
 // read at and sends it as If-Match: when the Connection changes elsewhere an untouched form takes the new version and
 // says so, and a form with changes keeps them, and its save is refused (412) with the offer to reload.
 
@@ -19,11 +21,12 @@ import {
   updateConnection,
   useGetConnection,
 } from "../api/gen/endpoints/connections/connections";
-import type { Connection, MattermostConnection } from "../api/gen/model";
+import type { Connection } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { CallbackHint } from "../components/callback-hint";
 import { ConnectionCheck } from "../components/connection-check";
 import { ConnectionDeleteDialog, ConnectionForm } from "../components/connection-form";
+import { normalizeBaseUrl } from "../components/telegram-connection-fields";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
 import { problemText } from "../lib/api";
@@ -33,11 +36,15 @@ export const Route = createFileRoute("/connections/$connectionId")({
   component: ConnectionPage,
 });
 
-function isMattermost(c: Connection): c is MattermostConnection {
-  return c.type === "mattermost";
+/** The bot's name as its messenger writes it: Telegram with an @. */
+function botName(c: Connection): string | undefined {
+  if (c.bot_username === undefined || c.bot_username === null || c.bot_username === "") {
+    return undefined;
+  }
+  return c.type === "telegram" ? `@${c.bot_username}` : c.bot_username;
 }
 
-function EditForm({ current }: { current: MattermostConnection }) {
+function EditForm({ current }: { current: Connection }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const canWrite = useCan("connections:write");
@@ -47,6 +54,14 @@ function EditForm({ current }: { current: MattermostConnection }) {
   const [saved, setSaved] = useState(false);
   const [replaced, setReplaced] = useState(false);
   const [reloadError, setReloadError] = useState<unknown>(null);
+  // The base URL in the form of a Telegram Connection, as it is typed.
+  const [baseUrl, setBaseUrl] = useState<string>();
+  const unsavedBaseUrl =
+    base.type === "telegram" &&
+    baseUrl !== undefined &&
+    normalizeBaseUrl(baseUrl) !== base.bot_api_base_url
+      ? baseUrl
+      : undefined;
   // The form is mounted again only for a version it did not save itself: a newer one or a reload.
   const [formKey, setFormKey] = useState(0);
   // A newer version (another Admin, another tab) replaces an untouched form, which says so.
@@ -78,6 +93,7 @@ function EditForm({ current }: { current: MattermostConnection }) {
         stale={current.etag !== base.etag}
         saved={saved}
         onDirtyChange={setDirty}
+        onBaseUrlChange={setBaseUrl}
         save={async (input) => {
           setSaving(true);
           setSaved(false);
@@ -90,7 +106,7 @@ function EditForm({ current }: { current: MattermostConnection }) {
             await queryClient.cancelQueries({ queryKey: getGetConnectionQueryKey(base.id) });
             queryClient.setQueryData(getGetConnectionQueryKey(updated.id), updated);
             void queryClient.invalidateQueries({ queryKey: getListConnectionsQueryKey() });
-            if (!isMattermost(updated)) {
+            if (updated.type !== base.type) {
               return undefined;
             }
             setDirty(false);
@@ -107,7 +123,7 @@ function EditForm({ current }: { current: MattermostConnection }) {
           queryClient
             .fetchQuery({ ...getGetConnectionQueryOptions(base.id), staleTime: 0 })
             .then((fresh) => {
-              if (isMattermost(fresh)) {
+              if (fresh.type === base.type) {
                 setDirty(false);
                 setReplaced(false);
                 setSaved(false);
@@ -118,9 +134,19 @@ function EditForm({ current }: { current: MattermostConnection }) {
             .catch((err: unknown) => setReloadError(err));
         }}
       />
-      <CallbackHint callbackUrl={current.callback_url} />
-      {/* A saved change of the server URL or the bot token makes an earlier result stale. */}
-      {canWrite && <ConnectionCheck key={base.etag} connectionId={base.id} dirty={dirty} />}
+      {current.type === "mattermost" && <CallbackHint callbackUrl={current.callback_url} />}
+      {/* A saved change of the address or the bot token makes an earlier result stale, and so does another unsaved
+          address: a result belongs to the address it was made for. */}
+      {canWrite && (
+        <ConnectionCheck
+          key={`${base.etag} ${unsavedBaseUrl ?? ""}`}
+          connectionId={base.id}
+          type={base.type}
+          dirty={dirty}
+          unsavedBaseUrl={unsavedBaseUrl}
+          updateMode={base.type === "telegram" ? base.update_mode : undefined}
+        />
+      )}
     </>
   );
 }
@@ -145,19 +171,19 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
             <h1 className="min-w-0 text-2xl font-semibold tracking-tight wrap-anywhere">
               {connection?.name ?? t("connections.edit.title")}
             </h1>
-            {connection !== undefined && isMattermost(connection) && (
+            {connection !== undefined && (
               <p
                 className="text-sm wrap-anywhere text-muted-foreground"
                 data-testid="connection-bot"
               >
-                {connection.bot_username
-                  ? t("connections.edit.bot", { bot: connection.bot_username })
-                  : t("connections.edit.botUnknown")}
+                {botName(connection) === undefined
+                  ? t("connections.edit.botUnknown")
+                  : t("connections.edit.bot", { bot: botName(connection) })}
               </p>
             )}
           </div>
           {/* Outside the form, which a newer version replaces; Delete sends the version read last. */}
-          {canWrite && connection !== undefined && isMattermost(connection) && (
+          {canWrite && connection !== undefined && (
             <ConnectionDeleteDialog connection={connection} />
           )}
         </div>
@@ -166,10 +192,8 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
         <p className="text-sm text-muted-foreground" role="status">
           {query.isError ? problemText(t, query.error) : t("common.loading")}
         </p>
-      ) : isMattermost(connection) ? (
-        <EditForm current={connection} />
       ) : (
-        <p className="text-sm text-muted-foreground">{t("connections.edit.unsupported")}</p>
+        <EditForm current={connection} />
       )}
     </div>
   );
