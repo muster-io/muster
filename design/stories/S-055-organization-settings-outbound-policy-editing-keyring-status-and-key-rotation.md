@@ -221,6 +221,9 @@ None.
 - Re-encryption runs in one transaction; at L1 sizes — a few hundred Secrets — it takes well under a second. The Desired
   state of open Alert Groups is only recomputed in that transaction; the edits themselves follow through the delivery
   worker within the limiters.
+- Master key rotation re-encrypts the three outgoing webhook secret fields: the Signing secret, the previous Signing
+  secret and the Secrets. The test of S-044 re-encrypts them by hand because rotation did not exist yet; this story
+  covers them with real rotation.
 
 ## Coverage
 
