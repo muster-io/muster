@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -88,8 +89,9 @@ func TestDevModeFakes(t *testing.T) {
 		if !me.OK || !me.Result.IsBot || me.Result.Username != "muster_dev_bot" || me.Result.ID != 123456 {
 			t.Errorf("getMe = %+v", me)
 		}
-		if paths := recordedPaths(t, h.Fakes.Telegram); len(paths) == 0 || paths[0] != "/bot123:abc/getMe" {
-			t.Errorf("recorded paths %v, want /bot123:abc/getMe first", paths)
+		// The demo Connection "Dev Telegram" polls the fake from the start, so the getMe is among the recorded paths.
+		if paths := recordedPaths(t, h.Fakes.Telegram); !slices.Contains(paths, "/bot123:abc/getMe") {
+			t.Errorf("recorded paths %v, want /bot123:abc/getMe among them", paths)
 		}
 		a := call(t, http.MethodPost, h.Fakes.Telegram+"/bot123:abc/sendMessage", `{"chat_id":1,"text":"hi"}`)
 		var e struct {
@@ -240,11 +242,24 @@ func TestFakesSurviveReplicaRestart(t *testing.T) {
 		t.Errorf("the restarted replica printed %q", r.Output())
 	}
 
-	if paths := recordedPaths(t, h.Fakes.Telegram); len(paths) != 1 || paths[0] != "/bot123:abc/getMe" {
-		t.Errorf("recorded paths after the restart %v, want [/bot123:abc/getMe]", paths)
+	// The replica's demo Connection "Dev Telegram" polls the fake with its own token; only the getMe has this one.
+	var ours []string
+	for _, p := range recordedPaths(t, h.Fakes.Telegram) {
+		if strings.Contains(p, "123:abc") {
+			ours = append(ours, p)
+		}
 	}
-	if reqs := h.InProcess.Telegram.Requests(); len(reqs) != 1 {
-		t.Errorf("Requests() after the restart has %d entries, want 1", len(reqs))
+	if !slices.Equal(ours, []string{"/bot123:abc/getMe"}) {
+		t.Errorf("recorded paths of the token after the restart %v, want [/bot123:abc/getMe]", ours)
+	}
+	n := 0
+	for _, r := range h.InProcess.Telegram.Requests() {
+		if strings.Contains(r.Path, "123:abc") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("Requests() after the restart has %d entries of the token, want 1", n)
 	}
 	a := call(t, http.MethodGet, h.Fakes.Mattermost+"/api/v4/users/me", "")
 	if a.status != http.StatusServiceUnavailable || a.header.Get("Retry-After") != "2" {

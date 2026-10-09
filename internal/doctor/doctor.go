@@ -4,8 +4,9 @@
 // Package doctor is `muster doctor` (C-02.FR-14, FR-15): it checks the database, its connections, the Keyring and the
 // clock, prints one line per check as `OK|WARN|FAIL <check>: <detail>` and reports whether any check failed. It only
 // reads: both connections it opens run every statement in a read-only transaction, and it takes no --actor. It checks
-// every Mattermost Connection and Destination as their checks do, in the background client class (C-13.FR-10);
-// Telegram ones arrive with C-14.
+// every Mattermost Connection and Destination as their checks do, in the background client class (C-13.FR-10), and
+// every Telegram Connection with the steps of its check — the dry probe, getMe, getWebhookInfo — printing the failing
+// step with its message (C-14.FR-11).
 package doctor
 
 import (
@@ -358,7 +359,7 @@ func (c *checks) clockSkew(ctx context.Context) {
 	}
 }
 
-// messengers checks the Mattermost Connections and Destinations of every Organization, one line each, through the
+// messengers checks the Connections and the Mattermost Destinations of every Organization, one line each, through the
 // Organization's outbound address policy; the outbound log lines are for the server, not for the doctor.
 func (c *checks) messengers(ctx context.Context) {
 	orgs, err := kdb.New(c.conns.Main).ListOrganizationIDs(ctx)

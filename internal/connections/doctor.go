@@ -15,6 +15,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/telegram"
 )
 
 // The kinds of a Finding.
@@ -50,16 +51,18 @@ type DoctorQueries interface {
 	ListMattermostDestinations(ctx context.Context, orgID int64) ([]dbgen.ListMattermostDestinationsRow, error)
 }
 
-// Doctor runs the checks of muster doctor (C-02.FR-14) over the Mattermost Connections and Destinations that are not
-// deleted, read through q: the Connection check (GET /api/v4/users/me) and the Destination check of
-// mattermost.CheckDestination, each request made at once in the background client class, whose retries each check
-// bounds by each. It only reads: it records nothing of what it finds. It needs the Keyring and the Network of the
-// Service only; without a Keyring every check fails, for the bot tokens cannot be opened.
+// Doctor runs the checks of muster doctor (C-02.FR-14) over the Connections and the Mattermost Destinations that are
+// not deleted, read through q: the Connection check of a Mattermost Connection (GET /api/v4/users/me) and the steps of
+// a Telegram one (the dry probe, getMe, getWebhookInfo), and the Destination check of mattermost.CheckDestination, each
+// request made at once in the background client class, whose retries each check bounds by each. A Telegram Connection
+// that fails names the failing step with its message. It only reads: it records nothing of what it finds. It needs the
+// Keyring and the Network of the Service only; without a Keyring every check fails, for the bot tokens cannot be
+// opened.
 func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duration) ([]Finding, error) {
 	var out []Finding
 	clients := map[int64]*mattermost.Client{}
 	failed := map[int64]string{}
-	params := dbgen.ListConnectionsParams{OrgID: s.cfg.OrgID, Type: nonEmpty(TypeMattermost), PageSize: doctorPage}
+	params := dbgen.ListConnectionsParams{OrgID: s.cfg.OrgID, PageSize: doctorPage}
 	for {
 		rows, err := q.ListConnections(ctx, params)
 		if err != nil {
@@ -67,6 +70,11 @@ func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duratio
 		}
 		for _, r := range rows {
 			f := Finding{Kind: FindingConnection, Name: r.Name}
+			if r.Type == TypeTelegram {
+				f.Message = s.doctorTelegram(ctx, dbgen.GetConnectionRow(r), each)
+				out = append(out, f)
+				continue
+			}
 			c, err := s.doctorClient(dbgen.GetConnectionRow(r))
 			if err == nil {
 				f.Message, f.Warning = connectionCheck(ctx, c, each)
@@ -117,6 +125,29 @@ func (s *Service) doctorClient(row dbgen.GetConnectionRow) (*mattermost.Client, 
 		return nil, errNoKeyring
 	}
 	return s.client(row)
+}
+
+// doctorTelegram runs the steps of the check of the Telegram Connection row in the background class, bounded by each:
+// an empty message when every step passed, otherwise the failing step with its message.
+func (s *Service) doctorTelegram(ctx context.Context, row dbgen.GetConnectionRow, each time.Duration) string {
+	if s.cfg.Keyring == nil {
+		return errNoKeyring.Error()
+	}
+	c, err := s.telegramClient(row)
+	if err != nil {
+		return err.Error()
+	}
+	ctx, cancel := context.WithTimeout(ctx, each)
+	defer cancel()
+	res, err := telegram.RunCheck(ctx, c, nil, telegram.Direct(delivery.Call{Class: outbound.ClassBackground}),
+		s.cfg.Clocks.Real)
+	if err != nil {
+		return err.Error()
+	}
+	if st, failed := res.Failed(); failed {
+		return st.Name + ": " + cmp.Or(st.Message, checkFailed)
+	}
+	return ""
 }
 
 // connectionCheck is the Connection check in the background class, bounded by each: an empty message when the bot

@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -57,6 +58,7 @@ import (
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/runtime"
+	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/tokens"
 	tokdb "github.com/muster-io/muster/internal/tokens/dbgen"
 	"github.com/muster-io/muster/internal/totp"
@@ -95,6 +97,7 @@ var registry = []Probe{
 	{Name: "ingestion", Run: probeIngestion},
 	{Name: "heartbeat", Run: probeHeartbeat},
 	{Name: "mattermost_connections", Run: probeMattermost},
+	{Name: "telegram_connections", Run: probeTelegram},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -1245,12 +1248,12 @@ func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error
 	}
 	c, err := svc.Create(ctx, by, in)
 	errs = append(errs, err)
-	res, err := svc.Check(ctx, c.PublicID)
+	res, err := svc.Check(ctx, c.PublicID, nil)
 	errs = append(errs, err, texts(res))
 	in.Proxy = proxyconf.Input{Enabled: false}
 	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
 	errs = append(errs, err)
-	res, err = svc.Check(ctx, c.PublicID)
+	res, err = svc.Check(ctx, c.PublicID, nil)
 	errs = append(errs, err, texts(res))
 	_, err = svc.Channels(ctx, c.PublicID, "", "")
 	errs = append(errs, err)
@@ -1265,6 +1268,127 @@ func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error
 		Token: logging.Secret(secrets[0]), Proxy: &outbound.Proxy{Type: "ftp", Address: "proxy:1", Username: "muster",
 			Password: logging.Secret(secrets[2])}})
 	return errors.Join(append(errs, err)...)
+}
+
+// probeTelegram pushes the secrets through a Telegram Connection (C-14.FR-12): the bot token, and the proxy password of
+// a SOCKS5 proxy that refuses it, through its creation, its check, an unsaved base URL, a mode switch whose setWebhook
+// the stand-in refuses, muster doctor and the Leader's poller; the webhook secret token through setWebhook and the
+// webhook endpoint; and the token through a refused connection. The stand-in server echoes the token, the path and the
+// body of each request in its descriptions.
+func probeTelegram(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	clocks := clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}}
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			status := http.StatusInternalServerError
+			if strings.HasSuffix(r.URL.Path, "/bot0:x/getMe") || strings.HasSuffix(r.URL.Path, "/getUpdates") {
+				status = http.StatusUnauthorized
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": status,
+				"description": "invalid token " + secrets[0] + " at " + r.URL.Path + " for " + string(body)})
+		})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	socks, err := fakeproxy.Start(ctx, fakeproxy.SOCKS5, "127.0.0.1:0", fakeproxy.Options{Username: "muster",
+		Password: "other"})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = socks.Close() }()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	network := mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}}
+	store := &probeConnections{}
+	svc := connections.New(connections.Config{OrgID: 1, Store: store, Keyring: k,
+		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks, Network: network,
+		Interactive: deliverytest.Unlimited(1, clocks), IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081"},
+		Log: logger})
+	by := connections.Requester{Actor: audit.System, Transport: audit.TransportUI}
+	in := connections.Input{Type: connections.TypeTelegram, Name: "probe", BotAPIBaseURL: "http://" + ln.Addr().String(),
+		UpdateMode: connections.ModeLongPolling, BotToken: keyring.Replace(logging.Secret(secrets[0])),
+		Limiter: connections.Limiter{Limit: 15, PerSeconds: 1},
+		Proxy: proxyconf.Input{Enabled: true, Type: new("socks5"), Address: new(socks.Addr()), UsernameSet: true,
+			Username: new("muster"), Password: keyring.Replace(logging.Secret(secrets[1]))}}
+	var errs []error
+	texts := func(c connections.CheckResult) error {
+		var b strings.Builder
+		for _, st := range c.Steps {
+			b.WriteString(st.Message + "\n")
+		}
+		return errors.New(b.String())
+	}
+	c, err := svc.Create(ctx, by, in)
+	errs = append(errs, err)
+	res, err := svc.Check(ctx, c.PublicID, nil)
+	errs = append(errs, err, texts(res))
+	in.Proxy = proxyconf.Input{Enabled: false}
+	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
+	errs = append(errs, err)
+	res, err = svc.Check(ctx, c.PublicID, nil)
+	errs = append(errs, err, texts(res))
+	unsaved := "http://127.0.0.1:1/x"
+	res, err = svc.Check(ctx, c.PublicID, &unsaved)
+	errs = append(errs, err, texts(res))
+	in.UpdateMode = connections.ModeWebhook
+	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
+	errs = append(errs, err)
+	found, err := svc.Doctor(ctx, store, 2*time.Second)
+	errs = append(errs, err)
+	for _, f := range found {
+		errs = append(errs, errors.New(f.Message))
+	}
+	tg := telegram.Network(network)
+	client, err := telegram.NewClient(tg, telegram.Settings{BaseURL: "http://" + ln.Addr().String(),
+		Token: logging.Secret(secrets[0])})
+	if err != nil {
+		return err
+	}
+	r := client.SetWebhook(ctx, outbound.ClassInteractive, "http://localhost:8081/hook", logging.Secret(secrets[2]))
+	errs = append(errs, errors.New(string(r.Outcome.Error)), errors.New(r.Description), errors.New(r.Detail))
+	refused, err := telegram.NewClient(tg, telegram.Settings{BaseURL: "http://127.0.0.1:1",
+		Token: logging.Secret(secrets[0])})
+	if err != nil {
+		return err
+	}
+	_, r = refused.GetMe(ctx, outbound.ClassInteractive)
+	errs = append(errs, errors.New(string(r.Outcome.Error)), errors.New(r.Detail))
+	router := &telegram.Router{Offsets: svc, Log: logger}
+	pollCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	errs = append(errs, (&telegram.Poller{Source: svc, Router: router, Log: logger}).Run(pollCtx))
+	cancel()
+	rec := &probeRecorder{header: http.Header{}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, telegram.WebhookPath+c.PublicID,
+		strings.NewReader(`{"update_id":1}`))
+	if err != nil {
+		return err
+	}
+	req.Header.Set(telegram.SecretTokenHeader, secrets[2])
+	telegram.NewWebhook(telegram.WebhookConfig{Connections: svc, Router: router, Log: logger}).ServeHTTP(rec, req)
+	errs = append(errs, errors.New(rec.body.String()))
+	return errors.Join(errs...)
 }
 
 // probePresses sends button presses to the callback of the Connection publicID: one that cannot be verified, one from
@@ -1388,8 +1512,10 @@ func (s *probeConnections) InTx(_ context.Context, f func(connections.Queries) e
 }
 
 func (s *probeConnections) InsertConnection(_ context.Context, a cdb.InsertConnectionParams) (int64, error) {
-	s.row = &cdb.GetConnectionRow{ID: 1, PublicID: a.PublicID, Type: connections.TypeMattermost, Name: a.Name,
-		MattermostServerUrl: a.ServerUrl, BotTokenCiphertext: a.BotTokenCiphertext, BotTokenKeyID: a.BotTokenKeyID,
+	s.row = &cdb.GetConnectionRow{ID: 1, PublicID: a.PublicID, Type: a.Type, Name: a.Name,
+		MattermostServerUrl: a.ServerUrl, TelegramBotApiBaseUrl: a.BotApiBaseUrl, TelegramUpdateMode: a.UpdateMode,
+		TelegramWebhookSecretCiphertext: a.WebhookSecretCiphertext, TelegramWebhookSecretKeyID: a.WebhookSecretKeyID,
+		BotTokenCiphertext: a.BotTokenCiphertext, BotTokenKeyID: a.BotTokenKeyID,
 		BotTokenUpdatedAt: a.BotTokenUpdatedAt, Proxy: a.Proxy, ProxyPasswordCiphertext: a.ProxyPasswordCiphertext,
 		ProxyPasswordKeyID: a.ProxyPasswordKeyID, ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt,
 		LimiterLimit: a.LimiterLimit, LimiterPerSeconds: a.LimiterPerSeconds, CreatedAt: a.Now, Version: 1}
@@ -1413,6 +1539,9 @@ func (s *probeConnections) LockConnection(context.Context, cdb.LockConnectionPar
 
 func (s *probeConnections) UpdateConnection(_ context.Context, a cdb.UpdateConnectionParams) error {
 	s.row.Name, s.row.MattermostServerUrl, s.row.Proxy = a.Name, a.ServerUrl, a.Proxy
+	s.row.TelegramBotApiBaseUrl, s.row.TelegramUpdateMode = a.BotApiBaseUrl, a.UpdateMode
+	s.row.TelegramWebhookSecretCiphertext, s.row.TelegramWebhookSecretKeyID = a.WebhookSecretCiphertext,
+		a.WebhookSecretKeyID
 	s.row.BotTokenCiphertext, s.row.BotTokenKeyID = a.BotTokenCiphertext, a.BotTokenKeyID
 	s.row.ProxyPasswordCiphertext, s.row.ProxyPasswordKeyID = a.ProxyPasswordCiphertext, a.ProxyPasswordKeyID
 	s.row.Version++
@@ -1460,6 +1589,26 @@ func (s *probeConnections) InsertAuditEntry(context.Context, adb.InsertAuditEntr
 }
 
 func (s *probeConnections) Notify(context.Context, db.Hint) error { return nil }
+
+// ListPollingConnections is the Connection when it is a Telegram one in the long-polling mode.
+func (s *probeConnections) ListPollingConnections(context.Context, int64) ([]cdb.ListPollingConnectionsRow, error) {
+	r := s.row
+	if r == nil || r.Type != connections.TypeTelegram || r.TelegramUpdateMode.String != connections.ModeLongPolling {
+		return nil, nil
+	}
+	return []cdb.ListPollingConnectionsRow{{ID: r.ID, PublicID: r.PublicID, TelegramBotApiBaseUrl: r.TelegramBotApiBaseUrl,
+		BotTokenCiphertext: r.BotTokenCiphertext, BotTokenKeyID: r.BotTokenKeyID, BotTokenUpdatedAt: r.BotTokenUpdatedAt,
+		Proxy: r.Proxy, ProxyPasswordCiphertext: r.ProxyPasswordCiphertext, ProxyPasswordKeyID: r.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt, Version: r.Version}}, nil
+}
+
+func (s *probeConnections) LockUpdateOffset(context.Context, cdb.LockUpdateOffsetParams) (pgtype.Int8, error) {
+	return pgtype.Int8{}, nil
+}
+
+func (s *probeConnections) StoreUpdateOffset(context.Context, cdb.StoreUpdateOffsetParams) error {
+	return nil
+}
 
 func Probes() []Probe {
 	return slices.Clone(registry)

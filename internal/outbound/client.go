@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -146,6 +147,34 @@ func parseTarget(raw string) (*url.URL, error) {
 
 func (c *Client) redact(s string) string { return c.redactor.redact(s) }
 
+// networkOf is what failed in a request that got no answer.
+func networkOf(err error) string {
+	var dns *net.DNSError
+	var ne net.Error
+	var cert *tls.CertificateVerificationError
+	var record tls.RecordHeaderError
+	var alert tls.AlertError
+	var unknown x509.UnknownAuthorityError
+	var host x509.HostnameError
+	var invalid x509.CertificateInvalidError
+	text := err.Error()
+	switch {
+	case errors.As(err, &dns):
+		return NetworkDNS
+	case errors.As(err, &cert), errors.As(err, &record), errors.As(err, &alert), errors.As(err, &unknown),
+		errors.As(err, &host), errors.As(err, &invalid), strings.Contains(text, "tls: "):
+		return NetworkTLS
+	// Go reports a CONNECT that the proxy answered 407 with the status text alone, and the SOCKS5 dialer a refused
+	// username and password with this text.
+	case strings.Contains(text, http.StatusText(http.StatusProxyAuthRequired)),
+		strings.Contains(text, "username/password authentication failed"):
+		return NetworkProxyAuth
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
+		return NetworkTimeout
+	}
+	return NetworkConnect
+}
+
 // Request is one request. URL is absolute, or a path below the base URL when the client has one.
 type Request struct {
 	Method string
@@ -181,9 +210,25 @@ type Error struct {
 	// Status is the status code of the answer, 0 without one.
 	Status        int
 	ProviderError Untrusted
-	msg           string
-	cause         error
+	// Network is what failed when the request got no answer, one of the Network constants, empty otherwise; Detail is
+	// the redacted text of that failure without the request, such as the TLS error.
+	Network string
+	Detail  string
+	msg     string
+	cause   error
 }
+
+// What failed when a request got no answer (Error.Network).
+const (
+	NetworkDNS     = "dns"
+	NetworkTLS     = "tls"
+	NetworkTimeout = "timeout"
+	// NetworkProxyAuth is a proxy that refused the client's credentials: 407 to an HTTP CONNECT, or a SOCKS5 proxy
+	// that refused the username and password.
+	NetworkProxyAuth = "proxy_auth"
+	// NetworkConnect is any other failure to connect or to read the answer, such as a refused connection.
+	NetworkConnect = "connect"
+)
 
 func (e *Error) Error() string { return e.msg }
 
@@ -355,11 +400,12 @@ func (c *Client) transportError(ctx context.Context, u *url.URL, err error) (Res
 		return Result{Outcome: OutcomeBlocked},
 			&Error{Outcome: OutcomeBlocked, Rule: rule, msg: c.redact(blocked.Error())}
 	}
-	msg := err.Error()
+	msg, detail := err.Error(), err
 	if ue, ok := errors.AsType[*url.Error](err); ok {
-		msg = fmt.Sprintf("%s %q: %v", ue.Op, c.display(u), ue.Err)
+		msg, detail = fmt.Sprintf("%s %q: %v", ue.Op, c.display(u), ue.Err), ue.Err
 	}
-	e := &Error{Outcome: OutcomeTransient, msg: c.redact(msg)}
+	e := &Error{Outcome: OutcomeTransient, msg: c.redact(msg), Network: networkOf(err),
+		Detail: c.redact(detail.Error())}
 	switch {
 	case ctx.Err() != nil:
 		e.cause = ctx.Err()

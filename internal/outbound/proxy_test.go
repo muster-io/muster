@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
 	"github.com/muster-io/muster/internal/logging"
@@ -298,5 +299,60 @@ func TestProxyPolicyAndResolverErrors(t *testing.T) {
 	if res, err := c.Do(context.Background(), Request{URL: "http://name.test/"}); res.Outcome != OutcomeTransient ||
 		err == nil || !strings.Contains(err.Error(), "resolver broken") {
 		t.Fatalf("resolver error: %+v %v", res, err)
+	}
+}
+
+// failingResolver answers every lookup with a DNS error.
+type failingResolver struct{}
+
+func (failingResolver) LookupNetIP(_ context.Context, _, host string) ([]netip.Addr, error) {
+	return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+}
+
+// TestNetworkOfFailures names what failed in a request that got no answer: the name, the TLS handshake, the time, the
+// proxy's credentials, the connection.
+func TestNetworkOfFailures(t *testing.T) {
+	network := func(c *Client, raw string) *Error {
+		t.Helper()
+		_, err := c.Do(t.Context(), Request{URL: raw})
+		e, ok := errors.AsType[*Error](err)
+		if !ok {
+			t.Fatalf("%s: error %v", raw, err)
+		}
+		return e
+	}
+	c, _ := newTestClient(t, Config{Resolver: failingResolver{}})
+	if e := network(c, "http://bot-api.invalid/x"); e.Network != NetworkDNS || !strings.Contains(e.Detail, "no such host") {
+		t.Fatalf("dns: %q %q", e.Network, e.Detail)
+	}
+	tg := newTarget(t, true)
+	c, _ = newTestClient(t, Config{})
+	if e := network(c, tg.URL); e.Network != NetworkTLS || !strings.Contains(e.Detail, "certificate") {
+		t.Fatalf("tls: %q %q", e.Network, e.Detail)
+	}
+	if e := network(c, "http://127.0.0.1:1/"); e.Network != NetworkConnect || e.Detail == "" {
+		t.Fatalf("refused: %q %q", e.Network, e.Detail)
+	}
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	defer slow.Close()
+	defer close(release)
+	c, _ = newTestClient(t, Config{Timeout: 50 * time.Millisecond})
+	if e := network(c, slow.URL); e.Network != NetworkTimeout {
+		t.Fatalf("timeout: %q", e.Network)
+	}
+	plain := newTarget(t, false)
+	for _, kind := range []fakeproxy.Kind{fakeproxy.HTTP, fakeproxy.SOCKS5} {
+		p := startProxy(t, kind, fakeproxy.Options{Username: "muster", Password: "right"})
+		c, _ = newTestClient(t, Config{Proxy: &Proxy{Type: ProxyType(kind), Address: p.Addr(), Username: "muster",
+			Password: "wrong"}})
+		// An http target through an HTTP proxy gets the proxy's 407 as an answer; an https one fails the CONNECT.
+		target := tg.URL
+		if kind == fakeproxy.SOCKS5 {
+			target = plain.URL
+		}
+		if e := network(c, target); e.Network != NetworkProxyAuth || strings.Contains(e.Detail, "wrong") {
+			t.Fatalf("%s proxy: %q %q", kind, e.Network, e.Detail)
+		}
 	}
 }

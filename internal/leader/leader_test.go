@@ -322,7 +322,7 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	}
 	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning",
 		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges",
-		"alert_group_retention", "delivery_queue", "thread_reply_retention"}
+		"alert_group_retention", "delivery_queue", "thread_reply_retention", "telegram_polling"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
@@ -489,6 +489,48 @@ func TestDeliveryTasks(t *testing.T) {
 	tasks = Tasks(Work{})()
 	if tasks[10].Run(t.Context()) != nil || tasks[11].Run(t.Context()) != nil {
 		t.Error("unwired delivery tasks did something")
+	}
+}
+
+// TestTelegramPollingTask covers C-14.FR-1 and C-02.FR-10: the Leader polls the Telegram Connections of every
+// Organization at once until its context ends, with the Organization passed to each, and returns their errors.
+func TestTelegramPollingTask(t *testing.T) {
+	failed := errors.New("list failed")
+	var mu sync.Mutex
+	var polled []int64
+	work := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		TelegramPolling: func(ctx context.Context, org int64) error {
+			mu.Lock()
+			polled = append(polled, org)
+			mu.Unlock()
+			if org == 2 {
+				return failed
+			}
+			<-ctx.Done()
+			return nil
+		},
+	}
+	task := Tasks(work)()[12]
+	if task.Name != "telegram_polling" || task.Every != TelegramPollingInterval {
+		t.Fatalf("task %s every %v", task.Name, task.Every)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if err := task.Run(ctx); !errors.Is(err, failed) {
+		t.Fatalf("run = %v", err)
+	}
+	slices.Sort(polled)
+	if !slices.Equal(polled, []int64{1, 2}) {
+		t.Fatalf("polled %v", polled)
+	}
+	orgsErr := errors.New("down")
+	work.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
+	if err := Tasks(work)()[12].Run(t.Context()); !errors.Is(err, orgsErr) {
+		t.Fatalf("organizations = %v", err)
+	}
+	if err := Tasks(Work{})()[12].Run(t.Context()); err != nil {
+		t.Fatalf("unwired = %v", err)
 	}
 }
 

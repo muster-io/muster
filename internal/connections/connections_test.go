@@ -204,7 +204,9 @@ func (s *memStore) InsertConnection(_ context.Context, a dbgen.InsertConnectionP
 	}
 	s.next++
 	s.rows[s.next] = &memRow{row: dbgen.GetConnectionRow{ID: s.next, PublicID: a.PublicID,
-		Type: connections.TypeMattermost, Name: a.Name, MattermostServerUrl: a.ServerUrl,
+		Type: a.Type, Name: a.Name, MattermostServerUrl: a.ServerUrl, TelegramBotApiBaseUrl: a.BotApiBaseUrl,
+		TelegramUpdateMode: a.UpdateMode, TelegramWebhookSecretCiphertext: a.WebhookSecretCiphertext,
+		TelegramWebhookSecretKeyID: a.WebhookSecretKeyID, TelegramWebhookSecretUpdatedAt: a.WebhookSecretUpdatedAt,
 		BotTokenCiphertext: a.BotTokenCiphertext, BotTokenKeyID: a.BotTokenKeyID, BotTokenUpdatedAt: a.BotTokenUpdatedAt,
 		Proxy: a.Proxy, ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
 		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, LimiterLimit: a.LimiterLimit,
@@ -222,6 +224,9 @@ func (s *memStore) UpdateConnection(_ context.Context, a dbgen.UpdateConnectionP
 	s.updates = append(s.updates, a)
 	r := &s.rows[a.ID].row
 	r.Name, r.MattermostServerUrl, r.Proxy = a.Name, a.ServerUrl, a.Proxy
+	r.TelegramBotApiBaseUrl, r.TelegramUpdateMode = a.BotApiBaseUrl, a.UpdateMode
+	r.TelegramWebhookSecretCiphertext, r.TelegramWebhookSecretKeyID, r.TelegramWebhookSecretUpdatedAt =
+		a.WebhookSecretCiphertext, a.WebhookSecretKeyID, a.WebhookSecretUpdatedAt
 	r.BotTokenCiphertext, r.BotTokenKeyID, r.BotTokenUpdatedAt = a.BotTokenCiphertext, a.BotTokenKeyID,
 		a.BotTokenUpdatedAt
 	r.ProxyPasswordCiphertext, r.ProxyPasswordKeyID, r.ProxyPasswordUpdatedAt = a.ProxyPasswordCiphertext,
@@ -229,6 +234,9 @@ func (s *memStore) UpdateConnection(_ context.Context, a dbgen.UpdateConnectionP
 	r.LimiterLimit, r.LimiterPerSeconds = a.LimiterLimit, a.LimiterPerSeconds
 	if a.ForgetBot {
 		r.BotUserID, r.BotUsername = pgtype.Text{}, pgtype.Text{}
+	}
+	if a.ForgetUpdates {
+		r.TelegramUpdateOffset = pgtype.Int8{}
 	}
 	r.Version++
 	return nil
@@ -260,7 +268,52 @@ func (s *memStore) MarkConnectionDeleted(_ context.Context, a dbgen.MarkConnecti
 	r.deleted = true
 	r.row.BotTokenCiphertext, r.row.BotTokenKeyID = nil, pgtype.Text{}
 	r.row.ProxyPasswordCiphertext, r.row.ProxyPasswordKeyID = nil, pgtype.Text{}
+	r.row.TelegramWebhookSecretCiphertext, r.row.TelegramWebhookSecretKeyID = nil, pgtype.Text{}
 	r.row.Version++
+	return nil
+}
+
+func (s *memStore) ListPollingConnections(_ context.Context, org int64) ([]dbgen.ListPollingConnectionsRow, error) {
+	if err := s.fail["ListPollingConnections"]; err != nil || org != 1 {
+		return nil, err
+	}
+	var out []dbgen.ListPollingConnectionsRow
+	for _, id := range slices.Sorted(maps.Keys(s.rows)) {
+		r := s.rows[id]
+		if r.deleted || r.row.Type != connections.TypeTelegram ||
+			r.row.TelegramUpdateMode.String != connections.ModeLongPolling {
+			continue
+		}
+		c := r.row
+		out = append(out, dbgen.ListPollingConnectionsRow{ID: c.ID, PublicID: c.PublicID,
+			TelegramBotApiBaseUrl: c.TelegramBotApiBaseUrl, TelegramUpdateOffset: c.TelegramUpdateOffset,
+			BotTokenCiphertext: c.BotTokenCiphertext, BotTokenKeyID: c.BotTokenKeyID,
+			BotTokenUpdatedAt: c.BotTokenUpdatedAt, Proxy: c.Proxy, ProxyPasswordCiphertext: c.ProxyPasswordCiphertext,
+			ProxyPasswordKeyID: c.ProxyPasswordKeyID, ProxyPasswordUpdatedAt: c.ProxyPasswordUpdatedAt,
+			Version: c.Version})
+	}
+	return out, nil
+}
+
+func (s *memStore) LockUpdateOffset(_ context.Context, a dbgen.LockUpdateOffsetParams) (pgtype.Int8, error) {
+	if err := s.fail["LockUpdateOffset"]; err != nil {
+		return pgtype.Int8{}, err
+	}
+	r := s.rows[a.ID]
+	if r == nil || r.deleted || r.row.Type != connections.TypeTelegram || a.OrgID != 1 {
+		return pgtype.Int8{}, pgx.ErrNoRows
+	}
+	return r.row.TelegramUpdateOffset, nil
+}
+
+func (s *memStore) StoreUpdateOffset(_ context.Context, a dbgen.StoreUpdateOffsetParams) error {
+	if err := s.fail["StoreUpdateOffset"]; err != nil {
+		return err
+	}
+	r := &s.rows[a.ID].row
+	if !r.TelegramUpdateOffset.Valid || r.TelegramUpdateOffset.Int64 < a.Next {
+		r.TelegramUpdateOffset = pgtype.Int8{Int64: a.Next, Valid: true}
+	}
 	return nil
 }
 
@@ -305,12 +358,14 @@ func (s *memStore) Notify(_ context.Context, h db.Hint) error {
 // telegramID is the Telegram Connection that addTelegram stores.
 const telegramID = "CNAAAAAAAAAAT1"
 
-// addTelegram stores a Telegram Connection directly, as C-14 will create them.
+// addTelegram stores a Telegram Connection directly, without a bot token, to a Bot API base URL where nothing listens.
 func (s *memStore) addTelegram() {
 	publicID := telegramID
 	s.next++
 	s.rows[s.next] = &memRow{row: dbgen.GetConnectionRow{ID: s.next, PublicID: publicID, Type: connections.TypeTelegram,
-		Name: "tg-" + publicID, Proxy: []byte(`{"enabled":false}`), LimiterLimit: 30, LimiterPerSeconds: 1,
+		Name: "tg-" + publicID, TelegramBotApiBaseUrl: pgtype.Text{String: "http://127.0.0.1:1", Valid: true},
+		TelegramUpdateMode: pgtype.Text{String: connections.ModeWebhook, Valid: true},
+		Proxy:              []byte(`{"enabled":false}`), LimiterLimit: 30, LimiterPerSeconds: 1,
 		CreatedAt: t0, BotTokenUpdatedAt: t0, Version: 1}}
 }
 
@@ -539,8 +594,7 @@ func TestCreate(t *testing.T) {
 	}
 }
 
-// TestCreateValidation: every field of a Connection is validated at its JSON pointer, and a Telegram Connection is
-// unsupported until C-14.
+// TestCreateValidation: every field of a Connection is validated at its JSON pointer.
 func TestCreateValidation(t *testing.T) {
 	e := newEnv(t)
 	base := input("mm", "http://127.0.0.1:1")
@@ -550,8 +604,6 @@ func TestCreateValidation(t *testing.T) {
 		pointer string
 		code    string
 	}{
-		{"telegram", func(in *connections.Input) { in.Type = connections.TypeTelegram }, "/type",
-			connections.CodeUnsupported},
 		{"unknown type", func(in *connections.Input) { in.Type = "slack" }, "/type", connections.CodeInvalidFormat},
 		{"empty name", func(in *connections.Input) { in.Name = "  " }, "/name", connections.CodeRequired},
 		{"long name", func(in *connections.Input) { in.Name = strings.Repeat("я", 201) }, "/name",
@@ -670,7 +722,7 @@ func TestUpdate(t *testing.T) {
 	c := e.create(t, "mm")
 	other := e.create(t, "other")
 	ctx := t.Context()
-	if _, err := e.svc.Check(ctx, c.PublicID); err != nil {
+	if _, err := e.svc.Check(ctx, c.PublicID, nil); err != nil {
 		t.Fatal(err)
 	}
 	stored := e.store.rows[c.ID].row
@@ -852,7 +904,7 @@ func TestCheck(t *testing.T) {
 	e := newEnv(t)
 	c := e.create(t, "mm")
 	ctx := t.Context()
-	res, err := e.svc.Check(ctx, c.PublicID)
+	res, err := e.svc.Check(ctx, c.PublicID, nil)
 	if err != nil || !res.OK || res.BotName != fakemattermost.BotUsername || len(res.Steps) != 1 ||
 		res.Steps[0].Name != connections.StepToken || !res.Steps[0].OK || res.Steps[0].Via != mattermost.ViaDirect ||
 		res.Steps[0].Latency != 7*time.Millisecond || res.Steps[0].Message != "" ||
@@ -874,19 +926,19 @@ func TestCheck(t *testing.T) {
 		t.Errorf("requests %+v", reqs)
 	}
 	e.configure(t, `{"bot_system_admin":true}`)
-	if res, err := e.svc.Check(ctx, c.PublicID); err != nil || !res.OK || len(res.Warnings) != 0 {
+	if res, err := e.svc.Check(ctx, c.PublicID, nil); err != nil || !res.OK || len(res.Warnings) != 0 {
 		t.Errorf("an admin bot = %+v, %v", res, err)
 	}
 	e.configure(t, `{"bot_system_admin":false}`)
 	if err := e.fake.SetFault(fakeserver.Fault{Path: "/api/v4/roles/names", Status: 503, Times: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if res, err := e.svc.Check(ctx, c.PublicID); err != nil || !res.OK || len(res.Warnings) != 0 {
+	if res, err := e.svc.Check(ctx, c.PublicID, nil); err != nil || !res.OK || len(res.Warnings) != 0 {
 		t.Errorf("roles unreadable = %+v, %v", res, err)
 	}
 	e.configure(t, `{"revoked_tokens":["`+botToken+`"]}`)
 	nBots := len(e.store.bots)
-	res, err = e.svc.Check(ctx, c.PublicID)
+	res, err = e.svc.Check(ctx, c.PublicID, nil)
 	if err != nil || res.OK || res.BotName != "" || res.Steps[0].OK ||
 		res.Steps[0].Message != mattermost.MessageTokenInvalid || len(e.store.bots) != nBots {
 		t.Errorf("revoked = %+v, %v", res, err)
@@ -895,29 +947,30 @@ func TestCheck(t *testing.T) {
 	if err := e.fake.SetFault(fakeserver.Fault{Path: "/api/v4/users/me", Status: 503, Times: 1}); err != nil {
 		t.Fatal(err)
 	}
-	res, err = e.svc.Check(ctx, c.PublicID)
+	res, err = e.svc.Check(ctx, c.PublicID, nil)
 	if err != nil || res.OK || !strings.Contains(res.Steps[0].Message, "answered 503") {
 		t.Errorf("unavailable = %+v, %v", res, err)
 	}
 	e.path.limited = true
-	if _, err := e.svc.Check(ctx, c.PublicID); !isLimited(err) {
+	if _, err := e.svc.Check(ctx, c.PublicID, nil); !isLimited(err) {
 		t.Errorf("limited = %v", err)
 	}
 	e.path.limited = false
 	e.store.fail["SetBotIdentity"] = errors.New("down")
-	if _, err := e.svc.Check(ctx, c.PublicID); err == nil {
+	if _, err := e.svc.Check(ctx, c.PublicID, nil); err == nil {
 		t.Error("a failed record of the bot")
 	}
 	delete(e.store.fail, "SetBotIdentity")
-	e.store.addTelegram()
-	if _, err := e.svc.Check(ctx, telegramID); !errors.Is(err, connections.ErrNotMattermost) {
-		t.Errorf("telegram = %v", err)
+	base := "http://127.0.0.1:1"
+	if fe := fieldError(func() error { _, err := e.svc.Check(ctx, c.PublicID, &base); return err }()); fe == nil ||
+		fe.Pointer != "/base_url" || fe.Code != connections.CodeUnsupported {
+		t.Errorf("a base URL for a Mattermost Connection = %v", fe)
 	}
-	if _, err := e.svc.Check(ctx, "CN000000000000"); !errors.Is(err, connections.ErrNotFound) {
+	if _, err := e.svc.Check(ctx, "CN000000000000", nil); !errors.Is(err, connections.ErrNotFound) {
 		t.Errorf("unknown = %v", err)
 	}
 	e.store.rows[c.ID].row.BotTokenCiphertext = []byte("garbage")
-	if _, err := e.svc.Check(ctx, c.PublicID); err == nil || strings.Contains(err.Error(), botToken) {
+	if _, err := e.svc.Check(ctx, c.PublicID, nil); err == nil || strings.Contains(err.Error(), botToken) {
 		t.Errorf("an unreadable token = %v", err)
 	}
 }
@@ -944,7 +997,7 @@ func TestCheckThroughProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := e.svc.Check(t.Context(), c.PublicID)
+	res, err := e.svc.Check(t.Context(), c.PublicID, nil)
 	if err != nil || !res.OK || res.Steps[0].Via != mattermost.ViaProxy {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
@@ -1135,7 +1188,7 @@ func TestEnsureDemo(t *testing.T) {
 		!bytes.Contains(a.Details, []byte(`"development_demo":true`)) || !secretChanged(diffOf(t, a), "/bot_token") {
 		t.Errorf("demo %+v, audit %s %s", c, a.Details, a.Diff)
 	}
-	if res, err := e.svc.Check(t.Context(), c.PublicID); err != nil || res.BotName != fakemattermost.BotUsername {
+	if res, err := e.svc.Check(t.Context(), c.PublicID, nil); err != nil || res.BotName != fakemattermost.BotUsername {
 		t.Errorf("check of the demo = %+v, %v", res, err)
 	}
 	other := newEnv(t)
@@ -1188,7 +1241,7 @@ func TestNotifyFailure(t *testing.T) {
 	e := newEnv(t)
 	c := e.create(t, "mm")
 	e.store.fail["Notify"] = errors.New("down")
-	if _, err := e.svc.Check(t.Context(), c.PublicID); err == nil {
+	if _, err := e.svc.Check(t.Context(), c.PublicID, nil); err == nil {
 		t.Error("a failed hint")
 	}
 	if _, err := e.svc.Create(t.Context(), by, input("mm2", e.fake.URL())); err == nil {

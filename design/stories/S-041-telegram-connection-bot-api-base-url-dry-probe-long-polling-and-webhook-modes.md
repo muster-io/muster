@@ -7,9 +7,17 @@ layer: L1
 depends_on: [S-061]
 covers: [C-14.FR-1, C-14.FR-8, C-14.FR-10, C-14.FR-11, C-14.FR-12, C-14.AC-3, C-14.AC-5, C-14.AC-6, C-14.AC-7, C-14.AC-10, C-14.AC-11, C-02.FR-14, C-01.FR-13, C-02.FR-10]
 files_touched:
+  - api/openapi.yaml
   - internal/connections/connections.go
+  - internal/connections/telegram.go
+  - internal/connections/doctor.go
   - internal/connections/query.sql
   - internal/connections/connections_test.go
+  - internal/connections/telegram_test.go
+  - internal/connections/doctor_test.go
+  - internal/connections/live_test.go
+  - internal/outbound/client.go
+  - internal/outbound/proxy_test.go
   - internal/telegram/client.go
   - internal/telegram/baseurl.go
   - internal/telegram/check.go
@@ -20,11 +28,13 @@ files_touched:
   - internal/telegram/baseurl_test.go
   - internal/telegram/check_test.go
   - internal/telegram/poller_test.go
+  - internal/telegram/webhook_test.go
   - internal/api/connections.go
-  - internal/api/callbacks.go
   - internal/api/connections_test.go
   - internal/leader/tasks.go
+  - internal/leader/leader_test.go
   - internal/doctor/doctor.go
+  - internal/doctor/doctor_test.go
   - internal/fakes/faketelegram/faketelegram.go
   - internal/fakes/faketelegram/updates.go
   - internal/fakes/faketelegram/faketelegram_test.go
@@ -33,10 +43,11 @@ files_touched:
   - internal/logging/events.go
   - internal/archlint/secretleak.go
   - test/e2e/telegram_connection_test.go
+  - test/e2e/smoke_test.go
 acceptance:
   - "[C-14.FR-1] A Telegram Connection is created with a name, a write-only bot token, the Bot API base URL (`connection.telegram.bot_api_base_url`), a proxy, its limiter (`connection.telegram.limiter`) and the update mode (`connection.telegram.update_mode`); deleting one that Destinations use answers 409 `in_use`."
   - "[C-14.FR-10] The base URL must be an absolute `http` or `https` URL without query, fragment or user information; a path prefix is kept and a trailing `/` normalized, so requests go to `<base>/bot<token>/<method>`; an `http` base URL is saved with the warning `base_url_uses_http`."
-  - "[C-14.FR-11, C-14.AC-5] The check runs three steps with latency and path: the dry probe `GET <base>/bot0:x/getMe` without the token passes on a `401` JSON answer and against a server answering HTML fails with \"This is not a Bot API.\"; `getMe` returns the bot's username; `getWebhookInfo` reports whether a webhook is set and the pending updates; neither dry probe carries the real token."
+  - "[C-14.FR-11, C-14.AC-5] The check runs three steps with latency and path: the dry probe `GET <base>/bot0:x/getMe` without the token passes on a `401` JSON answer and against a server answering HTML fails with \"This is not a Bot API.\"; `getMe` returns the bot's username; `getWebhookInfo` reports whether a webhook is set and the pending updates; neither dry probe carries the real token, and a failed dry probe skips the steps that would."
   - "[C-14.FR-11, C-14.AC-6] With an unsaved `base_url` in the check request only the dry probe runs, against that address, the other steps are `skipped`, and no request with the real token reaches it."
   - "[C-14.AC-10] With a base URL with the path prefix `/k3x9/`, every request reaches the fake server at `/k3x9/bot<token>/<method>`; with a SOCKS5 proxy on the Connection, only through the fake proxy."
   - "[C-14.FR-1, C-14.AC-3] In long-polling mode only the Leader polls `getUpdates` with an explicit `allowed_updates` and resumes at the stored offset after a Leader change; a `409 Conflict` from a second poller makes it back off with `telegram_poll_conflict` and nothing becomes Broken or counted against the Connection."
@@ -84,7 +95,12 @@ issue: 41
   proxy and the outbound address policy; the token is registered for redaction (C-14.FR-12, ADR-0015), so every error
   and log line carries `bot[redacted]`, and the client logs the base URL as scheme and host only. A `200` with
   `ok: false` is classified by `error_code` and `description` like a status; `retry_after` in `parameters` is the exact
-  delay; a non-JSON answer is `transient`. S-042 adds the delivery methods and their mapping.
+  delay; a non-JSON answer is `transient`; `409` is `unknown` and never retried, so that the poller sees it; a `429` to
+  the dry probe is `transient`, never a RetryAfter that would hold the Connection's limiter; an update whose known
+  parts are not the expected JSON is kept by its `update_id` and routed as `other`, so that it never stalls the
+  Connection. S-042 adds
+  the delivery methods and their mapping. To name what failed when no answer came (DNS, TLS, timeout, a proxy that
+  refused the credentials), `outbound.Error` carries `Network` and its redacted `Detail`.
 - **Connection check** (C-14.FR-11; `check.go`, interactive path and class, the Connection's limiter): steps with
   `latency_ms` and `via` (`direct` or `proxy`):
   1. `dry_probe` — `GET <base>/bot0:x/getMe` without the token; passes on a `401` answer with a JSON body; otherwise
@@ -94,7 +110,10 @@ issue: 41
   2. `get_me` — with the token; `bot_name` is the bot's username, stored with `bot_user_id`;
   3. `get_webhook_info` — `webhook_set` (and its URL's host in the message) and `pending_updates`.
   Steps 2 and 3 run only against the saved base URL; with `base_url` in the request, step 1 runs against that address
-  and steps 2 and 3 are `skipped`. No check, metric or background task sends the token to another address.
+  and steps 2 and 3 are `skipped`. A dry probe that fails skips steps 2 and 3 too, so that the token never goes to a
+  server that is not a Bot API, and a `getMe` that fails skips step 3. No check, metric or background task sends the
+  token to another address. A new base URL on an update needs the bot token again, as a new server URL does for
+  Mattermost (S-039), so that the stored token never reaches another server.
 - **Update mode** (C-14.FR-1; `poller.go`, `webhook.go`):
   - `long_polling`: a Leader task per Telegram Connection that is not deleted (C-02.FR-10, `internal/leader/tasks.go`)
     calls `getUpdates` with `offset` from `connections.telegram_update_offset`, a long-poll `timeout` and
@@ -105,15 +124,30 @@ issue: 41
     Organizations (one in L1) and passes `org_id` to every query (lint 1).
   - `webhook`: saving the mode generates a random secret token (stored like a Secret in
     `telegram_webhook_secret_*`) and calls `setWebhook` with `url` = `MUSTER_INGEST_URL/api/v1/callbacks/telegram/
-    <connection public_id>`, `secret_token` and the same `allowed_updates`; switching back to `long_polling` calls
-    `deleteWebhook`. Failures of these calls answer `422` with the step's message.
-- **Webhook endpoint** (C-14.AC-11; `telegramWebhook`): `401` unless the Connection exists, is in `webhook` mode and the
-  header `X-Telegram-Bot-Api-Secret-Token` equals its secret (constant-time comparison); otherwise `200` after the
-  update was handed to the router.
+    <connection public_id>`, `secret_token`, the same `allowed_updates` and `max_connections` 1, so that updates
+    arrive in order; switching back to `long_polling` calls `deleteWebhook` with the bot and base URL saved before the
+    switch. A new base URL or bot token in the webhook mode sets the webhook again with a new secret token. A new bot
+    token forgets `telegram_update_offset`, whose ids belong to the old bot. `telegram_webhook_set` is logged once the
+    save committed. The calls run in the interactive client class inside the
+    save's transaction, before it commits; their failures answer `422` `webhook_call_failed` at `/update_mode` with the
+    step's message, and nothing is saved. If the commit fails after `setWebhook` succeeded, the poller logs
+    `telegram_poll_conflict` until the next save; Muster never calls `deleteWebhook` on its own, which would break
+    another installation's webhook.
+- **Webhook endpoint** (C-14.AC-11; `telegramWebhook`, in `webhook.go`, mounted on the ingest listener's callback mux
+  beside the Mattermost callback and, like it, outside the generated server): `401` unless the Connection exists, is in
+  `webhook` mode and the header `X-Telegram-Bot-Api-Secret-Token` equals its secret (constant-time comparison);
+  otherwise `200` after the update was handed to the router; a router that failed answers `500` and logs
+  `telegram_update_failed`, and Telegram sends the update again.
 - **Update router** (`updates.go`): one entry for both modes; ignores an `update_id` it has already handled for the
-  Connection; hands `callback_query` and the `message` and `edited_message` updates of channels and groups to the
+  Connection: it holds the Connection's `telegram_update_offset` row locked while the update is handled and raises the
+  offset after it in the same transaction, so that a second poller of a frozen old Leader, or a webhook request with
+  the same update, waits and then skips it; a handler's error stores nothing, so the update comes again. A handler
+  therefore runs under the row lock: it must be short, must not lock that row itself and must not wait for a save of
+  the Connection (S-042, S-051). A poll that brings no update waits 1 s before the next. It hands
+  `callback_query` and the `message` and `edited_message` updates of channels and groups (and `channel_post`) to the
   handler that S-042 registers, and private messages (`/start <token>`, C-14.FR-8) to the handler that S-051 registers;
-  without a handler it logs `telegram_update_dropped` (INFO: `connection`, `kind`).
+  without a handler it logs `telegram_update_dropped` (INFO: `connection`, `kind`: `callback_query`, `chat_message`,
+  `private_message`, `my_chat_member` or `other`).
 - **`muster doctor`** (C-02.FR-14): one line per Telegram Connection — `connection <name>: ok` or the failing step with
   its message.
 - **Fake Telegram** (C-01.FR-13; `127.0.0.1:18081`), extending S-004:
@@ -126,17 +160,20 @@ issue: 41
     same token ends the first with `409 Conflict: terminated by other getUpdates request` (F-018); with a webhook
     set, `getUpdates` answers `409`;
   - `setWebhook`, `deleteWebhook`, `getWebhookInfo` (`url`, `pending_update_count`); with a webhook set, each update is
-    posted to its URL with the header `X-Telegram-Bot-Api-Secret-Token`;
+    posted to its URL with the header `X-Telegram-Bot-Api-Secret-Token`; `setWebhook` ends a running long poll with
+    `409 Conflict: terminated by setWebhook request`, and `GET /_fake/webhooks` lists the webhooks set;
   - `POST /_fake/updates` `{token, update}` enqueues a raw update for a bot, delivered through `getUpdates` or the
-    webhook; `POST /_fake/conflict` `{token}` ends that bot's running long poll with `409`;
+    webhook; `POST /_fake/conflict` `{token}` ends that bot's running long poll with `409`, or the next one when none
+    runs;
   - the harness's `requests`, with each request's path and `at_ms`, and `faults`.
 - **Development mode**: `muster dev` adds a demo Telegram Connection "Dev Telegram" to the fake server with the token
   `123456:dev-telegram-token`, in long-polling mode, without Destinations.
 - **Secrets** (lint 5): the bot token and the webhook secret token are pushed through the client, the check and the
   poller by a probe, including the error of a refused connection.
 - **Log events**: `telegram_poll_conflict` (INFO: `connection`, `backoff_ms`), `telegram_poll_failed` (WARN:
-  `connection`, `error`), `telegram_update_dropped` (INFO: `connection`, `kind`), `telegram_webhook_set` (INFO:
-  `connection`, `host`).
+  `connection`, `error`), `telegram_update_dropped` (INFO: `connection`, `kind`), `telegram_update_failed` (WARN:
+  `connection`, `error`; the webhook endpoint answered `500`), `telegram_webhook_set` (INFO: `connection`, `host`).
+- **Problem code**: `webhook_call_failed` (`422` at `/update_mode`), added to `x-problem-codes`.
 - **Defaults**: `connection.telegram.bot_api_base_url`, `connection.telegram.update_mode`,
   `connection.telegram.limiter` (P-28, measured in the test environment).
 
@@ -222,7 +259,7 @@ curl -s "${H[@]}" -X POST $API/connections/$N/checks | grep -c "down-token"   # 
 sleep 5; grep -c "down-token" dev.log                                        # 0   (the poller's failures included)
 
 # C-02.FR-14
-./bin/muster dev doctor | grep '^connection tg'                              # connection tg: ok
+./bin/muster dev doctor | grep 'connection tg:'                              # OK   connection tg: ok
 ```
 
 **Optional manual check against a real server** (the operator's test bot): create a Connection with the real token and
@@ -240,6 +277,10 @@ None.
 - Suggested commit: `feat(telegram): add telegram connections with the dry probe, long polling and webhooks`.
 - The fake's HTML mode stands for any web server that is not a Bot API, such as a reverse proxy pointed at the wrong
   upstream.
+- The Verification block is written for zsh: in bash, `"${2:-{\}}"` keeps the backslash and the check body is not JSON.
+- Telegram's cloud Bot API accepts only `https` webhook URLs on the ports 443, 80, 88 and 8443; a `MUSTER_INGEST_URL`
+  it cannot reach makes `setWebhook` fail with Telegram's description, answered as `webhook_call_failed`. A self-hosted
+  Bot API server in local mode accepts `http`.
 
 ## Coverage
 

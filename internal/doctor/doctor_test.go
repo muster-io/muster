@@ -23,6 +23,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
+	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/keyring"
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
@@ -430,8 +431,8 @@ func TestReadOnly(t *testing.T) {
 }
 
 // messengerDB is a fake database with the Mattermost Connection "Dev Mattermost" of the fake server, its bot token
-// sealed with key, and its Destinations "alerts" and "no-bot", under an outbound policy that allows the loopback
-// network.
+// sealed with key, and its Destinations "alerts" and "no-bot", and the Telegram Connection "Dev Telegram" of the fake
+// Bot API, under an outbound policy that allows the loopback network.
 func messengerDB(t *testing.T, key string) *fakeDB {
 	t.Helper()
 	f := fakemattermost.New()
@@ -439,6 +440,11 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = f.Close(context.WithoutCancel(t.Context())) })
+	tg := faketelegram.New()
+	if err := tg.Start(t.Context(), "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tg.Close(context.WithoutCancel(t.Context())) })
 	k, err := keyring.Load(t.Context(), keyring.Env{Keys: logging.Secret(key), Source: keyring.SecretKeysVar}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -457,10 +463,19 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 	}
 	d := newFakeDB(true)
 	d.answers["FROM keyring_state"] = &rows{values: [][]any{s.row}}
+	tgCiphertext, tgKeyID, err := k.Encrypt("connections.bot_token", []byte(doctorTelegramToken))
+	if err != nil {
+		t.Fatal(err)
+	}
 	text := func(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
 	d.answers["ListConnections"] = &rows{values: [][]any{{int64(1), "CNAAAAAAAAAAA1", "mattermost", "Dev Mattermost",
-		text(f.URL()), ciphertext, text(keyID), time.Now(), pgtype.Text{}, pgtype.Text{}, []byte(`{"enabled":false}`),
-		[]byte(nil), pgtype.Text{}, pgtype.Timestamptz{}, int64(5), int64(1), time.Now(), int64(1), int64(2)}}}
+		text(f.URL()), pgtype.Text{}, pgtype.Text{}, pgtype.Int8{}, []byte(nil), pgtype.Text{}, pgtype.Timestamptz{},
+		ciphertext, text(keyID), time.Now(), pgtype.Text{}, pgtype.Text{}, []byte(`{"enabled":false}`),
+		[]byte(nil), pgtype.Text{}, pgtype.Timestamptz{}, int64(5), int64(1), time.Now(), int64(1), int64(2)},
+		{int64(2), "CNAAAAAAAAAAT1", "telegram", "Dev Telegram", pgtype.Text{}, text(tg.URL()), text("long_polling"),
+			pgtype.Int8{}, []byte(nil), pgtype.Text{}, pgtype.Timestamptz{}, tgCiphertext, text(tgKeyID), time.Now(),
+			pgtype.Text{}, pgtype.Text{}, []byte(`{"enabled":false}`), []byte(nil), pgtype.Text{},
+			pgtype.Timestamptz{}, int64(15), int64(1), time.Now(), int64(1), int64(0)}}}
 	d.answers["ListMattermostDestinations"] = &rows{values: [][]any{
 		{int64(7), "DSAAAAAAAAAAA1", "alerts", pgtype.Int8{Int64: 1, Valid: true}, text(fakemattermost.TeamID),
 			text(fakemattermost.ChannelAlerts)},
@@ -471,11 +486,15 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 	return d
 }
 
-const doctorToken = "doctor-bot-token-0123456789"
+const (
+	doctorToken         = "doctor-bot-token-0123456789"
+	doctorTelegramToken = "777001:doctor-telegram-token"
+)
 
-// TestMessengerChecks is C-02.FR-14: one line per Mattermost Connection and per Mattermost Destination, ok, the
-// message of the step that failed or, as a WARN that fails nothing, the hint that the bot may not make ephemeral posts
-// (D284), made in the background class; a failure fails the doctor, and the bot token is never printed.
+// TestMessengerChecks is C-02.FR-14: one line per Connection and per Mattermost Destination, ok, the message of the
+// step that failed — for a Telegram Connection with the step's name — or, as a WARN that fails nothing, the hint that
+// the bot may not make ephemeral posts (D284), made in the background class; a failure fails the doctor, and the bot
+// tokens are never printed.
 func TestMessengerChecks(t *testing.T) {
 	key, _ := keys('a')
 	d := messengerDB(t, key)
@@ -483,9 +502,11 @@ func TestMessengerChecks(t *testing.T) {
 	before := background.Get()
 	out, ok := run(t, d, environ(key))
 	want := "WARN connection Dev Mattermost: " + mattermost.HintPressAnswersInThread + "\n" +
+		"OK   connection Dev Telegram: ok\n" +
 		"OK   destination alerts: ok\n" +
 		"FAIL destination no-bot: " + mattermost.MessageNotMember + "\n"
-	if ok || !strings.HasSuffix(out, want) || strings.Count(out, "\n") != 11 || strings.Contains(out, doctorToken) {
+	if ok || !strings.HasSuffix(out, want) || strings.Count(out, "\n") != 12 || strings.Contains(out, doctorToken) ||
+		strings.Contains(out, doctorTelegramToken) {
 		t.Errorf("ok %v, output:\n%s\nwant the end:\n%s", ok, out, want)
 	}
 	if n := background.Get() - before; n < 5 {
@@ -500,7 +521,8 @@ func TestMessengerChecks(t *testing.T) {
 
 	out, ok = run(t, d, environ(""))
 	if ok || !strings.Contains(out, "FAIL connection Dev Mattermost: the bot token cannot be opened: the master keys "+
-		"could not be loaded\n") || !strings.Contains(out, "FAIL destination alerts: its Connection failed its check") {
+		"could not be loaded\n") || !strings.Contains(out, "FAIL destination alerts: its Connection failed its check") ||
+		!strings.Contains(out, "FAIL connection Dev Telegram: the bot token cannot be opened") {
 		t.Errorf("without the master keys, ok %v, output:\n%s", ok, out)
 	}
 }

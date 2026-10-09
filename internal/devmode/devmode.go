@@ -193,6 +193,22 @@ func ConnectionDemo() connections.Demo {
 		BotToken: logging.Secret(ConnectionBotToken)}
 }
 
+// The demo Telegram Connection that `muster dev` ensures at start: "Dev Telegram" on the fake Bot API, in the
+// long-polling mode, with a published bot token that the fake accepts like any other.
+//
+//nolint:gosec // G101: a published development token, never used outside development mode
+const (
+	TelegramConnectionName     = "Dev Telegram"
+	TelegramConnectionBotToken = "123456:dev-telegram-token"
+)
+
+// TelegramDemo is the demo Connection "Dev Telegram", to the fake Telegram server in the long-polling mode, without
+// Destinations.
+func TelegramDemo() connections.Demo {
+	return connections.Demo{Type: connections.TypeTelegram, Name: TelegramConnectionName,
+		BaseURL: "http://" + TelegramAddr, BotToken: logging.Secret(TelegramConnectionBotToken)}
+}
+
 // AllowedInternalConnections is what `muster dev` sets as the fake Mattermost's AllowedUntrustedInternalConnections,
 // so that it calls the button presses back at MUSTER_INGEST_URL on loopback (F-022).
 const AllowedInternalConnections = "localhost 127.0.0.1"
