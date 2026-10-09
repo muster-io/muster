@@ -13,10 +13,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
@@ -126,6 +129,12 @@ func (w *Worker) record(ctx context.Context, q queries, org int64, a attempt, c 
 	if err != nil || !recorded {
 		return recorded, err
 	}
+	if sendsRequests(a.destination.Type) {
+		if err := w.settleRequest(ctx, q, org, a.destination, a.group(), a.row.AlertGroupPublicID, out,
+			w.Lease.Clocks.Business.Now().UTC(), logs); err != nil {
+			return true, err
+		}
+	}
 	if rejected != nil {
 		if err := RecordEvent(ctx, q, org, Event{At: w.Lease.Clocks.Business.Now().UTC(),
 			DestinationID: a.destination.ID, AlertGroupID: a.group(), StormID: a.storm(), Kind: EventMarkupRejected,
@@ -230,7 +239,8 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 	}
 	_, err := q.RecordDelivered(ctx, dbgen.RecordDeliveredParams{OrgID: org, ID: a.row.ID, Owner: w.Lease.Owner,
 		Version: a.row.DesiredVersion, Hash: a.row.DesiredHash, MessageID: nonEmpty(out.MessageID),
-		MessageUrl: nonEmpty(out.MessageURL), Published: a.publication, Now: now})
+		MessageUrl: nonEmpty(out.MessageURL), Published: a.publication, ResponseValues: valuesJSON(out.Values),
+		Now: now})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -297,13 +307,23 @@ func (w *Worker) transient(ctx context.Context, q queries, org int64, d Destinat
 	return nil
 }
 
+// endClass is the last_error_class of an outcome that ends a delivery or a Thread reply as Not delivered: template_error
+// for a request of an outgoing webhook whose template failed, unknown otherwise.
+func endClass(k OutcomeKind) string {
+	if k == OutcomeTemplateError {
+		return string(OutcomeTemplateError)
+	}
+	return string(OutcomeUnknown)
+}
+
 // notDelivered ends a delivery as Not delivered with the error, records the not_delivered delivery event and logs it
 // once the transaction commits (C-11.FR-10, AC-8, AC-13).
 func (w *Worker) notDelivered(ctx context.Context, q queries, org int64, a attempt, out Outcome, now time.Time,
 	logs *after) (bool, error) {
 	text := failure(out, unknownText)
+	class := endClass(out.Kind)
 	_, err := q.RecordNotDelivered(ctx, dbgen.RecordNotDeliveredParams{OrgID: org, ID: a.row.ID,
-		Owner: w.Lease.Owner, ErrorClass: string(OutcomeUnknown), Error: text, Now: now})
+		Owner: w.Lease.Owner, ErrorClass: class, Error: text, Now: now})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -314,20 +334,89 @@ func (w *Worker) notDelivered(ctx context.Context, q queries, org int64, a attem
 		return false, err
 	}
 	if err := RecordEvent(ctx, q, org, Event{At: now, DestinationID: a.destination.ID, AlertGroupID: a.group(),
-		StormID: a.storm(), Kind: EventNotDelivered, ErrorClass: string(OutcomeUnknown),
+		StormID: a.storm(), Kind: EventNotDelivered, ErrorClass: class,
 		Error: outbound.Untrusted(text)}); err != nil {
 		return false, err
 	}
-	logs.add(notDeliveredLine(a.destination.PublicID, a.row.AlertGroupPublicID, a.kind()))
+	logs.add(notDeliveredLine(a.destination.PublicID, a.row.AlertGroupPublicID, a.kind(), class))
 	return true, nil
 }
 
 // notDeliveredLine is the delivery_not_delivered line of a delivery or a Thread reply.
-func notDeliveredLine(destination, group, kind string) func(ctx context.Context, log *logging.Logger) {
+func notDeliveredLine(destination, group, kind, class string) func(ctx context.Context, log *logging.Logger) {
 	return func(ctx context.Context, log *logging.Logger) {
 		log.Log(ctx, logging.DeliveryNotDelivered, logging.F("destination", destination),
-			logging.F("group", group), logging.F("kind", kind), logging.F("error_class", string(OutcomeUnknown)))
+			logging.F("group", group), logging.F("kind", kind), logging.F("error_class", class))
 	}
+}
+
+// settleRequest records, in the transaction of q, what a request of the outgoing webhook d about the Alert Group
+// group (public_id groupPublicID; nil and empty for a Storm summary) came to beyond its outcome (C-15.FR-4, FR-7): a
+// system entry template_value_missing per extraction rule that found nothing, written through groups; for a request
+// whose template failed, the Destination's template error and MusterTemplateError when none is recorded yet and, once
+// committed, muster_template_errors_total and the webhook_template_failed line; for one that rendered, the end of the
+// template error and of MusterTemplateError.
+func (w *Worker) settleRequest(ctx context.Context, q queries, org int64, d Destination, group *int64,
+	groupPublicID string, out Outcome, now time.Time, logs *after) error {
+	for _, rule := range out.Missing {
+		logs.add(func(ctx context.Context, log *logging.Logger) {
+			log.Log(ctx, logging.WebhookValueMissing, logging.F("destination", d.PublicID),
+				logging.F("group", groupPublicID), logging.F("rule", rule))
+		})
+		if group == nil {
+			continue // a Storm summary has no Timeline
+		}
+		if err := q.RecordSystemEntry(ctx, groups.SystemEntry{OrgID: org, AlertGroupID: *group, At: now,
+			System: groups.SystemTemplateValueMissing, Detail: rule}); err != nil {
+			return err
+		}
+	}
+	if group != nil && len(out.Missing) > 0 {
+		if err := hintGroup(ctx, q, org, groupPublicID); err != nil {
+			return err
+		}
+	}
+	raiser := w.raiser(org)
+	switch {
+	case out.Kind == OutcomeTemplateError:
+		text := failure(out, "the request template failed")
+		rows, err := q.SetDestinationTemplateError(ctx, dbgen.SetDestinationTemplateErrorParams{OrgID: org, ID: d.ID,
+			Now: now, Error: text})
+		if err != nil {
+			return fmt.Errorf("record the template error of destination %s: %w", d.PublicID, err)
+		}
+		if len(rows) > 0 {
+			if err := raiser.RaiseFor(ctx, q, now, internalalerts.TemplateError, internalalerts.EntityDestination,
+				internalalerts.Entity{ID: rows[0].PublicID, Name: rows[0].Name},
+				map[string]string{"template": messages.TemplateWebhookRequest}); err != nil {
+				return fmt.Errorf("raise MusterTemplateError of %s: %w", d.PublicID, err)
+			}
+			if err := q.Notify(ctx, db.Hint{OrgID: org, Type: hintDestination, ID: d.PublicID}); err != nil {
+				return err
+			}
+		}
+		request := out.Request
+		logs.add(func(ctx context.Context, log *logging.Logger) {
+			metrics.TemplateErrors.With("", d.PublicID, messages.TemplateWebhookRequest).Inc()
+			log.Log(ctx, logging.WebhookTemplateFailed, logging.F("destination", d.PublicID),
+				logging.F("group", groupPublicID), logging.F("request", request), logging.F("error", text))
+		})
+	case out.Rendered:
+		ids, err := q.ClearDestinationTemplateError(ctx, dbgen.ClearDestinationTemplateErrorParams{OrgID: org,
+			ID: d.ID})
+		if err != nil {
+			return fmt.Errorf("clear the template error of destination %s: %w", d.PublicID, err)
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		if err := raiser.ResolveFor(ctx, q, now, internalalerts.TemplateError, internalalerts.EntityDestination,
+			ids[0]); err != nil {
+			return fmt.Errorf("resolve MusterTemplateError of %s: %w", d.PublicID, err)
+		}
+		return q.Notify(ctx, db.Hint{OrgID: org, Type: hintDestination, ID: d.PublicID})
+	}
+	return nil
 }
 
 // recordReply records the outcome of a Thread reply's call in the transaction of q, by the rules above, then what it
@@ -336,15 +425,30 @@ func (w *Worker) recordReply(ctx context.Context, q queries, org int64, a replyA
 	rejected, lost *Outcome, logs *after) error {
 	thread := changesThread(a, out, lost)
 	var th dbgen.LockDeliveryThreadRow
-	if thread {
+	if thread || out.ThreadOpened {
 		var err error
 		if th, err = lockThread(ctx, q, org, a); err != nil {
 			return err
 		}
 	}
+	if out.ThreadOpened {
+		// "open thread" ran whatever the reply after it came to: it does not run again for this Root message.
+		if err := q.RecordThreadOpened(ctx, dbgen.RecordThreadOpenedParams{OrgID: org, ID: a.row.DeliveryID,
+			ResponseValues: valuesJSON(out.Values), PublishedAt: a.row.PublishedAt.Time,
+			Now: w.Lease.Clocks.Business.Now().UTC()}); err != nil {
+			return fmt.Errorf("record the opened thread: %w", err)
+		}
+	}
 	recorded, err := w.recordReplyOutcome(ctx, q, org, a, out, logs)
 	if err != nil || !recorded {
 		return err
+	}
+	if sendsRequests(a.destination.Type) {
+		group := a.row.AlertGroupID
+		if err := w.settleRequest(ctx, q, org, a.destination, &group, a.row.AlertGroupPublicID, out,
+			w.Lease.Clocks.Business.Now().UTC(), logs); err != nil {
+			return err
+		}
 	}
 	if thread {
 		if err := w.recordThread(ctx, q, org, a, th, out, lost, w.Lease.Clocks.Business.Now().UTC()); err != nil {
@@ -404,8 +508,9 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 		return ok, err
 	default:
 		text := failure(out, unknownText)
+		class := endClass(out.Kind)
 		_, err := q.RecordReplyNotDelivered(ctx, dbgen.RecordReplyNotDeliveredParams{OrgID: org, ID: id,
-			Owner: w.Lease.Owner, ErrorClass: string(OutcomeUnknown), Error: text})
+			Owner: w.Lease.Owner, ErrorClass: class, Error: text})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
 		}
@@ -413,11 +518,11 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 			return false, fmt.Errorf("record the thread reply as not delivered: %w", err)
 		}
 		if err := RecordEvent(ctx, q, org, Event{At: now, DestinationID: a.destination.ID,
-			AlertGroupID: &a.row.AlertGroupID, Kind: EventNotDelivered, ErrorClass: string(OutcomeUnknown),
+			AlertGroupID: &a.row.AlertGroupID, Kind: EventNotDelivered, ErrorClass: class,
 			Error: outbound.Untrusted(text), Detail: map[string]any{"kind": kindReply, "event": a.row.Event}}); err != nil {
 			return false, err
 		}
-		logs.add(notDeliveredLine(a.destination.PublicID, a.row.AlertGroupPublicID, kindReply))
+		logs.add(notDeliveredLine(a.destination.PublicID, a.row.AlertGroupPublicID, kindReply, class))
 		return true, nil
 	}
 }

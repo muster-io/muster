@@ -6,10 +6,11 @@
 -- Telegram copy buffer. Only this package writes deliveries, thread_replies, rate_limit_buckets, delivery_events and
 -- telegram_post_copies. Due times are business times and leases real times; both come from Go.
 
--- ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health and the mode of an
--- outgoing webhook, in id order, for Enqueue.
+-- ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health, the mode of an
+-- outgoing webhook and whether it has a "reply in thread" request, in id order, for Enqueue.
 -- name: ListRouteDestinations :many
-SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health, d.webhook_mode
+SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health, d.webhook_mode,
+       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies
 FROM route_destinations rd
 JOIN destinations d ON d.org_id = rd.org_id AND d.id = rd.destination_id
 WHERE rd.org_id = @org_id AND rd.route_id = @route_id AND d.deleted_at IS NULL
@@ -62,7 +63,7 @@ SET desired_version     = desired_version + 1,
                               ELSE 'pending'
                           END,
     publication_loud    = CASE
-                              WHEN (state = 'withheld' OR (late_note AND message_id IS NULL)) AND @open::boolean
+                              WHEN (state = 'withheld' OR (late_note AND published_at IS NULL)) AND @open::boolean
                                   THEN @firing::boolean
                               ELSE publication_loud
                           END,
@@ -144,14 +145,15 @@ WHERE d.org_id = @org_id AND d.id = due.id
 RETURNING d.id, d.urgent, d.next_attempt_at, d.last_delivered_at;
 
 -- GetLeasedDelivery reads, and locks, a delivery whose lease this replica still holds at the real time now: its latest
--- Desired state, whether its next call is the final edit, its actual message, its notes, its Destination with its
--- health and, for Telegram, its channel and discussion group, and its Alert Group, or its Storm for a Storm summary,
--- whose Alert Group fields are empty. No row when the lease ran out or went to another replica.
+-- Desired state, whether its next call is the final edit, its actual message — published or not, and for an outgoing
+-- webhook in the template mode the values extracted from its responses — its notes, its Destination with its health
+-- and, for Telegram, its channel and discussion group, and its Alert Group, or its Storm for a Storm summary, whose
+-- Alert Group fields are empty. No row when the lease ran out or went to another replica.
 -- name: GetLeasedDelivery :one
 SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id, d.desired_version,
        d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
        d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
-       ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       d.published_at, d.response_values, d.thread_opened, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
        ds.telegram_discussion_chat_id,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
@@ -199,7 +201,10 @@ WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 -- RecordDelivered records a successful call that brought the actual message to @version: the delivery is delivered
 -- unless the Desired state grew meanwhile, or its Destination left the Route while the call was made, in which cases it
 -- stays pending and the next call carries the newest state or the final edit.
--- The delivered version clears the receipt time, so a later call never observes a Snapshot already delivered.
+-- The delivered version clears the receipt time, so a later call never observes a Snapshot already delivered. A
+-- Publication marks the Root message published — an outgoing webhook in the template mode may have no message id —
+-- and replaces the values extracted from responses with those of its "create" (@response_values, none for a
+-- messenger), whose Thread "open thread" has not opened yet.
 -- A row that ended while the call was in flight — withheld, retired or deleted in the messenger — stays so, with the
 -- actual message recorded, unless the call was a Publication that created a message on a row that had none (raced):
 -- a Storm summary is then retired with it; an Alert Group whose Destination was deleted or left its Route meanwhile
@@ -213,6 +218,11 @@ SET actual_version      = @version::bigint,
     message_url         = coalesce(sqlc.narg('message_url')::text, d.message_url),
     published_at        = CASE WHEN @published::boolean THEN coalesce(d.published_at, @now::timestamptz) ELSE d.published_at END,
     publications        = d.publications + CASE WHEN @published::boolean THEN 1 ELSE 0 END,
+    response_values     = CASE
+                              WHEN @published::boolean THEN coalesce(sqlc.narg('response_values')::jsonb, '{}'::jsonb)
+                              ELSE d.response_values
+                          END,
+    thread_opened       = d.thread_opened AND NOT @published::boolean,
     last_delivered_at   = @now::timestamptz,
     state               = CASE
                               WHEN f.ended AND NOT f.raced THEN d.state
@@ -233,8 +243,8 @@ SET actual_version      = @version::bigint,
     updated_at          = @now::timestamptz
 FROM (SELECT x.id,
              x.state IN ('withheld', 'retired', 'deleted_in_messenger') AS ended,
-             (x.state IN ('withheld', 'retired', 'deleted_in_messenger') AND x.message_id IS NULL
-              AND sqlc.narg('message_id')::text IS NOT NULL) AS raced,
+             (x.state IN ('withheld', 'retired', 'deleted_in_messenger') AND x.published_at IS NULL
+              AND @published::boolean) AS raced,
              (EXISTS (SELECT 1
                       FROM destinations ds
                       WHERE ds.org_id = x.org_id AND ds.id = x.destination_id AND ds.deleted_at IS NOT NULL)
@@ -256,7 +266,7 @@ UPDATE deliveries
 SET next_attempt_at        = @at,
     attempts               = attempts + CASE WHEN @counted::boolean THEN 1 ELSE 0 END,
     first_failed_at        = CASE WHEN @counted::boolean THEN coalesce(first_failed_at, @now) ELSE first_failed_at END,
-    publication_started_at = CASE WHEN message_id IS NULL THEN NULL ELSE publication_started_at END,
+    publication_started_at = CASE WHEN published_at IS NULL THEN NULL ELSE publication_started_at END,
     last_error_class       = sqlc.narg('error_class')::text,
     last_error             = sqlc.narg('error')::text,
     lease_owner            = NULL,
@@ -277,7 +287,7 @@ SET state                  = CASE
     desired_retire         = false,
     attempts               = 0,
     first_failed_at        = NULL,
-    publication_started_at = CASE WHEN message_id IS NULL THEN NULL ELSE publication_started_at END,
+    publication_started_at = CASE WHEN published_at IS NULL THEN NULL ELSE publication_started_at END,
     last_error_class       = @error_class::text,
     last_error             = @error::text,
     lease_owner            = NULL,
@@ -308,6 +318,9 @@ WHERE org_id = @org_id AND alert_group_id = @alert_group_id::bigint AND destinat
 UPDATE deliveries
 SET message_id               = NULL,
     message_url              = NULL,
+    published_at             = NULL,
+    response_values          = '{}',
+    thread_opened            = false,
     actual_version           = NULL,
     actual_hash              = NULL,
     publication_started_at   = NULL,
@@ -359,7 +372,7 @@ SET state            = CASE WHEN ds.health = 'broken' THEN 'withheld' ELSE d.sta
     updated_at       = @now
 FROM destinations ds
 WHERE d.org_id = @org_id AND d.id = @id AND ds.org_id = @org_id AND ds.id = d.destination_id
-  AND d.state = 'pending' AND d.message_id IS NULL AND d.held_by_storm_id IS NULL AND d.storm_id IS NULL;
+  AND d.state = 'pending' AND d.published_at IS NULL AND d.held_by_storm_id IS NULL AND d.storm_id IS NULL;
 
 -- EnsureBuckets creates the limiter buckets of a Destination and of its Connection, full, on first use.
 -- name: EnsureBuckets :exec
@@ -436,7 +449,7 @@ WITH due AS MATERIALIZED (
     JOIN deliveries d ON d.org_id = x.org_id AND d.id = x.delivery_id
     JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
     WHERE x.org_id = @org_id AND x.state IN ('collecting', 'pending') AND x.next_attempt_at <= @due::timestamptz
-      AND (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AND d.message_id IS NOT NULL
+      AND (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AND d.published_at IS NOT NULL
       AND ds.health = 'healthy'
       AND NOT EXISTS (SELECT 1
                       FROM thread_replies p
@@ -453,12 +466,13 @@ WHERE r.org_id = @org_id AND r.id = due.id
 RETURNING r.id, r.next_attempt_at;
 
 -- GetLeasedReply reads, and locks, a Thread reply whose lease this replica still holds at the real time now, with its
--- delivery's Root message, its Thread and the start of its Publication, its Destination with, for Telegram, its
--- channel and discussion group, its Alert Group and the language of its Route.
+-- delivery's Root message, its Thread and the start of its Publication, for an outgoing webhook in the template mode
+-- the latest Desired state, the values extracted so far and whether "open thread" ran, its Destination with, for
+-- Telegram, its channel and discussion group, its Alert Group and the language of its Route.
 -- name: GetLeasedReply :one
 SELECT r.id, r.delivery_id, r.alert_group_id, r.event, r.event_seqs, r.loudness, r.mentions, r.fingerprints,
        r.attempts, d.message_id, d.thread_state, d.thread_anchor_id, d.thread_chain_last_id, d.republished_after_delete,
-       d.publication_started_at,
+       d.publication_started_at, d.published_at, d.desired_payload, d.response_values, d.thread_opened,
        ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.telegram_channel_chat_id, ds.telegram_discussion_chat_id,
        g.public_id AS alert_group_public_id, g.number, g.title, g.status, g.urgent,
@@ -482,6 +496,42 @@ WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 UPDATE thread_replies
 SET next_attempt_at = @at, lease_owner = NULL, lease_until = NULL
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
+
+-- RecordThreadOpened records that "open thread" of an outgoing webhook in the template mode ran for a delivery, with
+-- the values its extraction rules found added to those of "create" (C-15.FR-3); it runs once per Root message, so a
+-- Root message published again while the reply was in flight (another published_at) is left alone.
+-- name: RecordThreadOpened :exec
+UPDATE deliveries
+SET thread_opened = true, response_values = response_values || coalesce(sqlc.narg('response_values')::jsonb, '{}'),
+    updated_at = @now
+WHERE org_id = @org_id AND id = @id AND published_at = @published_at::timestamptz;
+
+-- SetDestinationTemplateError records that a request template of an outgoing webhook failed (C-15.FR-7), when no
+-- template error is recorded yet. The Destination's row is skipped when another transaction holds it, so that a call's
+-- record never waits for it; the next failing request tries again. It returns the Destination's public_id and name
+-- when it recorded the error.
+-- name: SetDestinationTemplateError :many
+UPDATE destinations ds
+SET template_error_since = @now::timestamptz, template_error = @error::text
+FROM (SELECT l.id
+      FROM destinations l
+      WHERE l.org_id = @org_id AND l.id = @id AND l.template_error IS NULL
+      FOR UPDATE SKIP LOCKED) locked
+WHERE ds.org_id = @org_id AND ds.id = locked.id
+RETURNING ds.public_id, ds.name;
+
+-- ClearDestinationTemplateError clears the template error of an outgoing webhook once one of its requests rendered
+-- again; the row is skipped while another transaction holds it, as in SetDestinationTemplateError. It returns the
+-- Destination's public_id when it cleared one.
+-- name: ClearDestinationTemplateError :many
+UPDATE destinations ds
+SET template_error_since = NULL, template_error = NULL
+FROM (SELECT l.id
+      FROM destinations l
+      WHERE l.org_id = @org_id AND l.id = @id AND l.template_error IS NOT NULL
+      FOR UPDATE SKIP LOCKED) locked
+WHERE ds.org_id = @org_id AND ds.id = locked.id
+RETURNING ds.public_id;
 
 -- RecordReplySent records a Thread reply the messenger accepted.
 -- name: RecordReplySent :exec
@@ -537,7 +587,7 @@ WITH due AS (
     FROM thread_replies y
     JOIN deliveries d ON d.org_id = y.org_id AND d.id = y.delivery_id
     JOIN destinations ds ON ds.org_id = y.org_id AND ds.id = y.destination_id
-    WHERE y.org_id = @org_id AND y.state IN ('collecting', 'pending') AND d.message_id IS NOT NULL
+    WHERE y.org_id = @org_id AND y.state IN ('collecting', 'pending') AND d.published_at IS NOT NULL
       AND ds.health = 'healthy'
       AND NOT EXISTS (SELECT 1
                       FROM thread_replies p
@@ -637,13 +687,13 @@ WITH oldest AS (
     SET lease_owner      = @owner::text,
         lease_until      = @lease_until::timestamptz,
         publication_loud = CASE
-                               WHEN d.message_id IS NULL AND d.alert_group_id IS NOT NULL
+                               WHEN d.published_at IS NULL AND d.alert_group_id IS NOT NULL
                                    THEN coalesce((SELECT g.status = 'firing'
                                                   FROM alert_groups g
                                                   WHERE g.org_id = d.org_id AND g.id = d.alert_group_id), false)
                                ELSE d.publication_loud
                            END,
-        late_note        = CASE WHEN d.message_id IS NULL THEN false ELSE d.late_note END
+        late_note        = CASE WHEN d.published_at IS NULL THEN false ELSE d.late_note END
     FROM oldest o
     WHERE d.org_id = @org_id AND d.id = o.id AND o.free
     RETURNING d.id
@@ -722,7 +772,7 @@ WHERE org_id = @org_id AND destination_id = @destination_id AND state IN ('colle
 UPDATE deliveries d
 SET state = 'withheld', lease_owner = NULL, lease_until = NULL, updated_at = @now
 FROM alert_groups g
-WHERE d.org_id = @org_id AND d.destination_id = @destination_id AND d.state = 'pending' AND d.message_id IS NULL
+WHERE d.org_id = @org_id AND d.destination_id = @destination_id AND d.state = 'pending' AND d.published_at IS NULL
   AND d.held_by_storm_id IS NULL AND g.org_id = @org_id AND g.id = d.alert_group_id AND g.status = 'resolved';
 
 -- RecoverUnpublished makes the open Alert Groups never published on a recovered Destination due now: Loud when it is
@@ -731,7 +781,7 @@ WHERE d.org_id = @org_id AND d.destination_id = @destination_id AND d.state = 'p
 UPDATE deliveries d
 SET publication_loud = (g.status = 'firing'), late_note = false, next_attempt_at = @now, updated_at = @now
 FROM alert_groups g
-WHERE d.org_id = @org_id AND d.destination_id = @destination_id AND d.state = 'pending' AND d.message_id IS NULL
+WHERE d.org_id = @org_id AND d.destination_id = @destination_id AND d.state = 'pending' AND d.published_at IS NULL
   AND d.held_by_storm_id IS NULL AND g.org_id = @org_id AND g.id = d.alert_group_id AND g.status <> 'resolved';
 
 -- RecoverPublished makes the published Root messages of a recovered Destination due now: one edit to the current
@@ -739,7 +789,7 @@ WHERE d.org_id = @org_id AND d.destination_id = @destination_id AND d.state = 'p
 -- name: RecoverPublished :exec
 UPDATE deliveries
 SET next_attempt_at = @now, updated_at = @now
-WHERE org_id = @org_id AND destination_id = @destination_id AND state = 'pending' AND message_id IS NOT NULL
+WHERE org_id = @org_id AND destination_id = @destination_id AND state = 'pending' AND published_at IS NOT NULL
   AND held_by_storm_id IS NULL;
 
 -- ListDestinationHealth lists the health of each Destination that is not deleted, for muster_destination_broken.
@@ -827,12 +877,14 @@ ON CONFLICT (storm_id, destination_id) WHERE storm_id IS NOT NULL
 DO UPDATE SET updated_at = deliveries.updated_at
 RETURNING id, desired_hash;
 
--- ListStormSummaries lists the Storm summaries of a Storm, in every Destination it reached.
+-- ListStormSummaries lists the Storm summaries of a Storm, in every Destination it reached, with the Destination and
+-- its type.
 -- name: ListStormSummaries :many
-SELECT id, desired_hash
-FROM deliveries
-WHERE org_id = @org_id AND storm_id = @storm_id::bigint
-ORDER BY id;
+SELECT d.id, d.desired_hash, d.destination_id, ds.type AS destination_type
+FROM deliveries d
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+WHERE d.org_id = @org_id AND d.storm_id = @storm_id::bigint
+ORDER BY d.id;
 
 -- ReleaseHeld lets an Alert Group a Storm holds be published at once: it became Urgent.
 -- name: ReleaseHeld :exec
@@ -895,7 +947,7 @@ RETURNING g.public_id;
 -- name: QuietStormSummaries :exec
 UPDATE deliveries
 SET publication_loud = false, updated_at = @now
-WHERE org_id = @org_id AND storm_id = @storm_id::bigint AND message_id IS NULL;
+WHERE org_id = @org_id AND storm_id = @storm_id::bigint AND published_at IS NULL;
 
 -- GetActiveStorm reads the active Storm of a Route. No row when there is none.
 -- name: GetActiveStorm :one
@@ -907,7 +959,7 @@ WHERE org_id = @org_id AND route_id = @route_id AND ended_at IS NULL;
 -- published there, withheld otherwise; it receives nothing more.
 -- name: RetireStormSummary :exec
 UPDATE deliveries d
-SET state = CASE WHEN d.message_id IS NULL THEN 'withheld' ELSE 'retired' END, updated_at = @now
+SET state = CASE WHEN d.published_at IS NULL THEN 'withheld' ELSE 'retired' END, updated_at = @now
 FROM storms s
 WHERE d.org_id = @org_id AND d.destination_id = @destination_id AND d.storm_id = s.id AND s.org_id = @org_id
   AND s.route_id = @route_id AND s.ended_at IS NULL AND d.state NOT IN ('withheld', 'deleted_in_messenger', 'retired');
@@ -952,6 +1004,9 @@ ORDER BY g.id;
 UPDATE deliveries
 SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE message_id END,
     message_url              = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE message_url END,
+    published_at             = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE published_at END,
+    response_values          = CASE WHEN state IN ('retired', 'withheld') THEN '{}' ELSE response_values END,
+    thread_opened            = thread_opened AND state NOT IN ('retired', 'withheld'),
     actual_version           = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE actual_version END,
     actual_hash              = CASE WHEN state IN ('retired', 'withheld') THEN NULL ELSE actual_hash END,
     thread_state             = CASE WHEN state IN ('retired', 'withheld') THEN 'none' ELSE thread_state END,
@@ -974,8 +1029,8 @@ WHERE org_id = @org_id AND alert_group_id = @alert_group_id::bigint AND destinat
 -- It returns each delivery with the public_id of its Alert Group, for the alert-group hints.
 -- name: RetireRouteDeliveries :many
 UPDATE deliveries d
-SET state            = CASE WHEN d.message_id IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
-    desired_retire   = NOT (d.message_id IS NULL AND d.publication_started_at IS NULL),
+SET state            = CASE WHEN d.published_at IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
+    desired_retire   = NOT (d.published_at IS NULL AND d.publication_started_at IS NULL),
     held_by_storm_id = NULL,
     next_attempt_at  = @now,
     updated_at       = @now
@@ -989,8 +1044,8 @@ RETURNING d.id, g.public_id;
 -- it moved to a Route they are not Destinations of (C-09.FR-19).
 -- name: RetireGroupDeliveries :many
 UPDATE deliveries
-SET state            = CASE WHEN message_id IS NULL AND publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
-    desired_retire   = NOT (message_id IS NULL AND publication_started_at IS NULL),
+SET state            = CASE WHEN published_at IS NULL AND publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
+    desired_retire   = NOT (published_at IS NULL AND publication_started_at IS NULL),
     held_by_storm_id = NULL,
     next_attempt_at  = @now,
     updated_at       = @now
@@ -1001,8 +1056,8 @@ RETURNING id;
 -- RetireDestinationDeliveries gives the deliveries of the open Alert Groups in a deleted Destination their final edit.
 -- name: RetireDestinationDeliveries :many
 UPDATE deliveries d
-SET state            = CASE WHEN d.message_id IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
-    desired_retire   = NOT (d.message_id IS NULL AND d.publication_started_at IS NULL),
+SET state            = CASE WHEN d.published_at IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
+    desired_retire   = NOT (d.published_at IS NULL AND d.publication_started_at IS NULL),
     held_by_storm_id = NULL,
     next_attempt_at  = @now,
     updated_at       = @now
@@ -1016,7 +1071,7 @@ RETURNING d.id;
 -- published there, withheld otherwise.
 -- name: SettleDestinationLeftovers :exec
 UPDATE deliveries d
-SET state            = CASE WHEN d.message_id IS NULL THEN 'withheld' ELSE 'retired' END,
+SET state            = CASE WHEN d.published_at IS NULL THEN 'withheld' ELSE 'retired' END,
     desired_retire   = false,
     held_by_storm_id = NULL,
     updated_at       = @now
@@ -1057,7 +1112,7 @@ WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 
 -- GetDestinationState reads the public_id and health of a Destination, deleted or not.
 -- name: GetDestinationState :one
-SELECT public_id, health
+SELECT public_id, health, (template_error IS NOT NULL)::boolean AS template_error_set
 FROM destinations
 WHERE org_id = @org_id AND id = @id;
 
@@ -1118,7 +1173,7 @@ FROM (SELECT x.id, x.desired_retire, ds.public_id
       FOR UPDATE OF x) AS old
 WHERE d.org_id = @org_id AND d.id = old.id
 RETURNING d.id, d.destination_id, d.alert_group_id, d.storm_id, old.public_id AS destination_public_id,
-          old.desired_retire AS final_edit, (d.message_id IS NULL)::boolean AS unpublished,
+          old.desired_retire AS final_edit, (d.published_at IS NULL)::boolean AS unpublished,
           coalesce((SELECT g.public_id
                     FROM alert_groups g
                     WHERE g.org_id = d.org_id AND g.id = d.alert_group_id), '')::text AS alert_group_public_id;

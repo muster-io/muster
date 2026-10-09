@@ -675,8 +675,8 @@ func TestCreateWebhookRefusals(t *testing.T) {
 		pointer string
 		code    string
 	}{
-		"template":     {func(in *Input) { in.Webhook.Mode = webhooks.ModeTemplate }, "/mode", CodeUnsupported},
-		"both":         {func(in *Input) { in.Webhook.Mode = webhooks.ModeBoth }, "/mode", CodeUnsupported},
+		"template":     {func(in *Input) { in.Webhook.Mode = webhooks.ModeTemplate }, "/template", CodeRequired},
+		"both":         {func(in *Input) { in.Webhook.Mode = webhooks.ModeBoth }, "/template", CodeRequired},
 		"bad mode":     {func(in *Input) { in.Webhook.Mode = "x" }, "/mode", CodeInvalidFormat},
 		"no request":   {func(in *Input) { in.Webhook.Events = nil }, "/events", CodeRequired},
 		"no url":       {func(in *Input) { in.Webhook.Events.URL = " " }, "/events/url", CodeRequired},

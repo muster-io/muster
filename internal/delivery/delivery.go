@@ -128,15 +128,24 @@ const (
 
 // Outcome is what an adapter call ended with. An ok Publication or Thread reply names its message; a RetryAfter the
 // exact delay and its scope; a failure carries the provider's error text, masked of secrets and untrusted. Status is
-// the HTTP status of the answer of an outgoing webhook, 0 without one.
+// the HTTP status of the answer of an outgoing webhook, 0 without one. An outgoing webhook in the template mode also
+// reports the values the extraction rules of its "create" or "open thread" found (Values), by rule name, and the rules
+// that found nothing (Missing); that "open thread" ran (ThreadOpened), whatever the reply after it came to; that its
+// request templates rendered (Rendered), which ends the Destination's template error; and the request it ended with
+// (Request: create, update, open_thread, reply_in_thread or events) (C-15.FR-3, FR-4, FR-7).
 type Outcome struct {
-	Kind       OutcomeKind
-	MessageID  string
-	MessageURL string
-	RetryAfter time.Duration
-	Scope      Scope
-	Error      outbound.Untrusted
-	Status     int
+	Kind         OutcomeKind
+	MessageID    string
+	MessageURL   string
+	RetryAfter   time.Duration
+	Scope        Scope
+	Error        outbound.Untrusted
+	Status       int
+	Values       map[string]string
+	Missing      []string
+	ThreadOpened bool
+	Rendered     bool
+	Request      string
 }
 
 // Call is one adapter call: its client class (ADR-0015) — delivery for the worker, interactive for the interactive
@@ -151,6 +160,30 @@ type Call struct {
 	Mentions    []groups.Mention
 	Targets     []mentions.Target
 	Plain       bool
+	// Webhook is what a request of an outgoing webhook in the template mode reads besides the Message, which it does
+	// not use; nil for a messenger.
+	Webhook *WebhookCall
+}
+
+// WebhookCall is what a request of an outgoing webhook in the template mode reads (C-15.FR-3): the Desired state its
+// templates render (a RequestState), the values extracted from the responses of its "create" and "open thread",
+// whether "open thread" ran, the lifecycle event a Thread reply carries, and the text of the final edit, empty for
+// another call.
+type WebhookCall struct {
+	State        []byte
+	Response     map[string]string
+	ThreadOpened bool
+	Event        string
+	Final        string
+}
+
+// Requests renders the Desired state of an outgoing webhook in the template mode (C-15.FR-3), declared here by its
+// consumer; *webhooks.Adapter implements it. Desired renders, reading the Destination destinationID through db, its
+// "update" request for st, with its Secrets and the values extracted from responses left out, and returns the hash of
+// the request: a change that leaves the request as it was makes no call, as for a messenger whose text did not change.
+// A request that fails to render has a hash of its own for each state, so that the call that fails is made.
+type Requests interface {
+	Desired(ctx context.Context, db dbgen.DBTX, destinationID int64, st RequestState) ([]byte, error)
 }
 
 // Mentioner resolves the symbolic Mentions of a Loud message into the targets of its Destination (C-12.FR-8), reading
@@ -321,9 +354,17 @@ type queries interface {
 	brokenQueries
 	stormQueries
 	membershipQueries
+	RecordThreadOpened(ctx context.Context, arg dbgen.RecordThreadOpenedParams) error
+	SetDestinationTemplateError(ctx context.Context, arg dbgen.SetDestinationTemplateErrorParams) (
+		[]dbgen.SetDestinationTemplateErrorRow, error)
+	ClearDestinationTemplateError(ctx context.Context, arg dbgen.ClearDestinationTemplateErrorParams) ([]string, error)
 	// Internal alerts and live-update hints are written in the transaction of the change they announce.
 	internalalerts.Store
 	Notify(ctx context.Context, h db.Hint) error
+	// RecordSystemEntry writes a system entry to the Timeline of an Alert Group through groups, its only writer.
+	RecordSystemEntry(ctx context.Context, e groups.SystemEntry) error
+	// DB is the pool or transaction the queries run on, which the request of an outgoing webhook is rendered through.
+	DB() dbgen.DBTX
 }
 
 // Store runs the queries of the package over the main pool, alone or in short transactions, and over the
@@ -345,11 +386,17 @@ func NewStore(b db.Beginner, d dbgen.DBTX) *Store {
 type pgQueries struct {
 	*dbgen.Queries
 	internalalerts.Store
-	exec db.Execer
+	exec dbgen.DBTX
 }
 
 func (q pgQueries) Notify(ctx context.Context, h db.Hint) error {
 	return db.NotifyHint(ctx, q.exec, h)
+}
+
+func (q pgQueries) DB() dbgen.DBTX { return q.exec }
+
+func (q pgQueries) RecordSystemEntry(ctx context.Context, e groups.SystemEntry) error {
+	return groups.RecordSystemEntry(ctx, q.exec, e)
 }
 
 // q are the queries over the pool.
@@ -383,6 +430,8 @@ type Config struct {
 	// event is queued.
 	Bodies   EventBodies
 	Mentions Mentioner
+	// Requests renders the Desired state of outgoing webhooks in the template mode.
+	Requests Requests
 }
 
 // Service is the delivery of an Organization: Enqueue for the dispatcher, the delivery state of Alert Groups, the
@@ -398,6 +447,7 @@ type Service struct {
 	real     clock.Clock
 	bodies   EventBodies
 	mentions Mentioner
+	requests Requests
 }
 
 // New returns the Service of the Organization in cfg.
@@ -408,7 +458,7 @@ func New(cfg Config) *Service {
 	}
 	return &Service{orgID: cfg.OrgID, store: cfg.Store, clock: cfg.Business, renderer: cfg.Renderer, log: cfg.Log,
 		internal: internalalerts.NewRaiser(cfg.OrgID, cfg.RunbookBase), real: realClock, bodies: cfg.Bodies,
-		mentions: cfg.Mentions}
+		mentions: cfg.Mentions, requests: cfg.Requests}
 }
 
 // ErrNotFound is an Alert Group that does not exist in the Organization.

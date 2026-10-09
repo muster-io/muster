@@ -315,13 +315,13 @@ func sameSet(a, b []string) bool {
 	return slices.Equal(slices.Compact(a), slices.Compact(b))
 }
 
-// TestBuiltinSources: the built-in template of every kind but link_rule, which has none, and language parses and
-// renders against the example, in every markup.
+// TestBuiltinSources: the built-in template of every kind but link_rule and webhook_request, which have none, and
+// language parses and renders against the example, in every markup.
 func TestBuiltinSources(t *testing.T) {
 	r := newRenderer(t)
 	set := settings{route: RouteRef{Name: "db", Language: "en", SnoozeDurations: []int64{3600}}, tz: "UTC"}
 	for _, kind := range previewKinds {
-		if kind == TemplateLinkRule {
+		if kind == TemplateLinkRule || kind == TemplateWebhookRequest {
 			continue
 		}
 		for _, lang := range Languages {

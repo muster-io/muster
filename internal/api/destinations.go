@@ -266,7 +266,8 @@ func telegramDestinationInputOf(body gen.DestinationInput) (destinations.Input, 
 		Telegram: &destinations.TelegramInput{Connection: t.ConnectionId, ChannelID: t.ChannelId}}, nil
 }
 
-// webhookInputOf is the Input of an outgoing webhook's body: its mode, the request of the events mode and its proxy.
+// webhookInputOf is the Input of an outgoing webhook's body: its mode, the request of the events mode, the requests of
+// the template mode and its proxy.
 func webhookInputOf(body gen.DestinationInput) (destinations.Input, error) {
 	w, err := body.AsWebhookDestinationInput()
 	if err != nil {
@@ -284,9 +285,39 @@ func webhookInputOf(body gen.DestinationInput) (destinations.Input, error) {
 			in.Events.Headers = append(in.Events.Headers, webhooks.Header{Name: h.Name, Value: h.Value})
 		}
 	}
+	if t := w.Template; t != nil {
+		in.Template = &webhooks.TemplateConfig{Create: requestTemplateOf(t.Create), Update: requestTemplateOf(t.Update)}
+		if t.OpenThread != nil {
+			r := requestTemplateOf(*t.OpenThread)
+			in.Template.OpenThread = &r
+		}
+		if t.ReplyInThread != nil {
+			r := requestTemplateOf(*t.ReplyInThread)
+			in.Template.ReplyInThread = &r
+		}
+	}
 	return destinations.Input{Type: delivery.TypeWebhook, Name: w.Name, Mentions: set,
 		Limiter: destinations.Limiter{Limit: int64(w.Limiter.Limit), PerSeconds: int64(w.Limiter.PerSeconds)},
 		Webhook: in}, nil
+}
+
+// requestTemplateOf is a request of the template mode as the body gives it.
+func requestTemplateOf(r gen.RequestTemplate) webhooks.RequestTemplate {
+	out := webhooks.RequestTemplate{Method: string(r.Method), URL: r.Url,
+		Headers: make([]webhooks.Header, 0, len(r.Headers)), Extract: []webhooks.ExtractionRule{}}
+	for _, h := range r.Headers {
+		out.Headers = append(out.Headers, webhooks.Header{Name: h.Name, Value: h.Value})
+	}
+	if r.Body.IsSpecified() && !r.Body.IsNull() {
+		body := r.Body.MustGet()
+		out.Body = &body
+	}
+	if r.Extract != nil {
+		for _, e := range *r.Extract {
+			out.Extract = append(out.Extract, webhooks.ExtractionRule{Name: e.Name, Path: e.Path})
+		}
+	}
+	return out
 }
 
 // mentionSettingsOf is the Mention settings of a body, keyed by kind, with empty lists for missing ones.
@@ -435,6 +466,15 @@ func webhookOf(d destinations.Destination) (gen.WebhookDestination, error) {
 		w.Template = &gen.WebhookTemplateConfig{}
 		if err := json.Unmarshal(d.TemplateConfig, w.Template); err != nil {
 			return w, fmt.Errorf("read the request templates of %s: %w", d.PublicID, err)
+		}
+		c, err := webhooks.ParseTemplateConfig(d.TemplateConfig)
+		if err != nil {
+			return w, err
+		}
+		for _, warning := range webhooks.TemplateWarnings("/template", c) {
+			item := gen.DestinationWarning{Kind: gen.DestinationWarningKind(warning.Kind)}
+			item.Field.Set(warning.Field)
+			w.Warnings = append(w.Warnings, item)
 		}
 	}
 	return w, nil

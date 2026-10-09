@@ -34,7 +34,7 @@ func terminal(d *fakeDelivery) bool {
 
 // retire gives a delivery its final edit, or withholds it when nothing of it was ever published.
 func retire(d *fakeDelivery, now time.Time) {
-	if d.messageID == nil && d.started == nil {
+	if d.publishedAt == nil && d.started == nil {
 		d.state, d.desiredRetire = "withheld", false
 	} else {
 		d.state, d.desiredRetire = "pending", true
@@ -83,6 +83,7 @@ func (f *fakeDB) RejoinDelivery(_ context.Context, arg dbgen.RejoinDeliveryParam
 		d.heldBy = 0
 		if d.state == "retired" || d.state == "withheld" {
 			d.messageID, d.messageURL, d.actualVersion, d.actualHash, d.started = nil, nil, 0, nil, nil
+			d.publishedAt, d.responseValues, d.threadOpened = nil, nil, false
 			d.threadState, d.anchorID, d.chainLastID, d.republished = "none", nil, nil, false
 			d.loud, d.heldBy = pgtype.Bool{Bool: arg.Loud, Valid: true}, arg.HeldByStormID.Int64
 		}
@@ -156,7 +157,7 @@ func (f *fakeDB) SettleDestinationLeftovers(_ context.Context, arg dbgen.SettleD
 		leftover := (d.state == "pending" && !f.open(d.group)) || (d.storm != 0 && !terminal(d))
 		if d.dest == arg.DestinationID && !d.desiredRetire && leftover {
 			d.state = "retired"
-			if d.messageID == nil {
+			if d.publishedAt == nil {
 				d.state = "withheld"
 			}
 			d.heldBy, d.updated = 0, arg.Now
@@ -231,7 +232,8 @@ func (f *fakeDB) GetDestinationState(_ context.Context, arg dbgen.GetDestination
 		return dbgen.GetDestinationStateRow{}, err
 	}
 	ds := f.dests[arg.ID]
-	return dbgen.GetDestinationStateRow{PublicID: ds.publicID, Health: ds.health}, nil
+	return dbgen.GetDestinationStateRow{PublicID: ds.publicID, Health: ds.health,
+		TemplateErrorSet: ds.templateError != nil}, nil
 }
 
 func (f *fakeDB) WipeDestinationSecrets(_ context.Context, arg dbgen.WipeDestinationSecretsParams) error {
@@ -265,7 +267,7 @@ func (f *fakeDB) AbandonConnectionDeliveries(_ context.Context, arg dbgen.Abando
 			continue
 		}
 		row := dbgen.AbandonConnectionDeliveriesRow{ID: d.id, DestinationID: d.dest, DestinationPublicID: ds.publicID,
-			FinalEdit: d.desiredRetire, Unpublished: d.messageID == nil}
+			FinalEdit: d.desiredRetire, Unpublished: d.publishedAt == nil}
 		d.state, d.desiredRetire, d.errorClass, d.lastError = "not_delivered", false, at2("unknown"), at2(arg.Error)
 		d.owner, d.until, d.updated = "", time.Time{}, arg.Now
 		if d.storm != 0 {
@@ -375,7 +377,7 @@ func TestRouteMembership(t *testing.T) {
 	added := e.callsTo(destWH)
 	if callMethods(added) != "publish,publish" || slices.ContainsFunc(added, func(c deliverytest.Call) bool {
 		return c.Loudness != groups.Quiet || len(c.Mentions) != 0
-	}) || !strings.HasPrefix(added[0].Message.Text(), "#7 a") || !strings.HasPrefix(added[1].Message.Text(), "#22 g") ||
+	}) || !strings.HasPrefix(textOf(added[0]), "#7 a") || !strings.HasPrefix(textOf(added[1]), "#22 g") ||
 		e.deliveryOf(23, destWH) != nil || len(e.callsTo(destMM)) != 0 {
 		t.Fatalf("added %+v", added)
 	}
@@ -516,7 +518,7 @@ func TestDeleteDestinationDelivery(t *testing.T) {
 	}
 
 	// A Storm summary published there is retired with it, and the end of its Storm leaves it alone.
-	summary := &fakeDelivery{id: 904, dest: destWH, storm: 7, state: "delivered", messageID: at2("s"),
+	summary := &fakeDelivery{id: 904, dest: destWH, storm: 7, state: "delivered", messageID: at2("s"), publishedAt: at(business0),
 		threadState: "none"}
 	e.db.deliveries = append(e.db.deliveries, summary)
 	if err := e.svc.RetireDestination(t.Context(), nil, destWH); err != nil || summary.state != "retired" {
@@ -570,7 +572,7 @@ func TestMoveToDefaultRoute(t *testing.T) {
 	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
 	e.round(t)
 	e.db.deliveries = append(e.db.deliveries, &fakeDelivery{id: 900, dest: destWH, group: groupID, state: "retired",
-		messageID: at2("old"), threadState: "none", next: business0})
+		messageID: at2("old"), publishedAt: at(business0), threadState: "none", next: business0})
 	e.rec.Reset()
 	e.db.groups[groupID].route = defaultID
 	g := e.group(groups.StatusFiring, "b")
@@ -579,7 +581,7 @@ func TestMoveToDefaultRoute(t *testing.T) {
 		Loudness: groups.Quiet})
 	e.round(t)
 	mm, x, wh := e.callsTo(destMM), e.callsTo(destX), e.callsTo(destWH)
-	if callMethods(mm) != "update" || mm[0].Loudness != groups.Quiet || strings.Contains(mm[0].Message.Text(),
+	if callMethods(mm) != "update" || mm[0].Loudness != groups.Quiet || strings.Contains(textOf(mm[0]),
 		"No longer updated") {
 		t.Errorf("both %+v", mm)
 	}
@@ -626,10 +628,10 @@ func TestAbandonConnection(t *testing.T) {
 		t.Fatalf("waiting %+v", d)
 	}
 	e.db.deliveries = append(e.db.deliveries, &fakeDelivery{id: 901, dest: destMM, storm: 5, state: "pending",
-		messageID: at2("s"), desiredRetire: true, threadState: "none"},
+		messageID: at2("s"), publishedAt: at(business0), desiredRetire: true, threadState: "none"},
 		&fakeDelivery{id: 902, dest: destMM, storm: 6, state: "pending", threadState: "none"},
 		&fakeDelivery{id: 903, dest: destMM, group: groupID, state: "pending", threadState: "none"},
-		&fakeDelivery{id: 904, dest: destMM, group: groupID, state: "pending", messageID: at2("u"),
+		&fakeDelivery{id: 904, dest: destMM, group: groupID, state: "pending", messageID: at2("u"), publishedAt: at(business0),
 			threadState: "none"})
 	e.log.Reset()
 	committed, err := e.svc.AbandonConnection(t.Context(), nil, connID)
@@ -720,7 +722,7 @@ func TestMembershipFailures(t *testing.T) {
 		e := published(t)
 		d := e.only(t)
 		if q == "WithholdLeased" {
-			d.messageID = nil
+			d.messageID, d.publishedAt = nil, nil
 		}
 		d.state, d.desiredRetire = "pending", true
 		e.db.fail[q] = errBoom
@@ -817,7 +819,7 @@ func TestDeliveryEventRows(t *testing.T) {
 			e.calmCheck(t, e.onlyStorm(t))
 			e.round(t)
 			return slices.DeleteFunc(e.rec.Calls(), func(c deliverytest.Call) bool {
-				return strings.HasPrefix(c.Message.Text(), "Storm over")
+				return strings.HasPrefix(textOf(c), "Storm over")
 			})
 		}}},
 		delivery.DeliveryLate: {{true, func(t *testing.T) []deliverytest.Call {
@@ -832,7 +834,7 @@ func TestDeliveryEventRows(t *testing.T) {
 			e.round(t)
 			// The resolution's own Thread reply follows the Root message, as its lifecycle row says.
 			calls := without(e.rec.Calls(), deliverytest.MethodReply)
-			if len(calls) != 1 || !strings.Contains(calls[0].Message.Text(), "Delivered late") {
+			if len(calls) != 1 || !strings.Contains(textOf(calls[0]), "Delivered late") {
 				t.Errorf("late %+v", calls)
 			}
 			return calls

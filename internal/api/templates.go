@@ -48,8 +48,9 @@ func (s *Server) PreviewTemplate(ctx context.Context, req gen.PreviewTemplateReq
 	out := gen.TemplatePreviewResult{Valid: res.Valid, Errors: make([]gen.ProblemError, 0, len(res.Errors)),
 		Source: nullable.NewNullableWithValue(res.Source),
 		Format: nullable.NewNullNullable[gen.TemplatePreviewResultFormat]()}
-	if b.Kind == gen.TemplateKindLinkRule {
-		out.Source = nullable.NewNullNullable[string]() // a Link rule has no built-in template to start from
+	if b.Kind == gen.TemplateKindLinkRule || b.Kind == gen.TemplateKindWebhookRequest {
+		// A Link rule and an outgoing webhook request have no built-in template to start from.
+		out.Source = nullable.NewNullNullable[string]()
 	}
 	if res.Format != "" {
 		out.Format = nullable.NewNullableWithValue(gen.TemplatePreviewResultFormat(res.Format))

@@ -90,6 +90,19 @@ func (o publishOp) call(ctx context.Context, c Call) Outcome {
 // PublishOp sends m as a new message through a.
 func PublishOp(a Adapter, m Message) Op { return publishOp{adapter: a, message: m} }
 
+type webhookOp struct {
+	op      Op
+	webhook *WebhookCall
+}
+
+func (o webhookOp) call(ctx context.Context, c Call) Outcome {
+	c.Webhook = o.webhook
+	return o.op.call(ctx, c)
+}
+
+// WebhookOp is op with what a request of an outgoing webhook in the template mode reads in its call (C-15.FR-3).
+func WebhookOp(op Op, w *WebhookCall) Op { return webhookOp{op: op, webhook: w} }
+
 type updateOp struct {
 	adapter   Adapter
 	messageID string

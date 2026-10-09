@@ -69,7 +69,7 @@ func TestDeletedRootMessage(t *testing.T) {
 	pub := calls[1]
 	if pub.Loudness != groups.Quiet || len(pub.Mentions) != 0 ||
 		pub.Message.Notices[len(pub.Message.Notices)-1] != "The previous message was deleted at 12:42." ||
-		!strings.Contains(pub.Message.Text(), "Acknowledged") {
+		!strings.Contains(textOf(pub), "Acknowledged") {
 		t.Errorf("republication %+v", pub)
 	}
 	if d.state != "delivered" || !d.republished || *d.messageID != "m2" || d.threadState != "none" ||
@@ -241,7 +241,7 @@ func TestLatePublication(t *testing.T) {
 		t.Errorf("reopened with %+v", d)
 	}
 	e.waitPublished(t, d)
-	if pub := e.publications()[1]; strings.Contains(pub.Message.Text(), "Delivered late") ||
+	if pub := e.publications()[1]; strings.Contains(textOf(pub), "Delivered late") ||
 		slices.Contains(e.eventKinds(), "delivered_late") || pub.Loudness != groups.Loud ||
 		!slices.Equal(pub.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) {
 		t.Errorf("a late note on an open alert group %+v", pub)

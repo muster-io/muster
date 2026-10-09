@@ -2,9 +2,10 @@
 // Copyright The Muster Authors
 
 // Package fakewebhook is the fake receiver of outgoing webhooks. It answers POST /hook/{name}, and any method on any
-// path below /hook/{name}/, with 200 and an empty JSON object, and the harness records each request. The control
-// endpoints under /_fake/ register the Signing secrets of a name and list what a name received, with the number of
-// signatures that verify per the Standard Webhooks specification against the secrets registered at that moment.
+// path below /hook/{name}/, with 200 and an empty JSON object, and the harness records each request; below /chat/ it
+// is a small chat API for the template mode (chat.go). The control endpoints under /_fake/ register the Signing secrets
+// of a name, list what a name received, with the number of signatures that verify per the Standard Webhooks
+// specification against the secrets registered at that moment, and show a chat.
 package fakewebhook
 
 import (
@@ -55,6 +56,7 @@ type Fake struct {
 
 	mu      sync.Mutex
 	secrets map[string][]string
+	chats   chats
 }
 
 // New returns the fake with no Signing secrets.
@@ -64,6 +66,7 @@ func New() *Fake {
 	mux.HandleFunc("POST "+HookPrefix+"{name}", receive)
 	mux.HandleFunc(HookPrefix+"{name}/", receive)
 	f.Server = fakeserver.New("webhook", mux)
+	f.chats.mount(mux, f.Server)
 	f.HandleControl("PUT /_fake/secrets/{name}", f.putSecrets)
 	f.HandleControl("GET /_fake/received/{name}", func(w http.ResponseWriter, r *http.Request) {
 		fakeserver.WriteJSON(w, http.StatusOK, f.Received(r.PathValue("name")))
@@ -77,6 +80,9 @@ func receive(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, "{}")
 }
+
+// Chat is the state of the fake chat name.
+func (f *Fake) Chat(name string) Chat { return f.chats.Chat(name) }
 
 // SetSecrets replaces the Signing secrets of name; each is whsec_ and a key in standard base64.
 func (f *Fake) SetSecrets(name string, secrets []string) error {

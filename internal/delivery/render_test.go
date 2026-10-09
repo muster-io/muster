@@ -5,6 +5,7 @@ package delivery_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/templates"
@@ -54,7 +56,9 @@ func (s stubRenderer) Roots(_ context.Context, _ messages.DBTX, g delivery.Group
 	for _, c := range stubButtons[g.Status] {
 		m.Buttons = append(m.Buttons, messages.Button{Command: c, Label: c})
 	}
-	out := delivery.Roots{Messages: map[messages.Markup]messages.Rendered{}}
+	out := delivery.Roots{Messages: map[messages.Markup]messages.Rendered{}, Language: "en",
+		Data: &templates.Data{Status: string(g.Status), AlertGroup: templates.AlertGroup{Number: g.Number,
+			Title: g.Title, Status: status, Urgent: g.Urgent}}}
 	for _, mk := range markups {
 		out.Messages[mk] = messages.Rendered{Message: m, KeyID: "k-stub"}
 	}
@@ -95,6 +99,32 @@ func (stubRenderer) StormOver(_, _ string, open int64) delivery.Message {
 		Lines: []string{fmt.Sprintf("Storm over: %d Alert Groups still open", open)}}
 }
 
+// textOf is what a recorded call shows: the text of its message, or for a request of an outgoing webhook in the
+// template mode its Desired state as the stub renders a message — "#N title" and the status of the Alert Group, or the
+// Storm summary — and the text of the final edit.
+func textOf(c deliverytest.Call) string {
+	if c.Webhook == nil {
+		return c.Message.Text()
+	}
+	var st delivery.RequestState
+	_ = json.Unmarshal(c.Webhook.State, &st)
+	var lines []string
+	switch {
+	case st.Group != nil:
+		lines = append(lines, fmt.Sprintf("#%d %s", st.Group.AlertGroup.Number, st.Group.AlertGroup.Title),
+			st.Group.AlertGroup.Status)
+	case st.Storm != nil && st.Storm.Final:
+		lines = append(lines, "Storm over on Route "+st.Storm.Route)
+	case st.Storm != nil:
+		lines = append(lines, fmt.Sprintf("Storm on Route %s: %d new Alert Groups, %d Urgent", st.Storm.Route,
+			st.Storm.AlertGroupCount, st.Storm.UrgentCount))
+	}
+	if c.Webhook.Final != "" {
+		lines = append(lines, c.Webhook.Final)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // TestRenderOncePerMarkup: an Enqueue renders the Root message once for the markups of the Route's Destinations —
 // Markdown for Mattermost, plain text for an outgoing webhook — stores the key that signed its buttons, reports a
 // Route template that failed to the dispatcher and queues what the render runs once committed; a render that fails
@@ -131,10 +161,14 @@ func TestRenderOncePerMarkup(t *testing.T) {
 	if ran != 1 {
 		t.Errorf("the render's after-commit work ran %d times", ran)
 	}
-	for _, id := range []int64{destMM, destWH} {
-		if d := e.deliveryOf(groupID, id); d == nil || d.buttonKeyID != "k-stub" {
-			t.Errorf("delivery to %d: %+v", id, d)
-		}
+	if d := e.deliveryOf(groupID, destMM); d == nil || d.buttonKeyID != "k-stub" {
+		t.Errorf("delivery to Mattermost: %+v", d)
+	}
+	// An outgoing webhook in the template mode stores the data its request templates read, without buttons.
+	var st delivery.RequestState
+	if d := e.deliveryOf(groupID, destWH); d == nil || d.buttonKeyID != "" || json.Unmarshal(d.payload, &st) != nil ||
+		st.Group == nil || st.Group.AlertGroup.Number != 7 || st.Language != "en" {
+		t.Errorf("delivery to the webhook: %+v", d)
 	}
 	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business,
 		Renderer: stubRenderer{err: errBoom}})

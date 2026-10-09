@@ -184,10 +184,10 @@ func TestRecoveryCurrentState(t *testing.T) {
 	}
 	pub, upd := calls[0], calls[1]
 	if pub.Loudness != groups.Loud || !slices.Equal(pub.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) ||
-		!strings.HasPrefix(pub.Message.Text(), "#31 ") {
+		!strings.HasPrefix(textOf(pub), "#31 ") {
 		t.Errorf("A %+v", pub)
 	}
-	if !strings.HasPrefix(upd.Message.Text(), "#32 ") || !strings.Contains(upd.Message.Text(), "Acknowledged") {
+	if !strings.HasPrefix(textOf(upd), "#32 ") || !strings.Contains(textOf(upd), "Acknowledged") {
 		t.Errorf("B %+v", upd)
 	}
 	if e.db.dests[destMM].health != "healthy" || byGroup(groupC).state != "withheld" ||

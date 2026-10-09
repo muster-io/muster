@@ -71,6 +71,7 @@ type Renderer struct {
 	sandbox   *templates.Sandbox
 	links     Links
 	names     Names
+	requests  RequestPreviewer
 
 	mu    sync.Mutex
 	cache map[string]*templates.Template
@@ -407,6 +408,12 @@ func (r *Renderer) data(src *Source) templates.Data {
 		}
 	}
 	return d
+}
+
+// Data is the template data of src with alert data as received, unescaped for any markup: what the request templates
+// of an outgoing webhook read, whose receiver's format Muster does not know (C-15.FR-3).
+func (r *Renderer) Data(src *Source) templates.Data {
+	return r.data(src)
 }
 
 func alertData(a SourceAlert, loc *time.Location) templates.Alert {

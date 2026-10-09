@@ -61,3 +61,11 @@ The template sandbox (internal/templates, ADR-0012) uses the function registries
 (https://github.com/go-sprout/sprout), licensed under the MIT License, Copyright (C) 2013-2020 Masterminds, as a
 library dependency of the shipped binary; no sprout code is copied. Alertmanager's template functions are
 re-implemented under their Alertmanager names from their documented behaviour; no Alertmanager code is copied.
+
+
+JSONPath
+========
+
+The extraction rules of outgoing webhooks in template mode (internal/webhooks, C-15.FR-3) evaluate RFC 9535 JSONPath
+with theory/jsonpath (https://github.com/theory/jsonpath), licensed under the MIT License, Copyright 2024-2026
+David E. Wheeler, as a library dependency of the shipped binary; no jsonpath code is copied.

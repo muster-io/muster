@@ -11,24 +11,65 @@ files_touched:
   - internal/webhooks/extract.go
   - internal/webhooks/adapter.go
   - internal/webhooks/destination.go
+  - internal/webhooks/query.sql
   - internal/webhooks/template_test.go
   - internal/webhooks/extract_test.go
   - internal/webhooks/adapter_test.go
+  - internal/webhooks/secrets_test.go
+  - internal/delivery/delivery.go
   - internal/delivery/render.go
+  - internal/delivery/enqueue.go
+  - internal/delivery/worker.go
+  - internal/delivery/threads.go
   - internal/delivery/outcomes.go
+  - internal/delivery/storm.go
+  - internal/delivery/membership.go
+  - internal/delivery/interactive.go
   - internal/delivery/webhookevents.go
+  - internal/delivery/query.sql
+  - internal/delivery/deliverytest/recorder.go
   - internal/delivery/live_test.go
-  - internal/destinations/delete.go
+  - internal/delivery/outcomes_test.go
+  - internal/delivery/render_test.go
+  - internal/delivery/worker_test.go
+  - internal/delivery/membership_test.go
+  - internal/delivery/storm_test.go
+  - internal/delivery/threads_test.go
+  - internal/delivery/enqueue_test.go
+  - internal/delivery/broken_test.go
+  - internal/delivery/publication_test.go
+  - internal/delivery/presses_test.go
+  - internal/delivery/limiter_test.go
+  - internal/db/migrations/0006_deliveries_published_at.up.sql
+  - internal/db/migrations/0006_deliveries_published_at.down.sql
+  - internal/db/db_test.go
+  - internal/db/migrate_test.go
+  - internal/destinations/write.go
+  - internal/destinations/query.sql
+  - internal/destinations/write_test.go
   - internal/groups/system.go
   - internal/messages/preview.go
+  - internal/messages/render.go
+  - internal/messages/render_test.go
+  - internal/messages/default_test.go
+  - internal/templates/sandbox.go
+  - internal/internalalerts/registry.go
+  - internal/internalalerts/raise.go
+  - internal/internalalerts/internalalerts_test.go
   - internal/api/templates.go
+  - internal/api/destinations.go
   - internal/api/destinations_test.go
+  - internal/runtime/runtime.go
+  - internal/archlint/secretleak.go
   - internal/fakes/fakewebhook/chat.go
+  - internal/fakes/fakewebhook/fakewebhook.go
   - internal/fakes/fakewebhook/fakewebhook_test.go
   - internal/logging/events.go
   - go.mod
   - NOTICE
+  - design/db/schema.md
   - docs/outgoing-webhooks/templates.md
+  - docs/outgoing-webhooks/events.md
   - test/e2e/webhook_template_test.go
 acceptance:
   - "[C-15.FR-1, C-15.FR-3] An outgoing webhook Destination in mode `template` or `both` stores \"create\" and \"update\" requests and optional \"open thread\" and \"reply in thread\" requests — method, URL, headers, body and extraction rules — whose templates are parsed and dry-run on save."
@@ -208,7 +249,27 @@ None.
   its output for a change of status makes no call, as for a messenger whose text did not change.
 - The template forms `{{ with .Secrets }}…{{ end }}` and variables such as `$s := .Secrets` are not detected as Secret
   references today. A missing Secret read that way renders empty instead of failing, and in the URL it can raise a false
-  `literal_credential` warning. This story either recognises these forms or refuses them on save.
+  `literal_credential` warning. This story either recognises these forms or refuses them on save. Done (D291): a
+  template reads a Secret, or an extracted value, only as `.Secrets.<name>`, `$.Secrets.<name>` or `index .Secrets
+  "<name>"` (the same for `.Response`); every other use is refused on save at its line and column, in both modes, and
+  fails at runtime as a template error. Recognising the forms would need data-flow analysis of the template; refusing
+  is simpler and leaves no path where a missing Secret renders empty. The URL warning reads the same three forms.
+- D277: a first Publication is found by `deliveries.published_at IS NULL` instead of `message_id IS NULL` — a
+  template-mode "create" whose rule finds nothing publishes with no message id. `published_at` is cleared with the
+  message id when a Root message is forgotten for a republication; migration 0006 clears it on the rows already in that
+  state. Every delivery query that asked "is it published" changed, which is why `files_touched` grew past the first
+  estimate: the delivery queries, their in-memory fakes in the unit tests, and the schema.
+- Choices of this story within the contract: extraction rules belong to "create" and "open thread" only (a rule on
+  another request is refused on save, since its value is never stored); "create" reads no `.Response`, "open thread"
+  and "update" read those of "create" (an "update" can come before any thread exists), "reply in thread" both; the
+  Secrets printed or encoded whole (`{{ toJson . }}`) show as `[redacted]`; a request with a body and no `Content-Type` header of its own is sent as
+  `application/json`, and only `Content-Length`, `Host` and the three `webhook-*` headers are reserved; each request
+  has its own `webhook-id`, since reconciliation replaces a request instead of retrying it; a rule stores a string,
+  number or boolean of at most 1024 bytes, anything else counts as missing; the Desired state stores the data the
+  templates read and hashes the "update" request rendered with the Secrets as `[redacted]` and the values as
+  `example-<name>`; `MusterTemplateError` gains the Destination as its other entity (`destination`,
+  `destination_name`), and the events mode settles the template error the same way. The dry run on save uses the
+  built-in example of C-12.FR-5, as an outgoing webhook belongs to no Route.
 
 ## Coverage
 

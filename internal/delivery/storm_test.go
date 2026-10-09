@@ -123,7 +123,8 @@ func (f *fakeDB) ListStormSummaries(_ context.Context, arg dbgen.ListStormSummar
 	var out []dbgen.ListStormSummariesRow
 	for _, d := range f.deliveries {
 		if d.storm == arg.StormID {
-			out = append(out, dbgen.ListStormSummariesRow{ID: d.id, DesiredHash: d.hash})
+			out = append(out, dbgen.ListStormSummariesRow{ID: d.id, DesiredHash: d.hash, DestinationID: d.dest,
+				DestinationType: f.dests[d.dest].typ})
 		}
 	}
 	return out, nil
@@ -266,7 +267,7 @@ func (f *fakeDB) QuietStormSummaries(_ context.Context, arg dbgen.QuietStormSumm
 		return err
 	}
 	for _, d := range f.deliveries {
-		if d.storm == arg.StormID && d.messageID == nil {
+		if d.storm == arg.StormID && d.publishedAt == nil {
 			d.loud, d.updated = pgtype.Bool{Bool: false, Valid: true}, arg.Now
 		}
 	}
@@ -297,7 +298,7 @@ func (f *fakeDB) RetireStormSummary(_ context.Context, arg dbgen.RetireStormSumm
 	for _, d := range f.deliveries {
 		if st != nil && d.storm == st.id && d.dest == arg.DestinationID && !terminal(d) {
 			d.state = "retired"
-			if d.messageID == nil {
+			if d.publishedAt == nil {
 				d.state = "withheld"
 			}
 			d.updated = arg.Now
@@ -402,10 +403,10 @@ func TestStorm(t *testing.T) {
 	var loud, summaries, edits int
 	for _, c := range e.rec.Calls() {
 		switch {
-		case c.Method == deliverytest.MethodPublish && strings.HasPrefix(c.Message.Text(), "Storm on Route payments"):
+		case c.Method == deliverytest.MethodPublish && strings.HasPrefix(textOf(c), "Storm on Route payments"):
 			summaries++
 			if c.Loudness != groups.Loud || !slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) ||
-				!strings.Contains(c.Message.Text(), "1 new Alert Groups, 0 Urgent") {
+				!strings.Contains(textOf(c), "1 new Alert Groups, 0 Urgent") {
 				t.Errorf("summary %+v", c)
 			}
 		case c.Method == deliverytest.MethodPublish:
@@ -422,8 +423,8 @@ func TestStorm(t *testing.T) {
 	}
 	last := e.rec.Calls()[len(e.rec.Calls())-1]
 	if loud != 23 || summaries != 1 || edits != 9 ||
-		!strings.Contains(last.Message.Text(), "10 new Alert Groups, 3 Urgent") {
-		t.Errorf("publications %d, summaries %d, edits %d, last %q", loud, summaries, edits, last.Message.Text())
+		!strings.Contains(textOf(last), "10 new Alert Groups, 3 Urgent") {
+		t.Errorf("publications %d, summaries %d, edits %d, last %q", loud, summaries, edits, textOf(last))
 	}
 	var held []*fakeDelivery
 	for _, d := range e.db.deliveries {
@@ -486,7 +487,7 @@ func TestStorm(t *testing.T) {
 			final = append(final, c)
 		}
 	}
-	if len(final) != 1 || final[0].Loudness != groups.Quiet || final[0].Message.Text() !=
+	if len(final) != 1 || final[0].Loudness != groups.Quiet || textOf(final[0]) !=
 		"Storm over: 5 Alert Groups still open" {
 		t.Errorf("final summary %+v", final)
 	}
@@ -557,7 +558,7 @@ func TestStormDoesNotCalm(t *testing.T) {
 	e.enqueue(t, g, groups.System, groups.Recorded{Seq: 2, Event: groups.EventUrgencyRaised,
 		Variant: groups.VariantRemovesNone, Loudness: groups.Quiet})
 	e.round(t)
-	if p := e.publications(); len(p) != 1 || p[0].Loudness != groups.Loud || !strings.HasPrefix(p[0].Message.Text(),
+	if p := e.publications(); len(p) != 1 || p[0].Loudness != groups.Loud || !strings.HasPrefix(textOf(p[0]),
 		fmt.Sprintf("#%d ", id)) {
 		t.Errorf("released %+v", p)
 	}
@@ -714,7 +715,7 @@ func TestStormSummaryAfterEndIsQuiet(t *testing.T) {
 	e.round(t)
 	var summary []deliverytest.Call
 	for _, c := range e.publications() {
-		if strings.HasPrefix(c.Message.Text(), "Storm over") {
+		if strings.HasPrefix(textOf(c), "Storm over") {
 			summary = append(summary, c)
 		}
 	}
@@ -771,16 +772,16 @@ func TestStormDestinationJoinsAndLeaves(t *testing.T) {
 		switch {
 		case c.Destination.PublicID != wh || c.Method != deliverytest.MethodPublish:
 			t.Errorf("call %s to %s", c.Method, c.Destination.PublicID)
-		case strings.HasPrefix(c.Message.Text(), "Storm on Route"):
+		case strings.HasPrefix(textOf(c), "Storm on Route"):
 			summary = &c
 		case c.Loudness == groups.Quiet:
-			quiet = append(quiet, strings.Fields(c.Message.Text())[0])
+			quiet = append(quiet, strings.Fields(textOf(c))[0])
 		default:
 			t.Errorf("loud publication %+v", c)
 		}
 	}
 	slices.Sort(quiet)
-	if summary == nil || summary.Loudness != groups.Loud || !strings.Contains(summary.Message.Text(), "3 new Alert Groups") ||
+	if summary == nil || summary.Loudness != groups.Loud || !strings.Contains(textOf(*summary), "3 new Alert Groups") ||
 		!slices.Equal(quiet, []string{"#8001", "#8002", "#8004"}) {
 		t.Errorf("summary %+v, quiet %v", summary, quiet)
 	}
@@ -812,7 +813,7 @@ func TestStormDestinationJoinsAndLeaves(t *testing.T) {
 	}
 	e.round(t)
 	for _, c := range e.rec.Calls() {
-		if c.Destination.PublicID == wh && !strings.Contains(c.Message.Text(), "No longer updated here") {
+		if c.Destination.PublicID == wh && !strings.Contains(textOf(c), "No longer updated here") {
 			t.Errorf("a call to the destination that left %+v", c)
 		}
 	}

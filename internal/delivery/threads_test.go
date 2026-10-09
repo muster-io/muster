@@ -59,7 +59,7 @@ func TestThreadBatching(t *testing.T) {
 	g := e.group(groups.StatusFiring, "a")
 	e.enqueue(t, g, groups.System, alertsAdded(2, groups.StatusFiring, "fp00"))
 	e.round(t)
-	if r := e.replies(); len(r) != 1 || r[0].Message.Text() != "#7 alerts_added\nfp00" ||
+	if r := e.replies(); len(r) != 1 || textOf(r[0]) != "#7 alerts_added\nfp00" ||
 		r[0].Loudness != groups.Loud || !slices.Equal(r[0].Mentions, []groups.Mention{groups.MentionNewAlerts}) {
 		t.Fatalf("leading reply %+v", r)
 	}
@@ -97,7 +97,7 @@ func TestThreadBatching(t *testing.T) {
 	}
 	e.business.Set(business0.Add(120 * time.Second))
 	e.round(t)
-	if r := e.replies(); len(r) != 3 || r[2].Message.Text() != "#7 alerts_added\nfp40" {
+	if r := e.replies(); len(r) != 3 || textOf(r[2]) != "#7 alerts_added\nfp40" {
 		t.Fatalf("second batch %+v", r)
 	}
 	// A quiet period longer than the window: at once again.
@@ -131,7 +131,7 @@ func TestBatchLoudness(t *testing.T) {
 	e.round(t)
 	r := e.replies()
 	if len(r) != 2 || r[1].Loudness != groups.Loud || !slices.Equal(r[1].Mentions,
-		[]groups.Mention{groups.MentionNewAlerts}) || r[1].Message.Text() != "#7 alerts_added\nfp2\nfp3\nfp4" {
+		[]groups.Mention{groups.MentionNewAlerts}) || textOf(r[1]) != "#7 alerts_added\nfp2\nfp3\nfp4" {
 		t.Errorf("batch %+v", r)
 	}
 	var batch *fakeReply
@@ -166,7 +166,7 @@ func TestRepliesInOrder(t *testing.T) {
 	e.business.Advance(5*time.Second + delivery.TokenMargin)
 	e.round(t)
 	r := e.replies()
-	if e.rec.Count(deliverytest.MethodPublish) != 2 || len(r) != 1 || !strings.Contains(r[0].Message.Text(), "takeover") {
+	if e.rec.Count(deliverytest.MethodPublish) != 2 || len(r) != 1 || !strings.Contains(textOf(r[0]), "takeover") {
 		t.Fatalf("first round %+v", e.rec.Calls())
 	}
 	e.business.Advance(3*time.Second + delivery.TokenMargin)
@@ -174,8 +174,8 @@ func TestRepliesInOrder(t *testing.T) {
 	e.business.Advance(time.Second)
 	e.round(t)
 	r = e.replies()
-	if len(r) != 3 || !strings.Contains(r[1].Message.Text(), "takeover") ||
-		!strings.Contains(r[2].Message.Text(), "reopened") || r[2].Root.MessageID != "m1" {
+	if len(r) != 3 || !strings.Contains(textOf(r[1]), "takeover") ||
+		!strings.Contains(textOf(r[2]), "reopened") || r[2].Root.MessageID != "m1" {
 		t.Errorf("in order %+v", r)
 	}
 }
@@ -280,7 +280,7 @@ func TestReplyRenderer(t *testing.T) {
 	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: 2,
 		Event: groups.EventTakeover, Loudness: groups.Loud})
 	e.round(t)
-	if r := e.replies(); len(r) != 1 || r[0].Message.Text() != "custom takeover" {
+	if r := e.replies(); len(r) != 1 || textOf(r[0]) != "custom takeover" {
 		t.Errorf("replies %+v", r)
 	}
 	// A reply that cannot be rendered is not sent; its lease runs out and it is tried again.
