@@ -33,7 +33,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-11 Delivery engine | Shadow | 35 | S-034, S-035 | yes | 35 of 35 |
 | C-12 Messages | Shadow | 19 | S-036, S-037, S-038 | yes | 19 of 19 |
 | C-13 Mattermost | Shadow | 28 | S-039, S-061, S-040, S-064 | yes | 28 of 28 |
-| C-14 Telegram | Shadow | 35 | S-041, S-042, S-043 | yes | 35 of 35 |
+| C-14 Telegram | Shadow | 35 | S-041, S-042, S-066, S-067, S-043 | yes | 35 of 35 |
 | C-15 Outgoing webhook | Shadow | 25 | S-044, S-045, S-046 | yes | 25 of 25 |
 | C-16 Destination test | Shadow | 14 | S-047, S-048 | yes | 14 of 14 |
 | C-17 Timers | Actions | 20 | S-049, S-050 | yes | 20 of 20 |
@@ -60,7 +60,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-01.FR-10 | S-003 | complete |  |
 | C-01.FR-11 | S-002 (part), S-003 (part) | complete |  |
 | C-01.FR-12 | S-001 (part), S-005 (part), S-006 | complete |  |
-| C-01.FR-13 | S-004 (part), S-006 (part), S-009 (part), S-013 (part), S-018 (part), S-020 (part), S-023 (part), S-037 (part), S-039 (part), S-041 (part), S-042 (part), S-044 (part), S-045 (part), S-047 (part) | complete | later capabilities extend their fake servers and the demo configuration |
+| C-01.FR-13 | S-004 (part), S-006 (part), S-009 (part), S-013 (part), S-018 (part), S-020 (part), S-023 (part), S-037 (part), S-039 (part), S-041 (part), S-042 (part), S-066 (part), S-067 (part), S-044 (part), S-045 (part), S-047 (part) | complete | later capabilities extend their fake servers and the demo configuration |
 | C-01.FR-14 | S-001, S-058 (part) | complete | the README demo animation is added after the frontend stories, with S-058 |
 | C-01.FR-15 | S-003 (part), S-004 (part) | complete |  |
 | C-01.AC-1 | S-001 (part), S-002 (part) | complete |  |
@@ -381,14 +381,14 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 |---|---|---|---|
 | C-10.FR-1 | S-032 (part), S-063 (part), S-033 | complete |  |
 | C-10.FR-2 | S-032 (part), S-033 | complete |  |
-| C-10.FR-3 | S-032, S-061 (part), S-042 (part) | complete | the messenger Transports are passed in by S-061 and S-042 |
+| C-10.FR-3 | S-032, S-061 (part), S-067 (part) | complete | the messenger Transports are passed in by S-061 and S-067 |
 | C-10.FR-4 | S-032 (part), S-033, S-049 (part) | complete | Reminders starting over for the new Owner are C-17 (S-049) |
 | C-10.FR-5 | S-032 | complete |  |
-| C-10.FR-6 | S-032 (part), S-063 (part), S-033, S-061 (part), S-042 (part) | complete | the messenger durations come with S-061 and S-042 |
+| C-10.FR-6 | S-032 (part), S-063 (part), S-033, S-061 (part), S-042 (part), S-067 (part) | complete | the messenger durations come with S-061, and with S-042 (buttons) and S-067 (presses) |
 | C-10.FR-7 | S-032 (part), S-033 | complete |  |
 | C-10.FR-8 | S-063 (part), S-033 | complete |  |
 | C-10.FR-10 | S-032 | complete |  |
-| C-10.FR-11 | S-032 (part), S-061 (part), S-042 (part), S-051 | complete | the messenger adapters are S-061 and S-042; refusals of presses without an Account link are verified with real links by S-051 |
+| C-10.FR-11 | S-032 (part), S-061 (part), S-067 (part), S-051 | complete | the messenger presses are S-061 and S-067; refusals of presses without an Account link are verified with real links by S-051 |
 | C-10.FR-12 | S-032 (part), S-063 (part) | complete |  |
 | C-10.FR-13 | S-063 (part), S-033 | complete |  |
 | C-10.FR-14 | S-032 (part), S-033 | complete |  |
@@ -427,7 +427,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-11.FR-4 | S-034 | complete |  |
 | C-11.FR-5 | S-034 | complete |  |
 | C-11.FR-6 | S-035 (part), S-044 (part), S-045 (part) | complete |  |
-| C-11.FR-7 | S-034 (part), S-061 (part), S-042 (part) | complete |  |
+| C-11.FR-7 | S-034 (part), S-061 (part), S-042 (part), S-066 (part) | complete |  |
 | C-11.FR-8 | S-034 (part), S-035 (part), S-061 (part), S-042 (part), S-044 (part) | complete |  |
 | C-11.FR-9 | S-035 (part), S-061 (part), S-064 (part), S-042 (part), S-044 (part), S-047 (part) | complete |  |
 | C-11.FR-10 | S-035, S-064 (part) | complete |  |
@@ -436,12 +436,12 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-11.FR-13 | S-035 | complete |  |
 | C-11.FR-14 | S-035 (part), S-039 (part), S-044 (part), S-045 (part) | complete |  |
 | C-11.FR-15 | S-034 | complete |  |
-| C-11.FR-16 | S-034 (part), S-035 (part), S-064 (part), S-042 (part) | complete |  |
+| C-11.FR-16 | S-034 (part), S-035 (part), S-064 (part), S-066 (part) | complete |  |
 | C-11.FR-17 | S-034 (part), S-035 (part) | complete |  |
 | C-11.FR-18 | S-034 (part), S-035 (part), S-039 (part), S-042 (part), S-044 (part) | complete |  |
 | C-11.FR-19 | S-035 (part), S-044 (part) | complete |  |
 | C-11.FR-20 | S-034 (part), S-035 (part), S-049 (part) | complete | delivery handles the C-17 rows from S-034 on; they are produced from S-049 on |
-| C-11.FR-21 | S-034 (part), S-035 (part), S-042 (part) | complete |  |
+| C-11.FR-21 | S-034 (part), S-035 (part), S-066 (part) | complete |  |
 | C-11.AC-1 | S-034, S-061 (part) | complete | through the recording test adapter; repeated against the fake Mattermost server in S-061 |
 | C-11.AC-2 | S-034 | complete | through the recording test adapter; repeated against the fake Mattermost server in S-061 (C-13.AC-15) |
 | C-11.AC-3 | S-035 | complete | through the recording test adapter; repeated against the fake Mattermost server in S-061 |
@@ -470,7 +470,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-12.FR-5 | S-036 (part), S-038 (part) | complete |  |
 | C-12.FR-6 | S-036 (part), S-037 (part), S-038 (part) | complete |  |
 | C-12.FR-7 | S-036 (part), S-037 (part), S-061 (part), S-042 (part) | complete |  |
-| C-12.FR-8 | S-037 (part), S-039 (part), S-061 (part), S-064 (part), S-042 (part), S-044 (part), S-045 (part) | complete |  |
+| C-12.FR-8 | S-037 (part), S-039 (part), S-061 (part), S-064 (part), S-042 (part), S-066 (part), S-044 (part), S-045 (part) | complete |  |
 | C-12.FR-9 | S-037 (part), S-038 (part) | complete |  |
 | C-12.FR-10 | S-036 | complete |  |
 | C-12.FR-11 | S-036 (part), S-061 (part), S-042 (part) | complete |  |
@@ -521,16 +521,16 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-14
 
-[Telegram](../prd/l1/C-14-telegram.md) · Shadow · stories: S-041, S-042, S-043
+[Telegram](../prd/l1/C-14-telegram.md) · Shadow · stories: S-041, S-042, S-066, S-067, S-043
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-14.FR-1 | S-041 (part), S-043 (part) | complete |  |
-| C-14.FR-2 | S-042 (part), S-043 (part) | complete |  |
-| C-14.FR-3 | S-042 | complete |  |
-| C-14.FR-4 | S-042, S-049 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminders of S-049 |
-| C-14.FR-5 | S-042 | complete | the answer to a linked account is checked with link rows set up directly (S-051 creates links) |
-| C-14.FR-6 | S-042 | complete |  |
+| C-14.FR-2 | S-042 (part), S-066 (part), S-043 (part) | complete |  |
+| C-14.FR-3 | S-066 | complete |  |
+| C-14.FR-4 | S-067, S-049 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminders of S-049 |
+| C-14.FR-5 | S-067 | complete | the answer to a linked account is checked with link rows set up directly (S-051 creates links) |
+| C-14.FR-6 | S-042 (part), S-066 (part) | complete |  |
 | C-14.FR-7 | S-042 | complete |  |
 | C-14.FR-8 | S-041 (part), S-051 | complete | the router receives `/start`; the bot answers it once Account links exist (S-051) |
 | C-14.FR-9 | S-042 (part), S-058 | complete | the section on restricted networks is C-21.FR-7 (S-058) |
@@ -541,25 +541,25 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-14.FR-14 | S-042 (part), S-043 (part) | complete |  |
 | C-14.FR-15 | S-042 | complete |  |
 | C-14.FR-16 | S-042 | complete |  |
-| C-14.AC-1 | S-042 | complete |  |
-| C-14.AC-2 | S-042 | complete |  |
+| C-14.AC-1 | S-066 | complete |  |
+| C-14.AC-2 | S-066 | complete |  |
 | C-14.AC-3 | S-041 | complete |  |
-| C-14.AC-4 | S-042 | complete | by the press-age rule of C-14.FR-4 |
+| C-14.AC-4 | S-067 | complete | by the press-age rule of C-14.FR-4 |
 | C-14.AC-5 | S-041 | complete |  |
 | C-14.AC-6 | S-041 (part), S-043 (part) | complete |  |
 | C-14.AC-7 | S-041 (part), S-042 (part), S-043 (part) | complete |  |
 | C-14.AC-8 | S-042 | complete |  |
-| C-14.AC-9 | S-042 | complete |  |
+| C-14.AC-9 | S-067 | complete |  |
 | C-14.AC-10 | S-041 | complete |  |
-| C-14.AC-11 | S-041 (part), S-042 (part) | complete |  |
+| C-14.AC-11 | S-041 (part), S-067 (part) | complete |  |
 | C-14.AC-12 | S-042 | complete |  |
 | C-14.AC-13 | S-042 (part), S-043 (part) | complete |  |
 | C-14.AC-14 | S-042 | complete |  |
-| C-14.AC-15 | S-042 | complete |  |
-| C-14.AC-16 | S-042 (part), S-043 (part) | complete |  |
+| C-14.AC-15 | S-066 | complete |  |
+| C-14.AC-16 | S-066 (part), S-043 (part) | complete |  |
 | C-14.AC-17 | S-042 | complete |  |
-| C-14.AC-18 | S-042 | complete |  |
-| C-14.AC-19 | S-042 | complete |  |
+| C-14.AC-18 | S-067 | complete |  |
+| C-14.AC-19 | S-066 | complete |  |
 
 ## C-15
 

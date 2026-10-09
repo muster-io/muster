@@ -172,7 +172,7 @@ package) and S-034 and S-035 (the delivery engine before the first messenger). T
 `go test -tags integration`, that run the real runtime against the development database and the development clock —
 with a recording test adapter in place of a messenger — and their pull requests carry that output; S-036 uses the same
 path for the parts of messages that need delivery. The messenger stories repeat the key checks against the fake servers
-(S-061, S-042).
+(S-061, S-042, S-066, S-067).
 
 ## 6. IDs
 
@@ -233,10 +233,10 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 |---|---|---|---|
 | Foundation | C-01 – C-04 | S-001 – S-017, S-062 | 18 |
 | Observation | C-05 – C-10 | S-018 – S-033, S-063 | 17 |
-| Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064, S-065 | 18 |
+| Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 – S-067 | 20 |
 | Actions | C-17, C-18 | S-049 – S-052 | 4 |
 | Operations | C-19 – C-21 | S-053 – S-060 | 8 |
-| **L1** | 21 | | **65** |
+| **L1** | 21 | | **67** |
 
 ### Foundation
 
@@ -298,19 +298,21 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-040](S-040-mattermost-connection-pages-shared-destination-pages-delivery-state-and-delivery-problem-filter.md) | C-13 | Mattermost Connection pages with the check, the callback address and its hint (FE) | fe | S-038, S-061 |
 | [S-064](S-064-destination-pages-route-destinations-delivery-state-and-delivery-problem-filter.md) | C-13 | Destination pages, the Route's Destinations and delivery sections, delivery state and the Delivery problem filter (FE) | fe | S-040 |
 | [S-041](S-041-telegram-connection-bot-api-base-url-dry-probe-long-polling-and-webhook-modes.md) | C-14 | Telegram Connection: Bot API base URL, dry probe, long polling and webhook modes (BE) | be | S-061 |
-| [S-042](S-042-telegram-adapter-channel-posts-comment-threads-buttons-callbacks-and-check.md) | C-14 | Telegram adapter: channel posts, comment Threads, buttons, callbacks and Destination check (BE) | be | S-041 |
-| [S-043](S-043-telegram-connection-pages-step-by-step-check-and-destination-form.md) | C-14 | Telegram Connection pages with the step-by-step check and the Telegram Destination form (FE) | fe | S-064, S-042 |
+| [S-042](S-042-telegram-adapter-channel-posts-comment-threads-buttons-callbacks-and-check.md) | C-14 | Telegram Destinations, the Destination check, Root message posts and edits (BE) | be | S-041 |
+| [S-066](S-066-telegram-comment-threads-copy-buffer-copy-wait-and-unattached-replies.md) | C-14 | Telegram comment Threads: the post copy buffer, waiting for the copy and unattached replies (BE) | be | S-042 |
+| [S-067](S-067-telegram-button-presses-callback-answers-signed-data-account-links-and-update-router-lock.md) | C-14 | Telegram button presses: callback answers, signed data, Account links and the update router lock (BE) | be | S-042 |
+| [S-043](S-043-telegram-connection-pages-step-by-step-check-and-destination-form.md) | C-14 | Telegram Connection pages with the step-by-step check and the Telegram Destination form (FE) | fe | S-064, S-042, S-066 |
 | [S-044](S-044-outgoing-webhook-events-mode-signing-secret-secrets-and-error-mapping.md) | C-15 | Outgoing webhook events mode, Signing secret, Secrets and error mapping (BE) | be | S-039 |
 | [S-045](S-045-outgoing-webhook-template-mode-extraction-threads-storm-summaries-and-mentions.md) | C-15 | Outgoing webhook template mode: extraction, threads, Storm summaries and Mentions as data (BE) | be | S-044 |
 | [S-046](S-046-outgoing-webhook-destination-form-request-builders-secrets-and-signing-secret.md) | C-15 | Outgoing webhook Destination form, request builders, Secrets and Signing secret actions (FE) | fe | S-064, S-043, S-045 |
-| [S-047](S-047-destination-test-and-preview-for-every-destination-type.md) | C-16 | Destination test and preview for every Destination type (BE) | be | S-042, S-045 |
+| [S-047](S-047-destination-test-and-preview-for-every-destination-type.md) | C-16 | Destination test and preview for every Destination type (BE) | be | S-067, S-045 |
 | [S-048](S-048-test-and-preview-panels-on-the-destination-page.md) | C-16 | Test and Preview panels on the Destination page (FE) | fe | S-043, S-046, S-047 |
 
 ### Actions
 
 | ID | Capability | Title | Kind | Depends on |
 |---|---|---|---|---|
-| [S-049](S-049-ack-timeouts-unclaimed-reminders-auto-unacknowledge-and-still-on-it.md) | C-17 | Ack timeouts, Unclaimed, Reminders, auto-unacknowledge and "Still on it" (BE) | be | S-042, S-047 |
+| [S-049](S-049-ack-timeouts-unclaimed-reminders-auto-unacknowledge-and-still-on-it.md) | C-17 | Ack timeouts, Unclaimed, Reminders, auto-unacknowledge and "Still on it" (BE) | be | S-066, S-067, S-047 |
 | [S-050](S-050-route-timer-fields-unclaimed-filter-and-badge-next-notice-and-still-on-it.md) | C-17 | Route policy fields, Unclaimed filter and badge, next notice and "Still on it" (FE) | fe | S-033, S-038, S-064, S-049 |
 | [S-051](S-051-account-links-telegram-deep-links-mattermost-codes-press-attribution-and-audit-log.md) | C-18 | Account links: Telegram deep links, Mattermost codes, press attribution and Audit log (BE) | be | S-049 |
 | [S-052](S-052-messenger-accounts-in-the-profile-and-account-links-on-the-user-page.md) | C-18 | Messenger accounts in the profile and Account links on the user page (FE) | fe | S-015, S-051 |
@@ -344,7 +346,12 @@ pages, the Route editor's Destinations and delivery sections, the delivery state
 follows S-040 in the Shadow phase, and the Telegram and outgoing webhook pages and the timer fields (S-043, S-046,
 S-050) follow it. Both keep their file names. S-065 was added after S-061's load test showed that one Integration's
 burst misses NFR-2 (D283): it belongs to C-06 but follows S-061 in the Shadow phase, before S-040, because only the full
-load profile of S-061 measures it.
+load profile of S-061 measures it. S-066 and S-067 were split from S-042 before its implementation, because with the
+files its contract had missed it touched about 63 files. S-042 keeps the Telegram Destinations, the Destination check,
+`muster doctor`, the Root message posts and edits with the response mapping, and the documentation page; S-066 takes
+the comment Threads with the copy buffer, the copy wait and the lost Thread, and S-067 the button presses with the
+update router lock. Both follow S-042 in the Shadow phase, before S-043, which needs "Thread not attached" from S-066;
+S-047 and S-049 follow S-067. S-042 keeps its file name.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

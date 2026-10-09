@@ -114,7 +114,7 @@ issue: 35
   | `unknown` | the row ends `not_delivered` with `last_error_class` and the masked `last_error`; a `not_delivered` delivery event; the Destination stays healthy; the next change of its Desired state makes it `pending` again |
   | `markup_rejected` | the adapter resends the same text without markup in the same attempt; counted and recorded as `markup_rejected` |
   | `gone` | the deleted Root message flow (below) |
-  | `thread_lost` | Telegram's lost Thread (S-042) |
+  | `thread_lost` | Telegram's lost Thread (S-066) |
 
   A successful call resets `attempts` and `first_failed_at`.
 - **Broken** (C-11.FR-9, FR-18; `destinations.health`, `broken_since`, `broken_cause`, `broken_reason`,
@@ -306,12 +306,12 @@ None.
 | C-11.FR-12 | full | |
 | C-11.FR-13 | full | |
 | C-11.FR-14 | partial | Routes, deletion, wiping and abandoning; `deleteConnection` calls it from S-039, the events mode is S-044 |
-| C-11.FR-16 | partial | waiting, Not delivered, deleted in the messenger, withheld, retired, possible duplicate; "Thread not attached" is S-042 |
+| C-11.FR-16 | partial | waiting, Not delivered, deleted in the messenger, withheld, retired, possible duplicate; "Thread not attached" is S-066 |
 | C-11.FR-17 | partial | completes the metrics with S-034 |
 | C-11.FR-18 | partial | health; the type fields come with S-039, S-042 and S-044 |
 | C-11.FR-19 | partial | messengers; the events-mode exception is S-044 |
 | C-11.FR-20 | partial | the delivery-event rows and `moved_to_default_route`; completes FR-20 with S-034 |
-| C-11.FR-21 | partial | every kind but `thread_not_attached` (S-042) |
+| C-11.FR-21 | partial | every kind but `thread_not_attached` (S-066) |
 | C-11.AC-3 | full | repeated against the fake Mattermost server in S-061 |
 | C-11.AC-4 | full | repeated in S-061 (C-13.AC-12) |
 | C-11.AC-5 | full | repeated in S-061 with a restart of Muster |

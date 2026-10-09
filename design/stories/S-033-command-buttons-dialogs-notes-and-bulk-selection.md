@@ -65,7 +65,7 @@ issue: 33
 
 **OUT**
 
-- "Still on it", the next notice and Unclaimed (S-050); commands in messengers (S-061, S-042).
+- "Still on it", the next notice and Unclaimed (S-050); commands in messengers (S-061, S-067).
 
 ## Contracts
 
@@ -165,7 +165,7 @@ None.
 | ID | Covered | Note |
 |---|---|---|
 | C-10.FR-1 | full | together with S-032 and S-063 |
-| C-10.FR-2 | full | together with S-032; messenger answers are S-061 and S-042 |
+| C-10.FR-2 | full | together with S-032; messenger answers are S-061 and S-067 |
 | C-10.FR-4 | full | together with S-032; Reminders for the new Owner are S-049 |
 | C-10.FR-6 | full | together with S-032 and S-063; messenger durations are S-061 and S-042 |
 | C-10.FR-7 | full | together with S-032 |

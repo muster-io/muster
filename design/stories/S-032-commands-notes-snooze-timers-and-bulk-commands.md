@@ -79,7 +79,7 @@ issue: 32
   acknowledgements of disabled and deleted users (S-063). Until S-063, a Snooze with `until` stays snoozed past that
   time until a person changes it.
 - The UI (S-033).
-- Commands from Mattermost and Telegram and their private answers (S-061, S-042); presses from accounts without an
+- Commands from Mattermost and Telegram and their private answers (S-061, S-067); presses from accounts without an
   Account link (S-051).
 - "Still on it", Reminders, ack timeouts and auto-unacknowledge (S-049).
 
@@ -305,13 +305,13 @@ None.
 |---|---|---|
 | C-10.FR-1 | partial | every command but Add Note and the Note of Resolve, which are S-063 |
 | C-10.FR-2 | partial | the API refusals; their texts in the UI are S-033 |
-| C-10.FR-3 | full | the messenger Transports are passed in by S-061 and S-042 |
+| C-10.FR-3 | full | the messenger Transports are passed in by S-061 and S-067 |
 | C-10.FR-4 | partial | the Takeover; Reminders starting over are S-049 |
 | C-10.FR-5 | full | |
-| C-10.FR-6 | partial | `until` and `no_end` in the API; the Snooze end is S-063, the dialog and the messenger durations S-033, S-061 and S-042 |
+| C-10.FR-6 | partial | `until` and `no_end` in the API; the Snooze end is S-063, the dialog and the messenger durations S-033, S-061, S-042 and S-067 |
 | C-10.FR-7 | partial | the API and the notice of a newer Alert Group; the UI is S-033 |
 | C-10.FR-10 | full | |
-| C-10.FR-11 | partial | the dispatcher accepts the messenger Transports; their adapters are S-061 and S-042, refusals without an Account link S-051 |
+| C-10.FR-11 | partial | the dispatcher accepts the messenger Transports; their adapters are S-061 and S-067, refusals without an Account link S-051 |
 | C-10.FR-12 | partial | the Audit log actions of the Commands; `alert_group.note_added` is S-063 |
 | C-10.FR-14 | partial | the API; the selection is S-033 |
 | C-10.FR-15 | partial | every row but `note_added` (S-063) |

@@ -139,7 +139,7 @@ issue: 51
   `deleteUserAccountLink` delete the link, record `account_link.unlink` with the actor, the Transport and the client
   address, and send the hint to the link's User. Nothing unlinks from chat.
 - **Presses** (C-18.FR-8, C-10.FR-11; `accountlinks/lookup.go`): `Lookup(identity space, external id)` returns the User
-  with its status and sets `last_used_at` at most once a minute. The adapters of S-061 and S-042 already answer: no
+  with its status and sets `last_used_at` at most once a minute. The press handlers of S-061 and S-067 already answer: no
   link — the "not linked" text with `{MUSTER_PUBLIC_URL}/profile`; a disabled User — "Your Muster account is disabled",
   without running the command; a missing Permission from the dispatcher — "You are not permitted to do this". Deleted
   Users have no links.
@@ -306,7 +306,7 @@ None.
 ## Notes
 
 - Suggested commit: `feat(accountlinks): link messenger accounts from the profile and attribute presses`.
-- The answers to Viewers and disabled Users exist since S-061 and S-042 and are verified here for the first time with
+- The answers to Viewers and disabled Users exist since S-061 and S-067 and are verified here for the first time with
   links made through the profile; if one does not hold, its fix belongs in this pull request.
 
 ## Coverage
@@ -332,7 +332,7 @@ None.
 | C-18.AC-6 | full | |
 | C-18.AC-7 | full | |
 | C-14.FR-8 | full | together with S-041: the bot answers `/start <token>` |
-| C-10.FR-11 | full | together with S-032, S-061 and S-042: refusals of presses without a link, from disabled Users and from Viewers |
+| C-10.FR-11 | full | together with S-032, S-061 and S-067: refusals of presses without a link, from disabled Users and from Viewers |
 | C-03.AC-14 | full | together with S-016: removing an Account link with a token |
 | C-03.FR-13 | partial | links removed when a User is deleted |
 | C-03.FR-14 | partial | the Account link entry types |
