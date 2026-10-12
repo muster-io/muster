@@ -104,8 +104,34 @@ func TestHubFanOut(t *testing.T) {
 		t.Errorf("a restored LISTEN sent %v", got)
 	}
 	h.Send(Hint{Type: HintSystemNotices}, func(s Subscriber) bool { return s.Admin })
-	if len(received(a)) != 0 || len(received(b)) != 4 {
+	if len(received(a)) != 0 || len(received(b)) != 5 {
 		t.Error("a hint for Admins reached another stream")
+	}
+}
+
+// TestHubSystemStatusHintsOnlyToAdmins: the system-status hint (C-19.FR-10) reaches only the streams whose identity
+// reads the System status, and a restored LISTEN sends it only to them. The organization package, which cannot
+// import this one, sends the same hint type.
+func TestHubSystemStatusHintsOnlyToAdmins(t *testing.T) {
+	if organization.HintSystemStatus != HintSystemStatus || organization.HintOrganization != HintOrganization {
+		t.Fatalf("hint types differ: %q, %q", organization.HintSystemStatus, organization.HintOrganization)
+	}
+	h, _ := newHub(nil)
+	admin, other := subscribe(t, h, Subscriber{SessionID: 1, Admin: true}), subscribe(t, h,
+		Subscriber{SessionID: 2, AlertGroups: true})
+	h.Receive(db.Hint{OrgID: 1, Type: HintSystemStatus})
+	if got := received(admin); !slices.Equal(got, []Hint{{Type: HintSystemStatus}}) {
+		t.Errorf("admin = %v", got)
+	}
+	if got := received(other); len(got) != 0 {
+		t.Errorf("a stream without system-status:read = %v", got)
+	}
+	h.Listening(true)
+	if got := received(admin); !slices.Contains(got, Hint{Type: HintSystemStatus}) {
+		t.Errorf("a restored LISTEN sent %v", got)
+	}
+	if got := received(other); slices.Contains(got, Hint{Type: HintSystemStatus}) {
+		t.Errorf("a restored LISTEN sent system-status to %v", got)
 	}
 }
 

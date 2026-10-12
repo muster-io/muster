@@ -58,7 +58,10 @@ import (
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/oidc"
 	odb "github.com/muster-io/muster/internal/oidc/dbgen"
+	"github.com/muster-io/muster/internal/organization"
+	orgdb "github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/outgoingheartbeat"
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/runtime"
 	"github.com/muster-io/muster/internal/telegram"
@@ -106,6 +109,7 @@ var registry = []Probe{
 	{Name: "telegram_connections", Run: probeTelegram},
 	{Name: "outgoing_webhooks", Run: probeWebhooks},
 	{Name: "account_links", Run: probeAccountLinks},
+	{Name: "outgoing_heartbeat", Run: probeOutgoingHeartbeat},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -2475,3 +2479,179 @@ func (s *probeLinkStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryP
 }
 
 func (s *probeLinkStore) Notify(context.Context, db.Hint) error { return nil }
+
+// probeOutgoingHeartbeat pushes the secrets through the outgoing heartbeat (C-19.FR-7): the first in the path and the
+// second in the query of its URL, set through the organization resource, whose Audit log diff is returned; the third
+// as the password of its HTTP proxy, which refuses it. The sender then meets an answer of 503, a redirect whose target
+// carries them, a refused connection, the refused proxy, an answer of 200 and a URL the outbound address policy
+// blocks. Neither the log, the errors nor the last error it records for the System status may carry them.
+func probeOutgoingHeartbeat(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	business := clock.NewManual(time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC))
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, business.Now())
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	status := http.StatusServiceUnavailable
+	var mu sync.Mutex
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			code := status
+			mu.Unlock()
+			if code == http.StatusFound {
+				w.Header().Set("Location", "http://elsewhere.example.org/"+r.URL.RawPath+"?"+r.URL.RawQuery)
+			}
+			w.WriteHeader(code)
+			_, _ = fmt.Fprintf(w, "refused %s %s", r.URL.RawQuery, r.URL.Path) //nolint:gosec // G705: a stand-in server that echoes the secrets on purpose
+		})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	proxy, err := fakeproxy.Start(ctx, fakeproxy.HTTP, "127.0.0.1:0", fakeproxy.Options{Username: "muster",
+		Password: "other"})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = proxy.Close() }()
+
+	tail := "/hook/" + url.PathEscape(secrets[0]) + "?token=" + url.QueryEscape(secrets[1])
+	settings := &probeOrgSettings{proxy: []byte(`{"enabled":false}`)}
+	svc := organization.NewService(1, settings, audit.NewWriter(logger, business), business).WithKeyring(k)
+	set := func(target string, p organization.ProxyInput) error {
+		o, err := svc.Get(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = svc.Update(ctx, audit.System, audit.TransportAPI, netip.Addr{}, nil, organization.Input{
+			Name: o.Name, TimeZone: o.TimeZone, SeverityLabel: o.SeverityLabel, CriticalIsUrgent: o.CriticalIsUrgent,
+			InstanceLabels: o.InstanceLabels, TOTPRequired: o.TOTPRequired,
+			OIDCTokenGraceSeconds: int64(o.OIDCTokenGrace / time.Second),
+			HeartbeatURL:          keyring.Replace(logging.Secret(target)), HeartbeatProxy: p})
+		return err
+	}
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	sender := &outgoingheartbeat.Sender{Store: probeHeartbeatStore{settings}, Keyring: k, Business: business, Log: logger,
+		Network: outgoingheartbeat.Network{Policy: func(int64) outbound.PolicySource {
+			return outbound.StaticPolicy(policy)
+		}, Log: logger, Real: clock.Real{}}}
+	base := "http://" + ln.Addr().String()
+	direct := organization.ProxyInput{Enabled: false}
+	typ, addr, user := proxyconf.TypeHTTP, proxy.Addr(), "muster"
+	viaProxy := organization.ProxyInput{Enabled: true, Type: &typ, Address: &addr, UsernameSet: true, Username: &user,
+		Password: keyring.Replace(logging.Secret(secrets[2]))}
+	var errs []error
+	for _, c := range []struct {
+		target string
+		proxy  organization.ProxyInput
+		status int
+	}{
+		{base + tail, direct, http.StatusServiceUnavailable},
+		{base + tail, direct, http.StatusFound},
+		{"http://127.0.0.1:1" + tail, direct, http.StatusOK},
+		{base + tail, viaProxy, http.StatusOK},
+		{base + tail, direct, http.StatusOK},
+		{"http://169.254.169.254" + tail, direct, http.StatusOK},
+	} {
+		errs = append(errs, set(c.target, c.proxy))
+		mu.Lock()
+		status = c.status
+		mu.Unlock()
+		business.Advance(outgoingheartbeat.Interval)
+		errs = append(errs, sender.Send(ctx, 1), errors.New("last error: "+settings.lastError.String))
+	}
+	for _, e := range settings.audit {
+		errs = append(errs, errors.New("audit: "+string(e.Diff)))
+	}
+	return errors.Join(errs...)
+}
+
+// probeOrgSettings is the organization row of probeOutgoingHeartbeat in memory: the resource for the organization
+// Service and the outgoing heartbeat columns for the sender.
+type probeOrgSettings struct {
+	url, password keyring.StoredSecret
+	proxy         []byte
+	version       int64
+	attemptAt     time.Time
+	lastOK        pgtype.Bool
+	lastError     pgtype.Text
+	audit         []adb.InsertAuditEntryParams
+}
+
+func (s *probeOrgSettings) InTx(_ context.Context, f func(organization.SettingsQueries) error) error {
+	return f(s)
+}
+
+func (s *probeOrgSettings) GetSettings(context.Context, int64) (orgdb.GetSettingsRow, error) {
+	return orgdb.GetSettingsRow{ID: 1, PublicID: "RGAAAAAAAAAAA1", Name: "Muster", TimeZone: "UTC",
+		SeverityLabel: "severity", SeverityMapping: []byte("[]"), SeverityStyles: []byte("[]"),
+		InstanceLabels: []string{}, TotpRequired: "nobody", OutgoingHeartbeatUrlSet: s.url.Set(),
+		OutgoingHeartbeatProxy: s.proxy, OutgoingHeartbeatProxyPasswordSet: s.password.Set(), Version: s.version}, nil
+}
+
+func (s *probeOrgSettings) LockSettings(context.Context, int64) (int64, error) { return s.version, nil }
+
+func (s *probeOrgSettings) GetOutgoingHeartbeatSecrets(context.Context, int64) (
+	orgdb.GetOutgoingHeartbeatSecretsRow, error) {
+	return orgdb.GetOutgoingHeartbeatSecretsRow{
+		OutgoingHeartbeatUrlCiphertext:           s.url.Ciphertext,
+		OutgoingHeartbeatUrlKeyID:                pgtype.Text{String: s.url.KeyID, Valid: s.url.Set()},
+		OutgoingHeartbeatProxyPasswordCiphertext: s.password.Ciphertext,
+		OutgoingHeartbeatProxyPasswordKeyID:      pgtype.Text{String: s.password.KeyID, Valid: s.password.Set()},
+	}, nil
+}
+
+func (s *probeOrgSettings) UpdateSettings(_ context.Context, arg orgdb.UpdateSettingsParams) (int64, error) {
+	s.url = keyring.StoredSecret{Ciphertext: arg.UrlCiphertext, KeyID: arg.UrlKeyID.String}
+	s.password = keyring.StoredSecret{Ciphertext: arg.ProxyPasswordCiphertext, KeyID: arg.ProxyPasswordKeyID.String}
+	s.proxy, s.version = arg.Proxy, s.version+1
+	return 1, nil
+}
+
+func (s *probeOrgSettings) InsertAuditEntry(_ context.Context, arg adb.InsertAuditEntryParams) error {
+	s.audit = append(s.audit, arg)
+	return nil
+}
+
+func (s *probeOrgSettings) Notify(context.Context, db.Hint) error { return nil }
+
+func (s *probeOrgSettings) ClaimOutgoingHeartbeat(_ context.Context, arg orgdb.ClaimOutgoingHeartbeatParams) (
+	orgdb.ClaimOutgoingHeartbeatRow, error) {
+	if !s.url.Set() || s.attemptAt.After(arg.DueBefore) {
+		return orgdb.ClaimOutgoingHeartbeatRow{}, pgx.ErrNoRows
+	}
+	s.attemptAt = arg.Now
+	return orgdb.ClaimOutgoingHeartbeatRow{OutgoingHeartbeatUrlCiphertext: s.url.Ciphertext,
+		OutgoingHeartbeatUrlKeyID: pgtype.Text{String: s.url.KeyID, Valid: true}, OutgoingHeartbeatProxy: s.proxy,
+		OutgoingHeartbeatProxyPasswordCiphertext: s.password.Ciphertext,
+		OutgoingHeartbeatProxyPasswordKeyID:      pgtype.Text{String: s.password.KeyID, Valid: s.password.Set()}}, nil
+}
+
+func (s *probeOrgSettings) RecordOutgoingHeartbeat(_ context.Context, arg orgdb.RecordOutgoingHeartbeatParams) (
+	pgtype.Bool, error) {
+	previous := s.lastOK
+	s.lastOK, s.lastError = pgtype.Bool{Bool: arg.Ok, Valid: true}, arg.LastError
+	return previous, nil
+}
+
+// probeHeartbeatStore is probeOrgSettings as the sender's Store, whose InTx takes the sender's queries.
+type probeHeartbeatStore struct{ *probeOrgSettings }
+
+func (s probeHeartbeatStore) InTx(_ context.Context, f func(outgoingheartbeat.Queries) error) error {
+	return f(s)
+}

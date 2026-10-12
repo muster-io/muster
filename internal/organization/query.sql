@@ -54,8 +54,62 @@ FROM organizations
 WHERE id = @org_id
 FOR UPDATE;
 
--- SetTOTPPolicy changes the TOTP policy and moves the version of the resource.
--- name: SetTOTPPolicy :execrows
-UPDATE organizations
-SET totp_required = @totp_required, updated_at = @now, version = version + 1
+-- GetOutgoingHeartbeatSecrets reads the stored Secrets of the outgoing heartbeat, for an update that keeps them.
+-- name: GetOutgoingHeartbeatSecrets :one
+SELECT outgoing_heartbeat_url_ciphertext, outgoing_heartbeat_url_key_id, outgoing_heartbeat_url_updated_at,
+       outgoing_heartbeat_proxy_password_ciphertext, outgoing_heartbeat_proxy_password_key_id,
+       outgoing_heartbeat_proxy_password_updated_at
+FROM organizations
 WHERE id = @org_id;
+
+-- UpdateSettings writes the editable fields of the organization resource and moves its version. A new or cleared
+-- URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL.
+-- name: UpdateSettings :execrows
+UPDATE organizations
+SET totp_required                                = @totp_required,
+    outgoing_heartbeat_url_ciphertext            = @url_ciphertext,
+    outgoing_heartbeat_url_key_id                = @url_key_id,
+    outgoing_heartbeat_url_updated_at            = @url_updated_at,
+    outgoing_heartbeat_proxy                     = @proxy,
+    outgoing_heartbeat_proxy_password_ciphertext = @proxy_password_ciphertext,
+    outgoing_heartbeat_proxy_password_key_id     = @proxy_password_key_id,
+    outgoing_heartbeat_proxy_password_updated_at = @proxy_password_updated_at,
+    outgoing_heartbeat_last_attempt_at = CASE WHEN @url_changed::boolean THEN NULL
+                                              ELSE outgoing_heartbeat_last_attempt_at END,
+    outgoing_heartbeat_last_ok         = CASE WHEN @url_changed::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
+    outgoing_heartbeat_last_error      = CASE WHEN @url_changed::boolean THEN NULL
+                                              ELSE outgoing_heartbeat_last_error END,
+    updated_at = @now,
+    version = version + 1
+WHERE id = @org_id;
+
+-- ClaimOutgoingHeartbeat takes the send of the outgoing heartbeat that is due: with a URL set and no attempt since
+-- @due_before, it records the attempt at @now and returns what the send needs. A second claim in the same interval
+-- returns no row, so that two Leaders at once send once. A last attempt after @now, left by a clock that moved
+-- backward, is due too, so that the heartbeat does not stop until the clock catches up. It is runtime state: the
+-- version and updated_at of the resource stay.
+-- name: ClaimOutgoingHeartbeat :one
+UPDATE organizations
+SET outgoing_heartbeat_last_attempt_at = @now::timestamptz
+WHERE id = @org_id
+  AND outgoing_heartbeat_url_ciphertext IS NOT NULL
+  AND (outgoing_heartbeat_last_attempt_at IS NULL OR outgoing_heartbeat_last_attempt_at <= @due_before::timestamptz
+       OR outgoing_heartbeat_last_attempt_at > @now::timestamptz)
+RETURNING outgoing_heartbeat_url_ciphertext, outgoing_heartbeat_url_key_id, outgoing_heartbeat_url_updated_at,
+          outgoing_heartbeat_proxy, outgoing_heartbeat_proxy_password_ciphertext,
+          outgoing_heartbeat_proxy_password_key_id, outgoing_heartbeat_proxy_password_updated_at;
+
+-- RecordOutgoingHeartbeat stores the result of the attempt claimed at @attempt_at and returns the result before it;
+-- the result of an attempt that a newer claim or a changed URL replaced is not stored and returns no row. It leaves
+-- the version and updated_at of the resource.
+-- name: RecordOutgoingHeartbeat :one
+UPDATE organizations o
+SET outgoing_heartbeat_last_ok = @ok::boolean, outgoing_heartbeat_last_error = sqlc.narg(last_error)
+FROM (
+    SELECT x.id, x.outgoing_heartbeat_last_ok AS previous
+    FROM organizations x
+    WHERE x.id = @org_id
+    FOR UPDATE
+) p
+WHERE o.id = p.id AND o.outgoing_heartbeat_last_attempt_at = @attempt_at::timestamptz
+RETURNING p.previous;

@@ -9,12 +9,14 @@ them. Muster raises and resolves them explicitly when their condition changes; t
 Stale. Besides `alertname` and `severity`, a configuration entity appears by its immutable id (`integration`,
 `route`, `destination`) with its current name in a `*_name` label; the fingerprint is computed from `alertname` and
 the id label only, so renaming the entity updates the open Internal alert instead of raising a new one. Every
-Internal alert carries the annotations `summary`, `description` and `runbook_url`, the runbook page under
-`MUSTER_RUNBOOK_BASE_URL`. The capability is the one that raises it.
+Internal alert carries the annotations `summary`, `description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the
+`major.minor` of the binary (`latest` for a development build) and the runbook below, joined by `/`. The
+capability is the one that raises it.
 
 | Internal alert | Severity | Labels | Capability | Runbook | Raised while |
 |---|---|---|---|---|---|
 | `MusterDestinationBroken` | critical | `destination`, `destination_name` | C-11 | `operations/runbooks/MusterDestinationBroken/` | A Destination is Broken: the messenger answered with a Fatal error, or with Transient errors until the budget ran out, so its deliveries wait. It resolves when a probe, a Destination check or a Destination test succeeds. |
 | `MusterHeartbeatLost` | critical | `integration`, `integration_name`, the Integration's Static labels | C-07 | `operations/runbooks/MusterHeartbeatLost/` | An Integration is Heartbeat lost: no Heartbeat signal arrived within its Heartbeat timeout, so the path from its Alertmanager to Muster may be broken and Stale resolution is paused. It resolves with the next signal, when the Heartbeat is turned off or when the Integration is deleted. |
+| `MusterOIDCSecretExpiring` | warning | — | C-19 | `operations/runbooks/MusterOIDCSecretExpiring/` | The OIDC client secret expires within oidc.secret_expiry_lead, by the expiry date an Admin entered in the OIDC settings. It resolves when the date moves further out or is removed. |
 | `MusterSnapshotTruncated` | warning | `integration`, `integration_name` | C-06 | `operations/runbooks/MusterSnapshotTruncated/` | An Integration has a truncated groupKey: Alertmanager cut a Snapshot with max_alerts, so Muster keeps the unlisted Alerts alive and cannot resolve them by absence. It resolves with the next untruncated Snapshot of every truncated groupKey. |
 | `MusterTemplateError` | warning | `route`, `route_name`, `destination`, `destination_name`, `template` | C-12 | `operations/runbooks/MusterTemplateError/` | A template of a Route failed while rendering a message, so its messages use the Fallback template; or a request template of an outgoing webhook Destination failed, so that request was not sent. It resolves when the template renders again or, for a Route, a new template is saved. |

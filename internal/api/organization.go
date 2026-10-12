@@ -11,6 +11,8 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/keyring"
+	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
 )
 
@@ -27,8 +29,9 @@ func (s *Server) GetOrganization(ctx context.Context, _ gen.GetOrganizationReque
 		Headers: gen.GetOrganization200ResponseHeaders{ETag: &tag}}, nil
 }
 
-// UpdateOrganization is updateOrganization with If-Match: in this release it changes the TOTP policy, and a changed
-// value of any other field is 422 with unsupported at that field (C-03.FR-20).
+// UpdateOrganization is updateOrganization with If-Match: in this release it changes the TOTP policy and the outgoing
+// heartbeat, its write-only URL (null clears it) and its proxy (C-19.FR-7), and a changed value of any other field is
+// 422 with unsupported at that field (C-03.FR-20).
 func (s *Server) UpdateOrganization(ctx context.Context, req gen.UpdateOrganizationRequestObject) (
 	gen.UpdateOrganizationResponseObject, error) {
 	r, err := requester(ctx)
@@ -141,10 +144,13 @@ func inputOf(b gen.UpdateOrganizationJSONRequestBody) organization.Input {
 	return in
 }
 
+// secretInputOf is a write-only Secret field of the request body: omitted keeps it, null clears it.
 func secretInputOf(v nullable.Nullable[string]) organization.SecretInput {
-	in := organization.SecretInput{Given: v.IsSpecified(), Null: v.IsNull()}
-	if in.Given && !in.Null {
-		in.Value = v.MustGet()
+	switch {
+	case !v.IsSpecified():
+		return keyring.Keep
+	case v.IsNull():
+		return keyring.Clear
 	}
-	return in
+	return keyring.Replace(logging.Secret(v.MustGet()))
 }

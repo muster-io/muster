@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/organization"
 )
 
 // lockServer is the advisory lock of a database: one session holds it at a time.
@@ -323,7 +325,7 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning",
 		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges",
 		"alert_group_retention", "delivery_queue", "thread_reply_retention", "webhook_event_retention",
-		"telegram_polling"}
+		"telegram_polling", "oidc_secret_expiry", "outgoing_heartbeat"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
@@ -552,6 +554,67 @@ func TestTelegramPollingTask(t *testing.T) {
 	}
 }
 
+// TestSelfObservationTasks covers C-02.FR-10 for C-19: the OIDC client secret expiry check and the outgoing heartbeat
+// run per Organization, go on past one that fails, do nothing when unwired, and in development mode a move of the
+// development clock wakes both.
+func TestSelfObservationTasks(t *testing.T) {
+	failed := errors.New("failed")
+	var mu sync.Mutex
+	var calls []string
+	call := func(name string) func(context.Context, int64) error {
+		return func(_ context.Context, org int64) error {
+			mu.Lock()
+			defer mu.Unlock()
+			calls = append(calls, fmt.Sprintf("%s:%d", name, org))
+			if org == 1 {
+				return failed
+			}
+			return nil
+		}
+	}
+	wakes := &Wakes{}
+	work := Work{
+		Organizations:     func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		OIDCSecretExpiry:  call("oidc"),
+		OutgoingHeartbeat: call("heartbeat"),
+		ClockMoved:        wakes,
+	}
+	tasks := Tasks(work)()
+	expiry, heartbeat := tasks[14], tasks[15]
+	if expiry.Name != "oidc_secret_expiry" || expiry.Every != OIDCSecretExpiryInterval || expiry.Wake == nil ||
+		heartbeat.Name != "outgoing_heartbeat" || heartbeat.Every != OutgoingHeartbeatPoll || heartbeat.Wake == nil {
+		t.Fatalf("tasks %+v %+v", expiry, heartbeat)
+	}
+	for _, task := range []Task{expiry, heartbeat} {
+		if err := task.Run(t.Context()); !errors.Is(err, failed) {
+			t.Errorf("%s = %v", task.Name, err)
+		}
+	}
+	if !slices.Equal(calls, []string{"oidc:1", "oidc:2", "heartbeat:1", "heartbeat:2"}) {
+		t.Errorf("calls %v", calls)
+	}
+	wakes.Wake()
+	for _, task := range []Task{expiry, heartbeat} {
+		select {
+		case <-task.Wake:
+		default:
+			t.Errorf("%s was not woken", task.Name)
+		}
+	}
+	orgsErr := errors.New("down")
+	work.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
+	for _, task := range Tasks(work)()[14:] {
+		if err := task.Run(t.Context()); !errors.Is(err, orgsErr) {
+			t.Errorf("%s: organizations = %v", task.Name, err)
+		}
+	}
+	for _, task := range Tasks(Work{})()[14:] {
+		if err := task.Run(t.Context()); err != nil || task.Wake != nil {
+			t.Errorf("%s unwired = %v", task.Name, err)
+		}
+	}
+}
+
 // TestHeartbeatAndStaleTasks covers C-07.FR-8 and C-02.FR-10: the Heartbeat check runs over every Organization only
 // once this leadership's takeover ran, so that it measures from the end of a downtime the takeover records; the Stale
 // scan runs per Organization and goes on past one that fails; in development mode a move of the development clock
@@ -635,6 +698,39 @@ func TestHeartbeatAndStaleTasks(t *testing.T) {
 	}
 	var none *Wakes
 	none.Wake()
+}
+
+// TestAliveMarkFollowsTheClock: in development mode a move of the development clock wakes the alive mark, so that
+// the mark follows the business clock at once and the Leader is not taken for absent after the jump.
+func TestAliveMarkFollowsTheClock(t *testing.T) {
+	w := newWorld(0)
+	moved := &Wakes{}
+	alive := Tasks(Work{Alive: w.alive("a"), ClockMoved: moved})()[1]
+	if alive.Name != "alive_mark" || alive.Wake == nil {
+		t.Fatalf("task %+v", alive)
+	}
+	if err := alive.Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	w.business.Advance(10 * time.Minute)
+	if got := kinds(w.notices(t)); !slices.Equal(got, []organization.NoticeKind{organization.NoticeNoReplicaLeading}) {
+		t.Fatalf("notices after the jump %v", got)
+	}
+	moved.Wake()
+	select {
+	case <-alive.Wake:
+	default:
+		t.Fatal("the alive mark was not woken")
+	}
+	if err := alive.Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.notices(t); len(got) != 0 {
+		t.Errorf("notices after the woken mark %v", got)
+	}
+	if Tasks(Work{})()[1].Wake != nil {
+		t.Error("the alive mark is woken outside development mode")
+	}
 }
 
 // TestWokenTask: a task runs again at once when it is woken, between its ticks.

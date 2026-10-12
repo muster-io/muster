@@ -89,8 +89,9 @@ func TestRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 4 || defs[0] != DestinationBroken || defs[1] != HeartbeatLost || defs[2] != SnapshotTruncated ||
-		defs[3] != TemplateError || Lookup("MusterSnapshotTruncated") != SnapshotTruncated ||
+	if len(defs) != 5 || defs[0] != DestinationBroken || defs[1] != HeartbeatLost || defs[2] != OIDCSecretExpiring ||
+		defs[3] != SnapshotTruncated || defs[4] != TemplateError ||
+		Lookup("MusterSnapshotTruncated") != SnapshotTruncated ||
 		Lookup("MusterHeartbeatLost") != HeartbeatLost || Lookup("MusterDestinationBroken") != DestinationBroken ||
 		Lookup("MusterTemplateError") != TemplateError || Lookup("MusterUnknown") != nil {
 		t.Errorf("registry %v", defs)
@@ -174,7 +175,8 @@ func TestRaiseWithStaticLabels(t *testing.T) {
 		"integration": "NTAAAAAAAAAAAA", "integration_name": "hb", "env": "prod"}
 	if !mapsEqual(a.Labels, want) || a.Fingerprint != Fingerprint(HeartbeatLost, map[string]string{
 		"integration": "NTAAAAAAAAAAAA"}) || a.Annotations["summary"] != "No Heartbeat from the Alertmanager of "+
-		"Integration hb" || a.Annotations["runbook_url"] != DefaultRunbookBase+"/operations/runbooks/MusterHeartbeatLost/" {
+		"Integration hb" ||
+		a.Annotations["runbook_url"] != DefaultRunbookBase+"/latest/operations/runbooks/MusterHeartbeatLost/" {
 		t.Errorf("alert %+v", a)
 	}
 }
@@ -214,7 +216,7 @@ func TestRaise(t *testing.T) {
 	}
 	if a.Annotations["summary"] != "Alertmanager truncates the Snapshots of Integration lab" ||
 		!strings.Contains(a.Annotations["description"], "for Integration lab:") ||
-		a.Annotations["runbook_url"] != "https://docs.example.org/muster/operations/runbooks/MusterSnapshotTruncated/" {
+		a.Annotations["runbook_url"] != "https://docs.example.org/muster/latest/operations/runbooks/MusterSnapshotTruncated/" {
 		t.Errorf("annotations %v", a.Annotations)
 	}
 	if strings.Contains(string(body.Body), `<`) || strings.HasSuffix(string(body.Body), "\n") {
@@ -473,4 +475,80 @@ func mapsEqual(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func TestRunbookVersion(t *testing.T) {
+	for v, want := range map[string]string{"0.0.0-dev": "latest", "": "latest", "garbage": "latest", "1.4.0": "1.4",
+		"v2.10.3": "2.10", "1.4.0-rc.1": "1.4", "3.0.1+meta": "3.0", "0.1.0": "0.1"} {
+		if got := RunbookVersion(v); got != want {
+			t.Errorf("RunbookVersion(%q) = %q, want %q", v, got, want)
+		}
+	}
+}
+
+// TestRunbookURLOfRelease covers C-19.FR-9: a release binary points the runbook_url at the pages of its major.minor.
+func TestRunbookURLOfRelease(t *testing.T) {
+	old := version
+	version = func() string { return "1.4.2" }
+	t.Cleanup(func() { version = old })
+	q := newFake()
+	if err := NewRaiser(1, "https://docs.example.org").Raise(t.Context(), q, t0, OIDCSecretExpiring, Entity{},
+		nil); err != nil {
+		t.Fatal(err)
+	}
+	a := q.read(t, 0).Alerts[0]
+	if got := a.Annotations["runbook_url"]; got !=
+		"https://docs.example.org/1.4/operations/runbooks/MusterOIDCSecretExpiring/" {
+		t.Errorf("runbook_url %s", got)
+	}
+	if !mapsEqual(a.Labels, map[string]string{"alertname": "MusterOIDCSecretExpiring", "severity": "warning"}) ||
+		a.Fingerprint != Fingerprint(OIDCSecretExpiring, nil) {
+		t.Errorf("alert %+v", a)
+	}
+}
+
+func TestOIDCSecretExpiringRegistered(t *testing.T) {
+	d := Lookup("MusterOIDCSecretExpiring")
+	if d != OIDCSecretExpiring || d.Severity != SeverityWarning || len(d.Labels()) != 0 || d.Capability != "C-19" ||
+		d.StaticLabels {
+		t.Errorf("MusterOIDCSecretExpiring = %+v", d)
+	}
+}
+
+// TestFiring: an Internal alert of no entity fires when it is open or its raise is pending, and not once its pending
+// resolve is processed.
+func TestFiring(t *testing.T) {
+	ctx := t.Context()
+	r := NewRaiser(1, "")
+	q := newFake()
+	if got, err := r.Firing(ctx, q, OIDCSecretExpiring); err != nil || got {
+		t.Fatalf("nothing open: %v, %v", got, err)
+	}
+	if err := r.Raise(ctx, q, t0, OIDCSecretExpiring, Entity{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	q.pending = [][]byte{q.bodies[0].Body}
+	if got, err := r.Firing(ctx, q, OIDCSecretExpiring); err != nil || !got {
+		t.Fatalf("a pending raise: %v, %v", got, err)
+	}
+	if q.contains[len(q.contains)-1] != `{"alertname":"MusterOIDCSecretExpiring"}` {
+		t.Errorf("contains %v", q.contains)
+	}
+	q.pending = nil
+	q.open = []dbgen.ListOpenInternalAlertsRow{{Fingerprint: Fingerprint(OIDCSecretExpiring, nil),
+		Labels: []byte(`{"alertname":"MusterOIDCSecretExpiring","severity":"warning"}`), StartsAt: t0}}
+	if got, err := r.Firing(ctx, q, OIDCSecretExpiring); err != nil || !got {
+		t.Fatalf("open: %v, %v", got, err)
+	}
+	if err := r.Resolve(ctx, q, t0, OIDCSecretExpiring, ""); err != nil {
+		t.Fatal(err)
+	}
+	q.pending = [][]byte{q.bodies[1].Body}
+	if got, err := r.Firing(ctx, q, OIDCSecretExpiring); err != nil || got {
+		t.Fatalf("a pending resolve: %v, %v", got, err)
+	}
+	q.fail["ListOpenInternalAlerts"] = errors.New("down")
+	if _, err := r.Firing(ctx, q, OIDCSecretExpiring); err == nil {
+		t.Error("a failed read was ignored")
+	}
 }

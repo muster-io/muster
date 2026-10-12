@@ -4,16 +4,20 @@
 // Command refgen writes the reference pages of the log event registry, the metric registry and the Internal alert
 // registry (C-02.FR-18, C-02.FR-19, C-06.FR-14) into a directory, docs/reference by default. make generate runs it,
 // and make generate-check fails when a checked-in page differs from what it writes. It fails when a registry is
-// invalid.
+// invalid, and when the metric registry or the metrics page differs from the metrics catalogue of reference.md in a
+// name, a type, the Leader marker, the label names or a listed set of label values (C-19.FR-2).
 package main
 
 import (
+	"bufio"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -57,8 +61,9 @@ const internalAlertsIntro = "# Internal alerts\n\n" +
 	"Stale. Besides `alertname` and `severity`, a configuration entity appears by its immutable id (`integration`,\n" +
 	"`route`, `destination`) with its current name in a `*_name` label; the fingerprint is computed from `alertname` and\n" +
 	"the id label only, so renaming the entity updates the open Internal alert instead of raising a new one. Every\n" +
-	"Internal alert carries the annotations `summary`, `description` and `runbook_url`, the runbook page under\n" +
-	"`MUSTER_RUNBOOK_BASE_URL`. The capability is the one that raises it.\n\n" +
+	"Internal alert carries the annotations `summary`, `description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the\n" +
+	"`major.minor` of the binary (`latest` for a development build) and the runbook below, joined by `/`. The\n" +
+	"capability is the one that raises it.\n\n" +
 	"| Internal alert | Severity | Labels | Capability | Runbook | Raised while |\n" +
 	"|---|---|---|---|---|---|\n"
 
@@ -72,6 +77,8 @@ func run(args []string, stderr io.Writer) int {
 	flags := flag.NewFlagSet("refgen", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	out := flags.String("out", "docs/reference", "the directory of the reference pages")
+	cataloguePath := flags.String("catalogue", "design/prd/l1/reference.md",
+		"the PRD page whose metrics catalogue the metric registry must match")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -96,6 +103,10 @@ func run(args []string, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "refgen: %v\n", err)
 			return 1
 		}
+	}
+	if err := checkCatalogue(*cataloguePath, defs, pages[metricsPage]); err != nil {
+		fmt.Fprintf(stderr, "refgen: the metrics differ from the catalogue of %s:\n%v\n", *cataloguePath, err)
+		return 1
 	}
 	return 0
 }
@@ -203,4 +214,305 @@ func labelValues(l metrics.Label) string {
 
 func cell(s string) string {
 	return cellEscaper.Replace(s)
+}
+
+// catalogueLabel is a label of a metric of the catalogue; Values is nil where the catalogue lists no values.
+type catalogueLabel struct {
+	Name   string
+	Values []string
+}
+
+// catalogueMetric is a metric as the catalogue of reference.md, the registry or the metrics page declares it.
+type catalogueMetric struct {
+	Name   string
+	Type   string
+	Leader bool
+	Labels []catalogueLabel
+}
+
+var (
+	catalogueNameRe = regexp.MustCompile("^`(muster_[a-z0-9_]+)`$")
+	backtickRe      = regexp.MustCompile("^`([^`]+)`")
+)
+
+// checkCatalogue compares the catalogue of the PRD page at path with the registry and with the generated metrics
+// page, and names every difference by metric and field.
+func checkCatalogue(path string, defs []metrics.Definition, page string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	cat, err := readCatalogue(f)
+	if err != nil {
+		return err
+	}
+	published, err := readPage(page)
+	if err != nil {
+		return err
+	}
+	errs := compareCatalogue(cat, registryMetrics(defs), "the registry")
+	errs = append(errs, compareCatalogue(cat, published, metricsPage)...)
+	return errors.Join(errs...)
+}
+
+// tableRows returns the cells of the rows of the first table after the heading, without its header and separator.
+func tableRows(r io.Reader, heading string) ([][]string, error) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
+	var rows [][]string
+	found, inTable, seen := false, false, 0
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		switch {
+		case !found:
+			found = line == heading
+		case strings.HasPrefix(line, "|"):
+			inTable = true
+			if seen++; seen > 2 {
+				rows = append(rows, splitRow(line))
+			}
+		case inTable:
+			return rows, nil
+		case strings.HasPrefix(line, "#"):
+			return nil, fmt.Errorf("no table under %q", heading)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if !inTable {
+		return nil, fmt.Errorf("no table under %q", heading)
+	}
+	return rows, nil
+}
+
+// splitRow splits a Markdown table row into its trimmed cells; an escaped pipe stays in its cell.
+func splitRow(line string) []string {
+	line = strings.TrimSuffix(strings.TrimPrefix(line, "|"), "|")
+	var cells []string
+	var b strings.Builder
+	for i := 0; i < len(line); i++ {
+		switch {
+		case line[i] == '\\' && i+1 < len(line) && line[i+1] == '|':
+			b.WriteByte('|')
+			i++
+		case line[i] == '|':
+			cells = append(cells, strings.TrimSpace(b.String()))
+			b.Reset()
+		default:
+			b.WriteByte(line[i])
+		}
+	}
+	return append(cells, strings.TrimSpace(b.String()))
+}
+
+// readCatalogue reads the table under "## Metrics catalogue": the rows of one muster_ metric, with its type, the
+// Leader marker and its labels. The row of the process and Go runtime metrics is not a metric of the registry.
+func readCatalogue(r io.Reader) ([]catalogueMetric, error) {
+	rows, err := tableRows(r, "## Metrics catalogue")
+	if err != nil {
+		return nil, err
+	}
+	var out []catalogueMetric
+	for _, cells := range rows {
+		if len(cells) < 3 {
+			return nil, fmt.Errorf("catalogue row %q has fewer than 3 cells", strings.Join(cells, " | "))
+		}
+		m := catalogueNameRe.FindStringSubmatch(cells[0])
+		if m == nil {
+			continue
+		}
+		fields := strings.Fields(cells[1])
+		if len(fields) == 0 {
+			return nil, fmt.Errorf("metric %q: the catalogue has no type", m[1])
+		}
+		labels, err := parseLabels(cells[2])
+		if err != nil {
+			return nil, fmt.Errorf("metric %q: labels: %w", m[1], err)
+		}
+		out = append(out, catalogueMetric{Name: m[1], Type: fields[0],
+			Leader: strings.Contains(cells[1], "(Leader)"), Labels: labels})
+	}
+	return out, nil
+}
+
+// splitTop splits s at the separators outside parentheses.
+func splitTop(s, seps string) []string {
+	var parts []string
+	depth, start := 0, 0
+	for i, c := range s {
+		switch {
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		case depth == 0 && strings.ContainsRune(seps, c):
+			parts = append(parts, s[start:i])
+			start = i + len(string(c))
+		}
+	}
+	return append(parts, s[start:])
+}
+
+// parseLabels reads a Labels cell of the catalogue: label names in backticks, separated by commas or semicolons, each
+// optionally followed by a parenthesis that lists its values in backticks when it starts with one; prose after a
+// dash outside parentheses describes the labels. A cell that starts with a dash has no labels.
+func parseLabels(cell string) ([]catalogueLabel, error) {
+	cell = strings.TrimSpace(splitTop(cell, "—")[0])
+	if cell == "" {
+		return nil, nil
+	}
+	var labels []catalogueLabel
+	for _, item := range splitTop(cell, ",;") {
+		item = strings.TrimSpace(item)
+		m := backtickRe.FindStringSubmatch(item)
+		if m == nil {
+			return nil, fmt.Errorf("%q does not start with a label name in backticks", item)
+		}
+		l := catalogueLabel{Name: m[1]}
+		rest := strings.TrimSpace(item[len(m[0]):])
+		if strings.HasPrefix(rest, "(`") && strings.HasSuffix(rest, ")") {
+			l.Values = []string{}
+			for _, seg := range splitTop(rest[1:len(rest)-1], ",;") {
+				v := backtickRe.FindStringSubmatch(strings.TrimSpace(seg))
+				if v == nil {
+					break
+				}
+				l.Values = append(l.Values, v[1])
+			}
+		}
+		labels = append(labels, l)
+	}
+	return labels, nil
+}
+
+// registryMetrics are the metrics of the registry as the catalogue declares them; a closed label lists its values.
+func registryMetrics(defs []metrics.Definition) []catalogueMetric {
+	out := make([]catalogueMetric, 0, len(defs))
+	for _, d := range defs {
+		m := catalogueMetric{Name: d.Name, Type: string(d.Kind), Leader: d.LeaderOnly}
+		for _, l := range d.Labels {
+			cl := catalogueLabel{Name: l.Name}
+			if l.Kind == metrics.LabelClosed {
+				cl.Values = slices.Clone(l.Values)
+			}
+			m.Labels = append(m.Labels, cl)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// readPage reads the generated metrics page back: its table of metrics and its table of label values.
+func readPage(page string) ([]catalogueMetric, error) {
+	rows, err := tableRows(strings.NewReader(page), "# Metrics")
+	if err != nil {
+		return nil, err
+	}
+	var out []catalogueMetric
+	index := map[string]int{}
+	for _, cells := range rows {
+		m := catalogueNameRe.FindStringSubmatch(cells[0])
+		if m == nil || len(cells) < 5 {
+			return nil, fmt.Errorf("%s: unreadable row %q", metricsPage, strings.Join(cells, " | "))
+		}
+		cm := catalogueMetric{Name: m[1], Type: cells[1], Leader: cells[4] == "yes"}
+		if cells[2] != "—" {
+			for name := range strings.SplitSeq(cells[2], ",") {
+				cm.Labels = append(cm.Labels, catalogueLabel{Name: strings.TrimSpace(name)})
+			}
+		}
+		index[cm.Name] = len(out)
+		out = append(out, cm)
+	}
+	values, err := tableRows(strings.NewReader(page), "## Label values")
+	if err != nil {
+		return nil, err
+	}
+	for _, cells := range values {
+		m, l := catalogueNameRe.FindStringSubmatch(cells[0]), backtickRe.FindStringSubmatch(cells[1])
+		if m == nil || l == nil || len(cells) < 3 {
+			return nil, fmt.Errorf("%s: unreadable label row %q", metricsPage, strings.Join(cells, " | "))
+		}
+		i, ok := index[m[1]]
+		if !ok {
+			return nil, fmt.Errorf("%s: label values of %q, which the page does not list", metricsPage, m[1])
+		}
+		for j := range out[i].Labels {
+			if out[i].Labels[j].Name != l[1] || !strings.HasPrefix(cells[2], "`") {
+				continue
+			}
+			out[i].Labels[j].Values = []string{}
+			for v := range strings.SplitSeq(splitTop(cells[2], "—")[0], ",") {
+				if tok := backtickRe.FindStringSubmatch(strings.TrimSpace(v)); tok != nil {
+					out[i].Labels[j].Values = append(out[i].Labels[j].Values, tok[1])
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// compareCatalogue names, by metric and field, every difference between the catalogue and the metrics of other:
+// a metric missing on either side, its type, its Leader marker, its label names, and the values of every label for
+// which the catalogue lists them.
+func compareCatalogue(cat, other []catalogueMetric, otherName string) []error {
+	var errs []error
+	bad := func(name, format string, args ...any) {
+		errs = append(errs, fmt.Errorf("metric %q: %s", name, fmt.Sprintf(format, args...)))
+	}
+	byName := map[string]catalogueMetric{}
+	for _, m := range other {
+		byName[m.Name] = m
+	}
+	inCatalogue := map[string]bool{}
+	for _, c := range cat {
+		inCatalogue[c.Name] = true
+		o, ok := byName[c.Name]
+		if !ok {
+			bad(c.Name, "in the catalogue, missing from %s", otherName)
+			continue
+		}
+		if c.Type != o.Type {
+			bad(c.Name, "type: %s in the catalogue, %s in %s", c.Type, o.Type, otherName)
+		}
+		if c.Leader != o.Leader {
+			bad(c.Name, "leader only: %v in the catalogue, %v in %s", c.Leader, o.Leader, otherName)
+		}
+		cl, ol := labelNames(c.Labels), labelNames(o.Labels)
+		if !slices.Equal(cl, ol) {
+			bad(c.Name, "labels: %v in the catalogue, %v in %s", cl, ol, otherName)
+			continue
+		}
+		for _, l := range c.Labels {
+			if l.Values == nil {
+				continue
+			}
+			i := slices.IndexFunc(o.Labels, func(x catalogueLabel) bool { return x.Name == l.Name })
+			want, got := slices.Sorted(slices.Values(l.Values)), o.Labels[i].Values
+			if got == nil {
+				bad(c.Name, "label %q: values %v in the catalogue, not a closed set in %s", l.Name, want, otherName)
+				continue
+			}
+			if got = slices.Sorted(slices.Values(got)); !slices.Equal(want, got) {
+				bad(c.Name, "label %q: values %v in the catalogue, %v in %s", l.Name, want, got, otherName)
+			}
+		}
+	}
+	for _, o := range other {
+		if !inCatalogue[o.Name] {
+			bad(o.Name, "in %s, missing from the catalogue", otherName)
+		}
+	}
+	return errs
+}
+
+func labelNames(labels []catalogueLabel) []string {
+	names := make([]string, 0, len(labels))
+	for _, l := range labels {
+		names = append(names, l.Name)
+	}
+	slices.Sort(names)
+	return names
 }

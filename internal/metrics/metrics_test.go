@@ -9,6 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -256,5 +259,125 @@ func TestHandlerEmptyBuildInfo(t *testing.T) {
 	t.Cleanup(func() { buildinfo.Version, buildinfo.Commit = oldVersion, oldCommit })
 	if _, _, text := scrape(t, Handler(nil)); !strings.Contains(text, `muster_build_info{version="unknown",commit="unknown"} 1`) {
 		t.Errorf("an empty version or commit is not written as unknown:\n%s", text)
+	}
+}
+
+// catalogueRowRe matches the rows of the metrics catalogue of reference.md, which refgen compares field by field.
+var catalogueRowRe = regexp.MustCompile("(?m)^\\| `(muster_[a-z0-9_]+)` \\|")
+
+// TestCatalogueConstructed covers C-19.FR-2: every metric of the catalogue of reference.md is declared in the registry,
+// whose declarations are package variables and so are constructed when the server starts.
+func TestCatalogueConstructed(t *testing.T) {
+	data, err := os.ReadFile("../../design/prd/l1/reference.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	start := strings.Index(text, "## Metrics catalogue")
+	end := strings.Index(text, "## Chart rules")
+	if start < 0 || end < start {
+		t.Fatal("the metrics catalogue section was not found")
+	}
+	defs, err := Catalogue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(defs))
+	for _, d := range defs {
+		names = append(names, d.Name)
+	}
+	rows := catalogueRowRe.FindAllStringSubmatch(text[start:end], -1)
+	if len(rows) == 0 {
+		t.Fatal("no catalogue rows")
+	}
+	for _, m := range rows {
+		if !slices.Contains(names, m[1]) {
+			t.Errorf("%s is in the catalogue but not constructed", m[1])
+		}
+	}
+}
+
+// The label policy of C-19.AC-3 and ADR-0014: the only label names a series may carry.
+var (
+	policyEntity = []string{"integration", "route", "destination"}
+	policyClosed = []string{"client", "outcome", "state", "route_pattern", "method", "code", "kind", "reason", "status",
+		"by", "command", "transport", "template", "table"}
+	policyForbidden = []string{"alertname", "severity", "user", "number", "org_id", "organization"}
+)
+
+func allowedLabel(metric, label string) bool {
+	switch {
+	case slices.Contains(policyEntity, label), slices.Contains(policyClosed, label):
+		return true
+	case label == "name":
+		return strings.HasSuffix(metric, "_info")
+	case label == "version", label == "commit":
+		return metric == "muster_build_info"
+	}
+	return false
+}
+
+// TestLabelPolicy covers C-19.AC-3: every label of the registry, and every label of a scrape with one series of each
+// metric, is an entity id, a closed set, the name of an *_info gauge, the version and commit of the build, or le.
+func TestLabelPolicy(t *testing.T) {
+	for _, l := range policyForbidden {
+		if allowedLabel("muster_x_info", l) {
+			t.Fatalf("the policy allows %s", l)
+		}
+	}
+	defs, err := Catalogue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range defs {
+		for _, l := range d.Labels {
+			if !allowedLabel(d.Name, l.Name) {
+				t.Errorf("%s has the label %s, which the policy does not allow", d.Name, l.Name)
+			}
+		}
+	}
+
+	oldSet, oldLeaderSet, oldDiscardSet := set, leaderSet, discardSet
+	set, leaderSet, discardSet = vm.NewSet(), vm.NewSet(), vm.NewSet()
+	t.Cleanup(func() { set, leaderSet, discardSet = oldSet, oldLeaderSet, oldDiscardSet })
+	for _, d := range registry {
+		values := make([]string, 0, len(d.Labels))
+		for _, l := range d.Labels {
+			switch l.Kind {
+			case LabelClosed:
+				values = append(values, l.Values[0])
+			case LabelEntity:
+				values = append(values, "NTAAAAAAAAAAAA")
+			default:
+				values = append(values, "x")
+			}
+		}
+		switch d.Kind {
+		case KindCounter:
+			Counter{d}.With(values...).Inc()
+		case KindGauge:
+			Gauge{d}.With(values...).Set(1)
+		case KindHistogram:
+			Histogram{d}.With(values...).Update(1)
+		}
+	}
+	_, _, text := scrape(t, Handler(func() bool { return true }))
+	labelRe := regexp.MustCompile(`([a-z_]+)="`)
+	seen := map[string]bool{}
+	for line := range strings.SplitSeq(text, "\n") {
+		if !strings.HasPrefix(line, "muster_") {
+			continue
+		}
+		metric, _, _ := strings.Cut(line, "{")
+		metric = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(metric, "_bucket"), "_sum"), "_count")
+		for _, m := range labelRe.FindAllStringSubmatch(line, -1) {
+			seen[m[1]] = true
+			if m[1] != "le" && !allowedLabel(metric, m[1]) {
+				t.Errorf("the scrape has the label %s on %s", m[1], line)
+			}
+		}
+	}
+	if !seen["le"] || !seen["destination"] || !seen["version"] {
+		t.Errorf("the scrape lacks series: labels %v", seen)
 	}
 }

@@ -27,11 +27,14 @@ const (
 	// HintAccountLinks says that an Account link of the stream's User appeared or disappeared (C-18); it goes only to
 	// the streams of that User.
 	HintAccountLinks = "account-links"
+	// HintSystemStatus says that the System status changed, such as the result of the outgoing heartbeat (C-19); it
+	// goes only to the streams whose identity reads it (system-status:read), like the notices for Admins.
+	HintSystemStatus = "system-status"
 )
 
 // resyncTypes are the hints of everything a client may hold, sent to every stream when the replica listens again
 // after a loss, because the hints sent meanwhile are gone.
-var resyncTypes = []string{HintOrganization, HintSystemNotices, HintAlertGroups, HintAccountLinks}
+var resyncTypes = []string{HintOrganization, HintSystemNotices, HintAlertGroups, HintAccountLinks, HintSystemStatus}
 
 // alertGroupHints are the hint types about Alert Groups, which only streams whose identity reads Alert Groups get.
 var alertGroupHints = map[string]bool{HintAlertGroup: true, HintAlertGroups: true}
@@ -68,8 +71,11 @@ type Subscriber struct {
 }
 
 // accepts reports whether the subscriber may get a hint of the type: the hints about Alert Groups go only to those
-// who read them.
+// who read them, and the hint of the System status only to those who read it.
 func (s Subscriber) accepts(hintType string) bool {
+	if hintType == HintSystemStatus {
+		return s.Admin
+	}
 	return !alertGroupHints[hintType] || s.AlertGroups
 }
 

@@ -51,10 +51,13 @@ import (
 	"github.com/muster-io/muster/internal/oidc"
 	oidcdb "github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/outgoingheartbeat"
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/routing"
 	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/systemstatus"
 	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/templates"
 	"github.com/muster-io/muster/internal/timers"
@@ -152,6 +155,11 @@ type database interface {
 	OIDCPruner() oidc.PruneQueries
 	// OIDCClaimer claims the due background re-checks of OIDC users with lease.
 	OIDCClaimer(lease db.Lease) oidc.Claimer
+	// OIDCExpiryStore serves the OIDC client secret expiry check, OutgoingHeartbeatStore the outgoing heartbeat and
+	// SystemStatusQueries the System status.
+	OIDCExpiryStore() oidc.ExpiryStore
+	OutgoingHeartbeatStore() outgoingheartbeat.Store
+	SystemStatusQueries() systemstatus.Queries
 	// Clock reads the database clock, for the clock skew check.
 	Clock() rowQuerier
 }
@@ -246,6 +254,16 @@ func (d pgDatabase) UsersPruner() users.PruneQueries { return usersdb.New(d.Pool
 func (d pgDatabase) OIDCPruner() oidc.PruneQueries { return oidcdb.New(d.Pool) }
 
 func (d pgDatabase) OIDCClaimer(lease db.Lease) oidc.Claimer { return oidc.NewClaimer(d.Pool, lease) }
+
+func (d pgDatabase) OIDCExpiryStore() oidc.ExpiryStore { return oidc.NewExpiryStore(d.Pool) }
+
+func (d pgDatabase) OutgoingHeartbeatStore() outgoingheartbeat.Store {
+	return outgoingheartbeat.NewStore(d.Pool)
+}
+
+func (d pgDatabase) SystemStatusQueries() systemstatus.Queries {
+	return systemstatus.NewQueries(d.Pool)
+}
 
 func (d pgDatabase) Clock() rowQuerier { return d.Pool }
 
@@ -882,26 +900,32 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Admin:        admin,
 		AuditLog:     audit.NewReader(orgID, p.db.AuditReader()),
 		TOTP:         factors,
-		Organization: organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business),
+		Organization: organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business).WithKeyring(p.keyring),
 		Notices:      p.notices,
 		Live:         p.hub,
 		OIDC:         signIn,
 		Tokens: tokens.New(orgID, p.db.TokensStore(), w, p.clocks.Business, roles,
 			tokens.NewLimiter(p.clocks.Real)),
-		Integrations:   p.integrations,
-		Snapshots:      p.snapshots,
-		Alerts:         alerts,
-		Routes:         p.routes,
-		AlertGroups:    p.groups,
-		Commands:       p.groups,
-		Directory:      users.NewDirectory(orgID, p.db.AdminStore()),
-		Connections:    conns,
-		Destinations:   p.destinations,
-		Webhooks:       p.webhooks,
-		Deliveries:     p.delivery,
-		Templates:      p.renderer,
-		Links:          linkService,
-		AccountLinks:   p.links,
+		Integrations: p.integrations,
+		Snapshots:    p.snapshots,
+		Alerts:       alerts,
+		Routes:       p.routes,
+		AlertGroups:  p.groups,
+		Commands:     p.groups,
+		Directory:    users.NewDirectory(orgID, p.db.AdminStore()),
+		Connections:  conns,
+		Destinations: p.destinations,
+		Webhooks:     p.webhooks,
+		Deliveries:   p.delivery,
+		Templates:    p.renderer,
+		Links:        linkService,
+		AccountLinks: p.links,
+		SystemStatus: systemstatus.New(systemstatus.Config{OrgID: orgID, Queries: p.db.SystemStatusQueries(),
+			Replicas: func(ctx context.Context) ([]keyring.Replica, error) {
+				return keyring.LiveReplicas(ctx, p.db.KeyringStore(), p.clocks.Real.Now())
+			},
+			Business: p.clocks.Business, LeaderAbsence: leader.AbsenceNotice, Version: buildinfo.Version,
+			Commit: buildinfo.Commit}),
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -964,6 +988,13 @@ func (p *process) newKeeper() *leader.Keeper {
 			}
 			return p.poller.Run(ctx)
 		},
+		OIDCSecretExpiry: oidc.ExpiryCheck{Store: p.db.OIDCExpiryStore(), Business: p.clocks.Business, Log: p.log,
+			RunbookBase: p.cfg.RunbookBaseURL.String()}.Check,
+		OutgoingHeartbeat: (&outgoingheartbeat.Sender{Store: p.db.OutgoingHeartbeatStore(), Keyring: p.keyring,
+			Business: p.clocks.Business, Log: p.log, Network: outgoingheartbeat.Network{
+				Policy: func(orgID int64) outbound.PolicySource {
+					return organization.NewOutboundPolicies(p.db.OrganizationStore(), orgID, p.clocks.Real)
+				}, Log: p.log, Real: p.clocks.Real}}).Send,
 		ClockMoved: p.clockMoved,
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},

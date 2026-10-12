@@ -432,13 +432,19 @@ func TestNotFoundAndNotImplemented(t *testing.T) {
 			t.Errorf("%s %s = %d %s %s", c.method, c.path, a.status, a.header.Get("Allow"), a.body)
 		}
 	}
-	// getSystemStatus arrives with the System status page, in a later phase.
-	deliveries := "/api/v1/system-status"
-	a := x.call(t, http.MethodGet, deliveries, "", "Cookie", "admin-cookie")
+	// getKeyring arrives with S-055; a Role with organization:read reaches the handler.
+	roles["reader"] = []auth.Permission{"organization:read"}
+	t.Cleanup(func() { delete(roles, "reader") })
+	reader := user(8, "SRCCCCCCCCCCCC", "reader", "reader")
+	x.users.users[8] = reader
+	x.sessions.sessions["reader-cookie"] = session(8, reader, auth.StateActive)
+	x.sessions.cookies[8] = "reader-cookie"
+	keyringPath := "/api/v1/organization/keyring"
+	a := x.call(t, http.MethodGet, keyringPath, "", "Cookie", "reader-cookie")
 	if a.status != http.StatusNotImplemented || a.json(t)["type"] != problemBase+"not-implemented" {
-		t.Errorf("GET %s = %d %s", deliveries, a.status, a.body)
+		t.Errorf("GET %s = %d %s", keyringPath, a.status, a.body)
 	}
-	a = x.call(t, http.MethodGet, deliveries, "")
+	a = x.call(t, http.MethodGet, keyringPath, "")
 	if a.status != http.StatusUnauthorized {
 		t.Errorf("an unimplemented operation without credentials = %d", a.status)
 	}

@@ -56,10 +56,12 @@ import (
 	oidcdb "github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/organization"
 	odb "github.com/muster-io/muster/internal/organization/dbgen"
+	"github.com/muster-io/muster/internal/outgoingheartbeat"
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/routing"
 	rdb "github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/server"
+	"github.com/muster-io/muster/internal/systemstatus"
 	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/timers"
 	timersdb "github.com/muster-io/muster/internal/timers/dbgen"
@@ -298,6 +300,12 @@ func (f *fakeDB) AuthPruner() auth.PruneQueries { return nil }
 func (f *fakeDB) UsersPruner() users.PruneQueries { return nil }
 
 func (f *fakeDB) OIDCPruner() oidc.PruneQueries { return nil }
+
+func (f *fakeDB) OIDCExpiryStore() oidc.ExpiryStore { return nil }
+
+func (f *fakeDB) OutgoingHeartbeatStore() outgoingheartbeat.Store { return nil }
+
+func (f *fakeDB) SystemStatusQueries() systemstatus.Queries { return nil }
 
 func (f *fakeDB) OIDCClaimer(db.Lease) oidc.Claimer {
 	return func(context.Context, int64, int32) ([]int64, error) { return nil, nil }
@@ -1711,7 +1719,8 @@ func TestPGDatabaseStores(t *testing.T) {
 		d.RoutingStore(), d.HeartbeatStore(), d.IngestStore(), d.ProcessStore(), d.ReplayStore(), d.ClockStore(),
 		d.GroupsStore(), d.TimersStore(), d.DeliveryStore(), d.LinksStore(), d.DestinationsStore(),
 		d.DestinationsWriter(), d.ConnectionsStore(), d.LeaderStore(), d.ReplicaPruner(), d.AuthPruner(),
-		d.UsersPruner(), d.OIDCPruner(), d.OIDCClaimer(db.Lease{})}
+		d.UsersPruner(), d.OIDCPruner(), d.OIDCClaimer(db.Lease{}), d.OIDCExpiryStore(), d.OutgoingHeartbeatStore(),
+		d.SystemStatusQueries()}
 	for i, s := range stores {
 		if s == nil {
 			t.Errorf("store %d is nil", i)

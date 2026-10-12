@@ -9,7 +9,6 @@ covers: [C-19.FR-2, C-19.FR-5, C-19.FR-7, C-19.FR-9, C-19.FR-10, C-19.AC-1, C-19
 files_touched:
   - internal/tools/refgen/main.go
   - internal/tools/refgen/refgen_test.go
-  - internal/metrics/catalogue.go
   - internal/metrics/metrics_test.go
   - internal/internalalerts/registry.go
   - internal/internalalerts/raise.go
@@ -21,17 +20,25 @@ files_touched:
   - internal/organization/organization.go
   - internal/organization/query.sql
   - internal/organization/organization_test.go
+  - internal/organization/heartbeat_integration_test.go
   - internal/api/organization.go
+  - internal/api/problem.go
   - internal/api/system.go
   - internal/api/system_test.go
   - internal/api/organization_test.go
   - internal/api/server.go
   - internal/api/server_test.go
   - internal/live/hub.go
+  - internal/live/live_test.go
   - internal/systemstatus/status.go
   - internal/systemstatus/query.sql
   - internal/systemstatus/status_test.go
+  - internal/systemstatus/status_integration_test.go
   - internal/leader/tasks.go
+  - internal/leader/leader_test.go
+  - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
+  - sqlc.yaml
   - internal/logging/events.go
   - internal/archlint/secretleak.go
   - test/e2e/self_observation_test.go
@@ -110,7 +117,10 @@ issue: 53
 - **Per Organization**: both Leader tasks of this story, the OIDC secret expiry check and the outgoing heartbeat, run
   per Organization: each iterates over the Organizations (one in L1) and passes `org_id` to every query (lint 1).
 - **System status** (C-19.FR-10; `internal/systemstatus`, read-only, any replica): `version` and `commit`; `replicas`
-  — live rows of `replicas` with their key ids and `refreshed_at`, `leader` for `runtime_state.leader_replica_id`;
+  — live rows of `replicas` with their key ids and `refreshed_at`, `leader` for `runtime_state.leader_replica_id`
+  while its alive mark is fresh: a Leader whose alive mark is older than `leader.absence_notice` is not flagged
+  `leader` (in development mode a move of the development clock wakes the alive mark, as it wakes the other
+  time-based Leader tasks, so the flag follows the jump at once);
   `recovery` — `active` while `runtime_state.recovery_until` is ahead, with the last `downtime_periods` row;
   `delivery_queues` — Destinations with pending deliveries or due Thread replies (the count of
   `muster_delivery_queue`); `broken_destinations` with `since` and the masked reason; `integrations_attention` —
@@ -150,15 +160,15 @@ FIRING() { curl -s -b jar "$API/integrations/$(curl -s -b jar $API/integrations 
 
 # C-19.FR-7, AC-1, first and on real time, before the development clock is advanced: the outgoing heartbeat is sent by
 # the Leader only; with no replica leading nothing is sent, and it resumes with a Leader
-curl -s -b jar $API/system-status | jq -c .outgoing_heartbeat   # {"configured":false,"last_attempt_at":null,"last_ok":null,"last_error":null}
+curl -s -b jar $API/system-status | jq -c .outgoing_heartbeat   # {"configured":false,"last_attempt_at":null,"last_error":null,"last_ok":null}
 O=$(curl -s -b jar $API/organization)
 curl -s "${H[@]}" -X PUT -H "If-Match: $(jq -r .etag <<<"$O")" $API/organization \
   -d "$(jq -c 'del(.id, .etag) | .outgoing_heartbeat = {url: "http://127.0.0.1:18093/hook/dev/ping", proxy: {enabled: false}}' <<<"$O")" \
   | jq -c .outgoing_heartbeat.url_status.set                # true
 sleep 65; PINGS                                             # 1   (or 2)
 curl -s $FWH/received/dev | jq -r '[.[] | select(.path == "/hook/dev/ping")][-1].method'   # GET
-curl -s -b jar "$API/audit-log?action=organization.updated&limit=1" | jq -c '.items[0].diff[] | select(.field == "outgoing_heartbeat.url")'
-# {"field":"outgoing_heartbeat.url","secret_changed":true}
+curl -s -b jar "$API/audit-log?action=organization.updated&limit=1" | jq -c '.items[0].diff[] | select(.pointer == "/outgoing_heartbeat/url")'
+# {"pointer":"/outgoing_heartbeat/url","secret_changed":true}
 KEY=$((0x6d75737465720003))                                 # leader.LockKey, the Leader's session advisory lock
 kill %1; wait; psql "$MUSTER_DATABASE_URL" -c "SELECT pg_advisory_lock($KEY); SELECT pg_sleep(900)" > /dev/null & LOCK=$!
 make dev > dev.log 2>&1 & sleep 10

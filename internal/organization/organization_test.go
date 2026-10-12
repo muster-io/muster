@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/netip"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,8 @@ import (
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/keyring"
+	keyringdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/publicid"
@@ -209,10 +212,12 @@ func TestCurrentErrors(t *testing.T) {
 
 // fakeSettings is the organization resource in memory; fail makes the named method fail.
 type fakeSettings struct {
-	row   dbgen.GetSettingsRow
-	audit []auditdb.InsertAuditEntryParams
-	hints []db.Hint
-	fail  map[string]error
+	row     dbgen.GetSettingsRow
+	secrets dbgen.GetOutgoingHeartbeatSecretsRow
+	updates []dbgen.UpdateSettingsParams
+	audit   []auditdb.InsertAuditEntryParams
+	hints   []db.Hint
+	fail    map[string]error
 }
 
 func newFakeSettings(t *testing.T) *fakeSettings {
@@ -252,11 +257,28 @@ func (s *fakeSettings) LockSettings(context.Context, int64) (int64, error) {
 	return s.row.Version, s.fail["LockSettings"]
 }
 
-func (s *fakeSettings) SetTOTPPolicy(_ context.Context, arg dbgen.SetTOTPPolicyParams) (int64, error) {
-	if err := s.fail["SetTOTPPolicy"]; err != nil {
+func (s *fakeSettings) GetOutgoingHeartbeatSecrets(context.Context, int64) (dbgen.GetOutgoingHeartbeatSecretsRow,
+	error) {
+	return s.secrets, s.fail["GetOutgoingHeartbeatSecrets"]
+}
+
+func (s *fakeSettings) UpdateSettings(_ context.Context, arg dbgen.UpdateSettingsParams) (int64, error) {
+	if err := s.fail["UpdateSettings"]; err != nil {
 		return 0, err
 	}
+	s.updates = append(s.updates, arg)
 	s.row.TotpRequired, s.row.Version = arg.TotpRequired, s.row.Version+1
+	s.row.OutgoingHeartbeatProxy = arg.Proxy
+	s.row.OutgoingHeartbeatUrlSet, s.row.OutgoingHeartbeatUrlUpdatedAt = arg.UrlCiphertext != nil, arg.UrlUpdatedAt
+	s.row.OutgoingHeartbeatProxyPasswordSet = arg.ProxyPasswordCiphertext != nil
+	s.row.OutgoingHeartbeatProxyPasswordUpdatedAt = arg.ProxyPasswordUpdatedAt
+	s.secrets = dbgen.GetOutgoingHeartbeatSecretsRow{
+		OutgoingHeartbeatUrlCiphertext: arg.UrlCiphertext, OutgoingHeartbeatUrlKeyID: arg.UrlKeyID,
+		OutgoingHeartbeatUrlUpdatedAt:            arg.UrlUpdatedAt,
+		OutgoingHeartbeatProxyPasswordCiphertext: arg.ProxyPasswordCiphertext,
+		OutgoingHeartbeatProxyPasswordKeyID:      arg.ProxyPasswordKeyID,
+		OutgoingHeartbeatProxyPasswordUpdatedAt:  arg.ProxyPasswordUpdatedAt,
+	}
 	return 1, nil
 }
 
@@ -372,9 +394,6 @@ func TestOrganizationUpdate(t *testing.T) {
 		got.Version != 2 || len(s.audit) != 1 || len(s.hints) != 1 {
 		t.Errorf("an update without a change = %+v, %v, %d entries", got, err, len(s.audit))
 	}
-	user := "someone"
-	tz := "http"
-	proxyAddr := "proxy:3128"
 	changes := map[string]func(*Input){
 		"/name":                                 func(in *Input) { in.Name = "Other" },
 		"/time_zone":                            func(in *Input) { in.TimeZone = "Europe/Berlin" },
@@ -388,16 +407,6 @@ func TestOrganizationUpdate(t *testing.T) {
 		"/retention/alert_group_summaries_days": func(in *Input) { in.Retention.AlertGroupSummariesDays = 1 },
 		"/retention/audit_log_days":             func(in *Input) { in.Retention.AuditLogDays = 1 },
 		"/oidc_token_grace_seconds":             func(in *Input) { in.OIDCTokenGraceSeconds = 60 },
-		"/outgoing_heartbeat/url":               func(in *Input) { in.HeartbeatURL = SecretInput{Given: true, Value: "x"} },
-		"/outgoing_heartbeat/proxy/enabled":     func(in *Input) { in.HeartbeatProxy.Enabled = true },
-		"/outgoing_heartbeat/proxy/type":        func(in *Input) { in.HeartbeatProxy.Type = &tz },
-		"/outgoing_heartbeat/proxy/address":     func(in *Input) { in.HeartbeatProxy.Address = &proxyAddr },
-		"/outgoing_heartbeat/proxy/username": func(in *Input) {
-			in.HeartbeatProxy.UsernameSet, in.HeartbeatProxy.Username = true, &user
-		},
-		"/outgoing_heartbeat/proxy/password": func(in *Input) {
-			in.HeartbeatProxy.Password = SecretInput{Given: true, Value: "pw"}
-		},
 	}
 	for pointer, change := range changes {
 		in := inputOf(got)
@@ -420,8 +429,8 @@ func TestOrganizationUpdate(t *testing.T) {
 	if _, err := svc.Update(t.Context(), actor, audit.TransportUI, netip.Addr{}, nil, in); err != nil {
 		t.Errorf("clearing unset Secrets: %v", err)
 	}
-	for _, method := range []string{"InTx", "LockSettings", "GetSettings", "SetTOTPPolicy", "InsertAuditEntry",
-		"Notify"} {
+	for _, method := range []string{"InTx", "LockSettings", "GetSettings", "GetOutgoingHeartbeatSecrets",
+		"UpdateSettings", "InsertAuditEntry", "Notify"} {
 		s := newFakeSettings(t)
 		s.fail[method] = errors.New("db down")
 		svc := NewService(7, s, audit.NewWriter(logging.New(&log, logging.LevelInfo), clock.NewManual(t0)),
@@ -434,5 +443,229 @@ func TestOrganizationUpdate(t *testing.T) {
 		if _, err := svc.Update(t.Context(), actor, audit.TransportUI, netip.Addr{}, nil, in); err == nil {
 			t.Errorf("%s: no error", method)
 		}
+	}
+}
+
+type keyState struct {
+	keyring.Store
+	row *keyringdb.GetKeyringStateRow
+}
+
+func (s *keyState) GetKeyringState(context.Context) (keyringdb.GetKeyringStateRow, error) {
+	if s.row == nil {
+		return keyringdb.GetKeyringStateRow{}, pgx.ErrNoRows
+	}
+	return *s.row, nil
+}
+
+func (s *keyState) CreateKeyringState(_ context.Context, p keyringdb.CreateKeyringStateParams) (int64, error) {
+	s.row = &keyringdb.GetKeyringStateRow{ActiveKeyID: p.ActiveKeyID, CanaryKeyID: p.ActiveKeyID,
+		CanaryCiphertext: p.CanaryCiphertext}
+	return 1, nil
+}
+
+// activeKeyring is a Keyring of one key, active.
+func activeKeyring(t *testing.T) *keyring.Keyring {
+	t.Helper()
+	k, err := keyring.New([][]byte{bytes.Repeat([]byte{'o'}, keyring.KeySize)}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := k.Establish(t.Context(), &keyState{}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Open(t.Context(), logging.New(&bytes.Buffer{}, logging.LevelInfo), st); err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+func heartbeatService(t *testing.T) (*Service, *fakeSettings, *keyring.Keyring) {
+	t.Helper()
+	s := newFakeSettings(t)
+	k := activeKeyring(t)
+	svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
+		clock.NewManual(t0)).WithKeyring(k)
+	return svc, s, k
+}
+
+const hookURL = "https://hc.example.org/ping/0f6c2a1e-secret-token?k=v"
+
+// TestUpdateHeartbeatURLEncrypted covers C-19.FR-7 on the setting: the URL is stored encrypted for its field, read
+// back only as set, and the Audit log diff says only that it changed; an equal value again still changes it.
+func TestUpdateHeartbeatURLEncrypted(t *testing.T) {
+	svc, s, k := heartbeatService(t)
+	o, _ := svc.Get(t.Context())
+	in := inputOf(o)
+	in.HeartbeatURL = keyring.Replace(hookURL)
+	got, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.OutgoingHeartbeat.URL.Set || !got.OutgoingHeartbeat.URL.UpdatedAt.Equal(t0) || got.Version != 2 {
+		t.Errorf("Update = %+v", got.OutgoingHeartbeat)
+	}
+	u := s.updates[0]
+	if !u.UrlChanged || bytes.Contains(u.UrlCiphertext, []byte("secret-token")) || !u.UrlKeyID.Valid {
+		t.Errorf("update %+v", u)
+	}
+	plain, err := k.OpenSecret(FieldHeartbeatURL, secretOf(u.UrlCiphertext, u.UrlKeyID, u.UrlUpdatedAt))
+	if err != nil || string(plain) != hookURL {
+		t.Errorf("OpenSecret = %v", err)
+	}
+	if _, err := k.OpenSecret(FieldHeartbeatProxyPassword, secretOf(u.UrlCiphertext, u.UrlKeyID,
+		u.UrlUpdatedAt)); err == nil {
+		t.Error("the ciphertext opens for another field")
+	}
+	if len(s.audit) != 1 || string(s.audit[0].Diff) != `[{"pointer":"/outgoing_heartbeat/url","secret_changed":true}]` {
+		t.Errorf("audit %s", s.audit[0].Diff)
+	}
+	if !slices.Equal(s.hints, []db.Hint{{OrgID: 7, Type: HintOrganization}, {OrgID: 7, Type: HintSystemStatus}}) {
+		t.Errorf("hints %v", s.hints)
+	}
+	in = inputOf(got)
+	in.HeartbeatURL = keyring.Replace(hookURL)
+	if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil ||
+		len(s.audit) != 2 {
+		t.Errorf("the same value again: %v, %d entries", err, len(s.audit))
+	}
+}
+
+// TestUpdateHeartbeatURLClearResetsResult: clearing the URL clears it and its last result, is recorded and sends the
+// system-status hint; a change that keeps the URL sends none.
+func TestUpdateHeartbeatURLClearResetsResult(t *testing.T) {
+	svc, s, _ := heartbeatService(t)
+	o, _ := svc.Get(t.Context())
+	in := inputOf(o)
+	in.HeartbeatURL = keyring.Replace(hookURL)
+	if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil {
+		t.Fatal(err)
+	}
+	in.HeartbeatURL = keyring.Clear
+	got, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	if err != nil || got.OutgoingHeartbeat.URL.Set {
+		t.Fatalf("Update = %+v, %v", got.OutgoingHeartbeat, err)
+	}
+	if u := s.updates[1]; !u.UrlChanged || u.UrlCiphertext != nil || u.UrlKeyID.Valid || !u.UrlUpdatedAt.Valid {
+		t.Errorf("update %+v", u)
+	}
+	if got := s.hints[len(s.hints)-2:]; !slices.Equal(got, []db.Hint{{OrgID: 7, Type: HintOrganization},
+		{OrgID: 7, Type: HintSystemStatus}}) {
+		t.Errorf("hints of the clear %v", got)
+	}
+	// The TOTP policy alone keeps the URL and its result.
+	hints := len(s.hints)
+	in.TOTPRequired = TOTPEveryone
+	if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil {
+		t.Fatal(err)
+	}
+	if u := s.updates[2]; u.UrlChanged {
+		t.Errorf("a TOTP change reset the result: %+v", u)
+	}
+	if got := s.hints[hints:]; !slices.Equal(got, []db.Hint{{OrgID: 7, Type: HintOrganization}}) {
+		t.Errorf("hints of a TOTP change %v", got)
+	}
+}
+
+// TestUpdateHeartbeatProxy: the proxy of the outgoing heartbeat is the shared proxy object, its password a Secret; an
+// invalid field names its pointer.
+func TestUpdateHeartbeatProxy(t *testing.T) {
+	svc, s, k := heartbeatService(t)
+	o, _ := svc.Get(t.Context())
+	in := inputOf(o)
+	typ, addr, user := "http", "proxy.example.org:3128", "hb"
+	in.HeartbeatProxy = ProxyInput{Enabled: true, Type: &typ, Address: &addr, UsernameSet: true, Username: &user,
+		Password: keyring.Replace("proxy-pw")}
+	got, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := got.OutgoingHeartbeat.Proxy
+	if !p.Enabled || p.Type != "http" || p.Address != addr || *p.Username != "hb" || !got.OutgoingHeartbeat.ProxyPassword.Set {
+		t.Errorf("proxy %+v", got.OutgoingHeartbeat)
+	}
+	u := s.updates[0]
+	if pw, err := k.OpenSecret(FieldHeartbeatProxyPassword, secretOf(u.ProxyPasswordCiphertext,
+		u.ProxyPasswordKeyID, u.ProxyPasswordUpdatedAt)); err != nil || pw != "proxy-pw" || u.UrlChanged {
+		t.Errorf("password %v, update %+v", err, u)
+	}
+	diff := string(s.audit[0].Diff)
+	for _, want := range []string{`"pointer":"/outgoing_heartbeat/proxy/enabled"`,
+		`"pointer":"/outgoing_heartbeat/proxy/address","before":"","after":"proxy.example.org:3128"`,
+		`{"pointer":"/outgoing_heartbeat/proxy/password","secret_changed":true}`} {
+		if !strings.Contains(diff, want) {
+			t.Errorf("diff %s lacks %s", diff, want)
+		}
+	}
+	if strings.Contains(diff, "proxy-pw") {
+		t.Errorf("the diff has the password: %s", diff)
+	}
+	bad := "nohost"
+	in = inputOf(got)
+	in.HeartbeatProxy = ProxyInput{Enabled: true, Address: &bad}
+	_, err = svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	if f, ok := errors.AsType[*FieldError](err); !ok || f.Pointer != "/outgoing_heartbeat/proxy/address" ||
+		f.Code != "invalid_format" || !strings.Contains(f.Error(), f.Pointer) {
+		t.Errorf("a bad address: %v", err)
+	}
+	in.HeartbeatProxy = ProxyInput{Enabled: true, Password: keyring.Replace("")}
+	if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err == nil {
+		t.Error("an empty password was accepted")
+	} else if f, ok := errors.AsType[*FieldError](err); !ok || f.Pointer != "/outgoing_heartbeat/proxy/password" ||
+		f.Code != "too_short" {
+		t.Errorf("an empty password: %v", err)
+	}
+}
+
+// TestUpdateHeartbeatURLInvalid: a URL that is not an absolute http or https URL with a host, has a fragment or is
+// too long is refused at its pointer, without the URL in the error; an empty one is too short.
+func TestUpdateHeartbeatURLInvalid(t *testing.T) {
+	svc, s, _ := heartbeatService(t)
+	o, _ := svc.Get(t.Context())
+	for _, raw := range []string{"ftp://hc.example.org/x", "/relative", "https://", "https://hc.example.org/#frag",
+		"https://hc.example.org/" + strings.Repeat("a", maxHeartbeatURL), " https://hc.example.org/", "http://:80/"} {
+		in := inputOf(o)
+		in.HeartbeatURL = keyring.Replace(logging.Secret(raw))
+		_, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+		if f, ok := errors.AsType[*FieldError](err); !ok || f.Pointer != "/outgoing_heartbeat/url" ||
+			f.Code != "invalid_format" || strings.Contains(f.Detail, "hc.example.org") {
+			t.Errorf("%q: %v", raw, err)
+		}
+	}
+	in := inputOf(o)
+	in.HeartbeatURL = keyring.Replace("")
+	if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err == nil {
+		t.Error("an empty URL was accepted")
+	} else if f, ok := errors.AsType[*FieldError](err); !ok || f.Code != "too_short" {
+		t.Errorf("an empty URL: %v", err)
+	}
+	if len(s.updates) != 0 {
+		t.Errorf("a refused update wrote %d", len(s.updates))
+	}
+}
+
+// TestUpdateWithoutKeyring: a Service without a Keyring refuses to set a Secret instead of panicking, still refuses an
+// empty one as too short, and still clears one.
+func TestUpdateWithoutKeyring(t *testing.T) {
+	s := newFakeSettings(t)
+	svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
+		clock.NewManual(t0))
+	o, _ := svc.Get(t.Context())
+	in := inputOf(o)
+	in.HeartbeatURL = keyring.Replace(hookURL)
+	if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); !errors.Is(err,
+		errNoKeyring) {
+		t.Errorf("Update = %v", err)
+	}
+	in.HeartbeatURL = keyring.Replace("")
+	_, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	if f, ok := errors.AsType[*FieldError](err); !ok || f.Pointer != "/outgoing_heartbeat/url" ||
+		f.Code != "too_short" {
+		t.Errorf("an empty URL without a keyring: %v", err)
+	}
+	in.HeartbeatURL = keyring.Clear
+	if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil {
+		t.Errorf("clearing: %v", err)
 	}
 }
