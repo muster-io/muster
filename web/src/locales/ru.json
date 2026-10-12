@@ -24,7 +24,8 @@
       "reopened": "Переоткрыта",
       "snoozeEnd": "Отложена до",
       "status": "Статус",
-      "title": "Название"
+      "title": "Название",
+      "unclaimed": "Не взята в работу"
     },
     "deactivated": "{{name}} (деактивирован)",
     "deliveryProblem": "Проблема доставки: откройте группу алертов, чтобы увидеть, в каком месте доставки она возникла",
@@ -75,6 +76,8 @@
       "severity": "Важность",
       "snoozedNoEnd": "Отложены без срока",
       "title": "Фильтры",
+      "unclaimed": "Не взята в работу",
+      "unclaimedHint": "Всё ещё горят после всех уведомлений о тайм-ауте подтверждения.",
       "urgent": "Срочность",
       "urgentOnly": "Только срочные",
       "userWithLogin": "{{name}} ({{login}})"
@@ -94,6 +97,11 @@
     "newCountLabel_few": "{{count}} новые группы алертов, показать",
     "newCountLabel_many": "{{count}} новых групп алертов, показать",
     "newCountLabel_other": "{{count}} новых групп алертов, показать",
+    "nextNotice": {
+      "ackTimeout": "Следующее уведомление о тайм-ауте подтверждения: {{time}}",
+      "in": "Через {{duration}}",
+      "reminder": "Следующее напоминание: {{time}}"
+    },
     "noEnd": "Без срока",
     "notices": {
       "days_one": "{{count}} день",
@@ -106,7 +114,8 @@
       "stillFiring_one": "⚠ В Alertmanager ещё горит {{count}} алерт",
       "stillFiring_few": "⚠ В Alertmanager ещё горят {{count}} алерта",
       "stillFiring_many": "⚠ В Alertmanager ещё горят {{count}} алертов",
-      "stillFiring_other": "⚠ В Alertmanager ещё горят {{count}} алерта"
+      "stillFiring_other": "⚠ В Alertmanager ещё горят {{count}} алерта",
+      "unclaimed": "⚠ Никто не взял в работу"
     },
     "owner": "Владелец: {{name}}",
     "page": {
@@ -137,6 +146,7 @@
     "rowLabel": "{{title}}, #{{number}}, {{status}}, {{duration}}",
     "rowLabelDeliveryProblem": "{{label}}, проблема доставки",
     "rowLabelOwner": "{{label}}, владелец: {{name}}",
+    "rowLabelUnclaimed": "{{label}}, не взята в работу",
     "rowLabelUrgent": "{{title}}, #{{number}}, {{status}}, срочная, {{duration}}",
     "search": {
       "label": "Поиск",
@@ -169,6 +179,7 @@
       "snoozed": "Отложенные"
     },
     "title": "Группы алертов",
+    "unclaimed": "Не взята в работу",
     "urgent": "Срочная"
   },
   "alertmanagerRoutes": {
@@ -377,6 +388,7 @@
       "acknowledge": "Подтвердить",
       "resolve": "Закрыть",
       "snooze": "Отложить",
+      "stillOnIt": "Ещё работаю",
       "takeOver": "Перехватить у владельца {{name}}",
       "unacknowledge": "Снять подтверждение",
       "unresolve": "Открыть снова",
@@ -393,7 +405,9 @@
       "newerExists": "Есть более новая открытая группа алертов #{{number}}.",
       "newerExistsLinked": "Есть более новая открытая группа алертов <groupLink>#{{number}}</groupLink>.",
       "newerExistsUnknown": "Есть более новая открытая группа алертов.",
+      "noReminderPending": "Напоминания, на которое нужно ответить, нет.",
       "notAcknowledged": "Эта группа алертов не подтверждена.",
+      "notOwner": "Ответить на напоминание может только владелец.",
       "notResolved": "Эта группа алертов не закрыта.",
       "notSnoozed": "Эта группа алертов не отложена.",
       "ownerMustBeUser": "Сервисный аккаунт не может быть владельцем.",
@@ -1602,6 +1616,34 @@
       "notSent": "Запросы не отправляются.",
       "since": "Ошибка шаблона с {{time}}: {{error}}."
     },
+    "timers": {
+      "ackTimeout": "Тайм-аут подтверждения",
+      "ackTimeoutHint": "Пока горящую группу алертов никто не подтвердил, Muster отвечает в её треде: не больше трёх уведомлений, каждый следующий интервал вдвое длиннее предыдущего.",
+      "autoUnacknowledge": "Автоматически снимать подтверждение",
+      "autoUnacknowledgeHint": "Снимать подтверждение с группы алертов, если её владелец не ответил на два напоминания подряд.",
+      "cap": "Не реже чем раз в",
+      "capInvalid": "Введите число часов не меньше, чем в поле «Первое напоминание через».",
+      "firstNotice": "Первое уведомление через",
+      "firstReminder": "Первое напоминание через",
+      "hours": "ч",
+      "hoursInvalid": "Введите число часов больше 0.",
+      "minutes": "мин",
+      "minutesInvalid": "Введите число минут больше 0.",
+      "needsReminders": "Работает только с включёнными напоминаниями.",
+      "noticesAt_one": "Уведомления через {{first}}, {{second}} и {{third}} минуту",
+      "noticesAt_few": "Уведомления через {{first}}, {{second}} и {{third}} минуты",
+      "noticesAt_many": "Уведомления через {{first}}, {{second}} и {{third}} минут",
+      "noticesAt_other": "Уведомления через {{first}}, {{second}} и {{third}} минуты",
+      "readOnlyAck": "Включён, первое уведомление через {{duration}}",
+      "readOnlyReminders": "Включены, первое через {{first}}, не реже чем раз в {{cap}}",
+      "reminders": "Напоминания",
+      "remindersAt_one": "Напоминания через {{first}}, {{second}}, {{third}}, {{fourth}} и {{fifth}} час",
+      "remindersAt_few": "Напоминания через {{first}}, {{second}}, {{third}}, {{fourth}} и {{fifth}} часа",
+      "remindersAt_many": "Напоминания через {{first}}, {{second}}, {{third}}, {{fourth}} и {{fifth}} часов",
+      "remindersAt_other": "Напоминания через {{first}}, {{second}}, {{third}}, {{fourth}} и {{fifth}} часа",
+      "remindersHint": "Пока группа алертов подтверждена, напоминания упоминают её владельца; каждый следующий интервал вдвое длиннее предыдущего, но не длиннее значения «Не реже чем раз в».",
+      "title": "Тайм-аут подтверждения и напоминания"
+    },
     "title": "Маршруты"
   },
   "secondFactor": {
@@ -1881,7 +1923,7 @@
     "empty": "Записей нет.",
     "events": {
       "acknowledged": "Подтверждена",
-      "ackTimeout": "Не подтверждена вовремя, уведомление {{number}}",
+      "ackTimeout": "Уведомление о тайм-ауте подтверждения {{number}} из {{total}}",
       "alertContinued_one": "{{count}} алерт продолжился с новым временем начала",
       "alertContinued_few": "{{count}} алерта продолжились с новым временем начала",
       "alertContinued_many": "{{count}} алертов продолжились с новым временем начала",
@@ -1896,17 +1938,18 @@
       "alertsAdded_many": "Добавлено {{count}} алертов",
       "alertsAdded_other": "Добавлено {{count}} алерта",
       "annotationsChanged": "Изменились аннотации",
-      "autoUnacknowledged": "Подтверждение снято: на напоминания не ответили",
+      "autoUnacknowledged": "Подтверждение снято автоматически",
+      "autoUnacknowledgedWith": "Подтверждение снято автоматически: {{reason}}",
       "created": "Группа алертов создана",
       "movedToDefaultRoute": "Перенесена в маршрут по умолчанию",
       "noteAdded": "Заметка",
-      "noticesMissed_one": "Пока Muster был недоступен, пропущено {{count}} уведомление",
-      "noticesMissed_few": "Пока Muster был недоступен, пропущено {{count}} уведомления",
-      "noticesMissed_many": "Пока Muster был недоступен, пропущено {{count}} уведомлений",
-      "noticesMissed_other": "Пока Muster был недоступен, пропущено {{count}} уведомления",
+      "noticesMissed_one": "Пропущено {{count}} уведомление",
+      "noticesMissed_few": "Пропущено {{count}} уведомления",
+      "noticesMissed_many": "Пропущено {{count}} уведомлений",
+      "noticesMissed_other": "Пропущено {{count}} уведомления",
       "other": "Другое событие",
       "reminder": "Напоминание {{number}}",
-      "reminderAnswered": "На напоминание ответили: ещё работаю",
+      "reminderAnswered": "Ещё работаю",
       "reopened": "Переоткрыта",
       "resolved": "Закрыта",
       "resolvedWith": "Закрыта: {{reason}}",
@@ -1917,7 +1960,7 @@
       "takeover": "Перехвачена у {{name}}",
       "unacknowledged": "Подтверждение снято",
       "unacknowledgedWith": "Подтверждение снято: {{reason}}",
-      "unclaimed": "Никто не взял",
+      "unclaimed": "Не взята в работу",
       "unresolved": "Снова открыта",
       "unsnoozed": "Откладывание снято",
       "urgencyRaised": "Стала срочной"
@@ -1940,7 +1983,9 @@
       "newest": "Сначала новые",
       "oldest": "Сначала старые"
     },
+    "quiet": "Тихо",
     "reasons": {
+      "noAnswer": "нет ответа на два последних напоминания",
       "ownerDeleted": "владелец удалён",
       "ownerDisabled": "владелец отключён"
     },

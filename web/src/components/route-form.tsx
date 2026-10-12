@@ -4,10 +4,10 @@
 // The Route editor (C-08.FR-1, FR-2, FR-4, FR-5): the name, the description, the Matchers (none for the Default route),
 // the urgent mark, the Group key with its preview, the Destinations with their health and the Storm banner (C-13.FR-11,
 // C-11.FR-9), the Lifecycle section (C-09.FR-4, FR-5, FR-9), the Delivery section (the Thread batching window and the
-// Storm threshold of C-11), the Snooze durations (C-10.FR-6) and the Message section (C-12.FR-2, FR-3, FR-5), with the
-// banner of a template that keeps failing (C-12.FR-6). The policy fields of later capabilities are not shown yet: they
-// travel unchanged from the profile of a new Route, or from the stored Route, with every save. Without routes:write
-// the editor only shows the Route.
+// Storm threshold of C-11), the Snooze durations (C-10.FR-6), the "Ack timeout and Reminders" section (C-17.FR-2) and
+// the Message section (C-12.FR-2, FR-3, FR-5), with the banner of a template that keeps failing (C-12.FR-6). Every
+// policy field is shown; a new Route starts with the values of its profile. Without routes:write the editor only shows
+// the Route.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
@@ -63,6 +63,15 @@ import {
   SNOOZE_POINTER,
   sortedDurations,
 } from "./route-policy-snooze";
+import {
+  RoutePolicyTimers,
+  RoutePolicyTimersReadOnly,
+  TIMERS_POINTERS,
+  refineTimers,
+  timersSchema,
+  timersValues,
+  withTimers,
+} from "./route-policy-timers";
 import { TemplateErrorBanner } from "./template-error-banner";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -100,8 +109,10 @@ const formSchema = z
     }),
     ...lifecycleSchema,
     ...deliverySchema,
+    ...timersSchema,
   })
   .superRefine((v, ctx) => {
+    refineTimers(v, ctx);
     v.matchers.forEach((row, index) => {
       if (!isEmptyRow(row) && row.label.trim() === "") {
         ctx.addIssue({ code: "custom", path: ["matchers", index, "label"], message: "required" });
@@ -123,6 +134,7 @@ function formValues(base: RouteInput): FormValues {
     message: messageValues(base.policy),
     ...lifecycleValues(base.policy),
     ...deliveryValues(base.policy),
+    ...timersValues(base.policy),
   };
 }
 
@@ -141,10 +153,13 @@ function inputOf(base: RouteInput, v: FormValues, draft: string, isDefault: bool
     matchers: isDefault ? [] : matchersOf(v.matchers),
     group_key: withDraft(v.group_key, draft),
     destination_ids: [...v.destination_ids],
-    policy: withDelivery(
-      withMessage(
-        { ...withLifecycle(base.policy, v), snooze_durations_seconds: v.snooze_durations },
-        v.message,
+    policy: withTimers(
+      withDelivery(
+        withMessage(
+          { ...withLifecycle(base.policy, v), snooze_durations_seconds: v.snooze_durations },
+          v.message,
+        ),
+        v,
       ),
       v,
     ),
@@ -269,6 +284,24 @@ export function RouteForm({
   });
   const rows = useWatch({ control: form.control, name: "matchers" });
   const groupKey = useWatch({ control: form.control, name: "group_key" });
+  const [
+    ackTimeoutEnabled,
+    ackTimeoutFirst,
+    remindersEnabled,
+    remindersFirst,
+    remindersCap,
+    autoUnacknowledge,
+  ] = useWatch({
+    control: form.control,
+    name: [
+      "ack_timeout_enabled",
+      "ack_timeout_first_minutes",
+      "reminders_enabled",
+      "reminders_first_hours",
+      "reminders_cap_hours",
+      "auto_unacknowledge",
+    ],
+  });
 
   /**
    * Puts the errors of a refusal on the Matchers, by the rows the request was sent with, and on the Group key; returns
@@ -316,6 +349,7 @@ export function RouteForm({
       for (const item of err.errors ?? []) {
         const lifecycleField = LIFECYCLE_POINTERS[item.pointer];
         const deliveryField = DELIVERY_POINTERS[item.pointer];
+        const timersField = TIMERS_POINTERS[item.pointer];
         const template = templateOfPointer(item.pointer);
         if (template !== undefined) {
           byTemplate[template] = [...(byTemplate[template] ?? []), item];
@@ -332,6 +366,12 @@ export function RouteForm({
         } else if (deliveryField !== undefined) {
           form.setError(
             deliveryField,
+            { type: item.code, message: item.code },
+            { shouldFocus: true },
+          );
+        } else if (timersField !== undefined) {
+          form.setError(
+            timersField,
             { type: item.code, message: item.code },
             { shouldFocus: true },
           );
@@ -442,6 +482,7 @@ export function RouteForm({
         <RoutePolicyLifecycleReadOnly policy={base.policy} />
         <RoutePolicyDeliveryReadOnly policy={base.policy} />
         <RoutePolicySnoozeReadOnly durations={base.policy.snooze_durations_seconds} />
+        <RoutePolicyTimersReadOnly policy={base.policy} />
         <RoutePolicyMessage
           id={`${ID}-message`}
           routeId={route?.id}
@@ -639,6 +680,33 @@ export function RouteForm({
             error={snoozeError}
           />
         )}
+      />
+      <RoutePolicyTimers
+        id={`${ID}-timers`}
+        fields={{
+          ackEnabled: form.register("ack_timeout_enabled"),
+          ackFirst: form.register("ack_timeout_first_minutes", { valueAsNumber: true }),
+          remindersEnabled: form.register("reminders_enabled"),
+          remindersFirst: form.register("reminders_first_hours", { valueAsNumber: true }),
+          remindersCap: form.register("reminders_cap_hours", { valueAsNumber: true }),
+          autoUnacknowledge: form.register("auto_unacknowledge"),
+        }}
+        values={{
+          ack_timeout_enabled: ackTimeoutEnabled,
+          ack_timeout_first_minutes: ackTimeoutFirst,
+          reminders_enabled: remindersEnabled,
+          reminders_first_hours: remindersFirst,
+          reminders_cap_hours: remindersCap,
+          auto_unacknowledge: autoUnacknowledge,
+        }}
+        errors={{
+          ack_timeout_first_minutes: errors.ack_timeout_first_minutes?.message,
+          reminders_first_hours: errors.reminders_first_hours?.message,
+          reminders_cap_hours: errors.reminders_cap_hours?.message,
+          ack_timeout_enabled: errors.ack_timeout_enabled?.message,
+          reminders_enabled: errors.reminders_enabled?.message,
+          auto_unacknowledge: errors.auto_unacknowledge?.message,
+        }}
       />
       <Controller
         control={form.control}

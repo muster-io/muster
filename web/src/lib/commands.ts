@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Commands on Alert Groups from the UI (C-10.FR-1, FR-2, FR-14, FR-16): which buttons an Alert Group offers, taken
-// only from its allowed_commands; the refusal messages by their Problem code; running a Command and putting the
-// CommandResult into the page and the list; the texts of bulk results; and the limits the dialogs check.
+// Commands on Alert Groups from the UI (C-10.FR-1, FR-2, FR-14, FR-16; C-17.FR-10): which buttons an Alert Group
+// offers, taken only from its allowed_commands; the refusal messages by their Problem code; running a Command and
+// putting the CommandResult into the page and the list; the texts of bulk results; and the limits the dialogs check.
 
 import {
   type InfiniteData,
@@ -15,6 +15,7 @@ import type { TFunction } from "i18next";
 
 import {
   acknowledgeAlertGroup,
+  answerReminder,
   getGetAlertGroupCountsQueryKey,
   getGetAlertGroupQueryKey,
   getGetAlertGroupQueryOptions,
@@ -49,9 +50,10 @@ export const BULK_COMMAND_KEY = ["bulk-command"] as const;
 /** alert_group.note_max_length: the most characters of a Note. */
 export const NOTE_MAX_LENGTH = 4000;
 
-/** The Commands that have a button, in the order they show; still_on_it (S-050) and add_note (the Note box) have none. */
+/** The Commands that have a button, in the order they show; add_note (the Note box) has none. */
 export const BUTTON_COMMANDS = [
   "acknowledge",
+  "still_on_it",
   "unacknowledge",
   "resolve",
   "unresolve",
@@ -131,6 +133,10 @@ export function refusalCodeText(
         : t("commands.refusals.newerExists", { number: related.number });
     case "owner_must_be_user":
       return t("commands.refusals.ownerMustBeUser");
+    case "not_owner":
+      return t("commands.refusals.notOwner");
+    case "no_reminder_pending":
+      return t("commands.refusals.noReminderPending");
     default:
       return undefined;
   }
@@ -183,9 +189,9 @@ export function bulkItemText(t: TFunction, item: BulkCommandItem, ownerName?: st
   return t("commands.bulk.item", { subject, outcome });
 }
 
-/** What a Command button sends; Resolve may carry a Note and Snooze names its end. */
+/** What a Command button sends; Resolve may carry a Note and Snooze names its end. "Still on it" answers a Reminder. */
 export type CommandInput =
-  | { command: "acknowledge" | "unacknowledge" | "unresolve" | "unsnooze" }
+  | { command: "acknowledge" | "still_on_it" | "unacknowledge" | "unresolve" | "unsnooze" }
   | { command: "resolve"; note?: string }
   | { command: "snooze"; snooze: SnoozeRequest };
 
@@ -193,6 +199,8 @@ function send(alertGroupId: string, input: CommandInput): Promise<CommandResult>
   switch (input.command) {
     case "acknowledge":
       return acknowledgeAlertGroup(alertGroupId);
+    case "still_on_it":
+      return answerReminder(alertGroupId);
     case "unacknowledge":
       return unacknowledgeAlertGroup(alertGroupId);
     case "resolve":

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The Command buttons of an Alert Group (C-10.FR-1, FR-2, FR-4, FR-7, FR-16): built from allowed_commands only — the
-// page never works out itself what is allowed. On the page they form a bar right under the header; in a list row
-// they sit in a "…" menu. Acknowledge reads "Take over from {Owner}" when another user owns the Alert Group and needs
-// no confirmation. Resolve, Unresolve and Snooze open their dialogs. While a newer open Alert Group of the same key
-// exists, its link takes the place of Unresolve. A refusal shows its message, linked to the newer Alert Group when it
-// names one; the buttons wait while a Command is under way, so that nothing is sent twice.
+// The Command buttons of an Alert Group (C-10.FR-1, FR-2, FR-4, FR-7, FR-16; C-17.FR-10): built from allowed_commands
+// only — the page never works out itself what is allowed. On the page they form a bar right under the header; in a list
+// row they sit in a "…" menu. Acknowledge reads "Take over from {Owner}" when another user owns the Alert Group and
+// needs no confirmation. "Still on it", which the Owner sees while a Reminder waits, answers it at once. Resolve,
+// Unresolve and Snooze open their dialogs. While a newer open Alert Group of the same key exists, its link takes the
+// place of Unresolve. A refusal shows its message, linked to the newer Alert Group when it names one; the buttons wait
+// while a Command is under way, so that nothing is sent twice.
 
 import { useIsMutating, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -59,6 +60,8 @@ export function commandLabel(
       return owner !== undefined && owner.id !== me
         ? t("commands.buttons.takeOver", { name: personName(t, owner) })
         : t("commands.buttons.acknowledge");
+    case "still_on_it":
+      return t("commands.buttons.stillOnIt");
     case "unacknowledge":
       return t("commands.buttons.unacknowledge");
     case "resolve":
@@ -259,7 +262,9 @@ export function CommandButtons({ group }: { group: AlertGroup }) {
         {commands.map((c) => (
           <Button
             key={c}
-            variant={c === "acknowledge" || c === "resolve" ? "default" : "outline"}
+            variant={
+              c === "acknowledge" || c === "still_on_it" || c === "resolve" ? "default" : "outline"
+            }
             className="max-w-full min-w-0"
             disabled={busy}
             aria-haspopup={

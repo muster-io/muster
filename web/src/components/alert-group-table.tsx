@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The rows of the Alert Group list (C-09.FR-13, FR-24; C-10.FR-13, FR-14, FR-16; C-13.FR-12). On a desktop a
+// The rows of the Alert Group list (C-09.FR-13, FR-24; C-10.FR-13, FR-14, FR-16; C-13.FR-12; C-17.FR-3). On a desktop a
 // table: status with the Delivery problem mark, #N, title, Severity level, Urgent, Route, Integrations, firing and
-// total Alerts, Owner, Snooze end, start, duration, last change, Reopen count, the label columns the user picked and
-// the "…" menu of Commands. On a phone compact rows — status, #N, title, Urgent mark, duration, Owner and the
-// Delivery problem in words, a link to the page, with the menu beside it — so that nothing scrolls sideways. While
-// the user selects, each row has a checkbox. Titles, summaries and label values come from alerts: text only.
+// total Alerts, Owner, Snooze end, the badge "Unclaimed", start, duration, last change, Reopen count, the label columns
+// the user picked and the "…" menu of Commands. On a phone compact rows — status, the badge "Unclaimed", #N, title,
+// Urgent mark, duration, Owner and the Delivery problem in words, a link to the page, with the menu beside it — so that
+// nothing scrolls sideways. While the user selects, each row has a checkbox. Titles, summaries and label values come
+// from alerts: text only.
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
@@ -17,7 +18,13 @@ import { useTranslation } from "react-i18next";
 import type { AlertGroup } from "../api/gen/model";
 import { problemText } from "../lib/api";
 import { useTimeFormat } from "../lib/time";
-import { EntityLink, StatusBadge, UrgentMark, statusLabel } from "./alert-group-header";
+import {
+  EntityLink,
+  StatusBadge,
+  UnclaimedBadge,
+  UrgentMark,
+  statusLabel,
+} from "./alert-group-header";
 import { useCan } from "./app-shell";
 import { CommandMenu, personName } from "./command-buttons";
 import { type CursorList, type DataColumn, DataTable } from "./data-table";
@@ -223,6 +230,11 @@ function useColumns(labelColumns: readonly string[], selecting: boolean): DataCo
       { id: "owner", header: t("alertGroups.columns.owner"), Cell: OwnerCell },
       { id: "snooze_end", header: t("alertGroups.columns.snoozeEnd"), Cell: SnoozeEndCell },
       {
+        id: "unclaimed",
+        header: t("alertGroups.columns.unclaimed"),
+        Cell: ({ row }) => (row.unclaimed ? <UnclaimedBadge /> : null),
+      },
+      {
         id: "started",
         header: t("alertGroups.fields.started"),
         Cell: ({ row }) => <DateTime iso={row.started_at} />,
@@ -286,9 +298,12 @@ function CompactRow({ row }: { row: AlertGroup }) {
   });
   const withOwner =
     owner === undefined ? base : t("alertGroups.rowLabelOwner", { label: base, name: owner });
-  const label = row.delivery_problem
-    ? t("alertGroups.rowLabelDeliveryProblem", { label: withOwner })
+  const withUnclaimed = row.unclaimed
+    ? t("alertGroups.rowLabelUnclaimed", { label: withOwner })
     : withOwner;
+  const label = row.delivery_problem
+    ? t("alertGroups.rowLabelDeliveryProblem", { label: withUnclaimed })
+    : withUnclaimed;
   return (
     <li
       className="flex min-w-0 items-start border-t first:border-t-0"
@@ -307,6 +322,7 @@ function CompactRow({ row }: { row: AlertGroup }) {
       >
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <StatusBadge status={row.status} />
+          {row.unclaimed && <UnclaimedBadge />}
           <span className="font-mono text-sm text-muted-foreground">#{row.number}</span>
           {row.urgent && <UrgentMark />}
           <Duration

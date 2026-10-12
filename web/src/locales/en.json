@@ -22,7 +22,8 @@
       "reopened": "Reopened",
       "snoozeEnd": "Snooze end",
       "status": "Status",
-      "title": "Title"
+      "title": "Title",
+      "unclaimed": "Unclaimed"
     },
     "deactivated": "{{name}} (deactivated)",
     "deliveryProblem": "Delivery problem: open the Alert Group to see which Destination",
@@ -71,6 +72,8 @@
       "severity": "Severity",
       "snoozedNoEnd": "Snoozed with no end",
       "title": "Filters",
+      "unclaimed": "Unclaimed",
+      "unclaimedHint": "Still firing after every ack timeout notice.",
       "urgent": "Urgent",
       "urgentOnly": "Urgent only",
       "userWithLogin": "{{name}} ({{login}})"
@@ -86,6 +89,11 @@
     "newCount_other": "{{count}} new",
     "newCountLabel_one": "{{count}} new Alert Group, show it",
     "newCountLabel_other": "{{count}} new Alert Groups, show them",
+    "nextNotice": {
+      "ackTimeout": "Next ack timeout notice at {{time}}",
+      "in": "In {{duration}}",
+      "reminder": "Next Reminder at {{time}}"
+    },
     "noEnd": "No end",
     "notices": {
       "days_one": "{{count}} day",
@@ -94,7 +102,8 @@
       "firingAgain": "Firing again after a manual resolve of <link>#{{number}}</link>",
       "replacement": "Alerts were replaced because <label></label> changed. Consider removing Instance labels from the rule, for example <code>without(pod, instance)</code>.",
       "stillFiring_one": "⚠ {{count}} alert still firing in Alertmanager",
-      "stillFiring_other": "⚠ {{count}} alerts still firing in Alertmanager"
+      "stillFiring_other": "⚠ {{count}} alerts still firing in Alertmanager",
+      "unclaimed": "⚠ Nobody has taken this"
     },
     "owner": "Owner: {{name}}",
     "page": {
@@ -125,6 +134,7 @@
     "rowLabel": "{{title}}, #{{number}}, {{status}}, {{duration}}",
     "rowLabelDeliveryProblem": "{{label}}, delivery problem",
     "rowLabelOwner": "{{label}}, Owner: {{name}}",
+    "rowLabelUnclaimed": "{{label}}, Unclaimed",
     "rowLabelUrgent": "{{title}}, #{{number}}, {{status}}, Urgent, {{duration}}",
     "search": {
       "label": "Search",
@@ -157,6 +167,7 @@
       "snoozed": "Snoozed"
     },
     "title": "Alert Groups",
+    "unclaimed": "Unclaimed",
     "urgent": "Urgent"
   },
   "alertmanagerRoutes": {
@@ -355,6 +366,7 @@
       "acknowledge": "Acknowledge",
       "resolve": "Resolve",
       "snooze": "Snooze",
+      "stillOnIt": "Still on it",
       "takeOver": "Take over from {{name}}",
       "unacknowledge": "Unacknowledge",
       "unresolve": "Unresolve",
@@ -371,7 +383,9 @@
       "newerExists": "A newer open Alert Group #{{number}} exists.",
       "newerExistsLinked": "A newer open Alert Group <groupLink>#{{number}}</groupLink> exists.",
       "newerExistsUnknown": "A newer open Alert Group exists.",
+      "noReminderPending": "There is no Reminder to answer.",
       "notAcknowledged": "This Alert Group is not acknowledged.",
+      "notOwner": "Only the Owner can answer a Reminder.",
       "notResolved": "This Alert Group is not resolved.",
       "notSnoozed": "This Alert Group is not snoozed.",
       "ownerMustBeUser": "A Service account cannot be an Owner.",
@@ -1544,6 +1558,30 @@
       "notSent": "Requests are not sent.",
       "since": "Template error since {{time}}: {{error}}."
     },
+    "timers": {
+      "ackTimeout": "Ack timeout",
+      "ackTimeoutHint": "While nobody acknowledges a firing Alert Group, Muster replies in its Thread: up to three notices, each interval twice the one before.",
+      "autoUnacknowledge": "Auto-unacknowledge",
+      "autoUnacknowledgeHint": "Take the Alert Group back when its Owner leaves two Reminders in a row unanswered.",
+      "cap": "At most every",
+      "capInvalid": "Enter a number of hours no smaller than “First Reminder after”.",
+      "firstNotice": "First notice after",
+      "firstReminder": "First Reminder after",
+      "hours": "hours",
+      "hoursInvalid": "Enter a number of hours greater than 0.",
+      "minutes": "minutes",
+      "minutesInvalid": "Enter a number of minutes greater than 0.",
+      "needsReminders": "Turn on Reminders to use it.",
+      "noticesAt_one": "Notices at {{first}}, {{second}} and {{third}} minute",
+      "noticesAt_other": "Notices at {{first}}, {{second}} and {{third}} minutes",
+      "readOnlyAck": "On, first notice after {{duration}}",
+      "readOnlyReminders": "On, first after {{first}}, at most every {{cap}}",
+      "reminders": "Reminders",
+      "remindersAt_one": "Reminders at {{first}}, {{second}}, {{third}}, {{fourth}} and {{fifth}} hour",
+      "remindersAt_other": "Reminders at {{first}}, {{second}}, {{third}}, {{fourth}} and {{fifth}} hours",
+      "remindersHint": "While an Alert Group stays acknowledged, Reminders mention its Owner; each interval is twice the one before, up to “At most every”.",
+      "title": "Ack timeout and Reminders"
+    },
     "title": "Routes"
   },
   "secondFactor": {
@@ -1817,7 +1855,7 @@
     "empty": "No entries.",
     "events": {
       "acknowledged": "Acknowledged",
-      "ackTimeout": "Not acknowledged in time, notice {{number}}",
+      "ackTimeout": "Ack timeout notice {{number}} of {{total}}",
       "alertContinued_one": "{{count}} alert continued with a new start time",
       "alertContinued_other": "{{count}} alerts continued with a new start time",
       "alertReplaced": "Alert replaced",
@@ -1826,15 +1864,16 @@
       "alertsAdded_one": "{{count}} alert added",
       "alertsAdded_other": "{{count}} alerts added",
       "annotationsChanged": "Annotations changed",
-      "autoUnacknowledged": "Acknowledgement released: Reminders went unanswered",
+      "autoUnacknowledged": "Unacknowledged automatically",
+      "autoUnacknowledgedWith": "Unacknowledged automatically: {{reason}}",
       "created": "Alert Group created",
       "movedToDefaultRoute": "Moved to the Default route",
       "noteAdded": "Note",
-      "noticesMissed_one": "{{count}} notice missed while Muster was unavailable",
-      "noticesMissed_other": "{{count}} notices missed while Muster was unavailable",
+      "noticesMissed_one": "{{count}} notice missed",
+      "noticesMissed_other": "{{count}} notices missed",
       "other": "Other event",
       "reminder": "Reminder {{number}}",
-      "reminderAnswered": "Reminder answered: still on it",
+      "reminderAnswered": "Still on it",
       "reopened": "Reopened",
       "resolved": "Resolved",
       "resolvedWith": "Resolved: {{reason}}",
@@ -1845,7 +1884,7 @@
       "takeover": "Taken over from {{name}}",
       "unacknowledged": "Unacknowledged",
       "unacknowledgedWith": "Unacknowledged: {{reason}}",
-      "unclaimed": "Nobody has taken this",
+      "unclaimed": "Unclaimed",
       "unresolved": "Unresolved",
       "unsnoozed": "Unsnoozed",
       "urgencyRaised": "Became Urgent"
@@ -1868,7 +1907,9 @@
       "newest": "Newest first",
       "oldest": "Oldest first"
     },
+    "quiet": "Quiet",
     "reasons": {
+      "noAnswer": "No answer to the last two Reminders",
       "ownerDeleted": "the owner was deleted",
       "ownerDisabled": "the owner was disabled"
     },

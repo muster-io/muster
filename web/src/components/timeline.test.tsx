@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The Timeline in a real browser, against a stubbed API: a text for every event and system entry, the actor with the
-// Transport, the Loud mark and the Mentions, the details, a Note with markup shown as text, Russian plurals, the kind
-// filter and the order sent to the API.
+// The Timeline in a real browser, against a stubbed API: a text for every event and system entry (the timer entries of
+// C-17 among them), the actor with the Transport, the Loud or Quiet mark and the Mentions, the details, a Note with
+// markup shown as text, Russian plurals, the kind filter and the order sent to the API.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
@@ -182,7 +182,11 @@ describe("entryText", () => {
       [status("snoozed", { snooze_until: AT }), `Snoozed until ${dateTime(AT)}`],
       [status("snoozed", { snooze_until: null }), "Snoozed with no end"],
       [status("unsnoozed"), "Unsnoozed"],
-      [status("auto_unacknowledged"), "Acknowledgement released: Reminders went unanswered"],
+      [status("auto_unacknowledged"), "Unacknowledged automatically"],
+      [
+        status("auto_unacknowledged", { reason: "No answer to the last two Reminders" }),
+        "Unacknowledged automatically: No answer to the last two Reminders",
+      ],
       [alerts("alerts_added", { fingerprints: ["a"] }), "1 alert added"],
       [alerts("alerts_added", { fingerprints: ["a", "b"] }), "2 alerts added"],
       [alerts("alert_replaced", { replaced_label: "pod" }), "Alert replaced"],
@@ -193,14 +197,12 @@ describe("entryText", () => {
       ],
       [alerts("annotations_changed"), "Annotations changed"],
       [alerts("severity_raised"), "Severity raised"],
-      [timers("ack_timeout", { notice_number: 2 }), "Not acknowledged in time, notice 2"],
-      [timers("unclaimed"), "Nobody has taken this"],
+      [timers("ack_timeout", { notice_number: 2 }), "Ack timeout notice 2 of 3"],
+      [timers("unclaimed"), "Unclaimed"],
       [timers("reminder", { notice_number: 1 }), "Reminder 1"],
-      [timers("reminder_answered"), "Reminder answered: still on it"],
-      [
-        timers("notices_missed", { missed_count: 3 }),
-        "3 notices missed while Muster was unavailable",
-      ],
+      [timers("reminder_answered"), "Still on it"],
+      [timers("notices_missed", { missed_count: 1 }), "1 notice missed"],
+      [timers("notices_missed", { missed_count: 3 }), "3 notices missed"],
     ];
     for (const [entry, expected] of cases) {
       expect(text(entry), entry.kind).toBe(expected);
@@ -254,6 +256,18 @@ describe("entryText", () => {
     expect(added(5)).toBe("Добавлено 5 алертов");
     expect(added(21)).toBe("Добавлен 21 алерт");
     expect(text(status("reopened"))).toBe("Переоткрыта");
+    const missed = (n: number) => text(timers("notices_missed", { missed_count: n }));
+    expect(missed(1)).toBe("Пропущено 1 уведомление");
+    expect(missed(3)).toBe("Пропущено 3 уведомления");
+    expect(missed(5)).toBe("Пропущено 5 уведомлений");
+    expect(missed(21)).toBe("Пропущено 21 уведомление");
+    expect(text(timers("ack_timeout", { notice_number: 3 }))).toBe(
+      "Уведомление о тайм-ауте подтверждения 3 из 3",
+    );
+    expect(text(timers("reminder_answered"))).toBe("Ещё работаю");
+    expect(
+      text(status("auto_unacknowledged", { reason: "No answer to the last two Reminders" })),
+    ).toBe("Подтверждение снято автоматически: нет ответа на два последних напоминания");
     expect(
       text(
         system("fallback_template_used", {
@@ -312,6 +326,57 @@ describe("Timeline", () => {
     expect(document.querySelector("[data-testid=timeline] img")).toBeNull();
     expect(alerted).not.toHaveBeenCalled();
     expect(requests[0]?.searchParams.get("order")).toBe("desc");
+  });
+
+  test("shows the timer entries with their loudness, Mentions and the previous Owner", async () => {
+    entries = [
+      timers("ack_timeout", { id: "TT1", notice_number: 3, mentions: ["ack_timeout"] }),
+      timers("unclaimed", { id: "TT2", loudness: "quiet", mentions: [] }),
+      timers("reminder_answered", {
+        id: "TT3",
+        loudness: "quiet",
+        mentions: [],
+        actor: { kind: "user", id: BOB.id, name: "Bob", transport: "ui" },
+      }),
+      status("auto_unacknowledged", {
+        loudness: "loud",
+        mentions: ["owner"],
+        reason: "No answer to the last two Reminders",
+        previous_owner: BOB,
+      }),
+      delivery("publication"),
+    ];
+    await renderTimeline();
+
+    const notice = item("Ack timeout notice 3 of 3");
+    await expect.element(notice.getByTestId("timeline-loud")).toHaveTextContent("Loud");
+    await expect
+      .element(notice.getByTestId("timeline-mentions"))
+      .toHaveTextContent("Mentions: ack_timeout");
+    expect(notice.getByTestId("timeline-quiet").elements()).toHaveLength(0);
+
+    const unclaimed = item("Unclaimed");
+    await expect.element(unclaimed.getByTestId("timeline-quiet")).toHaveTextContent("Quiet");
+    expect(unclaimed.getByTestId("timeline-loud").elements()).toHaveLength(0);
+
+    const answered = item("Still on it");
+    await expect
+      .element(answered.getByTestId("timeline-actor"))
+      .toHaveTextContent("Bob via the UI");
+    await expect.element(answered.getByTestId("timeline-quiet")).toBeVisible();
+
+    const auto = item("Unacknowledged automatically: No answer to the last two Reminders");
+    await expect.element(auto.getByTestId("timeline-loud")).toHaveTextContent("Loud");
+    await expect
+      .element(auto.getByTestId("timeline-mentions"))
+      .toHaveTextContent("Mentions: owner");
+    await expect.element(auto.getByText("Previous owner:")).toBeVisible();
+    await expect.element(auto.getByText("Bob", { exact: true })).toBeVisible();
+
+    // A delivery event marks only what was Loud.
+    const published = item("Published in ops");
+    await expect.element(published).toBeVisible();
+    expect(published.getByTestId("timeline-quiet").elements()).toHaveLength(0);
   });
 
   test("filters by kind and turns the order", async () => {

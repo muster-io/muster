@@ -5,9 +5,9 @@
 // desktop and a sheet on a phone, time range, search by #N or text, sort, label columns and "Load more", all in the
 // URL. Live hints keep it current without moving it: a changed Alert Group updates its row in place, and Alert Groups
 // that newly match are announced as "N new" above the list and shown when that is pressed. After a reconnect of the
-// stream everything is read again. "Mine" filters the Alert Groups the user owns (C-10.FR-13); "Select" puts
-// checkboxes on the rows for a bulk command (C-10.FR-14), the selection kept across "Load more" and dropped when the
-// view changes.
+// stream everything is read again. "Mine" filters the Alert Groups the user owns (C-10.FR-13), "Unclaimed" those nobody
+// took after every ack timeout notice (C-17.FR-3); "Select" puts checkboxes on the rows for a bulk command
+// (C-10.FR-14), the selection kept across "Load more" and dropped when the view changes.
 
 import {
   type InfiniteData,
@@ -36,7 +36,7 @@ import {
   type AlertGroupList,
   AgSortParameter,
 } from "../api/gen/model";
-import { AlertGroupFilters } from "../components/alert-group-filters";
+import { AlertGroupFilters, UnclaimedToggle } from "../components/alert-group-filters";
 import {
   AlertGroupTable,
   type Selection,
@@ -535,6 +535,10 @@ function AlertGroups() {
         >
           <div className="flex flex-wrap items-center gap-2">
             <MineToggle value={search.owner} onChange={(owner) => update({ owner })} />
+            <UnclaimedToggle
+              value={search.unclaimed}
+              onChange={(unclaimed) => update({ unclaimed })}
+            />
             {canBulk && (
               <Button
                 variant="outline"
