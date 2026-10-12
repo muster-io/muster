@@ -14,6 +14,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/getkin/kin-openapi/routers"
 	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
 
 	"github.com/muster-io/muster/internal/audit"
@@ -150,7 +151,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Cache-Control", "no-store")
 	rec := &statusRecorder{ResponseWriter: w}
-	op := s.route(r)
+	op, allow := s.route(r)
 	defer func() {
 		pattern := metrics.RouteUnmatched
 		if op != nil {
@@ -171,6 +172,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			metrics.APIRequestDuration.With(pattern, method).Update(s.real.Now().Sub(start).Seconds())
 		}
 	}()
+	if op == nil && len(allow) > 0 {
+		h.Set("Allow", strings.Join(allow, ", "))
+		writeProblem(rec, r, errMethodNotAllowed)
+		return
+	}
 	if op == nil {
 		writeProblem(rec, r, errNotFound)
 		return
@@ -207,16 +213,37 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.validated.ServeHTTP(rec, r)
 }
 
-// route finds the operation of the app listener that serves r; nil when there is none.
-func (s *Server) route(r *http.Request) *operation {
+// allowMethods are the methods an Allow header may list.
+var allowMethods = []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete}
+
+// route finds the operation of the app listener that serves r; nil when there is none. For a path of the specification
+// without the request's method, allow lists the methods the app listener serves the path with; it is empty when the
+// path is not there at all.
+func (s *Server) route(r *http.Request) (*operation, []string) {
 	if !strings.HasPrefix(r.URL.Path, BasePath+"/") {
-		return nil
+		return nil, nil
 	}
 	route, _, err := s.router.FindRoute(r)
-	if err != nil {
-		return nil
+	if errors.Is(err, routers.ErrMethodNotAllowed) {
+		return nil, s.allowed(r)
 	}
-	return s.operations[route.Operation]
+	if err != nil {
+		return nil, nil
+	}
+	return s.operations[route.Operation], nil
+}
+
+// allowed are the methods of allowMethods with which the app listener serves the path of r.
+func (s *Server) allowed(r *http.Request) []string {
+	var out []string
+	for _, m := range allowMethods {
+		other := *r
+		other.Method = m
+		if route, _, err := s.router.FindRoute(&other); err == nil && s.operations[route.Operation] != nil {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // authenticate finds the identity of a request to an operation that needs one: a bearer token (C-04.FR-4), which needs

@@ -546,6 +546,37 @@ func TestFacts(t *testing.T) {
 			http.StatusForbidden, "api.context.permissions.app_error")
 	})
 
+	// S-051: a person is found by their username, without case; the bot's direct messages are listed by
+	// GET /_fake/dms with the person, and GET /_fake/posts leaves them out. Dana is in no channel.
+	t.Run("account links", func(t *testing.T) {
+		fx := start(t)
+		for _, name := range []string{"dana", "DANA"} {
+			u := decode[fakemattermost.User](t, fx.api(http.MethodGet, "/api/v4/users/username/"+name, ""))
+			if u.ID != fakemattermost.DanaUserID || u.Username != "dana" || u.IsBot {
+				t.Errorf("user %s = %+v", name, u)
+			}
+		}
+		wantAppError(t, fx.api(http.MethodGet, "/api/v4/users/username/nobody", ""), http.StatusNotFound,
+			"store.sql_user.get_by_username.app_error")
+		if u := decode[fakemattermost.User](t, fx.api(http.MethodGet, "/api/v4/users/username/"+
+			fakemattermost.BotUsername, "")); !u.IsBot {
+			t.Errorf("the bot = %+v", u)
+		}
+		c := decode[fakemattermost.Channel](t, fx.api(http.MethodPost, "/api/v4/channels/direct",
+			`["musterdevbotuserfake000000","u-dana"]`))
+		dm := fx.post(c.ID, "Your code: ABCD2345", "", "")
+		fx.post(fakemattermost.ChannelAlerts, "firing", "", "")
+		dms := decode[[]fakemattermost.DM](t, fx.control(http.MethodGet, "/_fake/dms", ""))
+		if len(dms) != 1 || dms[0].UserID != fakemattermost.DanaUserID || dms[0].Message != "Your code: ABCD2345" ||
+			dms[0].PostID != dm.ID || dms[0].CreateAt == 0 {
+			t.Errorf("dms %+v", dms)
+		}
+		posts := decode[[]fakemattermost.RecordedPost](t, fx.control(http.MethodGet, "/_fake/posts", ""))
+		if len(posts) != 1 || posts[0].Message != "firing" || len(fx.fake.Posts()) != 2 {
+			t.Errorf("posts %+v", posts)
+		}
+	})
+
 	t.Run("F-029", func(t *testing.T) {
 		fx := start(t)
 		p := fx.post(fakemattermost.ChannelAlerts, "firing", "", "")

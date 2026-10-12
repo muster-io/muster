@@ -7,12 +7,683 @@ package dbgen
 
 import (
 	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const consumeLinkRequest = `-- name: ConsumeLinkRequest :execrows
+UPDATE account_link_requests
+SET consumed_at = $1::timestamptz
+WHERE org_id = $2 AND id = $3 AND consumed_at IS NULL AND voided_at IS NULL
+`
+
+type ConsumeLinkRequestParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+}
+
+func (q *Queries) ConsumeLinkRequest(ctx context.Context, arg ConsumeLinkRequestParams) (int64, error) {
+	result, err := q.db.Exec(ctx, consumeLinkRequest, arg.Now, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const countTargetCodeRequests = `-- name: CountTargetCodeRequests :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
+FROM account_link_requests
+WHERE org_id = $2 AND connection_id = $3 AND target_external_id = $4
+  AND messenger = 'mattermost' AND created_at > $1::timestamptz
+`
+
+type CountTargetCodeRequestsParams struct {
+	Since            time.Time
+	OrgID            int64
+	ConnectionID     int64
+	TargetExternalID pgtype.Text
+}
+
+type CountTargetCodeRequestsRow struct {
+	Requests int64
+	Oldest   time.Time
+}
+
+// CountTargetCodeRequests counts the Mattermost code requests for one account of a Connection made after since, by
+// any User, with the oldest of them.
+func (q *Queries) CountTargetCodeRequests(ctx context.Context, arg CountTargetCodeRequestsParams) (CountTargetCodeRequestsRow, error) {
+	row := q.db.QueryRow(ctx, countTargetCodeRequests,
+		arg.Since,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.TargetExternalID,
+	)
+	var i CountTargetCodeRequestsRow
+	err := row.Scan(&i.Requests, &i.Oldest)
+	return i, err
+}
+
+const countUserCodeRequests = `-- name: CountUserCodeRequests :one
+SELECT count(*)::bigint AS requests, coalesce(min(created_at), $1::timestamptz)::timestamptz AS oldest
+FROM account_link_requests
+WHERE org_id = $2 AND user_id = $3 AND messenger = 'mattermost' AND created_at > $1::timestamptz
+`
+
+type CountUserCodeRequestsParams struct {
+	Since  time.Time
+	OrgID  int64
+	UserID int64
+}
+
+type CountUserCodeRequestsRow struct {
+	Requests int64
+	Oldest   time.Time
+}
+
+// CountUserCodeRequests counts the Mattermost code requests of a User made after since, with the oldest of them.
+func (q *Queries) CountUserCodeRequests(ctx context.Context, arg CountUserCodeRequestsParams) (CountUserCodeRequestsRow, error) {
+	row := q.db.QueryRow(ctx, countUserCodeRequests, arg.Since, arg.OrgID, arg.UserID)
+	var i CountUserCodeRequestsRow
+	err := row.Scan(&i.Requests, &i.Oldest)
+	return i, err
+}
+
+const deleteAccountLink = `-- name: DeleteAccountLink :execrows
+DELETE FROM account_links
+WHERE org_id = $1 AND id = $2
+`
+
+type DeleteAccountLinkParams struct {
+	OrgID int64
+	ID    int64
+}
+
+func (q *Queries) DeleteAccountLink(ctx context.Context, arg DeleteAccountLinkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAccountLink, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteUserAccountLinks = `-- name: DeleteUserAccountLinks :many
+WITH deleted AS (
+    DELETE FROM account_links
+    WHERE org_id = $1 AND user_id = $2
+    RETURNING id, public_id, messenger, connection_id, external_id, username
+)
+SELECT d.public_id, d.messenger, d.external_id, d.username, c.public_id AS connection_public_id,
+       c.name AS connection_name
+FROM deleted d
+JOIN connections c ON c.org_id = $1 AND c.id = d.connection_id
+ORDER BY d.id
+`
+
+type DeleteUserAccountLinksParams struct {
+	OrgID  int64
+	UserID int64
+}
+
+type DeleteUserAccountLinksRow struct {
+	PublicID           string
+	Messenger          string
+	ExternalID         string
+	Username           pgtype.Text
+	ConnectionPublicID string
+	ConnectionName     string
+}
+
+// DeleteUserAccountLinks deletes every link of a User and returns them with their Connections (C-03.FR-13).
+func (q *Queries) DeleteUserAccountLinks(ctx context.Context, arg DeleteUserAccountLinksParams) ([]DeleteUserAccountLinksRow, error) {
+	rows, err := q.db.Query(ctx, deleteUserAccountLinks, arg.OrgID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DeleteUserAccountLinksRow{}
+	for rows.Next() {
+		var i DeleteUserAccountLinksRow
+		if err := rows.Scan(
+			&i.PublicID,
+			&i.Messenger,
+			&i.ExternalID,
+			&i.Username,
+			&i.ConnectionPublicID,
+			&i.ConnectionName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAccountLinkBySpace = `-- name: GetAccountLinkBySpace :one
+SELECT id, public_id, user_id
+FROM account_links
+WHERE org_id = $1 AND identity_space = $2 AND external_id = $3
+FOR UPDATE
+`
+
+type GetAccountLinkBySpaceParams struct {
+	OrgID         int64
+	IdentitySpace string
+	ExternalID    string
+}
+
+type GetAccountLinkBySpaceRow struct {
+	ID       int64
+	PublicID string
+	UserID   int64
+}
+
+// GetAccountLinkBySpace locks the link of the account external_id of the identity space, whoever it belongs to.
+func (q *Queries) GetAccountLinkBySpace(ctx context.Context, arg GetAccountLinkBySpaceParams) (GetAccountLinkBySpaceRow, error) {
+	row := q.db.QueryRow(ctx, getAccountLinkBySpace, arg.OrgID, arg.IdentitySpace, arg.ExternalID)
+	var i GetAccountLinkBySpaceRow
+	err := row.Scan(&i.ID, &i.PublicID, &i.UserID)
+	return i, err
+}
+
+const getAccountLinkOfUser = `-- name: GetAccountLinkOfUser :one
+SELECT al.id, al.public_id, al.messenger, al.external_id, al.username,
+       c.public_id AS connection_public_id, c.name AS connection_name
+FROM account_links al
+JOIN connections c ON c.org_id = al.org_id AND c.id = al.connection_id
+WHERE al.org_id = $1 AND al.user_id = $2 AND al.public_id = $3
+FOR UPDATE OF al
+`
+
+type GetAccountLinkOfUserParams struct {
+	OrgID    int64
+	UserID   int64
+	PublicID string
+}
+
+type GetAccountLinkOfUserRow struct {
+	ID                 int64
+	PublicID           string
+	Messenger          string
+	ExternalID         string
+	Username           pgtype.Text
+	ConnectionPublicID string
+	ConnectionName     string
+}
+
+// GetAccountLinkOfUser locks the link public_id of a User, for unlinking it.
+func (q *Queries) GetAccountLinkOfUser(ctx context.Context, arg GetAccountLinkOfUserParams) (GetAccountLinkOfUserRow, error) {
+	row := q.db.QueryRow(ctx, getAccountLinkOfUser, arg.OrgID, arg.UserID, arg.PublicID)
+	var i GetAccountLinkOfUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Messenger,
+		&i.ExternalID,
+		&i.Username,
+		&i.ConnectionPublicID,
+		&i.ConnectionName,
+	)
+	return i, err
+}
+
+const getLinkConnection = `-- name: GetLinkConnection :one
+SELECT id, public_id, type, name, bot_user_id, bot_username
+FROM connections
+WHERE org_id = $1 AND public_id = $2 AND deleted_at IS NULL
+`
+
+type GetLinkConnectionParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+type GetLinkConnectionRow struct {
+	ID          int64
+	PublicID    string
+	Type        string
+	Name        string
+	BotUserID   pgtype.Text
+	BotUsername pgtype.Text
+}
+
+// GetLinkConnection reads a Connection that is not deleted, for starting a link through it.
+func (q *Queries) GetLinkConnection(ctx context.Context, arg GetLinkConnectionParams) (GetLinkConnectionRow, error) {
+	row := q.db.QueryRow(ctx, getLinkConnection, arg.OrgID, arg.PublicID)
+	var i GetLinkConnectionRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Type,
+		&i.Name,
+		&i.BotUserID,
+		&i.BotUsername,
+	)
+	return i, err
+}
+
+const getLinkRequest = `-- name: GetLinkRequest :one
+SELECT r.id, r.user_id, r.messenger, r.connection_id, r.target_external_id, r.target_username,
+       c.public_id AS connection_public_id, c.name AS connection_name
+FROM account_link_requests r
+JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
+WHERE r.org_id = $1 AND r.public_id = $2
+`
+
+type GetLinkRequestParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+type GetLinkRequestRow struct {
+	ID                 int64
+	UserID             int64
+	Messenger          string
+	ConnectionID       int64
+	TargetExternalID   pgtype.Text
+	TargetUsername     pgtype.Text
+	ConnectionPublicID string
+	ConnectionName     string
+}
+
+// GetLinkRequest reads a link request by its public_id, with its Connection.
+func (q *Queries) GetLinkRequest(ctx context.Context, arg GetLinkRequestParams) (GetLinkRequestRow, error) {
+	row := q.db.QueryRow(ctx, getLinkRequest, arg.OrgID, arg.PublicID)
+	var i GetLinkRequestRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Messenger,
+		&i.ConnectionID,
+		&i.TargetExternalID,
+		&i.TargetUsername,
+		&i.ConnectionPublicID,
+		&i.ConnectionName,
+	)
+	return i, err
+}
+
+const getTelegramRequestByHash = `-- name: GetTelegramRequestByHash :one
+SELECT r.id, r.user_id, r.connection_id, r.expires_at, r.consumed_at, r.voided_at,
+       u.public_id AS user_public_id, c.public_id AS connection_public_id
+FROM account_link_requests r
+JOIN users u ON u.org_id = r.org_id AND u.id = r.user_id
+JOIN connections c ON c.org_id = r.org_id AND c.id = r.connection_id
+WHERE r.org_id = $1 AND r.messenger = 'telegram' AND r.secret_hash = $2
+FOR UPDATE OF r
+`
+
+type GetTelegramRequestByHashParams struct {
+	OrgID      int64
+	SecretHash []byte
+}
+
+type GetTelegramRequestByHashRow struct {
+	ID                 int64
+	UserID             int64
+	ConnectionID       int64
+	ExpiresAt          time.Time
+	ConsumedAt         pgtype.Timestamptz
+	VoidedAt           pgtype.Timestamptz
+	UserPublicID       string
+	ConnectionPublicID string
+}
+
+// GetTelegramRequestByHash locks the Telegram link request of a token, which `/start` names by its hash alone, with
+// its User and the Connection it is bound to.
+func (q *Queries) GetTelegramRequestByHash(ctx context.Context, arg GetTelegramRequestByHashParams) (GetTelegramRequestByHashRow, error) {
+	row := q.db.QueryRow(ctx, getTelegramRequestByHash, arg.OrgID, arg.SecretHash)
+	var i GetTelegramRequestByHashRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ConnectionID,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.VoidedAt,
+		&i.UserPublicID,
+		&i.ConnectionPublicID,
+	)
+	return i, err
+}
+
+const getUserByPublicID = `-- name: GetUserByPublicID :one
+SELECT id, public_id, status
+FROM users
+WHERE org_id = $1 AND public_id = $2
+`
+
+type GetUserByPublicIDParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+type GetUserByPublicIDRow struct {
+	ID       int64
+	PublicID string
+	Status   string
+}
+
+// GetUserByPublicID reads a User named by an Admin, deleted ones included.
+func (q *Queries) GetUserByPublicID(ctx context.Context, arg GetUserByPublicIDParams) (GetUserByPublicIDRow, error) {
+	row := q.db.QueryRow(ctx, getUserByPublicID, arg.OrgID, arg.PublicID)
+	var i GetUserByPublicIDRow
+	err := row.Scan(&i.ID, &i.PublicID, &i.Status)
+	return i, err
+}
+
+const getUserLinkInSpace = `-- name: GetUserLinkInSpace :one
+SELECT al.id, al.public_id, al.messenger, al.external_id, al.username, al.created_at, al.last_used_at,
+       c.public_id AS connection_public_id, c.name AS connection_name
+FROM account_links al
+JOIN connections c ON c.org_id = al.org_id AND c.id = al.connection_id
+WHERE al.org_id = $1 AND al.user_id = $2 AND al.identity_space = $3
+FOR UPDATE OF al
+`
+
+type GetUserLinkInSpaceParams struct {
+	OrgID         int64
+	UserID        int64
+	IdentitySpace string
+}
+
+type GetUserLinkInSpaceRow struct {
+	ID                 int64
+	PublicID           string
+	Messenger          string
+	ExternalID         string
+	Username           pgtype.Text
+	CreatedAt          time.Time
+	LastUsedAt         pgtype.Timestamptz
+	ConnectionPublicID string
+	ConnectionName     string
+}
+
+// GetUserLinkInSpace locks the link a User has in the identity space, which a new link replaces or, for the same
+// account, keeps.
+func (q *Queries) GetUserLinkInSpace(ctx context.Context, arg GetUserLinkInSpaceParams) (GetUserLinkInSpaceRow, error) {
+	row := q.db.QueryRow(ctx, getUserLinkInSpace, arg.OrgID, arg.UserID, arg.IdentitySpace)
+	var i GetUserLinkInSpaceRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Messenger,
+		&i.ExternalID,
+		&i.Username,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.ConnectionPublicID,
+		&i.ConnectionName,
+	)
+	return i, err
+}
+
+const insertAccountLink = `-- name: InsertAccountLink :one
+INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id, username, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz)
+RETURNING id
+`
+
+type InsertAccountLinkParams struct {
+	OrgID        int64
+	PublicID     string
+	UserID       int64
+	Messenger    string
+	ConnectionID int64
+	ExternalID   string
+	Username     pgtype.Text
+	CreatedAt    time.Time
+}
+
+func (q *Queries) InsertAccountLink(ctx context.Context, arg InsertAccountLinkParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertAccountLink,
+		arg.OrgID,
+		arg.PublicID,
+		arg.UserID,
+		arg.Messenger,
+		arg.ConnectionID,
+		arg.ExternalID,
+		arg.Username,
+		arg.CreatedAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertLinkRequest = `-- name: InsertLinkRequest :one
+INSERT INTO account_link_requests (org_id, public_id, user_id, messenger, connection_id, secret_hash,
+                                   target_external_id, target_username, created_at, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7,
+        $8, $9::timestamptz, $10::timestamptz)
+RETURNING id
+`
+
+type InsertLinkRequestParams struct {
+	OrgID            int64
+	PublicID         string
+	UserID           int64
+	Messenger        string
+	ConnectionID     int64
+	SecretHash       []byte
+	TargetExternalID pgtype.Text
+	TargetUsername   pgtype.Text
+	CreatedAt        time.Time
+	ExpiresAt        time.Time
+}
+
+func (q *Queries) InsertLinkRequest(ctx context.Context, arg InsertLinkRequestParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertLinkRequest,
+		arg.OrgID,
+		arg.PublicID,
+		arg.UserID,
+		arg.Messenger,
+		arg.ConnectionID,
+		arg.SecretHash,
+		arg.TargetExternalID,
+		arg.TargetUsername,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const listAccountLinksOfUser = `-- name: ListAccountLinksOfUser :many
+SELECT al.public_id, al.messenger, al.external_id, al.username, al.last_used_at, al.created_at,
+       c.public_id AS connection_public_id, c.name AS connection_name
+FROM account_links al
+JOIN connections c ON c.org_id = al.org_id AND c.id = al.connection_id
+WHERE al.org_id = $1 AND al.user_id = $2
+ORDER BY al.messenger, al.created_at, al.id
+`
+
+type ListAccountLinksOfUserParams struct {
+	OrgID  int64
+	UserID int64
+}
+
+type ListAccountLinksOfUserRow struct {
+	PublicID           string
+	Messenger          string
+	ExternalID         string
+	Username           pgtype.Text
+	LastUsedAt         pgtype.Timestamptz
+	CreatedAt          time.Time
+	ConnectionPublicID string
+	ConnectionName     string
+}
+
+// ListAccountLinksOfUser lists the links of a User with the Connection each was made through.
+func (q *Queries) ListAccountLinksOfUser(ctx context.Context, arg ListAccountLinksOfUserParams) ([]ListAccountLinksOfUserRow, error) {
+	rows, err := q.db.Query(ctx, listAccountLinksOfUser, arg.OrgID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAccountLinksOfUserRow{}
+	for rows.Next() {
+		var i ListAccountLinksOfUserRow
+		if err := rows.Scan(
+			&i.PublicID,
+			&i.Messenger,
+			&i.ExternalID,
+			&i.Username,
+			&i.LastUsedAt,
+			&i.CreatedAt,
+			&i.ConnectionPublicID,
+			&i.ConnectionName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLinkableConnections = `-- name: ListLinkableConnections :many
+SELECT public_id, name, type
+FROM connections
+WHERE org_id = $1 AND deleted_at IS NULL
+ORDER BY type, lower(name), id
+`
+
+type ListLinkableConnectionsRow struct {
+	PublicID string
+	Name     string
+	Type     string
+}
+
+// ListLinkableConnections lists the Connections that are not deleted, by messenger and name (C-18.FR-10).
+func (q *Queries) ListLinkableConnections(ctx context.Context, orgID int64) ([]ListLinkableConnectionsRow, error) {
+	rows, err := q.db.Query(ctx, listLinkableConnections, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLinkableConnectionsRow{}
+	for rows.Next() {
+		var i ListLinkableConnectionsRow
+		if err := rows.Scan(&i.PublicID, &i.Name, &i.Type); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockCodeTarget = `-- name: LockCodeTarget :exec
+SELECT pg_advisory_xact_lock($1::int, hashtext(format('%s/%s/%s', $2::bigint, $3::bigint,
+                                                                $4::text)))
+`
+
+type LockCodeTargetParams struct {
+	LockClass        int32
+	OrgID            int64
+	ConnectionID     int64
+	TargetExternalID string
+}
+
+// LockCodeTarget takes, until the transaction ends, the lock of the Mattermost code requests for one account of a
+// Connection (class db.AccountLinkCodeTargetLockClass), so that the count of its requests and the new one of
+// concurrent requests serialize. A collision of the hash only serializes two accounts.
+func (q *Queries) LockCodeTarget(ctx context.Context, arg LockCodeTargetParams) error {
+	_, err := q.db.Exec(ctx, lockCodeTarget,
+		arg.LockClass,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.TargetExternalID,
+	)
+	return err
+}
+
+const lockLinkRequest = `-- name: LockLinkRequest :one
+SELECT id, secret_hash, attempts, expires_at, consumed_at, voided_at
+FROM account_link_requests
+WHERE org_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type LockLinkRequestParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type LockLinkRequestRow struct {
+	ID         int64
+	SecretHash []byte
+	Attempts   int64
+	ExpiresAt  time.Time
+	ConsumedAt pgtype.Timestamptz
+	VoidedAt   pgtype.Timestamptz
+}
+
+// LockLinkRequest locks a link request for checking its code.
+func (q *Queries) LockLinkRequest(ctx context.Context, arg LockLinkRequestParams) (LockLinkRequestRow, error) {
+	row := q.db.QueryRow(ctx, lockLinkRequest, arg.OrgID, arg.ID)
+	var i LockLinkRequestRow
+	err := row.Scan(
+		&i.ID,
+		&i.SecretHash,
+		&i.Attempts,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.VoidedAt,
+	)
+	return i, err
+}
+
+const lockLinkUser = `-- name: LockLinkUser :one
+SELECT id, public_id, login, name, language, status
+FROM users
+WHERE org_id = $1 AND id = $2
+FOR NO KEY UPDATE
+`
+
+type LockLinkUserParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type LockLinkUserRow struct {
+	ID       int64
+	PublicID string
+	Login    string
+	Name     string
+	Language pgtype.Text
+	Status   string
+}
+
+// LockLinkUser locks the User a link is made for, so that the links of one User change one at a time.
+func (q *Queries) LockLinkUser(ctx context.Context, arg LockLinkUserParams) (LockLinkUserRow, error) {
+	row := q.db.QueryRow(ctx, lockLinkUser, arg.OrgID, arg.ID)
+	var i LockLinkUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Login,
+		&i.Name,
+		&i.Language,
+		&i.Status,
+	)
+	return i, err
+}
 
 const lookupAccountLink = `-- name: LookupAccountLink :one
 
 
-SELECT u.id, u.public_id, u.login, u.name, u.role, u.status
+SELECT u.id, u.public_id, u.login, u.name, u.role, u.status, al.id AS link_id, al.last_used_at
 FROM account_links al
 JOIN users u ON u.org_id = al.org_id AND u.id = al.user_id
 WHERE al.org_id = $1 AND al.identity_space = $2 AND al.external_id = $3
@@ -26,20 +697,22 @@ type LookupAccountLinkParams struct {
 }
 
 type LookupAccountLinkRow struct {
-	ID       int64
-	PublicID string
-	Login    string
-	Name     string
-	Role     string
-	Status   string
+	ID         int64
+	PublicID   string
+	Login      string
+	Name       string
+	Role       string
+	Status     string
+	LinkID     int64
+	LastUsedAt pgtype.Timestamptz
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
-// Account links (C-18): the messenger accounts linked to Users, one per identity space and User. S-061 reads them
-// only, to run a button press as the linked User; S-051 adds linking and unlinking.
-// LookupAccountLink reads the User that the messenger account external_id of the identity space is linked to; a
-// deleted User has no links (C-18.FR-8).
+// Account links (C-18): the messenger accounts linked to Users, one per identity space and User, and the link
+// requests started from the web session — a hashed Telegram deep-link token or a hashed Mattermost code.
+// LookupAccountLink reads the User that the messenger account external_id of the identity space is linked to, with
+// the link's id and last use; a deleted User has no links (C-18.FR-8).
 func (q *Queries) LookupAccountLink(ctx context.Context, arg LookupAccountLinkParams) (LookupAccountLinkRow, error) {
 	row := q.db.QueryRow(ctx, lookupAccountLink, arg.OrgID, arg.IdentitySpace, arg.ExternalID)
 	var i LookupAccountLinkRow
@@ -50,6 +723,179 @@ func (q *Queries) LookupAccountLink(ctx context.Context, arg LookupAccountLinkPa
 		&i.Name,
 		&i.Role,
 		&i.Status,
+		&i.LinkID,
+		&i.LastUsedAt,
 	)
 	return i, err
+}
+
+const pruneLinkRequests = `-- name: PruneLinkRequests :execrows
+DELETE FROM account_link_requests r
+WHERE r.org_id = $1 AND r.id IN (
+    SELECT o.id FROM account_link_requests o
+    WHERE o.org_id = $1 AND o.expires_at < $2::timestamptz
+    ORDER BY o.id
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED
+)
+`
+
+type PruneLinkRequestsParams struct {
+	OrgID     int64
+	Before    time.Time
+	BatchSize int32
+}
+
+// PruneLinkRequests deletes up to batch_size link requests that expired before @before, consumed and voided ones
+// included. A request being used is skipped and taken at the next run.
+func (q *Queries) PruneLinkRequests(ctx context.Context, arg PruneLinkRequestsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneLinkRequests, arg.OrgID, arg.Before, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const recordWrongCode = `-- name: RecordWrongCode :one
+UPDATE account_link_requests
+SET attempts = attempts + 1,
+    voided_at = CASE WHEN attempts + 1 >= $1::bigint THEN $2::timestamptz ELSE voided_at END
+WHERE org_id = $3 AND id = $4
+RETURNING attempts
+`
+
+type RecordWrongCodeParams struct {
+	MaxAttempts int64
+	Now         time.Time
+	OrgID       int64
+	ID          int64
+}
+
+// RecordWrongCode counts a wrong code; the attempt that reaches max_attempts voids the request (C-18.AC-2).
+func (q *Queries) RecordWrongCode(ctx context.Context, arg RecordWrongCodeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, recordWrongCode,
+		arg.MaxAttempts,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
+	var attempts int64
+	err := row.Scan(&attempts)
+	return attempts, err
+}
+
+const touchAccountLink = `-- name: TouchAccountLink :exec
+UPDATE account_links
+SET last_used_at = $1::timestamptz
+WHERE org_id = $2 AND id = $3 AND (last_used_at IS NULL OR last_used_at < $4::timestamptz)
+`
+
+type TouchAccountLinkParams struct {
+	Now         time.Time
+	OrgID       int64
+	ID          int64
+	StaleBefore time.Time
+}
+
+// TouchAccountLink sets the last use of a link unless it was set after stale_before, so that a link is written at
+// most once per account_link touch interval.
+func (q *Queries) TouchAccountLink(ctx context.Context, arg TouchAccountLinkParams) error {
+	_, err := q.db.Exec(ctx, touchAccountLink,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+		arg.StaleBefore,
+	)
+	return err
+}
+
+const updateAccountLink = `-- name: UpdateAccountLink :exec
+UPDATE account_links
+SET username = $1, connection_id = $2
+WHERE org_id = $3 AND id = $4
+`
+
+type UpdateAccountLinkParams struct {
+	Username     pgtype.Text
+	ConnectionID int64
+	OrgID        int64
+	ID           int64
+}
+
+// UpdateAccountLink keeps a link whose account is linked again by its User, with the username and the Connection of
+// the new link.
+func (q *Queries) UpdateAccountLink(ctx context.Context, arg UpdateAccountLinkParams) error {
+	_, err := q.db.Exec(ctx, updateAccountLink,
+		arg.Username,
+		arg.ConnectionID,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
+const voidLinkRequest = `-- name: VoidLinkRequest :exec
+UPDATE account_link_requests
+SET voided_at = $1::timestamptz
+WHERE org_id = $2 AND id = $3 AND consumed_at IS NULL AND voided_at IS NULL
+`
+
+type VoidLinkRequestParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+}
+
+func (q *Queries) VoidLinkRequest(ctx context.Context, arg VoidLinkRequestParams) error {
+	_, err := q.db.Exec(ctx, voidLinkRequest, arg.Now, arg.OrgID, arg.ID)
+	return err
+}
+
+const voidPendingMattermostRequests = `-- name: VoidPendingMattermostRequests :execrows
+UPDATE account_link_requests
+SET voided_at = $1::timestamptz
+WHERE org_id = $2 AND user_id = $3 AND connection_id = $4 AND messenger = 'mattermost'
+  AND consumed_at IS NULL AND voided_at IS NULL
+`
+
+type VoidPendingMattermostRequestsParams struct {
+	Now          time.Time
+	OrgID        int64
+	UserID       int64
+	ConnectionID int64
+}
+
+// VoidPendingMattermostRequests voids the pending Mattermost requests of a User for a Connection, which a new one
+// replaces.
+func (q *Queries) VoidPendingMattermostRequests(ctx context.Context, arg VoidPendingMattermostRequestsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, voidPendingMattermostRequests,
+		arg.Now,
+		arg.OrgID,
+		arg.UserID,
+		arg.ConnectionID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const voidUserLinkRequests = `-- name: VoidUserLinkRequests :execrows
+UPDATE account_link_requests
+SET voided_at = $1::timestamptz
+WHERE org_id = $2 AND user_id = $3 AND consumed_at IS NULL AND voided_at IS NULL
+`
+
+type VoidUserLinkRequestsParams struct {
+	Now    time.Time
+	OrgID  int64
+	UserID int64
+}
+
+func (q *Queries) VoidUserLinkRequests(ctx context.Context, arg VoidUserLinkRequestsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, voidUserLinkRequests, arg.Now, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

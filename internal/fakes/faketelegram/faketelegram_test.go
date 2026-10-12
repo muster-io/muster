@@ -1088,3 +1088,63 @@ func TestAnswerDeadline(t *testing.T) {
 		t.Fatalf("answer within a deadline of 1 s = %d", s)
 	}
 }
+
+// TestPrivateChats is the private chat of S-051: a person's message to the bot opens their private chat — its id is
+// their user id — and reaches the bot as a message update from them; the bot can then answer there, plain text being
+// recorded under GET /_fake/messages?chat=<user id>, and before the person wrote, sendMessage answers "chat not found".
+func TestPrivateChats(t *testing.T) {
+	_, base := start(t)
+	if s, a := bot(t, base, "sendMessage", `{"chat_id":7001,"text":"hello"}`); s != http.StatusBadRequest ||
+		a.Description != faketelegram.DescriptionChatNotFound {
+		t.Fatalf("a send before the person wrote = %d %+v", s, a)
+	}
+	if s, _, _ := call(t, http.MethodGet, base+"/_fake/messages?chat=7001", ""); s != http.StatusNotFound {
+		t.Fatalf("the chat before the first message = %d", s)
+	}
+	s, b, _ := call(t, http.MethodPost, base+"/_fake/private",
+		`{"token":"`+token+`","from":{"id":7001,"username":"alice_t"},"text":"/start abc"}`)
+	if s != http.StatusOK || !strings.Contains(b, `"update_id":1`) {
+		t.Fatalf("private = %d %s", s, b)
+	}
+	u := updates(t, base)
+	if len(u) != 1 {
+		t.Fatalf("updates %v", u)
+	}
+	m := messageOf(t, u[0], "message")
+	var from struct {
+		ID        int64  `json:"id"`
+		Username  string `json:"username"`
+		FirstName string `json:"first_name"`
+		IsBot     bool   `json:"is_bot"`
+	}
+	_ = json.Unmarshal(u[0]["message"], &struct {
+		From *struct {
+			ID        int64  `json:"id"`
+			Username  string `json:"username"`
+			FirstName string `json:"first_name"`
+			IsBot     bool   `json:"is_bot"`
+		} `json:"from"`
+	}{From: &from})
+	if m.Chat.ID != 7001 || m.Chat.Type != faketelegram.TypePrivate || m.Text != "/start abc" || from.ID != 7001 ||
+		from.Username != "alice_t" || from.FirstName != "User 7001" || from.IsBot {
+		t.Fatalf("message %+v from %+v", m, from)
+	}
+	if s, a := bot(t, base, "sendMessage", `{"chat_id":7001,"text":"Linked","link_preview_options":{"is_disabled":true}}`); s != http.StatusOK || !a.OK {
+		t.Fatalf("the reply = %d %+v", s, a)
+	}
+	_, b, _ = call(t, http.MethodGet, base+"/_fake/messages?chat=7001", "")
+	var msgs []faketelegram.Message
+	if err := json.Unmarshal([]byte(b), &msgs); err != nil || len(msgs) != 2 || msgs[0].Text != "/start abc" ||
+		msgs[0].From.ID != 7001 || msgs[1].Text != "Linked" || msgs[1].From.ID != faketelegram.BotID {
+		t.Fatalf("messages %s", b)
+	}
+	call(t, http.MethodPost, base+"/_fake/private", `{"token":"`+token+`","from":{"id":7001},"text":"again"}`)
+	if u := updates(t, base); len(u) != 1 || messageOf(t, u[0], "message").MessageID != 3 {
+		t.Errorf("a second message %v", u)
+	}
+	for _, body := range []string{`{"from":{"id":7001},"text":"x"}`, `{"token":"t","from":{"id":0}}`, `not json`} {
+		if s, _, _ := call(t, http.MethodPost, base+"/_fake/private", body); s != http.StatusBadRequest {
+			t.Errorf("%s = %d", body, s)
+		}
+	}
+}

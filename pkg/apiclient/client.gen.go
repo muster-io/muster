@@ -8843,7 +8843,7 @@ type ClientInterface interface {
 
 	// StartMattermostLinkWithBody Start linking a Mattermost account
 	//
-	// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
+	// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user (`account_linked_elsewhere`), or without a code when Mattermost refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -8852,7 +8852,7 @@ type ClientInterface interface {
 
 	// StartMattermostLink Start linking a Mattermost account
 	//
-	// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
+	// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user (`account_linked_elsewhere`), or without a code when Mattermost refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -8879,7 +8879,7 @@ type ClientInterface interface {
 
 	// StartTelegramLinkWithBody Start linking a Telegram account
 	//
-	// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`, and when Telegram refuses the call, `409`.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -8888,7 +8888,7 @@ type ClientInterface interface {
 
 	// StartTelegramLink Start linking a Telegram account
 	//
-	// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`, and when Telegram refuses the call, `409`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -9568,7 +9568,7 @@ type ClientInterface interface {
 
 	// DeleteUserAccountLink Remove a user's Account link
 	//
-	// Admins can remove any link but cannot create one for someone else.
+	// Admins can remove any link but cannot create one for someone else. An Admin's own link is removed from the web session only; with a token the answer is `403` (`session_required`).
 	//
 	// Corresponds with DELETE /users/{user_id}/account-links/{account_link_id} (the `DeleteUserAccountLink` operationId).
 	DeleteUserAccountLink(ctx context.Context, userId UserId, accountLinkId AccountLinkId, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -11318,7 +11318,7 @@ func (c *Client) ListLinkableConnections(ctx context.Context, reqEditors ...Requ
 
 // StartMattermostLinkWithBody Start linking a Mattermost account
 //
-// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
+// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user (`account_linked_elsewhere`), or without a code when Mattermost refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
 //
 // Takes any type of body and a specified content type.
 //
@@ -11337,7 +11337,7 @@ func (c *Client) StartMattermostLinkWithBody(ctx context.Context, contentType st
 
 // StartMattermostLink Start linking a Mattermost account
 //
-// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
+// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user (`account_linked_elsewhere`), or without a code when Mattermost refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -11394,7 +11394,7 @@ func (c *Client) ConfirmMattermostLink(ctx context.Context, body ConfirmMattermo
 
 // StartTelegramLinkWithBody Start linking a Telegram account
 //
-// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`, and when Telegram refuses the call, `409`.
 //
 // Takes any type of body and a specified content type.
 //
@@ -11413,7 +11413,7 @@ func (c *Client) StartTelegramLinkWithBody(ctx context.Context, contentType stri
 
 // StartTelegramLink Start linking a Telegram account
 //
-// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`, and when Telegram refuses the call, `409`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -12973,7 +12973,7 @@ func (c *Client) ListUserAccountLinks(ctx context.Context, userId UserId, reqEdi
 
 // DeleteUserAccountLink Remove a user's Account link
 //
-// Admins can remove any link but cannot create one for someone else.
+// Admins can remove any link but cannot create one for someone else. An Admin's own link is removed from the web session only; with a token the answer is `403` (`session_required`).
 //
 // Corresponds with DELETE /users/{user_id}/account-links/{account_link_id} (the `DeleteUserAccountLink` operationId).
 func (c *Client) DeleteUserAccountLink(ctx context.Context, userId UserId, accountLinkId AccountLinkId, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -21078,7 +21078,7 @@ type ClientWithResponsesInterface interface {
 
 	// StartMattermostLinkWithBodyWithResponse Start linking a Mattermost account
 	//
-	// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
+	// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user (`account_linked_elsewhere`), or without a code when Mattermost refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21087,7 +21087,7 @@ type ClientWithResponsesInterface interface {
 
 	// StartMattermostLinkWithResponse Start linking a Mattermost account
 	//
-	// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
+	// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user (`account_linked_elsewhere`), or without a code when Mattermost refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21114,7 +21114,7 @@ type ClientWithResponsesInterface interface {
 
 	// StartTelegramLinkWithBodyWithResponse Start linking a Telegram account
 	//
-	// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`, and when Telegram refuses the call, `409`.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21123,7 +21123,7 @@ type ClientWithResponsesInterface interface {
 
 	// StartTelegramLinkWithResponse Start linking a Telegram account
 	//
-	// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+	// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`, and when Telegram refuses the call, `409`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21893,7 +21893,7 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteUserAccountLinkWithResponse Remove a user's Account link
 	//
-	// Admins can remove any link but cannot create one for someone else.
+	// Admins can remove any link but cannot create one for someone else. An Admin's own link is removed from the web session only; with a token the answer is `403` (`session_required`).
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -28313,6 +28313,8 @@ type StartTelegramLinkResponse struct {
 	ApplicationproblemJSON401 *Unauthorized
 	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
 	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationproblemJSON409 *Conflict
 	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
 	ApplicationproblemJSON422 *Unprocessable
 	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
@@ -28343,6 +28345,11 @@ func (r StartTelegramLinkResponse) GetApplicationproblemJSON401() *Unauthorized 
 // GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
 func (r StartTelegramLinkResponse) GetApplicationproblemJSON403() *Forbidden {
 	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r StartTelegramLinkResponse) GetApplicationproblemJSON409() *Conflict {
+	return r.ApplicationproblemJSON409
 }
 
 // GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
@@ -35531,7 +35538,7 @@ func (c *ClientWithResponses) ListLinkableConnectionsWithResponse(ctx context.Co
 
 // StartMattermostLinkWithBodyWithResponse Start linking a Mattermost account
 //
-// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
+// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user (`account_linked_elsewhere`), or without a code when Mattermost refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -35546,7 +35553,7 @@ func (c *ClientWithResponses) StartMattermostLinkWithBodyWithResponse(ctx contex
 
 // StartMattermostLinkWithResponse Start linking a Mattermost account
 //
-// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
+// The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user (`account_linked_elsewhere`), or without a code when Mattermost refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -35591,7 +35598,7 @@ func (c *ClientWithResponses) ConfirmMattermostLinkWithResponse(ctx context.Cont
 
 // StartTelegramLinkWithBodyWithResponse Start linking a Telegram account
 //
-// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`, and when Telegram refuses the call, `409`.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -35606,7 +35613,7 @@ func (c *ClientWithResponses) StartTelegramLinkWithBodyWithResponse(ctx context.
 
 // StartTelegramLinkWithResponse Start linking a Telegram account
 //
-// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+// Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`, and when Telegram refuses the call, `409`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36904,7 +36911,7 @@ func (c *ClientWithResponses) ListUserAccountLinksWithResponse(ctx context.Conte
 
 // DeleteUserAccountLinkWithResponse Remove a user's Account link
 //
-// Admins can remove any link but cannot create one for someone else.
+// Admins can remove any link but cannot create one for someone else. An Admin's own link is removed from the web session only; with a token the answer is `403` (`session_required`).
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -42797,6 +42804,13 @@ func ParseStartTelegramLinkResponse(rsp *http.Response) (*StartTelegramLinkRespo
 			return nil, err
 		}
 		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest Unprocessable

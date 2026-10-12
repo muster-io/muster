@@ -351,6 +351,13 @@ func (c *Client) sendMessage(ctx context.Context, class outbound.Class, m outgoi
 	return out, c.call(ctx, clientKey{class: class}, http.MethodPost, "sendMessage", m, &out)
 }
 
+// sendPrivate sends text as plain text, without link previews, to the private chat chatID of a person with the bot,
+// such as the reply to `/start`. Only the Account link handler calls it, inside a DirectOp of the interactive path.
+func (c *Client) sendPrivate(ctx context.Context, class outbound.Class, chatID int64, text string) Result {
+	_, r := c.sendMessage(ctx, class, outgoing{ChatID: chatID, Text: text, LinkPreview: linkPreview{IsDisabled: true}})
+	return r
+}
+
 // editMessageText edits the message m names to m, which notifies nobody (F-012) and keeps only the keyboard it
 // carries (F-011).
 func (c *Client) editMessageText(ctx context.Context, class outbound.Class, m outgoing) (sentMessage, Result) {

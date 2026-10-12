@@ -405,17 +405,31 @@ func TestProblemCodes(t *testing.T) {
 }
 
 // TestNotFoundAndNotImplemented is S-010 step 1: an unknown path under /api/v1 is a 404 problem, and an operation no
-// story has implemented answers 501 with a problem.
+// story has implemented answers 501 with a problem. A path of the specification without the request's method answers
+// 405 method-not-allowed with the methods of the path in Allow, before authentication (C-18.AC-4); a path the app
+// listener does not serve with any method stays 404.
 func TestNotFoundAndNotImplemented(t *testing.T) {
 	x := newTestAPI(t)
 	for _, c := range []struct{ method, path string }{
-		{http.MethodGet, "/api/v1/does-not-exist"}, {http.MethodPatch, "/api/v1/me"}, {http.MethodGet, "/api/v2/me"},
-		{http.MethodGet, "/api/v1"}, {http.MethodGet, "/api/v1/metrics"}, {http.MethodPost, "/api/v1/ingest"},
+		{http.MethodGet, "/api/v1/does-not-exist"}, {http.MethodGet, "/api/v2/me"}, {http.MethodGet, "/api/v1"},
+		{http.MethodGet, "/api/v1/metrics"}, {http.MethodPost, "/api/v1/ingest"}, {http.MethodGet, "/api/v1/ingest"},
 	} {
 		a := x.call(t, c.method, c.path, "")
 		if a.status != http.StatusNotFound || a.header.Get("Content-Type") != contentTypeProblem ||
 			a.json(t)["type"] != problemBase+"not-found" || a.json(t)["instance"] != c.path {
 			t.Errorf("%s %s = %d %s", c.method, c.path, a.status, a.body)
+		}
+	}
+	for _, c := range []struct{ method, path, allow string }{
+		{http.MethodPatch, "/api/v1/me", "GET, PUT"},
+		{http.MethodPost, "/api/v1/users/SRAAAAAAAAAAB1/account-links", "GET"},
+		{http.MethodPost, "/api/v1/me/account-links/AKAAAAAAAAAAB1", "DELETE"},
+	} {
+		a := x.call(t, c.method, c.path, "{}")
+		if a.status != http.StatusMethodNotAllowed || a.header.Get("Allow") != c.allow ||
+			a.header.Get("Content-Type") != contentTypeProblem || a.json(t)["type"] != problemBase+"method-not-allowed" ||
+			a.json(t)["title"] != "Method not allowed" || a.json(t)["instance"] != c.path {
+			t.Errorf("%s %s = %d %s %s", c.method, c.path, a.status, a.header.Get("Allow"), a.body)
 		}
 	}
 	// getSystemStatus arrives with the System status page, in a later phase.

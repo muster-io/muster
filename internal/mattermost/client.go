@@ -10,6 +10,7 @@ package mattermost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/muster-io/muster/internal/accountlinks"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/logging"
@@ -117,13 +119,14 @@ type Result struct {
 // OK reports whether the call succeeded.
 func (r Result) OK() bool { return r.Outcome.Kind == delivery.OutcomeOK }
 
-// User is a Mattermost user as the API answers it.
+// User is a Mattermost user as the API answers it; a DeleteAt other than 0 is a deactivated account.
 type User struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
 	IsBot    bool   `json:"is_bot"`
 	// Roles are the user's system roles, separated by spaces, such as "system_user".
-	Roles string `json:"roles"`
+	Roles    string `json:"roles"`
+	DeleteAt int64  `json:"delete_at"`
 }
 
 // Role is a Mattermost role with its permissions; a DeleteAt other than 0 grants nothing.
@@ -171,6 +174,12 @@ type Channel struct {
 func (c *Client) Me(ctx context.Context, class outbound.Class) (User, Result) {
 	var u User
 	return u, c.get(ctx, class, "/api/v4/users/me", &u)
+}
+
+// UserByUsername reads the user username, which Mattermost matches without case; an unknown one answers 404.
+func (c *Client) UserByUsername(ctx context.Context, class outbound.Class, username string) (User, Result) {
+	var u User
+	return u, c.get(ctx, class, "/api/v4/users/username/"+url.PathEscape(username), &u)
 }
 
 // Grants reports whether the system roles of u grant permission, as the server decides it for u's requests (F-064):
@@ -337,6 +346,18 @@ func (c *Client) ephemeralPost(ctx context.Context, class outbound.Class, userID
 	return c.send(ctx, class, http.MethodPost, "/api/v4/posts/ephemeral", body, nil)
 }
 
+// directPost posts message to the user userID in the direct channel of the bot botUserID and the user, which the bot
+// opens with POST /api/v4/channels/direct knowing only the user's id (F-028). Only the Account link bots call it,
+// inside a DirectOp of the interactive path.
+func (c *Client) directPost(ctx context.Context, class outbound.Class, botUserID, userID, message string) Result {
+	var ch Channel
+	if r := c.send(ctx, class, http.MethodPost, "/api/v4/channels/direct", []string{botUserID, userID}, &ch); !r.OK() {
+		return r
+	}
+	_, r := c.createPost(ctx, class, post{ChannelID: ch.ID, Message: message})
+	return r
+}
+
 // doAction presses the button actionID of the post postID as the bot (F-054): the server calls the button's
 // integration URL as for any press, and answers 400 with "Action integration error" when it could not (F-022).
 func (c *Client) doAction(ctx context.Context, class outbound.Class, postID, actionID string) Result {
@@ -400,4 +421,86 @@ func resultOf(res outbound.Result, err error) Result {
 		r.Outcome.Kind = delivery.OutcomeUnknown
 	}
 	return r
+}
+
+// LinkBots run the calls of an Account link through the bot of a Mattermost Connection (C-18.FR-3, FR-11): the
+// lookup of the account by its username and the bot's direct messages, on the interactive path, never as a delivery.
+// They implement accountlinks.MattermostBots.
+type LinkBots struct {
+	Conns Connections
+	Path  Path
+}
+
+// Session takes one limiter token of the Connection publicID on the interactive path and runs f with its bot; a 429
+// that a call of f gets holds the Connection. A Connection that is unknown, deleted or not a Mattermost one is
+// accountlinks.ErrNoConnection; no token within the budget is a *delivery.LimitedError and runs nothing.
+func (l LinkBots) Session(ctx context.Context, publicID string,
+	f func(ctx context.Context, b accountlinks.MattermostBot) error) error {
+	conn, err := l.Conns.Connection(ctx, publicID)
+	if errors.Is(err, ErrNoConnection) {
+		return accountlinks.ErrNoConnection
+	}
+	if err != nil {
+		return err
+	}
+	var ferr error
+	id := conn.ID
+	if _, err := l.Path.Do(ctx, delivery.Subject{Connection: &id}, delivery.DirectOp(
+		func(ctx context.Context, call delivery.Call) delivery.Outcome {
+			b := &linkBot{conn: conn, class: call.Class, last: delivery.Outcome{Kind: delivery.OutcomeOK}}
+			ferr = f(ctx, b)
+			return b.last
+		})); err != nil {
+		return err
+	}
+	return ferr
+}
+
+// linkBot is the bot of a Connection within a Session.
+type linkBot struct {
+	conn  Connection
+	class outbound.Class
+	// last is the outcome of the last call that failed, which the Session hands to the interactive path.
+	last delivery.Outcome
+}
+
+// FindUser finds the user username; an unknown one, a bot and a deactivated account are
+// accountlinks.ErrMessengerUserNotFound.
+func (b *linkBot) FindUser(ctx context.Context, username string) (accountlinks.MattermostAccount, error) {
+	u, r := b.conn.Client.UserByUsername(ctx, b.class, username)
+	if r.Status == http.StatusNotFound || (r.OK() && (u.IsBot || u.DeleteAt != 0 || u.ID == "")) {
+		return accountlinks.MattermostAccount{}, accountlinks.ErrMessengerUserNotFound
+	}
+	if err := b.failed("the user lookup", r); err != nil {
+		return accountlinks.MattermostAccount{}, err
+	}
+	return accountlinks.MattermostAccount{ID: u.ID, Username: u.Username}, nil
+}
+
+// SendDirect sends text to the user userID in the direct channel of the bot and the user: the bot's user id is the one
+// the Connection check learned, or GET /api/v4/users/me when none is stored.
+func (b *linkBot) SendDirect(ctx context.Context, userID, text string) error {
+	bot := b.conn.BotUserID
+	if bot == "" {
+		me, r := b.conn.Client.Me(ctx, b.class)
+		if err := b.failed("the bot's user", r); err != nil {
+			return err
+		}
+		bot = me.ID
+	}
+	return b.failed("the direct message", b.conn.Client.directPost(ctx, b.class, bot, userID, text))
+}
+
+// failed is the error of a call that did not succeed: a 429 is a *delivery.LimitedError, anything else an
+// *accountlinks.MessengerError that names the call and how it ended, never Mattermost's text, which may repeat the
+// message.
+func (b *linkBot) failed(call string, r Result) error {
+	if r.OK() {
+		return nil
+	}
+	b.last = r.Outcome
+	if r.Outcome.Kind == delivery.OutcomeRetryAfter {
+		return &delivery.LimitedError{RetryAfter: r.Outcome.RetryAfter}
+	}
+	return &accountlinks.MessengerError{Call: call, Outcome: string(r.Outcome.Kind), Status: r.Status}
 }

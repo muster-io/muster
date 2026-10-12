@@ -137,9 +137,9 @@ type database interface {
 	// WebhooksStore serves the outgoing webhooks and WebhooksWriter the changes of their secrets.
 	WebhooksStore() webhooks.Store
 	WebhooksWriter() webhooks.Writer
-	// ConnectionsStore serves the Connections; AccountLinksDB is the main pool the Account links are read from.
+	// ConnectionsStore serves the Connections; AccountLinksDB is the main pool the Account links are kept in.
 	ConnectionsStore() connections.Store
-	AccountLinksDB() accountlinks.DBTX
+	AccountLinksDB() accountlinks.Pool
 	// SessionListenConn opens a session connection for the LISTEN of the live-update hints.
 	SessionListenConn(ctx context.Context) (db.ListenConn, error)
 	// LeaderSession opens a session connection for the Leader lock; PartitionSession one for partition maintenance.
@@ -217,7 +217,7 @@ func (d pgDatabase) WebhooksWriter() webhooks.Writer { return webhooks.NewWriter
 
 func (d pgDatabase) ConnectionsStore() connections.Store { return connections.NewStore(d.Pool) }
 
-func (d pgDatabase) AccountLinksDB() accountlinks.DBTX { return d.Pool }
+func (d pgDatabase) AccountLinksDB() accountlinks.Pool { return d.Pool }
 
 func (d pgDatabase) LeaderSession(ctx context.Context) (leader.Session, error) {
 	return leader.Dial(d.ConnectSession, leader.ServerBound)(ctx)
@@ -464,6 +464,8 @@ type process struct {
 	// button presses answers through and runs Commands with.
 	interactive *delivery.Interactive
 	roles       auth.Roles
+	// links are the Account links, which map the presses of both messengers to their Users.
+	links *accountlinks.Service
 	// mattermost and telegram are the adapters of the messenger Destinations, which the delivery worker and the
 	// Destination tests share; testPresses connect the bot's press of a Mattermost test message, reported by the
 	// callback of any replica, with the test that waits for it.
@@ -673,7 +675,7 @@ func (p *process) messengerAdapters() {
 func (p *process) callbacks() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(mattermost.CallbackPattern, mattermost.NewCallback(mattermost.CallbackConfig{
-		Connections: p.connections, Bindings: p.delivery, Links: accountlinks.New(p.orgID, p.db.AccountLinksDB()),
+		Connections: p.connections, Bindings: p.delivery, Links: p.links,
 		Commands: p.groups, Roles: p.roles, Keys: p.keyring, Path: p.interactive, Business: p.clocks.Business,
 		PublicURL: p.cfg.PublicURL.String(), BodyLimit: ingest.BodyLimit, TestPresses: p.testPresses, Log: p.log}))
 	mux.Handle(telegram.WebhookPattern, telegram.NewWebhook(telegram.WebhookConfig{Connections: p.connections,
@@ -811,6 +813,10 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			return p.delivery.AbandonConnection(ctx, tx, id)
 		}})
 	p.connections, p.interactive, p.roles = conns, interactive, roles
+	// Account links start in the profile and finish through the bots on the interactive path (C-18, ADR-0013).
+	p.links = accountlinks.New(accountlinks.Config{OrgID: orgID, Store: accountlinks.NewStore(p.db.AccountLinksDB()),
+		Audit: w, Business: p.clocks.Business, Log: p.log, Telegram: telegram.Bots{Conns: conns, Path: interactive},
+		Mattermost: mattermost.LinkBots{Conns: conns, Path: interactive}})
 	p.messengerAdapters()
 	pool := p.db.MessagesDB()
 	p.testPresses = &mattermost.PressWaits{Notify: func(ctx context.Context, channel, payload string) error {
@@ -823,8 +829,9 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.updates = &telegram.Router{Offsets: conns, Log: p.log}
 	p.updates.Handle(telegram.KindChatMessage, telegram.Copies{Learner: p.delivery}.Handle)
 	p.updates.Handle(telegram.KindCallbackQuery, (&telegram.Presses{Bindings: p.delivery,
-		Links: accountlinks.New(orgID, p.db.AccountLinksDB()), Commands: p.groups, Roles: roles, Keys: p.keyring,
+		Links: p.links, Commands: p.groups, Roles: roles, Keys: p.keyring,
 		Path: interactive, Business: p.clocks.Business, PublicURL: p.cfg.PublicURL.String(), Log: p.log}).Handle)
+	p.updates.Handle(telegram.KindPrivateMessage, (&telegram.Start{Links: p.links, Path: interactive}).Handle)
 	p.poller = &telegram.Poller{Source: conns, Router: p.updates, Outages: conns, Clock: p.clocks.Business,
 		Log: p.log}
 	p.destinations = destinations.New(orgID, p.db.DestinationsStore())
@@ -864,9 +871,11 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			return nil, fmt.Errorf("the demo integration: %w", err)
 		}
 	}
-	// The Admin of the API releases the acknowledgements of the users it disables or deletes (C-03.FR-13).
+	// The Admin of the API releases the acknowledgements of the users it disables or deletes, and removes the Account
+	// links of those it deletes (C-03.FR-13).
 	admin := users.NewAdmin(orgID, p.db.AdminStore(), w, p.clocks.Business, p.cfg.PublicURL)
 	admin.SetOwnerReleaser(p.groups)
+	admin.SetLinkRemover(p.links)
 	return api.New(api.Config{
 		Sessions:     sessions,
 		Users:        users.NewService(orgID, p.db.UsersStore(), w, p.clocks.Business),
@@ -892,6 +901,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Deliveries:     p.delivery,
 		Templates:      p.renderer,
 		Links:          linkService,
+		AccountLinks:   p.links,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -967,6 +977,9 @@ func (p *process) newKeeper() *leader.Keeper {
 		},
 		PruneDelivery: []leader.PruneTable{
 			{Name: "telegram_post_copies", Delete: p.prunePostCopies},
+		},
+		PruneAccountLinks: []leader.PruneTable{
+			{Name: "account_link_requests", Delete: accountlinks.NewPruner(p.db.AccountLinksDB()).Requests},
 		},
 	}))
 }

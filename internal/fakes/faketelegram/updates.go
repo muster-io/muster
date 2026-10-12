@@ -12,7 +12,10 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"time"
+
+	"github.com/muster-io/muster/internal/fakes/fakeserver"
 )
 
 // SecretTokenHeader carries the webhook's secret token on every update the fake posts to it.
@@ -420,4 +423,67 @@ func (f *Fake) post(ctx context.Context, hook Webhook, update json.RawMessage) b
 	}
 	_ = resp.Body.Close()
 	return resp.StatusCode/100 == 2
+}
+
+// TypePrivate is the type of the private chat of a person with the bot.
+const TypePrivate = "private"
+
+// Private is a person's message to the bot in their private chat, as POST /_fake/private takes it: the bot's token,
+// the person and the text, such as `/start <token>` after following a deep link.
+type Private struct {
+	Token string `json:"token"`
+	From  Sender `json:"from"`
+	Text  string `json:"text"`
+}
+
+// postPrivate sends a person's message to the bot in their private chat; see SendPrivate.
+func (f *Fake) postPrivate(w http.ResponseWriter, r *http.Request) {
+	var p Private
+	if err := decodeControl(w, r, &p); err != nil {
+		return
+	}
+	m, id, err := f.SendPrivate(r.Context(), p)
+	if err != nil {
+		fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	fakeserver.WriteJSON(w, http.StatusOK, map[string]any{"update_id": id, "message": m})
+}
+
+// SendPrivate opens the private chat of p.From with the bot on its first message — the chat's id is the person's user
+// id, as in Telegram — records the message there and queues it as a message update for the bot of p.Token; it returns
+// the message and the update_id. The bot can write to a private chat only once the person wrote to it: before,
+// sendMessage answers "chat not found".
+func (f *Fake) SendPrivate(ctx context.Context, p Private) (Message, int64, error) {
+	if p.Token == "" || p.From.ID <= 0 {
+		return Message{}, 0, errors.New("token and from.id are required")
+	}
+	if p.From.FirstName == "" {
+		p.From.FirstName = "User " + strconv.FormatInt(p.From.ID, 10)
+	}
+	m, update := f.chats.private(p)
+	raw, _ := json.Marshal(map[string]any{"message": update})
+	id, err := f.Enqueue(ctx, p.Token, raw)
+	return m, id, err
+}
+
+// private records p in the private chat of its sender, opened on the first message, and returns the message and its
+// form in an update; c.mu is taken.
+func (c *chats) private(p Private) (Message, map[string]any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ch, ok := c.byID[p.From.ID]
+	if !ok {
+		ch = &Chat{ID: p.From.ID, Type: TypePrivate, Username: p.From.Username}
+		c.byID[ch.ID] = ch
+		c.members[ch.ID] = map[int64]Member{BotID: {Status: StatusMember}}
+	}
+	from := p.From
+	m := &Message{Chat: ch.ID, Date: c.now().Unix(), From: &from, Text: p.Text, Edits: []Edit{}}
+	c.next[ch.ID]++
+	m.ID = c.next[ch.ID]
+	c.messages[ch.ID] = append(c.messages[ch.ID], m)
+	out := *m
+	out.Edits = slices.Clone(m.Edits)
+	return out, c.apiMessage(m, false)
 }

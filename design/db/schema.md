@@ -698,7 +698,9 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18; [ADR-0005](../adr/0005-del
 - **`account_link_requests`** — pending links started from the web session: the hashed Telegram token (looked up by
   hash alone when `/start` arrives, so it has a unique partial index) or the hashed Mattermost code with its target
   account and `attempts` (`account_link.mattermost_code`). Two indexes back the request limits per requesting User and
-  per target account (`account_link.mattermost_code_requests`).
+  per target account (`account_link.mattermost_code_requests`). A request is deleted by `short_lived_pruning`
+  `account_link.request_prune_after` past its `expires_at`, consumed and voided ones included, which keeps the hour the
+  limits count; the batched delete scans the small table without an index of its own.
 
 ### 4.6 Integrations and ingestion
 
@@ -1130,7 +1132,7 @@ bumping `next_probe_at` by `delivery.broken_probe_interval` as the lease. **OIDC
 | Alert Group summary rows | `alert_groups` | — | `retention.alert_group_summaries`, 2 years after resolution | batched `DELETE` (cascades Notes, deliveries, timers, queues) |
 | Notes | `notes` | — | as long as their summary row | the cascade from the summary row; never the details purge |
 | Queue rows | `thread_replies`, `webhook_events`, `deliveries` of long-resolved Alert Groups | — | while needed, then `retention.alert_details` | batched `DELETE` |
-| Short-lived state | sessions, OIDC requests, setup links, link requests, throttles, Telegram copies, stale replicas | — | until expiry; sessions `auth.session_prune_after` after they ended, throttles `auth.signin_throttle_prune_after` after the last failure, setup links `auth.password_setup_prune_after` after they expired | batched `DELETE`; the hourly Leader task `short_lived_pruning` for sessions, throttles and setup links, each later short-lived table added by its story |
+| Short-lived state | sessions, OIDC requests, setup links, link requests, throttles, Telegram copies, stale replicas | — | until expiry; sessions `auth.session_prune_after` after they ended, throttles `auth.signin_throttle_prune_after` after the last failure, setup links `auth.password_setup_prune_after` after they expired, Account link requests `account_link.request_prune_after` after they expired | batched `DELETE`; the hourly Leader task `short_lived_pruning` for sessions, throttles and setup links, each later short-lived table added by its story |
 
 **Partition maintenance** is runtime work, never a migration ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md),
 C-02.FR-11). At startup, under the migration advisory lock and before serving, and then hourly on the Leader, Muster

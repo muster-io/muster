@@ -20,14 +20,17 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/accountlinks"
+	alinkdb "github.com/muster-io/muster/internal/accountlinks/dbgen"
 	"github.com/muster-io/muster/internal/api"
 	"github.com/muster-io/muster/internal/audit"
 	adb "github.com/muster-io/muster/internal/audit/dbgen"
@@ -102,6 +105,7 @@ var registry = []Probe{
 	{Name: "mattermost_connections", Run: probeMattermost},
 	{Name: "telegram_connections", Run: probeTelegram},
 	{Name: "outgoing_webhooks", Run: probeWebhooks},
+	{Name: "account_links", Run: probeAccountLinks},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -2087,3 +2091,387 @@ func (s *probeWebhookStore) InsertAuditEntry(context.Context, adb.InsertAuditEnt
 }
 
 func (s *probeWebhookStore) Notify(context.Context, db.Hint) error { return nil }
+
+// probeAccountLinks pushes the secrets through Account links (C-18, ADR-0013): the first as the random bytes of a
+// Telegram deep-link token, which the deep link carries in base64url; the second as the token of a `/start` to the
+// bot's handler of private messages, as are the deep link's own tokens — used, used again and expired; the third as the
+// code that confirms a Mattermost link through the API, wrong until its request is void. The stand-in servers refuse
+// the bot's replies and its first direct message with the request in their errors. Neither the log, the errors nor the
+// API's answers may carry them; the deep-link tokens and codes that come from crypto/rand are not planted secrets, so
+// the probe looks for them itself and reports a leak as the first secret.
+func probeAccountLinks(ctx context.Context, secrets []string, log io.Writer) error {
+	var seen bytes.Buffer
+	logger := logging.New(io.MultiWriter(log, &seen), logging.LevelInfo)
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	business := clock.NewManual(now)
+	clocks := clock.Clocks{Business: business, Real: clock.NewManual(now)}
+	dm := &probeDirect{}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: dm}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	base := "http://" + ln.Addr().String()
+	tg, err := telegram.NewClient(telegram.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}},
+		telegram.Settings{BaseURL: base, Token: "123456:probe"})
+	if err != nil {
+		return err
+	}
+	mm, err := mattermost.NewClient(mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger,
+		Real: clock.Real{}}, mattermost.Settings{ServerURL: base, Token: "probe"})
+	if err != nil {
+		return err
+	}
+	path := deliverytest.Unlimited(1, clocks)
+	tgConn := telegram.Conn{ID: 1, PublicID: "CNAAAAAAAAAAA1", Client: tg}
+	random := append([]byte(secrets[0]), make([]byte, 32)...)[:32]
+	links := accountlinks.New(accountlinks.Config{OrgID: 1, Store: &probeLinkStore{},
+		Audit: audit.NewWriter(logger, business), Business: business, Log: logger,
+		Telegram:   telegram.Bots{Conns: probeTGConn{tgConn}, Path: path},
+		Mattermost: mattermost.LinkBots{Conns: &probeMMConn{conn: mattermost.Connection{ID: 2, PublicID: "CNAAAAAAAAAAA2", Client: mm}}, Path: path},
+		Random:     io.MultiReader(bytes.NewReader(random), rand.Reader)})
+	sess := auth.Session{ID: 1, PublicID: "SNAAAAAAAAAAA1", State: auth.StateActive,
+		User: auth.Principal{ID: 1, PublicID: "SRAAAAAAAAAAA1", Name: "Bob", Role: auth.RoleResponder}}
+	h, err := api.New(api.Config{Sessions: probeSessions{sess: sess}, AccountLinks: links, Log: logger,
+		Real: clock.Real{}})
+	if err != nil {
+		return err
+	}
+	var answers []string
+	send := func(path, body string) string {
+		r, err := http.NewRequestWithContext(ctx, http.MethodPost, path, strings.NewReader(body))
+		if err != nil {
+			return err.Error()
+		}
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Cookie", auth.CookieName+"=probe")
+		r.Header.Set(auth.CSRFHeader, "probe")
+		rec := &probeRecorder{header: http.Header{}}
+		h.ServeHTTP(rec, r)
+		return rec.body.String()
+	}
+	// The deep link carries its token to the person, so its answer is left out of what must not carry a secret.
+	var started []string
+	for range 2 {
+		var st struct {
+			DeepLink string `json:"deep_link"`
+		}
+		_ = json.Unmarshal([]byte(send("/api/v1/me/account-links/telegram", `{"connection_id":"CNAAAAAAAAAAA1"}`)), &st)
+		_, token, _ := strings.Cut(st.DeepLink, "?start=")
+		started = append(started, token)
+	}
+	start := &telegram.Start{Links: links, Path: path}
+	var errs []error
+	for i, token := range []string{secrets[1], started[0], started[0], "", started[1]} {
+		if token == "" {
+			business.Advance(accountlinks.TelegramTokenTTL)
+			continue
+		}
+		u, err := telegram.ParseUpdate(fmt.Appendf(nil, `{"update_id":%d,"message":{"message_id":1,"chat":{"id":7001,
+			"type":"private"},"from":{"id":7001,"is_bot":false,"first_name":"A","username":"a"},"text":%q}}`, 200+i,
+			"/start "+token))
+		if err != nil {
+			return err
+		}
+		errs = append(errs, start.Handle(ctx, tgConn, u))
+	}
+	const mmStart = "/api/v1/me/account-links/mattermost"
+	answers = append(answers, send(mmStart, `{"connection_id":"CNAAAAAAAAAAA2","username":"bob"}`))
+	dm.allow()
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	for range 2 {
+		a := send(mmStart, `{"connection_id":"CNAAAAAAAAAAA2","username":"bob"}`)
+		answers = append(answers, a)
+		_ = json.Unmarshal([]byte(a), &req)
+		for _, code := range []string{secrets[2], secrets[2], secrets[2], secrets[2], secrets[2], dm.code()} {
+			answers = append(answers, send(mmStart+"/confirmation", `{"request_id":"`+req.RequestID+`","code":"`+
+				code+`"}`))
+		}
+	}
+	a := send(mmStart, `{"connection_id":"CNAAAAAAAAAAA2","username":"bob"}`)
+	_ = json.Unmarshal([]byte(a), &req)
+	answers = append(answers, a, send(mmStart+"/confirmation", `{"request_id":"`+req.RequestID+`","code":"`+
+		dm.code()+`"}`))
+	errs = append(errs, fmt.Errorf("answers: %s", strings.Join(answers, " | ")))
+	text := seen.String() + strings.Join(answers, "") + errors.Join(errs...).Error()
+	refused := dm.refusedCodes()
+	if len(refused) == 0 || slices.Contains(refused, "") {
+		errs = append(errs, errors.New("the probe saw no code in a refused direct message: "+secrets[0]))
+	}
+	for _, s := range append(append(dm.codes(), refused...), started[1]) {
+		if s != "" && strings.Contains(text, s) {
+			errs = append(errs, errors.New("a link token or code leaked: "+secrets[0]))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// probeDirect is the stand-in Telegram and Mattermost server of probeAccountLinks: the bots read their users, every
+// reply to `/start` is refused with the request in its error, and so is every direct message until allow, its code
+// kept among the refused ones; after allow a direct message is kept for its code.
+type probeDirect struct {
+	mu      sync.Mutex
+	allowed bool
+	sent    []string
+	refused []string
+}
+
+// refusedCodes are the codes of the direct messages that were refused, which their errors echo.
+func (p *probeDirect) refusedCodes() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.refused)
+}
+
+func (p *probeDirect) allow() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.allowed = true
+}
+
+var probeCodeRe = regexp.MustCompile(`[2-9A-HJKMNP-Z]{8}`)
+
+// codes are the codes of the direct messages, the last one last.
+func (p *probeDirect) codes() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []string
+	for _, m := range p.sent {
+		out = append(out, probeCodeRe.FindString(m))
+	}
+	return out
+}
+
+func (p *probeDirect) code() string {
+	c := p.codes()
+	if len(c) == 0 {
+		return ""
+	}
+	return c[len(c)-1]
+}
+
+func (p *probeDirect) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	w.Header().Set("Content-Type", "application/json")
+	refuse := func(v map[string]any) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(v)
+	}
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/getMe"):
+		_, _ = io.WriteString(w, `{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"Probe","username":"probe_bot"}}`)
+	case strings.HasSuffix(r.URL.Path, "/sendMessage"):
+		refuse(map[string]any{"ok": false, "error_code": 400, "description": "refused " + string(body)})
+	case r.URL.Path == "/api/v4/users/username/bob":
+		_, _ = io.WriteString(w, `{"id":"u-bob","username":"bob"}`)
+	case r.URL.Path == "/api/v4/users/me":
+		_, _ = io.WriteString(w, `{"id":"bot"}`)
+	case r.URL.Path == "/api/v4/channels/direct":
+		_, _ = io.WriteString(w, `{"id":"dm"}`)
+	case r.URL.Path == "/api/v4/posts":
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		var m struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal(body, &m)
+		if !p.allowed {
+			p.refused = append(p.refused, probeCodeRe.FindString(m.Message))
+			refuse(map[string]any{"id": "api.post.refused", "message": "refused " + string(body)})
+			return
+		}
+		p.sent = append(p.sent, m.Message)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"p"}`)
+	default:
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+// probeSessions is the one web session of probeAccountLinks, whose cookie and CSRF token are "probe".
+type probeSessions struct {
+	api.Sessions
+	sess auth.Session
+}
+
+func (s probeSessions) Authenticate(_ context.Context, cookie string) (auth.Session, error) {
+	if cookie != "probe" {
+		return auth.Session{}, auth.ErrUnauthenticated
+	}
+	return s.sess, nil
+}
+
+func (s probeSessions) Permissions(auth.Session) []auth.Permission { return []auth.Permission{} }
+
+func (s probeSessions) CheckCSRF(_ auth.Session, header string) bool { return header == "probe" }
+
+// probeTGConn is the Telegram Connection of probeAccountLinks.
+type probeTGConn struct{ conn telegram.Conn }
+
+func (p probeTGConn) TelegramConn(context.Context, string) (telegram.Conn, error) { return p.conn, nil }
+
+// probeMMConn is the Mattermost Connection of probeAccountLinks.
+type probeMMConn struct{ conn mattermost.Connection }
+
+func (p *probeMMConn) Connection(context.Context, string) (mattermost.Connection, error) {
+	return p.conn, nil
+}
+
+// probeLinkStore is the Account links of probeAccountLinks in memory: the User 1, the Telegram Connection 1 without a
+// stored bot username and the Mattermost Connection 2, the link requests and the links.
+type probeLinkStore struct {
+	accountlinks.Queries
+	reqs []probeLinkRequest
+}
+
+type probeLinkRequest struct {
+	row       alinkdb.LockLinkRequestRow
+	publicID  string
+	messenger string
+	conn      int64
+	target    pgtype.Text
+	created   time.Time
+}
+
+func (s *probeLinkStore) InTx(_ context.Context, f func(accountlinks.Queries) error) error {
+	return f(s)
+}
+
+func (s *probeLinkStore) Savepoint(_ context.Context, f func(accountlinks.Queries) error) error {
+	return f(s)
+}
+
+func (s *probeLinkStore) GetLinkConnection(_ context.Context, a alinkdb.GetLinkConnectionParams) (
+	alinkdb.GetLinkConnectionRow, error) {
+	switch a.PublicID {
+	case "CNAAAAAAAAAAA1":
+		return alinkdb.GetLinkConnectionRow{ID: 1, PublicID: a.PublicID, Type: "telegram", Name: "tg"}, nil
+	case "CNAAAAAAAAAAA2":
+		return alinkdb.GetLinkConnectionRow{ID: 2, PublicID: a.PublicID, Type: "mattermost", Name: "mm"}, nil
+	}
+	return alinkdb.GetLinkConnectionRow{}, pgx.ErrNoRows
+}
+
+func (s *probeLinkStore) LockLinkUser(context.Context, alinkdb.LockLinkUserParams) (alinkdb.LockLinkUserRow, error) {
+	return alinkdb.LockLinkUserRow{ID: 1, PublicID: "SRAAAAAAAAAAA1", Login: "bob", Name: "Bob", Status: "active"}, nil
+}
+
+func (s *probeLinkStore) InsertLinkRequest(_ context.Context, a alinkdb.InsertLinkRequestParams) (int64, error) {
+	id := int64(len(s.reqs) + 1)
+	s.reqs = append(s.reqs, probeLinkRequest{row: alinkdb.LockLinkRequestRow{ID: id, SecretHash: a.SecretHash,
+		ExpiresAt: a.ExpiresAt}, publicID: a.PublicID, messenger: a.Messenger, conn: a.ConnectionID,
+		target: a.TargetExternalID, created: a.CreatedAt})
+	return id, nil
+}
+
+func (s *probeLinkStore) req(id int64) *probeLinkRequest { return &s.reqs[id-1] }
+
+func (s *probeLinkStore) GetTelegramRequestByHash(_ context.Context, a alinkdb.GetTelegramRequestByHashParams) (
+	alinkdb.GetTelegramRequestByHashRow, error) {
+	for _, r := range s.reqs {
+		if r.messenger == "telegram" && bytes.Equal(r.row.SecretHash, a.SecretHash) {
+			return alinkdb.GetTelegramRequestByHashRow{ID: r.row.ID, UserID: 1, ConnectionID: r.conn,
+				ExpiresAt: r.row.ExpiresAt, ConsumedAt: r.row.ConsumedAt, VoidedAt: r.row.VoidedAt,
+				UserPublicID: "SRAAAAAAAAAAA1", ConnectionPublicID: "CNAAAAAAAAAAA1"}, nil
+		}
+	}
+	return alinkdb.GetTelegramRequestByHashRow{}, pgx.ErrNoRows
+}
+
+func (s *probeLinkStore) GetLinkRequest(_ context.Context, a alinkdb.GetLinkRequestParams) (alinkdb.GetLinkRequestRow,
+	error) {
+	for _, r := range s.reqs {
+		if r.publicID == a.PublicID {
+			return alinkdb.GetLinkRequestRow{ID: r.row.ID, UserID: 1, Messenger: r.messenger, ConnectionID: r.conn,
+				TargetExternalID: r.target, ConnectionPublicID: "CNAAAAAAAAAAA2", ConnectionName: "mm"}, nil
+		}
+	}
+	return alinkdb.GetLinkRequestRow{}, pgx.ErrNoRows
+}
+
+func (s *probeLinkStore) LockLinkRequest(_ context.Context, a alinkdb.LockLinkRequestParams) (
+	alinkdb.LockLinkRequestRow, error) {
+	return s.req(a.ID).row, nil
+}
+
+func (s *probeLinkStore) ConsumeLinkRequest(_ context.Context, a alinkdb.ConsumeLinkRequestParams) (int64, error) {
+	s.req(a.ID).row.ConsumedAt = pgtype.Timestamptz{Time: a.Now, Valid: true}
+	return 1, nil
+}
+
+func (s *probeLinkStore) RecordWrongCode(_ context.Context, a alinkdb.RecordWrongCodeParams) (int64, error) {
+	r := s.req(a.ID)
+	r.row.Attempts++
+	if r.row.Attempts >= a.MaxAttempts {
+		r.row.VoidedAt = pgtype.Timestamptz{Time: a.Now, Valid: true}
+	}
+	return r.row.Attempts, nil
+}
+
+func (s *probeLinkStore) void(match func(probeLinkRequest) bool, now time.Time) int64 {
+	var n int64
+	for i := range s.reqs {
+		if r := &s.reqs[i]; match(*r) && !r.row.ConsumedAt.Valid && !r.row.VoidedAt.Valid {
+			r.row.VoidedAt = pgtype.Timestamptz{Time: now, Valid: true}
+			n++
+		}
+	}
+	return n
+}
+
+func (s *probeLinkStore) VoidPendingMattermostRequests(_ context.Context,
+	a alinkdb.VoidPendingMattermostRequestsParams) (int64, error) {
+	return s.void(func(r probeLinkRequest) bool { return r.messenger == "mattermost" }, a.Now), nil
+}
+
+func (s *probeLinkStore) VoidLinkRequest(_ context.Context, a alinkdb.VoidLinkRequestParams) error {
+	s.void(func(r probeLinkRequest) bool { return r.row.ID == a.ID }, a.Now)
+	return nil
+}
+
+func (s *probeLinkStore) LockCodeTarget(context.Context, alinkdb.LockCodeTargetParams) error {
+	return nil
+}
+
+func (s *probeLinkStore) UpdateAccountLink(context.Context, alinkdb.UpdateAccountLinkParams) error {
+	return nil
+}
+
+func (s *probeLinkStore) CountUserCodeRequests(context.Context, alinkdb.CountUserCodeRequestsParams) (
+	alinkdb.CountUserCodeRequestsRow, error) {
+	return alinkdb.CountUserCodeRequestsRow{}, nil
+}
+
+func (s *probeLinkStore) CountTargetCodeRequests(context.Context, alinkdb.CountTargetCodeRequestsParams) (
+	alinkdb.CountTargetCodeRequestsRow, error) {
+	return alinkdb.CountTargetCodeRequestsRow{}, nil
+}
+
+func (s *probeLinkStore) GetAccountLinkBySpace(context.Context, alinkdb.GetAccountLinkBySpaceParams) (
+	alinkdb.GetAccountLinkBySpaceRow, error) {
+	return alinkdb.GetAccountLinkBySpaceRow{}, pgx.ErrNoRows
+}
+
+func (s *probeLinkStore) GetUserLinkInSpace(context.Context, alinkdb.GetUserLinkInSpaceParams) (
+	alinkdb.GetUserLinkInSpaceRow, error) {
+	return alinkdb.GetUserLinkInSpaceRow{}, pgx.ErrNoRows
+}
+
+func (s *probeLinkStore) InsertAccountLink(context.Context, alinkdb.InsertAccountLinkParams) (int64, error) {
+	return 1, nil
+}
+
+func (s *probeLinkStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
+	return nil
+}
+
+func (s *probeLinkStore) Notify(context.Context, db.Hint) error { return nil }

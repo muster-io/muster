@@ -24,11 +24,14 @@ const (
 	// may match a list (C-09.FR-25).
 	HintAlertGroup  = "alert-group"
 	HintAlertGroups = "alert-groups"
+	// HintAccountLinks says that an Account link of the stream's User appeared or disappeared (C-18); it goes only to
+	// the streams of that User.
+	HintAccountLinks = "account-links"
 )
 
 // resyncTypes are the hints of everything a client may hold, sent to every stream when the replica listens again
 // after a loss, because the hints sent meanwhile are gone.
-var resyncTypes = []string{HintOrganization, HintSystemNotices, HintAlertGroups}
+var resyncTypes = []string{HintOrganization, HintSystemNotices, HintAlertGroups, HintAccountLinks}
 
 // alertGroupHints are the hint types about Alert Groups, which only streams whose identity reads Alert Groups get.
 var alertGroupHints = map[string]bool{HintAlertGroup: true, HintAlertGroups: true}
@@ -55,10 +58,11 @@ type Hint struct {
 	ID   string
 }
 
-// Subscriber is who reads a stream: the session, whether its identity sees the notices for Admins
-// (system-status:read) and whether it reads Alert Groups (alert-groups:read).
+// Subscriber is who reads a stream: the session, the public_id of its User, whether its identity sees the notices for
+// Admins (system-status:read) and whether it reads Alert Groups (alert-groups:read).
 type Subscriber struct {
 	SessionID   int64
+	User        string
 	Admin       bool
 	AlertGroups bool
 }
@@ -153,12 +157,16 @@ func (h *Hub) Streams() int {
 }
 
 // Receive takes a hint of LISTEN/NOTIFY and sends it to every stream that may get it when it belongs to the Hub's
-// Organization.
+// Organization; a hint that names a User goes only to the streams of that User.
 func (h *Hub) Receive(n db.Hint) {
 	if n.OrgID != h.orgID {
 		return
 	}
-	h.Send(Hint{Type: n.Type, ID: n.ID}, nil)
+	var to func(Subscriber) bool
+	if n.User != "" {
+		to = func(s Subscriber) bool { return s.User == n.User }
+	}
+	h.Send(Hint{Type: n.Type, ID: n.ID}, to)
 }
 
 // Listening is called each time the replica listens for hints; after a loss it sends every stream the hints of

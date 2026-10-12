@@ -449,7 +449,7 @@ func (f *fakeDB) DeliveryStore() *delivery.Store { return delivery.NewStore(noDB
 func (f *fakeDB) MessagesDB() messages.DBTX { return noDB{} }
 
 // AccountLinksDB has no database: every lookup fails.
-func (f *fakeDB) AccountLinksDB() accountlinks.DBTX { return noDB{} }
+func (f *fakeDB) AccountLinksDB() accountlinks.Pool { return noDB{} }
 
 // LinksStore has the built-in Link rule only; nothing else reads it in these tests.
 func (f *fakeDB) LinksStore() links.Store { return fakeLinksStore{} }

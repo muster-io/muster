@@ -7,7 +7,8 @@
 // admin — the system roles with their permissions, direct messages, notifications, button presses sent to the
 // integration URL with the ephemeral_text of their answers, and the rate limit. Every other call is recorded and
 // answered 501. The control endpoints under /_fake/ list what happened and change the fixtures: posts, notifications,
-// ephemeral posts, presses, the server log, channel members, archived channels and the server configuration.
+// ephemeral posts, presses, the server log, channel members, archived channels, the server configuration, and the
+// direct messages of the bot, which the posts leave out.
 package fakemattermost
 
 import (
@@ -34,9 +35,15 @@ const (
 	AliceUsername = "alice"
 	BobUserID     = "u-bob"
 	BobUsername   = "bob"
+	// DanaUserID is a person in no channel, whom only direct messages reach.
+	DanaUserID   = "u-dana"
+	DanaUsername = "dana"
 
 	TeamID   = "team-dev"
 	TeamName = "dev"
+
+	// ChannelDirect is the type of a direct channel of two people (F-028).
+	ChannelDirect = "D"
 
 	ChannelAlerts     = "ch-alerts"
 	ChannelAlertsProd = "ch-alerts-prod"
@@ -157,6 +164,7 @@ var (
 		{ID: BotUserID, Username: BotUsername, IsBot: true, Roles: "system_user"},
 		{ID: AliceUserID, Username: AliceUsername, FirstName: "Alice", Roles: "system_user"},
 		{ID: BobUserID, Username: BobUsername, FirstName: "Bob", Roles: "system_user"},
+		{ID: DanaUserID, Username: DanaUsername, FirstName: "Dana", Roles: "system_user"},
 	}
 	devTeam = Team{ID: TeamID, Name: TeamName, DisplayName: "Dev", Type: "O"}
 )
@@ -224,6 +232,7 @@ func New() *Fake {
 	f.Server = fakeserver.New("Mattermost", http.HandlerFunc(f.serve))
 
 	f.api.HandleFunc("GET /api/v4/users/me", f.handleMe)
+	f.api.HandleFunc("GET /api/v4/users/username/{username}", f.handleUserByName)
 	f.api.HandleFunc("GET /api/v4/users/me/teams", f.handleMyTeams)
 	f.api.HandleFunc("GET /api/v4/users/me/teams/{team_id}/channels", f.handleMyChannels)
 	f.api.HandleFunc("GET /api/v4/teams/{team_id}", f.handleTeam)
@@ -253,7 +262,10 @@ func New() *Fake {
 	f.HandleControl("DELETE /_fake/channels/{id}/members/{user_id}", f.handleMember(false))
 	f.HandleControl("POST /_fake/channels/{id}/archive", f.handleArchive)
 	f.HandleControl("GET /_fake/posts", func(w http.ResponseWriter, _ *http.Request) {
-		fakeserver.WriteJSON(w, http.StatusOK, f.Posts())
+		fakeserver.WriteJSON(w, http.StatusOK, f.channelPosts())
+	})
+	f.HandleControl("GET /_fake/dms", func(w http.ResponseWriter, _ *http.Request) {
+		fakeserver.WriteJSON(w, http.StatusOK, f.DMs())
 	})
 	f.HandleControl("DELETE /_fake/posts", f.resetter(func(s *state) { s.posts, s.order = map[string]*post{}, nil }))
 	f.HandleControl("DELETE /_fake/posts/{id}", f.handleDeletePost)
@@ -624,6 +636,64 @@ func (f *Fake) handleMyMembership(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleUserByName answers the user with the username, matched without case, as any session may read it; an unknown
+// one is 404.
+func (f *Fake) handleUserByName(w http.ResponseWriter, r *http.Request) {
+	u, ok := userByName(r.PathValue("username"))
+	if !ok {
+		writeAppError(w, http.StatusNotFound, "store.sql_user.get_by_username.app_error",
+			"Unable to find an existing account matching your username for this team.")
+		return
+	}
+	fakeserver.WriteJSON(w, http.StatusOK, u)
+}
+
+// DM is a post in the direct channel of the bot and a person, as GET /_fake/dms lists it: the person, the post, its
+// message and when it was posted.
+type DM struct {
+	UserID   string `json:"user_id"`
+	PostID   string `json:"post_id"`
+	Message  string `json:"message"`
+	CreateAt int64  `json:"create_at"`
+}
+
+// DMs returns the posts of the direct channels of the bot in the order they were created, each with the member who is
+// not the bot.
+func (f *Fake) DMs() []DM {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []DM{}
+	for _, id := range f.st.order {
+		p := f.st.posts[id]
+		if c, ok := f.st.channels[p.ChannelID]; !ok || c.Type != ChannelDirect || !f.st.members[c.ID][BotUserID] {
+			continue
+		}
+		person := ""
+		for m := range f.st.members[p.ChannelID] {
+			if m != BotUserID {
+				person = m
+			}
+		}
+		out = append(out, DM{UserID: person, PostID: p.ID, Message: p.Message, CreateAt: p.CreateAt})
+	}
+	return out
+}
+
+// channelPosts are the posts GET /_fake/posts lists: every post but those in direct channels, which GET /_fake/dms
+// lists.
+func (f *Fake) channelPosts() []RecordedPost {
+	all := f.Posts()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]RecordedPost, 0, len(all))
+	for _, p := range all {
+		if c, ok := f.st.channels[p.ChannelID]; !ok || c.Type != ChannelDirect {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // handleDirect returns the direct channel of two users, creating it on the first call (F-028).
 func (f *Fake) handleDirect(w http.ResponseWriter, r *http.Request) {
 	var ids []string
@@ -643,7 +713,7 @@ func (f *Fake) handleDirect(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	c, ok := f.st.channels[id]
 	if !ok {
-		c = &Channel{ID: id, Name: id, Type: "D"}
+		c = &Channel{ID: id, Name: id, Type: ChannelDirect}
 		f.st.channels[id] = c
 		f.st.members[id] = map[string]bool{ids[0]: true, ids[1]: true}
 	}

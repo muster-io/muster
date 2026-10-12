@@ -175,8 +175,9 @@ var ReplicasPruned = newEvent("replicas_pruned", LevelInfo, "C-02",
 var ShortLivedPruned = newEvent("short_lived_pruned", LevelInfo, "C-02",
 	"The hourly short-lived pruning of the Leader deleted, in batches, rows of a short-lived table that can no "+
 		"longer be used, such as sessions that ended or expired auth.session_prune_after ago, sign-in throttles "+
-		"without a failure for auth.signin_throttle_prune_after and password setup links that expired "+
-		"auth.password_setup_prune_after ago; rows is how many it deleted from the table.",
+		"without a failure for auth.signin_throttle_prune_after, password setup links that expired "+
+		"auth.password_setup_prune_after ago and Account link requests that expired "+
+		"account_link.request_prune_after ago; rows is how many it deleted from the table.",
 	"table", "rows")
 
 // ClockSkew is logged when this replica's clock differs from the database clock by more than
@@ -561,9 +562,33 @@ var TelegramPollFailed = newEvent("telegram_poll_failed", LevelWarn, "C-14",
 var TelegramUpdateDropped = newEvent("telegram_update_dropped", LevelInfo, "C-14",
 	"An update of a Telegram Connection reached the update router, which has no handler for its kind and drops it: "+
 		"connection is the public_id of the Connection, kind one of callback_query, chat_message, private_message, "+
-		"my_chat_member or other. Until the handler of Account links is registered, private messages such as /start "+
-		"arrive here.",
+		"my_chat_member or other. Private messages, such as /start, go to the handler of Account links.",
 	"connection", "kind")
+
+// AccountLinkLinked is logged when a messenger account was linked to a User (C-18.FR-2, FR-3).
+var AccountLinkLinked = newEvent("account_link_linked", LevelInfo, "C-18",
+	"A messenger account was linked to a User, through /start with a deep-link token in Telegram or a code from the "+
+		"bot's direct message in Mattermost, and the account-links hint went to the User: messenger is telegram or "+
+		"mattermost, connection the public_id of the Connection, user the public_id of the User. error, when "+
+		"present, says why the bot's confirmation was not sent; the link stays. Never carries the token or the code.",
+	"messenger", "connection", "user", "error")
+
+// AccountLinkRejected is logged when a link of a messenger account was refused (C-18.FR-2, FR-3, FR-5).
+var AccountLinkRejected = newEvent("account_link_rejected", LevelInfo, "C-18",
+	"A link of a messenger account was refused and recorded as account_link.link_rejected: messenger is telegram or "+
+		"mattermost, connection the public_id of the Connection, reason token_unknown, token_used, token_expired or "+
+		"wrong_connection for a /start, wrong_code, token_used or token_expired for a Mattermost code, or conflict for "+
+		"an account linked to another User. error, when present, says why the bot's answer was not sent. Never "+
+		"carries the token or the code.",
+	"messenger", "connection", "reason", "error")
+
+// AccountLinkUnlinked is logged when an Account link was removed (C-18.FR-4, FR-6, C-03.FR-13).
+var AccountLinkUnlinked = newEvent("account_link_unlinked", LevelInfo, "C-18",
+	"An Account link was removed and recorded as account_link.unlink: messenger is telegram or mattermost, "+
+		"connection the public_id of the Connection it was made through, user the public_id of its User, reason "+
+		"removed when the User or an Admin unlinked it, replaced when a new link of the User in the same identity "+
+		"space took its place, or user_deleted when its User was deleted.",
+	"messenger", "connection", "user", "reason")
 
 // TelegramUpdateFailed is logged when the webhook endpoint of a Telegram Connection answered 500 (C-14.FR-1).
 var TelegramUpdateFailed = newEvent("telegram_update_failed", LevelWarn, "C-14",
