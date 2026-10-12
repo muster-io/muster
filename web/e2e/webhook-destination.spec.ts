@@ -211,7 +211,11 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
   await page.goto(`/destinations/${destinationId}`);
   await expect(page.getByTestId("destination-type")).toHaveText("Исходящий вебхук");
-  await expect(page.getByRole("tab")).toHaveText(["События", "Шаблон", "Оба режима"]);
+  await expect(page.getByTestId("webhook-fields").getByRole("tab")).toHaveText([
+    "События",
+    "Шаблон",
+    "Оба режима",
+  ]);
   await expect(page.getByRole("group", { name: "Создание", exact: true })).toBeVisible();
   await expect(page.getByRole("group", { name: "Ответ в треде", exact: true })).toBeVisible();
   await expect(page.getByTestId("signing-secret-status")).toHaveText(/^Секрет подписи: задан/);

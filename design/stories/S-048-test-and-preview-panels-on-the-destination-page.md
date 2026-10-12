@@ -10,6 +10,7 @@ files_touched:
   - web/src/components/destination-test-panel.tsx
   - web/src/components/destination-test-panel.test.tsx
   - web/src/components/destination-preview-panel.tsx
+  - web/src/components/destination-preview-panel.test.tsx
   - web/src/components/test-source-picker.tsx
   - web/src/components/rendered-request.tsx
   - web/src/routes/destinations.$destinationId.tsx
@@ -17,9 +18,10 @@ files_touched:
   - web/src/locales/ru.json
   - web/e2e/destination-test.spec.ts
   - web/e2e/destination-preview.spec.ts
+  - web/e2e/webhook-destination.spec.ts
 acceptance:
   - "[C-16.FR-1, C-16.FR-4] Every Destination page has \"Test\" and \"Preview\" (with `destinations:test`), each with a source selector: \"Example\" (default) or a recent Alert Group of the Destination's Routes by `#N` and title."
-  - "[C-16.FR-2] \"Send test message\" shows one block per step — \"Message\", \"Button press\", \"Event\" or \"Create\" — with the request (Secrets, the Signing secret and tokens shown as `[redacted]`), the response status, the response body as plain text, the extracted values, the duration and the outcome; `limited` reads \"The messenger is busy; nothing was sent. Try again in a few seconds.\""
+  - "[C-16.FR-2] \"Send test message\" shows one block per step — \"Message\", \"Button press\", \"Event\" or \"Create\" — with the request (Secrets, the Signing secret and tokens shown as `[redacted]`), the response status, the response body as plain text, the extracted values, the duration and the outcome; `limited` reads \"The messenger is busy; nothing was sent. Try again in a few seconds.\" for a messenger and \"The endpoint's rate limit is reached; nothing was sent. Try again in a few seconds.\" for an outgoing webhook."
   - "[C-16.FR-3, C-16.AC-7, C-13.FR-13] For a Mattermost Destination the \"Button press\" block reads \"Button presses reach Muster.\" or \"The button press did not reach Muster. Add the host of {MUSTER_INGEST_URL} to ServiceSettings.AllowedUntrustedInternalConnections on the Mattermost server.\""
   - "[C-16.AC-3] A test of an outgoing webhook in template mode shows the extracted values and shows every Secret value as `[redacted]`."
   - "[C-16.FR-4] \"Preview\" renders the Root message — Markdown for Mattermost, HTML for Telegram, both inside a sandboxed frame with links not followed — or each webhook request with method, URL, headers and body, without sending anything."
@@ -46,19 +48,31 @@ issue: 48
 
 - **API used**: `testDestination`, `previewDestination`, `listAlertGroups` (recent Alert Groups of the Destination's
   Routes, `route` filter), `getDestination`; the `destination` hint.
-- **Source selector** (`test-source-picker.tsx`): "Example" (`{kind: "example"}`) or "Alert Group" with a search over
-  the last 7 days of the Destination's Routes (`{kind: "alert_group", alert_group_id}`).
+- **Source selector** (`test-source-picker.tsx`), labelled "Based on" (the glossary keeps "Source" off the UI): "Example"
+  (`{kind: "example"}`) or "Alert Group" with a search over the last 7 days of the Destination's Routes
+  (`{kind: "alert_group", alert_group_id}`). Without `alert-groups:read` or without a Route only the example is
+  offered; `422 unknown_id` reads "This Alert Group is no longer one of the recent Alert Groups of this Destination's
+  Routes. Choose another one."
 - **Test panel** (`destination-test-panel.tsx`): "Send test message" (disabled while a test runs); one block per
   `TestStep` with the step's name — `message` "Message", `press` "Button press", `event` "Event", `create` "Create" —
   the outcome ("Sent", or the class's text: `limited` "The messenger is busy; nothing was sent. Try again in a few
-  seconds.", `transient` "No answer or a temporary error", `fatal` "Refused", `unknown` "Unexpected answer",
-  `template_error` "Template error", `blocked` "Blocked by the outbound address policy"), `error` as plain text,
+  seconds." for `message`, and "The endpoint's rate limit is reached; nothing was sent. Try again in a few seconds."
+  for the webhook steps `event` and `create`, since a webhook's limiter guards an endpoint, not a messenger; `transient` "No answer or a temporary error", `fatal` "Refused", `unknown` "Unexpected answer",
+  `template_error` "Template error", `blocked` "Blocked by the outbound address policy", `retry_after` "Asked to wait
+  and try again later"), `error` as plain text,
   `duration_ms`, the request (`rendered-request.tsx`: method, URL, headers, body as code), `response_status`,
   `response_body` as plain text and `extracted` as a table. The `press` block shows "Button presses reach Muster." when
   it has no error, otherwise its `error`. `health` from the result updates the page's health banner.
-- **Preview panel** (`destination-preview-panel.tsx`): items of `previewDestination`; `markdown` rendered without raw
-  HTML, `html` rendered in a sandboxed `iframe` (`sandbox=""`) with the Telegram subset, `json` and requests as code;
-  links are shown, never followed automatically.
+  When a step failed and the Destination is still Broken, the result says that a test ends the Broken state only when
+  every step succeeds, and, when the message was posted but the `press` step failed, that the button press did not
+  reach Muster (C-16.FR-7). The Mattermost and Telegram hints say that a person's press of a test message changes nothing
+  and is answered in English.
+- **Preview panel** (`destination-preview-panel.tsx`): items of `previewDestination`; the `markdown` (with the post's
+  attachment and buttons from `request.body`) and `html` (the Telegram subset, with the inline keyboard from
+  `request.body`) Root messages are both built element by element from text — the HTML parsed in an inert document,
+  only the subset's tags kept, no attribute — and shown in a sandboxed `iframe` (`sandbox=""`, `srcdoc`) that links the
+  page's own stylesheet, which the Content Security Policy allows; `json` and requests as code; an item with `text` and
+  no request is a failed template; links are shown with their address and are never anchors, so never followed.
 
 ## Steps
 
@@ -82,8 +96,8 @@ and "chat" (template). Then in Playwright:
 5. "tg-alerts" → "Preview" → "Example" → the rendered message shows the example Alert Group's heading without the
    "🧪 Test message" mark, the expandable label section and the buttons; "chat" → "Preview" shows "Create", "Update", "Open thread", "Reply in
    thread" with their URLs and bodies; the fake servers recorded no new message.
-6. With the limiter of "auto" set to 1 per 60 s and spent by a delivery from a terminal → "Test" → "Event: The messenger
-   is busy; nothing was sent. Try again in a few seconds."
+6. With the limiter of "auto" set to 1 per 60 s and spent by a delivery from a terminal → "Test" → "Event: The endpoint's
+   rate limit is reached; nothing was sent. Try again in a few seconds."
 7. Make "alerts" Broken from a terminal (as in S-047), add the bot back → "Test" → the page shows "Healthy" without a
    reload.
 
