@@ -7,7 +7,7 @@ layer: L1
 depends_on: [S-047, S-051, S-053]
 covers: [C-20.FR-1, C-20.FR-2, C-20.FR-3, C-20.FR-6, C-20.FR-7, C-20.FR-8, C-20.AC-1, C-20.AC-2, C-20.AC-3, C-20.AC-4, C-20.AC-5, C-20.AC-6, C-02.FR-15, C-02.FR-21, C-17.FR-6]
 files_touched:
-  - internal/organization/settings.go
+  - internal/organization/organization.go
   - internal/organization/severityvalues.go
   - internal/organization/outbound.go
   - internal/organization/query.sql
@@ -15,6 +15,8 @@ files_touched:
   - internal/organization/outbound_test.go
   - internal/api/organization.go
   - internal/api/organization_test.go
+  - internal/api/server.go
+  - internal/api/server_test.go
   - internal/keyring/status.go
   - internal/keyring/rotate.go
   - internal/keyring/replicas.go
@@ -22,6 +24,8 @@ files_touched:
   - internal/keyring/rotate_test.go
   - internal/delivery/enqueue.go
   - internal/delivery/enqueue_test.go
+  - internal/leader/tasks.go
+  - internal/runtime/runtime.go
   - internal/cli/secrets.go
   - internal/cli/cli.go
   - internal/cli/secrets_test.go
@@ -38,9 +42,9 @@ acceptance:
   - "[C-20.FR-1] After the time zone becomes `Europe/Berlin`, the times in new messages are shown in that zone."
   - "[C-20.FR-3, C-20.AC-1, C-02.FR-21] `updateOutboundPolicy` with `If-Match` replaces the policy and its lists, effective at once on every replica; under the standard policy a test of an outgoing webhook to 127.0.0.1 fails with `blocked` until `127.0.0.0/8` is allowed, and one to 169.254.169.254 stays `blocked` even with `169.254.0.0/16` allowed; `getOutboundPolicy` lists the rules that always apply."
   - "[C-20.FR-6] `getKeyring` lists every key id held by this or a live replica, which one is active, which live replicas hold or lack each, and for each older key whether a Secret or an open Root message still depends on it (`needed`) and whether it can be removed (`removable`)."
-  - "[C-20.FR-7, C-20.AC-2, C-02.FR-15] `muster secrets rotate-key --activate <id> --actor <name>` refuses with \"Replicas {names} do not hold key {id} yet.\" and exit 1 while a live replica lacks the key, and exits 2 without `--actor`; once every live replica holds it, it activates the key, re-encrypts every Secret and the key canary, recomputes the Desired state of every open Alert Group and records `keyring.key_activated`; replicas switch without a restart, and the old key becomes `removable` once the open Root messages are edited."
+  - "[C-20.FR-7, C-20.AC-2, C-02.FR-15] `muster secrets rotate-key --activate <id> --actor <name>` refuses with \"Replicas {names} do not hold key {id} yet.\" and exit 1 while a live replica lacks the key, and exits 2 without `--actor`; once every live replica holds it, it activates the key, re-encrypts every Secret and the key canary and records `keyring.key_activated`; replicas switch without a restart, the Leader then recomputes the Desired state of every open Alert Group whose buttons another key signed, and the old key becomes `removable` once the open Root messages are edited."
   - "[C-20.AC-5] After the activation, the open Root messages in the fake Mattermost server are edited with buttons signed by the new key, and a press on them runs the command."
-  - "[C-17.FR-6] After an activation and the removal of the old key from every replica, a press on a Reminder button sent before the activation is answered \"This button has expired; use the buttons on the Alert Group's message\" (end-to-end test)."
+  - "[C-17.FR-6] After an activation and the removal of the old key from every replica, a press on a Reminder button sent before the activation is answered \"This button has expired; use the buttons on the Alert Group's message\" and changes nothing."
 verify: "make ci test-integration e2e"
 operator_attention: false
 issue: 55
@@ -70,18 +74,19 @@ issue: 55
   and `listSeverityValues` (`organization:read`). Schemas: `OrganizationBase`, `OrganizationInput`,
   `RetentionSettings`, `SeverityMappingEntry`, `SeverityLevelStyle`, `OutboundPolicy`, `Keyring`, `KeyringKey`,
   `SeverityValue`, `SeverityValueList`; hint `organization`.
-- **Organization** (C-20.FR-1, FR-8; `organization/settings.go`, `organizations`): validation — `name` not empty;
+- **Organization** (C-20.FR-1, FR-8; `Service.Update` and `unsupported()` in `organization/organization.go`,
+  `organizations`): validation — `name` not empty;
   `time_zone` an IANA zone (`invalid_format`); `severity_label` a label name; `severity_mapping` values unique
   (`duplicate` at `/severity_mapping/<i>/value`); `severity_styles` exactly one entry per level with a non-empty emoji
   and a `#rrggbb` colour; `instance_labels` label names without duplicates; retention periods of at least one day, with
   `alert_group_summaries_days` ≥ `alert_details_days` (`422` `retention_order` at
   `/retention/alert_group_summaries_days`, checked before the database `CHECK`); `oidc_token_grace_seconds` ≥ 1. A
   valid update writes the row, increments `version` (the ETag), records `organization.updated` with the diff (Secrets as
-  `secret_changed`) and sends `NOTIFY organization`.
+  `secret_changed`) and sends `NOTIFY muster_organization`.
 - **Later evaluations only** (C-20.FR-2; `routing/severity.go`): routing, Severity levels, urgency and Replacement read
-  the settings through a per-replica cache that `NOTIFY organization` invalidates; levels, urgency and statuses already
-  stored are never recomputed by a settings change. Retention tasks and message rendering read the current values at
-  their next run.
+  the settings through a per-replica cache that `NOTIFY muster_organization` invalidates; levels, urgency and
+  statuses already stored are never recomputed by a settings change. Retention tasks and message rendering read the
+  current values at their next run.
 - **Values seen** (C-20.FR-1, AC-4; `organization/severityvalues.go`): the distinct values of the label
   `severity_label` among Alerts whose `last_seen_at` is within `organization.severity_values_window`, each with the
   number of Alerts, the level of the current mapping (an unmapped value counts as warning) and `mapped`;
@@ -90,8 +95,8 @@ issue: 55
   `strict`; `allowed` and `denied` entries must parse with the policy's own parser of S-009 (`invalid_format` at
   `/allowed/<i>` or `/denied/<i>`, `duplicate` for repeats); `always_blocked` lists the rules in code (link-local, cloud
   metadata, unspecified, multicast) and is read-only. An update records `outbound_policy.updated` with the diff and sends
-  `NOTIFY outbound_policy`, which drops the per-replica cache of S-009 at once (its 10-second age stays as a fallback),
-  answering S-009's open question 1.
+  `NOTIFY muster_outbound_policy`, which drops the per-replica cache of S-009 at once (its 10-second age stays as a
+  fallback), answering S-009's open question 1.
 - **Keyring status** (C-20.FR-6; `keyring/status.go`): the keys are the ids of this replica's Keyring and of every live
   replica's record; `active` from `keyring_state`; `held_by` and `missing_on` over live replicas; `needed` when a row of
   `encrypted_values` carries the key id or a delivery of an open Alert Group has it as `actual_button_key_id`;
@@ -102,16 +107,25 @@ issue: 55
   key, or when a live replica lacks it, printing "Replicas {names} do not hold key {id} yet."; exit 0 with "key {id} is
   already active" when it is. Otherwise, under the migration advisory lock and in one transaction: the active key and
   `activated_at` change and the canary is re-encrypted with it (`keyring_state` `CHECK`); every field listed by
-  `encrypted_values` is decrypted with its key and encrypted with the new one, keeping its `*_updated_at`;
-  `delivery.RerenderOpen` recomputes the Desired state of every open Alert Group, whose buttons the renderer now signs
-  with the new key, so the delivery worker edits their Root messages; `keyring.key_activated` is recorded with the
-  actor `cli`, the name, and the counts of re-encrypted fields and re-rendered deliveries; `NOTIFY keyring` follows the
-  commit. Replicas switch to the new active key on that notification and at their next key record refresh, without a
-  restart (`keyring/replicas.go`); a replica that sees an active key it does not hold stops, as in S-007. Thread reply
-  buttons, such as those of Reminders, are not re-rendered and expire once the old key is removed (C-17.FR-6).
+  `encrypted_values` is decrypted with its key and encrypted with the new one, keeping its `*_updated_at` (for the
+  previous Signing secret, `previous_signing_secret_since`); `keyring.key_activated` is recorded with the actor `cli`,
+  the name, the count of re-encrypted fields and the count of open deliveries whose `desired_button_key_id` is another
+  key; `NOTIFY muster_keyring` follows the commit. The CLI renders nothing: rendering needs the runtime's renderer,
+  templates and adapters, which a CLI process does not build. Replicas switch to the new active key on that
+  notification and at their next key record refresh, without a restart (`keyring/replicas.go`); a replica that sees an
+  active key it does not hold stops, as in S-007. Then the Leader runs the task `rerender_after_rotation`
+  (`leader/tasks.go`, on `muster_keyring` and when it starts leading): in batches, `delivery.RerenderOpen` recomputes
+  the Desired state of every open Alert Group delivery whose `desired_button_key_id` is not the active key, so the
+  renderer signs the buttons with the new key and the delivery worker edits the Root messages. The task is safe to run
+  twice (ADR-0007): a delivery already re-signed is no longer selected. Thread reply buttons, such as those of
+  Reminders, are not re-rendered and expire once the old key is removed (C-17.FR-6, S-068).
 - **Development mode**: a `MUSTER_SECRET_KEYS` given to `muster dev` replaces the development key (S-004), so a
   rotation against the development database lists both keys explicitly — the development key first, so that it stays
   active until the rotation — and runs the CLI as `muster dev secrets rotate-key` with the same environment.
+- **Operations without a story**: with `getKeyring`, `getOutboundPolicy`, `updateOutboundPolicy` and
+  `listSeverityValues` in the `implemented` map of `internal/api/server.go`, every operation of the app listener has a
+  story, so `TestNotFoundAndNotImplemented` (`server_test.go`) checks the `501` answer as a unit test of
+  `notImplemented` with an operation id that the specification does not have.
 - **Log events**: `organization_updated` (INFO: `fields`), `outbound_policy_updated` (INFO), `key_activated` (WARN:
   `from`, `to`, `actor`), `key_switched` (INFO: `active`) on every replica.
 - **Defaults**: `organization.*`, `retention.*`, `auth.oidc_token_grace`, `organization.outbound_policy`,
@@ -125,9 +139,10 @@ issue: 55
 2. Write the values seen. Check: tests cover the window, the counts and unmapped values.
 3. Write the outbound policy editing. Check: `outbound_test.go` covers C-20.AC-1 against the dialer of S-009 and the
    immediate effect on a second replica.
-4. Write the Keyring status, the rotation with re-encryption and `RerenderOpen`, the replica switch and the CLI. Check:
-   `rotate_test.go` with two replicas covers the refusal, the activation, the canary, every encrypted field and the
-   switch without a restart; `secrets_test.go` covers the exit codes.
+4. Write the Keyring status, the rotation with re-encryption, the replica switch, the Leader's re-render after a
+   rotation and the CLI. Check: `rotate_test.go` with two replicas covers the refusal, the activation, the canary, every
+   encrypted field and the switch without a restart; `enqueue_test.go` covers `RerenderOpen` selecting only deliveries
+   signed by another key and a second run that changes nothing; `secrets_test.go` covers the exit codes.
 5. Write the end-to-end test. Check: Verification below.
 
 ## Verification
@@ -140,11 +155,12 @@ make dev > dev.log 2>&1 &
 # As in S-053: the Admin's session (`jar`, `H`), the Responder "bob" with his Mattermost link made in S-051, the
 # Mattermost Destination "alerts" (D) on the Route "t", the Integration "lab" with FIRE, PUTA, NOTIFY, ADV and AG of S-049,
 # the outgoing webhook "auto" (WD) of S-044 pointing at http://127.0.0.1:18093/hook/auto; the CLI runs as
-# `./bin/muster dev <subcommand>` with the development defaults and the exported MUSTER_SECRET_KEYS
+# `./bin/muster dev <subcommand>` with the development defaults and the exported MUSTER_SECRET_KEYS; C is the
+# Mattermost Connection "mm", and the Route "t" has the On-call profile, so a Reminder comes 4 hours after Acknowledge
 API=localhost:8080/api/v1; FAM=127.0.0.1:19093/_fake; FMM=127.0.0.1:18065/_fake; CLK=localhost:8082/_dev/clock
 ORG() { O=$(curl -s -b jar $API/organization); curl -s "${H[@]}" -X PUT -H "If-Match: $(jq -r .etag <<<"$O")" $API/organization -d "$(jq -c "del(.id, .etag) | $1" <<<"$O")"; }
 POL() { Q=$(curl -s -b jar $API/organization/outbound-policy); curl -s "${H[@]}" -X PUT -H "If-Match: $(jq -r .etag <<<"$Q")" $API/organization/outbound-policy -d "$(jq -c "del(.etag, .always_blocked) | $1" <<<"$Q")" > /dev/null; }
-TEST() { curl -s "${H[@]}" -X POST $API/destinations/$1/tests | jq -c '{ok, c: ([.steps[] | .error_class] | map(select(. != null)) | first)}'; }
+TEST() { curl -s "${H[@]}" -X POST $API/destinations/$1/tests -d '{"source":{"kind":"example"}}' | jq -c '{c: ([.steps[] | .error_class] | map(select(. != "none")) | first)}'; }
 
 # C-20.AC-6, FR-8: the retention order; equal periods; a stale If-Match
 ORG '.retention.alert_group_summaries_days = 30 | .retention.alert_details_days = 90' | jq -c '{status, p: .errors[0].pointer, c: .errors[0].code}'
@@ -169,10 +185,10 @@ curl -s $FMM/posts | jq -r '[.[] | select(.root_id == "")] | last | .props.attac
 
 # C-20.AC-1, FR-3: the outbound address policy
 curl -s -b jar $API/organization/outbound-policy | jq -c '{policy, allowed, a: (.always_blocked | length > 0)}'   # {"policy":"standard","allowed":["127.0.0.0/8"],"a":true}
-POL '.allowed = []'; TEST $WD                                # {"ok":false,"c":"blocked"}
-POL '.allowed = ["127.0.0.0/8"]'; TEST $WD                   # {"ok":true,"c":null}
+POL '.allowed = []'; TEST $WD                                # {"c":"blocked"}
+POL '.allowed = ["127.0.0.0/8"]'; TEST $WD                   # {"c":null}
 MD=$(curl -s "${H[@]}" $API/destinations -d '{"type":"webhook","name":"meta","mode":"events","events":{"url":"http://169.254.169.254/latest","headers":[]},"limiter":{"limit":5,"per_seconds":1}}' | jq -r .destination.id)
-POL '.allowed = ["127.0.0.0/8", "169.254.0.0/16"]'; TEST $MD  # {"ok":false,"c":"blocked"}
+POL '.allowed = ["127.0.0.0/8", "169.254.0.0/16"]'; TEST $MD  # {"c":"blocked"}
 grep -c '"event":"outbound_blocked".*169.254.169.254' dev.log   # 1
 
 # C-20.FR-6, FR-7, AC-2: the Keyring, a refused activation, then the activation
@@ -188,6 +204,11 @@ psql "$MUSTER_DATABASE_URL" -qc "INSERT INTO replicas (replica_id, hostname, ver
 # exit=1
 psql "$MUSTER_DATABASE_URL" -qc "DELETE FROM replicas WHERE replica_id = 'ghost-1'"
 OPEN=$(curl -s -b jar "$API/alert-groups" | jq -r '.items[0].id')
+# a Reminder sent before the activation: the Admin acknowledges OPEN and the clock passes its first Reminder
+curl -s "${H[@]}" -X POST $API/alert-groups/$OPEN/acknowledge > /dev/null; ADV 14400; sleep 1
+OROOT=$(curl -s $FMM/posts | jq -r --arg g "$OPEN" '.[] | select(.root_id == "" and (.props.attachments[0].title_link | test($g))) | .id')
+RP=$(curl -s $FMM/posts | jq -r --arg r "$OROOT" '[.[] | select(.root_id == $r and ((.props.attachments[0].actions // []) | length) == 2)] | last | .id')
+RCTX=$(curl -s $FMM/posts | jq -c --arg rp "$RP" '.[] | select(.id == $rp) | .props.attachments[0].actions[0].integration.context')
 ./bin/muster dev secrets rotate-key --activate $K1ID --actor ops; echo "exit=$?"    # exit=0
 psql "$MUSTER_DATABASE_URL" -Atc "SELECT count(*) FROM encrypted_values WHERE key_id <> '$K1ID'"   # 0
 sleep 3; curl -s -b jar $API/organization/keyring | jq -c --arg k "$K0ID" '.keys[] | select(.id == $k) | {active, needed, removable}'
@@ -201,6 +222,12 @@ ROOT=$(curl -s $FMM/posts | jq -r --arg g "$OPEN" '.[] | select(.root_id == "" a
 curl -s $FMM/posts | jq -r --arg r "$ROOT" '.[] | select(.id == $r) | .props.attachments[0].actions[0].integration.context.key_id' | grep -c "$K1ID"   # 1
 curl -s -X POST $FMM/press -d "{\"post_id\":\"$ROOT\",\"action_id\":\"ack\",\"user_id\":\"u-bob\"}" > /dev/null; sleep 1
 curl -s -b jar $API/alert-groups/$OPEN | jq -r .owner.login  # bob
+
+# C-17.FR-6: restart with the new key only; the Reminder sent before the activation has expired. The fake servers
+# restart empty with muster dev, so the press is the callback the fake would have sent, with the context saved above.
+kill %1; wait; export MUSTER_SECRET_KEYS="$K1"; make dev > dev.log 2>&1 & sleep 10
+curl -s -X POST localhost:8081/api/v1/callbacks/mattermost/$C -d "{\"user_id\":\"u-bob\",\"channel_id\":\"ch-alerts\",\"post_id\":\"$RP\",\"context\":$RCTX}" | jq -r .ephemeral_text
+# This button has expired; use the buttons on the Alert Group's message
 ```
 
 `test/e2e/organization_test.go` repeats these steps in the harness mode of S-004 with the fakes in the test process,
@@ -208,8 +235,9 @@ with two replicas started as `muster dev --replica` with explicit keys: the seco
 activation is refused naming it; after it restarts with both keys the activation succeeds and both replicas switch
 without a restart; after both restart with K1 only, startup passes the canary, a press on a Root message works, and a
 press on a Reminder button sent before the activation is answered "This button has expired; use the buttons on the Alert
-Group's message" (C-17.FR-6). It also covers Instance labels, the token grace, a strict policy and the outbound policy
-change seen by the second replica at once.
+Group's message" (C-17.FR-6). It also covers Instance labels, the token grace, a strict policy, the outbound policy
+change seen by the second replica at once, and a Leader handover during `rerender_after_rotation`, after which every
+open Root message is still re-signed once.
 
 ## Open questions
 
@@ -219,8 +247,8 @@ None.
 
 - Suggested commit: `feat(organization): edit organization settings and the outbound policy, rotate the master key`.
 - Re-encryption runs in one transaction; at L1 sizes — a few hundred Secrets — it takes well under a second. The Desired
-  state of open Alert Groups is only recomputed in that transaction; the edits themselves follow through the delivery
-  worker within the limiters.
+  state of open Alert Groups is recomputed afterwards by the Leader (D298), not by the CLI, which has no renderer; the
+  edits themselves follow through the delivery worker within the limiters.
 - Master key rotation re-encrypts the three outgoing webhook secret fields: the Signing secret, the previous Signing
   secret and the Secrets. The test of S-044 re-encrypts them by hand because rotation did not exist yet; this story
   covers them with real rotation.
@@ -243,4 +271,4 @@ None.
 | C-20.AC-6 | full | |
 | C-02.FR-15 | partial | `muster secrets rotate-key` |
 | C-02.FR-21 | partial | editing the policy, effective at once |
-| C-17.FR-6 | partial | Reminder buttons expire after a real rotation (end-to-end test) |
+| C-17.FR-6 | partial | Reminder buttons expire after a real rotation; the rule is S-068 |

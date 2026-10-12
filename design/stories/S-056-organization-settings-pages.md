@@ -22,6 +22,7 @@ files_touched:
   - web/src/components/network-list-editor.test.tsx
   - web/src/components/keyring-status.tsx
   - web/src/components/app-shell.tsx
+  - web/src/components/app-shell.test.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/e2e/organization-settings.spec.ts
@@ -54,8 +55,11 @@ issue: 56
 
 - **API used**: `getOrganization`, `updateOrganization`, `listSeverityValues`, `getOutboundPolicy`,
   `updateOutboundPolicy`, `getKeyring`, the `organization` hint.
-- **Routes and navigation** (an "Organization" group in the navigation, each entry shown only with its Permission, as
-  in S-015):
+- **Routes and navigation**: the navigation is the flat `NAVIGATION` list of `app-shell.tsx`, which has no groups;
+  the new entries go together right before the existing "Security" entry, so that the Organization pages read as one
+  block — "General", "Severity levels", "Alert handling", "Retention", "Network", "Security", then "Outgoing heartbeat"
+  (S-054), "Lookup tables" and "Link rules" (S-038) — each shown only with its Permission, as in S-015.
+  `app-shell.test.tsx`, which checks the order of the entries, follows:
 
   | Route | Permission | Content |
   |---|---|---|
@@ -105,8 +109,9 @@ the development default, so it lists both and the Keyring has two keys — and r
 `admin@example.org` / `muster-dev-password`; from a terminal, send Alerts with `severity="P5"` as in S-055. Then in
 Playwright:
 
-1. The navigation group "Organization" shows "General", "Severity levels", "Alert handling", "Retention", "Network",
-   "Security" → General → time zone "Europe/Berlin" → "Save" → "Saved"; the Audit log shows `organization.updated`.
+1. The navigation shows, one after the other, "General", "Severity levels", "Alert handling", "Retention", "Network",
+   "Security", "Outgoing heartbeat", "Lookup tables" and "Link rules" → General → time zone "Europe/Berlin" → "Save" →
+   "Saved"; the Audit log shows `organization.updated`.
 2. Retention → "Alert Group summaries" 30 while "Alert details" is 90 → "Save" → "Keep Alert Group summaries at least as
    long as alert details." at the field → 90 → "Save" → "Saved".
 3. Severity levels → the banner "These values have no mapping and count as warning: P5." and the row "P5 · 1 · warning ·
@@ -120,8 +125,8 @@ Playwright:
    from MUSTER_SECRET_KEYS."
 6. Security → "Token grace" 3 days → "Save"; in a second browser context, an edit saved meanwhile makes the first save
    show "Someone else changed these settings. Reload to see them."
-7. As a Responder → no "Organization" group; `/admin/organization/general` shows "You do not have permission to see this
-   page."
+7. As a Responder → none of "General", "Severity levels", "Alert handling", "Retention", "Network" and "Security";
+   `/admin/organization/general` shows "You do not have permission to see this page."
 
 `make e2e` runs these steps as `web/e2e/organization-settings.spec.ts`.
 
@@ -134,6 +139,8 @@ None.
 - Suggested commit: `feat(web): add the organization settings pages`.
 - Pages that need `organization:read` only (Network, the Keyring) are read-only for a role without
   `organization:write`; in L1 only Admins hold either Permission.
+- S-054 also adds an entry to `app-shell.tsx` and keys to the locales; whichever of the two lands second rebases onto
+  the other and keeps the order above.
 
 ## Coverage
 

@@ -36,7 +36,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-14 Telegram | Shadow | 35 | S-041, S-042, S-066, S-067, S-043 | yes | 35 of 35 |
 | C-15 Outgoing webhook | Shadow | 25 | S-044, S-045, S-046 | yes | 25 of 25 |
 | C-16 Destination test | Shadow | 14 | S-047, S-048 | yes | 14 of 14 |
-| C-17 Timers | Actions | 20 | S-049, S-050 | yes | 20 of 20 |
+| C-17 Timers | Actions | 20 | S-049, S-068, S-050 | yes | 20 of 20 |
 | C-18 Account links | Actions | 18 | S-051, S-052 | yes | 18 of 18 |
 | C-19 Self-observation | Operations | 15 | S-053, S-054, S-059 | yes | 15 of 15 |
 | C-20 Organization settings and security | Operations | 12 | S-055, S-056 | yes | 12 of 12 |
@@ -492,7 +492,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-13.FR-1 | S-039 (part), S-040 (part) | complete |  |
 | C-13.FR-2 | S-039 (part), S-040 (part), S-061 (part), S-064 (part) | complete | the warning `press_answers_in_thread` in S-061, shown on the Connection page in S-040 |
 | C-13.FR-3 | S-039 (part), S-061 (part) | complete |  |
-| C-13.FR-4 | S-061 (part), S-049 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminders of S-049 |
+| C-13.FR-4 | S-061 (part), S-068 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminder buttons of S-068 |
 | C-13.FR-5 | S-061 | complete |  |
 | C-13.FR-6 | S-039 | complete |  |
 | C-13.FR-7 | S-061 | complete |  |
@@ -528,7 +528,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-14.FR-1 | S-041 (part), S-043 (part) | complete |  |
 | C-14.FR-2 | S-042 (part), S-066 (part), S-043 (part) | complete |  |
 | C-14.FR-3 | S-066 | complete |  |
-| C-14.FR-4 | S-067, S-049 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminders of S-049 |
+| C-14.FR-4 | S-067, S-068 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminder buttons of S-068 |
 | C-14.FR-5 | S-067 | complete | the answer to a linked account is checked with link rows set up directly (S-051 creates links) |
 | C-14.FR-6 | S-042 (part), S-066 (part) | complete |  |
 | C-14.FR-7 | S-042 | complete |  |
@@ -616,20 +616,20 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-17
 
-[Timers](../prd/l1/C-17-timers.md) · Actions · stories: S-049, S-050
+[Timers](../prd/l1/C-17-timers.md) · Actions · stories: S-049, S-068, S-050
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-17.FR-1 | S-049 | complete |  |
 | C-17.FR-2 | S-049 (part), S-050 (part) | complete |  |
 | C-17.FR-3 | S-049 (part), S-050 (part) | complete |  |
-| C-17.FR-4 | S-049 | complete |  |
+| C-17.FR-4 | S-049 (part), S-068 (part) | complete | the buttons on Reminders are S-068 |
 | C-17.FR-5 | S-049 | complete |  |
-| C-17.FR-6 | S-049, S-055 (part) | complete | S-055's end-to-end test repeats the expiry after a real key rotation |
+| C-17.FR-6 | S-068, S-055 (part) | complete | S-055 repeats the expiry after a real key rotation |
 | C-17.FR-7 | S-049 | complete |  |
 | C-17.FR-8 | S-049 | complete | the release itself is S-063 (C-03.FR-13) |
 | C-17.FR-9 | S-049 (part), S-050 (part) | complete |  |
-| C-17.FR-10 | S-049 (part), S-050 (part), S-051 (part) | complete | presses from links made through the profile with S-051 |
+| C-17.FR-10 | S-049 (part), S-068 (part), S-050 (part), S-051 (part) | complete | the API with S-049, the messenger buttons with S-068, presses from links made through the profile with S-051 |
 | C-17.FR-11 | S-049 | complete |  |
 | C-17.AC-1 | S-049 | complete |  |
 | C-17.AC-2 | S-049 | complete |  |
@@ -637,7 +637,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-17.AC-4 | S-049 | complete |  |
 | C-17.AC-5 | S-049 | complete |  |
 | C-17.AC-6 | S-049 (part), S-050 (part) | complete |  |
-| C-17.AC-7 | S-049 | complete |  |
+| C-17.AC-7 | S-068 | complete |  |
 | C-17.AC-8 | S-049 (part), S-050 (part) | complete |  |
 | C-17.AC-9 | S-049 | complete |  |
 
@@ -662,7 +662,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-18.AC-2 | S-051 | complete |  |
 | C-18.AC-3 | S-051 | complete |  |
 | C-18.AC-4 | S-051 | complete |  |
-| C-18.AC-5 | S-051 | complete | the Reminder buttons are C-17 (S-049) |
+| C-18.AC-5 | S-051 | complete | the Reminder buttons are C-17 (S-068) |
 | C-18.AC-6 | S-051 | complete |  |
 | C-18.AC-7 | S-051 | complete |  |
 

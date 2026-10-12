@@ -80,9 +80,10 @@ Checked against the fake Mattermost and Telegram servers.
 - **C-18.AC-5** After linking, pressing "Still on it" on a Reminder records the answer for that User, and pressing
   "Unack" unacknowledges the Alert Group.
 - **C-18.AC-6** A Viewer's press and a disabled User's press change nothing and get their refusal texts.
-- **C-18.AC-7** After Alice links the Telegram account `@alice_t` and no Mattermost account, an Alert Group she
-  acknowledged shows "Acknowledged by @alice_t" in the Telegram Root message and her display name in the Mattermost one,
-  and a Destination that mentions her for new Alert Groups mentions `@alice_t` in Telegram (C-12.FR-12).
+- **C-18.AC-7** After Alice links the Telegram account `alice_t` and no Mattermost account, an Alert Group she
+  acknowledged shows "Acknowledged by alice_t" in the Telegram Root message and her display name in the Mattermost one,
+  and a Destination that mentions her for new Alert Groups mentions her in Telegram with a `tg://user?id=` link to that
+  account whose text is her display name (C-12.FR-12).
 
 ## Related ADRs
 

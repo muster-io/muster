@@ -71,7 +71,7 @@ issue: 178
 
 - Telegram Destinations, the Destination check, the layout, `Publish`, `Update`, the response mapping (including the
   `thread_lost` class) and the documentation (S-042).
-- Button presses and the update router lock (S-067); presses on Thread replies and Reminders (S-049).
+- Button presses and the update router lock (S-067); Reminders (S-049) and presses on their Thread replies (S-068).
 - "Thread not attached to the Root message" on the Alert Group page (S-043).
 
 ## Contracts

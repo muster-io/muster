@@ -91,8 +91,8 @@ issue: 42
   (S-066).
 - Button presses, `answerCallbackQuery`, Account link lookups for presses, `telegram.press_max_age` and the update
   router lock (S-067).
-- `/start` for Account links (S-051); Reminders and their buttons on Thread replies (S-049); test messages (S-047);
-  the pages (S-043); "Telegram in restricted networks" (S-058).
+- `/start` for Account links (S-051); Reminders (S-049) and their buttons on Thread replies (S-068); test messages
+  (S-047); the pages (S-043); "Telegram in restricted networks" (S-058).
 
 ## Contracts
 
