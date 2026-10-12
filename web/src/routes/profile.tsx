@@ -2,8 +2,8 @@
 // Copyright The Muster Authors
 
 // The profile (C-03.FR-12): name, language and time zone, the sign-in method with "Link OIDC" (C-03.FR-29), the
-// password of an account that has one, the sessions, TOTP and the Personal access tokens (C-04). Account links join it
-// later.
+// password of an account that has one, the sessions, TOTP, the Personal access tokens (C-04) and the messenger accounts
+// linked to the user, with linking and unlinking (C-18).
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
@@ -25,6 +25,7 @@ import {
 import { useGetSignInOptions } from "../api/gen/endpoints/sessions/sessions";
 import type { Me, MeUpdate, User } from "../api/gen/model";
 import { UpdateMeBody } from "../api/gen/zod/profile/profile.zod";
+import { ProfileAccountLinks } from "../components/profile-account-links";
 import { ProfileSessions } from "../components/profile-sessions";
 import { ProfileTokens } from "../components/profile-tokens";
 import { ProfileTotp } from "../components/profile-totp";
@@ -472,6 +473,7 @@ function ProfilePage() {
           {user.sign_in_method === "local" && <PasswordCard />}
           <ProfileTotp hasPassword={user.sign_in_method === "local"} />
           <ProfileSessions />
+          <ProfileAccountLinks />
           <ProfileTokens user={user} held={me.data?.permissions ?? []} />
         </div>
       )}
