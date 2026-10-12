@@ -4,7 +4,7 @@ title: "Remaining documentation sections: Quick start, Install, Alertmanager, Si
 capability: C-21
 kind: docs
 layer: L1
-depends_on: [S-055, S-059]
+depends_on: [S-055, S-059, S-054]
 covers: [C-21.FR-2, C-21.FR-5, C-21.AC-2, C-19.FR-3]
 files_touched:
   - docs/quick-start.md

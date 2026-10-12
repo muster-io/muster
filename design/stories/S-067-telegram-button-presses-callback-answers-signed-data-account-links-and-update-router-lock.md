@@ -78,8 +78,8 @@ issue: 179
 
 - Telegram Destinations, the keyboard and its action ids, `Publish`, `Update` and the response mapping (S-042).
 - Comment Threads and the copy buffer (S-066).
-- Presses on Thread replies such as Reminders, and "Still on it" (S-049); creating Account links with `/start` (S-051);
-  presses on test messages (S-047).
+- Presses on Thread replies such as Reminders, and "Still on it" (S-049, S-068); creating Account links with `/start`
+  (S-051); presses on test messages (S-047).
 
 ## Contracts
 
@@ -90,7 +90,7 @@ issue: 179
   and a `429` on an answer holds the whole Connection. The data is verified with `internal/buttons` (at most 64 bytes: the compact action
   id, the key id and the signature of S-036); `message.chat.id` and `message.message_id` must be the Root message's
   channel post of a Telegram Destination of the Connection (`delivery.TelegramPressBinding`, by the Destination's
-  `telegram_channel_chat_id` and `deliveries.message_id`), or, from S-049, a Thread reply's message in the discussion
+  `telegram_channel_chat_id` and `deliveries.message_id`), or, from S-068, a Thread reply's message in the discussion
   group (F-009). A press that cannot be verified or bound is answered "This button could not be verified; nothing was
   changed." on the Connection's limiter and changes nothing.
 - **Answer before the edit** (C-14.FR-5, AC-18, D295): the handler runs the Command and answers within `HandleOnce`,
@@ -267,8 +267,8 @@ from an unlinked account and see the short answer on the button.
   would have made a save and a poller wait for each other (raised in the review of S-041). The advisory lock above
   leaves only the final offset write behind a save (D289, D292): that write can still wait up to 10 seconds while a
   save holds the row during `setWebhook`, and the next update of the Connection waits behind it.
-- Presses do not need comment Threads: a Root message is a channel post, so this story depends on S-042 only. Presses
-  on Thread replies arrive with the Reminders of S-049, which depends on S-066 and this story.
+- Presses do not need comment Threads: a Root message is a channel post, so this story depends on S-042 only. Presses on
+  Thread replies arrive with the Reminder buttons of S-068, which follows S-049; S-049 depends on S-066 and this story.
 - Linked presses are tested with link rows set up directly; S-051 creates them.
 - Split from S-042 together with S-066 before its implementation; S-047 and S-049 depend on this story.
 
@@ -276,7 +276,7 @@ from an unlinked account and see the short answer on the button.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-14.FR-4 | full | linked presses tested with link rows set up directly; S-051 creates them; presses on Thread replies are S-049 |
+| C-14.FR-4 | full | linked presses tested with link rows set up directly; S-051 creates them; presses on Thread replies are S-068 |
 | C-14.FR-5 | full | |
 | C-14.AC-4 | full | by the press-age rule of C-14.FR-4 |
 | C-14.AC-9 | full | |

@@ -88,8 +88,9 @@ Run `make dev`, sign in as `admin@example.org` / `muster-dev-password`; create t
 3. "Link Mattermost" → "mm", "@alice" → "Send code" → "Enter the code the bot sent you in Mattermost" and "5 attempts
    left" → "22222222" → "The code is wrong or no longer valid. Request a new code." and "4 attempts left" → the code from
    `curl -s 127.0.0.1:18065/_fake/dms | jq -r '.[-1].message'` → the list shows "Mattermost · mm · @alice".
-4. "Link Mattermost" → "mm", "@bob" while "bob" is linked to the Responder "bob" (S-051) → "This account is linked to
-   another user. Its owner or an admin can unlink it."
+4. "Link Mattermost" → "mm", "@bob" while the Mattermost account `bob` is linked to the Responder "bob" → "This
+   account is linked to another user. Its owner or an admin can unlink it." The link of "bob" is made first, as "bob",
+   through his own profile and the code from the fake server; nothing is left over from the checks of S-051."
 5. "Unlink" on the Mattermost row → confirm → the row disappears.
 6. As the Admin: Users → "alice" → "Account links" lists "Telegram · Dev Telegram · @alice_t" with "Remove" and no
    "Link" control → "Remove" → confirm → "No messenger accounts linked."; as "alice", the profile list is empty without a
@@ -98,7 +99,8 @@ Run `make dev`, sign in as `admin@example.org` / `muster-dev-password`; create t
    viewport width.
 
 `make e2e` runs these steps as `web/e2e/account-links.spec.ts`, sending `/start` and reading the code through the fake
-servers' control endpoints.
+servers' control endpoints. The spec starts from the fresh database of the end-to-end run, so it links bob's Mattermost
+account itself, in bob's browser context, before step 4.
 
 ## Open questions
 
@@ -109,6 +111,8 @@ None.
 - Suggested commit: `feat(web): add messenger accounts to the profile and account links to the user page`.
 - The profile never sees a token or a code it did not receive from the API or from the user; the deep link is shown
   only in the open dialog and is not stored in the page's state after it closes.
+- The Telegram dialog closes on the `account-links` hint, which reaches only the streams of the User whose link changed
+  through the User target that S-051 adds to hints (D298).
 
 ## Coverage
 

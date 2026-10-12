@@ -27,7 +27,8 @@ FR-11.
   Publication (for an Alert Group covered by a Storm summary, at its own Publication) and starts over whenever the Alert
   Group becomes firing again: Reopen into firing, Unacknowledge, Unsnooze, Unresolve, a Snooze ending, a rise to Urgent,
   an auto-unacknowledge. Acknowledge, Snooze and Resolve stop it. An Alert Group that has not been published — a Route
-  without Destinations, or only Broken ones — has no ack timeout until its first Publication.
+  without Destinations, or only Broken ones — has no ack timeout until its first Publication. For an outgoing webhook
+  in events mode, which has no Root message, the delivered `created` event counts as the Publication.
 - **C-17.FR-2** Notices come at doubling intervals from the Route's first interval F (`route.ack_timeout`) — F, 2F and
   4F, that is F, 3F and 7F after the start — and there are at most three. They are Loud Thread replies whose text is the
   Route's ack timeout template (C-12); Mentions follow each Destination's setting. The ack timeout can be turned off per
@@ -48,7 +49,7 @@ FR-11.
   `timers.auto_unacknowledge_after` Reminders, the next Reminder is not sent; instead the system unacknowledges the Alert
   Group with the reason "No answer to the last two Reminders": it becomes firing without an Owner, a Loud Thread reply
   gives the reason and mentions the Owner, and the ack timeout starts over. A Reminder that reached no Destination does
-  not count as unanswered.
+  not count as unanswered; for an outgoing webhook in events mode, a delivered `reminder` event counts as reaching it.
 - **C-17.FR-6** Buttons on Reminders are signed like Root message buttons but are not re-rendered after a key rotation;
   once the old key is removed they are answered privately with "This button has expired; use the buttons on the Alert
   Group's message".
@@ -102,8 +103,9 @@ Checked with a virtual clock, the recording test adapter of C-11 and the fake me
   28 is sent as usual.
 - **C-17.AC-6** The Unclaimed filter of the Alert Group list returns the Alert Group after its third notice.
 - **C-17.AC-7** Reminder Thread replies carry the buttons "Still on it" and "Unack" in the fake Mattermost and Telegram
-  servers; in the fake Mattermost server, the private answer to a press on them is an ephemeral post whose `root_id` is
-  the Root message (C-13.FR-4).
+  servers; in the fake Mattermost server, the private answer to a press on them reaches the person in the Thread of the
+  Root message: as an ephemeral post whose `root_id` is the Root message when the bot may make one, and otherwise, when
+  that post is refused, as the answer's `ephemeral_text`, which the server shows there (C-13.FR-4).
 - **C-17.AC-8** An Unclaimed Alert Group stops being Unclaimed — in the UI and in the Root message — when it is
   acknowledged, snoozed or resolved; after Unacknowledge it is not Unclaimed again until the third notice of the new ack
   timeout.

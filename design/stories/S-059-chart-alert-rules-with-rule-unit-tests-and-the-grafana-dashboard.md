@@ -7,6 +7,7 @@ layer: L1
 depends_on: [S-053, S-058]
 covers: [C-19.FR-3, C-19.FR-4, C-19.FR-9, C-19.AC-1, C-19.AC-4, C-19.AC-8, C-21.FR-3, C-21.AC-1]
 files_touched:
+  - deploy/helm/muster/.helmignore
   - deploy/helm/muster/values.yaml
   - deploy/helm/muster/values.schema.json
   - deploy/helm/muster/ci/all-options-values.yaml
@@ -85,7 +86,12 @@ issue: 59
 - **Checks** (`internal/tools/chartcheck`, in `make helm-check`): the rendered rule names equal the chart rules table of
   reference.md; each rule has a severity label, a `description` and a `runbook_url` of the form above; the dashboard has
   the uid, the variables and the four rows, and every metric name in its queries is in the metric registry (S-053).
-  `make helm-check` validates the rendered CRD resources with kubeconform and their published schemas.
+  `make helm-check` validates the rendered CRD resources with kubeconform and their published schemas: the default
+  schema location knows only the built-in kinds, so the Makefile adds a `-schema-location` for the CRD schemas of
+  `PrometheusRule`, `VMRule` and `GrafanaDashboard` in the layout of the CRDs catalog
+  (`{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json`) at a pinned commit, instead of skipping missing
+  schemas.
+- **Packaging**: `.helmignore` gains `tests/`, so that the rule unit tests are not part of the packaged chart.
 - **Runbook check** (C-21.FR-3, C-19.AC-4; `internal/tools/runbookcheck`): the rule names and the paths of the
   `runbook_url`s rendered with the all-options values join the one-to-one check of S-058.
 - **Defaults**: `alerting.runbookBaseURL`, "Chart rule thresholds, windows and job selector".

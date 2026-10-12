@@ -127,8 +127,8 @@ issue: 61
   (S-039).
 - The pages (S-040 for Connections, S-064 for Destinations and delivery state); the Telegram type (S-041, S-042);
   outgoing webhooks (S-044, S-045).
-- The test message and the bot's own press (S-047); Reminders and their buttons on Thread replies (S-049); creating
-  Account links, with which S-051 verifies the answers to Viewers and disabled Users.
+- The test message and the bot's own press (S-047); Reminders (S-049) and their buttons on Thread replies (S-068);
+  creating Account links, with which S-051 verifies the answers to Viewers and disabled Users.
 
 ## Contracts
 
@@ -206,7 +206,7 @@ issue: 61
   (`user_id`, `post: {channel_id, message}`) through `delivery.Interactive` on the limiters of the Destination and its
   Connection, bounded with its limiter wait by `delivery.interactive_budget`, without `root_id` for a press on a Root
   message so that it shows in the channel view (F-026), and with the Root message as `root_id` for a press on a Thread
-  reply (F-055, used from S-049); the answer is then `{}`. That call needs `create_post_ephemeral`, which a bot with the
+  reply (F-055, used from S-068); the answer is then `{}`. That call needs `create_post_ephemeral`, which a bot with the
   role Member lacks (F-063). When it is refused with `403` `api.context.permissions.app_error` — expected, so not an
   error — or fails any other way (a timeout, a `5xx`, no limiter token in the budget, logged as `error`), the text
   becomes the answer's `ephemeral_text` with `skip_slack_parsing: true`, which needs no permission and which Mattermost
@@ -499,7 +499,7 @@ shown (F-056); and that after the Root message is deleted in the client, the nex
 |---|---|---|
 | C-13.FR-2 | partial | the warning `press_answers_in_thread` of the Connection check and `muster doctor`; the page shows it in S-040 |
 | C-13.FR-3 | partial | the Root message layout; the Destination's fields are S-039 |
-| C-13.FR-4 | partial | presses on Root messages; presses from linked accounts are tested with link rows set up directly (S-051 creates them); presses on Thread replies are S-049 |
+| C-13.FR-4 | partial | presses on Root messages; presses from linked accounts are tested with link rows set up directly (S-051 creates them); presses on Thread replies are S-068 |
 | C-13.FR-5 | full | |
 | C-13.FR-7 | full | |
 | C-13.FR-8 | full | |

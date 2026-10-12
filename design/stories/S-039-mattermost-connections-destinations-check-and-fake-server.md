@@ -266,8 +266,8 @@ None.
 ## Notes
 
 - Suggested commit: `feat(mattermost): add mattermost connections, destinations and the destination check`.
-- The fake server is the largest part of this story; the facts it reproduces are its contract with S-061, S-047 and
-  S-049.
+- The fake server is the largest part of this story; the facts it reproduces are its contract with S-061, S-047, S-049
+  and S-068.
 - Corrections made while implementing:
   - `delivery.Interactive.Do` takes an `Op` instead of a function (journal D277): `PublishOp`, `UpdateOp` and
     `ReplyOp` make the adapter's send or edit inside `interactive.go`, so lint 3 stays strict; `CheckOp` runs an

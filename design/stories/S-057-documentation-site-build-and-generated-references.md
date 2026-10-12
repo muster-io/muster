@@ -4,14 +4,12 @@ title: Documentation site, its build and the generated references
 capability: C-21
 kind: docs
 layer: L1
-depends_on: [S-053]
+depends_on: [S-053, S-051]
 covers: [C-21.FR-1, C-21.FR-2, C-21.FR-4, C-21.FR-5, C-21.AC-1]
 files_touched:
   - mkdocs.yml
   - docs/requirements.txt
   - docs/index.md
-  - docs/reference/index.md
-  - docs/reference/api.md
   - internal/tools/refgen/main.go
   - internal/tools/refgen/refgen_test.go
   - internal/config/config.go
@@ -63,19 +61,25 @@ issue: 57
   `docs`, `strict: true` with link and anchor validation turned into errors, the `pymdownx.superfences` fence for
   `mermaid`, admonitions, tables, the search, the version selector reading `versions.json`, and the navigation:
   Home; Alertmanager (`integrations/alertmanager.md`, `integrations/heartbeat.md`); Messengers
-  (`messengers/mattermost.md`, `messengers/telegram.md`, `messengers/account-links.md`); Outgoing webhooks
+  (`messengers/mattermost.md`, `messengers/telegram.md`, `messengers/account-links.md` of S-051); Outgoing webhooks
   (`outgoing-webhooks/events.md`, `outgoing-webhooks/templates.md`); Sign-in (`sign-in/oidc-keycloak.md`); Reference.
-  Later stories add their pages to it.
+  Later stories add their pages to it. `exclude_docs` leaves out `brand/README.md`, the notes on the Muster mark, which
+  is not a page of the site; the SVG files of `docs/brand/` stay available to the theme as logo and favicon.
 - **Home** (`docs/index.md`): what Muster is, a Mermaid diagram of the path Alertmanager → Muster → Destinations, and
   links to the sections.
 - **Generated references** (C-21.FR-2, FR-4; `internal/tools/refgen`, `make generate`): besides `metrics.md`,
   `log-events.md` and `internal-alerts.md`, it writes `docs/reference/environment.md` from the bootstrap settings
   registry of `internal/config` (name, default, description, the `_FILE` form) and `docs/reference/chart-values.md`
   from `deploy/helm/muster/values.schema.json` (path, type, default, description), which gains a description for every
-  value. `make generate-check` fails when any of them is not current.
-- **API reference** (`docs/reference/api.md`): a page that explains the conventions of `api/README.md` in short and
-  links to `reference/api/`, which `make docs` renders from `api/openapi.yaml` with Redocly CLI into the built site
-  (never checked in), so each version of the site has the reference of that version.
+  value. `make generate-check` fails when any of them is not current. Everything in `docs/reference/` is generated:
+  `make generate` removes `docs/reference/*.md` before refgen runs (`Makefile`), so a hand-written page there would be
+  deleted. refgen therefore also writes `docs/reference/index.md`, the list of the reference pages, and
+  `docs/reference/api.md`, the API page below, from text kept in refgen.
+- **API reference** (`docs/reference/api.md`, written by refgen): a page that explains the conventions of
+  `api/README.md` in short and links to `reference/api/spec/`, which `make docs` renders from `api/openapi.yaml` with
+  Redocly CLI into the built site (never checked in), so each version of the site has the reference of that version.
+  The page builds to `reference/api/` and the rendered specification to `reference/api/spec/`, so the two never
+  collide.
 - **Publishing** (C-21.FR-1; `internal/tools/docspublish`, `.github/workflows/docs.yml`): `docspublish --site site
   --target <gh-pages checkout> --version <major.minor|latest>` replaces that directory, updates `versions.json` (version,
   title, aliases) and the root `index.html` redirect to the newest release, and refuses a version older than the newest
@@ -91,8 +95,9 @@ issue: 57
 
 1. Set up the generator and write `mkdocs.yml`, `docs/requirements.txt` and the home page. Check: `make docs` builds; a
    broken link fails it.
-2. Add the two new generated pages and the API reference. Check: `make generate-check` fails on an edited page; the
-   built site has every Reference page.
+2. Add the two new generated pages, the generated index and API pages, and the rendered API reference. Check:
+   `make generate-check` fails on an edited page and keeps `index.md` and `api.md`; the built site has every Reference
+   page.
 3. Write `docspublish` and the workflow. Check: `docspublish_test.go` covers a new minor, `latest`, the redirect and the
    refusal of an older minor; Verification below.
 
@@ -104,7 +109,8 @@ for p in metrics log-events internal-alerts environment chart-values api; do tes
 grep -c 'muster_build_info' site/reference/metrics/index.html          # 1
 grep -c 'MUSTER_SECRET_KEYS' site/reference/environment/index.html     # 1
 grep -c 'existingSecret' site/reference/chart-values/index.html        # 1
-grep -c 'getSystemStatus' site/reference/api/index.html                # 1
+grep -c 'getSystemStatus' site/reference/api/spec/index.html           # 1
+make generate && git status --porcelain docs/reference                 # (no output: index.md and api.md survive)
 grep -c 'class="mermaid"' site/index.html                              # 1
 
 # C-21.FR-4: a broken link and a stale generated page fail

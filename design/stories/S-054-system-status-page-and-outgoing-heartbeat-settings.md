@@ -83,8 +83,8 @@ on whose signal never arrives after the first one (`ADV 360`). Then in Playwrigh
    since {time}", and "Outgoing heartbeat" with "Set up an outgoing heartbeat so that a stopped Muster is noticed.".
 2. The page has no button besides the navigation; "alerts" links to `/destinations/…`.
 3. Terminal: add the bot back and `ADV 300` → without a reload "Broken Destinations" says "None".
-4. "Set up an outgoing heartbeat" → Organization → Outgoing heartbeat → "Replace" → `http://127.0.0.1:18093/ping/dev`
-   → "Save" → "Set, changed {time}".
+4. "Set up an outgoing heartbeat" → Organization → Outgoing heartbeat → "Replace" →
+   `http://127.0.0.1:18093/hook/dev/ping` → "Save" → "Set, changed {time}".
 5. Terminal: `ADV 60` → the page shows "Last result: OK"; System status shows "Last sent {time}: OK".
 6. As a Responder → no "System status" entry; `/admin/system-status` shows "You do not have permission to see this
    page."
@@ -100,6 +100,8 @@ None.
 
 - Suggested commit: `feat(web): add the system status page and the outgoing heartbeat settings`.
 - The page only reads; every fix happens on the page of the entity it links to.
+- S-056 also adds entries to `app-shell.tsx` and keys to the locales; whichever of the two lands second rebases onto the
+  other and keeps the Organization entries together in the navigation.
 
 ## Coverage
 

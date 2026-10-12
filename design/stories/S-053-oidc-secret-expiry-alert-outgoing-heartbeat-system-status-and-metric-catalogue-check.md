@@ -11,26 +11,28 @@ files_touched:
   - internal/tools/refgen/refgen_test.go
   - internal/metrics/catalogue.go
   - internal/metrics/metrics_test.go
-  - internal/config/config.go
   - internal/internalalerts/registry.go
+  - internal/internalalerts/raise.go
   - internal/internalalerts/internalalerts_test.go
   - internal/oidc/expiry.go
   - internal/oidc/expiry_test.go
   - internal/outgoingheartbeat/sender.go
   - internal/outgoingheartbeat/sender_test.go
-  - internal/organization/settings.go
+  - internal/organization/organization.go
   - internal/organization/query.sql
   - internal/organization/organization_test.go
   - internal/api/organization.go
   - internal/api/system.go
   - internal/api/system_test.go
   - internal/api/organization_test.go
+  - internal/api/server.go
+  - internal/api/server_test.go
+  - internal/live/hub.go
   - internal/systemstatus/status.go
   - internal/systemstatus/query.sql
   - internal/systemstatus/status_test.go
   - internal/leader/tasks.go
   - internal/logging/events.go
-  - internal/fakes/fakewebhook/fakewebhook.go
   - internal/archlint/secretleak.go
   - test/e2e/self_observation_test.go
 acceptance:
@@ -71,7 +73,12 @@ issue: 53
   `outgoing_heartbeat.url` (write-only, `null` clears it) and `outgoing_heartbeat.proxy` — the `unsupported` answer of
   S-012 is removed for these two fields only; `getOrganization` shows them as `url_status` and `proxy`. Schemas:
   `SystemStatus`, `ReplicaStatus`, `QueueDepth`, `BrokenDestination`, `IntegrationAttention`, `TemplateErrorEntry`,
-  `ActiveStorm`, `OutgoingHeartbeatResult`; hint `system-status`.
+  `ActiveStorm`, `OutgoingHeartbeatResult`; hint `system-status`, which the hub delivers only to streams whose
+  identity holds `system-status:read` (`internal/live/hub.go`, like the notices for Admins). `GetSystemStatus` joins
+  the `implemented` map of `internal/api/server.go`; `TestNotFoundAndNotImplemented` (`server_test.go`), which used
+  `getSystemStatus` as its example of a `501`, takes `getKeyring` instead, the last operation of the app listener
+  without a story before S-055. The editing of `outgoing_heartbeat` lifts it out of `unsupported()` in
+  `Service.Update` of `internal/organization/organization.go`.
 - **Metric catalogue check** (C-19.FR-2; `internal/tools/refgen`): `make generate` and `make generate-check` read the
   table of the [metrics catalogue](../prd/l1/reference.md#metrics-catalogue) and compare it with the metric registry
   and `docs/reference/metrics.md`: the same names, types, label names and, where the table lists them, label values.
@@ -79,17 +86,19 @@ issue: 53
   is constructed when the server starts.
 - **Label policy** (C-19.AC-3, ADR-0014): label names come only from the catalogue — entity ids (`integration`,
   `route`, `destination`), the closed sets (`client`, `outcome`, `state`, `route_pattern`, `method`, `code`, `kind`,
-  `reason`, `status`, `by`, `command`, `transport`, `template`), `name` of the `*_info` metrics, `version` and `commit`,
-  and `le`. A test over the registry fails on any other name.
+  `reason`, `status`, `by`, `command`, `transport`, `template`, `table`), `name` of the `*_info` metrics, `version` and
+  `commit`, and `le`. A test over the registry fails on any other name.
 - **Internal alerts** (C-19.FR-5, FR-9; `internal/internalalerts`, `internal/oidc/expiry.go`): `MusterOIDCSecretExpiring`
   (severity `warning`, no labels besides `alertname` and `severity`) is registered and the reference page regenerated.
-  A Leader task (`internal/leader/tasks.go`) runs every 5 minutes and when the OIDC settings change: it raises the
-  alert while `client_secret_expires_on` is less than `oidc.secret_expiry_lead` away, and resolves it when the date
-  moves further out or is removed, raising and resolving only on transitions (C-06.FR-14). Every Internal alert's
-  `runbook_url` annotation is `MUSTER_RUNBOOK_BASE_URL` + `/` + the binary's `major.minor` (`latest` for the
-  development version `0.0.0-dev`) + `/operations/runbooks/<alertname>/`. `MUSTER_RUNBOOK_BASE_URL` is a bootstrap
-  setting of `internal/config` with the default of defaults.md, `https://muster-io.github.io/muster`; the chart sets it
-  from `alerting.runbookBaseURL` (S-059).
+  A Leader task (`internal/leader/tasks.go`) runs every 5 minutes: it raises the alert while `client_secret_expires_on`
+  is less than `oidc.secret_expiry_lead` away, and resolves it when the date moves further out or is removed, raising
+  and resolving only on transitions (C-06.FR-14). A change of the OIDC settings is seen at the next run, at most 5
+  minutes later; the task has no hook on the settings. Every Internal alert's `runbook_url` annotation is
+  `MUSTER_RUNBOOK_BASE_URL` + `/` + the binary's `major.minor` (`latest` for the development version `0.0.0-dev`) +
+  `/operations/runbooks/<alertname>/`: the raiser (`internalalerts/raise.go`, which today joins the base and
+  `Definition.Runbook()` without a version) adds the version segment. `MUSTER_RUNBOOK_BASE_URL` exists since S-021 as a
+  bootstrap setting of `internal/config` with the default of defaults.md, `https://muster-io.github.io/muster`; the
+  chart sets it from `alerting.runbookBaseURL` (S-059).
 - **Outgoing heartbeat** (C-19.FR-7, ADR-0014; `internal/outgoingheartbeat`, `organizations.outgoing_heartbeat_*`): a
   Leader task; once per `outgoing_heartbeat.interval` of Muster's clock, when a URL is set, it sends
   `outgoing_heartbeat.method` with an empty body through the outbound package in the `heartbeat` client class, with the
@@ -108,8 +117,9 @@ issue: 53
   `heartbeat_lost` and `snapshot_truncated` with `since`; `template_errors` of Routes and Destinations;
   `active_storms`; `outgoing_heartbeat` (`configured` false without a URL). Each entity is an `EntityRef` that the page
   links; the resource has no operation besides the read.
-- **Fake dead man's switch** (C-01.FR-13): the fake receiving endpoint of S-044 (`127.0.0.1:18093`) answers `200` to
-  `GET` and `POST` under `/ping/` and records them in its `requests`.
+- **Fake dead man's switch** (C-01.FR-13): the fake receiving endpoint of S-044 (`127.0.0.1:18093`) already answers
+  `200` to any method under `/hook/{name}/` and lists the requests at `GET /_fake/received/{name}`; the checks use
+  `http://127.0.0.1:18093/hook/dev/ping` and need no change of the fake.
 - **Log events**: `outgoing_heartbeat_failed` (WARN), `outgoing_heartbeat_recovered` (INFO), `oidc_secret_expiring`
   (WARN: `expires_on`) on the raise.
 - **Defaults**: `outgoing_heartbeat.url`, `outgoing_heartbeat.interval`, `outgoing_heartbeat.method`,
@@ -134,7 +144,7 @@ make dev > dev.log 2>&1 &
 # As in S-039: the Admin's session (`jar`, `H`), the Responder "bob" (jar `bob`), the Mattermost Connection "mm" (C)
 # with MKD, the Destination "alerts" (D, ch-alerts), the Integration "lab" with FIRE, ADV and AG of S-049, the Route "t"
 API=localhost:8080/api/v1; FMM=127.0.0.1:18065/_fake; FWH=127.0.0.1:18093/_fake; CLK=localhost:8082/_dev/clock
-PINGS() { curl -s $FWH/requests | jq '[.[] | select(.path == "/ping/dev")] | length'; }
+PINGS() { curl -s $FWH/received/dev | jq '[.[] | select(.path == "/hook/dev/ping")] | length'; }
 DAYS() { curl -s $CLK | jq -r --argjson d "$1" '.now | .[0:10] + "T00:00:00Z" | fromdate + $d * 86400 | strftime("%Y-%m-%d")'; }
 FIRING() { curl -s -b jar "$API/integrations/$(curl -s -b jar $API/integrations | jq -r '.items[] | select(.builtin) | .id')/alerts?state=firing" | jq -c '[.items[].labels.alertname]'; }
 
@@ -143,13 +153,13 @@ FIRING() { curl -s -b jar "$API/integrations/$(curl -s -b jar $API/integrations 
 curl -s -b jar $API/system-status | jq -c .outgoing_heartbeat   # {"configured":false,"last_attempt_at":null,"last_ok":null,"last_error":null}
 O=$(curl -s -b jar $API/organization)
 curl -s "${H[@]}" -X PUT -H "If-Match: $(jq -r .etag <<<"$O")" $API/organization \
-  -d "$(jq -c 'del(.id, .etag) | .outgoing_heartbeat = {url: "http://127.0.0.1:18093/ping/dev", proxy: {enabled: false}}' <<<"$O")" \
+  -d "$(jq -c 'del(.id, .etag) | .outgoing_heartbeat = {url: "http://127.0.0.1:18093/hook/dev/ping", proxy: {enabled: false}}' <<<"$O")" \
   | jq -c .outgoing_heartbeat.url_status.set                # true
 sleep 65; PINGS                                             # 1   (or 2)
-curl -s $FWH/requests | jq -r '[.[] | select(.path == "/ping/dev")][-1].method'   # GET
+curl -s $FWH/received/dev | jq -r '[.[] | select(.path == "/hook/dev/ping")][-1].method'   # GET
 curl -s -b jar "$API/audit-log?action=organization.updated&limit=1" | jq -c '.items[0].diff[] | select(.field == "outgoing_heartbeat.url")'
 # {"field":"outgoing_heartbeat.url","secret_changed":true}
-KEY=$(psql "$MUSTER_DATABASE_URL" -Atc "SELECT (classid::bigint << 32) | objid::bigint FROM pg_locks WHERE locktype = 'advisory' AND objsubid = 1 AND granted")
+KEY=$((0x6d75737465720003))                                 # leader.LockKey, the Leader's session advisory lock
 kill %1; wait; psql "$MUSTER_DATABASE_URL" -c "SELECT pg_advisory_lock($KEY); SELECT pg_sleep(900)" > /dev/null & LOCK=$!
 make dev > dev.log 2>&1 & sleep 10
 curl -s localhost:8082/metrics | grep '^muster_leader '      # muster_leader 0
@@ -161,7 +171,7 @@ P0=$(PINGS); sleep 65; echo $(( $(PINGS) - P0 )) | grep -cE '^[12]$'           #
 # C-19.AC-7: once per interval of Muster's clock; a failure is counted, logged and retried by the next tick
 P0=$(PINGS); ADV 60; ADV 60; ADV 60; sleep 1; echo $(( $(PINGS) - P0 ))   # 3   (4 if a real minute also passed)
 curl -s -b jar $API/system-status | jq -c '.outgoing_heartbeat | {configured, last_ok}'   # {"configured":true,"last_ok":true}
-curl -s -X POST $FWH/faults -d '{"path":"/ping/dev","status":503}' > /dev/null; ADV 60; sleep 1
+curl -s -X POST $FWH/faults -d '{"path":"/hook/dev/ping","status":503}' > /dev/null; ADV 60; sleep 1
 curl -s -b jar $API/system-status | jq -c '.outgoing_heartbeat | {last_ok, e: (.last_error | test("503"))}'   # {"last_ok":false,"e":true}
 grep -c '"event":"outgoing_heartbeat_failed"' dev.log       # 1
 curl -s localhost:8082/metrics | grep -c 'muster_client_requests_total{client="heartbeat",outcome="transient"}'   # 1
@@ -173,7 +183,7 @@ make generate-check && echo ok                              # ok
 grep -o '`muster_[a-z_]*`' design/prd/l1/reference.md | tr -d '`' | sort -u | while read m; do grep -q "| \`$m\` |" docs/reference/metrics.md || echo "missing $m"; done
 #                                                            (no output)
 curl -s localhost:8082/metrics | grep '^muster_' | grep -o '{[^}]*}' | tr ',' '\n' | sed 's/=.*//; s/[{}]//g' | sort -u | tr '\n' ' '
-# by client code command commit destination integration kind le method name outcome reason route route_pattern state status template transport version
+# by client code command commit destination integration kind le method name outcome reason route route_pattern state status table template transport version
 curl -s localhost:8082/metrics | grep '^muster_' | grep -cE '(alertname|severity|user|number|org_id)='   # 0
 
 # C-19.FR-5, AC-5, FR-9: the OIDC client secret expires in 10 days, then in 30

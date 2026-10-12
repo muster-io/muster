@@ -165,6 +165,7 @@ Other lifecycle values:
 | `account_link.telegram_token_ttl` | single use, 10 min | built in | C-18 | decided |
 | `account_link.mattermost_code` | 8 characters without look-alikes, valid 10 min, at most 5 attempts | built in | C-18 | decided |
 | `account_link.mattermost_code_requests` | 5 per hour per requesting User; 3 per hour per target account | built in | C-18 | decided |
+| `account_link.request_prune_after` | 24 h after a link request's `expires_at`, consumed and voided requests included, so that the hour `account_link.mattermost_code_requests` counts is kept and a late `/start` still answers that the link expired; then the Leader deletes the row (`short_lived_pruning`, hourly) | built in | C-18 | decided |
 
 ## Organization
 

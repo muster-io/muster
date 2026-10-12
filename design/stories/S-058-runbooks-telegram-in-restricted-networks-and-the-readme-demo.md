@@ -28,6 +28,9 @@ files_touched:
   - docs/messengers/telegram-restricted-networks.md
   - docs/messengers/telegram.md
   - web/e2e/demo.spec.ts
+  - web/playwright.config.ts
+  - web/playwright.demo.config.ts
+  - web/tsconfig.json
   - README.md
   - docs/index.md
   - mkdocs.yml
@@ -72,8 +75,9 @@ issue: 58
   alert registry and from the Chart rules table of reference.md must equal the set of runbook pages; every page must
   have the four headings; a difference fails with the names. S-059 adds the rules rendered by `helm template` and their
   `runbook_url`s to the same check.
-- **Internal alerts reference** (`internal/tools/refgen`): `docs/reference/internal-alerts.md` gains a "Runbook" column
-  linking each alert to its page, so the strict build of S-057 checks every link.
+- **Internal alerts reference** (`internal/tools/refgen`): the "Runbook" column of `docs/reference/internal-alerts.md`,
+  which today shows the page's path as code, becomes a link to the page, so the strict build of S-057 checks every
+  link.
 - **Version paths** (C-21.AC-1): pages build to `operations/runbooks/<alertname>/` in each published version, which is
   the path of the `runbook_url` of S-053 and S-059.
 - **Telegram in restricted networks** (C-21.FR-7, C-14.FR-9; `docs/messengers/telegram-restricted-networks.md`): in this
@@ -81,9 +85,15 @@ issue: 58
   installation's own domain in front of `api.telegram.org`, with an nginx and a Caddy recipe that set the upstream SNI
   and `Host`, timeouts above the long-polling timeout, the request body size, access logs off or without the request
   URI, and a secret path prefix or an address allowlist, used as the Connection's Bot API base URL; (3) only then a
-  self-hosted Bot API server, with every warning of C-21.FR-7, and the manual procedure for moving a bot between
-  servers (Muster has no wizard). `docs/messengers/telegram.md` links to it where it mentions restricted networks and
-  where it describes the base URL.
+  self-hosted Bot API server, with every warning of C-21.FR-7, and the manual procedure for moving a bot between servers
+  (Muster has no wizard). The procedure says what Muster itself does with `deleteWebhook` (S-041): it calls it only when
+  a Connection leaves the webhook mode, at the base URL saved before, and a failed call blocks that save; so the
+  Connection is switched to long polling while the old server still answers, and the operator's own `deleteWebhook` on
+  the old server before `logOut` is a best-effort step whose failure does not stop the move.
+  `docs/messengers/telegram.md` links to it where it mentions restricted networks and where it describes the base URL.
+- **Demo outside CI**: `web/playwright.config.ts` runs every spec under `web/e2e` in `make e2e` and CI
+  (`testDir: "e2e"`), so it gains `testIgnore` for `demo.spec.ts`; `make demo` runs that spec alone with
+  `web/playwright.demo.config.ts` (same directory and global setup, video on), which `web/tsconfig.json` includes.
 - **README demo** (C-01.FR-14; `web/e2e/demo.spec.ts`, `make demo`): a Playwright script, run against `muster dev` at
   1280 × 720, that sends an Alert Group through the fake Alertmanager, opens it from the list, acknowledges it, shows the
   Timeline and lets it resolve, with pauses for the viewer; Playwright records the video and `make demo` converts it with

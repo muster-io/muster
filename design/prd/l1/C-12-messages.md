@@ -100,8 +100,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   final state, "Storm over: M Alert Groups still open".
 - **C-12.FR-11** A rendered message that exceeds the length limit the adapter declares is shortened by trimming the
   Alert list first, then the label sections, always keeping the title, status, footer, buttons and the link to Muster.
-- **C-12.FR-12** The footer and Mentions show a user by their messenger username when they have an Account link in that
-  messenger, otherwise by their Muster display name (checked in C-18.AC-7).
+- **C-12.FR-12** The footer shows a user by their messenger username, without `@`, when they have an Account link in
+  that messenger, otherwise by their Muster display name. A Mention of a user with an Account link uses the
+  messenger's own form — `@username` in Mattermost, a `tg://user?id=` link whose text is the display name in Telegram —
+  and of a user without one the display name as text, which notifies nobody (checked in C-18.AC-7).
 - **C-12.FR-13** Rendering exports the metrics listed for C-12 in the [metrics
   catalogue](reference.md#metrics-catalogue): template errors and the rendering time of each kind of template.
 

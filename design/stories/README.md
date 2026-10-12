@@ -234,9 +234,9 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Foundation | C-01 – C-04 | S-001 – S-017, S-062 | 18 |
 | Observation | C-05 – C-10 | S-018 – S-033, S-063 | 17 |
 | Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 – S-067 | 20 |
-| Actions | C-17, C-18 | S-049 – S-052 | 4 |
+| Actions | C-17, C-18 | S-049 – S-052, S-068 | 5 |
 | Operations | C-19 – C-21 | S-053 – S-060 | 8 |
-| **L1** | 21 | | **67** |
+| **L1** | 21 | | **68** |
 
 ### Foundation
 
@@ -313,8 +313,9 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | ID | Capability | Title | Kind | Depends on |
 |---|---|---|---|---|
 | [S-049](S-049-ack-timeouts-unclaimed-reminders-auto-unacknowledge-and-still-on-it.md) | C-17 | Ack timeouts, Unclaimed, Reminders, auto-unacknowledge and "Still on it" (BE) | be | S-066, S-067, S-047 |
+| [S-068](S-068-reminder-buttons-in-mattermost-and-telegram.md) | C-17 | Reminder buttons in Mattermost and Telegram (BE) | be | S-049 |
 | [S-050](S-050-route-timer-fields-unclaimed-filter-and-badge-next-notice-and-still-on-it.md) | C-17 | Route policy fields, Unclaimed filter and badge, next notice and "Still on it" (FE) | fe | S-033, S-038, S-064, S-049 |
-| [S-051](S-051-account-links-telegram-deep-links-mattermost-codes-press-attribution-and-audit-log.md) | C-18 | Account links: Telegram deep links, Mattermost codes, press attribution and Audit log (BE) | be | S-049 |
+| [S-051](S-051-account-links-telegram-deep-links-mattermost-codes-press-attribution-and-audit-log.md) | C-18 | Account links: Telegram deep links, Mattermost codes, press attribution and Audit log (BE) | be | S-068 |
 | [S-052](S-052-messenger-accounts-in-the-profile-and-account-links-on-the-user-page.md) | C-18 | Messenger accounts in the profile and Account links on the user page (FE) | fe | S-015, S-051 |
 
 ### Operations
@@ -325,10 +326,10 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-054](S-054-system-status-page-and-outgoing-heartbeat-settings.md) | C-19 | System status page and outgoing heartbeat settings (FE) | fe | S-015, S-053 |
 | [S-055](S-055-organization-settings-outbound-policy-editing-keyring-status-and-key-rotation.md) | C-20 | Organization settings, outbound policy editing, Keyring status and key rotation (BE) | be | S-047, S-051, S-053 |
 | [S-056](S-056-organization-settings-pages.md) | C-20 | Organization settings pages (FE) | fe | S-015, S-055 |
-| [S-057](S-057-documentation-site-build-and-generated-references.md) | C-21 | Documentation site, its build and the generated references | docs | S-053 |
+| [S-057](S-057-documentation-site-build-and-generated-references.md) | C-21 | Documentation site, its build and the generated references | docs | S-053, S-051 |
 | [S-058](S-058-runbooks-telegram-in-restricted-networks-and-the-readme-demo.md) | C-21 | Runbooks, Telegram in restricted networks and the README demo | docs | S-056, S-057 |
 | [S-059](S-059-chart-alert-rules-with-rule-unit-tests-and-the-grafana-dashboard.md) | C-19 | Chart alert rules with rule unit tests and the Grafana dashboard | infra | S-053, S-058 |
-| [S-060](S-060-quick-start-install-concepts-operations-and-remaining-documentation.md) | C-21 | Remaining documentation sections: Quick start, Install, Alertmanager, Sign-in, Concepts and Operations | docs | S-055, S-059 |
+| [S-060](S-060-quick-start-install-concepts-operations-and-remaining-documentation.md) | C-21 | Remaining documentation sections: Quick start, Install, Alertmanager, Sign-in, Concepts and Operations | docs | S-055, S-059, S-054 |
 
 S-059 and S-060 were split from S-053 and S-058 when their contracts were written; S-053 and S-058 keep their IDs. The
 chart rules follow the runbook pages, so that the check of rendered rules against the pages can run as soon as the
@@ -351,7 +352,12 @@ files its contract had missed it touched about 63 files. S-042 keeps the Telegra
 `muster doctor`, the Root message posts and edits with the response mapping, and the documentation page; S-066 takes
 the comment Threads with the copy buffer, the copy wait and the lost Thread, and S-067 the button presses with the
 update router lock. Both follow S-042 in the Shadow phase, before S-043, which needs "Thread not attached" from S-066;
-S-047 and S-049 follow S-067. S-042 keeps its file name.
+S-047 and S-049 follow S-067. S-042 keeps its file name. S-068 was split from S-049 by the plan review of the
+Actions phase, before its implementation, because with the files its contract had missed S-049 touched about 58 files
+(D298). S-049 keeps the ack timeout, Unclaimed, Reminders as plain Thread replies, auto-unacknowledge, the collapse,
+`next_notice`, the `unclaimed` filter, `answerReminder` and the lifecycle rows; S-068 takes the buttons on Reminder
+Thread replies, the presses on them and the expired-button answer. S-068 follows S-049, S-050 depends on S-049 only,
+and S-051 follows S-068, whose buttons its Reminder presses need.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group
