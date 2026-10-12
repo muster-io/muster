@@ -30,7 +30,7 @@ jobs:
       IMAGE: ghcr.io/muster-io/muster
       KEEP: "30"
       # renovate: datasource=github-releases depName=goreleaser/goreleaser
-      GORELEASER_VERSION: v2.18.2
+      GORELEASER_VERSION: v2.18.3
       # renovate: datasource=github-releases depName=anchore/syft
       SYFT_VERSION: v1.54.1
     steps:
