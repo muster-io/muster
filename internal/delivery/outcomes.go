@@ -52,6 +52,7 @@ type outcomeQueries interface {
 	MarkDeletedInMessenger(ctx context.Context, arg dbgen.MarkDeletedInMessengerParams) (int64, error)
 	DropPendingReplies(ctx context.Context, arg dbgen.DropPendingRepliesParams) error
 	SettleResolvedPublication(ctx context.Context, arg dbgen.SettleResolvedPublicationParams) error
+	ReminderReached(ctx context.Context, arg dbgen.ReminderReachedParams) (bool, error)
 }
 
 // The texts an outcome without an error of its own records.
@@ -228,7 +229,8 @@ func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, n
 
 // delivered records a call the messenger accepted: the delivery event of a first Publication — storm_summary for a
 // Storm summary — and of a late one, the Thread of a Telegram post — attached to its known copy or waiting for it,
-// under the lock of the post — and the end of the Broken state of a Destination that a probe reached.
+// under the lock of the post — and the end of the Broken state of a Destination that a probe reached. A Publication of
+// an Alert Group not yet marked published, or any later call while it is still unmarked, marks it once committed.
 func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt, c Call, out Outcome, now time.Time,
 	logs *after) (bool, error) {
 	p, telegramPost := publicationPost(a, out.MessageID)
@@ -272,10 +274,33 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 			}
 		}
 	}
+	if a.row.GroupUnpublished && (a.publication || a.row.PublishedAt.Valid) {
+		at := now
+		if a.row.PublishedAt.Valid {
+			at = a.row.PublishedAt.Time
+		}
+		logs.add(w.markPublished(a.row.AlertGroupID, at))
+	}
 	if a.row.DestinationHealth == healthBroken {
 		return true, markHealthy(ctx, q, w.raiser(org), org, a.destination.ID, now, logs)
 	}
 	return true, nil
+}
+
+// markPublished marks, once the transaction that recorded a Publication of the Alert Group groupID at at committed,
+// its first Publication (C-17.FR-1, D298): through the dispatcher in a transaction of its own, never inside the
+// outcome's, which locks deliveries before alert_groups while the dispatcher locks them the other way round. A
+// failure is logged; the next delivered call or event of the Alert Group marks it again while it is unmarked.
+func (w *Worker) markPublished(groupID int64, at time.Time) func(ctx context.Context, log *logging.Logger) {
+	return func(ctx context.Context, log *logging.Logger) {
+		if w.Published == nil {
+			return
+		}
+		if err := w.Published(ctx, groupID, at); err != nil && ctx.Err() == nil {
+			log.Log(ctx, logging.DeliveryWorkFailed, logging.F("work", "mark_published"),
+				logging.F("error", err.Error()))
+		}
+	}
 }
 
 // retry records an outcome retried at at; ok is false when the lease went to another replica.

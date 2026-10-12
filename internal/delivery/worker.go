@@ -68,6 +68,9 @@ type Worker struct {
 	RunbookBase string
 	// PublicURL is MUSTER_PUBLIC_URL, the base of the link to an Alert Group in a final edit.
 	PublicURL string
+	// Published marks the first Publication of an Alert Group at a time, (*groups.Service).MarkPublished, once the
+	// outcome that recorded it committed; nil marks nothing.
+	Published func(ctx context.Context, groupID int64, at time.Time) error
 
 	once sync.Once
 	wake chan struct{}

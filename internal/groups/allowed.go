@@ -8,8 +8,9 @@ package groups
 // Takeover, and is not offered to the Owner, for whom it would change nothing; a Service account is never offered
 // Acknowledge. Unresolve is offered only while every precondition holds: a person resolved the Alert Group, its Route
 // was not deleted, no newer open Alert Group of its Route and key takes part in grouping, and one of its Alerts still
-// fires — the API still refuses it when that changes before the command arrives. add_note is offered in every status
-// to a caller with alert-groups:note; still_on_it comes with its story (S-049).
+// fires — the API still refuses it when that changes before the command arrives. still_on_it is offered only to the
+// Owner, never to a Service account, while a Reminder waits for an answer (C-17.FR-10); add_note in every status to a
+// caller with alert-groups:note.
 func (v View) Allowed(c Caller) []Command {
 	ack, resolve, snooze := c.can(PermissionAcknowledge), c.can(PermissionResolve), c.can(PermissionSnooze)
 	user := c.user()
@@ -29,6 +30,7 @@ func (v View) Allowed(c Caller) []Command {
 		add(ack, CommandUnacknowledge)
 		add(resolve, CommandResolve)
 		add(snooze, CommandSnooze)
+		add(ack && user != 0 && v.ownerID == user && v.reminderPending, CommandStillOnIt)
 	case StatusSnoozed:
 		add(ack && user != 0, CommandAcknowledge)
 		add(resolve, CommandResolve)

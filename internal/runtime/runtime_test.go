@@ -1697,7 +1697,7 @@ func TestConfigureWorker(t *testing.T) {
 			}
 		}
 	}
-	if len(p.timers.Handlers) != 4 {
+	if len(p.timers.Handlers) != 6 || p.deliverer.Published == nil {
 		t.Errorf("handlers %v", slices.Collect(maps.Keys(p.timers.Handlers)))
 	}
 }

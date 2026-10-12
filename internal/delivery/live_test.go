@@ -936,6 +936,9 @@ func TestLive(t *testing.T) {
 			{"telegram_threads", l.telegramThreads},
 			// The follow-ups of S-067.
 			{"telegram_press_lock", l.telegramPressLock},
+			// S-049.
+			{"reminder_reached", l.reminderReached},
+			{"ack_timeout_notice_fallback", l.ackTimeoutNoticeFallback},
 		} {
 			t.Run(sub.name, sub.run)
 		}
@@ -3544,4 +3547,101 @@ func (l *live) templateMode(t *testing.T) {
 		t.Errorf("MusterTemplateError still firing %d", n)
 	}
 	l.exec(t, `DELETE FROM route_destinations WHERE destination_id = $1`, dest)
+}
+
+// enqueueEvent hands the lifecycle event ev of the Alert Group titled title over to delivery, in a transaction of its
+// own, and returns the id of the Alert Group.
+func (l *live) enqueueEvent(t *testing.T, title string, status groups.Status, ev groups.Recorded) int64 {
+	t.Helper()
+	gid := l.group(t, title)
+	var id, number int64
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT id, number FROM alert_groups WHERE public_id = $1`,
+		gid).Scan(&id, &number); err != nil {
+		t.Fatal(err)
+	}
+	g := &groups.Group{ID: id, PublicID: gid, Number: number, RouteID: l.routeID, Title: title, Status: status}
+	if err := pgxTx(t, l, func(tx groups.DBTX) error {
+		return l.svc.Enqueue(t.Context(), tx, groups.Rendering{Group: g, Actor: groups.System,
+			Events: []groups.Recorded{ev}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// reminderReached is the answer rule's check on PostgreSQL (C-17.FR-5, D298): a Reminder whose Thread reply was sent
+// reached a Destination, one never sent did not, and one delivered only as the reminder event of an events-mode
+// outgoing webhook did.
+func (l *live) reminderReached(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.fire(t, "rr", "Remind/a")
+	l.round(t, l.a)
+	id := l.enqueueEvent(t, "Remind", groups.StatusAcknowledged, groups.Recorded{Seq: 50, Event: groups.EventReminder,
+		Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionOwner}})
+	l.round(t, l.a)
+	reached := func(seq int64) bool {
+		t.Helper()
+		ok, err := l.svc.ReminderReached(t.Context(), l.d.Pool, id, seq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	if l.count(t, `SELECT count(*) FROM thread_replies WHERE alert_group_id = $1 AND state = 'sent'
+		AND 50 = ANY(event_seqs)`, id) != 1 || !reached(50) || reached(51) {
+		t.Fatalf("sent reply: reached %v, never sent %v", reached(50), reached(51))
+	}
+	var dest int64
+	if err := l.d.Pool.QueryRow(t.Context(), `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode,
+		webhook_events_config, signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions,
+		limiter_limit, limiter_per_seconds, health, created_at, updated_at)
+		VALUES ($1, 'DSAAAAAAAAAARR', 'webhook', 'remind-hook', 'events', '{"url":"http://127.0.0.1/","headers":[]}',
+		'\x01', 'k1', $2, '{}', 1000, 1, 'healthy', $2, $2) RETURNING id`, l.orgID, l.business.Now()).Scan(&dest); err != nil {
+		t.Fatal(err)
+	}
+	for seq, state := range map[int64]string{52: "delivered", 53: "pending"} {
+		l.exec(t, `INSERT INTO webhook_events (org_id, destination_id, alert_group_id, sequence, webhook_id, event, notify,
+			occurred_at, body, state, next_attempt_at, delivered_at, created_at)
+			VALUES ($1, $2, $3, $4, $5, 'reminder', true, $6, '{}', $7, $6,
+			CASE WHEN $7 = 'delivered' THEN $6::timestamptz END, $6)`, l.orgID, dest, id, seq,
+			fmt.Sprintf("msg_reminder_%d", seq), l.business.Now(), state)
+	}
+	if !reached(52) || reached(53) {
+		t.Errorf("events mode: delivered %v, pending %v", reached(52), reached(53))
+	}
+}
+
+// ackTimeoutNoticeFallback is C-12.FR-4 and FR-6 for the ack timeout notice on PostgreSQL: the Route's template, read
+// with the Alert Group, fails, so the reply carries the built-in notice, the Route records its template error, the
+// Timeline records fallback_template_used and muster_template_errors_total counts it.
+func (l *live) ackTimeoutNoticeFallback(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.fire(t, "ack", "Unacked/a")
+	l.round(t, l.a)
+	l.rec.Reset()
+	l.exec(t, `UPDATE routes SET template_ack_timeout_notice = '{{ env "HOME" }}' WHERE id = $1`, l.routeID)
+	var route string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT public_id FROM routes WHERE id = $1`,
+		l.routeID).Scan(&route); err != nil {
+		t.Fatal(err)
+	}
+	counter := func() uint64 { return metrics.TemplateErrors.With(route, "", "ack_timeout_notice").Get() }
+	before := counter()
+	id := l.enqueueEvent(t, "Unacked", groups.StatusFiring, groups.Recorded{Seq: 60, Event: groups.EventAckTimeout,
+		Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionAckTimeout}})
+	l.round(t, l.a)
+	replies := only(l.rec.Calls(), deliverytest.MethodReply)
+	if len(replies) != 1 || replies[0].Message.Body == nil ||
+		!strings.HasPrefix(replies[0].Message.Body.Text, "Nobody has acknowledged #") ||
+		len(replies[0].Message.Buttons) != 0 {
+		t.Fatalf("replies %+v", replies)
+	}
+	if n := l.count(t, `SELECT count(*) FROM timeline_entries WHERE alert_group_id = $1
+		AND system_event = 'fallback_template_used' AND detail LIKE 'ack_timeout_notice template failed: %'`, id) +
+		l.count(t, `SELECT count(*) FROM routes WHERE id = $1 AND template_error_template = 'ack_timeout_notice'`,
+			l.routeID); n != 2 || counter() != before+1 {
+		t.Errorf("recorded %d, counted %d", n, counter()-before)
+	}
+	l.exec(t, `UPDATE routes SET template_ack_timeout_notice = NULL, template_error = NULL,
+		template_error_template = NULL, template_error_since = NULL WHERE id = $1`, l.routeID)
 }

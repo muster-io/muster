@@ -53,7 +53,7 @@ type BulkItem struct {
 func (s *Service) Bulk(ctx context.Context, c Caller, r BulkRequest) ([]BulkItem, error) {
 	switch r.Command {
 	case CommandAcknowledge, CommandResolve, CommandSnooze, CommandUnsnooze:
-	case CommandUnacknowledge, CommandUnresolve, CommandAddNote:
+	case CommandUnacknowledge, CommandUnresolve, CommandStillOnIt, CommandAddNote:
 		return nil, &FieldError{Pointer: "/command", Code: CodeInvalid, Detail: "This command has no bulk form."}
 	default:
 		return nil, &FieldError{Pointer: "/command", Code: CodeInvalid, Detail: "No such command."}
@@ -77,7 +77,7 @@ func (s *Service) Bulk(ctx context.Context, c Caller, r BulkRequest) ([]BulkItem
 		a.end = r.Snooze
 	case CommandResolve:
 		a.note = r.Note
-	case CommandAcknowledge, CommandUnacknowledge, CommandUnresolve, CommandUnsnooze, CommandAddNote:
+	case CommandAcknowledge, CommandUnacknowledge, CommandUnresolve, CommandUnsnooze, CommandStillOnIt, CommandAddNote:
 	}
 	if err := a.check("/snooze", s.clock.Now()); err != nil {
 		return nil, err

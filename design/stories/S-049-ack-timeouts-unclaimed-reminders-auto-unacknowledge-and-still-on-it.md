@@ -14,38 +14,53 @@ files_touched:
   - internal/api/commands_test.go
   - internal/api/alertgroups.go
   - internal/api/alertgroups_test.go
-  - internal/timers/worker.go
-  - internal/timers/worker_test.go
   - internal/timers/schedule.go
   - internal/timers/schedule_test.go
-  - internal/timers/query.sql
   - internal/groups/timers.go
   - internal/groups/timers_test.go
   - internal/groups/dispatcher.go
-  - internal/groups/transitions.go
-  - internal/groups/transitions_test.go
-  - internal/groups/snooze.go
+  - internal/groups/dispatcher_test.go
   - internal/groups/commands.go
-  - internal/groups/release.go
-  - internal/groups/notes.go
+  - internal/groups/commands_test.go
+  - internal/groups/bulk.go
+  - internal/groups/system.go
   - internal/groups/events.go
   - internal/groups/events_test.go
   - internal/groups/allowed.go
   - internal/groups/allowed_test.go
   - internal/groups/filters.go
   - internal/groups/read.go
-  - internal/groups/query.sql
+  - internal/groups/list.go
   - internal/groups/list_test.go
+  - internal/groups/counts.go
+  - internal/groups/query.sql
+  - internal/groups/groups_integration_test.go
   - internal/delivery/enqueue.go
+  - internal/delivery/worker.go
+  - internal/delivery/worker_test.go
   - internal/delivery/outcomes.go
   - internal/delivery/outcomes_test.go
   - internal/delivery/webhookevents.go
+  - internal/delivery/webhookevents_test.go
   - internal/delivery/threads.go
+  - internal/delivery/threads_test.go
+  - internal/delivery/render.go
   - internal/delivery/query.sql
+  - internal/delivery/live_test.go
   - internal/messages/replies.go
+  - internal/messages/render.go
   - internal/messages/render_test.go
+  - internal/messages/query.sql
+  - internal/messages/texts/en.json
+  - internal/messages/texts/ru.json
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/logging/events.go
+  - internal/db/migrations/0007_alert_groups_first_published_at_backfill.up.sql
+  - internal/db/migrations/0007_alert_groups_first_published_at_backfill.down.sql
+  - internal/db/db_test.go
+  - internal/db/migrate_test.go
+  - design/db/schema.md
   - test/e2e/timers_test.go
 acceptance:
   - "[C-17.FR-1, C-17.FR-2, C-17.AC-1, C-12.FR-4] On a Route with the On-call profile a firing Alert Group gets Loud ack timeout notices — Thread replies with the Route's ack timeout notice, Mentions by each Destination's `ack_timeout` setting and only links — at exactly 15, 45 and 105 minutes after its first Publication, and no fourth."
@@ -80,8 +95,10 @@ issue: 49
 - Reminders: the doubling schedule, Takeover, Reopen into acknowledged, and their end when a disabled or deleted Owner
   is released.
 - Auto-unacknowledge with the answer rule, including Reminders that reached no Destination.
-- What counts for an events-mode outgoing webhook: its delivered `created` event as the first Publication, its
-  delivered `reminder` event as a Reminder that reached it (D298).
+- What counts for an events-mode outgoing webhook: its delivered `created` event as the first Publication (or the
+  first delivered event when no `created` was delivered), its delivered `reminder` event as a Reminder that reached
+  it (D298).
+- Migration `0007`, which fills `first_published_at` of the Alert Groups published before this story.
 - "Still on it" through the API (`answerReminder`).
 - Collapsed overdue notices; `next_notice`; the `unclaimed` filter and field; the lifecycle events of C-17.FR-11.
 - The C-09.FR-8 part left by S-063: the ack timeout starts over when a Snooze ends.
@@ -111,9 +128,13 @@ issue: 49
   `ack_timeout_notices_sent`, `unclaimed`, `reminders_sent`, `reminders_unanswered`, `last_reminder_at`,
   `owner_answered_at`), `timers` (kinds `ack_timeout` and `reminder`, `notice_number`), `timeline_entries`,
   `thread_replies` (`state` of `reminder` replies), `webhook_events` (`created` and `reminder`, `delivered_at`),
-  `deliveries.published_at`. No migration is needed; an optional index that turns out useful (for example on
-  `alert_groups` for `unclaimed`) is migration `0007`, the next free number, with `schema.md` updated and the file
-  added to this list.
+  `deliveries.published_at`. The columns exist since `0001_init`; migration
+  `0007_alert_groups_first_published_at_backfill` (data only, `schema.md` updated) fills `first_published_at` of the
+  Alert Groups published before this story with their earliest `deliveries.published_at` or delivered
+  `webhook_events.delivered_at`. Without it the first delivered call after the upgrade would mark them at that old
+  time, and every open firing Alert Group would collapse its overdue notices into one Loud reply at once. It sets no
+  `ack_timeout_started_at` and writes no timer: such an Alert Group gets an ack timeout on its next transition into
+  firing. Its down migration changes nothing.
 - **Schedules** (`internal/timers/schedule.go`, pure functions over the policy): ack timeout notice `n` (1 to 3) is
   due at start + (2ⁿ − 1)·F with F = `ack_timeout.first_interval_seconds`, that is F, 3F and 7F; Reminder `k` (1, 2, …)
   is due one interval after Reminder `k − 1` (or after the acknowledgement for `k` = 1), the interval being
@@ -125,22 +146,29 @@ issue: 49
   - *Start* (D277, D298): the first Publication of an Alert Group to any Destination starts it. The delivery worker
     does not change the Alert Group inside its outcome transaction, which locks `deliveries` before `alert_groups`
     while the dispatcher, through `Enqueue`, locks them the other way round. After the transaction that recorded a
-    successful Publication has committed (`internal/delivery/outcomes.go`, through its post-commit list), the worker
-    calls `groups.MarkPublished(alert_group, at)` with `at` = that delivery's `published_at`. `MarkPublished` is a
-    system transition of the dispatcher in its own transaction and idempotent: it changes nothing unless
+    successful Publication has committed (`internal/delivery/outcomes.go`, through its post-commit list, and the
+    worker's `Published` hook in `worker.go`, which the runtime wires to `groups.MarkPublished`), the worker calls
+    `groups.MarkPublished(alert_group, at)` with `at` = that delivery's `published_at`. `MarkPublished` is a system
+    transition of the dispatcher in its own transaction and idempotent: it changes nothing unless
     `first_published_at IS NULL`; otherwise it sets `first_published_at` = `at` and, when the Alert Group is firing and
     the Route's ack timeout is on, sets `ack_timeout_started_at` = `at`, resets `ack_timeout_notices_sent` and
     `unclaimed`, and writes the `ack_timeout` timer for notice 1 at `at` + F. A republication after the Root message
     was deleted (S-035) finds `first_published_at` set and never starts the ack timeout over. A Storm summary is not a
     Publication of the Alert Groups it covers (S-035). For an events-mode outgoing webhook, which has no Root message,
     the delivered `created` event counts as the Publication, with `at` = its `delivered_at`
-    (`internal/delivery/webhookevents.go`); in template mode the "create" request is the Publication as for a
+    (`internal/delivery/webhookevents.go`); while `first_published_at` is empty, any other delivered event of the Alert
+    Group calls it too, with the `created` event's `delivered_at` when that was delivered there and otherwise its own
+    `delivered_at` — a webhook added to a Route with open Alert Groups sends no `created` for them, and a `created`
+    event may end `not_delivered`; in template mode the "create" request is the Publication as for a
     messenger. A replica that stops between the commit and the call leaves `first_published_at` empty: every later
     delivered call or event of that Alert Group repeats the call while it is empty.
   - *Start over*: every transition into firing of an Alert Group that has `first_published_at` — Reopen into firing,
     Unacknowledge, Unsnooze, Unresolve, a Snooze ending, a rise to Urgent that removes the acknowledgement or ends a
-    Snooze, auto-unacknowledge, the release of a disabled or deleted Owner (S-063, `release.go`, through the same
-    transition) — does the same with the transition's time (`transitions.go`, `snooze.go`, `commands.go`).
+    Snooze, auto-unacknowledge, the release of a disabled or deleted Owner (S-063) — does the same with the
+    transition's time. Starting over and stopping are not hooks in each transition: the dispatcher compares the status,
+    the Owner and `first_published_at` before and after every change and keeps the timers with them in one place
+    (`syncTimers` in `internal/groups/timers.go`, beside `syncSnoozeTimer`), so `transitions.go`, `snooze.go`,
+    `release.go` and `commands.go` need no code of their own.
   - *Stop*: Acknowledge (Takeover included), Snooze and Resolve, by a person or the system, delete the `ack_timeout`
     timer and clear `unclaimed`.
   - *Notice*: the timer records `ack_timeout` (Loud, Mentions `[ack_timeout]`, kind `timers`, `notice_number`), and
@@ -153,12 +181,15 @@ issue: 49
   it. A Reopen into acknowledged continues the sequence: the counters are kept and the next Reminder is due one
   interval of the next step after the Reopen. The timer records `reminder` (Loud, Mentions `[owner]`, kind `timers`,
   `notice_number` = k), sets `last_reminder_at` and reschedules itself. Disabling or deleting the Owner releases the
-  Alert Group (S-063, `release.go`) and so deletes the timer: no Reminder and no auto-unacknowledge follow, and the
+  Alert Group (S-063) and so, through the same timer sync of the dispatcher, deletes the timer: no Reminder and no
+  auto-unacknowledge follow, and the
   release's Loud Thread reply carries the text of S-036; enabling the User again writes no timer, and the next
   Acknowledge starts the Reminders over. A `reminder` timer that comes due on an Alert Group that is no longer
   acknowledged, or whose Route's Reminders are off, is deleted with `reminder_skipped`. There are no quiet hours.
 - **Answers and auto-unacknowledge** (C-17.FR-5): `owner_answered_at` is set when the Owner answers "Still on it",
-  runs any command on the Alert Group (`commands.go`), or adds a Note to it (`notes.go`). When a Reminder is due, the
+  runs any command on the Alert Group, or adds a Note to it: the dispatcher sets it for every change that writes made
+  by the User who owned the Alert Group before the change (`markAnswered` in `timers.go`; `notes.go` needs no code of
+  its own), and an Acknowledge by the current Owner, which changes nothing, does not count. When a Reminder is due, the
   previous one counts as unanswered if it reached at least one Destination — a `thread_replies` row of that `reminder`
   event in state `sent`, or a `webhook_events` row of it in state `delivered` for an events-mode outgoing webhook — and
   `owner_answered_at` is not later than it; `reminders_unanswered` is then incremented, otherwise set to 0. The check is
@@ -192,17 +223,20 @@ issue: 49
   `reminder_answered` — and `MarkPublished` send the `alert-group` hint of the Alert Group, and a change of `unclaimed`
   also `alert-groups`, so that the pages of S-050 follow without a reload.
 - **Messages** (C-12.FR-3, FR-4; `messages/replies.go`): an ack timeout notice renders the Route's `ack_timeout_notice`
-  template (S-036) in the sandbox, or the built-in one, with the notice number, and carries only links; a failing
-  template falls back as for the Root message (`muster_template_errors_total{template="ack_timeout_notice"}`,
-  `MusterTemplateError`). A Reminder reply carries the Owner's Mention and the text "Reminder: {user}, are you still on
+  template (S-036) in the sandbox, or the built-in one, in the Route's language with the data of the Root message (the
+  notice number is in the Timeline only), and carries only links; a failing template falls back as for the Root
+  message (`muster_template_errors_total{template="ack_timeout_notice"}`, `MusterTemplateError`) and records
+  `fallback_template_used` through `groups.RecordSystemEntry` (`groups/system.go`) in the transaction that prepares the
+  reply. A Reminder reply carries the Owner's Mention and the text "Reminder: {user}, are you still on
   it?"; S-068 adds its buttons. `auto_unacknowledged` gives the reason with "The acknowledgement was released: nobody
   answered the Reminders."; `notices_missed` says "{count} notices were missed while Muster was unavailable."
-- **Existing scaffolding** (reuse and extend, do not duplicate): the texts `reply.ackTimeout`, `reply.unclaimed`,
+- **Existing scaffolding** (reuse and extend, do not duplicate): the texts `reply.unclaimed`,
   `reply.reminder`, `reply.autoUnacknowledged`, `reply.noticesMissed_*` and `notice.unclaimed`; the reply cases of
   `messages/replies.go`; `buttons.CommandStillOnIt`, `buttons.SubjectReply` and the Mattermost action id `stillonit`
   (used by S-068); the `command` value `still_on_it` of `muster_commands_total`; `CommandNameStillOnIt` in the
   generated API.
-- **Read** (C-17.FR-9, C-09.FR-1, C-09.FR-13; `groups/read.go`, `filters.go`): `unclaimed` from the column;
+- **Read** (C-17.FR-9, C-09.FR-1, C-09.FR-13; `groups/read.go`, `list.go`, `counts.go`, `filters.go`): `unclaimed`
+  from the column;
   `next_notice` from the Alert Group's `ack_timeout` or `reminder` timer (`kind`, `at` = its deadline), absent when
   there is none; `unclaimed=true` filters the list and the counts.
 - **Log events and metrics**: `timer_fired` (INFO: `kind`, `group`, `notice`, `missed`), `reminder_skipped` (INFO:
@@ -250,7 +284,7 @@ B=(-H "Authorization: Bearer $BPAT" -H 'Content-Type: application/json')
 VIEW() { curl -s "${A[@]}" "$API/integrations/$INT/alerts?$1"; }
 TL() { curl -s "${A[@]}" "$API/alert-groups/$1/timeline?kind=timers&order=asc" | jq -c "[.items[] | {event, n: .notice_number, loudness, mentions}]$2"; }
 DUE() { curl -s "${A[@]}" "$API/alert-groups/$1" | jq -c --arg now "$(curl -s $CLK | jq -r .now)" \
-  '{kind: .next_notice.kind, min: (if .next_notice then (((.next_notice.at | .[0:19] + "Z" | fromdate) - ($now | .[0:19] + "Z" | fromdate)) / 60) else null end), unclaimed}'; }
+  '{kind: .next_notice.kind, min: (if .next_notice then (((.next_notice.at | .[0:19] + "Z" | fromdate) - ($now | .[0:19] + "Z" | fromdate)) / 60 | round) else null end), unclaimed}'; }
 ROUTE() { curl -s "${A[@]}" $API/routes -d "{\"name\":\"$1\",\"matchers\":[{\"label\":\"team\",\"op\":\"=\",\"value\":\"$1\"}],\"urgent\":false,
   \"group_key\":[\"alertname\",\"host\"],\"destination_ids\":[\"$D\",\"$TD\"],\"policy\":$2}" | jq -r .id; }
 FIRE() { curl -s -X PUT $FAM/groups/$1 -d "{\"receiver\":\"lab\",\"route\":\"{}\",\"labels\":{\"alertname\":\"$2\"}}" > /dev/null
@@ -267,7 +301,7 @@ ADV 1800; DUE $G1                                           # {"kind":"ack_timeo
 ADV 3600; TL $G1 '| map(.event)'                            # ["ack_timeout","ack_timeout","ack_timeout","unclaimed"]
 DUE $G1                                                     # {"kind":null,"min":null,"unclaimed":true}
 curl -s "${A[@]}" "$API/alert-groups?unclaimed=true" | jq -r '.items[].id' | grep -c "$G1"   # 1
-curl -s "${A[@]}" "$API/alert-group-counts?unclaimed=true" | jq .total                       # 1
+curl -s "${A[@]}" "$API/alert-group-counts?unclaimed=true" | jq .all                         # 1
 curl -s $FMM/posts | jq -r "[.[] | select(.root_id == \"\")] | first | .props.attachments[0].text" | grep -c 'Nobody has taken this'   # 1
 
 # C-17.AC-8: acknowledging ends Unclaimed; after Unacknowledge it comes back only after the third new notice
@@ -299,7 +333,7 @@ curl -s -H "Authorization: Bearer $SAT" -X POST $API/alert-groups/$G3/still-on-i
 ADV 3600; curl -s "${B[@]}" -X POST $API/alert-groups/$G3/still-on-it | jq -r .outcome   # done
 DUE $G3                                                     # {"kind":"reminder","min":420,"unclaimed":false}
 ADV 25200; ADV 57600; ADV 86400; TL $G3 '| map(select(.event == "reminder") | .n)'   # [1,2,3,4]
-curl -s $FMM/posts | jq -c '[.[] | select(.root_id != "" and (.message | test("@bob")))] | last | (.props.attachments[0].actions // []) | length'
+curl -s $FMM/posts | jq -c '[.[] | select(.root_id != "" and (.message | test("bob, are you still on it")))] | last | (.props.attachments[0].actions // []) | length'
 # 0                                                          (the Reminder at hour 52 mentions the Owner; its buttons are S-068)
 curl -s "$FTG/messages?chat=$GR" | jq '[.[] | select(.text // "" | test("are you still on it"))] | length > 0'   # true
 
@@ -318,12 +352,12 @@ ROUTE au "$(jq -c '.auto_unacknowledge = true' <<<"$P")" > /dev/null
 G7=$(FIRE g7 Disk au); G8=$(FIRE g8 Disk2 au)
 for g in $G7 $G8; do curl -s "${B[@]}" -X POST $API/alert-groups/$g/acknowledge > /dev/null; done
 ADV 14400; ADV 3600
-curl -s "${B[@]}" $API/alert-groups/$G8/notes -d '{"text":"Still checking the disk."}' > /dev/null
+curl -s "${B[@]}" $API/alert-groups/$G8/notes -d '{"body":"Still checking the disk."}' > /dev/null
 ADV 25200; ADV 57600
 curl -s "${A[@]}" $API/alert-groups/$G7 | jq -c '{status, owner}'          # {"status":"firing","owner":null}
 curl -s "${A[@]}" "$API/alert-groups/$G7/timeline?kind=status&limit=1" | jq -c '.items[0] | {event, reason, loudness, mentions}'
 # {"event":"auto_unacknowledged","reason":"No answer to the last two Reminders","loudness":"loud","mentions":["owner"]}
-curl -s $FMM/posts | jq -r '[.[] | select(.root_id != "")] | map(.message) | map(select(test("nobody answered the Reminders"))) | last' | grep -c '@bob'   # 1
+curl -s $FMM/posts | jq -r '[.[] | select(.root_id != "")] | map(.message) | map(select(test("nobody answered the Reminders"))) | last' | grep -c 'bob'   # 1
 DUE $G7                                                     # {"kind":"ack_timeout","min":15,"unclaimed":false}
 TL $G8 '| map(select(.event == "reminder") | .n)'           # [1,2,3]
 
@@ -333,7 +367,7 @@ ROOT5=$(curl -s $FMM/posts | jq -r --arg g "$G5" '.[] | select(.root_id == "" an
 ADV 7200; curl -s "${A[@]}" "$API/alert-groups/$G5/timeline?kind=timers&order=asc" | jq -c '[.items[] | {event, missed_count}]'
 # [{"event":"notices_missed","missed_count":3},{"event":"unclaimed","missed_count":null}]
 curl -s $FMM/posts | jq --arg r "$ROOT5" '[.[] | select(.root_id == $r)] | length'   # 1
-grep -c '"event":"timer_fired".*"missed":3' dev.log         # 1
+grep '"event":"timer_fired"' dev.log | grep "\"group\":\"$G5\"" | grep -c '"missed":3'   # 1
 ```
 
 `test/e2e/timers_test.go` repeats these steps and adds: C-17.FR-8 and C-03.AC-27 (an Owner who is disabled, and one
@@ -357,7 +391,12 @@ None.
 - Suggested commit: `feat(timers): add ack timeouts, unclaimed, reminders and auto-unacknowledge`.
 - Split (D298): the plan review of the phase counted about 58 hand-written files with those the contract had missed,
   so the Reminder buttons, the presses on Thread replies and the expired-button answer moved to S-068; this story keeps
-  40 files. S-050 depends on this story only; S-051 depends on S-068.
+  55 hand-written files: the contract had missed the fakes and integration tests that existing tests needed for the new
+  columns and queries, the list and count reads, `bulk.go` (an exhaustive switch over the commands), `system.go`,
+  delivery's `worker.go` and `render.go`, and the message query and texts; the review added migration `0007`, its two
+  version tests and `schema.md`, so that an upgrade does not collapse the notices of every open Alert Group at once.
+  S-050 depends on this story only; S-051
+  depends on S-068.
 - `MarkPublished` runs after the delivery outcome has committed (D298): the outcome transaction locks `deliveries`
   before `alert_groups`, and a dispatcher transition locks `alert_groups` before `deliveries` (`Enqueue`), so doing both
   in one transaction can deadlock.
@@ -368,7 +407,7 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-17.FR-1 | full | the first Publication of a messenger, of template mode and, for events mode, the delivered `created` event |
+| C-17.FR-1 | full | the first Publication of a messenger, of template mode and, for events mode, the delivered `created` event (or the first delivered event without one) |
 | C-17.FR-2 | partial | the behaviour; the Route editor fields are S-050 |
 | C-17.FR-3 | partial | the Root message, the field and the filter in the API; the list filter, column and badge are S-050 |
 | C-17.FR-4 | partial | the Reminders and their schedule; the buttons on them are S-068 |

@@ -72,6 +72,10 @@ func (f *fakeCommands) Unsnooze(_ context.Context, c groups.Caller, id string) (
 	return f.record("unsnooze", c, id)
 }
 
+func (f *fakeCommands) AnswerReminder(_ context.Context, c groups.Caller, id string) (groups.Result, error) {
+	return f.record("still_on_it", c, id)
+}
+
 func (f *fakeCommands) AddNote(_ context.Context, c groups.Caller, id, body string) (groups.NoteView, error) {
 	f.notes = append(f.notes, body)
 	if _, err := f.record("add_note", c, id); err != nil {
@@ -273,5 +277,43 @@ func TestAlertGroupCommandFields(t *testing.T) {
 	if len(list.Items) != 1 || len(list.Items[0].AllowedCommands) != 1 ||
 		list.Items[0].AllowedCommands[0] != gen.CommandNameAcknowledge || list.Items[0].SnoozeUntil.IsSpecified() {
 		t.Errorf("list for a responder = %+v", list.Items)
+	}
+}
+
+// TestAnswerReminderAPI is answerReminder (C-17.FR-10, C-04.FR-2): a Personal access token reaches the dispatcher as
+// its User with the Transport api and gets the outcome with the Alert Group; the refusals of the dispatcher —
+// owner_must_be_user for a Service account, not_owner and no_reminder_pending — are 409 command-refused with their code;
+// a missing Permission is the dispatcher's 403, and its failure a 500.
+func TestAnswerReminderAPI(t *testing.T) {
+	x, fc := newCommandsAPI(t)
+	path := "/api/v1/alert-groups/" + groupID + "/still-on-it"
+	var out gen.CommandResult
+	a := x.as(t, fullToken, http.MethodPost, path, "")
+	decodeInto(t, a, &out)
+	c := fc.callers[len(fc.callers)-1]
+	if a.status != http.StatusOK || out.Outcome != gen.CommandOutcomeDone || out.AlertGroup.Id != groupID ||
+		c.Actor.Kind != audit.ActorUser || c.Actor.TokenName != "full" || c.Transport != audit.TransportAPI ||
+		fc.calls[len(fc.calls)-1] != "still_on_it "+groupID {
+		t.Errorf("answer = %d %s, caller %+v", a.status, a.body, c)
+	}
+	for code, message := range map[string]string{groups.CodeOwnerMustBeUser: "a Service account cannot be an Owner",
+		groups.CodeNotOwner: "only the Owner answers a Reminder", groups.CodeNoReminderPending: "no Reminder waits for an answer"} {
+		fc.err = &groups.RefusedError{Code: code, Message: message}
+		var p gen.Problem
+		a := x.as(t, serviceToken, http.MethodPost, path, "")
+		decodeInto(t, a, &p)
+		if a.status != http.StatusConflict || p.Type != problemBase+"command-refused" || *p.Code != code {
+			t.Errorf("%s = %d %s", code, a.status, a.body)
+		}
+	}
+	fc.err = nil
+	calls := len(fc.calls)
+	if a := x.mutate(t, viewerCookie, http.MethodPost, path, ""); a.status != http.StatusForbidden ||
+		len(fc.calls) != calls+1 {
+		t.Errorf("viewer = %d %s", a.status, a.body)
+	}
+	fc.err = errBoom
+	if a := x.as(t, fullToken, http.MethodPost, path, ""); a.status != http.StatusInternalServerError {
+		t.Errorf("failing = %d", a.status)
 	}
 }

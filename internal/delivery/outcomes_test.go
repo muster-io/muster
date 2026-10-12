@@ -825,3 +825,86 @@ func TestPublishedDuringUpgrade(t *testing.T) {
 		t.Errorf("a stale open thread was recorded: %v %+v", err, d)
 	}
 }
+
+// publishedCall is a call of Worker.Published: the Alert Group, the time of its first Publication, and whether a
+// transaction of the store was still open, as it must not be.
+type publishedCall struct {
+	group int64
+	at    time.Time
+	inTx  bool
+}
+
+// recordPublished records the calls of Worker.Published, which marks the Alert Group published unless it fails with
+// the errors of fail in turn.
+func (e *env) recordPublished(fail ...error) *[]publishedCall {
+	var calls []publishedCall
+	e.w.Published = func(_ context.Context, id int64, at time.Time) error {
+		calls = append(calls, publishedCall{id, at, e.begin.open > 0})
+		if len(fail) > 0 {
+			err := fail[0]
+			fail = fail[1:]
+			if err != nil {
+				return err
+			}
+		}
+		e.db.groups[id].published = true
+		return nil
+	}
+	return &calls
+}
+
+// TestMarkPublishedAfterCommit is C-17.FR-1 and D298: the delivery worker marks the first Publication of an Alert
+// Group at its published_at only after the transaction that recorded it committed, never inside it; a mark that fails
+// is logged and repeated, with that published_at, by the next delivered call while the Alert Group is unmarked; a
+// marked Alert Group, a call that failed and a Storm summary mark nothing.
+func TestMarkPublishedAfterCommit(t *testing.T) {
+	e, d := pending(t)
+	calls := e.recordPublished(errBoom)
+	e.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeTransient, "HTTP 503"))
+	e.round(t)
+	if len(*calls) != 0 {
+		t.Fatalf("a failed publication marked %+v", *calls)
+	}
+	e.business.Advance(delivery.TransientFirstStep)
+	publishedAt := e.business.Now()
+	e.round(t)
+	if len(*calls) != 1 || (*calls)[0] != (publishedCall{groupID, publishedAt, false}) || d.publishedAt == nil ||
+		!d.publishedAt.Equal(publishedAt) {
+		t.Fatalf("calls %+v, published at %v", *calls, d.publishedAt)
+	}
+	if !strings.Contains(e.log.String(), `"event":"delivery_work_failed"`) ||
+		!strings.Contains(e.log.String(), `"work":"mark_published","error":"boom"`) {
+		t.Errorf("log %s", e.log)
+	}
+	e.business.Advance(time.Minute)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), person, groups.Recorded{Seq: 2,
+		Event: groups.EventAcknowledged, Loudness: groups.Quiet})
+	e.round(t)
+	if len(*calls) != 2 || (*calls)[1] != (publishedCall{groupID, publishedAt, false}) {
+		t.Fatalf("the edit while unmarked: calls %+v", *calls)
+	}
+	e.business.Advance(time.Minute)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), person, groups.Recorded{Seq: 3,
+		Event: groups.EventUnacknowledged, Variant: groups.VariantCommand, Loudness: groups.Quiet})
+	e.round(t)
+	if len(*calls) != 2 || len(e.rec.Calls()) != 4 {
+		t.Errorf("a marked alert group: calls %+v, adapter calls %d", *calls, len(e.rec.Calls()))
+	}
+
+	storm := newEnv(t)
+	storm.db.routes[routeID] = fakeRoute{language: "en", window: 60, publicID: "RTAAAAAAAAAAA1", name: "payments"}
+	stormCalls := storm.recordPublished()
+	storm.enqueue(t, storm.group(groups.StatusFiring, "a"), groups.System, created())
+	storm.round(t)
+	if !slices.ContainsFunc(storm.db.deliveries, func(d *fakeDelivery) bool { return d.storm != 0 }) ||
+		len(storm.rec.Calls()) == 0 || len(*stormCalls) != 0 {
+		t.Errorf("a storm summary: calls %+v", *stormCalls)
+	}
+
+	// Without the hook, nothing is marked and nothing fails.
+	e, _ = pending(t)
+	e.round(t)
+	if strings.Contains(e.log.String(), "mark_published") {
+		t.Errorf("log %s", e.log)
+	}
+}

@@ -43,9 +43,10 @@ WHERE g.org_id = $2
        OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
   AND ($16::boolean IS NULL
        OR dp.delivery_problem = $16::boolean)
-  AND ($17::jsonb IS NULL OR g.common_labels @> $17::jsonb)
-  AND ($18::text IS NULL OR g.title ILIKE $18::text
-       OR g.summary ILIKE $18::text)
+  AND ($17::boolean IS NULL OR g.unclaimed = $17::boolean)
+  AND ($18::jsonb IS NULL OR g.common_labels @> $18::jsonb)
+  AND ($19::text IS NULL OR g.title ILIKE $19::text
+       OR g.summary ILIKE $19::text)
 GROUP BY g.status, (CASE WHEN $1::boolean THEN g.common_labels END)
 `
 
@@ -66,6 +67,7 @@ type CountGroupsParams struct {
 	OwnerID         pgtype.Int8
 	SnoozedNoEnd    pgtype.Bool
 	DeliveryProblem pgtype.Bool
+	Unclaimed       pgtype.Bool
 	Contains        []byte
 	Pattern         pgtype.Text
 }
@@ -96,6 +98,7 @@ func (q *Queries) CountGroups(ctx context.Context, arg CountGroupsParams) ([]Cou
 		arg.OwnerID,
 		arg.SnoozedNoEnd,
 		arg.DeliveryProblem,
+		arg.Unclaimed,
 		arg.Contains,
 		arg.Pattern,
 	)
@@ -368,7 +371,11 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        o.retention_alert_details_days, g.owner_user_id, g.snooze_until, g.snoozed_by_user_id,
        g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem,
+       g.unclaimed, coalesce(nn.kind, '')::text AS next_notice_kind,
+       coalesce(nn.deadline, '0001-01-01 00:00:00+00')::timestamptz AS next_notice_at,
+       (g.status = 'acknowledged' AND g.reminders_sent > 0
+        AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -385,6 +392,11 @@ JOIN LATERAL (SELECT EXISTS (SELECT 1
                                AND (d.state IN ('not_delivered', 'deleted_in_messenger')
                                     OR (d.state = 'pending' AND ds.health = 'broken')
                                     OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
+LEFT JOIN LATERAL (SELECT t.kind, t.deadline
+                   FROM timers t
+                   WHERE t.org_id = g.org_id AND t.alert_group_id = g.id AND t.kind IN ('ack_timeout', 'reminder')
+                   ORDER BY t.deadline
+                   LIMIT 1) nn ON true
 WHERE g.org_id = $1 AND g.public_id = $2
 `
 
@@ -431,6 +443,10 @@ type GetGroupRow struct {
 	NewerNumber                int64
 	RouteDeleted               bool
 	DeliveryProblem            bool
+	Unclaimed                  bool
+	NextNoticeKind             string
+	NextNoticeAt               time.Time
+	ReminderPending            bool
 }
 
 // GetGroup reads an Alert Group by public_id with its Route, the #N of the Alert Group it fires again after, the
@@ -440,7 +456,9 @@ type GetGroupRow struct {
 // the Route and organization.critical_is_urgent as they are now (C-08.FR-6), so that marking a Route urgent or
 // changing the setting shows on open Alert Groups at once without changing them. It has a Delivery problem
 // (C-13.FR-12) when a delivery of it is Not delivered or deleted in the messenger, waits for a Broken Destination, or
-// has a Thread not attached.
+// has a Thread not attached. Its next notice is the earliest of its ack_timeout and reminder timers (C-17.FR-9): an
+// empty kind and the zero time 0001-01-01 when it has none. A Reminder waits for its Owner's answer while it is
+// acknowledged, a Reminder was sent and the Owner has not answered since the last one (C-17.FR-10).
 func (q *Queries) GetGroup(ctx context.Context, arg GetGroupParams) (GetGroupRow, error) {
 	row := q.db.QueryRow(ctx, getGroup, arg.OrgID, arg.PublicID)
 	var i GetGroupRow
@@ -482,6 +500,10 @@ func (q *Queries) GetGroup(ctx context.Context, arg GetGroupParams) (GetGroupRow
 		&i.NewerNumber,
 		&i.RouteDeleted,
 		&i.DeliveryProblem,
+		&i.Unclaimed,
+		&i.NextNoticeKind,
+		&i.NextNoticeAt,
+		&i.ReminderPending,
 	)
 	return i, err
 }
@@ -562,6 +584,27 @@ func (q *Queries) GetGroupRef(ctx context.Context, arg GetGroupRefParams) (GetGr
 	return i, err
 }
 
+const getGroupTimer = `-- name: GetGroupTimer :one
+SELECT deadline
+FROM timers
+WHERE org_id = $1 AND alert_group_id = $2::bigint AND kind = $3
+`
+
+type GetGroupTimerParams struct {
+	OrgID        int64
+	AlertGroupID int64
+	Kind         string
+}
+
+// GetGroupTimer reads the deadline of an Alert Group's timer of a kind, after the Alert Group is locked: a timer fired
+// after another change moved it finds a deadline other than the one it was claimed with.
+func (q *Queries) GetGroupTimer(ctx context.Context, arg GetGroupTimerParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getGroupTimer, arg.OrgID, arg.AlertGroupID, arg.Kind)
+	var deadline time.Time
+	err := row.Scan(&deadline)
+	return deadline, err
+}
+
 const getGroupingSettings = `-- name: GetGroupingSettings :one
 
 
@@ -585,6 +628,29 @@ func (q *Queries) GetGroupingSettings(ctx context.Context, orgID int64) (GetGrou
 	var i GetGroupingSettingsRow
 	err := row.Scan(&i.CriticalIsUrgent, &i.InstanceLabels)
 	return i, err
+}
+
+const getLastReminderSeq = `-- name: GetLastReminderSeq :one
+SELECT event_seq::bigint
+FROM timeline_entries
+WHERE org_id = $1 AND alert_group_id = $2
+  AND (event = 'reminder' OR (event = 'notices_missed' AND 'owner' = ANY(mentions)))
+ORDER BY event_seq DESC
+LIMIT 1
+`
+
+type GetLastReminderSeqParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+// GetLastReminderSeq reads the lifecycle event number of the last Reminder of an Alert Group: a reminder, or a
+// notices_missed that stands for Reminders, which mentions the Owner (C-17.FR-5, FR-7).
+func (q *Queries) GetLastReminderSeq(ctx context.Context, arg GetLastReminderSeqParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getLastReminderSeq, arg.OrgID, arg.AlertGroupID)
+	var event_seq int64
+	err := row.Scan(&event_seq)
+	return event_seq, err
 }
 
 const getListSettings = `-- name: GetListSettings :one
@@ -688,6 +754,43 @@ func (q *Queries) GetSnapshotReceivedAt(ctx context.Context, arg GetSnapshotRece
 	var received_at time.Time
 	err := row.Scan(&received_at)
 	return received_at, err
+}
+
+const getTimerPolicy = `-- name: GetTimerPolicy :one
+SELECT ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
+       reminders_cap_seconds, auto_unacknowledge
+FROM routes
+WHERE org_id = $1 AND id = $2
+`
+
+type GetTimerPolicyParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type GetTimerPolicyRow struct {
+	AckTimeoutEnabled              bool
+	AckTimeoutFirstIntervalSeconds int64
+	RemindersEnabled               bool
+	RemindersFirstIntervalSeconds  int64
+	RemindersCapSeconds            int64
+	AutoUnacknowledge              bool
+}
+
+// GetTimerPolicy reads the timer policy of a Route, deleted or not, at the time a timer is set or fires (C-17): the
+// ack timeout, the Reminders and auto-unacknowledge.
+func (q *Queries) GetTimerPolicy(ctx context.Context, arg GetTimerPolicyParams) (GetTimerPolicyRow, error) {
+	row := q.db.QueryRow(ctx, getTimerPolicy, arg.OrgID, arg.ID)
+	var i GetTimerPolicyRow
+	err := row.Scan(
+		&i.AckTimeoutEnabled,
+		&i.AckTimeoutFirstIntervalSeconds,
+		&i.RemindersEnabled,
+		&i.RemindersFirstIntervalSeconds,
+		&i.RemindersCapSeconds,
+		&i.AutoUnacknowledge,
+	)
+	return i, err
 }
 
 const insertDowntimeEntries = `-- name: InsertDowntimeEntries :exec
@@ -860,7 +963,7 @@ INSERT INTO timeline_entries (
     org_id, public_id, alert_group_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind,
     actor_user_id, actor_service_account_id, api_token_id, token_name, transport, reason, from_status, to_status,
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
-    period_to, detail
+    period_to, detail, notice_number, missed_count
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7,
@@ -869,7 +972,7 @@ VALUES (
     $17, $18, $19, $20,
     $21, $22, $23::text[],
     $24, $25::text[], $26,
-    $27, $28
+    $27, $28, $29, $30
 )
 `
 
@@ -902,6 +1005,8 @@ type InsertTimelineEntryParams struct {
 	PeriodFrom            pgtype.Timestamptz
 	PeriodTo              pgtype.Timestamptz
 	Detail                pgtype.Text
+	NoticeNumber          pgtype.Int8
+	MissedCount           pgtype.Int8
 }
 
 // InsertTimelineEntry records one Timeline entry: a lifecycle event or a system entry.
@@ -935,6 +1040,8 @@ func (q *Queries) InsertTimelineEntry(ctx context.Context, arg InsertTimelineEnt
 		arg.PeriodFrom,
 		arg.PeriodTo,
 		arg.Detail,
+		arg.NoticeNumber,
+		arg.MissedCount,
 	)
 	return err
 }
@@ -1347,7 +1454,11 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem,
+       g.unclaimed, coalesce(nn.kind, '')::text AS next_notice_kind,
+       coalesce(nn.deadline, '0001-01-01 00:00:00+00')::timestamptz AS next_notice_at,
+       (g.status = 'acknowledged' AND g.reminders_sent > 0
+        AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -1364,6 +1475,11 @@ JOIN LATERAL (SELECT EXISTS (SELECT 1
                                AND (d.state IN ('not_delivered', 'deleted_in_messenger')
                                     OR (d.state = 'pending' AND ds.health = 'broken')
                                     OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
+LEFT JOIN LATERAL (SELECT t.kind, t.deadline
+                   FROM timers t
+                   WHERE t.org_id = g.org_id AND t.alert_group_id = g.id AND t.kind IN ('ack_timeout', 'reminder')
+                   ORDER BY t.deadline
+                   LIMIT 1) nn ON true
 WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -1382,13 +1498,14 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
        OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
   AND ($16::boolean IS NULL
        OR dp.delivery_problem = $16::boolean)
-  AND ($17::jsonb IS NULL OR g.common_labels @> $17::jsonb)
-  AND ($18::text IS NULL OR g.title ILIKE $18::text
-       OR g.summary ILIKE $18::text)
-  AND ($19::timestamptz IS NULL
-       OR (g.last_changed_at, g.id) > ($19::timestamptz, $20::bigint))
+  AND ($17::boolean IS NULL OR g.unclaimed = $17::boolean)
+  AND ($18::jsonb IS NULL OR g.common_labels @> $18::jsonb)
+  AND ($19::text IS NULL OR g.title ILIKE $19::text
+       OR g.summary ILIKE $19::text)
+  AND ($20::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) > ($20::timestamptz, $21::bigint))
 ORDER BY g.last_changed_at, g.id
-LIMIT $21
+LIMIT $22
 `
 
 type ListGroupsChangedAscParams struct {
@@ -1408,6 +1525,7 @@ type ListGroupsChangedAscParams struct {
 	OwnerID         pgtype.Int8
 	SnoozedNoEnd    pgtype.Bool
 	DeliveryProblem pgtype.Bool
+	Unclaimed       pgtype.Bool
 	Contains        []byte
 	Pattern         pgtype.Text
 	AfterAt         pgtype.Timestamptz
@@ -1447,6 +1565,10 @@ type ListGroupsChangedAscRow struct {
 	NewerNumber                int64
 	RouteDeleted               bool
 	DeliveryProblem            bool
+	Unclaimed                  bool
+	NextNoticeKind             string
+	NextNoticeAt               time.Time
+	ReminderPending            bool
 }
 
 // ListGroupsChangedAsc reads a batch of the Alert Group list, earliest change first, after the cursor when given.
@@ -1468,6 +1590,7 @@ func (q *Queries) ListGroupsChangedAsc(ctx context.Context, arg ListGroupsChange
 		arg.OwnerID,
 		arg.SnoozedNoEnd,
 		arg.DeliveryProblem,
+		arg.Unclaimed,
 		arg.Contains,
 		arg.Pattern,
 		arg.AfterAt,
@@ -1513,6 +1636,10 @@ func (q *Queries) ListGroupsChangedAsc(ctx context.Context, arg ListGroupsChange
 			&i.NewerNumber,
 			&i.RouteDeleted,
 			&i.DeliveryProblem,
+			&i.Unclaimed,
+			&i.NextNoticeKind,
+			&i.NextNoticeAt,
+			&i.ReminderPending,
 		); err != nil {
 			return nil, err
 		}
@@ -1532,7 +1659,11 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem,
+       g.unclaimed, coalesce(nn.kind, '')::text AS next_notice_kind,
+       coalesce(nn.deadline, '0001-01-01 00:00:00+00')::timestamptz AS next_notice_at,
+       (g.status = 'acknowledged' AND g.reminders_sent > 0
+        AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -1549,6 +1680,11 @@ JOIN LATERAL (SELECT EXISTS (SELECT 1
                                AND (d.state IN ('not_delivered', 'deleted_in_messenger')
                                     OR (d.state = 'pending' AND ds.health = 'broken')
                                     OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
+LEFT JOIN LATERAL (SELECT t.kind, t.deadline
+                   FROM timers t
+                   WHERE t.org_id = g.org_id AND t.alert_group_id = g.id AND t.kind IN ('ack_timeout', 'reminder')
+                   ORDER BY t.deadline
+                   LIMIT 1) nn ON true
 WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -1567,13 +1703,14 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
        OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
   AND ($16::boolean IS NULL
        OR dp.delivery_problem = $16::boolean)
-  AND ($17::jsonb IS NULL OR g.common_labels @> $17::jsonb)
-  AND ($18::text IS NULL OR g.title ILIKE $18::text
-       OR g.summary ILIKE $18::text)
-  AND ($19::timestamptz IS NULL
-       OR (g.last_changed_at, g.id) < ($19::timestamptz, $20::bigint))
+  AND ($17::boolean IS NULL OR g.unclaimed = $17::boolean)
+  AND ($18::jsonb IS NULL OR g.common_labels @> $18::jsonb)
+  AND ($19::text IS NULL OR g.title ILIKE $19::text
+       OR g.summary ILIKE $19::text)
+  AND ($20::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) < ($20::timestamptz, $21::bigint))
 ORDER BY g.last_changed_at DESC, g.id DESC
-LIMIT $21
+LIMIT $22
 `
 
 type ListGroupsChangedDescParams struct {
@@ -1593,6 +1730,7 @@ type ListGroupsChangedDescParams struct {
 	OwnerID         pgtype.Int8
 	SnoozedNoEnd    pgtype.Bool
 	DeliveryProblem pgtype.Bool
+	Unclaimed       pgtype.Bool
 	Contains        []byte
 	Pattern         pgtype.Text
 	AfterAt         pgtype.Timestamptz
@@ -1632,6 +1770,10 @@ type ListGroupsChangedDescRow struct {
 	NewerNumber                int64
 	RouteDeleted               bool
 	DeliveryProblem            bool
+	Unclaimed                  bool
+	NextNoticeKind             string
+	NextNoticeAt               time.Time
+	ReminderPending            bool
 }
 
 // ListGroupsChangedDesc reads a batch of the Alert Group list, latest change first, after the cursor when given.
@@ -1653,6 +1795,7 @@ func (q *Queries) ListGroupsChangedDesc(ctx context.Context, arg ListGroupsChang
 		arg.OwnerID,
 		arg.SnoozedNoEnd,
 		arg.DeliveryProblem,
+		arg.Unclaimed,
 		arg.Contains,
 		arg.Pattern,
 		arg.AfterAt,
@@ -1698,6 +1841,10 @@ func (q *Queries) ListGroupsChangedDesc(ctx context.Context, arg ListGroupsChang
 			&i.NewerNumber,
 			&i.RouteDeleted,
 			&i.DeliveryProblem,
+			&i.Unclaimed,
+			&i.NextNoticeKind,
+			&i.NextNoticeAt,
+			&i.ReminderPending,
 		); err != nil {
 			return nil, err
 		}
@@ -1717,7 +1864,11 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem,
+       g.unclaimed, coalesce(nn.kind, '')::text AS next_notice_kind,
+       coalesce(nn.deadline, '0001-01-01 00:00:00+00')::timestamptz AS next_notice_at,
+       (g.status = 'acknowledged' AND g.reminders_sent > 0
+        AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -1734,6 +1885,11 @@ JOIN LATERAL (SELECT EXISTS (SELECT 1
                                AND (d.state IN ('not_delivered', 'deleted_in_messenger')
                                     OR (d.state = 'pending' AND ds.health = 'broken')
                                     OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
+LEFT JOIN LATERAL (SELECT t.kind, t.deadline
+                   FROM timers t
+                   WHERE t.org_id = g.org_id AND t.alert_group_id = g.id AND t.kind IN ('ack_timeout', 'reminder')
+                   ORDER BY t.deadline
+                   LIMIT 1) nn ON true
 WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -1752,13 +1908,14 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
        OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
   AND ($16::boolean IS NULL
        OR dp.delivery_problem = $16::boolean)
-  AND ($17::jsonb IS NULL OR g.common_labels @> $17::jsonb)
-  AND ($18::text IS NULL OR g.title ILIKE $18::text
-       OR g.summary ILIKE $18::text)
-  AND ($19::timestamptz IS NULL
-       OR (g.created_at, g.id) > ($19::timestamptz, $20::bigint))
+  AND ($17::boolean IS NULL OR g.unclaimed = $17::boolean)
+  AND ($18::jsonb IS NULL OR g.common_labels @> $18::jsonb)
+  AND ($19::text IS NULL OR g.title ILIKE $19::text
+       OR g.summary ILIKE $19::text)
+  AND ($20::timestamptz IS NULL
+       OR (g.created_at, g.id) > ($20::timestamptz, $21::bigint))
 ORDER BY g.created_at, g.id
-LIMIT $21
+LIMIT $22
 `
 
 type ListGroupsStartedAscParams struct {
@@ -1778,6 +1935,7 @@ type ListGroupsStartedAscParams struct {
 	OwnerID         pgtype.Int8
 	SnoozedNoEnd    pgtype.Bool
 	DeliveryProblem pgtype.Bool
+	Unclaimed       pgtype.Bool
 	Contains        []byte
 	Pattern         pgtype.Text
 	AfterAt         pgtype.Timestamptz
@@ -1817,6 +1975,10 @@ type ListGroupsStartedAscRow struct {
 	NewerNumber                int64
 	RouteDeleted               bool
 	DeliveryProblem            bool
+	Unclaimed                  bool
+	NextNoticeKind             string
+	NextNoticeAt               time.Time
+	ReminderPending            bool
 }
 
 // ListGroupsStartedAsc reads a batch of the Alert Group list, oldest start first, after the cursor when given.
@@ -1838,6 +2000,7 @@ func (q *Queries) ListGroupsStartedAsc(ctx context.Context, arg ListGroupsStarte
 		arg.OwnerID,
 		arg.SnoozedNoEnd,
 		arg.DeliveryProblem,
+		arg.Unclaimed,
 		arg.Contains,
 		arg.Pattern,
 		arg.AfterAt,
@@ -1883,6 +2046,10 @@ func (q *Queries) ListGroupsStartedAsc(ctx context.Context, arg ListGroupsStarte
 			&i.NewerNumber,
 			&i.RouteDeleted,
 			&i.DeliveryProblem,
+			&i.Unclaimed,
+			&i.NextNoticeKind,
+			&i.NextNoticeAt,
+			&i.ReminderPending,
 		); err != nil {
 			return nil, err
 		}
@@ -1903,7 +2070,11 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem,
+       g.unclaimed, coalesce(nn.kind, '')::text AS next_notice_kind,
+       coalesce(nn.deadline, '0001-01-01 00:00:00+00')::timestamptz AS next_notice_at,
+       (g.status = 'acknowledged' AND g.reminders_sent > 0
+        AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -1920,6 +2091,11 @@ JOIN LATERAL (SELECT EXISTS (SELECT 1
                                AND (d.state IN ('not_delivered', 'deleted_in_messenger')
                                     OR (d.state = 'pending' AND ds.health = 'broken')
                                     OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
+LEFT JOIN LATERAL (SELECT t.kind, t.deadline
+                   FROM timers t
+                   WHERE t.org_id = g.org_id AND t.alert_group_id = g.id AND t.kind IN ('ack_timeout', 'reminder')
+                   ORDER BY t.deadline
+                   LIMIT 1) nn ON true
 WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($3::bigint IS NULL OR g.number = $3::bigint)
   AND ($3::bigint IS NOT NULL
@@ -1938,13 +2114,14 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
        OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
   AND ($16::boolean IS NULL
        OR dp.delivery_problem = $16::boolean)
-  AND ($17::jsonb IS NULL OR g.common_labels @> $17::jsonb)
-  AND ($18::text IS NULL OR g.title ILIKE $18::text
-       OR g.summary ILIKE $18::text)
-  AND ($19::timestamptz IS NULL
-       OR (g.created_at, g.id) < ($19::timestamptz, $20::bigint))
+  AND ($17::boolean IS NULL OR g.unclaimed = $17::boolean)
+  AND ($18::jsonb IS NULL OR g.common_labels @> $18::jsonb)
+  AND ($19::text IS NULL OR g.title ILIKE $19::text
+       OR g.summary ILIKE $19::text)
+  AND ($20::timestamptz IS NULL
+       OR (g.created_at, g.id) < ($20::timestamptz, $21::bigint))
 ORDER BY g.created_at DESC, g.id DESC
-LIMIT $21
+LIMIT $22
 `
 
 type ListGroupsStartedDescParams struct {
@@ -1964,6 +2141,7 @@ type ListGroupsStartedDescParams struct {
 	OwnerID         pgtype.Int8
 	SnoozedNoEnd    pgtype.Bool
 	DeliveryProblem pgtype.Bool
+	Unclaimed       pgtype.Bool
 	Contains        []byte
 	Pattern         pgtype.Text
 	AfterAt         pgtype.Timestamptz
@@ -2003,6 +2181,10 @@ type ListGroupsStartedDescRow struct {
 	NewerNumber                int64
 	RouteDeleted               bool
 	DeliveryProblem            bool
+	Unclaimed                  bool
+	NextNoticeKind             string
+	NextNoticeAt               time.Time
+	ReminderPending            bool
 }
 
 // The Alert Group list (C-09.FR-13) reads the summary rows in one of four orders. Every query runs with the plan of its
@@ -2014,7 +2196,8 @@ type ListGroupsStartedDescRow struct {
 // and is ignored for a number. Label Matchers other than = with a value are matched in Go on common_labels, after
 // these conditions; urgency and the newer open Alert Group are derived as in GetGroup. The Owner filter, with
 // @owner_set, selects the Alert Groups the User @owner_id owns, or nobody owns when it is null. The Delivery problem
-// (C-13.FR-12) is derived as in GetGroup.
+// (C-13.FR-12) and the next notice (C-17.FR-9) are derived as in GetGroup; @unclaimed selects the Unclaimed Alert Groups
+// or the others (C-09.FR-13).
 // ListGroupsStartedDesc reads a batch of the Alert Group list, newest start first, after the cursor when given.
 func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStartedDescParams) ([]ListGroupsStartedDescRow, error) {
 	rows, err := q.db.Query(ctx, listGroupsStartedDesc,
@@ -2034,6 +2217,7 @@ func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStart
 		arg.OwnerID,
 		arg.SnoozedNoEnd,
 		arg.DeliveryProblem,
+		arg.Unclaimed,
 		arg.Contains,
 		arg.Pattern,
 		arg.AfterAt,
@@ -2079,6 +2263,10 @@ func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStart
 			&i.NewerNumber,
 			&i.RouteDeleted,
 			&i.DeliveryProblem,
+			&i.Unclaimed,
+			&i.NextNoticeKind,
+			&i.NextNoticeAt,
+			&i.ReminderPending,
 		); err != nil {
 			return nil, err
 		}
@@ -3143,7 +3331,8 @@ SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, g
        resolve_reason_text, reopen_deadline, prior_status, prior_owner_user_id, prior_snooze_until,
        prior_snooze_no_end, prior_snoozed_while_urgent, prior_snoozed_by_user_id,
        prior_snoozed_by_service_account_id, grace_deadline, firing_again_after_id, event_seq, created_at,
-       last_changed_at, first_acknowledged_at
+       last_changed_at, first_acknowledged_at, first_published_at, ack_timeout_started_at, ack_timeout_notices_sent,
+       unclaimed, reminders_sent, reminders_unanswered, last_reminder_at, owner_answered_at
 FROM alert_groups
 WHERE org_id = $1 AND id = ANY($2::bigint[])
 ORDER BY id
@@ -3203,6 +3392,14 @@ type LockGroupsRow struct {
 	CreatedAt                      time.Time
 	LastChangedAt                  time.Time
 	FirstAcknowledgedAt            pgtype.Timestamptz
+	FirstPublishedAt               pgtype.Timestamptz
+	AckTimeoutStartedAt            pgtype.Timestamptz
+	AckTimeoutNoticesSent          int64
+	Unclaimed                      bool
+	RemindersSent                  int64
+	RemindersUnanswered            int64
+	LastReminderAt                 pgtype.Timestamptz
+	OwnerAnsweredAt                pgtype.Timestamptz
 }
 
 // LockGroups locks Alert Groups for a change, in id order, so that two transactions never wait for each other.
@@ -3263,6 +3460,14 @@ func (q *Queries) LockGroups(ctx context.Context, arg LockGroupsParams) ([]LockG
 			&i.CreatedAt,
 			&i.LastChangedAt,
 			&i.FirstAcknowledgedAt,
+			&i.FirstPublishedAt,
+			&i.AckTimeoutStartedAt,
+			&i.AckTimeoutNoticesSent,
+			&i.Unclaimed,
+			&i.RemindersSent,
+			&i.RemindersUnanswered,
+			&i.LastReminderAt,
+			&i.OwnerAnsweredAt,
 		); err != nil {
 			return nil, err
 		}
@@ -3581,8 +3786,12 @@ SET route_id = $1, moved_from_route_id = $2, title = $3,
     prior_snoozed_by_user_id = $34,
     prior_snoozed_by_service_account_id = $35,
     grace_deadline = $36, event_seq = $37, last_changed_at = $38,
-    first_acknowledged_at = $39
-WHERE org_id = $40 AND id = $41
+    first_acknowledged_at = $39,
+    first_published_at = $40, ack_timeout_started_at = $41,
+    ack_timeout_notices_sent = $42, unclaimed = $43, reminders_sent = $44,
+    reminders_unanswered = $45, last_reminder_at = $46,
+    owner_answered_at = $47
+WHERE org_id = $48 AND id = $49
 `
 
 type SaveGroupParams struct {
@@ -3625,6 +3834,14 @@ type SaveGroupParams struct {
 	EventSeq                       int64
 	LastChangedAt                  time.Time
 	FirstAcknowledgedAt            pgtype.Timestamptz
+	FirstPublishedAt               pgtype.Timestamptz
+	AckTimeoutStartedAt            pgtype.Timestamptz
+	AckTimeoutNoticesSent          int64
+	Unclaimed                      bool
+	RemindersSent                  int64
+	RemindersUnanswered            int64
+	LastReminderAt                 pgtype.Timestamptz
+	OwnerAnsweredAt                pgtype.Timestamptz
 	OrgID                          int64
 	ID                             int64
 }
@@ -3671,6 +3888,14 @@ func (q *Queries) SaveGroup(ctx context.Context, arg SaveGroupParams) error {
 		arg.EventSeq,
 		arg.LastChangedAt,
 		arg.FirstAcknowledgedAt,
+		arg.FirstPublishedAt,
+		arg.AckTimeoutStartedAt,
+		arg.AckTimeoutNoticesSent,
+		arg.Unclaimed,
+		arg.RemindersSent,
+		arg.RemindersUnanswered,
+		arg.LastReminderAt,
+		arg.OwnerAnsweredAt,
 		arg.OrgID,
 		arg.ID,
 	)
@@ -3715,11 +3940,11 @@ func (q *Queries) UpdateMemberships(ctx context.Context, arg UpdateMembershipsPa
 }
 
 const upsertTimer = `-- name: UpsertTimer :exec
-INSERT INTO timers (org_id, alert_group_id, kind, deadline, created_at, updated_at)
-VALUES ($1, $2::bigint, $3, $4, $5, $5)
+INSERT INTO timers (org_id, alert_group_id, kind, deadline, notice_number, created_at, updated_at)
+VALUES ($1, $2::bigint, $3, $4, $5, $6, $6)
 ON CONFLICT (alert_group_id, kind) WHERE alert_group_id IS NOT NULL
-DO UPDATE SET deadline = excluded.deadline, lease_owner = NULL, lease_until = NULL, attempts = 0,
-              updated_at = excluded.updated_at
+DO UPDATE SET deadline = excluded.deadline, notice_number = excluded.notice_number, lease_owner = NULL,
+              lease_until = NULL, attempts = 0, updated_at = excluded.updated_at
 `
 
 type UpsertTimerParams struct {
@@ -3727,16 +3952,19 @@ type UpsertTimerParams struct {
 	AlertGroupID int64
 	Kind         string
 	Deadline     time.Time
+	NoticeNumber pgtype.Int8
 	Now          time.Time
 }
 
-// UpsertTimer sets the deadline of an Alert Group's timer of a kind, free of any lease.
+// UpsertTimer sets the deadline of an Alert Group's timer of a kind, with the number of the notice or Reminder it
+// stands for, free of any lease.
 func (q *Queries) UpsertTimer(ctx context.Context, arg UpsertTimerParams) error {
 	_, err := q.db.Exec(ctx, upsertTimer,
 		arg.OrgID,
 		arg.AlertGroupID,
 		arg.Kind,
 		arg.Deadline,
+		arg.NoticeNumber,
 		arg.Now,
 	)
 	return err

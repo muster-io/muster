@@ -39,6 +39,8 @@ type fakeRoute struct {
 	dbgen.LockRoutesRow
 	name    string
 	deleted bool
+	// timers is the timer policy of the Route; the zero policy has no ack timeout and no Reminders.
+	timers dbgen.GetTimerPolicyRow
 }
 
 // fakeMember is an alert_group_alerts row.
@@ -69,6 +71,9 @@ type fakeDB struct {
 	members  []*fakeMember
 	entries  []*fakeEntry
 	timers   map[string]time.Time
+	// notices are the notice numbers of the timers, by the same key, and upserts how often each was set.
+	notices  map[string]int64
+	upserts  map[string]int
 	counter  *int64
 	notified int
 	users    map[int64]dbgen.ListUserRefsRow
@@ -102,7 +107,8 @@ func newDB() *fakeDB {
 	return &fakeDB{settings: dbgen.GetGroupingSettingsRow{CriticalIsUrgent: true,
 		InstanceLabels: []string{"pod", "instance", "container", "endpoint"}}, routes: map[int64]*fakeRoute{},
 		alerts: map[int64]*dbgen.ListChangedAlertsRow{}, groups: map[int64]*dbgen.LockGroupsRow{},
-		timers: map[string]time.Time{}, users: map[int64]dbgen.ListUserRefsRow{},
+		timers: map[string]time.Time{}, notices: map[string]int64{}, upserts: map[string]int{},
+		users:    map[int64]dbgen.ListUserRefsRow{},
 		accounts: map[int64]dbgen.ListServiceAccountRefsRow{}, ints: map[int64]dbgen.ListIntegrationRefsRow{},
 		keys: map[int64][]string{}, fail: map[string]error{}, calls: map[string]int{}, before: map[string]func(){},
 		nextID: 100, details: 90, summaries: 730, timeZone: "UTC"}
@@ -223,6 +229,19 @@ func (f *fakeDB) GetRoutePolicy(_ context.Context, arg dbgen.GetRoutePolicyParam
 		return dbgen.GetRoutePolicyRow{}, pgx.ErrNoRows
 	}
 	return dbgen.GetRoutePolicyRow(r.LockRoutesRow), nil
+}
+
+func (f *fakeDB) GetTimerPolicy(_ context.Context, arg dbgen.GetTimerPolicyParams) (dbgen.GetTimerPolicyRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetTimerPolicy"); err != nil {
+		return dbgen.GetTimerPolicyRow{}, err
+	}
+	r := f.routes[arg.ID]
+	if r == nil || arg.OrgID != orgID {
+		return dbgen.GetTimerPolicyRow{}, pgx.ErrNoRows
+	}
+	return r.timers, nil
 }
 
 func (f *fakeDB) FindOpenGroup(_ context.Context, arg dbgen.FindOpenGroupParams) (int64, error) {
@@ -367,6 +386,9 @@ func (f *fakeDB) SaveGroup(_ context.Context, a dbgen.SaveGroupParams) error {
 	if err := f.call("SaveGroup"); err != nil {
 		return err
 	}
+	if a.Unclaimed && a.Status != "firing" {
+		return errors.New(`new row for relation "alert_groups" violates check constraint "alert_groups_unclaimed_check"`)
+	}
 	g := f.groups[a.ID]
 	g.RouteID, g.MovedFromRouteID, g.Title, g.TitleFromGroupKey, g.Summary = a.RouteID, a.MovedFromRouteID, a.Title,
 		a.TitleFromGroupKey, a.Summary
@@ -387,6 +409,10 @@ func (f *fakeDB) SaveGroup(_ context.Context, a dbgen.SaveGroupParams) error {
 		a.PriorSnoozedByServiceAccountID
 	g.GraceDeadline, g.EventSeq, g.LastChangedAt = a.GraceDeadline, a.EventSeq, a.LastChangedAt
 	g.FirstAcknowledgedAt = a.FirstAcknowledgedAt
+	g.FirstPublishedAt, g.AckTimeoutStartedAt, g.AckTimeoutNoticesSent = a.FirstPublishedAt, a.AckTimeoutStartedAt,
+		a.AckTimeoutNoticesSent
+	g.Unclaimed, g.RemindersSent, g.RemindersUnanswered = a.Unclaimed, a.RemindersSent, a.RemindersUnanswered
+	g.LastReminderAt, g.OwnerAnsweredAt = a.LastReminderAt, a.OwnerAnsweredAt
 	return nil
 }
 
@@ -540,6 +566,8 @@ func (f *fakeDB) UpsertTimer(_ context.Context, arg dbgen.UpsertTimerParams) err
 		return err
 	}
 	f.timers[timerKey(arg.AlertGroupID, arg.Kind)] = arg.Deadline
+	f.notices[timerKey(arg.AlertGroupID, arg.Kind)] = arg.NoticeNumber.Int64
+	f.upserts[timerKey(arg.AlertGroupID, arg.Kind)]++
 	return nil
 }
 
@@ -550,6 +578,7 @@ func (f *fakeDB) DeleteTimer(_ context.Context, arg dbgen.DeleteTimerParams) err
 		return err
 	}
 	delete(f.timers, timerKey(arg.AlertGroupID, arg.Kind))
+	delete(f.notices, timerKey(arg.AlertGroupID, arg.Kind))
 	return nil
 }
 
@@ -649,8 +678,9 @@ func (f *fakeDB) GetGroup(_ context.Context, arg dbgen.GetGroupParams) (dbgen.Ge
 		RoutePublicID: r.PublicID, RouteName: r.name, RetentionAlertDetailsDays: f.details,
 		OwnerUserID: g.OwnerUserID, SnoozeUntil: g.SnoozeUntil, SnoozedByUserID: g.SnoozedByUserID,
 		SnoozedByServiceAccountID: g.SnoozedByServiceAccountID, RouteDeleted: r.deleted,
-		DeliveryProblem: f.problems[g.ID]}
+		DeliveryProblem: f.problems[g.ID], Unclaimed: g.Unclaimed, ReminderPending: rowReminderPending(g)}
 	out.NewerPublicID, out.NewerNumber = f.newer(g)
+	out.NextNoticeKind, out.NextNoticeAt = f.nextNotice(g.ID)
 	if g.FiringAgainAfterID.Valid {
 		out.FiringAgainAfterNumber = f.groups[g.FiringAgainAfterID.Int64].Number
 	}

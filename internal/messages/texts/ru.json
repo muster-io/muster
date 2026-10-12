@@ -49,7 +49,6 @@
   "reason.integration_deleted": "интеграция удалена",
   "reason.resolved": "все алерты закрыты",
   "reason.stale": "алерты устарели (Stale)",
-  "reply.ackTimeout": "Эту группу алертов ещё никто не подтвердил.",
   "reply.alertsAdded": "Новые алерты ({count}):",
   "reply.autoUnacknowledged": "Подтверждение снято: на напоминания никто не ответил.",
   "reply.more": "…и ещё {count} — смотрите в Muster",

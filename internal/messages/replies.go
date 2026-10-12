@@ -38,16 +38,25 @@ const (
 )
 
 // ReplyInput is a Thread reply to render: its lifecycle event, the number of the first event it stands for, the
-// fingerprints of the new Alerts it lists and how many it lists at most.
+// fingerprints of the new Alerts it lists and how many it lists at most. An ack timeout notice renders the Route's
+// template for Markup, plain text when empty; a failing template is reported to Fallback with its detail, and what to
+// run once the transaction of the render committed — the counter and the log line of a failure — is handed to After,
+// or run at once when After is nil.
 type ReplyInput struct {
 	Event        string
 	Seq          int64
 	Fingerprints []string
 	Listed       int
+	Markup       Markup
+	After        func(f func(context.Context))
+	Fallback     func(detail string)
 }
 
 // Reply renders the Thread reply in of the Alert Group groupID, reading through db.
 func (r *Renderer) Reply(ctx context.Context, db DBTX, groupID int64, in ReplyInput) (Message, error) {
+	if in.Event == EventAckTimeout {
+		return r.ackTimeoutNotice(ctx, db, groupID, in)
+	}
 	src, err := r.loadGroup(ctx, db, groupID)
 	if err != nil {
 		return Message{}, err
@@ -99,6 +108,12 @@ func (r *Renderer) Reply(ctx context.Context, db DBTX, groupID int64, in ReplyIn
 			return Message{}, err
 		}
 		m.Lines = []string{N(lang, "reply.noticesMissed", max(e.MissedCount, 1), nil)}
+	case EventReminder:
+		e, err := entry()
+		if err != nil {
+			return Message{}, err
+		}
+		m.Lines = []string{T(lang, "reply.reminder", Args{"user": Value(cmp.Or(e.OwnerName, src.Owner))})}
 	default:
 		m.Lines = []string{replyText(src, lang, in.Event)}
 	}
@@ -118,16 +133,66 @@ func replyText(src *Source, lang, event string) string {
 		return T(lang, "reply.urgent", nil)
 	case EventResolved:
 		return T(lang, "reply.resolvedAutomatically", Args{"reason": reason(lang, src.ResolveReason)})
-	case EventAckTimeout:
-		return T(lang, "reply.ackTimeout", nil)
 	case EventUnclaimed:
 		return T(lang, "reply.unclaimed", nil)
-	case EventReminder:
-		return T(lang, "reply.reminder", Args{"user": Value(src.Owner)})
 	case EventAutoUnacknowledged:
 		return T(lang, "reply.autoUnacknowledged", nil)
 	}
 	return "#" + strconv.FormatInt(src.Number, 10) + " " + event
+}
+
+// ackTimeoutNotice is an ack timeout notice (C-17.FR-2, C-12.FR-4): the Route's ack_timeout_notice template, or the
+// built-in one, rendered in the sandbox on the Alert Group with its Alerts, and only links — "Open in Muster" and the
+// Alert Group's links — without buttons. A Route template that fails gives way to the built-in one and is settled as
+// for the Root message (C-12.FR-6): the Route's template error and MusterTemplateError in the transaction db, and
+// muster_template_errors_total and the log line once it committed.
+func (r *Renderer) ackTimeoutNotice(ctx context.Context, db DBTX, groupID int64, in ReplyInput) (Message, error) {
+	src, err := r.Load(ctx, db, groupID)
+	if err != nil {
+		return Message{}, err
+	}
+	lang, markup := language(src.Route.Language), cmp.Or(in.Markup, MarkupPlain)
+	builtin := BuiltinSource(TemplateAckTimeoutNotice, lang)
+	source := cmp.Or(deref(src.Route.AckTimeoutNotice), builtin)
+	var failures []Failure
+	var rendered []string
+	text, err := r.notice(source, src, markup)
+	switch {
+	case err != nil && source != builtin:
+		failures = []Failure{{Template: TemplateAckTimeoutNotice, Error: sandboxError(err)}}
+		if text, err = r.notice(builtin, src, markup); err != nil {
+			return Message{}, fmt.Errorf("render the built-in ack timeout notice: %w", err)
+		}
+	case err != nil:
+		return Message{}, fmt.Errorf("render the built-in ack timeout notice: %w", err)
+	case source != builtin:
+		rendered = []string{TemplateAckTimeoutNotice}
+	}
+	after, err := r.Settle(ctx, db, src, failures, rendered)
+	if err != nil {
+		return Message{}, err
+	}
+	for _, f := range failures {
+		if in.Fallback != nil {
+			in.Fallback(f.Detail())
+		}
+	}
+	if in.After != nil {
+		in.After(after)
+	} else {
+		after(ctx)
+	}
+	return Message{Kind: KindReply, Language: lang, TimeZone: src.TimeZone, Colour: src.Status, Buttons: []Button{},
+		Body: &Body{Text: Neutralize(text), Markup: markup},
+		Links: append([]Link{{Text: T(lang, "link.open", nil), URL: r.GroupURL(src.PublicID)}},
+			linksOf(src.Links, lang)...)}, nil
+}
+
+// notice runs the ack_timeout_notice template source on src for markup and records how long it took.
+func (r *Renderer) notice(source string, src *Source, markup Markup) (string, error) {
+	start := r.real.Now()
+	defer func() { observe(TemplateAckTimeoutNotice, r.real.Now().Sub(start)) }()
+	return r.execute(TemplateAckTimeoutNotice, source, SafeData(r.data(src), markup))
 }
 
 // newAlerts are the lines of a new-Alert Thread reply: "New alerts (N):", one line per new Alert with its labels that

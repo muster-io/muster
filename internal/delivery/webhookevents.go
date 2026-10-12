@@ -57,6 +57,7 @@ type webhookEventQueries interface {
 	RenewWebhookEventLease(ctx context.Context, arg dbgen.RenewWebhookEventLeaseParams) error
 	RescheduleWebhookEvent(ctx context.Context, arg dbgen.RescheduleWebhookEventParams) error
 	RecordWebhookEventDelivered(ctx context.Context, arg dbgen.RecordWebhookEventDeliveredParams) (int64, error)
+	GetCreatedEventDeliveredAt(ctx context.Context, arg dbgen.GetCreatedEventDeliveredAtParams) (time.Time, error)
 	RecordWebhookEventRetry(ctx context.Context, arg dbgen.RecordWebhookEventRetryParams) (
 		dbgen.RecordWebhookEventRetryRow, error)
 	RecordWebhookEventNotDelivered(ctx context.Context, arg dbgen.RecordWebhookEventNotDeliveredParams) (int64, error)
@@ -337,6 +338,31 @@ func (w *Worker) releaseEvent(ctx context.Context, q queries, org, id int64, rea
 	return wipeSecrets(ctx, q, org, dest, realNow)
 }
 
+// eventPublished marks, once committed, the first Publication of an Alert Group in an outgoing webhook in the events
+// mode, which has no Root message (C-17.FR-1, C-15.AC-11): its created event delivered at now; for a later event
+// delivered while the Alert Group is still unmarked, when its created event was delivered there, or at now when none
+// was (a webhook added to a Route with open Alert Groups, or a created event not delivered).
+func (w *Worker) eventPublished(ctx context.Context, q queries, org int64, a eventAttempt, now time.Time,
+	logs *after) error {
+	if !a.row.GroupUnpublished {
+		return nil
+	}
+	at := now
+	if a.row.Event != string(groups.EventCreated) {
+		created, err := q.GetCreatedEventDeliveredAt(ctx, dbgen.GetCreatedEventDeliveredAtParams{OrgID: org,
+			DestinationID: a.destination.ID, AlertGroupID: a.row.AlertGroupID})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return fmt.Errorf("read when the created event was delivered: %w", err)
+		default:
+			at = created
+		}
+	}
+	logs.add(w.markPublished(a.row.AlertGroupID, at))
+	return nil
+}
+
 func (w *Worker) recordEventOutcome(ctx context.Context, q queries, org int64, a eventAttempt, out Outcome,
 	now time.Time, logs *after) (bool, error) {
 	id, d := a.row.ID, a.destination
@@ -350,6 +376,9 @@ func (w *Worker) recordEventOutcome(ctx context.Context, q queries, org int64, a
 		}
 		if err != nil {
 			return false, fmt.Errorf("record the delivered webhook event: %w", err)
+		}
+		if err := w.eventPublished(ctx, q, org, a, now, logs); err != nil {
+			return false, err
 		}
 		if broken {
 			return true, markHealthy(ctx, q, w.raiser(org), org, d.ID, now, logs)

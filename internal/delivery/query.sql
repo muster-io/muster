@@ -148,7 +148,8 @@ RETURNING d.id, d.urgent, d.next_attempt_at, d.last_delivered_at;
 -- Desired state, whether its next call is the final edit, its actual message — published or not, and for an outgoing
 -- webhook in the template mode the values extracted from its responses — its notes, its Destination with its health
 -- and, for Telegram, its channel and discussion group, and its Alert Group, or its Storm for a Storm summary, whose
--- Alert Group fields are empty. No row when the lease ran out or went to another replica.
+-- Alert Group fields are empty, with whether the Alert Group still waits for its first Publication to be marked
+-- (C-17.FR-1). No row when the lease ran out or went to another replica.
 -- name: GetLeasedDelivery :one
 SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id, d.desired_version,
        d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
@@ -158,7 +159,7 @@ SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id
        ds.telegram_discussion_chat_id,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
        coalesce(g.status, '')::text AS group_status, coalesce(g.created_at, d.created_at)::timestamptz AS group_created_at,
-       g.resolved_at AS group_resolved_at
+       g.resolved_at AS group_resolved_at, (g.id IS NOT NULL AND g.first_published_at IS NULL)::boolean AS group_unpublished
 FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
 LEFT JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
@@ -1369,18 +1370,29 @@ WHERE e.org_id = @org_id AND e.id = due.id
 RETURNING e.id, e.next_attempt_at;
 
 -- GetLeasedWebhookEvent reads, and locks, a pending event whose lease this replica still holds at the real time now,
--- with its Destination and its Alert Group. No row when the lease ran out, went to another replica, or the event
--- ended meanwhile.
+-- with its Destination and its Alert Group, and whether the Alert Group still waits for its first Publication to be
+-- marked (C-17.FR-1). No row when the lease ran out, went to another replica, or the event ended meanwhile.
 -- name: GetLeasedWebhookEvent :one
 SELECT e.id, e.alert_group_id, e.sequence, e.webhook_id, e.event, e.body, e.attempts, e.received_at,
        ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       ds.type AS destination_type, ds.health AS destination_health, g.public_id AS alert_group_public_id, g.number
+       ds.type AS destination_type, ds.health AS destination_health, g.public_id AS alert_group_public_id, g.number,
+       (g.first_published_at IS NULL)::boolean AS group_unpublished
 FROM webhook_events e
 JOIN destinations ds ON ds.org_id = e.org_id AND ds.id = e.destination_id
 JOIN alert_groups g ON g.org_id = e.org_id AND g.id = e.alert_group_id
 WHERE e.org_id = @org_id AND e.id = @id AND e.state = 'pending' AND e.lease_owner = @owner::text
   AND e.lease_until > @now::timestamptz
 FOR UPDATE OF e;
+
+-- GetCreatedEventDeliveredAt reads when the created event of an Alert Group was delivered to an outgoing webhook in
+-- the events mode, its first Publication there (C-17.FR-1); no row while it is not delivered.
+-- name: GetCreatedEventDeliveredAt :one
+SELECT delivered_at::timestamptz
+FROM webhook_events
+WHERE org_id = @org_id AND destination_id = @destination_id AND alert_group_id = @alert_group_id
+  AND event = 'created' AND state = 'delivered'
+ORDER BY sequence
+LIMIT 1;
 
 -- RenewWebhookEventLease extends the lease of an event this replica holds before its call.
 -- name: RenewWebhookEventLease :exec
@@ -1491,3 +1503,19 @@ WHERE t.org_id = @org_id AND t.id IN (SELECT e.id
                                       ORDER BY e.created_at, e.id
                                       LIMIT @batch_size
                                       FOR UPDATE SKIP LOCKED);
+
+-- ReminderReached reports whether the Reminder recorded as the lifecycle event @seq of an Alert Group reached at least
+-- one Destination (C-17.FR-5, D298): a Thread reply carrying it was sent, or its reminder event was delivered to an
+-- events-mode outgoing webhook. A reply dropped while its Destination was Broken, or still waiting, did not reach it.
+-- name: ReminderReached :one
+SELECT (EXISTS (SELECT 1
+                FROM deliveries d
+                JOIN thread_replies r ON r.org_id = d.org_id AND r.delivery_id = d.id
+                WHERE d.org_id = @org_id AND d.alert_group_id = @alert_group_id::bigint AND r.org_id = @org_id
+                  AND r.state = 'sent' AND @seq::bigint = ANY(r.event_seqs))
+        OR EXISTS (SELECT 1
+                   FROM destinations ds
+                   JOIN webhook_events e ON e.org_id = ds.org_id AND e.destination_id = ds.id
+                   WHERE ds.org_id = @org_id AND ds.type = 'webhook' AND e.org_id = @org_id
+                     AND e.alert_group_id = @alert_group_id::bigint AND e.sequence = @seq::bigint
+                     AND e.state = 'delivered'))::boolean AS reached;

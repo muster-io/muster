@@ -3822,6 +3822,7 @@ paths:
         Refused with `409` `command-refused` and the codes `not_owner`, `no_reminder_pending` and, for a Service account token,
         `owner_must_be_user`.
       x-permission: alert-groups:acknowledge
+      x-permission-check: dispatcher
       x-listener: app
       security:
       - sessionCookie: []

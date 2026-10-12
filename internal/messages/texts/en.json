@@ -47,7 +47,6 @@
   "reason.integration_deleted": "the Integration was deleted",
   "reason.resolved": "all alerts resolved",
   "reason.stale": "the alerts are Stale",
-  "reply.ackTimeout": "Nobody has acknowledged this Alert Group yet.",
   "reply.alertsAdded": "New alerts ({count}):",
   "reply.autoUnacknowledged": "The acknowledgement was released: nobody answered the Reminders.",
   "reply.more": "…and {count} more — open in Muster",

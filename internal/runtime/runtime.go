@@ -795,6 +795,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		RunbookBase: p.cfg.RunbookBaseURL.String(), Real: p.clocks.Real, Bodies: p.webhooks, Mentions: p.mentions,
 		Requests: p.requests})
 	p.groups.SetRerender(p.delivery.Enqueue)
+	p.groups.SetReminderReached(p.delivery.ReminderReached)
 	// Destinations added to or removed from a Route, or deleted, publish there or get their final edit (C-11.FR-14).
 	p.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, routeID int64, added, removed []int64) error {
 		return p.delivery.RouteDestinationsChanged(ctx, tx, routeID, added, removed)
@@ -1147,6 +1148,7 @@ func (p *process) configureWorker() {
 	p.deliverer.Renderer = delivery.MessageRenderer{Renderer: p.renderer}
 	p.deliverer.Mentions = p.mentions
 	p.deliverer.Events = p.requests
+	p.deliverer.Published = p.groups.MarkPublished
 	p.timers.Handlers = map[string]timers.Handler{
 		delivery.TimerStormCalmCheck: func(ctx context.Context, tx timersdb.DBTX, org int64, t timers.Timer) (
 			func(context.Context), error) {
@@ -1168,6 +1170,17 @@ func (p *process) configureWorker() {
 			func(context.Context), error) {
 			return p.groups.EndSnooze(ctx, tx, id)
 		}),
+		groups.TimerAckTimeout: groupTimer(p.orgID, func(ctx context.Context, tx timersdb.DBTX, id int64) (
+			func(context.Context), error) {
+			return p.groups.FireAckTimeout(ctx, tx, id)
+		}),
+		groups.TimerReminder: func(ctx context.Context, tx timersdb.DBTX, org int64, t timers.Timer) (
+			func(context.Context), error) {
+			if org != p.orgID || t.AlertGroupID == nil {
+				return nil, nil
+			}
+			return p.groups.FireReminder(ctx, tx, *t.AlertGroupID, t.Deadline)
+		},
 	}
 }
 

@@ -31,16 +31,6 @@ const (
 	FormNothing        Form = "nothing"
 )
 
-// The lifecycle events of the timers (C-17.FR-11), which the timers record from S-049 on.
-const (
-	EventAckTimeout         groups.Event = "ack_timeout"
-	EventUnclaimed          groups.Event = "unclaimed"
-	EventReminder           groups.Event = "reminder"
-	EventReminderAnswered   groups.Event = "reminder_answered"
-	EventAutoUnacknowledged groups.Event = "auto_unacknowledged"
-	EventNoticesMissed      groups.Event = "notices_missed"
-)
-
 // VariantSystem is resolved by the system (C-09.FR-22), whose row differs from a person's Resolve (C-10.FR-15, the
 // variant groups.VariantCommand); the groups package records both as one event.
 const VariantSystem groups.Variant = "system"
@@ -94,12 +84,14 @@ var Table = []Row{
 	{groups.EventSnoozed, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventUnsnoozed, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventNoteAdded, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
-	{EventAckTimeout, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionAckTimeout}, false},
-	{EventUnclaimed, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
-	{EventReminder, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionOwner}, false},
-	{EventReminderAnswered, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
-	{EventAutoUnacknowledged, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionOwner}, false},
-	{EventNoticesMissed, groups.VariantAny, FormReply, groups.Loud, nil, true},
+	{groups.EventAckTimeout, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionAckTimeout},
+		false},
+	{groups.EventUnclaimed, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
+	{groups.EventReminder, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionOwner}, false},
+	{groups.EventReminderAnswered, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
+	{groups.EventAutoUnacknowledged, groups.VariantAny, FormReply, groups.Loud,
+		[]groups.Mention{groups.MentionOwner}, false},
+	{groups.EventNoticesMissed, groups.VariantAny, FormReply, groups.Loud, nil, true},
 }
 
 // EventRow is a row of the Loud/Quiet table of delivery events (reference.md, Loud and Quiet): what delivery

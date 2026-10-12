@@ -1005,6 +1005,30 @@ func (q *Queries) GetActiveStorm(ctx context.Context, arg GetActiveStormParams) 
 	return i, err
 }
 
+const getCreatedEventDeliveredAt = `-- name: GetCreatedEventDeliveredAt :one
+SELECT delivered_at::timestamptz
+FROM webhook_events
+WHERE org_id = $1 AND destination_id = $2 AND alert_group_id = $3
+  AND event = 'created' AND state = 'delivered'
+ORDER BY sequence
+LIMIT 1
+`
+
+type GetCreatedEventDeliveredAtParams struct {
+	OrgID         int64
+	DestinationID int64
+	AlertGroupID  int64
+}
+
+// GetCreatedEventDeliveredAt reads when the created event of an Alert Group was delivered to an outgoing webhook in
+// the events mode, its first Publication there (C-17.FR-1); no row while it is not delivered.
+func (q *Queries) GetCreatedEventDeliveredAt(ctx context.Context, arg GetCreatedEventDeliveredAtParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getCreatedEventDeliveredAt, arg.OrgID, arg.DestinationID, arg.AlertGroupID)
+	var delivered_at time.Time
+	err := row.Scan(&delivered_at)
+	return delivered_at, err
+}
+
 const getDestinationState = `-- name: GetDestinationState :one
 SELECT public_id, health, (template_error IS NOT NULL)::boolean AS template_error_set
 FROM destinations
@@ -1080,7 +1104,7 @@ SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id
        ds.telegram_discussion_chat_id,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
        coalesce(g.status, '')::text AS group_status, coalesce(g.created_at, d.created_at)::timestamptz AS group_created_at,
-       g.resolved_at AS group_resolved_at
+       g.resolved_at AS group_resolved_at, (g.id IS NOT NULL AND g.first_published_at IS NULL)::boolean AS group_unpublished
 FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
 LEFT JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
@@ -1128,13 +1152,15 @@ type GetLeasedDeliveryRow struct {
 	GroupStatus              string
 	GroupCreatedAt           time.Time
 	GroupResolvedAt          pgtype.Timestamptz
+	GroupUnpublished         bool
 }
 
 // GetLeasedDelivery reads, and locks, a delivery whose lease this replica still holds at the real time now: its latest
 // Desired state, whether its next call is the final edit, its actual message — published or not, and for an outgoing
 // webhook in the template mode the values extracted from its responses — its notes, its Destination with its health
 // and, for Telegram, its channel and discussion group, and its Alert Group, or its Storm for a Storm summary, whose
-// Alert Group fields are empty. No row when the lease ran out or went to another replica.
+// Alert Group fields are empty, with whether the Alert Group still waits for its first Publication to be marked
+// (C-17.FR-1). No row when the lease ran out or went to another replica.
 func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryParams) (GetLeasedDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, getLeasedDelivery,
 		arg.OrgID,
@@ -1176,6 +1202,7 @@ func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryPa
 		&i.GroupStatus,
 		&i.GroupCreatedAt,
 		&i.GroupResolvedAt,
+		&i.GroupUnpublished,
 	)
 	return i, err
 }
@@ -1291,7 +1318,8 @@ func (q *Queries) GetLeasedReply(ctx context.Context, arg GetLeasedReplyParams) 
 const getLeasedWebhookEvent = `-- name: GetLeasedWebhookEvent :one
 SELECT e.id, e.alert_group_id, e.sequence, e.webhook_id, e.event, e.body, e.attempts, e.received_at,
        ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
-       ds.type AS destination_type, ds.health AS destination_health, g.public_id AS alert_group_public_id, g.number
+       ds.type AS destination_type, ds.health AS destination_health, g.public_id AS alert_group_public_id, g.number,
+       (g.first_published_at IS NULL)::boolean AS group_unpublished
 FROM webhook_events e
 JOIN destinations ds ON ds.org_id = e.org_id AND ds.id = e.destination_id
 JOIN alert_groups g ON g.org_id = e.org_id AND g.id = e.alert_group_id
@@ -1323,11 +1351,12 @@ type GetLeasedWebhookEventRow struct {
 	DestinationHealth   string
 	AlertGroupPublicID  string
 	Number              int64
+	GroupUnpublished    bool
 }
 
 // GetLeasedWebhookEvent reads, and locks, a pending event whose lease this replica still holds at the real time now,
-// with its Destination and its Alert Group. No row when the lease ran out, went to another replica, or the event
-// ended meanwhile.
+// with its Destination and its Alert Group, and whether the Alert Group still waits for its first Publication to be
+// marked (C-17.FR-1). No row when the lease ran out, went to another replica, or the event ended meanwhile.
 func (q *Queries) GetLeasedWebhookEvent(ctx context.Context, arg GetLeasedWebhookEventParams) (GetLeasedWebhookEventRow, error) {
 	row := q.db.QueryRow(ctx, getLeasedWebhookEvent,
 		arg.OrgID,
@@ -1352,6 +1381,7 @@ func (q *Queries) GetLeasedWebhookEvent(ctx context.Context, arg GetLeasedWebhoo
 		&i.DestinationHealth,
 		&i.AlertGroupPublicID,
 		&i.Number,
+		&i.GroupUnpublished,
 	)
 	return i, err
 }
@@ -3350,6 +3380,36 @@ func (q *Queries) ReleaseWebhookEventLease(ctx context.Context, arg ReleaseWebho
 	var destination_id int64
 	err := row.Scan(&destination_id)
 	return destination_id, err
+}
+
+const reminderReached = `-- name: ReminderReached :one
+SELECT (EXISTS (SELECT 1
+                FROM deliveries d
+                JOIN thread_replies r ON r.org_id = d.org_id AND r.delivery_id = d.id
+                WHERE d.org_id = $1 AND d.alert_group_id = $2::bigint AND r.org_id = $1
+                  AND r.state = 'sent' AND $3::bigint = ANY(r.event_seqs))
+        OR EXISTS (SELECT 1
+                   FROM destinations ds
+                   JOIN webhook_events e ON e.org_id = ds.org_id AND e.destination_id = ds.id
+                   WHERE ds.org_id = $1 AND ds.type = 'webhook' AND e.org_id = $1
+                     AND e.alert_group_id = $2::bigint AND e.sequence = $3::bigint
+                     AND e.state = 'delivered'))::boolean AS reached
+`
+
+type ReminderReachedParams struct {
+	OrgID        int64
+	AlertGroupID int64
+	Seq          int64
+}
+
+// ReminderReached reports whether the Reminder recorded as the lifecycle event @seq of an Alert Group reached at least
+// one Destination (C-17.FR-5, D298): a Thread reply carrying it was sent, or its reminder event was delivered to an
+// events-mode outgoing webhook. A reply dropped while its Destination was Broken, or still waiting, did not reach it.
+func (q *Queries) ReminderReached(ctx context.Context, arg ReminderReachedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, reminderReached, arg.OrgID, arg.AlertGroupID, arg.Seq)
+	var reached bool
+	err := row.Scan(&reached)
+	return reached, err
 }
 
 const renewDeliveryLease = `-- name: RenewDeliveryLease :exec

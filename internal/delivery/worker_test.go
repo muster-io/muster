@@ -86,6 +86,8 @@ type (
 		route      int64
 		created    time.Time
 		resolvedAt *time.Time
+		// published is set once its first Publication was marked (first_published_at).
+		published bool
 	}
 	fakeDelivery struct {
 		id, dest, group                     int64
@@ -592,6 +594,7 @@ func (f *fakeDB) GetLeasedDelivery(_ context.Context, arg dbgen.GetLeasedDeliver
 	g := f.groups[d.group]
 	out.AlertGroupPublicID, out.Number, out.GroupStatus, out.GroupCreatedAt, out.GroupResolvedAt = g.publicID,
 		g.number, g.status, g.created, tz(g.resolvedAt)
+	out.GroupUnpublished = !g.published
 	return out, nil
 }
 
@@ -1605,18 +1608,35 @@ func (f *fakeDB) Notify(_ context.Context, h db.Hint) error {
 }
 
 // fakeTx is a transaction of the fake database, which is not transactional.
-type fakeTx struct{ pgx.Tx }
+// fakeTx is a transaction of fakeBeginner, which counts the transactions it began until they end.
+type fakeTx struct {
+	pgx.Tx
+	b    *fakeBeginner
+	done *bool
+}
 
-func (fakeTx) Commit(context.Context) error   { return nil }
-func (fakeTx) Rollback(context.Context) error { return nil }
+func (t fakeTx) end() {
+	if t.b != nil && !*t.done {
+		*t.done = true
+		t.b.open--
+	}
+}
 
-type fakeBeginner struct{ err error }
+func (t fakeTx) Commit(context.Context) error   { t.end(); return nil }
+func (t fakeTx) Rollback(context.Context) error { t.end(); return nil }
+
+// fakeBeginner begins fake transactions; open is how many have not ended.
+type fakeBeginner struct {
+	err  error
+	open int
+}
 
 func (b *fakeBeginner) Begin(context.Context) (pgx.Tx, error) {
 	if b.err != nil {
 		return nil, b.err
 	}
-	return fakeTx{}, nil
+	b.open++
+	return fakeTx{b: b, done: new(bool)}, nil
 }
 
 // env is delivery over the fake database: a Destination of each kind, a Route, the recording adapter and the worker,

@@ -28,6 +28,20 @@ import (
 // with the thread_not_attached delivery event. A reply the messenger refuses because the copy is gone (thread_lost,
 // F-008) is sent again at once without its reply link and makes the Thread unattached the same way.
 
+// ReminderReached reports whether the Reminder recorded as the lifecycle event seq of the Alert Group groupID reached
+// at least one Destination, read through db, the transaction of the timer (C-17.FR-5, D298): a Thread reply carrying it
+// was sent, or its reminder event was delivered to an events-mode outgoing webhook. It is the groups.ReminderCheck of
+// the runtime.
+func (s *Service) ReminderReached(ctx context.Context, db groups.DBTX, groupID, seq int64) (bool, error) {
+	reached, err := s.store.queries(db).ReminderReached(ctx, dbgen.ReminderReachedParams{OrgID: s.orgID,
+		AlertGroupID: groupID, Seq: seq})
+	if err != nil {
+		return false, fmt.Errorf("check whether reminder %d of alert group %d reached a destination: %w", seq, groupID,
+			err)
+	}
+	return reached, nil
+}
+
 // claimReplies leases the due Thread replies of the Organization.
 func (w *Worker) claimReplies(ctx context.Context, org int64) ([]int64, error) {
 	rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
@@ -55,12 +69,17 @@ type replyAttempt struct {
 	root        Root
 	chain       bool
 	anchor      string
+	// after is what its render left to run once the transaction that prepared it committed.
+	after []func(context.Context)
 }
 
 // reply sends one claimed Thread reply; a failure is logged and the reply is attempted again once its lease runs out.
 func (w *Worker) reply(ctx context.Context, org, id int64) {
 	a, ok, err := w.prepareReply(ctx, org, id)
 	if err == nil && ok {
+		for _, f := range a.after {
+			f(ctx)
+		}
 		err = w.sendReply(ctx, org, a)
 	}
 	if err != nil && ctx.Err() == nil {
@@ -129,13 +148,24 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		}
 		var msg Message
 		var webhook *WebhookCall
+		var pending []func(context.Context)
+		var fallbacks []string
 		if sendsRequests(d.Type) {
 			// The request templates render the Alert Group's latest Desired state and the event the reply carries.
 			webhook = &WebhookCall{State: row.DesiredPayload, Response: responseValues(row.ResponseValues),
 				ThreadOpened: row.ThreadOpened, Event: row.Event}
 		} else if msg, err = w.Renderer.Reply(ctx, tx, ReplyView{Event: groups.Event(row.Event), Seq: seq,
-			Fingerprints: row.Fingerprints, Language: row.Language, Listed: ThreadAlertsListed}, g); err != nil {
+			Fingerprints: row.Fingerprints, Language: row.Language, Listed: ThreadAlertsListed,
+			Markup: markupOf(d.Type), After: func(f func(context.Context)) { pending = append(pending, f) },
+			Fallback: func(detail string) { fallbacks = append(fallbacks, detail) }}, g); err != nil {
 			return fmt.Errorf("render the thread reply: %w", err)
+		}
+		// A Route template that failed for the reply is recorded in the Timeline as for the Root message (C-12.FR-6).
+		for _, detail := range fallbacks {
+			if err := q.RecordSystemEntry(ctx, groups.SystemEntry{OrgID: org, AlertGroupID: row.AlertGroupID, At: now,
+				System: groups.SystemFallbackTemplateUsed, Detail: detail}); err != nil {
+				return err
+			}
 		}
 		targets, err := w.targets(ctx, tx, org, d, row.AlertGroupID, seq, groups.Loudness(row.Loudness), mentions)
 		if err != nil {
@@ -144,7 +174,7 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 		a = replyAttempt{row: row, destination: d,
 			call: Call{Class: outbound.ClassDelivery, Destination: d, Loudness: groups.Loudness(row.Loudness),
 				Mentions: mentions, Targets: targets, Webhook: webhook},
-			message: msg, root: root, chain: chain, anchor: root.ThreadAnchorID}
+			message: msg, root: root, chain: chain, anchor: root.ThreadAnchorID, after: pending}
 		ok = true
 		return nil
 	})

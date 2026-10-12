@@ -34,6 +34,7 @@ const (
 	CommandUnresolve     Command = "unresolve"
 	CommandSnooze        Command = "snooze"
 	CommandUnsnooze      Command = "unsnooze"
+	CommandStillOnIt     Command = "still_on_it"
 	CommandAddNote       Command = "add_note"
 )
 
@@ -48,7 +49,7 @@ const (
 // Permission is the Permission the Command needs.
 func (c Command) Permission() auth.Permission {
 	switch c {
-	case CommandAcknowledge, CommandUnacknowledge:
+	case CommandAcknowledge, CommandUnacknowledge, CommandStillOnIt:
 		return PermissionAcknowledge
 	case CommandResolve, CommandUnresolve:
 		return PermissionResolve
@@ -72,6 +73,8 @@ const (
 	ActionSnoozed        = "alert_group.snoozed"
 	ActionUnsnoozed      = "alert_group.unsnoozed"
 	ActionNoteAdded      = "alert_group.note_added"
+	// ActionReminderAnswered is "Still on it" (C-17.FR-10).
+	ActionReminderAnswered = "alert_group.reminder_answered"
 )
 
 // The refusal codes of command-refused (C-10.FR-2), forbidden for a missing Permission, and the codes of the other
@@ -89,6 +92,8 @@ const (
 	CodeForbidden             = "forbidden"
 	CodeOwnedByOther          = "owned_by_other"
 	CodeNotFound              = "not_found"
+	CodeNotOwner              = "not_owner"
+	CodeNoReminderPending     = "no_reminder_pending"
 )
 
 // The field codes of the requests of Commands.
@@ -107,6 +112,8 @@ var messages = map[string]string{
 	CodeResolvedAutomatically: "resolved automatically — it reopens by itself when an alert returns",
 	CodeOwnerMustBeUser:       "a Service account cannot be an Owner",
 	CodeRouteDeleted:          "its Route was deleted",
+	CodeNotOwner:              "only the Owner answers a Reminder",
+	CodeNoReminderPending:     "no Reminder waits for an answer",
 }
 
 // Caller is who runs a Command and how: a User — through the web session, or a Personal access token, which acts as
@@ -243,6 +250,12 @@ func (s *Service) Snooze(ctx context.Context, c Caller, publicID string, end Sno
 // Unsnooze is the Command Unsnooze: firing without an Owner.
 func (s *Service) Unsnooze(ctx context.Context, c Caller, publicID string) (Result, error) {
 	return s.command(ctx, c, CommandUnsnooze, publicID, args{})
+}
+
+// AnswerReminder is "Still on it" (C-17.FR-10, C-10.FR-16): the Owner answers the Reminder that waits, which the
+// answer rule of auto-unacknowledge counts; the Reminder schedule does not move.
+func (s *Service) AnswerReminder(ctx context.Context, c Caller, publicID string) (Result, error) {
+	return s.command(ctx, c, CommandStillOnIt, publicID, args{})
 }
 
 // args are the arguments of a Command: the end of a Snooze, the text of a Note — Add Note's, or the one of Resolve —
@@ -464,6 +477,8 @@ func (s *Service) transition(ctx context.Context, q Queries, c Caller, cmd Comma
 		return snooze{end: *a.end, user: user, account: account, urgent: urgent}, nil
 	case CommandUnsnooze:
 		return unsnooze{}, nil
+	case CommandStillOnIt:
+		return stillOnIt{user: c.user(), now: now}, nil
 	case CommandAddNote:
 		note := a.added
 		if note == nil {

@@ -102,6 +102,9 @@ type Queries interface {
 	ListOwnedGroups(ctx context.Context, arg dbgen.ListOwnedGroupsParams) ([]int64, error)
 	ListOpenGroupIDs(ctx context.Context, orgID int64) ([]int64, error)
 	InsertDowntimeEntries(ctx context.Context, arg dbgen.InsertDowntimeEntriesParams) error
+	GetTimerPolicy(ctx context.Context, arg dbgen.GetTimerPolicyParams) (dbgen.GetTimerPolicyRow, error)
+	GetGroupTimer(ctx context.Context, arg dbgen.GetGroupTimerParams) (time.Time, error)
+	GetLastReminderSeq(ctx context.Context, arg dbgen.GetLastReminderSeqParams) (int64, error)
 	UpsertTimer(ctx context.Context, arg dbgen.UpsertTimerParams) error
 	DeleteTimer(ctx context.Context, arg dbgen.DeleteTimerParams) error
 	NotifyTimers(ctx context.Context, channel string) error
@@ -253,6 +256,19 @@ type Group struct {
 	EventSeq      int64
 	CreatedAt     time.Time
 	LastChangedAt time.Time
+
+	// FirstPublishedAt is the first Publication, where the ack timeout starts (C-17.FR-1); AckTimeoutStartedAt and
+	// AckTimeoutNoticesSent the ack timeout that runs and its notices sent; Unclaimed is set after its last notice.
+	FirstPublishedAt      *time.Time
+	AckTimeoutStartedAt   *time.Time
+	AckTimeoutNoticesSent int64
+	Unclaimed             bool
+	// RemindersSent, RemindersUnanswered and LastReminderAt are the Reminders of the acknowledgement, and
+	// OwnerAnsweredAt when its Owner last answered one (C-17.FR-4, FR-5).
+	RemindersSent       int64
+	RemindersUnanswered int64
+	LastReminderAt      *time.Time
+	OwnerAnsweredAt     *time.Time
 }
 
 // groupOf reads a locked row.
@@ -271,7 +287,10 @@ func groupOf(r dbgen.LockGroupsRow) (*Group, error) {
 		ResolveReasonText: textOf(r.ResolveReasonText), ReopenDeadline: timeOf(r.ReopenDeadline),
 		GraceDeadline: timeOf(r.GraceDeadline), FiringAgainAfterID: int8Of(r.FiringAgainAfterID),
 		EventSeq: r.EventSeq, CreatedAt: r.CreatedAt, LastChangedAt: r.LastChangedAt,
-		FirstAcknowledgedAt: timeOf(r.FirstAcknowledgedAt),
+		FirstAcknowledgedAt: timeOf(r.FirstAcknowledgedAt), FirstPublishedAt: timeOf(r.FirstPublishedAt),
+		AckTimeoutStartedAt: timeOf(r.AckTimeoutStartedAt), AckTimeoutNoticesSent: r.AckTimeoutNoticesSent,
+		Unclaimed: r.Unclaimed, RemindersSent: r.RemindersSent, RemindersUnanswered: r.RemindersUnanswered,
+		LastReminderAt: timeOf(r.LastReminderAt), OwnerAnsweredAt: timeOf(r.OwnerAnsweredAt),
 	}
 	if r.PriorStatus.Valid {
 		g.Prior = &Prior{Status: Status(r.PriorStatus.String), OwnerUserID: int8Of(r.PriorOwnerUserID),
@@ -305,7 +324,10 @@ func (g *Group) saveParams(orgID int64) dbgen.SaveGroupParams {
 		ResolvedByServiceAccountID: nullInt(g.ResolvedByServiceAccount), ResolveReason: text(g.ResolveReason),
 		ResolveReasonText: text(g.ResolveReasonText), ReopenDeadline: timestamptz(g.ReopenDeadline),
 		GraceDeadline: timestamptz(g.GraceDeadline), EventSeq: g.EventSeq, LastChangedAt: g.LastChangedAt,
-		FirstAcknowledgedAt: timestamptz(g.FirstAcknowledgedAt),
+		FirstAcknowledgedAt: timestamptz(g.FirstAcknowledgedAt), FirstPublishedAt: timestamptz(g.FirstPublishedAt),
+		AckTimeoutStartedAt: timestamptz(g.AckTimeoutStartedAt), AckTimeoutNoticesSent: g.AckTimeoutNoticesSent,
+		Unclaimed: g.Unclaimed, RemindersSent: g.RemindersSent, RemindersUnanswered: g.RemindersUnanswered,
+		LastReminderAt: timestamptz(g.LastReminderAt), OwnerAnsweredAt: timestamptz(g.OwnerAnsweredAt),
 	}
 	if g.Prior != nil {
 		p.PriorStatus = pgtype.Text{String: string(g.Prior.Status), Valid: true}
@@ -335,6 +357,12 @@ type entry struct {
 	PeriodFrom    *time.Time
 	PeriodTo      *time.Time
 	Detail        string
+	// NoticeNumber is the number of an ack timeout notice or Reminder, or of the last one a notices_missed stands for,
+	// and MissedCount how many that notices_missed stands for.
+	NoticeNumber *int64
+	MissedCount  *int64
+	// Mentions are the Mentions of a notices_missed: those of the notices it stands for.
+	Mentions []Mention
 	// Note is the Note of a note_added, written to notes instead of the Timeline entries.
 	Note *noteEntry
 }
@@ -456,7 +484,10 @@ func (d *dispatcher) receivedAt(ctx context.Context, q Queries) (*time.Time, err
 // Audit log → Timeline → re-render, inside the caller's transaction, on a row the caller locked FOR UPDATE, and the
 // live-update hints of the change once the transaction commits. System transitions need no Permission and write no
 // Audit log entry; a Command passes permit first and names its Audit log action in its change. Whatever path enters,
-// moves or leaves a Snooze with an end, the dispatcher keeps its snooze_end timer with it.
+// moves or leaves a Snooze with an end, the dispatcher keeps its snooze_end timer with it; whatever path makes a
+// published Alert Group firing, or stops it being firing, starts its ack timeout over or stops it, whatever path
+// acknowledges it, hands it over or ends its acknowledgement starts its Reminders, continues or stops them, and any
+// change by its Owner answers a Reminder (timers.go).
 type dispatcher struct {
 	orgID int64
 	clock clock.Clock
@@ -466,6 +497,8 @@ type dispatcher struct {
 	rerender func(ctx context.Context, q Queries, r Rendering) error
 	// routeIDs names Routes by public_id for the metrics and the log lines.
 	routeIDs func(ctx context.Context, q Queries, id int64) (string, error)
+	// reached is the answer rule's check whether a Reminder reached a Destination; nil counts none as reached.
+	reached ReminderCheck
 }
 
 // dispatch runs t on the locked Alert Group g as actor and records what it did; after are the counters and log lines
@@ -475,7 +508,7 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	if err := t.precondition(g); err != nil {
 		return err
 	}
-	from, snoozeEnd := g.Status, snoozeDeadline(g)
+	from, snoozeEnd, timersBefore := g.Status, snoozeDeadline(g), timerStateOf(g)
 	var c change
 	now := d.clock.Now().UTC()
 	if err := t.apply(ctx, q, g, &c); err != nil {
@@ -487,6 +520,10 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	if err := d.syncSnoozeTimer(ctx, q, g, snoozeEnd, now); err != nil {
 		return err
 	}
+	if err := d.syncTimers(ctx, q, g, timersBefore, now); err != nil {
+		return err
+	}
+	markAnswered(g, timersBefore, actor, now)
 	if c.action != "" {
 		if err := d.audit.Record(ctx, q, audit.Entry{OrgID: d.orgID, Actor: actor.Person, Transport: actor.Transport,
 			Action: c.action, Resource: audit.Resource{Type: ResourceAlertGroup, PublicID: g.PublicID,
@@ -521,6 +558,9 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 		}
 	}
 	if err := d.hint(ctx, q, g, from); err != nil {
+		return err
+	}
+	if err := d.hintUnclaimed(ctx, q, g, timersBefore); err != nil {
 		return err
 	}
 	if from != g.Status {
@@ -567,6 +607,7 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 			SnoozeUntil: timestamptz(e.SnoozeUntil), Fingerprints: e.Fingerprints,
 			ReplacedLabel: nonEmpty(e.ReplacedLabel), LabelConflicts: e.Conflicts,
 			PeriodFrom: timestamptz(e.PeriodFrom), PeriodTo: timestamptz(e.PeriodTo), Detail: nonEmpty(e.Detail),
+			NoticeNumber: nullInt(e.NoticeNumber), MissedCount: nullInt(e.MissedCount),
 		}
 		switch person := actor.Person; person.Kind {
 		case audit.ActorUser:
@@ -586,11 +627,15 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 			p.Event = pgtype.Text{String: string(row.Event), Valid: true}
 			p.EventSeq = pgtype.Int8{Int64: g.EventSeq, Valid: true}
 			p.Loudness = pgtype.Text{String: string(row.Loudness), Valid: true}
-			for _, m := range row.Mentions {
+			mentions := row.Mentions
+			if row.Event == EventNoticesMissed {
+				mentions = e.Mentions
+			}
+			for _, m := range mentions {
 				p.Mentions = append(p.Mentions, string(m))
 			}
 			out = append(out, Recorded{Seq: g.EventSeq, Event: row.Event, Variant: row.Variant,
-				Loudness: row.Loudness, Mentions: row.Mentions, Fingerprints: e.Fingerprints, Reason: e.Reason})
+				Loudness: row.Loudness, Mentions: mentions, Fingerprints: e.Fingerprints, Reason: e.Reason})
 		}
 		if e.System != "" {
 			p.Kind = string(KindSystem)
@@ -684,8 +729,18 @@ func lock(ctx context.Context, q Queries, orgID int64, ids []int64) (map[int64]*
 
 // setTimer sets the deadline of an Alert Group's timer and wakes the timer workers once the transaction commits.
 func setTimer(ctx context.Context, q Queries, orgID, groupID int64, kind string, deadline, now time.Time) error {
-	if err := q.UpsertTimer(ctx, dbgen.UpsertTimerParams{OrgID: orgID, AlertGroupID: groupID, Kind: kind,
-		Deadline: deadline, Now: now}); err != nil {
+	return setNoticeTimer(ctx, q, orgID, groupID, kind, deadline, 0, now)
+}
+
+// setNoticeTimer sets the deadline of an Alert Group's timer with the number of the notice or Reminder it stands for,
+// none for 0, and wakes the timer workers once the transaction commits.
+func setNoticeTimer(ctx context.Context, q Queries, orgID, groupID int64, kind string, deadline time.Time,
+	notice int64, now time.Time) error {
+	p := dbgen.UpsertTimerParams{OrgID: orgID, AlertGroupID: groupID, Kind: kind, Deadline: deadline, Now: now}
+	if notice > 0 {
+		p.NoticeNumber = pgtype.Int8{Int64: notice, Valid: true}
+	}
+	if err := q.UpsertTimer(ctx, p); err != nil {
 		return fmt.Errorf("set the %s timer: %w", kind, err)
 	}
 	if err := q.NotifyTimers(ctx, TimersChannel); err != nil {
