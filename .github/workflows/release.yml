@@ -33,7 +33,7 @@ jobs:
       # renovate: datasource=github-releases depName=sigstore/cosign
       COSIGN_VERSION: v3.1.3
       # renovate: datasource=github-releases depName=anchore/syft
-      SYFT_VERSION: v1.54.0
+      SYFT_VERSION: v1.54.1
       # The Makefile's helm; `make` fails when the two versions differ.
       # renovate: datasource=go depName=helm.sh/helm/v4
       HELM_VERSION: v4.3.0
