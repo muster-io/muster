@@ -39,7 +39,7 @@ acceptance:
   - "[C-17.FR-6] A press on a Reminder button whose key is not in the Keyring is answered privately with \"This button has expired; use the buttons on the Alert Group's message\" and changes nothing, while a Root message button in the same case keeps the answer \"This button could not be verified; nothing was changed.\" (tests with a Keyring that lacks the signing key; S-055 repeats it live after a real rotation)."
 verify: "make ci test-integration e2e"
 operator_attention: true
-issue: null
+issue: 197
 ---
 
 # S-068. Reminder buttons in Mattermost and Telegram (BE)
