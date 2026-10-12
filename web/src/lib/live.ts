@@ -10,6 +10,10 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 
 import {
+  getListLinkableConnectionsQueryKey,
+  getListMyAccountLinksQueryKey,
+} from "../api/gen/endpoints/account-links/account-links";
+import {
   getGetAlertGroupCountsQueryKey,
   getGetAlertGroupQueryKey,
   getGetAlertGroupTimelineQueryKey,
@@ -83,12 +87,16 @@ registerHint("route", (id) =>
     ? [getListRoutesQueryKey(), getListRouteSuggestionsQueryKey()]
     : [getListRoutesQueryKey(), getListRouteSuggestionsQueryKey(), getGetRouteQueryKey(id)],
 );
-// A Connection changed, or the bot a check found: the list with its Destination counts, and the Connection's page,
-// whose untouched form then takes the new version.
+// A Connection changed, or the bot a check found: the list with its Destination counts, the Connection's page, whose
+// untouched form then takes the new version, and the Connection pickers of the profile's Account links.
 registerHint("connection", (id) =>
   id === null
-    ? [getListConnectionsQueryKey()]
-    : [getListConnectionsQueryKey(), getGetConnectionQueryKey(id)],
+    ? [getListConnectionsQueryKey(), getListLinkableConnectionsQueryKey()]
+    : [
+        getListConnectionsQueryKey(),
+        getGetConnectionQueryKey(id),
+        getListLinkableConnectionsQueryKey(),
+      ],
 );
 // A Destination changed, came or went, or became Broken or healthy: the list with its health, the Destination's page,
 // the Connections list, which counts the Destinations of each Connection, and the suggestion of a Route for Internal
@@ -117,6 +125,9 @@ registerHint("alert-group", (id) =>
 );
 // New Alert Groups may match: the counts; the list announces them as "N new" through a listener.
 registerHint("alert-groups", () => [getGetAlertGroupCountsQueryKey()]);
+// An Account link of the signed-in user came or went; only that user's streams get the hint (C-18). The "Link Telegram"
+// dialog closes through a listener.
+registerHint("account-links", () => [getListMyAccountLinksQueryKey()]);
 
 /** What a page does with a hint itself; id is as in HintQueries. */
 export type HintListener = (id: string | null) => void;

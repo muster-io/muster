@@ -100,7 +100,9 @@ Run `make dev`, sign in as `admin@example.org` / `muster-dev-password`; create t
 
 `make e2e` runs these steps as `web/e2e/account-links.spec.ts`, sending `/start` and reading the code through the fake
 servers' control endpoints. The spec starts from the fresh database of the end-to-end run, so it links bob's Mattermost
-account itself, in bob's browser context, before step 4.
+account itself, in bob's browser context, before step 4. Its Muster logins are `link-alice` (display name "Alice
+Smith") and `link-bob`, not "alice" and "bob": `profile.spec.ts` creates the users "Alice" and "bob" in the same run,
+and logins are unique regardless of case. The Mattermost and Telegram accounts stay `alice`, `bob` and `alice_t`.
 
 ## Open questions
 

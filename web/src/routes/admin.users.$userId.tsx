@@ -2,8 +2,8 @@
 // Copyright The Muster Authors
 
 // A user's page (C-03.FR-3, FR-11, FR-13, FR-29): the details, and for users:write the edit of name, email and Role,
-// disable and enable, reset TOTP, a new password setup link, convert to local and delete. S-052 adds the user's
-// Account links here.
+// disable and enable, reset TOTP, a new password setup link, convert to local and delete. The user's Account links
+// (C-18.FR-6), with "Remove" for users:write; only the user links an account, from the profile.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -14,6 +14,11 @@ import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
+import {
+  deleteUserAccountLink,
+  getListUserAccountLinksQueryKey,
+  useListUserAccountLinks,
+} from "../api/gen/endpoints/account-links/account-links";
 import {
   deleteUser,
   getGetUserQueryKey,
@@ -29,6 +34,7 @@ import {
 } from "../api/gen/endpoints/users/users";
 import type { PasswordSetupLink, User } from "../api/gen/model";
 import { UpdateUserBody } from "../api/gen/zod/users/users.zod";
+import { AccountLinksTable, accountName } from "../components/account-links-table";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { SetupLinkDialog } from "../components/setup-link-dialog";
 import { Alert, AlertDescription } from "../components/ui/alert";
@@ -505,6 +511,53 @@ function ActionsCard({ user }: { user: User }) {
   );
 }
 
+/**
+ * The user's Account links. The account-links hint reaches only the user's own streams, so the list is read again after
+ * a removal here.
+ */
+function AccountLinksCard({ user, canWrite }: { user: User; canWrite: boolean }) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const links = useListUserAccountLinks(user.id);
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader>
+        <CardTitle>
+          <h2>{t("accountLinks.admin.title")}</h2>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <AccountLinksTable
+          label={t("accountLinks.admin.title")}
+          links={links.data?.items ?? []}
+          loading={links.isPending}
+          error={links.error}
+          empty={t("accountLinks.admin.empty")}
+          remove={
+            canWrite
+              ? {
+                  action: t("accountLinks.remove.action"),
+                  ariaLabel: (link) =>
+                    t("accountLinks.remove.label", { account: accountName(link) }),
+                  confirm: (link) =>
+                    t("accountLinks.remove.confirm", {
+                      account: accountName(link),
+                      user: user.name,
+                    }),
+                  run: (link) => deleteUserAccountLink(user.id, link.id),
+                  onDone: () =>
+                    void queryClient.invalidateQueries({
+                      queryKey: getListUserAccountLinksQueryKey(user.id),
+                    }),
+                }
+              : undefined
+          }
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
 function UserView({ userId }: { userId: string }) {
   const { t } = useTranslation();
   const canWrite = useCan("users:write");
@@ -533,6 +586,7 @@ function UserView({ userId }: { userId: string }) {
           <Details user={user} />
           {canWrite && user.status !== "deleted" && <EditCard key={user.id} user={user} />}
           {canWrite && user.status !== "deleted" && <ActionsCard user={user} />}
+          {user.status !== "deleted" && <AccountLinksCard user={user} canWrite={canWrite} />}
         </div>
       )}
     </div>

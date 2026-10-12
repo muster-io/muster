@@ -1,4 +1,60 @@
 {
+  "accountLinks": {
+    "admin": {
+      "empty": "No messenger accounts linked.",
+      "title": "Account links"
+    },
+    "connection": "Connection",
+    "empty": "No messenger accounts linked yet.",
+    "errors": {
+      "busy": "The messenger is busy. Try again in a few seconds."
+    },
+    "hint": "Button presses from linked accounts act as you.",
+    "list": {
+      "label": "Linked messenger accounts",
+      "lastUsedAgo": "{{duration}} ago",
+      "linked": "Linked {{date}}",
+      "never": "Never"
+    },
+    "mattermost": {
+      "attemptsLeft_one": "{{count}} attempt left",
+      "attemptsLeft_other": "{{count}} attempts left",
+      "code": "Enter the code the bot sent you in Mattermost",
+      "confirm": "Link",
+      "errors": {
+        "codeInvalid": "The code is wrong or no longer valid. Request a new code.",
+        "linkedElsewhere": "This account is linked to another user. Its owner or an admin can unlink it.",
+        "tooManyCodes_one": "Too many codes were requested. Try again in {{count}} minute.",
+        "tooManyCodes_other": "Too many codes were requested. Try again in {{count}} minutes.",
+        "userNotFound": "No user @{{username}} on this Mattermost server."
+      },
+      "newCode": "Request a new code",
+      "send": "Send code",
+      "start": "Link Mattermost",
+      "username": "Your Mattermost username"
+    },
+    "remove": {
+      "action": "Remove",
+      "confirm": "Remove this link? Presses from {{account}} will no longer act as {{user}}.",
+      "label": "Remove {{account}}"
+    },
+    "telegram": {
+      "expired": "This link has expired.",
+      "expires": "This link works once and expires at {{time}}.",
+      "getLink": "Get link",
+      "hint": "Open the link in Telegram and press Start.",
+      "newLink": "Get a new link",
+      "open": "Open Telegram",
+      "qrLabel": "QR code of the Telegram link",
+      "start": "Link Telegram"
+    },
+    "title": "Messenger accounts",
+    "unlink": {
+      "action": "Unlink",
+      "confirm": "Unlink {{account}} from Muster? Presses from this account will no longer act as you.",
+      "label": "Unlink {{account}}"
+    }
+  },
   "alertGroups": {
     "alertCounts_one": "{{count}} of {{total}} firing",
     "alertCounts_other": "{{count}} of {{total}} firing",
