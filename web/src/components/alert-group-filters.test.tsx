@@ -2,8 +2,8 @@
 // Copyright The Muster Authors
 
 // The filters of the Alert Group list in a real browser, against a stubbed API: every filter set through its control
-// lands in the URL, the URL read back in a new router shows the same filters, and the view's request names them. A
-// Matcher the server refuses leaves the URL as it was.
+// lands in the URL, the URL read back in a new router shows the same filters, and the view's request names them; the
+// "Unclaimed" quick filter sets the same value as its checkbox. A Matcher the server refuses leaves the URL as it was.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -31,7 +31,7 @@ import {
   listParams,
 } from "../lib/alert-group-search";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
-import { AlertGroupFilters } from "./alert-group-filters";
+import { AlertGroupFilters, UnclaimedToggle } from "./alert-group-filters";
 
 const ROUTES = [
   { id: "RT0000000000K8", name: "k8s", is_default: false },
@@ -108,16 +108,16 @@ async function renderAt(href: string) {
     component: function Page() {
       const location = useLocation();
       const search = alertGroupSearchSchema.parse(defaultParseSearch(location.searchStr));
+      const update = (patch: Partial<AlertGroupSearch>) =>
+        history.replace(`/alert-groups${defaultStringifySearch(compact({ ...search, ...patch }))}`);
       return (
-        <AlertGroupFilters
-          search={search}
-          showColumns
-          onChange={(patch) =>
-            history.replace(
-              `/alert-groups${defaultStringifySearch(compact({ ...search, ...patch }))}`,
-            )
-          }
-        />
+        <>
+          <UnclaimedToggle
+            value={search.unclaimed}
+            onChange={(unclaimed) => update({ unclaimed })}
+          />
+          <AlertGroupFilters search={search} showColumns onChange={update} />
+        </>
       );
     },
   });
@@ -204,6 +204,15 @@ describe("search parameters", () => {
     expect(compact(listParams(search, 0))).toEqual({ delivery_problem: true });
     expect(alertGroupSearchSchema.parse(defaultParseSearch("?delivery_problem=no"))).toEqual({});
   });
+
+  test("keep the Unclaimed filter in the URL and send it to the list and the counts", () => {
+    const search = alertGroupSearchSchema.parse(defaultParseSearch("?unclaimed=true"));
+    expect(search).toEqual({ unclaimed: true });
+    expect(defaultStringifySearch(search)).toBe("?unclaimed=true");
+    expect(compact(countParams(search, 0))).toEqual({ unclaimed: true });
+    expect(compact(listParams(search, 0))).toEqual({ unclaimed: true });
+    expect(alertGroupSearchSchema.parse(defaultParseSearch("?unclaimed=no"))).toEqual({});
+  });
 });
 
 describe("AlertGroupFilters", () => {
@@ -219,6 +228,7 @@ describe("AlertGroupFilters", () => {
     await screen.getByLabelText("Resolved by").selectOptions("The system");
     await screen.getByLabelText("Reason").selectOptions("Gone");
     await screen.getByLabelText("Reopened").selectOptions("Reopened at least once");
+    await screen.getByRole("checkbox", { name: "Unclaimed" }).click();
     await userEvent.type(
       screen.getByRole("textbox", { name: "Label filters" }),
       'namespace="payments"{Enter}',
@@ -236,6 +246,7 @@ describe("AlertGroupFilters", () => {
       resolved_by: "system",
       resolve_reason: "gone",
       reopened: true,
+      unclaimed: true,
       label: ['namespace="payments"'],
       columns: ["pod"],
     };
@@ -261,6 +272,10 @@ describe("AlertGroupFilters", () => {
     await expect.element(again.screen.getByLabelText("Resolved by")).toHaveValue("system");
     await expect.element(again.screen.getByLabelText("Reason")).toHaveValue("gone");
     await expect.element(again.screen.getByLabelText("Reopened")).toHaveValue("yes");
+    await expect.element(again.screen.getByRole("checkbox", { name: "Unclaimed" })).toBeChecked();
+    await expect
+      .element(again.screen.getByRole("button", { name: "Unclaimed" }))
+      .toHaveAttribute("aria-pressed", "true");
     await expect
       .element(again.screen.getByTestId("matcher-chip"))
       .toHaveTextContent('namespace="payments"');
@@ -271,6 +286,20 @@ describe("AlertGroupFilters", () => {
     await expect.poll(() => searchOf(again.router).route).toBeUndefined();
     await again.screen.getByRole("button", { name: "Clear filters" }).click();
     await expect.poll(() => searchOf(again.router)).toEqual({ columns: ["pod"] });
+  });
+
+  test("the Unclaimed quick filter sets and clears the same value as its checkbox", async () => {
+    const { router, screen } = await renderAt("/alert-groups");
+    const toggle = screen.getByRole("button", { name: "Unclaimed" });
+    await expect.element(toggle).toHaveAttribute("aria-pressed", "false");
+    await toggle.click();
+    await expect.poll(() => searchOf(router)).toEqual({ unclaimed: true });
+    expect(router.state.location.searchStr).toBe("?unclaimed=true");
+    await expect.element(screen.getByRole("checkbox", { name: "Unclaimed" })).toBeChecked();
+    await expect.element(toggle).toHaveAttribute("aria-pressed", "true");
+    await toggle.click();
+    await expect.poll(() => searchOf(router)).toEqual({});
+    await expect.element(screen.getByRole("checkbox", { name: "Unclaimed" })).not.toBeChecked();
   });
 
   test("a Matcher the server refuses leaves the URL as it was", async () => {

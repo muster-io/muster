@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The notices of the Alert Group page (C-09.FR-5, FR-7, FR-16): the texts of reference.md for Alerts still firing after
-// a manual resolve, a Replacement, details removed by retention, and an Alert Group firing again after a manual resolve
-// of another one, linked to it through a search by its number.
+// The notices of the Alert Group page (C-09.FR-5, FR-7, FR-14, FR-16): the texts of reference.md for an Unclaimed Alert
+// Group (C-17.FR-3), Alerts still firing after a manual resolve, a Replacement, details removed by retention, and an
+// Alert Group firing again after a manual resolve of another one, linked to it through a search by its number.
 
 import { Link } from "@tanstack/react-router";
 import { InfoIcon, TriangleAlertIcon } from "lucide-react";
@@ -82,12 +82,25 @@ function NoticeText({ notice }: { notice: AlertGroupNotice }) {
   }
 }
 
-export function AlertGroupNotices({ notices }: { notices: readonly AlertGroupNotice[] }) {
-  if (notices.length === 0) {
+export function AlertGroupNotices({
+  notices,
+  unclaimed = false,
+}: {
+  notices: readonly AlertGroupNotice[];
+  /** The Alert Group is Unclaimed: "⚠ Nobody has taken this" comes first. */
+  unclaimed?: boolean;
+}) {
+  const { t } = useTranslation();
+  if (notices.length === 0 && !unclaimed) {
     return null;
   }
   return (
     <div className="flex flex-col gap-2" data-testid="alert-group-notices">
+      {unclaimed && (
+        <Notice kind="unclaimed" tone="warning">
+          {t("alertGroups.notices.unclaimed")}
+        </Notice>
+      )}
       {notices.map((n) => (
         <Notice
           key={n.kind}

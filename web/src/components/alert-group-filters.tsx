@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The filters of the Alert Group list (C-09.FR-13, C-10.FR-13, C-13.FR-12): Route and Integration (several of each),
-// Severity level, Urgent, resolved by a person or by the system with its reason, Reopened, the Owner, "Snoozed with no
-// end", "Delivery problem" and label Matchers; on a desktop also the label
-// columns. All combine, and all live in the URL. The pickers are native selects (D250); a picker that takes several
-// values adds each chosen one as a chip that removes it again.
+// The filters of the Alert Group list (C-09.FR-13, C-10.FR-13, C-13.FR-12, C-17.FR-3): Route and Integration (several
+// of each), Severity level, Urgent, resolved by a person or by the system with its reason, Reopened, the Owner,
+// "Unclaimed", "Snoozed with no end", "Delivery problem" and label Matchers; on a desktop also the label columns. All
+// combine, and all live in the URL. The pickers are native selects (D250); a picker that takes several values adds each
+// chosen one as a chip that removes it again. The "Unclaimed" quick filter beside the list sets the same value.
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -282,6 +282,24 @@ export function AlertGroupFilters({
       <OwnerFilter value={search.owner} onChange={(owner) => onChange({ owner })} />
       <div className="flex items-start gap-2">
         <input
+          id={`${id}-unclaimed`}
+          type="checkbox"
+          className="mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          checked={search.unclaimed === true}
+          aria-describedby={`${id}-unclaimed-hint`}
+          onChange={(e) => onChange({ unclaimed: e.target.checked ? true : undefined })}
+        />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <Label htmlFor={`${id}-unclaimed`} className="leading-snug">
+            {t("alertGroups.filters.unclaimed")}
+          </Label>
+          <p id={`${id}-unclaimed-hint`} className="text-xs text-muted-foreground">
+            {t("alertGroups.filters.unclaimedHint")}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-start gap-2">
+        <input
           id={`${id}-no-end`}
           type="checkbox"
           className="mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
@@ -333,5 +351,27 @@ export function AlertGroupFilters({
         </div>
       )}
     </div>
+  );
+}
+
+/** The "Unclaimed" quick filter beside the list (C-17.FR-3): the Alert Groups still firing after every notice. */
+export function UnclaimedToggle({
+  value,
+  onChange,
+}: {
+  value: true | undefined;
+  onChange: (next: true | undefined) => void;
+}) {
+  const { t } = useTranslation();
+  const on = value === true;
+  return (
+    <Button
+      variant={on ? "default" : "outline"}
+      aria-pressed={on}
+      onClick={() => onChange(on ? undefined : true)}
+      data-testid="filter-unclaimed"
+    >
+      {t("alertGroups.filters.unclaimed")}
+    </Button>
   );
 }

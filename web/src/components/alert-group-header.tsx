@@ -4,12 +4,14 @@
 // The header of the Alert Group page (C-09.FR-14, FR-10): status, #N, title and summary, Severity level, Urgent, the
 // Route and the Integrations linked, start and duration, "🔁 Reopened ×N" and, once resolved, who resolved it or the
 // system's reason; the Owner, the end of a Snooze ("No end" too) and who set it (C-10.FR-13), a deleted user named
-// "(deactivated)". Status and urgency are words, never only a colour. The title and summary come from alert labels
-// and annotations, so they show as text only. The list shares the status and the Urgent mark.
+// "(deactivated)"; the badge "Unclaimed" (C-17.FR-3) and the next ack timeout notice or Reminder from next_notice, in
+// the user's time zone with the time left on hover (C-17.FR-9). Status and urgency are words, never only a colour. The
+// title and summary come from alert labels and annotations, so they show as text only. The list shares the status, the
+// Urgent mark and the badge "Unclaimed".
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
-import { ArrowLeftIcon, SirenIcon } from "lucide-react";
+import { ArrowLeftIcon, SirenIcon, TriangleAlertIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -18,12 +20,13 @@ import type {
   AlertGroup,
   AlertGroupStatus,
   EntityRef,
+  NextNotice,
   ResolvedBy,
 } from "../api/gen/model";
 import { useTimeFormat } from "../lib/time";
 import { useCan } from "./app-shell";
 import { reasonLabel, severityLabel } from "./integration-alerts";
-import { DateTime, Duration } from "./relative-time";
+import { DateTime, Duration, formatElapsed, useNow } from "./relative-time";
 import { cn } from "./ui/utils";
 
 export function statusLabel(t: TFunction, status: AlertGroupStatus): string {
@@ -82,6 +85,23 @@ export function UrgentMark({ className }: { className?: string }) {
     >
       <SirenIcon aria-hidden="true" className="size-3.5" />
       {t("alertGroups.urgent")}
+    </span>
+  );
+}
+
+/** The badge of an Unclaimed Alert Group: still firing after every ack timeout notice (C-17.FR-3). */
+export function UnclaimedBadge({ className }: { className?: string }) {
+  const { t } = useTranslation();
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs font-medium whitespace-nowrap text-amber-800 dark:text-amber-300",
+        className,
+      )}
+      data-testid="unclaimed-badge"
+    >
+      <TriangleAlertIcon aria-hidden="true" className="size-3.5" />
+      {t("alertGroups.unclaimed")}
     </span>
   );
 }
@@ -177,6 +197,29 @@ function Ownership({ group }: { group: AlertGroup }) {
   );
 }
 
+/** The next notice the server scheduled: "Next ack timeout notice at …" or "Next Reminder at …"; nothing without. */
+function NextNoticeLine({ notice }: { notice: NextNotice | undefined }) {
+  const { t } = useTranslation();
+  const { dateTime } = useTimeFormat();
+  const now = useNow();
+  if (notice === undefined) {
+    return null;
+  }
+  const time = dateTime(notice.at);
+  const left = Math.max(0, Math.round((Date.parse(notice.at) - now) / 1000));
+  return (
+    <p
+      className="text-sm wrap-anywhere"
+      data-testid="alert-group-next-notice"
+      title={t("alertGroups.nextNotice.in", { duration: formatElapsed(t, left) })}
+    >
+      {notice.kind === "ack_timeout"
+        ? t("alertGroups.nextNotice.ackTimeout", { time })
+        : t("alertGroups.nextNotice.reminder", { time })}
+    </p>
+  );
+}
+
 export function AlertGroupHeader({ group }: { group: AlertGroup }) {
   const { t } = useTranslation();
   const canRoutes = useCan("routes:read");
@@ -193,6 +236,7 @@ export function AlertGroupHeader({ group }: { group: AlertGroup }) {
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={group.status} />
+          {group.unclaimed && <UnclaimedBadge />}
           <span
             className="font-mono text-sm text-muted-foreground"
             data-testid="alert-group-number"
@@ -223,6 +267,7 @@ export function AlertGroupHeader({ group }: { group: AlertGroup }) {
           </p>
         )}
         <Ownership group={group} />
+        <NextNoticeLine notice={group.next_notice} />
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
         <Fact term={t("alertGroups.fields.severity")} testId="fact-severity">

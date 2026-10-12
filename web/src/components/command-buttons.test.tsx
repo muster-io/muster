@@ -2,9 +2,9 @@
 // Copyright The Muster Authors
 
 // The Command buttons in a real browser, against a stubbed API: exactly the buttons of each allowed_commands set and
-// none for a Viewer, the Takeover wording, the newer Alert Group's link in place of Unresolve, the refusal messages of
-// a 409 (a race of Unresolve included, with its link) and of a 403, one request for a double press, the "…" menu of a
-// list row, and the Russian texts.
+// none for a Viewer, the Takeover wording, "Still on it" for the Owner while a Reminder waits, the newer Alert Group's
+// link in place of Unresolve, the refusal messages of a 409 (a race of Unresolve included, with its link) and of a 403,
+// one request for a double press, the "…" menu of a list row, and the Russian texts.
 
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import {
@@ -19,7 +19,10 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
-import { getGetAlertGroupQueryKey } from "../api/gen/endpoints/alert-groups/alert-groups";
+import {
+  getAlertGroup,
+  getGetAlertGroupQueryKey,
+} from "../api/gen/endpoints/alert-groups/alert-groups";
 import type { AlertGroup, CommandName, Problem, Session } from "../api/gen/model";
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
@@ -148,6 +151,17 @@ function LivePage({ initial }: { initial: AlertGroup }) {
   return <CommandButtons group={query.data} />;
 }
 
+/** The buttons of an Alert Group the page reads from the API, as the Alert Group page does. */
+function ReadPage({ initial }: { initial: AlertGroup }) {
+  const query = useQuery({
+    queryKey: getGetAlertGroupQueryKey(initial.id),
+    queryFn: ({ signal }) => getAlertGroup(initial.id, { signal }),
+    initialData: initial,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  return <CommandButtons group={query.data} />;
+}
+
 /** The last Command sent; a refusal also reads the Alert Group again. */
 function posted() {
   return requests.filter((r) => r.method === "POST").at(-1);
@@ -204,6 +218,12 @@ describe("CommandButtons", () => {
         ["Acknowledge", "Resolve", "Snooze", "Unsnooze"],
       ],
       [group("resolved", ["unresolve", "add_note"]), ["Unresolve"]],
+      [
+        group("acknowledged", ["still_on_it", "unacknowledge", "resolve", "snooze", "add_note"], {
+          owner: { id: ME, name: "Me", deactivated: false },
+        }),
+        ["Still on it", "Unacknowledge", "Resolve", "Snooze"],
+      ],
     ];
     for (const [g, expected] of cases) {
       const { screen } = await renderWith(<CommandButtons group={g} />);
@@ -225,7 +245,11 @@ describe("CommandButtons", () => {
 
   test("never offers a Command that allowed_commands leaves out, whatever the status", () => {
     expect(buttonCommands(group("resolved", ["add_note"]))).toEqual([]);
-    expect(buttonCommands(group("firing", ["still_on_it", "add_note"]))).toEqual([]);
+    expect(buttonCommands(group("firing", ["still_on_it", "add_note"]))).toEqual(["still_on_it"]);
+    expect(buttonCommands(group("acknowledged", ["unacknowledge", "resolve"]))).toEqual([
+      "unacknowledge",
+      "resolve",
+    ]);
   });
 
   test("Acknowledge of another user's Alert Group reads Take over and is sent at once", async () => {
@@ -253,6 +277,50 @@ describe("CommandButtons", () => {
     expect(commandLabel(i18n.t, "acknowledge", { ...ALICE, deactivated: true }, ME)).toBe(
       "Take over from Alice (deactivated)",
     );
+  });
+
+  test("Still on it answers the Reminder at once and goes away with the answer", async () => {
+    const me = { id: ME, name: "Me", deactivated: false };
+    const before = group("acknowledged", ["still_on_it", "unacknowledge", "resolve", "add_note"], {
+      owner: me,
+    });
+    const after = {
+      ...before,
+      last_changed_at: "2026-10-07T13:00:00Z",
+      allowed_commands: ["unacknowledge", "resolve", "add_note"],
+    };
+    answer = (path) =>
+      path.endsWith("/still-on-it")
+        ? { status: 200, body: { outcome: "done", alert_group: after } }
+        : { status: 200, body: after };
+    await renderWith(<ReadPage initial={before} />);
+    const still = page.getByRole("button", { name: "Still on it" });
+    await expect.element(still).toBeVisible();
+    await still.click();
+    await vi.waitFor(() => expect(posted()).toBeDefined());
+    expect(posted()?.path).toBe("/api/v1/alert-groups/AG0000000000AA/still-on-it");
+    expect(page.getByRole("dialog").query()).toBeNull();
+    await vi.waitFor(() =>
+      expect(page.getByRole("button", { name: "Still on it" }).query()).toBeNull(),
+    );
+    expect(await buttonTexts()).toEqual(["Unacknowledge", "Resolve"]);
+  });
+
+  test("a refused Still on it says why", async () => {
+    const before = group("acknowledged", ["still_on_it", "unacknowledge"], {
+      owner: { id: ME, name: "Me", deactivated: false },
+    });
+    for (const [code, text] of [
+      ["not_owner", "Only the Owner can answer a Reminder."],
+      ["no_reminder_pending", "There is no Reminder to answer."],
+    ] as const) {
+      answer = (path) =>
+        path.endsWith("/still-on-it") ? refusal(code) : { status: 200, body: before };
+      const { screen } = await renderWith(<CommandButtons group={before} />);
+      await page.getByRole("button", { name: "Still on it" }).click();
+      await expect.element(page.getByTestId("command-refusal")).toHaveTextContent(text);
+      await screen.unmount();
+    }
   });
 
   test("a double press sends one request while the first is under way", async () => {
@@ -348,6 +416,8 @@ describe("CommandButtons", () => {
         "A newer open Alert Group #415 exists.",
       ],
       [refused("owner_must_be_user"), "A Service account cannot be an Owner."],
+      [refused("not_owner"), "Only the Owner can answer a Reminder."],
+      [refused("no_reminder_pending"), "There is no Reminder to answer."],
       [new ApiError(403, {}, undefined), "You are not permitted to do this."],
     ];
     for (const [err, text] of cases) {
@@ -419,6 +489,24 @@ describe("CommandButtons", () => {
       "Закрыть",
       "Отложить",
     ]);
+  });
+
+  test("speaks Russian, with Still on it and its refusals", async () => {
+    await i18n.changeLanguage("ru");
+    await renderWith(
+      <CommandButtons
+        group={group("acknowledged", ["still_on_it", "unacknowledge"], {
+          owner: { id: ME, name: "Me", deactivated: false },
+        })}
+      />,
+    );
+    expect(await buttonTexts()).toEqual(["Ещё работаю", "Снять подтверждение"]);
+    expect(refusalText(i18n.t, refused("not_owner"))).toBe(
+      "Ответить на напоминание может только владелец.",
+    );
+    expect(refusalText(i18n.t, refused("no_reminder_pending"))).toBe(
+      "Напоминания, на которое нужно ответить, нет.",
+    );
   });
 });
 

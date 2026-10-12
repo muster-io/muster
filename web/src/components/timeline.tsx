@@ -2,9 +2,10 @@
 // Copyright The Muster Authors
 
 // The Timeline of an Alert Group (C-09.FR-11, FR-14): newest or oldest first, filtered by kind. Each entry shows its
-// time, the actor ("Muster" for the system) with the Transport, a text for its event, a "Loud" mark and the symbolic
-// Mentions it asked for, and its details: fingerprints, the replaced label, Static label conflicts, the period of
-// Muster's downtime, a Note's text, a delivery error. Notes, names and errors are untrusted text and show as such.
+// time, the actor ("Muster" for the system) with the Transport, a text for its event — the ack timeout notices,
+// Unclaimed, Reminders and their answer of C-17 among them —, a "Loud" or, for a lifecycle event, "Quiet" mark and the
+// symbolic Mentions it asked for, and its details: fingerprints, the replaced label, Static label conflicts, the period
+// of Muster's downtime, a Note's text, a delivery error. Notes, names and errors are untrusted text and show as such.
 
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -92,6 +93,12 @@ export function actorText(t: TFunction, actor: TimelineActor): string {
     : t("timeline.actorVia", { actor: name, transport });
 }
 
+/** Notices of one ack timeout at most (C-17.FR-2). */
+const ACK_TIMEOUT_NOTICES = 3;
+
+/** The reason the server gives an auto-unacknowledge (groups.ReasonNoAnswer), translated by its exact text. */
+const REASON_NO_ANSWER = "No answer to the last two Reminders";
+
 /** What the reason of an automatic status change says: the reason of a resolved Alert, or why an Owner left. */
 function changeReason(t: TFunction, reason: string | null | undefined): string | null {
   switch (reason) {
@@ -103,6 +110,8 @@ function changeReason(t: TFunction, reason: string | null | undefined): string |
       return t("timeline.reasons.ownerDisabled");
     case "owner_deleted":
       return t("timeline.reasons.ownerDeleted");
+    case REASON_NO_ANSWER:
+      return t("timeline.reasons.noAnswer");
     case "resolved":
     case "gone":
     case "stale":
@@ -171,7 +180,9 @@ export function entryText(
         case "unsnoozed":
           return t("timeline.events.unsnoozed");
         case "auto_unacknowledged":
-          return t("timeline.events.autoUnacknowledged");
+          return reason === null
+            ? t("timeline.events.autoUnacknowledged")
+            : t("timeline.events.autoUnacknowledgedWith", { reason });
         default:
           return t("timeline.events.other");
       }
@@ -200,7 +211,10 @@ export function entryText(
     case "timers":
       switch (entry.event) {
         case "ack_timeout":
-          return t("timeline.events.ackTimeout", { number: entry.notice_number ?? 1 });
+          return t("timeline.events.ackTimeout", {
+            number: entry.notice_number ?? 1,
+            total: ACK_TIMEOUT_NOTICES,
+          });
         case "unclaimed":
           return t("timeline.events.unclaimed");
         case "reminder":
@@ -354,18 +368,23 @@ function EntryDetails({ entry }: { entry: TimelineEntry }) {
   );
 }
 
-/** The loudness and Mentions an entry carries; a system entry has them only when it records a lifecycle event. */
-function soundOf(entry: TimelineEntry): { loud: boolean; mentions: string[] } {
+/**
+ * The loudness and Mentions an entry carries; a system entry has them only when it records a lifecycle event. "Quiet"
+ * shows for lifecycle events only: a delivery event marks only what was Loud.
+ */
+function soundOf(entry: TimelineEntry): { loud: boolean; quiet: boolean; mentions: string[] } {
+  const loud = entry.loudness === "loud";
+  const quiet = entry.loudness === "quiet" && entry.kind !== "delivery";
   if (entry.kind === "system") {
-    return { loud: entry.loudness === "loud", mentions: entry.mentions ?? [] };
+    return { loud, quiet, mentions: entry.mentions ?? [] };
   }
-  return { loud: entry.loudness === "loud", mentions: entry.mentions };
+  return { loud, quiet, mentions: entry.mentions };
 }
 
 export function TimelineItem({ entry }: { entry: TimelineEntry }) {
   const { t } = useTranslation();
   const { dateTime } = useTimeFormat();
-  const { loud, mentions } = soundOf(entry);
+  const { loud, quiet, mentions } = soundOf(entry);
   return (
     <li
       className="flex min-w-0 flex-col gap-1 border-l-2 py-2 pl-3"
@@ -383,7 +402,7 @@ export function TimelineItem({ entry }: { entry: TimelineEntry }) {
       <p className="text-sm font-medium wrap-anywhere" data-testid="timeline-text">
         {entryText(t, entry, dateTime)}
       </p>
-      {(loud || mentions.length > 0) && (
+      {(loud || quiet || mentions.length > 0) && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
           {loud && (
             <span
@@ -392,6 +411,11 @@ export function TimelineItem({ entry }: { entry: TimelineEntry }) {
             >
               <BellRingIcon aria-hidden="true" className="size-3.5" />
               {t("timeline.loud")}
+            </span>
+          )}
+          {quiet && (
+            <span className="text-muted-foreground" data-testid="timeline-quiet">
+              {t("timeline.quiet")}
             </span>
           )}
           {mentions.length > 0 && (
