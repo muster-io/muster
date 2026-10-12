@@ -44,6 +44,7 @@ const (
 	typeUnauthenticated      = "unauthenticated"
 	typeForbidden            = "forbidden"
 	typeNotFound             = "not-found"
+	typeMethodNotAllowed     = "method-not-allowed"
 	typeConflict             = "conflict"
 	typeCommandRefused       = "command-refused"
 	typeDefaultRoute         = "default-route-immutable"
@@ -106,6 +107,7 @@ var titles = map[string]string{
 	typeUnauthenticated:      "Unauthenticated",
 	typeForbidden:            "Forbidden",
 	typeNotFound:             "Not found",
+	typeMethodNotAllowed:     "Method not allowed",
 	typeConflict:             "Conflict",
 	typeCommandRefused:       "Command refused",
 	typeDefaultRoute:         "Default route immutable",
@@ -209,7 +211,9 @@ func positive(n int) *int {
 var (
 	errNotImplemented = problem(http.StatusNotImplemented, typeNotImplemented, "",
 		"This build does not implement the operation yet.")
-	errNotFound        = problem(http.StatusNotFound, typeNotFound, "", "No such operation.")
+	errNotFound         = problem(http.StatusNotFound, typeNotFound, "", "No such operation.")
+	errMethodNotAllowed = problem(http.StatusMethodNotAllowed, typeMethodNotAllowed, "",
+		"The path does not take this method; the Allow header lists the methods it takes.")
 	errUnauthenticated = problem(http.StatusUnauthorized, typeUnauthenticated, "", "Sign in to continue.")
 	errSessionExpired  = problem(http.StatusUnauthorized, typeUnauthenticated, codeSessionExpired,
 		"The session expired; sign in again.")

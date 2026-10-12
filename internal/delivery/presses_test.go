@@ -238,6 +238,25 @@ func TestAnswerOp(t *testing.T) {
 	}
 }
 
+// TestDirectOp: a bot's message to one person takes a limiter token of its Connection and makes the client's call in
+// the interactive client class, with its outcome, without calling the adapter.
+func TestDirectOp(t *testing.T) {
+	e := newEnv(t)
+	conn := int64(connID)
+	var got delivery.Call
+	out, err := e.interactive().Do(t.Context(), delivery.Subject{Connection: &conn}, delivery.DirectOp(
+		func(_ context.Context, c delivery.Call) delivery.Outcome {
+			got = c
+			return delivery.Outcome{Kind: delivery.OutcomeOK}
+		}))
+	if err != nil || out.Kind != delivery.OutcomeOK || got.Class != outbound.ClassInteractive {
+		t.Fatalf("Do = %+v, %v; call %+v", out, err, got)
+	}
+	if len(e.rec.Calls()) != 0 {
+		t.Errorf("the direct message called the adapter: %+v", e.rec.Calls())
+	}
+}
+
 // TestTelegramPressBinding is the binding of C-14.FR-4: a press is bound to the Alert Group's delivery to a Telegram
 // Destination of the Connection whose channel is the chat pressed and whose Root message is the post pressed, with the
 // Route's language and Snooze durations; another chat, another post, another Connection, another Alert Group or a

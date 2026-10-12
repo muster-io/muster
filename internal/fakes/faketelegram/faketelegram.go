@@ -7,7 +7,8 @@
 // (F-018); setWebhook, deleteWebhook and getWebhookInfo keep a webhook per bot, to which the queued updates are posted
 // with the secret token header. getChat, getChatMember, sendMessage and editMessageText work on the chats of chats.go:
 // two channels and a discussion group, the bot's rights in them, the messages the bot sent with their keyboards and
-// edits, the budget of sends and edits per chat and the notifications of two accounts; copies.go adds the automatic
+// edits, the budget of sends and edits per chat and the notifications of two accounts, and the private chats people
+// open with the bot by writing to it, such as `/start <token>` (updates.go); copies.go adds the automatic
 // copies of channel posts in the discussion group, their edits, people's comments and deleted messages; presses.go
 // adds button presses and answerCallbackQuery with its deadline. Every other
 // method is recorded and answered 501. The control endpoints under /_fake/ change the configuration (a path prefix, an
@@ -117,6 +118,7 @@ func New() *Fake {
 	f.HandleControl("PUT /_fake/config", f.putConfig)
 	f.HandleControl("POST /_fake/updates", f.postUpdate)
 	f.HandleControl("POST /_fake/conflict", f.postConflict)
+	f.HandleControl("POST /_fake/private", f.postPrivate)
 	f.HandleControl("GET /_fake/webhooks", func(w http.ResponseWriter, _ *http.Request) {
 		fakeserver.WriteJSON(w, http.StatusOK, f.Webhooks())
 	})

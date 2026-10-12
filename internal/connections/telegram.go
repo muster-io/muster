@@ -281,6 +281,25 @@ func (s *Service) Hooked(ctx context.Context, publicID string) (telegram.Conn, l
 	return telegram.Conn{ID: row.ID, PublicID: row.PublicID, Client: c}, secret, nil
 }
 
+// TelegramConn is the Telegram Connection publicID with its client, for the bot's reads of an Account link
+// (telegram.ConnLookup); a Connection that is unknown, deleted or not a Telegram one is ErrNotFound.
+func (s *Service) TelegramConn(ctx context.Context, publicID string) (telegram.Conn, error) {
+	row, err := s.row(ctx, s.cfg.Store, publicID)
+	if err != nil {
+		return telegram.Conn{}, err
+	}
+	if row.Type != TypeTelegram {
+		return telegram.Conn{}, ErrNotFound
+	}
+	c, err := s.cachedTelegramClient(row.ID, row.Version, func() (*telegram.Client, error) {
+		return s.telegramClient(row)
+	})
+	if err != nil {
+		return telegram.Conn{}, err
+	}
+	return telegram.Conn{ID: row.ID, PublicID: row.PublicID, Client: c}, nil
+}
+
 // HandleOnce runs f for the update updateID of the Telegram Connection id unless its stored offset is past it, and then
 // raises the offset to updateID+1, all in one transaction under the Connection's update lock (telegram.Offsets): a
 // transaction advisory lock of the class db.TelegramUpdateLockClass keyed by the Connection, so that a second poller of

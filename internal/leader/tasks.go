@@ -114,6 +114,8 @@ type Work struct {
 	PruneOIDC []PruneTable
 	// PruneDelivery are the short-lived tables of internal/delivery: the copy buffer of Telegram comment Threads.
 	PruneDelivery []PruneTable
+	// PruneAccountLinks are the short-lived tables of internal/accountlinks: the Account link requests.
+	PruneAccountLinks []PruneTable
 
 	// IngestBacklog sets muster_ingest_backlog from the pending Stored Snapshots of the Organizations.
 	IngestBacklog func(ctx context.Context, orgs []int64) error
@@ -160,7 +162,7 @@ type PruneTable struct {
 }
 
 func (w Work) shortLived() []PruneTable {
-	return slices.Concat(w.PruneAuth, w.PruneUsers, w.PruneOIDC, w.PruneDelivery)
+	return slices.Concat(w.PruneAuth, w.PruneUsers, w.PruneOIDC, w.PruneDelivery, w.PruneAccountLinks)
 }
 
 // pruneShortLived runs every short-lived table in every Organization at the same now, deleting in batches until a

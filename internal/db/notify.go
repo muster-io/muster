@@ -33,11 +33,13 @@ const (
 
 // Hint is the payload of a notification on HintChannel: something of the Organization changed. Type is the type of a
 // live-update hint (HintEvent in the API specification) and ID the public_id it names, or empty for a whole
-// collection.
+// collection. User, the public_id of a User, limits the hint to that User's streams, such as the account-links hint of
+// the User whose Account link changed; empty is every stream.
 type Hint struct {
 	OrgID int64  `json:"org_id"`
 	Type  string `json:"type"`
 	ID    string `json:"id,omitempty"`
+	User  string `json:"user,omitempty"`
 }
 
 // Execer runs a statement: a pool, a connection or the transaction of the change a hint announces.

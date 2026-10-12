@@ -16,32 +16,48 @@ files_touched:
   - internal/accountlinks/accountlinks_test.go
   - internal/accountlinks/telegram_test.go
   - internal/accountlinks/mattermost_test.go
+  - internal/accountlinks/live_test.go
   - internal/api/accountlinks.go
   - internal/api/accountlinks_test.go
   - internal/api/middleware.go
   - internal/api/server.go
   - internal/api/server_test.go
   - internal/api/live.go
+  - internal/api/problem.go
   - internal/db/notify.go
   - internal/delivery/interactive.go
+  - internal/delivery/presses_test.go
   - internal/telegram/client.go
   - internal/telegram/start.go
+  - internal/telegram/start_test.go
   - internal/telegram/updates.go
+  - internal/connections/telegram.go
+  - internal/connections/telegram_test.go
+  - internal/db/checks.go
   - internal/mattermost/client.go
+  - internal/mattermost/callback_test.go
+  - internal/messages/texts/en.json
+  - internal/messages/texts/ru.json
   - internal/users/admin.go
   - internal/users/admin_test.go
   - internal/live/hub.go
+  - internal/live/live_test.go
   - internal/fakes/fakemattermost/fakemattermost.go
   - internal/fakes/fakemattermost/fakemattermost_test.go
+  - internal/fakes/faketelegram/faketelegram.go
   - internal/fakes/faketelegram/updates.go
   - internal/fakes/faketelegram/faketelegram_test.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/leader/tasks.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
   - internal/archlint/secretleak.go
   - docs/messengers/account-links.md
+  - design/db/schema.md
   - test/e2e/account_links_test.go
+  - test/e2e/telegram_connection_test.go
+  - design/stories/S-052-messenger-accounts-in-the-profile-and-account-links-on-the-user-page.md
 acceptance:
   - "[C-18.FR-1, C-18.FR-2, C-18.FR-7, C-14.FR-8] `startTelegramLink` from the web session, without re-authentication or TOTP, returns `https://t.me/<bot>?start=<token>` with a 43-character token valid for `account_link.telegram_token_ttl`; `/start <token>` to the bot links that Telegram account, the bot replies \"Linked to Muster user {name} ({login})\", and the user's live-update stream gets an `account-links` hint."
   - "[C-18.AC-1, C-18.FR-2] The second `/start` with the same token links nothing, gets the reply \"This link is invalid or expired. Start again from your Muster profile.\" and is recorded as `account_link.link_rejected` with the reason `token_used`; an unknown token, an expired one and a token of another Connection are rejected the same way, with the same reply."
@@ -86,17 +102,20 @@ issue: 51
 - **Operations implemented**: `listMyAccountLinks` and `listLinkableConnections` (any signed-in User; a Service account
   gets `403` `service_account_not_allowed`), `deleteMyAccountLink`, `startTelegramLink`, `startMattermostLink`,
   `confirmMattermostLink` (web session with its CSRF token only: a token gets `403` `session_required`, C-03.FR-27),
-  `listUserAccountLinks` (`users:read`), `deleteUserAccountLink` (`users:write`; tokens allowed). No operation creates a
+  `listUserAccountLinks` (`users:read`), `deleteUserAccountLink` (`users:write`; tokens allowed, except on the caller's
+  own link, which a token removes with `403` `session_required` as under `/me`, C-03.AC-14). No operation creates a
   link for another User; `/users/{id}/account-links` has no `POST`, which the router answers with `405` (below). The
-  ten operations join the `implemented` map of `internal/api/server.go`. Schemas:
+  eight operations join the `implemented` map of `internal/api/server.go`. Schemas:
   `AccountLink(List)`, `LinkableConnection(List)`, `Messenger`, `TelegramLinkRequest`, `TelegramLinkStart`,
   `MattermostLinkRequest`, `MattermostLinkStarted`, `MattermostLinkConfirm`; hint `account-links`.
 - **Method not allowed** (`internal/api/middleware.go`, `api/openapi.yaml`): today every `FindRoute` error of the
   router becomes `404`. The router's `routers.ErrMethodNotAllowed` — a path of the specification without the request's
   method — answers `405` with the new problem type `method-not-allowed` (added to `x-problem-types` of the
   specification) and an `Allow` header listing the methods of that path; every other routing error stays `404`
-  `not-found`. `TestNotFoundAndNotImplemented` (`server_test.go`) moves `PATCH /api/v1/me` from its `404` cases to a
-  `405` case with `Allow: GET`.
+  `not-found`; the `Allow` header lists only the methods the app listener serves the path with, and a path it serves
+  with none stays `404`. `TestNotFoundAndNotImplemented` (`server_test.go`) moves `PATCH /api/v1/me` from its `404`
+  cases to a `405` case with `Allow: GET, PUT` (the path has `getMe` and `updateMe`); the title of the problem type is
+  "Method not allowed" (`internal/api/problem.go`).
 - **Validation answers**: a `connection_id` that is not a live Connection of the right type answers `422` `unknown_id`
   at `/connection_id` in `startTelegramLink` and `startMattermostLink`; `link_code_invalid` (a wrong, expired or void
   code, never saying which) and `messenger_user_not_found` (no such username on the Mattermost server) are the
@@ -107,14 +126,15 @@ issue: 51
   the table in `metrics.ShortLivedTables`): a request is deleted once its `expires_at` is
   `account_link.request_prune_after` (24 h) past, consumed and voided ones included, which keeps the last hour that
   `account_link.mattermost_code_requests` counts and answers a late `/start` with `token_expired` for a day. No
-  migration is needed; an optional index for the pruning (on `expires_at`) is the next free migration number (`0007`
-  unless S-049 or S-068 took it), with `schema.md` updated and the file added to this list.
+  migration is needed: the existing indexes serve the hourly counts, and the batched prune scans the small table
+  (`0007` is taken by S-049, and no index is added); `schema.md` notes the pruning.
 - **Telegram** (C-18.FR-2, C-14.FR-8; `accountlinks/telegram.go`, `telegram/start.go`, ADR-0013):
   - `startTelegramLink {connection_id}`: a Telegram Connection that is not deleted. The token is 32 bytes from
     `crypto/rand` in base64url without padding (43 characters); its SHA-256 is stored with the User, the Connection
     and `expires_at` = now + `account_link.telegram_token_ttl`. Answer `201` with `deep_link`
     `https://t.me/<bot_username>?start=<token>` and `expires_at`; the bot's username comes from the last Connection
-    check, or from `getMe` through the interactive path when none is stored (`503` `Limited` when no token is free).
+    check, or from `getMe` through the interactive path when none is stored (`503` `Limited` when no token is free,
+    `409` `conflict` when Telegram refuses the call — the `409` is added to the operation in the specification).
   - The update router of S-041 hands private messages to `telegram.Start`, which runs, like every update, under the
     update lock of its Connection (`db.TelegramUpdateLockClass`, `0x6d75_0004`, S-067) and within
     `telegram.parallel_updates` (P-52). A text other than `/start <token>` is ignored. The token is looked up by its
@@ -129,14 +149,19 @@ issue: 51
   - If the Telegram account (`from.id`) is linked to another User: `link_rejected` with `conflict` and the reply "This
     account is linked to another user. Its owner or an admin can unlink it." Otherwise, in one transaction: the User's
     previous Telegram link is deleted (`account_link.unlink` with `replaced`), the link is inserted (`external_id`
-    `from.id`, `username` `from.username`), the request is consumed, `account_link.link` is recorded, and the
+    `from.id`, `username` `from.username`) — or, when the account is already linked to this User, the link is kept with
+    its id and takes the new username and Connection, nothing replaced — the request is consumed, `account_link.link`
+    (with what changed) is recorded, and the
     `account-links` hint goes to that User; after the commit the bot replies "Linked to Muster user {display name}
     ({login})" with `sendMessage` to the private chat through `delivery.Interactive` on the Connection's limiter.
 - **Mattermost** (C-18.FR-3; `accountlinks/mattermost.go`, `mattermost/client.go`):
   - `startMattermostLink {connection_id, username}`: a leading `@` is dropped. The limits of
     `account_link.mattermost_code_requests` are counted over `account_link_requests` of the last hour — per requesting
     User, and per Connection and target account — and refused with `429` `rate-limited` and `Retry-After` until the
-    oldest counted request is an hour old. Through the interactive path: `GET /api/v4/users/username/{username}` (`404`
+    oldest counted request is an hour old. Both are counted in the transaction that stores the request, under the lock
+    of the User's row and a transaction advisory lock of the target account (`db.AccountLinkCodeTargetLockClass`,
+    `0x6d75_0005`), so that concurrent requests cannot pass them; the User's count is also checked before the lookup,
+    which spends no messenger call on a refused request. Through the interactive path: `GET /api/v4/users/username/{username}` (`404`
     → `422` `messenger_user_not_found` at `/username`). An account linked to another User in this Connection's identity
     space answers `409` `account_linked_elsewhere` and records `link_rejected` (`conflict`). Otherwise the User's
     earlier pending Mattermost requests for this Connection are voided, a code of `account_link.mattermost_code` — 8
@@ -155,7 +180,8 @@ issue: 51
     counts no attempt.
 - **Rules** (C-18.FR-4 – FR-7, ADR-0013): the unique constraints of `account_links` carry one account per User per
   identity space and one User per account; nothing moves silently; linking needs no re-authentication and no TOTP
-  beyond the signed-in session.
+  beyond the signed-in session. A concurrent link of the same account by another User resolves to the same conflict:
+  the insert runs in a savepoint and a violation of `account_links_account_key` is `conflict`, the request untouched.
 - **Lists and removal** (C-18.FR-6, FR-10): `listMyAccountLinks` and `listUserAccountLinks` return `messenger`,
   `connection` (id and name), `external_id`, `username`, `last_used_at`, `created_at`. `listLinkableConnections` returns
   every Connection that is not deleted with only `id`, `name` and `messenger`, ordered by messenger and name, and needs
@@ -180,15 +206,19 @@ issue: 51
 - **Secrets** (lint 5): link tokens and codes are hashed before storage and pushed through the handlers and the log by a
   probe; neither appears in a log line or an error.
 - **Fake servers** (C-01.FR-13): Mattermost gains the user `dana` (`u-dana`), `GET /api/v4/users/username/{username}`
-  and the listing of direct-channel posts by `GET /_fake/dms` (`user_id`, `message`); it serves
-  `POST /api/v4/channels/direct` since S-039. Telegram
+  and the listing of direct-channel posts by `GET /_fake/dms` (`user_id`, `post_id`, `message`, `create_at`), which
+  `GET /_fake/posts` leaves out; it serves `POST /api/v4/channels/direct` since S-039. Telegram
   records `sendMessage` to private chats under `GET /_fake/messages?chat=<user id>` and gains `POST /_fake/private`
   `{token, from, text}`, which queues a private message update for the bot.
 - **Documentation** (`docs/messengers/account-links.md`): why links start in the profile, linking Telegram and
   Mattermost step by step, what the bot answers to an invalid or expired link, unlinking, what Admins can do, and the
   answers to unlinked, Viewer and disabled presses.
-- **Log events**: `account_link_linked` (INFO: `messenger`, `connection`, `user`), `account_link_rejected` (INFO:
-  `messenger`, `connection`, `reason`), `account_link_unlinked` (INFO).
+- **Log events**: `account_link_linked` (INFO: `messenger`, `connection`, `user`, and `error` when the bot's
+  confirmation failed), `account_link_rejected` (INFO: `messenger`, `connection`, `reason`, and `error` when the bot's
+  answer failed), `account_link_unlinked` (INFO: `messenger`, `connection`, `user`, `reason` — `removed`, `replaced` or
+  `user_deleted`).
+- **Texts** (`internal/messages/texts`): the bot's messages during linking exist in English and Russian and follow the
+  User's profile language, English without one; a rejection whose User is unknown is in English.
 - **Defaults**: `account_link.telegram_token_ttl`, `account_link.mattermost_code`,
   `account_link.mattermost_code_requests`, `account_link.request_prune_after`, `delivery.interactive_budget`,
   `telegram.parallel_updates`.
@@ -259,7 +289,7 @@ curl -s "${HA[@]}" $API/me/account-links/mattermost -d "{\"connection_id\":\"$C\
 REJ                                                         # {"reason":"conflict","messenger":"mattermost","external_id":"u-bob"}
 for i in 1 2 3; do curl -s -o /dev/null -w '%{http_code} ' "${HD[@]}" $API/me/account-links/mattermost -d "{\"connection_id\":\"$C\",\"username\":\"dana\"}"; done
 curl -s -D - -o /dev/null "${HD[@]}" $API/me/account-links/mattermost -d "{\"connection_id\":\"$C\",\"username\":\"dana\"}" | grep -iE '^(HTTP|retry-after)'
-# 202 202 202 HTTP/1.1 429 Too Many Requests / Retry-After: 3600
+# 202 202 202 HTTP/1.1 429 Too Many Requests / Retry-After: 3600 (or a few seconds less, as the clock moved)
 
 # C-18.FR-10: the Connections to link through show only id, name and messenger
 curl -s -b dana $API/me/account-links/connections | jq -c '[.items[] | keys] | unique'      # [["id","messenger","name"]]
@@ -271,6 +301,8 @@ curl -s "${A[@]}" $API/me/account-links/telegram -d "{\"connection_id\":\"$T\"}"
 AP=$(curl -s "${HA[@]}" $API/me/personal-access-tokens -d '{"name":"cli","permissions":["alert-groups:read"]}' | jq -r .value)
 LID=$(curl -s -b alice $API/me/account-links | jq -r '.items[0].id')
 curl -s -H "Authorization: Bearer $AP" -X DELETE $API/me/account-links/$LID | jq -c '[.status, .code]'   # [403,"session_required"]
+ADM=$(curl -s "${A[@]}" $API/me | jq -r .user.id)
+curl -s "${A[@]}" -X DELETE $API/users/$ADM/account-links/$LID | jq -c '[.status, .code]'   # [403,"session_required"]
 BOB=$(curl -s "${A[@]}" "$API/users?q=bob" | jq -r '.items[0].id')
 curl -s "${A[@]}" $API/users/$BOB/account-links | jq -c '[.items[].messenger]'          # ["mattermost"]
 curl -s -D - "${A[@]}" -X POST $API/users/$BOB/account-links -d '{}' | grep -iE '^(HTTP|allow)|method-not-allowed' | tr -d '\r'

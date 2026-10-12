@@ -248,6 +248,38 @@ func TestHooked(t *testing.T) {
 	}
 }
 
+// TestTelegramConn: the bot of a Telegram Connection for an Account link, with its cached client, whatever its update
+// mode; an unknown or Mattermost Connection, or a failed read, gives none.
+func TestTelegramConn(t *testing.T) {
+	e := newTGEnv(t)
+	mm := e.create(t, "mm")
+	for _, id := range []string{"CN000000000000", "bad", mm.PublicID} {
+		if _, err := e.svc.TelegramConn(t.Context(), id); !errors.Is(err, connections.ErrNotFound) {
+			t.Errorf("%s = %v", id, err)
+		}
+	}
+	c, err := e.svc.Create(t.Context(), by, e.input("tg", connections.ModeLongPolling))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := e.svc.TelegramConn(t.Context(), c.PublicID)
+	if err != nil || conn.ID != c.ID || conn.PublicID != c.PublicID || conn.Client == nil {
+		t.Fatalf("TelegramConn = %+v, %v", conn, err)
+	}
+	if again, _ := e.svc.TelegramConn(t.Context(), c.PublicID); again.Client != conn.Client {
+		t.Error("the client is not cached")
+	}
+	e.store.rows[c.ID].row.BotTokenCiphertext = []byte("garbage")
+	e.store.rows[c.ID].row.Version++
+	if _, err := e.svc.TelegramConn(t.Context(), c.PublicID); err == nil {
+		t.Error("an unreadable bot token")
+	}
+	e.store.fail["GetConnection"] = errors.New("down")
+	if _, err := e.svc.TelegramConn(t.Context(), c.PublicID); err == nil || errors.Is(err, connections.ErrNotFound) {
+		t.Errorf("a failed read = %v", err)
+	}
+}
+
 // TestTelegramCheck covers C-14.FR-11, AC-5 and AC-6 through the Service: the three steps on the interactive path of the
 // Connection, the bot recorded; with an unsaved base URL only the dry probe runs there.
 func TestTelegramCheck(t *testing.T) {

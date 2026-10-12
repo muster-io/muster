@@ -362,7 +362,7 @@ export const useDeleteMyAccountLink = <TError = UnauthorizedResponse | Forbidden
 }
 
 /**
- * Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`. Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session can start a link (not a token). No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`. When the bot's username is not known from the last Connection check, it is read with `getMe` on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`, and when Telegram refuses the call, `409`.
  * @summary Start linking a Telegram account
  */
 export const startTelegramLink = async (telegramLinkRequest: TelegramLinkRequest, options?: Parameters<typeof apiFetch>[1]): Promise<TelegramLinkStart> => {
@@ -396,7 +396,7 @@ return apiFetch<TelegramLinkStart>(getStartTelegramLinkUrl(),
 
 export const getStartTelegramLinkMutationKey = () => ['startTelegramLink'] as const;
 
-export const getStartTelegramLinkMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
+export const getStartTelegramLinkMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startTelegramLink>>, TError,StartTelegramLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof startTelegramLink>>, TError,StartTelegramLinkMutationVariables, TContext> => {
 
@@ -425,13 +425,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type StartTelegramLinkMutationResult = NonNullable<Awaited<ReturnType<typeof startTelegramLink>>>
     export type StartTelegramLinkMutationBody = TelegramLinkRequest
-    export type StartTelegramLinkMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse
+    export type StartTelegramLinkMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse
     export type StartTelegramLinkMutationVariables = {data: TelegramLinkRequest}
 
     /**
  * @summary Start linking a Telegram account
  */
-export const useStartTelegramLink = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
+export const useStartTelegramLink = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | ConflictResponse | UnprocessableResponse | TooManyRequestsResponse | LimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startTelegramLink>>, TError,StartTelegramLinkMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof startTelegramLink>>,
@@ -450,7 +450,7 @@ export const useStartTelegramLink = <TError = BadRequestResponse | UnauthorizedR
 }
 
 /**
- * The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
+ * The Connection's bot sends a direct message with a code to the `@username`. Code requests are limited per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already linked to another user (`account_linked_elsewhere`), or without a code when Mattermost refuses a call. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No operation starts a link for another User, whatever the caller's Role. A `connection_id` that names no Mattermost Connection — missing, deleted or a Telegram one — answers `422` `unknown_id` at `/connection_id`; a username the Mattermost server does not know answers `422` `messenger_user_not_found` at `/username`.
  * @summary Start linking a Mattermost account
  */
 export const startMattermostLink = async (mattermostLinkRequest: MattermostLinkRequest, options?: Parameters<typeof apiFetch>[1]): Promise<MattermostLinkStarted> => {
@@ -727,7 +727,7 @@ export const getDeleteUserAccountLinkUrl = (userId: string,
 }
 
 /**
- * Admins can remove any link but cannot create one for someone else.
+ * Admins can remove any link but cannot create one for someone else. An Admin's own link is removed from the web session only; with a token the answer is `403` (`session_required`).
  * @summary Remove a user's Account link
  */
 export const deleteUserAccountLink = async (userId: string,

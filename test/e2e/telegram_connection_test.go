@@ -227,7 +227,10 @@ func TestTelegramConnection(t *testing.T) {
 		info.Result.URL != devmode.IngestURL+"/api/v1/callbacks/telegram/"+id {
 		t.Fatalf("webhook URL %q", info.Result.URL)
 	}
-	u := `{"update_id":9001,"message":{"message_id":1,"chat":{"id":42,"type":"private"},"text":"hello"}}`
+	// A private message reaches the router, which hands `/start <token>` to the Account links (S-051): an unknown
+	// token is rejected and logged with the Connection.
+	u := `{"update_id":9001,"message":{"message_id":1,"chat":{"id":42,"type":"private"},"from":{"id":42,"is_bot":false,
+		"first_name":"x"},"text":"/start unknown-token"}}`
 	hook := r.Ingest + "/api/v1/callbacks/telegram/"
 	for _, c := range []struct{ id, secret string }{{id, ""}, {id, "wrong"}, {"CN000000000000", "x"}} {
 		var header []string
@@ -238,15 +241,16 @@ func TestTelegramConnection(t *testing.T) {
 			t.Fatalf("webhook %s with %q = %d", c.id, c.secret, a.status)
 		}
 	}
-	if strings.Contains(r.Output(), `"event":"telegram_update_dropped","connection":"`+id) {
+	routed := regexp.MustCompile(`"event":"account_link_rejected","messenger":"telegram","connection":"` + id +
+		`","reason":"token_unknown"`)
+	if routed.MatchString(r.Output()) {
 		t.Fatal("a refused webhook request reached the router")
 	}
 	e.fake(http.MethodPost, "/updates", `{"token":"`+token+`","update":`+u+`}`)
-	dropped := regexp.MustCompile(`"event":"telegram_update_dropped","connection":"` + id + `","kind":"private_message"`)
-	waitLog(t, r, "the private message to reach the router", dropped)
+	waitLog(t, r, "the private message to reach the router", routed)
 	time.Sleep(500 * time.Millisecond)
-	if n := len(dropped.FindAllString(r.Output(), -1)); n != 1 {
-		t.Fatalf("the private message was dropped %d times", n)
+	if n := len(routed.FindAllString(r.Output(), -1)); n != 1 {
+		t.Fatalf("the private message was handled %d times", n)
 	}
 
 	// C-14.AC-7: a network error leaves the token nowhere.

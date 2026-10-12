@@ -1,4 +1,9 @@
 {
+  "accountLink.code": "Вы запросили связывание учётной записи с Muster. Никому не сообщайте этот код.\n\n{code}",
+  "accountLink.conflict": "Эта учётная запись связана с другим пользователем. Отвязать её может владелец или администратор.",
+  "accountLink.invalid": "Эта ссылка недействительна или устарела. Начните заново в своём профиле Muster.",
+  "accountLink.linkedMattermost": "Учётная запись связана с пользователем Muster {name}",
+  "accountLink.linkedTelegram": "Учётная запись связана с пользователем Muster {name} ({login})",
   "alerts.fullList": "Полный список в Muster",
   "alerts.more": "и ещё {count}",
   "button.acknowledge": "Подтвердить",

@@ -21,8 +21,8 @@ const (
 	// KindChatMessage is a message, an edit or a post in a channel or a group, such as the automatic copy of a channel
 	// post in its discussion group, which Copies processes.
 	KindChatMessage = "chat_message"
-	// KindPrivateMessage is a message to the bot in a private chat, such as `/start <token>`, which the Account link
-	// handler of S-051 processes.
+	// KindPrivateMessage is a message to the bot in a private chat, such as `/start <token>`, which Start, the
+	// handler of Account links, processes.
 	KindPrivateMessage = "private_message"
 	// KindMyChatMember is a change of the bot's own membership in a chat.
 	KindMyChatMember = "my_chat_member"

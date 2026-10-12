@@ -49,6 +49,12 @@ const RouteMembershipLockClass int32 = 0x6d75_0002
 // channel post's copy.
 const TelegramUpdateLockClass int32 = 0x6d75_0004
 
+// AccountLinkCodeTargetLockClass is the first key of the transaction advisory lock of the Mattermost code requests for
+// one account of a Connection, whose second key is hashtext of the Organization, the Connection and the account: a
+// code request holds it while it counts the account's requests of the last hour and stores its own
+// (account_link.mattermost_code_requests).
+const AccountLinkCodeTargetLockClass int32 = 0x6d75_0005
+
 // querier is what the checks need of the main pool or of a connection.
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)

@@ -59,7 +59,8 @@ func (e *LimitedError) Seconds() int {
 
 // Op is one interactive call. A send or an edit is an adapter call made here, in interactive.go, so that lint 3 allows
 // it nowhere else: PublishOp, UpdateOp and ReplyOp. CheckOp is an adapter's Destination check, and ReadOp a read that
-// changes no message, such as a Connection check or a channel list, whose answer its function keeps.
+// changes no message, such as a Connection check or a channel list, whose answer its function keeps. AnswerOp answers
+// a press privately and DirectOp is a bot's message to one person; neither touches a Root message or a Thread reply.
 type Op interface {
 	call(ctx context.Context, c Call) Outcome
 }
@@ -138,6 +139,15 @@ func (f answerOp) call(ctx context.Context, c Call) Outcome { return f(ctx, c) }
 // AnswerOp is a private answer to the person who pressed a button, such as a Mattermost ephemeral post (C-11.FR-2): it
 // changes no Root message and no Thread reply, and send is the adapter's own call.
 func AnswerOp(send func(ctx context.Context, c Call) Outcome) Op { return answerOp(send) }
+
+type directOp func(ctx context.Context, c Call) Outcome
+
+func (f directOp) call(ctx context.Context, c Call) Outcome { return f(ctx, c) }
+
+// DirectOp is a bot's message to one person in a private or direct chat, such as the reply to a Telegram `/start` or
+// the Mattermost direct message with an Account link code (C-18.FR-11): it changes no Root message and no Thread reply,
+// and send is the messenger client's own call.
+func DirectOp(send func(ctx context.Context, c Call) Outcome) Op { return directOp(send) }
 
 // Do makes op once a token of s is taken, in the interactive client class. When no token frees within the budget it
 // returns a *LimitedError and calls nothing. A RetryAfter the call answers holds the bucket of its scope, as for the

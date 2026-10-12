@@ -113,6 +113,8 @@ None.
   only in the open dialog and is not stored in the page's state after it closes.
 - The Telegram dialog closes on the `account-links` hint, which reaches only the streams of the User whose link changed
   through the User target that S-051 adds to hints (D298).
+- The `account-links` hint goes only to the link's own User, so the Admin's user page re-fetches the list after its own
+  deletes.
 
 ## Coverage
 

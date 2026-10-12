@@ -1198,6 +1198,65 @@ func TestOwnerRelease(t *testing.T) {
 	}
 }
 
+// linkRemover records the removals of Account links the deletion asks for, inside its transaction or not, and fails
+// when told to.
+type linkRemover struct {
+	calls     []string
+	inTx      []bool
+	fail      error
+	none      bool
+	committed int
+}
+
+func (r *linkRemover) RemoveUserLinks(_ context.Context, tx dbgen.DBTX, userID int64, actor audit.Actor,
+	tr audit.Transport, addr netip.Addr) (func(context.Context), error) {
+	_, ok := tx.(fakeTx)
+	r.calls = append(r.calls, fmt.Sprintf("%d %s %s %s", userID, actor.PublicID, tr, addr))
+	r.inTx = append(r.inTx, ok)
+	if r.fail != nil {
+		return nil, r.fail
+	}
+	if r.none {
+		return nil, nil
+	}
+	return func(context.Context) { r.committed++ }, nil
+}
+
+// TestDeleteRemovesLinks is C-03.FR-13 and C-18.FR-8: Delete removes the user's Account links inside its own
+// transaction with the actor, the Transport and the address of the delete, and runs what the removal returns once
+// committed; Disable removes none; a failing removal rolls the delete back, with no Audit log entry.
+func TestDeleteRemovesLinks(t *testing.T) {
+	s := &adminStore{users: []dbgen.GetUserRow{adminRow(1, adminID, "admin"), adminRow(2, bobID, "bob"),
+		adminRow(3, "SRC0000000000C", "carol")}}
+	s.users[1].Role, s.users[2].Role = auth.RoleResponder, auth.RoleResponder
+	a, _ := newAdmin(t, s)
+	r := &linkRemover{fail: errors.New("boom")}
+	a.SetLinkRemover(r)
+	if _, err := a.Disable(t.Context(), byAdmin, bobID); err != nil || len(r.calls) != 0 {
+		t.Fatalf("disable = %v, removed %v", err, r.calls)
+	}
+	audits := len(s.audit)
+	if err := a.Delete(t.Context(), byAdmin, bobID, nil); err == nil || !strings.Contains(err.Error(), "boom") ||
+		s.user(2).Status == StatusDeleted || len(s.audit) != audits || r.committed != 0 {
+		t.Fatalf("delete with a failing removal = %v, %s", err, s.user(2).Status)
+	}
+	r.fail = nil
+	if err := a.Delete(t.Context(), byAdmin, bobID, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("2 %s %s %s", byAdmin.Actor.PublicID, byAdmin.Transport, byAdmin.Address)
+	if r.calls[len(r.calls)-1] != want || !r.inTx[len(r.inTx)-1] || r.committed != 1 {
+		t.Errorf("delete removed %v in a transaction %v, committed %d", r.calls, r.inTx, r.committed)
+	}
+	if e, _ := lastAudit(t, s); e.Action != audit.ActionUserDeleted {
+		t.Errorf("entry %s", e.Action)
+	}
+	r.none = true
+	if err := a.Delete(t.Context(), byAdmin, "SRC0000000000C", nil); err != nil || r.committed != 1 {
+		t.Errorf("a removal with nothing to run = %v, committed %d", err, r.committed)
+	}
+}
+
 // nothing is an OwnerReleaser with nothing to release.
 type nothing struct{}
 

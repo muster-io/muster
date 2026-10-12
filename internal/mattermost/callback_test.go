@@ -857,3 +857,93 @@ func TestExpiredButton(t *testing.T) {
 		}
 	})
 }
+
+// TestLinkBots is C-18.FR-3 and FR-11: within one limiter token of the interactive path, the bot finds a person by
+// username without case — an unknown one and a bot are not found — and sends them a direct message, opening the
+// direct channel with its user id or, before a Connection check learned it, the one of GET /api/v4/users/me. A refused
+// call is a MessengerError without Mattermost's text, a 429 a LimitedError; an unknown Connection is
+// accountlinks.ErrNoConnection, and no limiter token runs nothing.
+func TestLinkBots(t *testing.T) {
+	e := newCallback(t)
+	lb := mattermost.LinkBots{Conns: e.conns, Path: e.cfg.Path}
+	var found accountlinks.MattermostAccount
+	err := lb.Session(t.Context(), connectionPublicID, func(ctx context.Context, b accountlinks.MattermostBot) error {
+		var err error
+		if found, err = b.FindUser(ctx, "DANA"); err != nil {
+			return err
+		}
+		for _, name := range []string{"nobody", fakemattermost.BotUsername} {
+			if _, err := b.FindUser(ctx, name); !errors.Is(err, accountlinks.ErrMessengerUserNotFound) {
+				t.Errorf("FindUser(%s) = %v", name, err)
+			}
+		}
+		return b.SendDirect(ctx, found.ID, "Your code: ABCD2345")
+	})
+	if err != nil || found != (accountlinks.MattermostAccount{ID: fakemattermost.DanaUserID, Username: "dana"}) {
+		t.Fatalf("Session = %v, found %+v", err, found)
+	}
+	dms := e.fake.DMs()
+	if len(dms) != 1 || dms[0].UserID != fakemattermost.DanaUserID || dms[0].Message != "Your code: ABCD2345" {
+		t.Fatalf("dms %+v", dms)
+	}
+	me := func() int {
+		n := 0
+		for _, r := range e.fake.Requests() {
+			if r.Path == "/api/v4/users/me" {
+				n++
+			}
+		}
+		return n
+	}
+	if me() != 1 {
+		t.Errorf("the bot's user was read %d times", me())
+	}
+	e.conns.conn.BotUserID = fakemattermost.BotUserID
+	send := func(text string) error {
+		return lb.Session(t.Context(), connectionPublicID, func(ctx context.Context, b accountlinks.MattermostBot) error {
+			return b.SendDirect(ctx, fakemattermost.BobUserID, text)
+		})
+	}
+	if err := send("hello"); err != nil || me() != 1 || len(e.fake.DMs()) != 2 {
+		t.Errorf("a direct message with a known bot = %v, %d reads of the bot", err, me())
+	}
+	fault(t, e.fake, fakeserver.Fault{Path: "/api/v4/channels/direct", Status: 403, Times: 1,
+		Body: `{"id":"api.context.permissions.app_error","message":"echo Your code: ABCD2345"}`})
+	var me1 *accountlinks.MessengerError
+	if err := send("Your code: ABCD2345"); !errors.As(err, &me1) || me1.Call != "the direct message" ||
+		me1.Status != 403 || strings.Contains(err.Error(), "ABCD2345") {
+		t.Errorf("a refused direct message = %v", err)
+	}
+	fault(t, e.fake, fakeserver.Fault{Path: "/api/v4/posts", Status: 429, RetryAfterSeconds: 2, Times: 1,
+		ContentType: "text/plain", Body: "limit exceeded"})
+	var limited *delivery.LimitedError
+	if err := send("x"); !errors.As(err, &limited) || limited.RetryAfter != 2*time.Second {
+		t.Errorf("a 429 = %v", err)
+	}
+	e.conns.conn.BotUserID = ""
+	fault(t, e.fake, fakeserver.Fault{Path: "/api/v4/users/me", Status: 500, Times: 1})
+	if err := send("x"); !errors.As(err, &me1) || me1.Call != "the bot's user" {
+		t.Errorf("a failed read of the bot = %v", err)
+	}
+	fault(t, e.fake, fakeserver.Fault{Path: "/api/v4/users/username/*", Status: 502, Times: 1})
+	err = lb.Session(t.Context(), connectionPublicID, func(ctx context.Context, b accountlinks.MattermostBot) error {
+		_, err := b.FindUser(ctx, "bob")
+		return err
+	})
+	if !errors.As(err, &me1) || me1.Call != "the user lookup" || me1.Outcome != string(delivery.OutcomeTransient) {
+		t.Errorf("a failed lookup = %v", err)
+	}
+	ran := false
+	run := func(context.Context, accountlinks.MattermostBot) error { ran = true; return nil }
+	if err := lb.Session(t.Context(), "CN0000000000Z9", run); !errors.Is(err, accountlinks.ErrNoConnection) {
+		t.Errorf("an unknown Connection = %v", err)
+	}
+	if err := (mattermost.LinkBots{Conns: e.conns, Path: &limitedPath{}}).Session(t.Context(), connectionPublicID,
+		run); !errors.As(err, &limited) || ran {
+		t.Errorf("no limiter token = %v, ran %v", err, ran)
+	}
+	e.conns.err = errors.New("database down")
+	if err := lb.Session(t.Context(), connectionPublicID, run); err == nil || ran {
+		t.Errorf("a failed lookup of the Connection = %v", err)
+	}
+}

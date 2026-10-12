@@ -22335,6 +22335,22 @@ func (response StartTelegramLink403ApplicationProblemPlusJSONResponse) VisitStar
 	return err
 }
 
+type StartTelegramLink409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response StartTelegramLink409ApplicationProblemPlusJSONResponse) VisitStartTelegramLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type StartTelegramLink422ApplicationProblemPlusJSONResponse struct {
 	UnprocessableApplicationProblemPlusJSONResponse
 }

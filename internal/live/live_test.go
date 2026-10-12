@@ -99,11 +99,12 @@ func TestHubFanOut(t *testing.T) {
 		t.Errorf("the first LISTEN sent %v", got)
 	}
 	h.Listening(true)
-	if got := received(a); !slices.Equal(got, []Hint{{Type: HintOrganization}, {Type: HintSystemNotices}}) {
+	if got := received(a); !slices.Equal(got, []Hint{{Type: HintOrganization}, {Type: HintSystemNotices},
+		{Type: HintAccountLinks}}) {
 		t.Errorf("a restored LISTEN sent %v", got)
 	}
 	h.Send(Hint{Type: HintSystemNotices}, func(s Subscriber) bool { return s.Admin })
-	if len(received(a)) != 0 || len(received(b)) != 3 {
+	if len(received(a)) != 0 || len(received(b)) != 4 {
 		t.Error("a hint for Admins reached another stream")
 	}
 }
@@ -130,6 +131,27 @@ func TestHubAlertGroupHints(t *testing.T) {
 	}
 	if got := received(other); slices.Contains(got, Hint{Type: HintAlertGroups}) {
 		t.Errorf("a restored LISTEN sent alert-groups to %v", got)
+	}
+}
+
+// TestHubUserHints: a hint that names a User, such as account-links (C-18.FR-2), reaches only the streams of that User,
+// all of them; a hint without a User reaches every stream.
+func TestHubUserHints(t *testing.T) {
+	h, _ := newHub(nil)
+	alice1 := subscribe(t, h, Subscriber{SessionID: 1, User: "SRAAAAAAAAAAA1"})
+	alice2 := subscribe(t, h, Subscriber{SessionID: 2, User: "SRAAAAAAAAAAA1"})
+	bob := subscribe(t, h, Subscriber{SessionID: 3, User: "SRAAAAAAAAAAA2", AlertGroups: true})
+	h.Receive(db.Hint{OrgID: 1, Type: HintAccountLinks, User: "SRAAAAAAAAAAA1"})
+	h.Receive(db.Hint{OrgID: 2, Type: HintAccountLinks, User: "SRAAAAAAAAAAA2"})
+	h.Receive(db.Hint{OrgID: 1, Type: HintOrganization})
+	want := []Hint{{Type: HintAccountLinks}, {Type: HintOrganization}}
+	for _, sub := range []*Subscription{alice1, alice2} {
+		if got := received(sub); !slices.Equal(got, want) {
+			t.Errorf("a stream of the User = %v", got)
+		}
+	}
+	if got := received(bob); !slices.Equal(got, []Hint{{Type: HintOrganization}}) {
+		t.Errorf("another User's stream = %v", got)
 	}
 }
 
