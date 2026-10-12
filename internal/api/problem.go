@@ -346,6 +346,9 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	if f, ok := errors.AsType[*users.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
+	if f, ok := errors.AsType[*organization.FieldError](err); ok {
+		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
 	if u, ok := errors.AsType[*organization.UnsupportedError](err); ok {
 		p := problem(http.StatusUnprocessableEntity, typeValidationFailed, "", detailSemanticValidation)
 		detail := "This setting cannot be changed yet."

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/buildinfo"
 	"github.com/muster-io/muster/internal/internalalerts/dbgen"
 	"github.com/muster-io/muster/internal/publicid"
 )
@@ -36,6 +38,21 @@ type Notification struct {
 
 // DefaultRunbookBase is MUSTER_RUNBOOK_BASE_URL when it is not set: the published documentation site.
 const DefaultRunbookBase = "https://muster-io.github.io/muster"
+
+// version is the version of the binary whose runbooks the runbook_url points at; tests replace it.
+var version = func() string { return buildinfo.Version }
+
+var releaseRe = regexp.MustCompile(`^v?(\d+)\.(\d+)(\.\d+)?([-+].*)?$`)
+
+// RunbookVersion is the segment of the documentation site for the binary of version v (C-19.FR-9): its major.minor,
+// or latest for the development version 0.0.0-dev and any version that is not a release number.
+func RunbookVersion(v string) string {
+	m := releaseRe.FindStringSubmatch(v)
+	if m == nil || (m[1] == "0" && m[2] == "0" && m[3] == ".0" && strings.HasPrefix(m[4], "-dev")) {
+		return "latest"
+	}
+	return m[1] + "." + m[2]
+}
 
 // The groupKeys of synthetic Stored Snapshots: one per Internal alert, and the marker of a deleted Integration.
 const (
@@ -175,7 +192,7 @@ func (r *Raiser) raise(ctx context.Context, q Store, now time.Time, d *Definitio
 	annotations := map[string]string{
 		"summary":     strings.ReplaceAll(summary, "{name}", name),
 		"description": strings.ReplaceAll(description, "{name}", name),
-		"runbook_url": r.base + "/" + d.Runbook(),
+		"runbook_url": r.base + "/" + RunbookVersion(version()) + "/" + d.Runbook(),
 	}
 	builtin, err := r.builtin(ctx, q)
 	if err != nil {
@@ -246,6 +263,16 @@ func (r *Raiser) ResolveAbout(ctx context.Context, q Store, now time.Time, entit
 		}
 	}
 	return nil
+}
+
+// Firing reports whether the Internal alert d, of no entity, fires or will once its pending raise is processed, so
+// that a check raises and resolves it only on transitions.
+func (r *Raiser) Firing(ctx context.Context, q Store, d *Definition) (bool, error) {
+	open, err := r.firingAbout(ctx, q, "alertname", d.Name)
+	if err != nil {
+		return false, err
+	}
+	return len(open) > 0, nil
 }
 
 // firing is an Internal alert that fires, or will once its pending raise is processed.

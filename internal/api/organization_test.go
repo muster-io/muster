@@ -58,8 +58,18 @@ func (f *fakeOrganization) Update(_ context.Context, actor audit.Actor, _ audit.
 		return organization.Organization{}, organization.ErrVersionMismatch
 	case in.Name != f.org.Name:
 		return organization.Organization{}, &organization.UnsupportedError{Pointers: []string{"/name", "/time_zone"}}
+	case strings.HasPrefix(string(in.HeartbeatURL.Value), "ftp:"):
+		return organization.Organization{}, &organization.FieldError{Pointer: "/outgoing_heartbeat/url",
+			Code: fieldInvalidFormat, Detail: "The URL is not an absolute http or https URL."}
 	}
 	f.org.TOTPRequired = in.TOTPRequired
+	if in.HeartbeatURL.Given {
+		f.org.OutgoingHeartbeat.URL.Set = !in.HeartbeatURL.Null
+	}
+	f.org.OutgoingHeartbeat.Proxy.Enabled = in.HeartbeatProxy.Enabled
+	if in.HeartbeatProxy.Address != nil {
+		f.org.OutgoingHeartbeat.Proxy.Address = *in.HeartbeatProxy.Address
+	}
 	f.org.Version++
 	return f.org, nil
 }
@@ -174,6 +184,56 @@ func TestUpdateOrganization(t *testing.T) {
 	if a := x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", body, "If-Match", `W/"x"`); a.status !=
 		http.StatusPreconditionFailed {
 		t.Errorf("an If-Match that names no version = %d", a.status)
+	}
+}
+
+// TestUpdateOrganizationOutgoingHeartbeat covers C-19.FR-7 on the API: an Admin sets the write-only URL of the
+// outgoing heartbeat, read back only as set, clears it with null and sets its proxy; an invalid URL is 422 at its
+// pointer; no answer carries the URL.
+func TestUpdateOrganizationOutgoingHeartbeat(t *testing.T) {
+	x, f := newOrganizationAPI(t)
+	f.org.OutgoingHeartbeat = organization.OutgoingHeartbeat{}
+	put := func(change func(hb map[string]any)) answer {
+		t.Helper()
+		read := x.call(t, http.MethodGet, "/api/v1/organization", "", "Cookie", adminCookie)
+		body := updateBody(t, read.body, func(m map[string]any) {
+			change(m["outgoing_heartbeat"].(map[string]any))
+		})
+		return x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", body, "If-Match",
+			read.header.Get("ETag"))
+	}
+	a := put(func(hb map[string]any) {
+		hb["url"] = "https://hb.example.org/ping/secret-token"
+		hb["proxy"] = map[string]any{"enabled": false}
+	})
+	if a.status != http.StatusOK || a.json(t)["outgoing_heartbeat"].(map[string]any)["url_status"].(map[string]any)["set"] != true ||
+		strings.Contains(string(a.body), "secret-token") {
+		t.Fatalf("set = %d %s", a.status, a.body)
+	}
+	if in := f.inputs[len(f.inputs)-1]; in.HeartbeatURL.Value != "https://hb.example.org/ping/secret-token" ||
+		in.HeartbeatProxy.Enabled {
+		t.Errorf("input %+v", in)
+	}
+	a = put(func(hb map[string]any) {
+		hb["url"] = nil
+		hb["proxy"] = map[string]any{"enabled": true, "type": "http", "address": "127.0.0.1:18091"}
+	})
+	hb := a.json(t)["outgoing_heartbeat"].(map[string]any)
+	if a.status != http.StatusOK || hb["url_status"].(map[string]any)["set"] != false ||
+		hb["proxy"].(map[string]any)["address"] != "127.0.0.1:18091" {
+		t.Fatalf("clear = %d %s", a.status, a.body)
+	}
+	if in := f.inputs[len(f.inputs)-1]; !in.HeartbeatURL.Null || !in.HeartbeatProxy.Enabled {
+		t.Errorf("input %+v", in)
+	}
+	a = put(func(hb map[string]any) { hb["url"] = "ftp://hb.example.org/x" })
+	var p struct {
+		Errors []struct{ Pointer, Code string }
+	}
+	_ = json.Unmarshal(a.body, &p)
+	if a.status != http.StatusUnprocessableEntity || len(p.Errors) != 1 || p.Errors[0].Pointer !=
+		"/outgoing_heartbeat/url" || p.Errors[0].Code != fieldInvalidFormat || strings.Contains(string(a.body), "ftp:") {
+		t.Errorf("an ftp URL = %d %s", a.status, a.body)
 	}
 }
 

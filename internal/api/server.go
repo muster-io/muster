@@ -206,6 +206,7 @@ type Config struct {
 	Templates    Templates
 	Links        Links
 	AccountLinks AccountLinks
+	SystemStatus SystemStatus
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -241,6 +242,7 @@ type Server struct {
 	templates      Templates
 	links          Links
 	accountLinks   AccountLinks
+	systemStatus   SystemStatus
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -293,7 +295,7 @@ var implemented = map[string]bool{
 	"RetirePreviousSigningSecret": true, "TestDestination": true, "PreviewDestination": true,
 	"ListMyAccountLinks": true, "ListLinkableConnections": true, "DeleteMyAccountLink": true,
 	"StartTelegramLink": true, "StartMattermostLink": true, "ConfirmMattermostLink": true,
-	"ListUserAccountLinks": true, "DeleteUserAccountLink": true,
+	"ListUserAccountLinks": true, "DeleteUserAccountLink": true, "GetSystemStatus": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -324,7 +326,7 @@ func New(cfg Config) (*Server, error) {
 		integrations: cfg.Integrations, snapshots: cfg.Snapshots, alerts: cfg.Alerts, routes: cfg.Routes,
 		alertGroups: cfg.AlertGroups, commands: cfg.Commands, directory: cfg.Directory,
 		connections: cfg.Connections, destinations: cfg.Destinations, webhooks: cfg.Webhooks, deliveries: cfg.Deliveries, templates: cfg.Templates, links: cfg.Links,
-		accountLinks: cfg.AccountLinks, trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
+		accountLinks: cfg.AccountLinks, systemStatus: cfg.SystemStatus, trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}
 	mux := http.NewServeMux()

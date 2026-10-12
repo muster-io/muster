@@ -41,6 +41,14 @@ const (
 // as a failed read of the Connections; while it runs, it polls without pause.
 const TelegramPollingInterval = 10 * time.Second
 
+// OIDCSecretExpiryInterval is how often the Leader checks the expiry date of the OIDC client secret (C-19.FR-5); a
+// change of the OIDC settings is seen at the next run.
+const OIDCSecretExpiryInterval = 5 * time.Minute
+
+// OutgoingHeartbeatPoll is how often the Leader looks whether the outgoing heartbeat is due; the sender measures
+// outgoing_heartbeat.interval on the business clock, so the poll only bounds how late a send is.
+const OutgoingHeartbeatPoll = 5 * time.Second
+
 // PruneBatch is the most rows one delete of short-lived pruning removes, so that a large backlog is deleted in short
 // statements that hold their row locks briefly.
 const PruneBatch = 1000
@@ -143,12 +151,17 @@ type Work struct {
 	// WebhookEventRetention deletes, in batches, the outgoing webhook events of the Organization orgID that are
 	// delivered or not delivered and older than retention.alert_details at now, and returns how many it deleted.
 	WebhookEventRetention func(ctx context.Context, orgID int64, now time.Time) (int64, error)
+	// OIDCSecretExpiry raises and resolves MusterOIDCSecretExpiring for the Organization orgID (C-19.FR-5).
+	OIDCSecretExpiry func(ctx context.Context, orgID int64) error
+	// OutgoingHeartbeat sends the outgoing heartbeat of the Organization orgID when it is due (C-19.FR-7).
+	OutgoingHeartbeat func(ctx context.Context, orgID int64) error
 	// TelegramPolling runs the long polling of the Telegram Connections of the Organization orgID until ctx ends
 	// (C-14.FR-1): it stops every poller before it returns, and a failed read of the Connections returns early.
 	TelegramPolling func(ctx context.Context, orgID int64) error
-	// ClockMoved, in development mode, wakes the Heartbeat check, the Stale scan, the Alert Group retention, the
-	// retention of Thread replies and of outgoing webhook events and the short-lived pruning when the development clock
-	// moved; nil otherwise.
+	// ClockMoved, in development mode, wakes the alive mark, the Heartbeat check, the Stale scan, the Alert Group
+	// retention, the retention of Thread replies and of outgoing webhook events, the short-lived pruning, the OIDC client
+	// secret expiry check and the outgoing heartbeat when the development clock moved, so that the alive mark keeps up
+	// with the business clock and the Leader is not taken for absent; nil otherwise.
 	ClockMoved *Wakes
 }
 
@@ -207,15 +220,17 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 // Tasks returns the closed list of Leader tasks (ADR-0007): partition maintenance and retention, the alive mark, the
 // pruning of replica records, the pruning of short-lived state, the ingestion backlog, the retention of the Alerts
 // view, the Heartbeat check, the Stale scan, the count of open Alert Groups, the Alert Group retention, the count of
-// pending deliveries, the retention of Thread replies and of outgoing webhook events and the long polling of Telegram
-// Connections. Later capabilities
-// add theirs here: the outgoing heartbeat and the OIDC client secret expiry check. The Keeper calls the result at every leadership, so each one
+// pending deliveries, the retention of Thread replies and of outgoing webhook events, the long polling of Telegram
+// Connections, the OIDC client secret expiry check and the outgoing heartbeat (C-02.FR-10). Later capabilities add
+// theirs at the end of the list. The Keeper calls the result at every leadership, so each one
 // starts with a takeover; the Heartbeat check waits for it, so that it measures the timeouts from the end of a
 // downtime the takeover records (C-07.FR-4).
 func Tasks(w Work) func() []Task {
 	heartbeatWake, staleWake, retentionWake := w.ClockMoved.channel(), w.ClockMoved.channel(), w.ClockMoved.channel()
 	replyRetentionWake, eventRetentionWake := w.ClockMoved.channel(), w.ClockMoved.channel()
 	shortLivedWake := w.ClockMoved.channel()
+	oidcExpiryWake, outgoingHeartbeatWake := w.ClockMoved.channel(), w.ClockMoved.channel()
+	aliveWake := w.ClockMoved.channel()
 	return func() []Task {
 		var takenOver atomic.Bool
 		return []Task{
@@ -223,7 +238,7 @@ func Tasks(w Work) func() []Task {
 				_ = w.MaintainPartitions(ctx) // logged as partition_maintenance_failed and retried at the next run
 				return nil
 			}},
-			{Name: "alive_mark", Every: AliveMarkInterval, Run: func(ctx context.Context) error {
+			{Name: "alive_mark", Every: AliveMarkInterval, Wake: aliveWake, Run: func(ctx context.Context) error {
 				if takenOver.Load() {
 					return w.Alive.Mark(ctx)
 				}
@@ -254,8 +269,33 @@ func Tasks(w Work) func() []Task {
 			{Name: "webhook_event_retention", Every: MaintenanceInterval, Wake: eventRetentionWake,
 				Run: w.webhookEventRetention},
 			{Name: "telegram_polling", Every: TelegramPollingInterval, Run: w.telegramPolling},
+			{Name: "oidc_secret_expiry", Every: OIDCSecretExpiryInterval, Wake: oidcExpiryWake,
+				Run: func(ctx context.Context) error {
+					return w.perOrganization(ctx, "the oidc secret expiry check", w.OIDCSecretExpiry)
+				}},
+			{Name: "outgoing_heartbeat", Every: OutgoingHeartbeatPoll, Wake: outgoingHeartbeatWake,
+				Run: func(ctx context.Context) error {
+					return w.perOrganization(ctx, "the outgoing heartbeat", w.OutgoingHeartbeat)
+				}},
 		}
 	}
+}
+
+// perOrganization runs f for every Organization; a failed Organization does not stop the others, and a nil f does
+// nothing.
+func (w Work) perOrganization(ctx context.Context, what string, f func(ctx context.Context, orgID int64) error) error {
+	if f == nil {
+		return nil
+	}
+	orgs, err := w.Organizations(ctx)
+	if err != nil {
+		return fmt.Errorf("list the organizations for %s: %w", what, err)
+	}
+	var errs []error
+	for _, org := range orgs {
+		errs = append(errs, f(ctx, org))
+	}
+	return errors.Join(errs...)
 }
 
 // alertGroupGauges counts the open Alert Groups of every Organization; counting twice sets the same values.

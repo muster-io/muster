@@ -12,6 +12,54 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimOutgoingHeartbeat = `-- name: ClaimOutgoingHeartbeat :one
+UPDATE organizations
+SET outgoing_heartbeat_last_attempt_at = $1::timestamptz
+WHERE id = $2
+  AND outgoing_heartbeat_url_ciphertext IS NOT NULL
+  AND (outgoing_heartbeat_last_attempt_at IS NULL OR outgoing_heartbeat_last_attempt_at <= $3::timestamptz
+       OR outgoing_heartbeat_last_attempt_at > $1::timestamptz)
+RETURNING outgoing_heartbeat_url_ciphertext, outgoing_heartbeat_url_key_id, outgoing_heartbeat_url_updated_at,
+          outgoing_heartbeat_proxy, outgoing_heartbeat_proxy_password_ciphertext,
+          outgoing_heartbeat_proxy_password_key_id, outgoing_heartbeat_proxy_password_updated_at
+`
+
+type ClaimOutgoingHeartbeatParams struct {
+	Now       time.Time
+	OrgID     int64
+	DueBefore time.Time
+}
+
+type ClaimOutgoingHeartbeatRow struct {
+	OutgoingHeartbeatUrlCiphertext           []byte
+	OutgoingHeartbeatUrlKeyID                pgtype.Text
+	OutgoingHeartbeatUrlUpdatedAt            pgtype.Timestamptz
+	OutgoingHeartbeatProxy                   []byte
+	OutgoingHeartbeatProxyPasswordCiphertext []byte
+	OutgoingHeartbeatProxyPasswordKeyID      pgtype.Text
+	OutgoingHeartbeatProxyPasswordUpdatedAt  pgtype.Timestamptz
+}
+
+// ClaimOutgoingHeartbeat takes the send of the outgoing heartbeat that is due: with a URL set and no attempt since
+// @due_before, it records the attempt at @now and returns what the send needs. A second claim in the same interval
+// returns no row, so that two Leaders at once send once. A last attempt after @now, left by a clock that moved
+// backward, is due too, so that the heartbeat does not stop until the clock catches up. It is runtime state: the
+// version and updated_at of the resource stay.
+func (q *Queries) ClaimOutgoingHeartbeat(ctx context.Context, arg ClaimOutgoingHeartbeatParams) (ClaimOutgoingHeartbeatRow, error) {
+	row := q.db.QueryRow(ctx, claimOutgoingHeartbeat, arg.Now, arg.OrgID, arg.DueBefore)
+	var i ClaimOutgoingHeartbeatRow
+	err := row.Scan(
+		&i.OutgoingHeartbeatUrlCiphertext,
+		&i.OutgoingHeartbeatUrlKeyID,
+		&i.OutgoingHeartbeatUrlUpdatedAt,
+		&i.OutgoingHeartbeatProxy,
+		&i.OutgoingHeartbeatProxyPasswordCiphertext,
+		&i.OutgoingHeartbeatProxyPasswordKeyID,
+		&i.OutgoingHeartbeatProxyPasswordUpdatedAt,
+	)
+	return i, err
+}
+
 const createOrganization = `-- name: CreateOrganization :one
 INSERT INTO organizations (
     public_id, name, time_zone, severity_label, severity_mapping, severity_styles, critical_is_urgent,
@@ -170,6 +218,38 @@ func (q *Queries) GetOutboundPolicy(ctx context.Context, orgID int64) (GetOutbou
 	return i, err
 }
 
+const getOutgoingHeartbeatSecrets = `-- name: GetOutgoingHeartbeatSecrets :one
+SELECT outgoing_heartbeat_url_ciphertext, outgoing_heartbeat_url_key_id, outgoing_heartbeat_url_updated_at,
+       outgoing_heartbeat_proxy_password_ciphertext, outgoing_heartbeat_proxy_password_key_id,
+       outgoing_heartbeat_proxy_password_updated_at
+FROM organizations
+WHERE id = $1
+`
+
+type GetOutgoingHeartbeatSecretsRow struct {
+	OutgoingHeartbeatUrlCiphertext           []byte
+	OutgoingHeartbeatUrlKeyID                pgtype.Text
+	OutgoingHeartbeatUrlUpdatedAt            pgtype.Timestamptz
+	OutgoingHeartbeatProxyPasswordCiphertext []byte
+	OutgoingHeartbeatProxyPasswordKeyID      pgtype.Text
+	OutgoingHeartbeatProxyPasswordUpdatedAt  pgtype.Timestamptz
+}
+
+// GetOutgoingHeartbeatSecrets reads the stored Secrets of the outgoing heartbeat, for an update that keeps them.
+func (q *Queries) GetOutgoingHeartbeatSecrets(ctx context.Context, orgID int64) (GetOutgoingHeartbeatSecretsRow, error) {
+	row := q.db.QueryRow(ctx, getOutgoingHeartbeatSecrets, orgID)
+	var i GetOutgoingHeartbeatSecretsRow
+	err := row.Scan(
+		&i.OutgoingHeartbeatUrlCiphertext,
+		&i.OutgoingHeartbeatUrlKeyID,
+		&i.OutgoingHeartbeatUrlUpdatedAt,
+		&i.OutgoingHeartbeatProxyPasswordCiphertext,
+		&i.OutgoingHeartbeatProxyPasswordKeyID,
+		&i.OutgoingHeartbeatProxyPasswordUpdatedAt,
+	)
+	return i, err
+}
+
 const getSettings = `-- name: GetSettings :one
 SELECT id, public_id, name, time_zone, severity_label, severity_mapping, severity_styles, critical_is_urgent,
        instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
@@ -251,21 +331,91 @@ func (q *Queries) LockSettings(ctx context.Context, orgID int64) (int64, error) 
 	return version, err
 }
 
-const setTOTPPolicy = `-- name: SetTOTPPolicy :execrows
-UPDATE organizations
-SET totp_required = $1, updated_at = $2, version = version + 1
-WHERE id = $3
+const recordOutgoingHeartbeat = `-- name: RecordOutgoingHeartbeat :one
+UPDATE organizations o
+SET outgoing_heartbeat_last_ok = $1::boolean, outgoing_heartbeat_last_error = $2
+FROM (
+    SELECT x.id, x.outgoing_heartbeat_last_ok AS previous
+    FROM organizations x
+    WHERE x.id = $4
+    FOR UPDATE
+) p
+WHERE o.id = p.id AND o.outgoing_heartbeat_last_attempt_at = $3::timestamptz
+RETURNING p.previous
 `
 
-type SetTOTPPolicyParams struct {
-	TotpRequired string
-	Now          time.Time
-	OrgID        int64
+type RecordOutgoingHeartbeatParams struct {
+	Ok        bool
+	LastError pgtype.Text
+	AttemptAt time.Time
+	OrgID     int64
 }
 
-// SetTOTPPolicy changes the TOTP policy and moves the version of the resource.
-func (q *Queries) SetTOTPPolicy(ctx context.Context, arg SetTOTPPolicyParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setTOTPPolicy, arg.TotpRequired, arg.Now, arg.OrgID)
+// RecordOutgoingHeartbeat stores the result of the attempt claimed at @attempt_at and returns the result before it;
+// the result of an attempt that a newer claim or a changed URL replaced is not stored and returns no row. It leaves
+// the version and updated_at of the resource.
+func (q *Queries) RecordOutgoingHeartbeat(ctx context.Context, arg RecordOutgoingHeartbeatParams) (pgtype.Bool, error) {
+	row := q.db.QueryRow(ctx, recordOutgoingHeartbeat,
+		arg.Ok,
+		arg.LastError,
+		arg.AttemptAt,
+		arg.OrgID,
+	)
+	var previous pgtype.Bool
+	err := row.Scan(&previous)
+	return previous, err
+}
+
+const updateSettings = `-- name: UpdateSettings :execrows
+UPDATE organizations
+SET totp_required                                = $1,
+    outgoing_heartbeat_url_ciphertext            = $2,
+    outgoing_heartbeat_url_key_id                = $3,
+    outgoing_heartbeat_url_updated_at            = $4,
+    outgoing_heartbeat_proxy                     = $5,
+    outgoing_heartbeat_proxy_password_ciphertext = $6,
+    outgoing_heartbeat_proxy_password_key_id     = $7,
+    outgoing_heartbeat_proxy_password_updated_at = $8,
+    outgoing_heartbeat_last_attempt_at = CASE WHEN $9::boolean THEN NULL
+                                              ELSE outgoing_heartbeat_last_attempt_at END,
+    outgoing_heartbeat_last_ok         = CASE WHEN $9::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
+    outgoing_heartbeat_last_error      = CASE WHEN $9::boolean THEN NULL
+                                              ELSE outgoing_heartbeat_last_error END,
+    updated_at = $10,
+    version = version + 1
+WHERE id = $11
+`
+
+type UpdateSettingsParams struct {
+	TotpRequired            string
+	UrlCiphertext           []byte
+	UrlKeyID                pgtype.Text
+	UrlUpdatedAt            pgtype.Timestamptz
+	Proxy                   []byte
+	ProxyPasswordCiphertext []byte
+	ProxyPasswordKeyID      pgtype.Text
+	ProxyPasswordUpdatedAt  pgtype.Timestamptz
+	UrlChanged              bool
+	Now                     time.Time
+	OrgID                   int64
+}
+
+// UpdateSettings writes the editable fields of the organization resource and moves its version. A new or cleared
+// URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL.
+func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateSettings,
+		arg.TotpRequired,
+		arg.UrlCiphertext,
+		arg.UrlKeyID,
+		arg.UrlUpdatedAt,
+		arg.Proxy,
+		arg.ProxyPasswordCiphertext,
+		arg.ProxyPasswordKeyID,
+		arg.ProxyPasswordUpdatedAt,
+		arg.UrlChanged,
+		arg.Now,
+		arg.OrgID,
+	)
 	if err != nil {
 		return 0, err
 	}

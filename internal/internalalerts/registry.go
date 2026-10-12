@@ -242,3 +242,16 @@ var TemplateError = register(&Definition{
 		"and column; fix the request templates of the Destination.",
 	Capability: "C-12",
 })
+
+// OIDCSecretExpiring is raised while the OIDC client secret expires within oidc.secret_expiry_lead (C-19.FR-5).
+var OIDCSecretExpiring = register(&Definition{
+	Name:     "MusterOIDCSecretExpiring",
+	Severity: SeverityWarning,
+	Condition: "The OIDC client secret expires within oidc.secret_expiry_lead, by the expiry date an Admin entered in " +
+		"the OIDC settings. It resolves when the date moves further out or is removed.",
+	Summary: "The OIDC client secret expires soon",
+	Description: "The client secret Muster uses to sign people in through the identity provider expires soon, by the " +
+		"date entered in the OIDC settings. Create a new secret at the identity provider, enter it and its expiry date " +
+		"in the OIDC settings; until then sign-in through OIDC keeps working.",
+	Capability: "C-19",
+})

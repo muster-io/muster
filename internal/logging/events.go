@@ -816,3 +816,19 @@ var LinkRuleFailed = newEvent("link_rule_failed", LevelWarn, "C-12",
 		"failed, with its line and column. Logged once per rule and Alert Group on each replica; the counter grows "+
 		"at every failure.",
 	"link_rule", "route", "group", "error")
+
+// OIDCSecretExpiring is logged when the Leader raises MusterOIDCSecretExpiring (C-19.FR-5).
+var OIDCSecretExpiring = newEvent("oidc_secret_expiring", LevelWarn, "C-19",
+	"The OIDC client secret expires within oidc.secret_expiry_lead, so MusterOIDCSecretExpiring is raised: "+
+		"expires_on is the expiry date entered in the OIDC settings. Logged once per raise.",
+	"expires_on")
+
+// OutgoingHeartbeatFailed is logged when a send of the outgoing heartbeat failed (C-19.FR-7).
+var OutgoingHeartbeatFailed = newEvent("outgoing_heartbeat_failed", LevelWarn, "C-19",
+	"A send of the outgoing heartbeat to the dead man's switch failed and is not retried; the next interval sends "+
+		"again. error says what failed, without the URL. Logged at every failed send.",
+	"error")
+
+// OutgoingHeartbeatRecovered is logged when the outgoing heartbeat succeeded after a failed send (C-19.FR-7).
+var OutgoingHeartbeatRecovered = newEvent("outgoing_heartbeat_recovered", LevelInfo, "C-19",
+	"A send of the outgoing heartbeat succeeded after a failed one.")
