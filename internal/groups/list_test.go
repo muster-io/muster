@@ -59,6 +59,7 @@ type fakeFilter struct {
 	owner         pgtype.Int8
 	snoozedNoEnd  pgtype.Bool
 	problem       pgtype.Bool
+	unclaimed     pgtype.Bool
 }
 
 func (f *fakeDB) matches(g *dbgen.LockGroupsRow, p fakeFilter) bool {
@@ -104,6 +105,9 @@ func (f *fakeDB) matches(g *dbgen.LockGroupsRow, p fakeFilter) bool {
 	if p.problem.Valid && f.problems[g.ID] != p.problem.Bool {
 		return false
 	}
+	if p.unclaimed.Valid && g.Unclaimed != p.unclaimed.Bool {
+		return false
+	}
 	if p.contains != nil {
 		var want, have map[string]string
 		_ = json.Unmarshal(p.contains, &want)
@@ -128,7 +132,7 @@ func (f *fakeDB) matches(g *dbgen.LockGroupsRow, p fakeFilter) bool {
 func (f *fakeDB) listRow(g *dbgen.LockGroupsRow) listRow {
 	r := f.routes[g.RouteID]
 	newerID, newerNumber := f.newer(g)
-	return listRow{ID: g.ID, PublicID: g.PublicID, Number: g.Number, Title: g.Title, Summary: g.Summary,
+	r2 := listRow{ID: g.ID, PublicID: g.PublicID, Number: g.Number, Title: g.Title, Summary: g.Summary,
 		Status: g.Status, SeverityLevel: g.SeverityLevel, Urgent: f.urgent(g), CommonLabels: g.CommonLabels,
 		IntegrationIds: g.IntegrationIds, ReopenCount: g.ReopenCount, FiringAlertCount: g.FiringAlertCount,
 		ResolvedAlertCount: g.ResolvedAlertCount, ResolvedAt: g.ResolvedAt, ResolvedByKind: g.ResolvedByKind,
@@ -137,7 +141,28 @@ func (f *fakeDB) listRow(g *dbgen.LockGroupsRow) listRow {
 		LastChangedAt: g.LastChangedAt, RoutePublicID: r.PublicID, RouteName: r.name, OwnerUserID: g.OwnerUserID,
 		SnoozeUntil: g.SnoozeUntil, SnoozedByUserID: g.SnoozedByUserID,
 		SnoozedByServiceAccountID: g.SnoozedByServiceAccountID, NewerPublicID: newerID, NewerNumber: newerNumber,
-		RouteDeleted: r.deleted, DeliveryProblem: f.problems[g.ID]}
+		RouteDeleted: r.deleted, DeliveryProblem: f.problems[g.ID], Unclaimed: g.Unclaimed,
+		ReminderPending: rowReminderPending(g)}
+	r2.NextNoticeKind, r2.NextNoticeAt = f.nextNotice(g.ID)
+	return r2
+}
+
+// rowReminderPending is reminder_pending as the reads derive it from a row.
+func rowReminderPending(g *dbgen.LockGroupsRow) bool {
+	return g.Status == "acknowledged" && g.RemindersSent > 0 &&
+		(!g.OwnerAnsweredAt.Valid || g.OwnerAnsweredAt.Time.Before(g.LastReminderAt.Time))
+}
+
+// nextNotice is the earliest ack_timeout or reminder timer of an Alert Group, as the reads join it: an empty kind and
+// the zero time without one.
+func (f *fakeDB) nextNotice(id int64) (string, time.Time) {
+	kind, at := "", time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, k := range []string{TimerAckTimeout, TimerReminder} {
+		if d, ok := f.timers[timerKey(id, k)]; ok && (kind == "" || d.Before(at)) {
+			kind, at = k, d
+		}
+	}
+	return kind, at
 }
 
 func (f *fakeDB) list(name string, p dbgen.ListGroupsStartedDescParams, changed, asc bool) ([]listRow, error) {
@@ -149,7 +174,8 @@ func (f *fakeDB) list(name string, p dbgen.ListGroupsStartedDescParams, changed,
 	ff := fakeFilter{number: p.Number, from: p.RangeFrom, to: p.RangeTo, routes: p.RouteIds, ints: p.IntegrationIds,
 		severities: p.Severities, urgent: p.Urgent, resolvedBy: p.ResolvedBy, reason: p.ResolveReason,
 		reopened: p.Reopened, contains: p.Contains, pattern: p.Pattern, statuses: p.Statuses, ownerSet: p.OwnerSet,
-		owner: p.OwnerID, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem}
+		owner: p.OwnerID, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
+		unclaimed: p.Unclaimed}
 	key := func(g *dbgen.LockGroupsRow) time.Time {
 		if changed {
 			return g.LastChangedAt
@@ -231,7 +257,8 @@ func (f *fakeDB) CountGroups(_ context.Context, p dbgen.CountGroupsParams) ([]db
 	ff := fakeFilter{number: p.Number, from: p.RangeFrom, to: p.RangeTo, routes: p.RouteIds, ints: p.IntegrationIds,
 		severities: p.Severities, urgent: p.Urgent, resolvedBy: p.ResolvedBy, reason: p.ResolveReason,
 		reopened: p.Reopened, contains: p.Contains, pattern: p.Pattern, withoutStatus: true, ownerSet: p.OwnerSet,
-		owner: p.OwnerID, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem}
+		owner: p.OwnerID, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
+		unclaimed: p.Unclaimed}
 	counts := map[[2]string]int64{}
 	for _, g := range f.groups {
 		if !f.matches(g, ff) {
@@ -935,6 +962,53 @@ func TestDeliveryProblem(t *testing.T) {
 		v, err := h.svc.Get(t.Context(), h.db.groups[1000+n].PublicID)
 		if err != nil || v.DeliveryProblem != want {
 			t.Errorf("get #%d = %v %v", n, v.DeliveryProblem, err)
+		}
+	}
+}
+
+// TestUnclaimedAndNextNotice is C-09.FR-13, C-17.FR-3, FR-9 and C-17.AC-6: unclaimed selects the list and the
+// counts, and the list items and the Alert Group carry it with the next notice, the earliest of the ack_timeout and
+// reminder timers, none without one.
+func TestUnclaimedAndNextNotice(t *testing.T) {
+	h := newHarness(t)
+	h.summary(1, 2, t0.Add(-time.Hour), time.Time{}, "A", nil).Unclaimed = true
+	acked := h.summary(2, 2, t0.Add(-time.Hour), time.Time{}, "B", nil)
+	acked.Status = string(StatusAcknowledged)
+	h.summary(3, 2, t0.Add(-time.Hour), time.Time{}, "C", nil)
+	h.db.timers[timerKey(1003, TimerAckTimeout)] = t0.Add(15 * time.Minute)
+	h.db.timers[timerKey(1002, TimerReminder)] = t0.Add(4 * time.Hour)
+	h.db.timers[timerKey(1002, TimerSnoozeEnd)] = t0.Add(time.Hour)
+	yes, no := true, false
+	for _, c := range []struct {
+		name   string
+		f      Filter
+		want   []int64
+		counts Counts
+	}{
+		{"unclaimed", Filter{Unclaimed: &yes}, []int64{1}, Counts{Firing: 1, All: 1}},
+		{"claimed", Filter{Unclaimed: &no}, []int64{3, 2}, Counts{Firing: 1, Acknowledged: 1, All: 2}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := numbers(h.list(t, ListRequest{Filter: c.f})); !slices.Equal(got, c.want) {
+				t.Errorf("list = %v, want %v", got, c.want)
+			}
+			if got, err := h.svc.Counts(t.Context(), c.f); err != nil || got != c.counts {
+				t.Errorf("counts = %+v %v, want %+v", got, err, c.counts)
+			}
+		})
+	}
+	want := map[int64]*NextNotice{1: nil, 2: {TimerReminder, t0.Add(4 * time.Hour)},
+		3: {TimerAckTimeout, t0.Add(15 * time.Minute)}}
+	same := func(a, b *NextNotice) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+	for _, v := range h.list(t, ListRequest{}).Groups {
+		if v.Unclaimed != (v.Number == 1) || !same(v.NextNotice, want[v.Number]) {
+			t.Errorf("#%d unclaimed %v, next %+v", v.Number, v.Unclaimed, v.NextNotice)
+		}
+	}
+	for n, next := range want {
+		v, err := h.svc.Get(t.Context(), h.db.groups[1000+n].PublicID)
+		if err != nil || v.Unclaimed != (n == 1) || !same(v.NextNotice, next) {
+			t.Errorf("get #%d = %v %+v %v", n, v.Unclaimed, v.NextNotice, err)
 		}
 	}
 }

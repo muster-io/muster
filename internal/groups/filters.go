@@ -73,6 +73,8 @@ type Filter struct {
 	SnoozedNoEnd *bool
 	// DeliveryProblem selects the Alert Groups with a Delivery problem when true, and the others when false.
 	DeliveryProblem *bool
+	// Unclaimed selects the Unclaimed Alert Groups when true, and the others when false (C-17.FR-3).
+	Unclaimed *bool
 }
 
 // The values of Filter.Owner that name no User.
@@ -99,6 +101,7 @@ type query struct {
 	owner        pgtype.Int8
 	snoozedNoEnd pgtype.Bool
 	problem      pgtype.Bool
+	unclaimed    pgtype.Bool
 	// rowwise are the Matchers the database does not apply.
 	rowwise []matchers.Matcher
 }
@@ -160,6 +163,9 @@ func (s *Service) resolve(ctx context.Context, f Filter, now time.Time) (query, 
 	}
 	if f.DeliveryProblem != nil {
 		q.problem = pgtype.Bool{Bool: *f.DeliveryProblem, Valid: true}
+	}
+	if f.Unclaimed != nil {
+		q.unclaimed = pgtype.Bool{Bool: *f.Unclaimed, Valid: true}
 	}
 	contains := map[string]string{}
 	for _, m := range f.Matchers {

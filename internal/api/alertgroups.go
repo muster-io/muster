@@ -71,15 +71,10 @@ type filterParams struct {
 	me audit.Actor
 }
 
-// filterOf is the groups.Filter of the parameters. The filter Unclaimed belongs to a later story and answers 422
-// unsupported until then.
+// filterOf is the groups.Filter of the parameters.
 func filterOf(p filterParams) (groups.Filter, error) {
-	if p.unclaimed != nil {
-		return groups.Filter{}, fieldProblem(http.StatusUnprocessableEntity, "/query/unclaimed", fieldUnsupported,
-			"This filter is not available yet.")
-	}
 	f := groups.Filter{Urgent: p.urgent, Reopened: p.reopened, From: p.from, To: p.to, SnoozedNoEnd: p.snoozedNoEnd,
-		DeliveryProblem: p.problem, Me: p.me}
+		DeliveryProblem: p.problem, Unclaimed: p.unclaimed, Me: p.me}
 	if p.owner != nil {
 		f.Owner = *p.owner
 	}
@@ -295,7 +290,7 @@ func (s *Server) GetAlertGroup(ctx context.Context, req gen.GetAlertGroupRequest
 }
 
 // alertGroupOf is the API form of an Alert Group for the caller c, of its page or of a list item; a list item leaves
-// out the labels, the notices and the links. Unclaimed arrives with its capability.
+// out the labels, the notices and the links.
 func alertGroupOf(v groups.View, c groups.Caller) gen.AlertGroup {
 	out := gen.AlertGroup{
 		Id: v.PublicID, Number: int(v.Number), Title: v.Title, Summary: nullableString(v.Summary),
@@ -305,7 +300,10 @@ func alertGroupOf(v groups.View, c groups.Caller) gen.AlertGroup {
 		ReopenCount: int(v.ReopenCount), FiringAlertCount: int(v.FiringCount),
 		ResolvedAlertCount: int(v.ResolvedCount), AllowedCommands: []gen.CommandName{},
 		Links: linksOf(v.Links), DetailsRemoved: &v.DetailsRemoved, Resolution: resolvedByOf(v.Resolution),
-		Owner: userRefOf(v.Owner), DeliveryProblem: v.DeliveryProblem,
+		Owner: userRefOf(v.Owner), DeliveryProblem: v.DeliveryProblem, Unclaimed: v.Unclaimed,
+	}
+	if v.NextNotice != nil {
+		out.NextNotice = &gen.NextNotice{Kind: gen.NextNoticeKind(v.NextNotice.Kind), At: v.NextNotice.At}
 	}
 	for _, cmd := range v.Allowed(c) {
 		out.AllowedCommands = append(out.AllowedCommands, gen.CommandName(cmd))

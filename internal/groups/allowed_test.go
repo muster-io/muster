@@ -13,9 +13,10 @@ import (
 	"github.com/muster-io/muster/internal/ingest"
 )
 
-// TestAllowed is C-10.FR-16, C-10.AC-18 and C-10.FR-7: allowed_commands by status for a Responder, the Owner, a
-// Viewer and a Service account, Unresolve on a person-resolved Alert Group only while every precondition holds, and
-// add_note in every status for every caller with alert-groups:note.
+// TestAllowed is C-10.FR-16, C-10.AC-18, C-10.FR-7 and C-17.FR-10: allowed_commands by status for a Responder, the
+// Owner, a Viewer and a Service account, Unresolve on a person-resolved Alert Group only while every precondition
+// holds, still_on_it only for the Owner while a Reminder waits, and add_note in every status for every caller with
+// alert-groups:note.
 func TestAllowed(t *testing.T) {
 	type cmds = []Command
 	viewer := carol
@@ -33,6 +34,17 @@ func TestAllowed(t *testing.T) {
 		{"acknowledged, another user", func(h *harness, g *dbgen.LockGroupsRow) { h.acknowledge(g) }, bob,
 			cmds{CommandAcknowledge, CommandUnacknowledge, CommandResolve, CommandSnooze, CommandAddNote}},
 		{"acknowledged, service account", func(h *harness, g *dbgen.LockGroupsRow) { h.acknowledge(g) }, robot,
+			cmds{CommandUnacknowledge, CommandResolve, CommandSnooze, CommandAddNote}},
+		{"a reminder waits, owner", remindedOwner(false), alice,
+			cmds{CommandUnacknowledge, CommandResolve, CommandSnooze, CommandStillOnIt, CommandAddNote}},
+		{"a reminder waits, owner by token", remindedOwner(false), Caller{Actor: alice.Actor.Via(33, "script"),
+			Transport: "api", Permissions: responder},
+			cmds{CommandUnacknowledge, CommandResolve, CommandSnooze, CommandStillOnIt, CommandAddNote}},
+		{"a reminder waits, another user", remindedOwner(false), bob,
+			cmds{CommandAcknowledge, CommandUnacknowledge, CommandResolve, CommandSnooze, CommandAddNote}},
+		{"a reminder waits, service account", remindedOwner(false), robot,
+			cmds{CommandUnacknowledge, CommandResolve, CommandSnooze, CommandAddNote}},
+		{"a reminder answered, owner", remindedOwner(true), alice,
 			cmds{CommandUnacknowledge, CommandResolve, CommandSnooze, CommandAddNote}},
 		{"snoozed, responder", func(h *harness, g *dbgen.LockGroupsRow) { h.snooze(g, t0.Add(time.Hour), false) },
 			bob, cmds{CommandAcknowledge, CommandResolve, CommandSnooze, CommandUnsnooze, CommandAddNote}},
@@ -118,5 +130,16 @@ func TestOwnerAndSnoozeInReads(t *testing.T) {
 	v, err := h.svc.Get(t.Context(), b.PublicID)
 	if err != nil || v.SnoozedBy == nil || v.SnoozedBy.Name != "robot" || v.SnoozeUntil == nil {
 		t.Errorf("get b = %v %+v", err, v)
+	}
+}
+
+// remindedOwner acknowledges an Alert Group as Alice with a Reminder sent at t0, answered after it when answered.
+func remindedOwner(answered bool) func(h *harness, g *dbgen.LockGroupsRow) {
+	return func(h *harness, g *dbgen.LockGroupsRow) {
+		h.acknowledge(g)
+		g.RemindersSent, g.LastReminderAt = 1, ts(t0)
+		if answered {
+			g.OwnerAnsweredAt = ts(t0.Add(time.Minute))
+		}
 	}
 }

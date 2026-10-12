@@ -178,7 +178,9 @@ type RouteRef struct {
 	SnoozeDurations []int64
 	RootMessage     *string
 	Line            *string
-	ErrorTemplate   string
+	// AckTimeoutNotice is the Route's ack_timeout_notice template, nil for the built-in one.
+	AckTimeoutNotice *string
+	ErrorTemplate    string
 }
 
 // SourceAlert is one Alert of an Alert Group.
@@ -258,7 +260,8 @@ func (r *Renderer) loadGroup(ctx context.Context, db DBTX, groupID int64) (*Sour
 		ResolvedBy: g.ResolvedByName,
 		Route: RouteRef{ID: g.RouteID, PublicID: g.RoutePublicID, Name: g.RouteName, Language: g.Language,
 			SnoozeDurations: g.SnoozeDurationsSeconds, RootMessage: textOf(g.TemplateRootMessage),
-			Line: textOf(g.TemplateLine), ErrorTemplate: g.TemplateErrorTemplate.String}}
+			Line: textOf(g.TemplateLine), AckTimeoutNotice: textOf(g.TemplateAckTimeoutNotice),
+			ErrorTemplate: g.TemplateErrorTemplate.String}}
 	return src, nil
 }
 

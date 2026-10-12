@@ -36,6 +36,17 @@ const (
 	EventNoteAdded    Event = "note_added"
 )
 
+// The lifecycle events of the timers (C-17.FR-11). notices_missed stands for overdue ack timeout notices or Reminders
+// collapsed into one, and carries the Mentions of the notices it stands for.
+const (
+	EventAckTimeout         Event = "ack_timeout"
+	EventUnclaimed          Event = "unclaimed"
+	EventReminder           Event = "reminder"
+	EventReminderAnswered   Event = "reminder_answered"
+	EventAutoUnacknowledged Event = "auto_unacknowledged"
+	EventNoticesMissed      Event = "notices_missed"
+)
+
 // Kind is the Timeline kind of an entry.
 type Kind string
 
@@ -100,9 +111,10 @@ type Row struct {
 	Mentions []Mention
 }
 
-// Table is the lifecycle event table of C-09.FR-22 with the rows of C-10.FR-15, a closed list: every transition and
-// change of an Alert Group records exactly one entry of one of its rows. The CHECKs of timeline_entries back the kinds
-// and Mentions.
+// Table is the lifecycle event table of C-09.FR-22 with the rows of C-10.FR-15 and C-17.FR-11, a closed list: every
+// transition and change of an Alert Group records exactly one entry of one of its rows. The CHECKs of timeline_entries
+// back the kinds and Mentions. notices_missed has no Mentions of its own: its entry carries those of the notices it
+// stands for (ack_timeout or owner).
 var Table = []Row{
 	{EventCreated, VariantAny, KindStatus, Loud, []Mention{MentionNewAlertGroup}},
 	{EventAlertsAdded, VariantFiring, KindAlerts, Loud, []Mention{MentionNewAlerts}},
@@ -129,6 +141,12 @@ var Table = []Row{
 	{EventSnoozed, VariantAny, KindStatus, Quiet, nil},
 	{EventUnsnoozed, VariantAny, KindStatus, Quiet, nil},
 	{EventNoteAdded, VariantAny, KindNotes, Quiet, nil},
+	{EventAckTimeout, VariantAny, KindTimers, Loud, []Mention{MentionAckTimeout}},
+	{EventUnclaimed, VariantAny, KindTimers, Quiet, nil},
+	{EventReminder, VariantAny, KindTimers, Loud, []Mention{MentionOwner}},
+	{EventReminderAnswered, VariantAny, KindTimers, Quiet, nil},
+	{EventAutoUnacknowledged, VariantAny, KindStatus, Loud, []Mention{MentionOwner}},
+	{EventNoticesMissed, VariantAny, KindTimers, Loud, nil},
 }
 
 // rowOf is the row of the event and variant; an event outside the table is a programming error.

@@ -278,6 +278,7 @@ var implemented = map[string]bool{
 	"GetAlertGroupStatistics": true,
 	"AcknowledgeAlertGroup":   true, "UnacknowledgeAlertGroup": true, "ResolveAlertGroup": true,
 	"UnresolveAlertGroup": true, "SnoozeAlertGroup": true, "UnsnoozeAlertGroup": true, "RunBulkCommand": true,
+	"AnswerReminder":      true,
 	"ListAlertGroupNotes": true, "CreateAlertGroupNote": true, "ListUserDirectory": true,
 	"ListAlertGroupDeliveries": true, "ListDestinations": true, "GetDestination": true, "DeleteDestination": true,
 	"PreviewTemplate": true, "ListLookupTables": true, "CreateLookupTable": true, "GetLookupTable": true,

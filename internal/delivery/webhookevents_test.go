@@ -160,7 +160,7 @@ func (f *fakeDB) GetLeasedWebhookEvent(_ context.Context, arg dbgen.GetLeasedWeb
 	row := dbgen.GetLeasedWebhookEventRow{ID: e.id, AlertGroupID: e.group, Sequence: e.seq, WebhookID: e.webhookID,
 		Event: e.event, Body: e.body, Attempts: e.attempts, DestinationID: ds.id, DestinationPublicID: ds.publicID,
 		DestinationName: ds.name, DestinationType: ds.typ, DestinationHealth: ds.health,
-		AlertGroupPublicID: g.publicID, Number: g.number}
+		AlertGroupPublicID: g.publicID, Number: g.number, GroupUnpublished: !g.published}
 	if e.received != nil {
 		row.ReceivedAt = pgtype.Timestamptz{Time: *e.received, Valid: true}
 	}
@@ -213,6 +213,22 @@ func (f *fakeDB) RecordWebhookEventDelivered(_ context.Context, arg dbgen.Record
 	e.state, e.deliveredAt, e.errorClass, e.lastError, e.owner, e.until = "delivered", at(arg.Now), nil, nil, "",
 		time.Time{}
 	return e.id, nil
+}
+
+func (f *fakeDB) GetCreatedEventDeliveredAt(_ context.Context, arg dbgen.GetCreatedEventDeliveredAtParams) (time.Time,
+	error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetCreatedEventDeliveredAt"); err != nil {
+		return time.Time{}, err
+	}
+	for _, e := range f.webhookEvents {
+		if e.dest == arg.DestinationID && e.group == arg.AlertGroupID && e.event == "created" &&
+			e.state == "delivered" {
+			return *e.deliveredAt, nil
+		}
+	}
+	return time.Time{}, pgx.ErrNoRows
 }
 
 func (f *fakeDB) RecordWebhookEventRetry(_ context.Context, arg dbgen.RecordWebhookEventRetryParams) (
@@ -1097,5 +1113,71 @@ func TestWebhookEventsProbeKeepsRetryAfter(t *testing.T) {
 	}
 	if second.state != "delivered" || !first.next.Equal(business0.Add(time.Hour)) || third.state != "delivered" {
 		t.Errorf("after recovery: first %+v, third %+v", first, third)
+	}
+}
+
+// TestWebhookEventsMarkPublished is C-17.FR-1 and C-15.AC-11: on an outgoing webhook in the events mode, which has no
+// Root message, the delivered created event is the first Publication, marked at its delivered_at once its outcome
+// committed; a later event delivered while the Alert Group is still unmarked marks it when its created event was
+// delivered, or at its own delivered_at when no created event was (one not delivered, or a webhook added to a Route
+// with an open Alert Group, whose first event is not created); a marked one marks nothing.
+func TestWebhookEventsMarkPublished(t *testing.T) {
+	e := newEventsEnv(t, nil)
+	calls := e.recordPublished(errBoom)
+	g := e.group(groups.StatusFiring, "t")
+	e.enqueue(t, g, groups.System, created())
+	e.drain(t)
+	createdAt := e.business.Now()
+	if len(*calls) != 1 || (*calls)[0] != (publishedCall{groupID, createdAt, false}) ||
+		!strings.Contains(e.log.String(), `"work":"mark_published"`) {
+		t.Fatalf("created: calls %+v, log %s", *calls, e.log)
+	}
+	e.business.Advance(time.Minute)
+	e.enqueue(t, g, webUser, event(2, groups.EventAcknowledged, groups.VariantAny))
+	e.drain(t)
+	if len(*calls) != 2 || (*calls)[1] != (publishedCall{groupID, createdAt, false}) {
+		t.Fatalf("a later event while unmarked: calls %+v", *calls)
+	}
+	e.enqueue(t, g, webUser, event(3, groups.EventResolved, groups.VariantAny))
+	e.drain(t)
+	if len(*calls) != 2 {
+		t.Errorf("a marked alert group: calls %+v", *calls)
+	}
+
+	e = newEventsEnv(t, nil)
+	calls = e.recordPublished()
+	g = e.group(groups.StatusFiring, "t")
+	e.enqueue(t, g, groups.System, created())
+	e.enqueue(t, g, webUser, event(2, groups.EventAcknowledged, groups.VariantAny))
+	e.sender.answers = []delivery.Outcome{{Kind: delivery.OutcomeUnknown, Status: 400, Error: "answered 400"}}
+	e.drain(t)
+	if got := e.sender.sent(t); len(got) != 2 || len(*calls) != 1 ||
+		(*calls)[0] != (publishedCall{groupID, e.business.Now(), false}) {
+		t.Errorf("created not delivered: sent %v, calls %+v", got, *calls)
+	}
+
+	e = newEventsEnv(t, nil)
+	calls = e.recordPublished()
+	g = e.group(groups.StatusFiring, "t")
+	e.business.Advance(time.Hour)
+	e.enqueue(t, g, webUser, event(4, groups.EventAcknowledged, groups.VariantAny))
+	e.drain(t)
+	e.enqueue(t, g, webUser, event(5, groups.EventResolved, groups.VariantAny))
+	e.drain(t)
+	if got := e.sender.sent(t); len(got) != 2 || len(*calls) != 1 ||
+		(*calls)[0] != (publishedCall{groupID, e.business.Now(), false}) {
+		t.Errorf("webhook added to a route with an open alert group: sent %v, calls %+v", got, *calls)
+	}
+
+	e = newEventsEnv(t, nil)
+	calls = e.recordPublished(errBoom)
+	g = e.group(groups.StatusFiring, "t")
+	e.enqueue(t, g, groups.System, created())
+	e.drain(t)
+	e.db.fail["GetCreatedEventDeliveredAt"] = errBoom
+	e.enqueue(t, g, webUser, event(2, groups.EventAcknowledged, groups.VariantAny))
+	e.round(t)
+	if len(*calls) != 1 || !strings.Contains(e.log.String(), "read when the created event was delivered: boom") {
+		t.Errorf("a failing read: calls %+v, log %s", *calls, e.log)
 	}
 }

@@ -111,7 +111,7 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolved_by_kind, g.resolve_reason, g.snooze_until, g.snooze_no_end, g.unclaimed, g.created_at,
        r.id AS route_id, r.public_id AS route_public_id, r.name AS route_name, r.language,
        r.snooze_durations_seconds, r.template_root_message, r.template_line, r.template_error_template,
-       o.time_zone,
+       r.template_ack_timeout_notice, o.time_zone,
        coalesce(ou.name, '')::text AS owner_name,
        coalesce(su.name, ss.name, '')::text AS snoozed_by_name,
        coalesce(ru.name, rs.name, '')::text AS resolved_by_name
@@ -132,38 +132,39 @@ type GetRenderGroupParams struct {
 }
 
 type GetRenderGroupRow struct {
-	ID                     int64
-	PublicID               string
-	Number                 int64
-	Title                  string
-	Summary                pgtype.Text
-	Status                 string
-	SeverityLevel          string
-	Urgent                 bool
-	GroupKeyLabels         []string
-	GroupKeyValues         []byte
-	CommonLabels           []byte
-	CommonAnnotations      []byte
-	FiringAlertCount       int64
-	ReopenCount            int64
-	ResolvedByKind         pgtype.Text
-	ResolveReason          pgtype.Text
-	SnoozeUntil            pgtype.Timestamptz
-	SnoozeNoEnd            bool
-	Unclaimed              bool
-	CreatedAt              time.Time
-	RouteID                int64
-	RoutePublicID          string
-	RouteName              string
-	Language               string
-	SnoozeDurationsSeconds []int64
-	TemplateRootMessage    pgtype.Text
-	TemplateLine           pgtype.Text
-	TemplateErrorTemplate  pgtype.Text
-	TimeZone               string
-	OwnerName              string
-	SnoozedByName          string
-	ResolvedByName         string
+	ID                       int64
+	PublicID                 string
+	Number                   int64
+	Title                    string
+	Summary                  pgtype.Text
+	Status                   string
+	SeverityLevel            string
+	Urgent                   bool
+	GroupKeyLabels           []string
+	GroupKeyValues           []byte
+	CommonLabels             []byte
+	CommonAnnotations        []byte
+	FiringAlertCount         int64
+	ReopenCount              int64
+	ResolvedByKind           pgtype.Text
+	ResolveReason            pgtype.Text
+	SnoozeUntil              pgtype.Timestamptz
+	SnoozeNoEnd              bool
+	Unclaimed                bool
+	CreatedAt                time.Time
+	RouteID                  int64
+	RoutePublicID            string
+	RouteName                string
+	Language                 string
+	SnoozeDurationsSeconds   []int64
+	TemplateRootMessage      pgtype.Text
+	TemplateLine             pgtype.Text
+	TemplateErrorTemplate    pgtype.Text
+	TemplateAckTimeoutNotice pgtype.Text
+	TimeZone                 string
+	OwnerName                string
+	SnoozedByName            string
+	ResolvedByName           string
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -206,6 +207,7 @@ func (q *Queries) GetRenderGroup(ctx context.Context, arg GetRenderGroupParams) 
 		&i.TemplateRootMessage,
 		&i.TemplateLine,
 		&i.TemplateErrorTemplate,
+		&i.TemplateAckTimeoutNotice,
 		&i.TimeZone,
 		&i.OwnerName,
 		&i.SnoozedByName,
@@ -243,10 +245,11 @@ func (q *Queries) GetRenderSettings(ctx context.Context, orgID int64) (GetRender
 }
 
 const getReplyEntry = `-- name: GetReplyEntry :one
-SELECT coalesce(reason, '')::text AS reason, coalesce(replaced_label, '')::text AS replaced_label,
-       coalesce(missed_count, 0)::bigint AS missed_count
-FROM timeline_entries
-WHERE org_id = $1 AND alert_group_id = $2 AND event_seq = $3::bigint
+SELECT coalesce(e.reason, '')::text AS reason, coalesce(e.replaced_label, '')::text AS replaced_label,
+       coalesce(e.missed_count, 0)::bigint AS missed_count, coalesce(u.name, '')::text AS owner_name
+FROM timeline_entries e
+LEFT JOIN users u ON u.org_id = e.org_id AND u.id = e.owner_user_id
+WHERE e.org_id = $1 AND e.alert_group_id = $2 AND e.event_seq = $3::bigint
 LIMIT 1
 `
 
@@ -260,14 +263,20 @@ type GetReplyEntryRow struct {
 	Reason        string
 	ReplacedLabel string
 	MissedCount   int64
+	OwnerName     string
 }
 
-// GetReplyEntry reads the reason, the replaced label and the count of missed notices of the lifecycle event a Thread
-// reply is about.
+// GetReplyEntry reads the reason, the replaced label, the count of missed notices and the name of the Owner of the
+// lifecycle event a Thread reply is about.
 func (q *Queries) GetReplyEntry(ctx context.Context, arg GetReplyEntryParams) (GetReplyEntryRow, error) {
 	row := q.db.QueryRow(ctx, getReplyEntry, arg.OrgID, arg.AlertGroupID, arg.EventSeq)
 	var i GetReplyEntryRow
-	err := row.Scan(&i.Reason, &i.ReplacedLabel, &i.MissedCount)
+	err := row.Scan(
+		&i.Reason,
+		&i.ReplacedLabel,
+		&i.MissedCount,
+		&i.OwnerName,
+	)
 	return i, err
 }
 

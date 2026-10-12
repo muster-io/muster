@@ -1445,3 +1445,224 @@ func TestIntegrationDeliveryProblem(t *testing.T) {
 		check("delivered")
 	})
 }
+
+// TestIntegrationAckTimeout is C-17.FR-1 to FR-3, FR-7 and FR-9 on PostgreSQL: the first Publication starts the ack
+// timeout of a firing Alert Group on an On-call Route, a second one does not; two replicas fire notice 1 once at 15
+// minutes; notices 2 and 3 overdue together collapse into notices_missed and make it Unclaimed, which the list, the
+// counts and the read show; Acknowledge ends Unclaimed and the timer, Unacknowledge starts the ack timeout over.
+func TestIntegrationAckTimeout(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		e.route(t, "db", "db", "pod")
+		bob := groups.Caller{Actor: audit.User(e.user(t, "SRAAAAAAAAAAA2", "bob"), "SRAAAAAAAAAAA2"),
+			Transport: audit.TransportUI, Permissions: []auth.Permission{groups.PermissionAcknowledge}}
+		e.process(t, gk, alert("firing", "2026-10-07T11:00:00Z", "alertname", "DiskFull", "team", "db", "pod", "a"))
+		ga := e.groupOf(t, "a")
+		id := e.groupID(t, ga)
+		if v, err := e.groups.Get(ctx, ga); err != nil || v.NextNotice != nil || v.Unclaimed {
+			t.Fatalf("unpublished = %+v %v", v.NextNotice, err)
+		}
+		published := e.clock.Now()
+		for _, at := range []time.Time{published, published.Add(time.Minute)} {
+			if err := e.groups.MarkPublished(ctx, id, at); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n := e.count(t, `SELECT count(*) FROM timers t JOIN alert_groups g ON g.id = t.alert_group_id
+			WHERE g.public_id = $1 AND t.kind = 'ack_timeout' AND t.notice_number = 1 AND t.deadline = $2
+			  AND g.first_published_at = $3 AND g.ack_timeout_started_at = $3`, ga, published.Add(15*time.Minute),
+			published); n != 1 {
+			t.Fatalf("%d ack_timeout timers at notice 1", n)
+		}
+		v, err := e.groups.Get(ctx, ga)
+		if err != nil || v.NextNotice == nil || v.NextNotice.Kind != groups.TimerAckTimeout ||
+			!v.NextNotice.At.Equal(published.Add(15*time.Minute)) {
+			t.Fatalf("next notice = %+v %v", v.NextNotice, err)
+		}
+		round := func() map[int64]int {
+			var mu sync.Mutex
+			fired := map[int64]int{}
+			var wg sync.WaitGroup
+			for _, owner := range []string{"a", "b"} {
+				w := &timers.Worker{Store: timers.NewStore(e.d.Pool),
+					Lease: db.Lease{Owner: owner, Duration: timers.Lease, Clocks: clock.Clocks{Business: e.clock,
+						Real: clock.Real{}}},
+					Organizations: func(context.Context) ([]int64, error) { return []int64{e.orgID}, nil },
+					Log:           logging.New(&bytes.Buffer{}, logging.LevelInfo),
+					Handlers: map[string]timers.Handler{groups.TimerAckTimeout: func(ctx context.Context,
+						tx timersdb.DBTX, _ int64, tm timers.Timer) (func(context.Context), error) {
+						mu.Lock()
+						fired[tm.ID]++
+						mu.Unlock()
+						return e.groups.FireAckTimeout(ctx, tx, *tm.AlertGroupID)
+					}}}
+				wg.Go(func() {
+					if _, err := w.Round(ctx); err != nil {
+						t.Error(err)
+					}
+				})
+			}
+			wg.Wait()
+			return fired
+		}
+		e.clock.Set(published.Add(15 * time.Minute))
+		if fired := round(); len(fired) != 1 {
+			t.Errorf("fired %v", fired)
+		}
+		timeline := func() string {
+			page, err := e.groups.Timeline(ctx, ga, groups.TimelineFilter{Ascending: true, Limit: 100,
+				Kinds: []groups.Kind{groups.KindTimers}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, x := range page.Entries {
+				n, m := int64(0), int64(0)
+				if x.NoticeNumber != nil {
+					n = *x.NoticeNumber
+				}
+				if x.MissedCount != nil {
+					m = *x.MissedCount
+				}
+				out = append(out, fmt.Sprintf("%s/%d/%d/%s/%s", x.Event, n, m, x.Loudness, strings.Join(x.Mentions, ",")))
+			}
+			return strings.Join(out, " ")
+		}
+		if got := timeline(); got != "ack_timeout/1/0/loud/ack_timeout" {
+			t.Errorf("after notice 1: %s", got)
+		}
+		e.clock.Set(published.Add(3 * time.Hour))
+		round()
+		if got := timeline(); got != "ack_timeout/1/0/loud/ack_timeout notices_missed/3/2/loud/ack_timeout "+
+			"unclaimed/0/0/quiet/" {
+			t.Errorf("after the collapse: %s", got)
+		}
+		yes := true
+		page, err := e.groups.List(ctx, groups.ListRequest{Filter: groups.Filter{Unclaimed: &yes}, Limit: 10})
+		counts, cerr := e.groups.Counts(ctx, groups.Filter{Unclaimed: &yes})
+		if err != nil || cerr != nil || len(page.Groups) != 1 || page.Groups[0].PublicID != ga ||
+			!page.Groups[0].Unclaimed || page.Groups[0].NextNotice != nil || counts.All != 1 {
+			t.Errorf("unclaimed list = %+v %v, counts %+v %v", page.Groups, err, counts, cerr)
+		}
+		if _, err := e.groups.Acknowledge(ctx, bob, ga); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_groups WHERE unclaimed OR ack_timeout_started_at IS NOT NULL`) +
+			e.count(t, `SELECT count(*) FROM timers WHERE kind = 'ack_timeout'`); n != 0 {
+			t.Errorf("acknowledged: %d left", n)
+		}
+		e.clock.Advance(time.Minute)
+		if _, err := e.groups.Unacknowledge(ctx, bob, ga); err != nil {
+			t.Fatal(err)
+		}
+		v, err = e.groups.Get(ctx, ga)
+		if err != nil || v.Unclaimed || v.NextNotice == nil ||
+			!v.NextNotice.At.Equal(e.clock.Now().Add(15*time.Minute)) {
+			t.Errorf("unacknowledged = %+v %v", v.NextNotice, err)
+		}
+	})
+}
+
+// TestIntegrationReminders checks the SQL of the Reminders on PostgreSQL (C-17.FR-4, FR-5, FR-10): the reminder timer
+// with its notice number after an Acknowledge, the reminder_pending of the reads behind still_on_it, the last
+// Reminder's lifecycle event read back for the answer rule through the timer's transaction, "Still on it" and
+// auto-unacknowledge after two unanswered Reminders, which starts the ack timeout over.
+func TestIntegrationReminders(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		r := e.route(t, "db", "db", "pod")
+		if _, err := e.d.Pool.Exec(ctx, `UPDATE routes SET reminders_enabled = true, auto_unacknowledge = true,
+			reminders_first_interval_seconds = 14400, reminders_cap_seconds = 86400 WHERE public_id = $1`, r.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		bob := groups.Caller{Actor: audit.User(e.user(t, "SRAAAAAAAAAAA2", "bob"), "SRAAAAAAAAAAA2"),
+			Transport: audit.TransportUI, Permissions: []auth.Permission{groups.PermissionAcknowledge}}
+		var asked []int64
+		e.groups.SetReminderReached(func(ctx context.Context, db groups.DBTX, group, seq int64) (bool, error) {
+			asked = append(asked, seq)
+			var ok bool
+			err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM timeline_entries WHERE alert_group_id = $1
+				AND event_seq = $2 AND event = 'reminder')`, group, seq).Scan(&ok)
+			return ok, err
+		})
+		e.process(t, gk, alert("firing", "2026-10-07T11:00:00Z", "alertname", "DiskFull", "team", "db", "pod", "a"))
+		ga := e.groupOf(t, "a")
+		id := e.groupID(t, ga)
+		if err := e.groups.MarkPublished(ctx, id, e.clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+		acked := e.clock.Now()
+		if _, err := e.groups.Acknowledge(ctx, bob, ga); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timers WHERE alert_group_id = $1 AND kind = 'reminder'
+			AND notice_number = 1 AND deadline = $2`, id, acked.Add(4*time.Hour)); n != 1 {
+			t.Fatalf("%d reminder timers", n)
+		}
+		w := &timers.Worker{Store: timers.NewStore(e.d.Pool),
+			Lease: db.Lease{Owner: "a", Duration: timers.Lease, Clocks: clock.Clocks{Business: e.clock,
+				Real: clock.Real{}}},
+			Organizations: func(context.Context) ([]int64, error) { return []int64{e.orgID}, nil },
+			Log:           logging.New(&bytes.Buffer{}, logging.LevelInfo),
+			Handlers: map[string]timers.Handler{groups.TimerReminder: func(ctx context.Context, tx timersdb.DBTX,
+				_ int64, tm timers.Timer) (func(context.Context), error) {
+				return e.groups.FireReminder(ctx, tx, *tm.AlertGroupID, tm.Deadline)
+			}}}
+		at := func(d time.Duration) {
+			t.Helper()
+			e.clock.Set(acked.Add(d))
+			if _, err := w.Round(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		pending := func() bool {
+			t.Helper()
+			v, err := e.groups.Get(ctx, ga)
+			if err != nil {
+				t.Fatal(err)
+			}
+			page, err := e.groups.List(ctx, groups.ListRequest{Limit: 10})
+			if err != nil || len(page.Groups) != 1 {
+				t.Fatalf("list = %v %v", page.Groups, err)
+			}
+			get, list := slices.Contains(v.Allowed(bob), groups.CommandStillOnIt),
+				slices.Contains(page.Groups[0].Allowed(bob), groups.CommandStillOnIt)
+			if get != list {
+				t.Errorf("get %v, list %v", get, list)
+			}
+			return get
+		}
+		at(4 * time.Hour)
+		if !pending() {
+			t.Fatal("no reminder pending after the first")
+		}
+		e.clock.Advance(time.Minute)
+		if _, err := e.groups.AnswerReminder(ctx, bob, ga); err != nil {
+			t.Fatal(err)
+		}
+		if pending() || e.count(t, `SELECT count(*) FROM audit_log WHERE action = 'alert_group.reminder_answered'`) != 1 {
+			t.Error("still pending after the answer")
+		}
+		at(12 * time.Hour)
+		at(28 * time.Hour)
+		if v, err := e.groups.Get(ctx, ga); err != nil || v.Status != groups.StatusAcknowledged ||
+			v.NextNotice == nil || v.NextNotice.Kind != groups.TimerReminder ||
+			!v.NextNotice.At.Equal(acked.Add(52*time.Hour)) || len(asked) != 1 {
+			t.Fatalf("after hour 28 = %+v %v, asked %v", v.NextNotice, err, asked)
+		}
+		at(52 * time.Hour)
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE alert_group_id = $1
+			AND event = 'auto_unacknowledged' AND kind = 'status' AND reason = 'No answer to the last two Reminders'
+			AND previous_owner_user_id = $2 AND mentions = '{owner}'`, id, bob.Actor.ID); n != 1 {
+			t.Fatalf("%d auto_unacknowledged entries", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timers WHERE alert_group_id = $1 AND kind = 'ack_timeout'
+			AND deadline = $2`, id, acked.Add(52*time.Hour+15*time.Minute)) +
+			e.count(t, `SELECT count(*) FROM alert_groups WHERE id = $1 AND status = 'firing' AND owner_user_id IS NULL`,
+				id); n != 2 || len(asked) != 2 {
+			t.Errorf("after the auto-unacknowledge: %d, asked %v", n, asked)
+		}
+	})
+}

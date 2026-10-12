@@ -49,6 +49,14 @@ SELECT id, public_id, is_default, urgent, group_key, reopen_window_seconds, grac
 FROM routes
 WHERE org_id = @org_id AND id = @id;
 
+-- GetTimerPolicy reads the timer policy of a Route, deleted or not, at the time a timer is set or fires (C-17): the
+-- ack timeout, the Reminders and auto-unacknowledge.
+-- name: GetTimerPolicy :one
+SELECT ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
+       reminders_cap_seconds, auto_unacknowledge
+FROM routes
+WHERE org_id = @org_id AND id = @id;
+
 -- FindOpenGroup finds the open Alert Group of a Route and Group key values; Alert Groups moved to the Default route
 -- are left out, as alert_groups_open_key leaves them out.
 -- name: FindOpenGroup :one
@@ -84,7 +92,8 @@ SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, g
        resolve_reason_text, reopen_deadline, prior_status, prior_owner_user_id, prior_snooze_until,
        prior_snooze_no_end, prior_snoozed_while_urgent, prior_snoozed_by_user_id,
        prior_snoozed_by_service_account_id, grace_deadline, firing_again_after_id, event_seq, created_at,
-       last_changed_at, first_acknowledged_at
+       last_changed_at, first_acknowledged_at, first_published_at, ack_timeout_started_at, ack_timeout_notices_sent,
+       unclaimed, reminders_sent, reminders_unanswered, last_reminder_at, owner_answered_at
 FROM alert_groups
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[])
 ORDER BY id
@@ -157,7 +166,11 @@ SET route_id = @route_id, moved_from_route_id = sqlc.narg('moved_from_route_id')
     prior_snoozed_by_user_id = sqlc.narg('prior_snoozed_by_user_id'),
     prior_snoozed_by_service_account_id = sqlc.narg('prior_snoozed_by_service_account_id'),
     grace_deadline = sqlc.narg('grace_deadline'), event_seq = @event_seq, last_changed_at = @last_changed_at,
-    first_acknowledged_at = sqlc.narg('first_acknowledged_at')
+    first_acknowledged_at = sqlc.narg('first_acknowledged_at'),
+    first_published_at = sqlc.narg('first_published_at'), ack_timeout_started_at = sqlc.narg('ack_timeout_started_at'),
+    ack_timeout_notices_sent = @ack_timeout_notices_sent, unclaimed = @unclaimed, reminders_sent = @reminders_sent,
+    reminders_unanswered = @reminders_unanswered, last_reminder_at = sqlc.narg('last_reminder_at'),
+    owner_answered_at = sqlc.narg('owner_answered_at')
 WHERE org_id = @org_id AND id = @id;
 
 -- IsActiveUser reports whether a User can still own an Alert Group: a disabled or deleted Owner has no
@@ -222,7 +235,7 @@ INSERT INTO timeline_entries (
     org_id, public_id, alert_group_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind,
     actor_user_id, actor_service_account_id, api_token_id, token_name, transport, reason, from_status, to_status,
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
-    period_to, detail
+    period_to, detail, notice_number, missed_count
 )
 VALUES (
     @org_id, @public_id, @alert_group_id, @at, @kind, sqlc.narg('event'), sqlc.narg('event_seq'),
@@ -231,7 +244,7 @@ VALUES (
     sqlc.narg('reason'), sqlc.narg('from_status'), sqlc.narg('to_status'), sqlc.narg('owner_user_id'),
     sqlc.narg('previous_owner_user_id'), sqlc.narg('snooze_until'), sqlc.narg('fingerprints')::text[],
     sqlc.narg('replaced_label'), sqlc.narg('label_conflicts')::text[], sqlc.narg('period_from'),
-    sqlc.narg('period_to'), sqlc.narg('detail')
+    sqlc.narg('period_to'), sqlc.narg('detail'), sqlc.narg('notice_number'), sqlc.narg('missed_count')
 );
 
 -- InsertNote records a Note with the event_seq of its note_added lifecycle event (C-10.FR-8).
@@ -290,13 +303,31 @@ INSERT INTO timeline_entries (org_id, public_id, alert_group_id, at, kind, syste
 SELECT @org_id, unnest(@public_ids::text[]), unnest(@alert_group_ids::bigint[]), @at, 'system',
        'muster_unavailable', 'system', 'system', @period_from::timestamptz, @period_to::timestamptz;
 
--- UpsertTimer sets the deadline of an Alert Group's timer of a kind, free of any lease.
+-- UpsertTimer sets the deadline of an Alert Group's timer of a kind, with the number of the notice or Reminder it
+-- stands for, free of any lease.
 -- name: UpsertTimer :exec
-INSERT INTO timers (org_id, alert_group_id, kind, deadline, created_at, updated_at)
-VALUES (@org_id, @alert_group_id::bigint, @kind, @deadline, @now, @now)
+INSERT INTO timers (org_id, alert_group_id, kind, deadline, notice_number, created_at, updated_at)
+VALUES (@org_id, @alert_group_id::bigint, @kind, @deadline, sqlc.narg('notice_number'), @now, @now)
 ON CONFLICT (alert_group_id, kind) WHERE alert_group_id IS NOT NULL
-DO UPDATE SET deadline = excluded.deadline, lease_owner = NULL, lease_until = NULL, attempts = 0,
-              updated_at = excluded.updated_at;
+DO UPDATE SET deadline = excluded.deadline, notice_number = excluded.notice_number, lease_owner = NULL,
+              lease_until = NULL, attempts = 0, updated_at = excluded.updated_at;
+
+-- GetGroupTimer reads the deadline of an Alert Group's timer of a kind, after the Alert Group is locked: a timer fired
+-- after another change moved it finds a deadline other than the one it was claimed with.
+-- name: GetGroupTimer :one
+SELECT deadline
+FROM timers
+WHERE org_id = @org_id AND alert_group_id = @alert_group_id::bigint AND kind = @kind;
+
+-- GetLastReminderSeq reads the lifecycle event number of the last Reminder of an Alert Group: a reminder, or a
+-- notices_missed that stands for Reminders, which mentions the Owner (C-17.FR-5, FR-7).
+-- name: GetLastReminderSeq :one
+SELECT event_seq::bigint
+FROM timeline_entries
+WHERE org_id = @org_id AND alert_group_id = @alert_group_id
+  AND (event = 'reminder' OR (event = 'notices_missed' AND 'owner' = ANY(mentions)))
+ORDER BY event_seq DESC
+LIMIT 1;
 
 -- DeleteTimer stops an Alert Group's timer of a kind.
 -- name: DeleteTimer :exec
@@ -335,7 +366,9 @@ ORDER BY id;
 -- the Route and organization.critical_is_urgent as they are now (C-08.FR-6), so that marking a Route urgent or
 -- changing the setting shows on open Alert Groups at once without changing them. It has a Delivery problem
 -- (C-13.FR-12) when a delivery of it is Not delivered or deleted in the messenger, waits for a Broken Destination, or
--- has a Thread not attached.
+-- has a Thread not attached. Its next notice is the earliest of its ack_timeout and reminder timers (C-17.FR-9): an
+-- empty kind and the zero time 0001-01-01 when it has none. A Reminder waits for its Owner's answer while it is
+-- acknowledged, a Reminder was sent and the Owner has not answered since the last one (C-17.FR-10).
 -- name: GetGroup :one
 SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
        (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.group_key_values,
@@ -357,7 +390,11 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        o.retention_alert_details_days, g.owner_user_id, g.snooze_until, g.snoozed_by_user_id,
        g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem,
+       g.unclaimed, coalesce(nn.kind, '')::text AS next_notice_kind,
+       coalesce(nn.deadline, '0001-01-01 00:00:00+00')::timestamptz AS next_notice_at,
+       (g.status = 'acknowledged' AND g.reminders_sent > 0
+        AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -374,6 +411,11 @@ JOIN LATERAL (SELECT EXISTS (SELECT 1
                                AND (d.state IN ('not_delivered', 'deleted_in_messenger')
                                     OR (d.state = 'pending' AND ds.health = 'broken')
                                     OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
+LEFT JOIN LATERAL (SELECT t.kind, t.deadline
+                   FROM timers t
+                   WHERE t.org_id = g.org_id AND t.alert_group_id = g.id AND t.kind IN ('ack_timeout', 'reminder')
+                   ORDER BY t.deadline
+                   LIMIT 1) nn ON true
 WHERE g.org_id = @org_id AND g.public_id = @public_id;
 
 -- GetGroupID reads the id of an Alert Group by public_id, with when it was resolved and retention.alert_details, which
@@ -519,7 +561,8 @@ WHERE org_id = @org_id AND deleted_at IS NULL;
 -- and is ignored for a number. Label Matchers other than = with a value are matched in Go on common_labels, after
 -- these conditions; urgency and the newer open Alert Group are derived as in GetGroup. The Owner filter, with
 -- @owner_set, selects the Alert Groups the User @owner_id owns, or nobody owns when it is null. The Delivery problem
--- (C-13.FR-12) is derived as in GetGroup.
+-- (C-13.FR-12) and the next notice (C-17.FR-9) are derived as in GetGroup; @unclaimed selects the Unclaimed Alert Groups
+-- or the others (C-09.FR-13).
 
 -- ListGroupsStartedDesc reads a batch of the Alert Group list, newest start first, after the cursor when given.
 -- name: ListGroupsStartedDesc :many
@@ -530,7 +573,11 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem,
+       g.unclaimed, coalesce(nn.kind, '')::text AS next_notice_kind,
+       coalesce(nn.deadline, '0001-01-01 00:00:00+00')::timestamptz AS next_notice_at,
+       (g.status = 'acknowledged' AND g.reminders_sent > 0
+        AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -547,6 +594,11 @@ JOIN LATERAL (SELECT EXISTS (SELECT 1
                                AND (d.state IN ('not_delivered', 'deleted_in_messenger')
                                     OR (d.state = 'pending' AND ds.health = 'broken')
                                     OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
+LEFT JOIN LATERAL (SELECT t.kind, t.deadline
+                   FROM timers t
+                   WHERE t.org_id = g.org_id AND t.alert_group_id = g.id AND t.kind IN ('ack_timeout', 'reminder')
+                   ORDER BY t.deadline
+                   LIMIT 1) nn ON true
 WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL
@@ -565,6 +617,7 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('delivery_problem')::boolean IS NULL
        OR dp.delivery_problem = sqlc.narg('delivery_problem')::boolean)
+  AND (sqlc.narg('unclaimed')::boolean IS NULL OR g.unclaimed = sqlc.narg('unclaimed')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -582,7 +635,11 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem,
+       g.unclaimed, coalesce(nn.kind, '')::text AS next_notice_kind,
+       coalesce(nn.deadline, '0001-01-01 00:00:00+00')::timestamptz AS next_notice_at,
+       (g.status = 'acknowledged' AND g.reminders_sent > 0
+        AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -599,6 +656,11 @@ JOIN LATERAL (SELECT EXISTS (SELECT 1
                                AND (d.state IN ('not_delivered', 'deleted_in_messenger')
                                     OR (d.state = 'pending' AND ds.health = 'broken')
                                     OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
+LEFT JOIN LATERAL (SELECT t.kind, t.deadline
+                   FROM timers t
+                   WHERE t.org_id = g.org_id AND t.alert_group_id = g.id AND t.kind IN ('ack_timeout', 'reminder')
+                   ORDER BY t.deadline
+                   LIMIT 1) nn ON true
 WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL
@@ -617,6 +679,7 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('delivery_problem')::boolean IS NULL
        OR dp.delivery_problem = sqlc.narg('delivery_problem')::boolean)
+  AND (sqlc.narg('unclaimed')::boolean IS NULL OR g.unclaimed = sqlc.narg('unclaimed')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -634,7 +697,11 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem,
+       g.unclaimed, coalesce(nn.kind, '')::text AS next_notice_kind,
+       coalesce(nn.deadline, '0001-01-01 00:00:00+00')::timestamptz AS next_notice_at,
+       (g.status = 'acknowledged' AND g.reminders_sent > 0
+        AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -651,6 +718,11 @@ JOIN LATERAL (SELECT EXISTS (SELECT 1
                                AND (d.state IN ('not_delivered', 'deleted_in_messenger')
                                     OR (d.state = 'pending' AND ds.health = 'broken')
                                     OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
+LEFT JOIN LATERAL (SELECT t.kind, t.deadline
+                   FROM timers t
+                   WHERE t.org_id = g.org_id AND t.alert_group_id = g.id AND t.kind IN ('ack_timeout', 'reminder')
+                   ORDER BY t.deadline
+                   LIMIT 1) nn ON true
 WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL
@@ -669,6 +741,7 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('delivery_problem')::boolean IS NULL
        OR dp.delivery_problem = sqlc.narg('delivery_problem')::boolean)
+  AND (sqlc.narg('unclaimed')::boolean IS NULL OR g.unclaimed = sqlc.narg('unclaimed')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -686,7 +759,11 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
        g.owner_user_id, g.snooze_until, g.snoozed_by_user_id, g.snoozed_by_service_account_id,
        coalesce(nw.public_id, '')::text AS newer_public_id, coalesce(nw.number, 0)::bigint AS newer_number,
-       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem
+       (r.deleted_at IS NOT NULL)::boolean AS route_deleted, dp.delivery_problem::boolean AS delivery_problem,
+       g.unclaimed, coalesce(nn.kind, '')::text AS next_notice_kind,
+       coalesce(nn.deadline, '0001-01-01 00:00:00+00')::timestamptz AS next_notice_at,
+       (g.status = 'acknowledged' AND g.reminders_sent > 0
+        AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
 JOIN organizations o ON o.id = g.org_id
@@ -703,6 +780,11 @@ JOIN LATERAL (SELECT EXISTS (SELECT 1
                                AND (d.state IN ('not_delivered', 'deleted_in_messenger')
                                     OR (d.state = 'pending' AND ds.health = 'broken')
                                     OR d.thread_state = 'unattached')) AS delivery_problem) dp ON true
+LEFT JOIN LATERAL (SELECT t.kind, t.deadline
+                   FROM timers t
+                   WHERE t.org_id = g.org_id AND t.alert_group_id = g.id AND t.kind IN ('ack_timeout', 'reminder')
+                   ORDER BY t.deadline
+                   LIMIT 1) nn ON true
 WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('number')::bigint IS NULL OR g.number = sqlc.narg('number')::bigint)
   AND (sqlc.narg('number')::bigint IS NOT NULL
@@ -721,6 +803,7 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('delivery_problem')::boolean IS NULL
        OR dp.delivery_problem = sqlc.narg('delivery_problem')::boolean)
+  AND (sqlc.narg('unclaimed')::boolean IS NULL OR g.unclaimed = sqlc.narg('unclaimed')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)
@@ -762,6 +845,7 @@ WHERE g.org_id = @org_id
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('delivery_problem')::boolean IS NULL
        OR dp.delivery_problem = sqlc.narg('delivery_problem')::boolean)
+  AND (sqlc.narg('unclaimed')::boolean IS NULL OR g.unclaimed = sqlc.narg('unclaimed')::boolean)
   AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
   AND (sqlc.narg('pattern')::text IS NULL OR g.title ILIKE sqlc.narg('pattern')::text
        OR g.summary ILIKE sqlc.narg('pattern')::text)

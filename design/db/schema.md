@@ -13,7 +13,9 @@
   [`0005_webhook_events_received_at`](../../internal/db/migrations/0005_webhook_events_received_at.up.sql)
   (`webhook_events.received_at`, S-044) and
   [`0006_deliveries_published_at`](../../internal/db/migrations/0006_deliveries_published_at.up.sql)
-  (`deliveries.published_at` marks a Root message that exists, S-045), in `internal/db/migrations/` — golang-migrate
+  (`deliveries.published_at` marks a Root message that exists, S-045) and
+  [`0007_alert_groups_first_published_at_backfill`](../../internal/db/migrations/0007_alert_groups_first_published_at_backfill.up.sql)
+  (`alert_groups.first_published_at` filled for Alert Groups published before S-049), in `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
   ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md))
@@ -838,7 +840,7 @@ Columns by concern:
 | Reopen window | `reopen_deadline`, `prior_status`, `prior_owner_user_id`, `prior_snooze_until`, `prior_snooze_no_end`, `prior_snoozed_while_urgent`, `prior_snoozed_by_user_id`, `prior_snoozed_by_service_account_id` |
 | Grace period | `grace_deadline`, `firing_again_after_id` ("firing again after a manual resolve of #N"; `ON DELETE SET NULL` since migration 0003, so that summary retention can delete the earlier Alert Group) |
 | Counters | `firing_alert_count`, `resolved_alert_count`, `reopen_count`, `event_seq` |
-| Timers | `first_published_at`, `ack_timeout_started_at`, `ack_timeout_notices_sent`, `unclaimed`, `reminders_sent`, `reminders_unanswered`, `last_reminder_at`, `owner_answered_at` |
+| Timers | `first_published_at` (filled by migration 0007 for Alert Groups published before it was set: the earliest `deliveries.published_at` or delivered `webhook_events.delivered_at`; their ack timeout starts at their next transition into firing), `ack_timeout_started_at`, `ack_timeout_notices_sent`, `unclaimed`, `reminders_sent`, `reminders_unanswered`, `last_reminder_at`, `owner_answered_at` |
 | Time | `created_at` (start), `last_changed_at` |
 
 Invariants, enforced by `CHECK`:

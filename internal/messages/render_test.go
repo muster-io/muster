@@ -69,7 +69,8 @@ func (f *fakeQueries) GetRenderGroup(_ context.Context, arg dbgen.GetRenderGroup
 		ResolveReason: pgtype.Text{String: s.ResolveReason, Valid: s.ResolveReason != ""}, CreatedAt: s.StartedAt,
 		RouteID: s.Route.ID, RoutePublicID: s.Route.PublicID, RouteName: s.Route.Name, Language: s.Route.Language,
 		SnoozeDurationsSeconds: s.Route.SnoozeDurations, TemplateRootMessage: text(s.Route.RootMessage),
-		TemplateLine: text(s.Route.Line), TemplateErrorTemplate: pgtype.Text{String: f.routeErr,
+		TemplateLine: text(s.Route.Line), TemplateAckTimeoutNotice: text(s.Route.AckTimeoutNotice),
+		TemplateErrorTemplate: pgtype.Text{String: f.routeErr,
 			Valid: f.routeErr != ""}, TimeZone: s.TimeZone, OwnerName: s.Owner}
 	if s.SnoozeUntil != nil {
 		row.SnoozeUntil = pgtype.Timestamptz{Time: *s.SnoozeUntil, Valid: true}
@@ -456,7 +457,6 @@ func TestLoadAndReplies(t *testing.T) {
 		EventSnoozeEnded:        "Snooze ended while alerts still fire.",
 		EventUrgencyRaised:      "This Alert Group is Urgent now.",
 		EventResolved:           "Resolved automatically: all alerts resolved",
-		EventAckTimeout:         "Nobody has acknowledged this Alert Group yet.",
 		EventUnclaimed:          "⚠ Nobody has taken this",
 		EventReminder:           "Reminder: Alice, are you still on it?",
 		EventAutoUnacknowledged: "The acknowledgement was released: nobody answered the Reminders.",
@@ -879,4 +879,117 @@ func (fakeRequests) PreviewRequest(src string, d templates.Data) (string, error)
 		return "", &templates.Error{Code: templates.CodeSyntax, Line: 3, Detail: "failed"}
 	}
 	return src + "|" + strconv.FormatInt(d.AlertGroup.Number, 10) + "|" + d.Alerts[0].Labels["alertname"], nil
+}
+
+// TestAckTimeoutNotice is C-17.FR-2, C-12.FR-4 and C-12.FR-6 for the ack timeout notice: the built-in template in the
+// Route's language, or the Route's ack_timeout_notice template run in the sandbox on the Alert Group with its Alerts,
+// its data escaped for the markup of the Destination, and only links — "Open in Muster" and the Alert Group's links —
+// without buttons; a failing Route template gives way to the built-in one, is reported with its detail, sets the
+// Route's template error and counts muster_template_errors_total{template="ack_timeout_notice"} once the transaction
+// committed; a Route template that renders again clears the error.
+func TestAckTimeoutNotice(t *testing.T) {
+	f := &fakeQueries{group: source("firing", 2)}
+	f.group.Title = "Pod_Down"
+	r := withFake(t, f)
+	ctx := t.Context()
+	notice := func(markup Markup) (Message, []string, []func(context.Context)) {
+		t.Helper()
+		var fallbacks []string
+		var after []func(context.Context)
+		m, err := r.Reply(ctx, nil, 9, ReplyInput{Event: EventAckTimeout, Seq: 3, Markup: markup,
+			After:    func(f func(context.Context)) { after = append(after, f) },
+			Fallback: func(d string) { fallbacks = append(fallbacks, d) }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m, fallbacks, after
+	}
+	m, fallbacks, after := notice("")
+	if m.Kind != KindReply || m.Body == nil || m.Body.Text != "Nobody has acknowledged #12 Pod_Down yet." ||
+		m.Body.Markup != MarkupPlain || len(m.Buttons) != 0 || len(m.Links) == 0 ||
+		m.Links[0].URL != "https://muster.example.org/alert-groups/AGK7M3QX9P2RTA" || len(fallbacks) != 0 ||
+		len(after) != 1 {
+		t.Errorf("built-in = %+v, fallbacks %v", m, fallbacks)
+	}
+	f.group.Route.Language = "ru"
+	if m, _, _ := notice(MarkupMarkdown); m.Body.Text != "Группу алертов #12 Pod\\_Down ещё никто не подтвердил." ||
+		m.Body.Markup != MarkupMarkdown {
+		t.Errorf("ru markdown = %q", m.Body.Text)
+	}
+	f.group.Route.Language = "en"
+	f.group.Route.AckTimeoutNotice = ptr(`{{ len .Alerts }} alerts of {{ .AlertGroup.Title }} wait`)
+	if m, _, _ := notice(MarkupHTML); m.Body.Text != "2 alerts of Pod_Down wait" {
+		t.Errorf("route template = %q", m.Body.Text)
+	}
+	f.group.Route.AckTimeoutNotice = ptr(`{{ env "HOME" }}`)
+	before := metrics.TemplateErrors.With("RTAAAAAAAAAAA1", "", TemplateAckTimeoutNotice).Get()
+	m, fallbacks, after = notice(MarkupPlain)
+	if m.Body.Text != "Nobody has acknowledged #12 Pod_Down yet." || len(fallbacks) != 1 ||
+		!strings.HasPrefix(fallbacks[0], "ack_timeout_notice template failed: ") || f.routeErr != TemplateAckTimeoutNotice {
+		t.Errorf("failing = %q, fallbacks %v, route error %q", m.Body.Text, fallbacks, f.routeErr)
+	}
+	if metrics.TemplateErrors.With("RTAAAAAAAAAAA1", "", TemplateAckTimeoutNotice).Get() != before {
+		t.Error("counted before the commit")
+	}
+	for _, a := range after {
+		a(ctx)
+	}
+	if metrics.TemplateErrors.With("RTAAAAAAAAAAA1", "", TemplateAckTimeoutNotice).Get() != before+1 {
+		t.Error("not counted after the commit")
+	}
+	// Without After the counter runs at once; a template that renders again clears the error.
+	if _, err := r.Reply(ctx, nil, 9, ReplyInput{Event: EventAckTimeout}); err != nil ||
+		metrics.TemplateErrors.With("RTAAAAAAAAAAA1", "", TemplateAckTimeoutNotice).Get() != before+2 {
+		t.Errorf("without after = %v", err)
+	}
+	f.group.Route.ErrorTemplate = TemplateAckTimeoutNotice
+	f.group.Route.AckTimeoutNotice = ptr(`late`)
+	if m, _, _ := notice(MarkupPlain); m.Body.Text != "late" || f.routeErr != "" {
+		t.Errorf("recovered = %q, route error %q", m.Body.Text, f.routeErr)
+	}
+	for _, q := range []string{"GetRenderGroup", "ListRenderAlerts", "SetTemplateError"} {
+		f.fail = map[string]error{q: errBoom}
+		f.routeErr, f.group.Route.ErrorTemplate = "", ""
+		f.group.Route.AckTimeoutNotice = ptr(`{{ env "HOME" }}`)
+		if _, err := r.Reply(ctx, nil, 9, ReplyInput{Event: EventAckTimeout}); !errors.Is(err, errBoom) {
+			t.Errorf("%s failing = %v", q, err)
+		}
+	}
+	f.fail = map[string]error{}
+	if _, err := r.Reply(ctx, nil, 99, ReplyInput{Event: EventAckTimeout}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown group = %v", err)
+	}
+}
+
+// TestReminderReply is C-17.FR-4 and C-17.FR-5 on the messages: a Reminder names the Owner — "Reminder: {user}, are
+// you still on it?" — with no buttons (they come with S-068); auto_unacknowledged gives its reason and notices_missed
+// how many notices were missed, in English and Russian. The Owner named is the one the Reminder's Timeline entry
+// mentions, not whoever owns the Alert Group when the reply is prepared.
+func TestReminderReply(t *testing.T) {
+	f := &fakeQueries{group: source("acknowledged", 1), entry: dbgen.GetReplyEntryRow{MissedCount: 3}}
+	f.group.Owner = "Bob"
+	r := withFake(t, f)
+	for _, c := range []struct{ lang, event, want string }{
+		{"en", EventReminder, "Reminder: Bob, are you still on it?"},
+		{"ru", EventReminder, "Напоминание: Bob, вы ещё работаете над этим?"},
+		{"en", EventAutoUnacknowledged, "The acknowledgement was released: nobody answered the Reminders."},
+		{"en", EventNoticesMissed, "3 notices were missed while Muster was unavailable."},
+		{"ru", EventNoticesMissed, "Пока Muster был недоступен, пропущено 3 уведомления."},
+	} {
+		f.group.Route.Language = c.lang
+		m, err := r.Reply(t.Context(), nil, 9, ReplyInput{Event: c.event, Seq: 5})
+		if err != nil || strings.Join(m.Lines, "\n") != c.want || len(m.Buttons) != 0 || m.Body != nil {
+			t.Errorf("%s %s = %q %v", c.lang, c.event, m.Lines, err)
+		}
+	}
+	f.group.Route.Language = "en"
+	f.entry.OwnerName = "Carol"
+	if m, err := r.Reply(t.Context(), nil, 9, ReplyInput{Event: EventReminder, Seq: 5}); err != nil ||
+		strings.Join(m.Lines, "\n") != "Reminder: Carol, are you still on it?" {
+		t.Errorf("owner of the entry = %q %v", m.Lines, err)
+	}
+	f.fail = map[string]error{"GetReplyEntry": errBoom}
+	if _, err := r.Reply(t.Context(), nil, 9, ReplyInput{Event: EventReminder, Seq: 5}); !errors.Is(err, errBoom) {
+		t.Errorf("a failing read = %v", err)
+	}
 }

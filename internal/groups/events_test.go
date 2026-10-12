@@ -195,9 +195,11 @@ func TestLifecycleEventTable(t *testing.T) {
 			produced[c.want.event] = true
 		})
 	}
-	// TestCommandEventTable and TestNoteAddedEvent cover the rows of the Commands (C-10.FR-15).
+	// TestCommandEventTable and TestNoteAddedEvent cover the rows of the Commands (C-10.FR-15), TestTimerEventTable
+	// those of the timers (C-17.FR-11).
 	for _, e := range []Event{EventAcknowledged, EventTakeover, EventUnresolved, EventSnoozed, EventUnsnoozed,
-		EventNoteAdded} {
+		EventNoteAdded, EventAckTimeout, EventUnclaimed, EventReminder, EventReminderAnswered, EventAutoUnacknowledged,
+		EventNoticesMissed} {
 		produced[e] = true
 	}
 	for _, r := range Table {
@@ -491,6 +493,106 @@ func TestStatusVariant(t *testing.T) {
 		StatusSnoozed: VariantSnoozed, StatusResolved: VariantFiring} {
 		if got := statusVariant(s); got != v {
 			t.Errorf("statusVariant(%s) = %s", s, got)
+		}
+	}
+}
+
+// TestTimerEventTable is C-17.AC-9, C-17.FR-11 and C-09.FR-11: every row of the lifecycle event table of the timers
+// records exactly one Timeline entry with the row's event, kind, loudness and Mentions — notices_missed with those of
+// the notices it stands for — made by the system, reminder_answered by the Owner who answered. The expected values are
+// the PRD table's, written out here.
+func TestTimerEventTable(t *testing.T) {
+	type want struct {
+		event    Event
+		kind     Kind
+		loudness Loudness
+		mentions []string
+		// actor is the actor_kind of the entry: the system, or the Owner who answered.
+		actor string
+	}
+	// ack fires the ack_timeout timer of an Alert Group published at t0 at the offset at; remind acknowledges it as
+	// Bob at t0 and fires its reminder timer at at, Reminders reaching their Destinations.
+	ack := func(at time.Duration) func(t *testing.T, h *harness, g *dbgen.LockGroupsRow) {
+		return func(t *testing.T, h *harness, g *dbgen.LockGroupsRow) {
+			h.clock.Set(t0.Add(at))
+			h.fire(t, g, TimerAckTimeout)
+		}
+	}
+	remind := func(until time.Duration, answer bool) func(t *testing.T, h *harness, g *dbgen.LockGroupsRow) {
+		return func(t *testing.T, h *harness, g *dbgen.LockGroupsRow) {
+			var asked []int64
+			h.svc.SetReminderReached(reachedAll(&asked))
+			if _, err := h.svc.Acknowledge(t.Context(), bob, g.PublicID); err != nil {
+				t.Fatal(err)
+			}
+			h.runUntil(t, g, t0.Add(until))
+			if answer {
+				h.clock.Advance(time.Minute)
+				if _, err := h.svc.AnswerReminder(t.Context(), bob, g.PublicID); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	collapse := func(t *testing.T, h *harness, g *dbgen.LockGroupsRow) {
+		if _, err := h.svc.Acknowledge(t.Context(), bob, g.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		h.clock.Set(t0.Add(13 * time.Hour))
+		h.fire(t, g, TimerReminder)
+	}
+	cases := []struct {
+		name    string
+		want    want
+		produce func(t *testing.T, h *harness, g *dbgen.LockGroupsRow)
+	}{
+		{"ack timeout notice", want{EventAckTimeout, KindTimers, Loud, []string{"ack_timeout"}, "system"},
+			ack(15 * time.Minute)},
+		{"unclaimed", want{EventUnclaimed, KindTimers, Quiet, nil, "system"}, ack(2 * time.Hour)},
+		{"overdue ack timeout notices", want{EventNoticesMissed, KindTimers, Loud, []string{"ack_timeout"}, "system"},
+			ack(time.Hour)},
+		{"reminder", want{EventReminder, KindTimers, Loud, []string{"owner"}, "system"}, remind(4*time.Hour, false)},
+		{"still on it", want{EventReminderAnswered, KindTimers, Quiet, nil, "user"}, remind(4*time.Hour, true)},
+		{"auto-unacknowledge", want{EventAutoUnacknowledged, KindStatus, Loud, []string{"owner"}, "system"},
+			remind(28*time.Hour, false)},
+		{"overdue reminders", want{EventNoticesMissed, KindTimers, Loud, []string{"owner"}, "system"}, collapse},
+	}
+	produced := map[Event]bool{}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.people()
+			h.onCall()
+			h.db.routes[2].timers.AutoUnacknowledge = true
+			g := h.firing(t, "x")
+			h.publish(t, g, t0)
+			c.produce(t, h, g)
+			var matching []*fakeEntry
+			for _, e := range h.entriesOf(g) {
+				if e.Event.String == string(c.want.event) {
+					matching = append(matching, e)
+				}
+			}
+			if len(matching) != 1 {
+				t.Fatalf("%d %s entries in %v", len(matching), c.want.event, h.events(g))
+			}
+			e := matching[0]
+			mentions := c.want.mentions
+			if mentions == nil {
+				mentions = []string{}
+			}
+			if e.Kind != string(c.want.kind) || e.Loudness.String != string(c.want.loudness) ||
+				!slices.Equal(e.Mentions, mentions) || e.EventSeq.Int64 < 1 || e.EventSeq.Int64 > g.EventSeq ||
+				e.ActorKind != c.want.actor {
+				t.Errorf("entry %+v, want %+v", e.InsertTimelineEntryParams, c.want)
+			}
+			produced[c.want.event] = true
+		})
+	}
+	for _, e := range []Event{EventAckTimeout, EventUnclaimed, EventReminder, EventReminderAnswered,
+		EventAutoUnacknowledged, EventNoticesMissed} {
+		if !produced[e] {
+			t.Errorf("no case covers %s", e)
 		}
 	}
 }

@@ -527,7 +527,7 @@ func TestCommandFailures(t *testing.T) {
 		t.Errorf("GetGroupRef failing = %v", err)
 	}
 	// An unknown command never reaches a transition.
-	if _, err := h.svc.transition(t.Context(), h.db, alice, "still_on_it", &Group{}, args{}, false); err == nil {
+	if _, err := h.svc.transition(t.Context(), h.db, alice, "bogus", &Group{}, args{}, false); err == nil {
 		t.Error("an unknown command ran")
 	}
 	// A row that disappears between the lookup and the lock is not found.

@@ -393,6 +393,19 @@ var TimerFailed = newEvent("timer_failed", LevelWarn, "C-09",
 		"once its lease runs out.",
 	"kind", "error")
 
+// TimerFired is logged when an ack timeout notice or a Reminder of an Alert Group fired (C-17.FR-2, FR-4, FR-7).
+var TimerFired = newEvent("timer_fired", LevelInfo, "C-17",
+	"A timer of an Alert Group fired: kind is ack_timeout or reminder, group the public_id of the Alert Group, "+
+		"notice the number of the notice or Reminder it sent, or of the last one a collapse stands for, and missed "+
+		"how many overdue ones collapsed into one notices_missed, 0 when none did.",
+	"kind", "group", "notice", "missed")
+
+// ReminderSkipped is logged when a Reminder came due on an Alert Group that no longer wants it (C-17.FR-4).
+var ReminderSkipped = newEvent("reminder_skipped", LevelInfo, "C-17",
+	"A Reminder came due and was dropped with its timer: group is the public_id of the Alert Group and reason "+
+		"not_acknowledged when it is no longer acknowledged or policy_off when its Route's Reminders are off.",
+	"group", "reason")
+
 // AlertGroupsPurged is logged when the Alert Group retention of the Leader deleted details or summary rows.
 var AlertGroupsPurged = newEvent("alert_groups_purged", LevelInfo, "C-09",
 	"The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended "+
@@ -413,8 +426,10 @@ var DeliveryAttempt = newEvent("delivery_attempt", LevelInfo, "C-11",
 // Broken Destination.
 var DeliveryWorkFailed = newEvent("delivery_work_failed", LevelWarn, "C-11",
 	"The delivery worker could not attempt a delivery or a Thread reply, or probe a Broken Destination (work is "+
-		"delivery, thread_reply or probe), because of error, such as a lost database connection. Any replica "+
-		"attempts it again once its lease runs out, or at the next probe.",
+		"delivery, thread_reply or probe), or mark the first Publication of an Alert Group once its outcome "+
+		"committed (work is mark_published), because of error, such as a lost database connection. Any replica "+
+		"attempts it again once its lease runs out, or at the next probe; a first Publication is marked again by "+
+		"the next delivered call or event of the Alert Group.",
 	"work", "error")
 
 // DestinationBroken is logged when a Destination becomes Broken (C-11.FR-9).

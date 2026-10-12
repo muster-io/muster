@@ -31,9 +31,10 @@ type SystemEntry struct {
 
 // RecordSystemEntry writes the system entry e to the Timeline through db, the transaction of the caller, with Muster
 // as the actor: the Timeline has one writer, this package, and delivery records what it learns while delivering
-// through here (ADR-0016). Only template_value_missing is recorded this way.
+// through here (ADR-0016). Only template_value_missing and fallback_template_used — a Route template of a Thread reply,
+// the ack timeout notice, that failed when delivery rendered it (C-12.FR-6) — are recorded this way.
 func RecordSystemEntry(ctx context.Context, db DBTX, e SystemEntry) error {
-	if e.System != SystemTemplateValueMissing {
+	if e.System != SystemTemplateValueMissing && e.System != SystemFallbackTemplateUsed {
 		return fmt.Errorf("the system entry %s is not recorded from outside the dispatcher", e.System)
 	}
 	err := dbgen.New(db).InsertTimelineEntry(ctx, dbgen.InsertTimelineEntryParams{OrgID: e.OrgID,

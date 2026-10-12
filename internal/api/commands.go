@@ -11,7 +11,7 @@ import (
 )
 
 // Commands is what the API needs of the command layer of internal/groups (ADR-0016): the Commands of C-10, Add Note
-// included, and bulk commands, each checked by the dispatcher, Permission included.
+// and "Still on it" included, and bulk commands, each checked by the dispatcher, Permission included.
 type Commands interface {
 	Acknowledge(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
 	Unacknowledge(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
@@ -19,6 +19,7 @@ type Commands interface {
 	Unresolve(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
 	Snooze(ctx context.Context, c groups.Caller, publicID string, end groups.SnoozeEnd) (groups.Result, error)
 	Unsnooze(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
+	AnswerReminder(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
 	AddNote(ctx context.Context, c groups.Caller, publicID, body string) (groups.NoteView, error)
 	Bulk(ctx context.Context, c groups.Caller, r groups.BulkRequest) ([]groups.BulkItem, error)
 }
@@ -122,6 +123,19 @@ func (s *Server) UnsnoozeAlertGroup(ctx context.Context, req gen.UnsnoozeAlertGr
 		return nil, err
 	}
 	return gen.UnsnoozeAlertGroup200JSONResponse(out), nil
+}
+
+// AnswerReminder is answerReminder, "Still on it" (C-17.FR-10): the dispatcher checks the Permission and refuses
+// anyone but the Owner — a Service account first — and an Alert Group without a Reminder waiting for an answer.
+func (s *Server) AnswerReminder(ctx context.Context, req gen.AnswerReminderRequestObject) (
+	gen.AnswerReminderResponseObject, error) {
+	out, err := s.command(ctx, func(c groups.Caller) (groups.Result, error) {
+		return s.commands.AnswerReminder(ctx, c, req.AlertGroupId)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return gen.AnswerReminder200JSONResponse(out), nil
 }
 
 // snoozeEndOf is the end of a Snooze as the request gives it.

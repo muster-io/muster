@@ -39,13 +39,18 @@ func viewOf(g *groups.Group) GroupView {
 }
 
 // ReplyView is a Thread reply as the renderer shows it: its lifecycle event, the number of the first event it stands
-// for, the fingerprints of the new Alerts it lists, the language of the Route and how many Alerts it lists at most.
+// for, the fingerprints of the new Alerts it lists, the language of the Route and how many Alerts it lists at most,
+// with the markup of its Destination. A Route template that fails for it is reported to Fallback, and what to run
+// once the transaction of the render committed is handed to After.
 type ReplyView struct {
 	Event        groups.Event
 	Seq          int64
 	Fingerprints []string
 	Language     string
 	Listed       int
+	Markup       messages.Markup
+	After        func(f func(context.Context))
+	Fallback     func(detail string)
 }
 
 // Roots are the Root messages of one Alert Group, one per markup of its Destinations, as one render produced them:
@@ -109,7 +114,7 @@ func (r MessageRenderer) Roots(ctx context.Context, db messages.DBTX, g GroupVie
 // Reply renders a Thread reply of g.
 func (r MessageRenderer) Reply(ctx context.Context, db messages.DBTX, rv ReplyView, g GroupView) (Message, error) {
 	return r.Renderer.Reply(ctx, db, g.ID, messages.ReplyInput{Event: string(rv.Event), Seq: rv.Seq,
-		Fingerprints: rv.Fingerprints, Listed: rv.Listed})
+		Fingerprints: rv.Fingerprints, Listed: rv.Listed, Markup: rv.Markup, After: rv.After, Fallback: rv.Fallback})
 }
 
 // markupOf is the markup a Destination type writes: Markdown in Mattermost, HTML in Telegram, plain text for an

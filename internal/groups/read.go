@@ -127,11 +127,31 @@ type View struct {
 	// DeliveryProblem is set while a delivery of it is Not delivered or deleted in the messenger, waits for a Broken
 	// Destination, or has a Thread not attached (C-13.FR-12).
 	DeliveryProblem bool
-	// ownerID is the Owner's id, stillFiring the Alerts still firing in it and routeDeleted whether its Route was
-	// deleted, which allowed_commands needs.
-	ownerID      int64
-	stillFiring  int64
-	routeDeleted bool
+	// Unclaimed is set after the last notice of its ack timeout until it stops being firing (C-17.FR-3), and
+	// NextNotice is its next ack timeout notice or Reminder, nil when none is scheduled (C-17.FR-9).
+	Unclaimed  bool
+	NextNotice *NextNotice
+	// ownerID is the Owner's id, stillFiring the Alerts still firing in it, routeDeleted whether its Route was
+	// deleted and reminderPending whether a Reminder waits for the Owner's answer, which allowed_commands needs.
+	ownerID         int64
+	stillFiring     int64
+	routeDeleted    bool
+	reminderPending bool
+}
+
+// NextNotice is the next scheduled ack timeout notice or Reminder of an Alert Group: the kind of its timer and when it
+// is due.
+type NextNotice struct {
+	Kind string
+	At   time.Time
+}
+
+// nextNoticeOf is the next notice of a read row: none for the empty kind of an Alert Group without one.
+func nextNoticeOf(kind string, at time.Time) *NextNotice {
+	if kind == "" {
+		return nil
+	}
+	return &NextNotice{Kind: kind, At: at.UTC()}
 }
 
 // Link is a link of an Alert Group: its kind, its name and its http(s) URL.
@@ -206,7 +226,8 @@ func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
 		Route: Ref{PublicID: r.RoutePublicID, Name: r.RouteName}, StartedAt: r.CreatedAt.UTC(),
 		LastChangedAt: r.LastChangedAt.UTC(), ResolvedAt: timeOf(r.ResolvedAt), ReopenCount: r.ReopenCount,
 		FiringCount: r.FiringAlertCount, ResolvedCount: r.ResolvedAlertCount, Integrations: []Ref{},
-		Notices: []Notice{}, Links: []Link{}, DeliveryProblem: r.DeliveryProblem}
+		Notices: []Notice{}, Links: []Link{}, DeliveryProblem: r.DeliveryProblem, Unclaimed: r.Unclaimed,
+		NextNotice: nextNoticeOf(r.NextNoticeKind, r.NextNoticeAt)}
 	for _, f := range []struct {
 		raw  []byte
 		into *map[string]string
@@ -237,7 +258,7 @@ func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
 	}
 	v.owned(refs, r.OwnerUserID, r.SnoozedByUserID, r.SnoozedByServiceAccountID, r.SnoozeUntil, r.NewerPublicID,
 		r.NewerNumber)
-	v.stillFiring, v.routeDeleted = r.FiringAlertCount, r.RouteDeleted
+	v.stillFiring, v.routeDeleted, v.reminderPending = r.FiringAlertCount, r.RouteDeleted, r.ReminderPending
 	if r.ResolvedByKind.String == ResolvedByUser && r.StillFiring > 0 {
 		v.Notices = append(v.Notices, Notice{Kind: NoticeAlertsStillFiring, Count: &r.StillFiring})
 	}

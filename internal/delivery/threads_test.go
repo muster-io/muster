@@ -5,6 +5,7 @@ package delivery_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/mentions"
@@ -447,5 +449,118 @@ func TestChainLinkOfRepublishedRoot(t *testing.T) {
 	e.round(t)
 	if d.threadState != "waiting_for_copy" || d.chainLastID != nil || e.threadEvents() != 0 {
 		t.Fatalf("thread %s %s events %d", d.threadState, str(d.chainLastID), e.threadEvents())
+	}
+}
+
+func (f *fakeDB) ReminderReached(_ context.Context, arg dbgen.ReminderReachedParams) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ReminderReached"); err != nil {
+		return false, err
+	}
+	sent := slices.ContainsFunc(f.replies, func(r *fakeReply) bool {
+		return r.group == arg.AlertGroupID && r.state == "sent" && slices.Contains(r.seqs, arg.Seq)
+	})
+	delivered := slices.ContainsFunc(f.webhookEvents, func(e *fakeEvent) bool {
+		return e.group == arg.AlertGroupID && e.seq == arg.Seq && e.state == "delivered" &&
+			f.dests[e.dest].typ == delivery.TypeWebhook
+	})
+	return sent || delivered, nil
+}
+
+// reminder is the reminder lifecycle event seq of the Owner.
+func reminder(seq int64) groups.Recorded {
+	return groups.Recorded{Seq: seq, Event: groups.EventReminder, Loudness: groups.Loud,
+		Mentions: []groups.Mention{groups.MentionOwner}}
+}
+
+// TestReminderReached is the check of the answer rule (C-17.FR-5, D298): a Reminder reached a Destination when a
+// Thread reply carrying it was sent, or its reminder event was delivered to an events-mode outgoing webhook; one whose
+// reply was dropped while its Destination was Broken, or that was never sent, reached nobody.
+func TestReminderReached(t *testing.T) {
+	e := published(t)
+	ctx := t.Context()
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System, reminder(5))
+	e.round(t)
+	reached := func(seq int64) bool {
+		t.Helper()
+		ok, err := e.svc.ReminderReached(ctx, nil, groupID, seq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	if len(e.replies()) != 1 || !reached(5) {
+		t.Errorf("a sent reminder: replies %d, reached %v", len(e.replies()), reached(5))
+	}
+	if reached(6) {
+		t.Error("a reminder never sent reached a destination")
+	}
+	e.breakDest(destMM, "unavailable")
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System, reminder(7))
+	e.round(t)
+	if reached(7) {
+		t.Error("a reminder of a broken destination reached it")
+	}
+	// Delivered only as the reminder event of an events-mode outgoing webhook.
+	at := e.business.Now()
+	e.db.webhookEvents = append(e.db.webhookEvents, &fakeEvent{id: 900, dest: destWH, group: groupID, seq: 8,
+		event: "reminder", state: "delivered", deliveredAt: &at},
+		&fakeEvent{id: 901, dest: destWH, group: groupID, seq: 9, event: "reminder", state: "pending"})
+	if !reached(8) || reached(9) {
+		t.Errorf("events mode: delivered %v, pending %v", reached(8), reached(9))
+	}
+	e.db.fail["ReminderReached"] = errBoom
+	if _, err := e.svc.ReminderReached(ctx, nil, groupID, 8); !errors.Is(err, errBoom) {
+		t.Errorf("failing = %v", err)
+	}
+}
+
+// noticeRenderer renders the ack timeout notice as a failing Route template does: it reports the failure and leaves
+// its counter to run once the transaction committed, and records what the worker handed it.
+type noticeRenderer struct {
+	stubRenderer
+	views *[]delivery.ReplyView
+	ran   *[]int
+	begin *fakeBeginner
+}
+
+func (n noticeRenderer) Reply(_ context.Context, _ messages.DBTX, r delivery.ReplyView, _ delivery.GroupView) (
+	delivery.Message, error) {
+	*n.views = append(*n.views, r)
+	r.Fallback("ack_timeout_notice template failed: line 1: boom")
+	r.After(func(context.Context) { *n.ran = append(*n.ran, n.begin.open) })
+	return delivery.Message{Lines: []string{"notice"}}, nil
+}
+
+// TestAckTimeoutNoticeReply is C-12.FR-4 and FR-6 for the ack timeout notice: the worker renders it for the markup of
+// its Destination, records a failing Route template in the Timeline as fallback_template_used in the transaction that
+// prepared it, and runs what the render left once that transaction committed, before the call.
+func TestAckTimeoutNoticeReply(t *testing.T) {
+	e := published(t)
+	var views []delivery.ReplyView
+	var ran []int
+	e.w.Renderer = noticeRenderer{views: &views, ran: &ran, begin: e.begin}
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: 2,
+		Event: groups.EventAckTimeout, Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionAckTimeout}})
+	e.round(t)
+	if len(views) != 1 || views[0].Markup != messages.MarkupMarkdown || len(e.replies()) != 1 {
+		t.Fatalf("views %+v, replies %d", views, len(e.replies()))
+	}
+	if len(ran) != 1 || ran[0] != 0 {
+		t.Errorf("after ran %v, want once with no transaction open", ran)
+	}
+	last := e.db.system[len(e.db.system)-1]
+	if last.System != groups.SystemFallbackTemplateUsed || last.AlertGroupID != groupID ||
+		!strings.Contains(last.Detail, "ack_timeout_notice template failed") {
+		t.Errorf("system entry %+v", last)
+	}
+	// A failure to record it leaves the reply for later.
+	e.db.fail["RecordSystemEntry"] = errBoom
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: 3,
+		Event: groups.EventAckTimeout, Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionAckTimeout}})
+	e.round(t)
+	if len(e.replies()) != 1 || len(ran) != 1 {
+		t.Errorf("recording failed: replies %d, after ran %v", len(e.replies()), ran)
 	}
 }
