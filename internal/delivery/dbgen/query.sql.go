@@ -1507,6 +1507,63 @@ func (q *Queries) GetPressBinding(ctx context.Context, arg GetPressBindingParams
 	return i, err
 }
 
+const getReplyPressBinding = `-- name: GetReplyPressBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       coalesce(ds.mattermost_channel_id, '')::text AS channel_id, coalesce(d.message_id, '')::text AS root_message_id,
+       r.language, r.snooze_durations_seconds
+FROM deliveries d
+JOIN thread_replies t ON t.org_id = d.org_id AND t.delivery_id = d.id
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE d.org_id = $1 AND ds.connection_id = $2 AND ds.type = 'mattermost' AND ds.deleted_at IS NULL
+  AND g.public_id = $3 AND t.event = 'reminder' AND t.state = 'sent'
+  AND t.message_id = $4::text
+ORDER BY t.id
+LIMIT 1
+`
+
+type GetReplyPressBindingParams struct {
+	OrgID         int64
+	ConnectionID  pgtype.Int8
+	GroupPublicID string
+	MessageID     string
+}
+
+type GetReplyPressBindingRow struct {
+	DestinationID          int64
+	DestinationPublicID    string
+	DestinationName        string
+	ChannelID              string
+	RootMessageID          string
+	Language               string
+	SnoozeDurationsSeconds []int64
+}
+
+// GetReplyPressBinding reads what a press on the Reminder message_id of the Alert Group group_public_id is bound to
+// (C-13.FR-4): a sent Reminder of that Alert Group to a Mattermost Destination of the Connection that is not deleted,
+// with the Destination's channel, the Root message the Reminder replies to and the Route's language and Snooze
+// durations.
+func (q *Queries) GetReplyPressBinding(ctx context.Context, arg GetReplyPressBindingParams) (GetReplyPressBindingRow, error) {
+	row := q.db.QueryRow(ctx, getReplyPressBinding,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.GroupPublicID,
+		arg.MessageID,
+	)
+	var i GetReplyPressBindingRow
+	err := row.Scan(
+		&i.DestinationID,
+		&i.DestinationPublicID,
+		&i.DestinationName,
+		&i.ChannelID,
+		&i.RootMessageID,
+		&i.Language,
+		&i.SnoozeDurationsSeconds,
+	)
+	return i, err
+}
+
 const getRetentionDetailsDays = `-- name: GetRetentionDetailsDays :one
 SELECT retention_alert_details_days
 FROM organizations
@@ -1627,6 +1684,60 @@ func (q *Queries) GetTelegramPressBinding(ctx context.Context, arg GetTelegramPr
 		arg.MessageID,
 	)
 	var i GetTelegramPressBindingRow
+	err := row.Scan(
+		&i.DestinationID,
+		&i.DestinationPublicID,
+		&i.DestinationName,
+		&i.Language,
+		&i.SnoozeDurationsSeconds,
+	)
+	return i, err
+}
+
+const getTelegramReplyPressBinding = `-- name: GetTelegramReplyPressBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name, r.language,
+       r.snooze_durations_seconds
+FROM deliveries d
+JOIN thread_replies t ON t.org_id = d.org_id AND t.delivery_id = d.id
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE d.org_id = $1 AND ds.connection_id = $2 AND ds.type = 'telegram' AND ds.deleted_at IS NULL
+  AND ds.telegram_discussion_chat_id = $3::bigint AND g.public_id = $4
+  AND t.event = 'reminder' AND t.state = 'sent' AND t.message_id = $5::text
+ORDER BY t.id
+LIMIT 1
+`
+
+type GetTelegramReplyPressBindingParams struct {
+	OrgID         int64
+	ConnectionID  pgtype.Int8
+	ChatID        int64
+	GroupPublicID string
+	MessageID     string
+}
+
+type GetTelegramReplyPressBindingRow struct {
+	DestinationID          int64
+	DestinationPublicID    string
+	DestinationName        string
+	Language               string
+	SnoozeDurationsSeconds []int64
+}
+
+// GetTelegramReplyPressBinding reads what a press on the message message_id of the chat chat_id that names the Alert
+// Group group_public_id is bound to (C-14.FR-4): a sent Reminder of that Alert Group, the message message_id of the
+// discussion group chat_id of a Telegram Destination of the Connection that is not deleted, with the Route's language
+// and Snooze durations.
+func (q *Queries) GetTelegramReplyPressBinding(ctx context.Context, arg GetTelegramReplyPressBindingParams) (GetTelegramReplyPressBindingRow, error) {
+	row := q.db.QueryRow(ctx, getTelegramReplyPressBinding,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.ChatID,
+		arg.GroupPublicID,
+		arg.MessageID,
+	)
+	var i GetTelegramReplyPressBindingRow
 	err := row.Scan(
 		&i.DestinationID,
 		&i.DestinationPublicID,
@@ -3029,24 +3140,28 @@ func (q *Queries) RecordReplyRetry(ctx context.Context, arg RecordReplyRetryPara
 
 const recordReplySent = `-- name: RecordReplySent :exec
 UPDATE thread_replies
-SET state = 'sent', sent_at = $1::timestamptz, message_id = $2::text, last_error_class = NULL,
-    last_error = NULL, lease_owner = NULL, lease_until = NULL
-WHERE org_id = $3 AND id = $4 AND lease_owner = $5::text
+SET state = 'sent', sent_at = $1::timestamptz, message_id = $2::text,
+    button_key_id = $3::text, last_error_class = NULL, last_error = NULL, lease_owner = NULL,
+    lease_until = NULL
+WHERE org_id = $4 AND id = $5 AND lease_owner = $6::text
 `
 
 type RecordReplySentParams struct {
-	Now       time.Time
-	MessageID pgtype.Text
-	OrgID     int64
-	ID        int64
-	Owner     string
+	Now         time.Time
+	MessageID   pgtype.Text
+	ButtonKeyID pgtype.Text
+	OrgID       int64
+	ID          int64
+	Owner       string
 }
 
-// RecordReplySent records a Thread reply the messenger accepted.
+// RecordReplySent records a Thread reply the messenger accepted, with its message id and the key that signed its
+// buttons (a Reminder's), for the presses on them.
 func (q *Queries) RecordReplySent(ctx context.Context, arg RecordReplySentParams) error {
 	_, err := q.db.Exec(ctx, recordReplySent,
 		arg.Now,
 		arg.MessageID,
+		arg.ButtonKeyID,
 		arg.OrgID,
 		arg.ID,
 		arg.Owner,

@@ -87,6 +87,13 @@ func TestKeyboard(t *testing.T) {
 	if k := keyboard(nil); k == nil || k.InlineKeyboard == nil || len(k.InlineKeyboard) != 0 {
 		t.Fatalf("empty = %+v", k)
 	}
+	// A Reminder's buttons are one row: "Still on it" and "Unack" (C-14.FR-4).
+	k = keyboard([]messages.Button{{Command: buttons.CommandStillOnIt, Label: "Still on it", ActionID: "s"},
+		{Command: buttons.CommandUnacknowledge, Label: "Unack", ActionID: "u"}})
+	if len(k.InlineKeyboard) != 1 || len(k.InlineKeyboard[0]) != 2 || k.InlineKeyboard[0][0].Text != "Still on it" ||
+		k.InlineKeyboard[0][0].CallbackData != "s" || k.InlineKeyboard[0][1].Text != "Unack" {
+		t.Errorf("reminder = %+v", k)
+	}
 }
 
 func TestPermalink(t *testing.T) {

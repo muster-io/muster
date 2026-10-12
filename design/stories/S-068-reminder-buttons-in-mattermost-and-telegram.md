@@ -7,8 +7,10 @@ layer: L1
 depends_on: [S-049]
 covers: [C-17.FR-4, C-17.FR-6, C-17.FR-10, C-17.AC-7, C-13.FR-4, C-14.FR-4]
 files_touched:
+  - internal/archlint/secretleak.go
   - internal/buttons/buttons.go
   - internal/buttons/buttons_test.go
+  - internal/delivery/delivery.go
   - internal/delivery/render.go
   - internal/delivery/render_test.go
   - internal/delivery/outcomes.go
@@ -16,6 +18,9 @@ files_touched:
   - internal/delivery/presses.go
   - internal/delivery/presses_test.go
   - internal/delivery/query.sql
+  - internal/delivery/worker_test.go
+  - internal/delivery/live_test.go
+  - internal/logging/events.go
   - internal/messages/replies.go
   - internal/messages/render_test.go
   - internal/messages/texts/en.json
@@ -31,6 +36,7 @@ files_touched:
   - internal/telegram/presses.go
   - internal/telegram/presses_test.go
   - test/e2e/reminder_buttons_test.go
+  - test/e2e/timers_test.go
 acceptance:
   - "[C-17.FR-4, C-17.AC-7, C-13.FR-4, C-14.FR-4] Reminder Thread replies carry the buttons \"Still on it\" and \"Unack\" in the fake Mattermost server (one attachment on a post whose `root_id` is the Root message) and in the fake Telegram server (an inline keyboard on one row, on the reply in the discussion group); each reply's `message_id` and `button_key_id` are stored with it, and reply buttons are never re-rendered."
   - "[C-17.FR-10, C-13.FR-4, C-14.FR-4] A press on \"Still on it\" from the Owner's linked account records `reminder_answered` for that User with the Transport `mattermost` or `telegram` and does not move the next Reminder; a press on \"Unack\" unacknowledges the Alert Group; the Telegram callback answers are \"Done: Still on it\" and \"Done: Unacknowledge\"."
@@ -82,7 +88,10 @@ issue: 197
   `ErrExpired` is answered "This button has expired; use the buttons on the Alert Group's message" (`press.expired`,
   new in `texts/en.json` and `texts/ru.json`); a `root` action id, and every `ErrInvalid`, keeps S-061's "This button
   could not be verified; nothing was changed." The key id prefix is part of what is signed, so an action id whose key
-  id was edited fails as `ErrInvalid`, not as expired: the tests use a Keyring that lacks the signing key.
+  prefix was edited to name another key of the Keyring fails as `ErrInvalid`; a prefix that names no key of the Keyring
+  cannot be told from an expired key and is `ErrExpired`, which changes nothing: the expiry text is answered only when
+  the press is bound to a Reminder reply, and every other such press is refused as one that could not be verified.
+  The tests use a Keyring that lacks the signing key.
 - **Mattermost** (C-13.FR-4; `layout.go`, `adapter.go`, `callback.go`): a Reminder reply is a post with `root_id` and
   one attachment holding the text and the two buttons (the action ids `stillonit` and `unack` of `layout.go`, the same
   `integration` URL and `context` as on Root messages); the Owner's Mention stays in `message`. A press on a reply is

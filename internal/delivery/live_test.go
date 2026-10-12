@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
@@ -938,6 +940,8 @@ func TestLive(t *testing.T) {
 			{"telegram_press_lock", l.telegramPressLock},
 			// S-049.
 			{"reminder_reached", l.reminderReached},
+			// S-068.
+			{"reminder_press_binding", l.reminderPressBinding},
 			{"ack_timeout_notice_fallback", l.ackTimeoutNoticeFallback},
 		} {
 			t.Run(sub.name, sub.run)
@@ -3609,6 +3613,101 @@ func (l *live) reminderReached(t *testing.T) {
 	if !reached(52) || reached(53) {
 		t.Errorf("events mode: delivered %v, pending %v", reached(52), reached(53))
 	}
+}
+
+// reminderPressBinding is C-17.FR-4, C-13.FR-4 and C-14.FR-4 on PostgreSQL: a sent Reminder carries the buttons
+// "Still on it" and "Unack" of the subject reply and stores its message id and the key that signed them; a press on it
+// is bound in Mattermost by its post, with the Destination's channel and the Root message it replies to, and in
+// Telegram by its message in the discussion group of the Destination; the Root message, another Alert Group, another
+// Connection, the channel and a Reminder not sent are not bound.
+func (l *live) reminderPressBinding(t *testing.T) {
+	ctx := t.Context()
+	l.fresh(t, 1000, 1)
+	l.fire(t, "rpb", "RemindPress/a")
+	l.round(t, l.a)
+	id := l.enqueueEvent(t, "RemindPress", groups.StatusAcknowledged, groups.Recorded{Seq: 70,
+		Event: groups.EventReminder, Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionOwner}})
+	l.round(t, l.a)
+	gid := l.group(t, "RemindPress")
+	replies := only(l.rec.Calls(), deliverytest.MethodReply)
+	if len(replies) != 1 || len(replies[0].Message.Buttons) != 2 {
+		t.Fatalf("replies %+v", replies)
+	}
+	for i, b := range replies[0].Message.Buttons {
+		cmd := []string{buttons.CommandStillOnIt, buttons.CommandUnacknowledge}[i]
+		if b.Command != cmd || b.ActionID == "" || b.KeyID == "" {
+			t.Errorf("button %d = %+v", i, b)
+		}
+	}
+	var reply, key, root, channel string
+	if err := l.d.Pool.QueryRow(ctx, `SELECT t.message_id, t.button_key_id, d.message_id, ds.mattermost_channel_id
+		FROM thread_replies t JOIN deliveries d ON d.id = t.delivery_id JOIN destinations ds ON ds.id = d.destination_id
+		WHERE t.alert_group_id = $1 AND t.event = 'reminder' AND t.state = 'sent'`, id).Scan(&reply, &key, &root,
+		&channel); err != nil {
+		t.Fatal(err)
+	}
+	if reply == "" || key != replies[0].Message.Buttons[0].KeyID {
+		t.Fatalf("stored message id %q and key %q", reply, key)
+	}
+	b, err := l.svc.ReplyBinding(ctx, l.conn, gid, reply)
+	if err != nil || b.Destination.ID != l.dests[0] || b.ChannelID != channel || b.RootMessageID != root ||
+		b.Language != "en" {
+		t.Fatalf("ReplyBinding = %+v, %v", b, err)
+	}
+	for _, c := range []struct {
+		conn        int64
+		group, post string
+	}{{l.conn, gid, root}, {l.conn + 1000, gid, reply}, {l.conn, "AG0000000000ZZ", reply}} {
+		if _, err := l.svc.ReplyBinding(ctx, c.conn, c.group, c.post); !errors.Is(err, delivery.ErrNotBound) {
+			t.Errorf("ReplyBinding(%d, %s, %s) = %v", c.conn, c.group, c.post, err)
+		}
+	}
+	// Telegram: the Reminder is the message 812 of the discussion group of a Telegram Destination.
+	const channelChat, groupChat = int64(-1001000000011), int64(-1001000000012)
+	var conn, dest, del int64
+	if err := l.d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
+		telegram_bot_api_base_url, telegram_update_mode, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at,
+		limiter_limit, limiter_per_seconds, created_at, updated_at) VALUES ($1, 'CNAAAAAAAAAR68', 'telegram', 'tg-s068',
+		'https://api.telegram.org', 'long_polling', '\x00', 'k1', $2, 1000, 1, $2, $2) RETURNING id`, l.orgID,
+		t0).Scan(&conn); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.d.Pool.QueryRow(ctx, `INSERT INTO destinations (org_id, public_id, type, name, connection_id,
+		telegram_channel_id, telegram_channel_chat_id, telegram_discussion_chat_id, mentions, limiter_limit,
+		limiter_per_seconds, health, created_at, updated_at) VALUES ($1, 'DSAAAAAAAAAR68', 'telegram', 'alerts-s068', $2,
+		'@muster_alerts2', $3, $4, '{}', 1000, 1, 'healthy', $5, $5) RETURNING id`, l.orgID, conn, channelChat,
+		groupChat, t0).Scan(&dest); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.d.Pool.QueryRow(ctx, `INSERT INTO deliveries (org_id, destination_id, alert_group_id, state,
+		message_id, next_attempt_at, created_at, updated_at) VALUES ($1, $2, $3, 'delivered', '501', $4, $4, $4)
+		RETURNING id`, l.orgID, dest, id, t0).Scan(&del); err != nil {
+		t.Fatal(err)
+	}
+	l.exec(t, `INSERT INTO thread_replies (org_id, delivery_id, alert_group_id, destination_id, event, event_seqs,
+		loudness, state, next_attempt_at, message_id, button_key_id, created_at)
+		VALUES ($1, $2, $3, $4, 'reminder', '{70}', 'loud', 'sent', $5, '812', $6, $5)`, l.orgID, del, id, dest, t0,
+		key)
+	tb, err := l.svc.TelegramReplyBinding(ctx, conn, gid, groupChat, 812)
+	if err != nil || tb.Destination.ID != dest || tb.Destination.Type != delivery.TypeTelegram ||
+		tb.ChannelID != strconv.FormatInt(groupChat, 10) || tb.Language != "en" {
+		t.Fatalf("TelegramReplyBinding = %+v, %v", tb, err)
+	}
+	for _, c := range []struct {
+		conn, chat, message int64
+		group               string
+	}{{conn, channelChat, 812, gid}, {conn, groupChat, 501, gid}, {conn, groupChat, 812, "AG0000000000ZZ"},
+		{l.conn, groupChat, 812, gid}} {
+		if _, err := l.svc.TelegramReplyBinding(ctx, c.conn, c.group, c.chat, c.message); !errors.Is(err,
+			delivery.ErrNotBound) {
+			t.Errorf("TelegramReplyBinding(%+v) = %v", c, err)
+		}
+	}
+	l.exec(t, `UPDATE thread_replies SET state = 'pending' WHERE delivery_id = $1`, del)
+	if _, err := l.svc.TelegramReplyBinding(ctx, conn, gid, groupChat, 812); !errors.Is(err, delivery.ErrNotBound) {
+		t.Errorf("a Reminder not sent = %v", err)
+	}
+	t.Logf("reminder %s signed by %s in the thread of %s; telegram reminder 812 in %d", reply, key, root, groupChat)
 }
 
 // ackTimeoutNoticeFallback is C-12.FR-4 and FR-6 for the ack timeout notice on PostgreSQL: the Route's template, read

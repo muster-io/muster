@@ -64,6 +64,8 @@ func (o Outage) quietSince(start time.Time) (time.Time, bool) {
 type Bindings interface {
 	TelegramPressBinding(ctx context.Context, connectionID int64, groupPublicID string, chatID, messageID int64) (
 		delivery.Binding, error)
+	TelegramReplyBinding(ctx context.Context, connectionID int64, groupPublicID string, chatID, messageID int64) (
+		delivery.Binding, error)
 }
 
 // Links map a Telegram account to its User; *accountlinks.Service implements it.
@@ -78,6 +80,7 @@ type Commands interface {
 	Resolve(ctx context.Context, c groups.Caller, publicID string, note *string) (groups.Result, error)
 	Snooze(ctx context.Context, c groups.Caller, publicID string, end groups.SnoozeEnd) (groups.Result, error)
 	Unsnooze(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
+	AnswerReminder(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
 }
 
 // Presses is the handler of button presses, the callback_query updates of the router (C-14.FR-4, FR-5).
@@ -105,6 +108,7 @@ const (
 	outcomeNotLinked   = "not_linked"
 	outcomeDisabled    = "disabled"
 	outcomeNotVerified = "not_verified"
+	outcomeExpired     = "expired"
 	outcomeFailed      = "failed"
 	// outcomeTest is a press of a test message, answered that nothing changed (C-16.FR-3).
 	outcomeTest = "test"
@@ -123,10 +127,13 @@ type pressed struct {
 // Connection received no updates for longer than PressMaxAge is dropped unanswered and logged telegram_press_dropped.
 // Otherwise the button data — at most 64 bytes: the compact action id, the key id and the signature — is verified
 // with any key of the Keyring and must name the Alert Group whose Root message is the channel post pressed, in the
-// channel of a Telegram Destination of the Connection; anything else is answered "This button could not be verified;
-// nothing was changed." The Telegram account from.id is mapped to its User through its Account link in the one
+// channel of a Telegram Destination of the Connection, or whose Reminder is the message pressed in its discussion
+// group; anything else is answered "This button could not be verified; nothing was changed." A press on a Reminder
+// whose key left the Keyring is answered "This button has expired; use the buttons on the Alert Group's message"
+// (C-17.FR-6). The Telegram account from.id is mapped to its User through its Account link in the one
 // identity space of Telegram; the Command runs as that User through the dispatcher with the Transport telegram, and
-// the press is answered with answerCallbackQuery — "Done: {command}", the refusal, or for an account without a link
+// the press is answered with answerCallbackQuery — "Done: {command}" ("Done: Still on it" for a Reminder's answer),
+// the refusal, or for an account without a link
 // the link to the profile — cut to MaxAnswerLength characters, in the language of the Route. The Root message is
 // edited through delivery, never here, and only after the answer: the handler runs under the Connection's update
 // lock, which the delivery worker tries before an edit, rescheduling the edit while it is held. The update is
@@ -163,11 +170,20 @@ func (p *Presses) handle(ctx context.Context, c Conn, q *CallbackQuery) pressed 
 		p.answer(ctx, c, q, &r, messages.T(messages.LanguageEnglish, "press.test", nil))
 		return r
 	}
-	if len(q.Data) > buttons.MaxLen || err != nil || a.Subject != buttons.SubjectRoot || q.Message == nil {
+	if len(q.Data) <= buttons.MaxLen && errors.Is(err, buttons.ErrExpired) && a.Subject == buttons.SubjectReply &&
+		q.Message != nil {
+		return p.expired(ctx, c, q, a)
+	}
+	if len(q.Data) > buttons.MaxLen || err != nil || q.Message == nil ||
+		(a.Subject != buttons.SubjectRoot && a.Subject != buttons.SubjectReply) {
 		return p.notVerified(ctx, c, q, pressed{})
 	}
 	r := pressed{group: a.PublicID, command: a.Command}
-	b, err := p.Bindings.TelegramPressBinding(ctx, c.ID, a.PublicID, q.Message.Chat.ID, q.Message.MessageID)
+	bind := p.Bindings.TelegramPressBinding
+	if a.Subject == buttons.SubjectReply {
+		bind = p.Bindings.TelegramReplyBinding
+	}
+	b, err := bind(ctx, c.ID, a.PublicID, q.Message.Chat.ID, q.Message.MessageID)
 	if errors.Is(err, delivery.ErrNotBound) {
 		return p.notVerified(ctx, c, q, r)
 	}
@@ -203,8 +219,7 @@ func (p *Presses) run(ctx context.Context, q *CallbackQuery, a buttons.Action, b
 	switch {
 	case err == nil:
 		r.outcome = string(res.Outcome)
-		return messages.T(b.Language, "press.done",
-			messages.Args{"command": messages.T(b.Language, "command."+a.Command, nil)})
+		return messages.Done(b.Language, a.Command)
 	case errors.Is(err, errUnverifiable):
 		r.outcome = outcomeNotVerified
 		return messages.T(b.Language, "press.notVerified", nil)
@@ -219,10 +234,16 @@ func (p *Presses) run(ctx context.Context, q *CallbackQuery, a buttons.Action, b
 	return messages.T(b.Language, "press.failed", nil)
 }
 
-// dispatch runs the Command of the button a as c; a Snooze lasts the duration of the Route at the button's index.
+// dispatch runs the Command of the button a as c; a Snooze lasts the duration of the Route at the button's index. A
+// Reminder carries only "Still on it" and Unacknowledge, and only a Reminder carries "Still on it".
 func (p *Presses) dispatch(ctx context.Context, c groups.Caller, a buttons.Action, b delivery.Binding) (
 	groups.Result, error) {
+	if !onSubject(a) {
+		return groups.Result{}, errUnverifiable
+	}
 	switch a.Command {
+	case buttons.CommandStillOnIt:
+		return p.Commands.AnswerReminder(ctx, c, a.PublicID)
 	case buttons.CommandAcknowledge:
 		return p.Commands.Acknowledge(ctx, c, a.PublicID)
 	case buttons.CommandUnacknowledge:
@@ -239,6 +260,34 @@ func (p *Presses) dispatch(ctx context.Context, c groups.Caller, a buttons.Actio
 		return p.Commands.Snooze(ctx, c, a.PublicID, groups.SnoozeEnd{Until: &until})
 	}
 	return groups.Result{}, errUnverifiable
+}
+
+// onSubject is whether the Command of a is one its subject carries: "Still on it" and Unacknowledge on a Reminder,
+// any other on a Root message.
+func onSubject(a buttons.Action) bool {
+	if a.Subject == buttons.SubjectReply {
+		return a.Command == buttons.CommandStillOnIt || a.Command == buttons.CommandUnacknowledge
+	}
+	return a.Command != buttons.CommandStillOnIt
+}
+
+// expired answers a press on a Reminder whose data name a key that is no longer in the Keyring (C-17.FR-6): it changes
+// nothing and, when the message pressed is a sent Reminder of the Alert Group the data name in the discussion group of
+// a Telegram Destination of the Connection, is answered that the button has expired; otherwise it is not verified. The
+// data are not verified, so neither their Alert Group nor their Command is logged.
+func (p *Presses) expired(ctx context.Context, c Conn, q *CallbackQuery, a buttons.Action) pressed {
+	b, err := p.Bindings.TelegramReplyBinding(ctx, c.ID, a.PublicID, q.Message.Chat.ID, q.Message.MessageID)
+	if errors.Is(err, delivery.ErrNotBound) {
+		return p.notVerified(ctx, c, q, pressed{})
+	}
+	if err != nil {
+		r := pressed{outcome: outcomeFailed, err: err}
+		p.answer(ctx, c, q, &r, messages.T(messages.LanguageEnglish, "press.failed", nil))
+		return r
+	}
+	r := pressed{outcome: outcomeExpired}
+	p.answer(ctx, c, q, &r, messages.T(b.Language, "press.expired", nil))
+	return r
 }
 
 // notVerified answers a press whose data or binding does not hold: it changes nothing.

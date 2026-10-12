@@ -19,7 +19,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/buttons"
 	idb "github.com/muster-io/muster/internal/internalalerts/dbgen"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/links"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mentions"
@@ -962,24 +964,39 @@ func TestAckTimeoutNotice(t *testing.T) {
 }
 
 // TestReminderReply is C-17.FR-4 and C-17.FR-5 on the messages: a Reminder names the Owner — "Reminder: {user}, are
-// you still on it?" — with no buttons (they come with S-068); auto_unacknowledged gives its reason and notices_missed
-// how many notices were missed, in English and Russian. The Owner named is the one the Reminder's Timeline entry
-// mentions, not whoever owns the Alert Group when the reply is prepared.
+// you still on it?" — with the buttons "Still on it" and "Unack", whose action ids of the subject reply name the Alert
+// Group and are signed with the active key; auto_unacknowledged gives its reason and notices_missed how many notices
+// were missed, without buttons, in English and Russian. The Owner named is the one the Reminder's Timeline entry
+// mentions, not whoever owns the Alert Group when the reply is prepared. Without a Keyring, or when signing fails, the
+// Reminder goes without buttons.
 func TestReminderReply(t *testing.T) {
 	f := &fakeQueries{group: source("acknowledged", 1), entry: dbgen.GetReplyEntryRow{MissedCount: 3}}
 	f.group.Owner = "Bob"
 	r := withFake(t, f)
-	for _, c := range []struct{ lang, event, want string }{
-		{"en", EventReminder, "Reminder: Bob, are you still on it?"},
-		{"ru", EventReminder, "Напоминание: Bob, вы ещё работаете над этим?"},
-		{"en", EventAutoUnacknowledged, "The acknowledgement was released: nobody answered the Reminders."},
-		{"en", EventNoticesMissed, "3 notices were missed while Muster was unavailable."},
-		{"ru", EventNoticesMissed, "Пока Muster был недоступен, пропущено 3 уведомления."},
+	for _, c := range []struct {
+		lang, event, want string
+		labels            []string
+	}{
+		{"en", EventReminder, "Reminder: Bob, are you still on it?", []string{"Still on it", "Unack"}},
+		{"ru", EventReminder, "Напоминание: Bob, вы ещё работаете над этим?",
+			[]string{"Ещё работаю", "Снять подтверждение"}},
+		{"en", EventAutoUnacknowledged, "The acknowledgement was released: nobody answered the Reminders.", nil},
+		{"en", EventNoticesMissed, "3 notices were missed while Muster was unavailable.", nil},
+		{"ru", EventNoticesMissed, "Пока Muster был недоступен, пропущено 3 уведомления.", nil},
 	} {
 		f.group.Route.Language = c.lang
 		m, err := r.Reply(t.Context(), nil, 9, ReplyInput{Event: c.event, Seq: 5})
-		if err != nil || strings.Join(m.Lines, "\n") != c.want || len(m.Buttons) != 0 || m.Body != nil {
-			t.Errorf("%s %s = %q %v", c.lang, c.event, m.Lines, err)
+		if err != nil || strings.Join(m.Lines, "\n") != c.want || len(m.Buttons) != len(c.labels) || m.Body != nil {
+			t.Errorf("%s %s = %q %+v %v", c.lang, c.event, m.Lines, m.Buttons, err)
+			continue
+		}
+		for i, b := range m.Buttons {
+			cmd := []string{buttons.CommandStillOnIt, buttons.CommandUnacknowledge}[i]
+			a, err := buttons.Verify(fakeKeys{}, b.ActionID, b.KeyID)
+			if b.Label != c.labels[i] || b.Command != cmd || b.KeyID != "k-0123456789abcdef" || err != nil ||
+				a != (buttons.Action{Subject: buttons.SubjectReply, PublicID: "AGK7M3QX9P2RTA", Command: cmd}) {
+				t.Errorf("%s button %d = %+v, %+v %v", c.lang, i, b, a, err)
+			}
 		}
 	}
 	f.group.Route.Language = "en"
@@ -988,8 +1005,37 @@ func TestReminderReply(t *testing.T) {
 		strings.Join(m.Lines, "\n") != "Reminder: Carol, are you still on it?" {
 		t.Errorf("owner of the entry = %q %v", m.Lines, err)
 	}
+	for _, k := range []buttons.Keys{nil, failingKeys{}} {
+		r.keys = k
+		if m, err := r.Reply(t.Context(), nil, 9, ReplyInput{Event: EventReminder, Seq: 5}); err != nil ||
+			m.Buttons == nil || len(m.Buttons) != 0 {
+			t.Errorf("keys %v: buttons %+v %v", k, m.Buttons, err)
+		}
+	}
+	r.keys = fakeKeys{}
 	f.fail = map[string]error{"GetReplyEntry": errBoom}
 	if _, err := r.Reply(t.Context(), nil, 9, ReplyInput{Event: EventReminder, Seq: 5}); !errors.Is(err, errBoom) {
 		t.Errorf("a failing read = %v", err)
+	}
+}
+
+// failingKeys cannot sign: a Keyring without an active key.
+type failingKeys struct{ fakeKeys }
+
+func (failingKeys) Sign(keyring.Purpose, []byte) ([]byte, string, error) {
+	return nil, "", keyring.ErrNoActiveKey
+}
+
+// TestDone: the answer to a press whose Command ran names the Command in the language, "Still on it" included.
+func TestDone(t *testing.T) {
+	for _, c := range []struct{ lang, command, want string }{
+		{"en", buttons.CommandStillOnIt, "Done: Still on it"},
+		{"ru", buttons.CommandStillOnIt, "Готово: Ещё работаю"},
+		{"en", buttons.CommandUnacknowledge, "Done: Unacknowledge"},
+		{"ru", buttons.CommandAcknowledge, "Готово: Подтвердить"},
+	} {
+		if got := Done(c.lang, c.command); got != c.want {
+			t.Errorf("%s %s = %q", c.lang, c.command, got)
+		}
 	}
 }

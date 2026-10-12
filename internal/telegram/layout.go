@@ -259,10 +259,10 @@ func mentionText(ts []mentions.Target, w writer) string {
 	return strings.Join(out, " ")
 }
 
-// keyboard is the inline keyboard of the buttons (C-14.FR-15): Ack, Unack, Unsnooze and Resolve on one row, one
-// Snooze button per Snooze duration on the next, each sending its compact action id, at most buttons.MaxLen bytes. A
-// button without a usable action id is left out. The keyboard is never nil, so that an edit always carries it and an
-// edit to a state without buttons removes them on purpose (F-011).
+// keyboard is the inline keyboard of the buttons (C-14.FR-15): Ack, Unack, Unsnooze and Resolve — or a Reminder's
+// Still on it and Unack — on one row, one Snooze button per Snooze duration on the next, each sending its compact
+// action id, at most buttons.MaxLen bytes. A button without a usable action id is left out. The keyboard is never
+// nil, so that an edit always carries it and an edit to a state without buttons removes them on purpose (F-011).
 func keyboard(bs []messages.Button) *inlineKeyboard {
 	var first, snooze []inlineButton
 	for _, b := range bs {

@@ -349,6 +349,10 @@ type queries interface {
 	GetTelegramPressBinding(ctx context.Context, arg dbgen.GetTelegramPressBindingParams) (
 		dbgen.GetTelegramPressBindingRow, error)
 	GetTestDestination(ctx context.Context, arg dbgen.GetTestDestinationParams) (dbgen.GetTestDestinationRow, error)
+	GetReplyPressBinding(ctx context.Context, arg dbgen.GetReplyPressBindingParams) (dbgen.GetReplyPressBindingRow,
+		error)
+	GetTelegramReplyPressBinding(ctx context.Context, arg dbgen.GetTelegramReplyPressBindingParams) (
+		dbgen.GetTelegramReplyPressBindingRow, error)
 	outcomeQueries
 	copyQueries
 	webhookEventQueries

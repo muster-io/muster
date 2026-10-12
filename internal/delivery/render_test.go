@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
@@ -85,6 +86,10 @@ func (s stubRenderer) Reply(_ context.Context, _ messages.DBTX, r delivery.Reply
 	m.Lines = append(m.Lines, listed...)
 	if more := len(r.Fingerprints) - len(listed); more > 0 {
 		m.Lines = append(m.Lines, fmt.Sprintf("…and %d more — open in Muster", more))
+	}
+	if r.Event == messages.EventReminder {
+		m.Buttons = []messages.Button{{Command: buttons.CommandStillOnIt, Label: "Still on it", ActionID: "s",
+			KeyID: "k-stub"}, {Command: buttons.CommandUnacknowledge, Label: "Unack", ActionID: "u", KeyID: "k-stub"}}
 	}
 	return m, nil
 }

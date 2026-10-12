@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -88,8 +89,10 @@ func TestActionIDs(t *testing.T) {
 	for i := range raw {
 		changed := bytes.Clone(raw)
 		changed[i] ^= 0x01
-		if _, err := buttons.Verify(k, base64.RawURLEncoding.EncodeToString(changed), ""); !errors.Is(err,
-			buttons.ErrInvalid) {
+		// A changed key prefix names no key of the Keyring: it cannot be told from an expired key.
+		_, err := buttons.Verify(k, base64.RawURLEncoding.EncodeToString(changed), "")
+		if !errors.Is(err, buttons.ErrInvalid) && (i < keyPrefixAt || i >= macAt || !errors.Is(err,
+			buttons.ErrExpired)) {
 			t.Errorf("byte %d changed: %v", i, err)
 		}
 	}
@@ -98,8 +101,8 @@ func TestActionIDs(t *testing.T) {
 			t.Errorf("%q: %v", bad, err)
 		}
 	}
-	// An id signed by a key the Keyring no longer holds does not verify; one signed by a key it still holds does.
-	if _, err := buttons.Verify(active(t, 'c'), id, ""); !errors.Is(err, buttons.ErrInvalid) {
+	// An id signed by a key the Keyring no longer holds is expired; one signed by a key it still holds verifies.
+	if _, err := buttons.Verify(active(t, 'c'), id, ""); !errors.Is(err, buttons.ErrExpired) {
 		t.Errorf("unknown key: %v", err)
 	}
 	if _, err := buttons.Verify(active(t, 'b', 'a'), id, ""); err != nil {
@@ -137,6 +140,59 @@ func TestActionIDs(t *testing.T) {
 	}
 	if _, _, err := buttons.Sign(&rotating{}, a); err == nil {
 		t.Error("an active key that keeps changing")
+	}
+}
+
+// The offsets of the key prefix and the MAC in an action id.
+const (
+	keyPrefixAt = 18
+	macAt       = 22
+)
+
+// TestExpired: an action id whose key left the Keyring is ErrExpired with what it says, unverified, and is not
+// ErrInvalid; a changed MAC, a key prefix edited to name another key of the Keyring, a full key id that disagrees with
+// the prefix and a malformed id stay ErrInvalid.
+func TestExpired(t *testing.T) {
+	signer, other := active(t, 'a'), active(t, 'b')
+	a := buttons.Action{Subject: buttons.SubjectReply, PublicID: "AGK7M3QX9P2RTA", Command: buttons.CommandStillOnIt}
+	id, keyID, err := buttons.Sign(signer, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kid := range []string{"", keyID} {
+		got, err := buttons.Verify(other, id, kid)
+		if !errors.Is(err, buttons.ErrExpired) || errors.Is(err, buttons.ErrInvalid) || got != a {
+			t.Errorf("key id %q: %+v, %v", kid, got, err)
+		}
+	}
+	if errors.Is(buttons.ErrExpired, buttons.ErrInvalid) || errors.Is(buttons.ErrInvalid, buttons.ErrExpired) {
+		t.Error("ErrExpired and ErrInvalid are one error")
+	}
+	raw, _ := base64.RawURLEncoding.DecodeString(id)
+	tampered := bytes.Clone(raw)
+	tampered[len(tampered)-1] ^= 0x01
+	both := active(t, 'a', 'b')
+	if _, err := buttons.Verify(both, base64.RawURLEncoding.EncodeToString(tampered), ""); !errors.Is(err,
+		buttons.ErrInvalid) {
+		t.Errorf("a changed MAC: %v", err)
+	}
+	edited := bytes.Clone(raw)
+	otherPrefix, _ := hex.DecodeString(other.ActiveKeyID()[2:10])
+	copy(edited[keyPrefixAt:macAt], otherPrefix)
+	if _, err := buttons.Verify(other, base64.RawURLEncoding.EncodeToString(edited), ""); !errors.Is(err,
+		buttons.ErrInvalid) {
+		t.Errorf("a prefix edited to name another key: %v", err)
+	}
+	if _, err := buttons.Verify(both, id, other.ActiveKeyID()); !errors.Is(err, buttons.ErrInvalid) {
+		t.Errorf("a key id that disagrees with the prefix: %v", err)
+	}
+	if _, err := buttons.Verify(other, id, other.ActiveKeyID()); !errors.Is(err, buttons.ErrInvalid) {
+		t.Errorf("an unknown prefix with a key id that disagrees with it: %v", err)
+	}
+	for _, bad := range []string{"", "!!", id[:20]} {
+		if _, err := buttons.Verify(other, bad, ""); !errors.Is(err, buttons.ErrInvalid) {
+			t.Errorf("%q: %v", bad, err)
+		}
 	}
 }
 

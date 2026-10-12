@@ -587,10 +587,11 @@ func TestTimers(t *testing.T) {
 		}
 		reminders := 0
 		for _, p := range e.threadOf(g3) {
-			if strings.Contains(p.Message, "Reminder: bob, are you still on it?") {
+			if len(p.Attachments) == 1 && strings.Contains(p.Attachments[0].Text, "Reminder: bob, are you still on it?") {
 				reminders++
-				if len(p.Attachments) > 0 && len(p.Attachments[0].Actions) > 0 {
-					t.Errorf("a reminder with buttons %+v", p)
+				// The buttons of S-068: "Still on it" and "Unack".
+				if a := p.Attachments[0].Actions; len(a) != 2 || a[0].ID != "stillonit" || a[1].ID != "unack" {
+					t.Errorf("a reminder without its buttons %+v", p)
 				}
 			}
 		}
@@ -619,8 +620,8 @@ func TestTimers(t *testing.T) {
 			t.Errorf("reminders of g4 %v", got)
 		}
 		thread := e.threadOf(g4)
-		if x := thread[len(thread)-1]; !strings.Contains(x.Message, "Reminder: bob, are you still on it?") {
-			t.Errorf("the reminder after the takeover %q", x.Message)
+		if x := thread[len(thread)-1]; !strings.Contains(x.attachment(t).Text, "Reminder: bob, are you still on it?") {
+			t.Errorf("the reminder after the takeover %+v", x)
 		}
 
 		// A snoozed Alert Group gets none.

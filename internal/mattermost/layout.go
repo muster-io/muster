@@ -21,9 +21,10 @@ import (
 // title links to the Alert Group page and whose text holds the sections 3 to 8 of C-12.FR-1, the line of links that
 // starts with "Open in Muster", the notices and the footer, as its last line; its buttons follow. Mentions never go
 // into the attachment, where they would notify with an empty notification (F-056). A Thread reply carries its
-// Mentions and its text in its message. Alert data are escaped for Mattermost Markdown and their `@` neutralized by
-// the escaper of internal/messages. The trusted Mention tokens of template output are written where they stand
-// without notifying; a Loud Publish adds the everyone and group ones to its Mentions (C-13.FR-8).
+// Mentions and its text in its message; a Reminder, which has buttons, carries its Mentions in its message and its
+// text and buttons in one attachment (C-13.FR-4). Alert data are escaped for Mattermost Markdown and their `@`
+// neutralized by the escaper of internal/messages. The trusted Mention tokens of template output are written where
+// they stand without notifying; a Loud Publish adds the everyone and group ones to its Mentions (C-13.FR-8).
 
 // LengthLimit is the longest post message, and the longest attachment text, in characters: the server's MaxPostSize
 // (F-057).
@@ -88,15 +89,15 @@ func rootPost(m messages.Message, l look, mentions string) post {
 		Props: &props{Attachments: []attachment{att}}}
 }
 
-// replyPost lays out a Thread reply: its Mentions first, then its text; its buttons, when it has any, in an
-// attachment.
+// replyPost lays out a Thread reply: its Mentions first, then its text. A reply with buttons — a Reminder's "Still on
+// it" and "Unack" — keeps its Mentions in its message and has its text and buttons in one attachment.
 func replyPost(m messages.Message, l look, mentions string) post {
 	m, _ = messages.Shorten(m, l.limit, l.markup)
-	p := post{Message: cutEnd(joinLines(mentions, text(m, l)), l.limit)}
-	if len(m.Buttons) > 0 {
-		p.Props = buttonsOnly(m, l)
+	if len(m.Buttons) == 0 {
+		return post{Message: cutEnd(joinLines(mentions, text(m, l)), l.limit)}
 	}
-	return p
+	return post{Message: cutEnd(mentions, l.limit), Props: &props{Attachments: []attachment{{Color: colours[m.Colour],
+		Text: text(m, l), Actions: actions(m.Buttons, l.callback)}}}}
 }
 
 // buttonsOnly are the props of a post without a heading: one attachment with its buttons, or none.

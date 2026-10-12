@@ -279,8 +279,9 @@ func TestStormPost(t *testing.T) {
 	}
 }
 
-// TestReplyPost lays out a Thread reply: the Mentions of a Loud one first, then its text; its buttons, when it has
-// any, in an attachment.
+// TestReplyPost lays out a Thread reply: the Mentions of a Loud one first, then its text. A Reminder, which has
+// buttons, keeps the Owner's Mention in its message and has its text and the buttons "Still on it" and "Unack", with
+// the same integration URL and context as on Root messages, in one attachment (C-13.FR-4).
 func TestReplyPost(t *testing.T) {
 	m := messages.Message{Kind: messages.KindReply, Language: "en", Colour: messages.ColourFiring,
 		Lines: []string{"New alerts (1):", "• pod: i_2"}, Buttons: []messages.Button{}}
@@ -290,12 +291,31 @@ func TestReplyPost(t *testing.T) {
 	if p := replyPost(m, testLook(), "@channel"); !strings.HasPrefix(p.Message, "@channel\nNew alerts (1):") {
 		t.Errorf("loud reply = %q", p.Message)
 	}
-	m.Buttons = []messages.Button{{Command: buttons.CommandStillOnIt, Label: "Still on it", ActionID: "x", KeyID: "k"},
-		{Command: buttons.CommandUnacknowledge, Label: "Unack", ActionID: "y", KeyID: "k"}}
-	p := replyPost(m, testLook(), "")
-	if p.Props == nil || len(p.Props.Attachments) != 1 || len(p.Props.Attachments[0].Actions) != 2 ||
-		p.Props.Attachments[0].Actions[0].ID != "stillonit" || p.Props.Attachments[0].Text != "" {
-		t.Errorf("reply with buttons = %+v", p.Props)
+	m = messages.Message{Kind: messages.KindReply, Language: "en", Colour: messages.ColourAcknowledged,
+		Lines: []string{"Reminder: bob_1, are you still on it?"},
+		Buttons: []messages.Button{{Command: buttons.CommandStillOnIt, Label: "Still on it", ActionID: "x", KeyID: "k"},
+			{Command: buttons.CommandUnacknowledge, Label: "Unack", ActionID: "y", KeyID: "k"}}}
+	l := testLook()
+	p := replyPost(m, l, "@bob")
+	if p.Message != "@bob" || p.Props == nil || len(p.Props.Attachments) != 1 {
+		t.Fatalf("reminder = %+v", p)
+	}
+	att := p.Props.Attachments[0]
+	if att.Text != "Reminder: bob\\_1, are you still on it?" || att.Color != "#f57c00" || len(att.Actions) != 2 {
+		t.Errorf("reminder attachment = %+v", att)
+	}
+	for i, want := range []action{
+		{ID: "stillonit", Name: "Still on it", Type: "button",
+			Integration: integration{URL: l.callback, Context: actionContext{Action: "x", KeyID: "k"}}},
+		{ID: "unack", Name: "Unack", Type: "button",
+			Integration: integration{URL: l.callback, Context: actionContext{Action: "y", KeyID: "k"}}},
+	} {
+		if att.Actions[i] != want {
+			t.Errorf("action %d = %+v", i, att.Actions[i])
+		}
+	}
+	if p := replyPost(m, l, ""); p.Message != "" || len(p.Props.Attachments) != 1 {
+		t.Errorf("quiet reminder = %+v", p)
 	}
 }
 

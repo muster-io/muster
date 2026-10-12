@@ -506,11 +506,13 @@ var MattermostPress = newEvent("mattermost_press", LevelInfo, "C-13",
 		"public_id of the Alert Group and command the Command, once the signed action id is verified; outcome done or "+
 		"unchanged for a Command that ran; refused, forbidden, not_linked, disabled or not_verified for a press that "+
 		"changed nothing and was answered, a not_verified one only on a post delivered to a Destination of the "+
-		"Connection in the channel of the press; test for a press of a test message by a person, answered that nothing "+
-		"changed, and test_press for the bot's own press of it during a Destination test, answered with nothing; "+
-		"invalid_request for a body that is not a press, unknown_connection, "+
+		"Connection in the channel of the press; expired for a press on a Reminder whose button was signed by a key "+
+		"that is no longer in the Keyring, answered that the button has expired; test for a press of a test message "+
+		"by a person, answered that nothing changed, and test_press for the bot's own press of it during a "+
+		"Destination test, answered with nothing; invalid_request for a body that is not a press, unknown_connection, "+
 		"or failed, answered once the press is bound to its post; answer how the person was answered: ephemeral_post "+
-		"for an ephemeral post in the channel, ephemeral_text for the text in the callback's answer, shown in the "+
+		"for an ephemeral post in the channel, or in the Thread of the Root message for a press on a Reminder, "+
+		"ephemeral_text for the text in the callback's answer, shown in the "+
 		"Thread, when that post was not made, absent when nothing was answered; error why the press failed or why "+
 		"its ephemeral post was not sent, masked of secrets, never the 403 of a bot without the permission to make "+
 		"ephemeral posts.",
@@ -522,7 +524,8 @@ var TelegramPress = newEvent("telegram_press", LevelInfo, "C-14",
 		"before the Root message was edited: connection is the public_id of the Connection; group the public_id of "+
 		"the Alert Group and command the Command, once the button data is verified; outcome done or unchanged for a "+
 		"Command that ran; refused, forbidden, not_linked, disabled or not_verified for a press that changed nothing; "+
-		"test for a press of a test message, answered that nothing changed; "+
+		"expired for a press on a Reminder whose button was signed by a key that is no longer in the Keyring, "+
+		"answered that the button has expired; test for a press of a test message, answered that nothing changed; "+
 		"failed when a read or the Command failed. error, when present, says why the press failed or why its answer "+
 		"was not made — no limiter token within the interactive budget, or Telegram refusing an answer that came too "+
 		"late — masked of the bot token. The update is confirmed whatever the outcome, so that a press never runs "+

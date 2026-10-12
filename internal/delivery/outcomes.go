@@ -495,7 +495,7 @@ func (w *Worker) recordReplyOutcome(ctx context.Context, q queries, org int64, a
 	switch out.Kind {
 	case OutcomeOK:
 		if err := q.RecordReplySent(ctx, dbgen.RecordReplySentParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
-			MessageID: nonEmpty(out.MessageID), Now: now}); err != nil {
+			MessageID: nonEmpty(out.MessageID), ButtonKeyID: nonEmpty(buttonKeyOf(a.message)), Now: now}); err != nil {
 			return false, fmt.Errorf("record the sent thread reply: %w", err)
 		}
 		return true, nil

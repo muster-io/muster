@@ -29,6 +29,7 @@ import (
 	kdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/leader"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/outbound"
 )
 
@@ -86,9 +87,28 @@ func openKeyring(t *testing.T, seed byte) *keyring.Keyring {
 	return k
 }
 
+// replyKey is a Reminder of an Alert Group: the Connection, the discussion group and the message.
+type replyKey struct {
+	conn, chat, message int64
+	group               string
+}
+
 type pressBindings struct {
-	bound map[[3]int64]delivery.Binding
-	err   error
+	bound   map[[3]int64]delivery.Binding
+	replies map[replyKey]delivery.Binding
+	err     error
+}
+
+func (f *pressBindings) TelegramReplyBinding(_ context.Context, conn int64, group string, chat, message int64) (
+	delivery.Binding, error) {
+	if f.err != nil {
+		return delivery.Binding{}, f.err
+	}
+	b, ok := f.replies[replyKey{conn, chat, message, group}]
+	if !ok {
+		return delivery.Binding{}, delivery.ErrNotBound
+	}
+	return b, nil
 }
 
 func (f *pressBindings) TelegramPressBinding(_ context.Context, conn int64, group string, chat, message int64) (
@@ -165,6 +185,10 @@ func (f *pressCommands) Unsnooze(_ context.Context, c groups.Caller, id string) 
 	return f.run(ran{command: "unsnooze", group: id, caller: c})
 }
 
+func (f *pressCommands) AnswerReminder(_ context.Context, c groups.Caller, id string) (groups.Result, error) {
+	return f.run(ran{command: "still_on_it", group: id, caller: c})
+}
+
 // recordingPath is the interactive path of the tests: it records the subject and the outcome of each answer and
 // answers as deliverytest.Unlimited, or fails with err.
 type recordingPath struct {
@@ -213,7 +237,7 @@ func newPressEnv(t *testing.T) *pressEnv {
 	e.bindings = &pressBindings{bound: map[[3]int64]delivery.Binding{
 		{pressConn, faketelegram.ChannelID, e.post}: {Destination: pressDest, ChannelID: "-1001000000001",
 			Language: "en", SnoozeSeconds: []int64{3600, 14400}},
-	}}
+	}, replies: map[replyKey]delivery.Binding{}}
 	e.presses = &Presses{Bindings: e.bindings, Links: e.links, Commands: e.commands, Roles: pressRoles, Keys: e.keys,
 		Path: e.path, Business: e.business, PublicURL: "http://localhost:8080/",
 		Log: logging.New(e.log, logging.LevelInfo)}
@@ -645,5 +669,160 @@ func TestPressAnswerSpendsOnlyTheConnection(t *testing.T) {
 	if o := e.path.outcomes[len(e.path.outcomes)-1]; o.Kind != delivery.OutcomeRetryAfter ||
 		o.Scope != delivery.ScopeConnection || o.RetryAfter != 7*time.Second {
 		t.Errorf("a 429 on an answer = %+v", o)
+	}
+}
+
+// The fixtures of Reminder presses: Alert Group B, whose Reminder is in the same discussion group.
+const pressGroupB = "AG0000000000B1"
+
+// reminderKeyboard is the keyboard of a Reminder of group signed by k: "Still on it" and "Unack" on one row.
+func reminderKeyboard(t *testing.T, k buttons.Keys, group string) *inlineKeyboard {
+	t.Helper()
+	var bs []messages.Button
+	for _, c := range []struct{ command, label string }{{buttons.CommandStillOnIt, "Still on it"},
+		{buttons.CommandUnacknowledge, "Unack"}} {
+		id, kid, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectReply, PublicID: group,
+			Command: c.command})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bs = append(bs, messages.Button{Command: c.command, Label: c.label, ActionID: id, KeyID: kid})
+	}
+	return keyboard(bs)
+}
+
+// reminder sends a Reminder of group signed by k into the Thread of the channel post, binds it and returns its id.
+func (e *pressEnv) reminder(t *testing.T, k buttons.Keys, group, lang string) int64 {
+	t.Helper()
+	id := e.send(t, faketelegram.GroupID, e.copyOf(t), reminderKeyboard(t, k, group))
+	e.bindings.replies[replyKey{pressConn, faketelegram.GroupID, id, group}] = delivery.Binding{
+		Destination: pressDest, ChannelID: "-1001000000002", Language: lang, SnoozeSeconds: []int64{3600}}
+	return id
+}
+
+// pressIn presses the button label of the message id of the discussion group as from, with the button data of the
+// message dataFrom when it is not 0, and returns the text of the answer.
+func (e *pressEnv) pressIn(t *testing.T, id, dataFrom, from int64, label string) string {
+	t.Helper()
+	return e.handle(t, e.press(t, fmt.Sprintf(`{"chat":%d,"message_id":%d,"data_from":%d,"from":{"id":%d},`+
+		`"button":%q}`, faketelegram.GroupID, id, dataFrom, from, label)))
+}
+
+const (
+	textNotVerified = "This button could not be verified; nothing was changed."
+	textExpired     = "This button has expired; use the buttons on the Alert Group's message"
+)
+
+// TestReminderPress covers C-17.FR-10 and C-14.FR-4 on Reminders: "Still on it" from the Owner's linked account
+// answers the Reminder as that User with the Transport telegram and is answered "Done: Still on it", "Unack"
+// unacknowledges and is answered "Done: Unacknowledge", in the language of the Route; an unlinked account gets the
+// link to the profile and runs nothing.
+func TestReminderPress(t *testing.T) {
+	e := newPressEnv(t)
+	r := e.reminder(t, e.keys, pressGroup, "en")
+	if got := e.pressIn(t, r, 0, bobTG, "Still on it"); got != "Done: Still on it" {
+		t.Fatalf("still on it = %q", got)
+	}
+	c := e.commands.calls
+	if len(c) != 1 || c[0].command != "still_on_it" || c[0].group != pressGroup ||
+		c[0].caller.Transport != audit.TransportTelegram || c[0].caller.Actor != audit.User(7, "SR0000000000B1") {
+		t.Fatalf("commands %+v", c)
+	}
+	if l := e.last(t, "telegram_press"); l["group"] != pressGroup || l["command"] != "still_on_it" ||
+		l["outcome"] != "done" {
+		t.Errorf("log %v", l)
+	}
+	if got := e.pressIn(t, r, 0, bobTG, "Unack"); got != "Done: Unacknowledge" ||
+		e.commands.calls[1].command != "unacknowledge" {
+		t.Errorf("unack = %q, %+v", got, e.commands.calls)
+	}
+	rb := e.reminder(t, e.keys, pressGroupB, "ru")
+	if got := e.pressIn(t, rb, 0, bobTG, "Still on it"); got != "Готово: Ещё работаю" {
+		t.Errorf("a Russian answer %q", got)
+	}
+	if got := e.pressIn(t, r, 0, carolTG, "Still on it"); !strings.HasPrefix(got,
+		"Your Telegram account is not linked") || len(e.commands.calls) != 3 {
+		t.Errorf("unlinked = %q, %+v", got, e.commands.calls)
+	}
+	e.commands.err = &groups.RefusedError{Code: groups.CodeNotOwner, Message: "only the Owner answers a Reminder"}
+	if got := e.pressIn(t, r, 0, bobTG, "Still on it"); got != "Only the Owner answers a Reminder." ||
+		e.last(t, "telegram_press")["outcome"] != "refused" {
+		t.Errorf("refused = %q", got)
+	}
+}
+
+// TestReminderPressBinding covers C-14.FR-4 on Reminders: a press must come from the Reminder's chat and message, and a
+// Reminder carries only "Still on it" and Unack; the data of another Alert Group's Reminder, a Reminder's data on the
+// channel post or on another message, a Root message's data on a Reminder and another Command of a Reminder are
+// answered "This button could not be verified; nothing was changed." and run nothing.
+func TestReminderPressBinding(t *testing.T) {
+	e := newPressEnv(t)
+	r := e.reminder(t, e.keys, pressGroup, "en")
+	rb := e.reminder(t, e.keys, pressGroupB, "en")
+	stillOnIt, resolve := e.replySigned(t, buttons.CommandStillOnIt), e.replySigned(t, buttons.CommandResolve)
+	const copied = `{"chat":%d,"message_id":%d,"data_from":%d,"from":{"id":%d},"button":"Still on it"}`
+	const data = `{"chat":%d,"message_id":%d,"from":{"id":%d},"button":"x","data":%q}`
+	for name, body := range map[string]string{
+		"another alert group's reminder": fmt.Sprintf(copied, faketelegram.GroupID, r, rb, bobTG),
+		"another message":                fmt.Sprintf(copied, faketelegram.GroupID, e.reply, r, bobTG),
+		"the channel post":               fmt.Sprintf(data, faketelegram.ChannelID, e.post, bobTG, stillOnIt),
+		"a root message's data":          fmt.Sprintf(data, faketelegram.GroupID, r, bobTG, e.signed(t, pressGroup)),
+		"another command":                fmt.Sprintf(data, faketelegram.GroupID, r, bobTG, resolve),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := e.handle(t, e.press(t, body)); got != textNotVerified || len(e.commands.calls) != 0 ||
+				e.last(t, "telegram_press")["outcome"] != "not_verified" {
+				t.Errorf("answer %q, commands %+v", got, e.commands.calls)
+			}
+		})
+	}
+}
+
+// replySigned is the data of a Reminder button of Alert Group A that runs command.
+func (e *pressEnv) replySigned(t *testing.T, command string) string {
+	t.Helper()
+	id, _, err := buttons.Sign(e.keys, buttons.Action{Subject: buttons.SubjectReply, PublicID: pressGroup,
+		Command: command})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// TestExpiredButton covers C-17.FR-6 with a Keyring that lacks the signing key: a press on a Reminder is answered "This
+// button has expired; use the buttons on the Alert Group's message" in the language of the Route and runs nothing,
+// while a Root message button signed by the same key keeps "This button could not be verified; nothing was changed.";
+// an expired Reminder button on a message that is not that Reminder is not verified, and a failed binding is answered
+// as a failure.
+func TestExpiredButton(t *testing.T) {
+	e := newPressEnv(t)
+	gone := openKeyring(t, 'z')
+	r := e.reminder(t, gone, pressGroup, "en")
+	if got := e.pressIn(t, r, 0, bobTG, "Still on it"); got != textExpired {
+		t.Fatalf("an expired Reminder = %q", got)
+	}
+	if l := e.last(t, "telegram_press"); l["outcome"] != "expired" || l["group"] != "" || l["command"] != "" {
+		t.Errorf("log %v", l)
+	}
+	rr := e.reminder(t, gone, pressGroup, "ru")
+	if got := e.pressIn(t, rr, 0, bobTG, "Unack"); got != "Срок действия этой кнопки истёк; используйте кнопки в "+
+		"сообщении группы алертов" {
+		t.Errorf("a Russian expiry = %q", got)
+	}
+	root := e.send(t, faketelegram.ChannelID, 0, e.keyboard(t, gone, buttons.SubjectRoot, pressGroup))
+	if got := e.handle(t, e.press(t, fmt.Sprintf(`{"chat":%d,"message_id":%d,"from":{"id":%d},"button":"Ack"}`,
+		faketelegram.ChannelID, root, bobTG))); got != textNotVerified {
+		t.Errorf("an expired Root message button = %q", got)
+	}
+	if got := e.pressIn(t, e.reply, r, bobTG, "Still on it"); got != textNotVerified {
+		t.Errorf("an expired Reminder button on another message = %q", got)
+	}
+	if len(e.commands.calls) != 0 {
+		t.Fatalf("an expired press ran %+v", e.commands.calls)
+	}
+	e.bindings.err = errors.New("bindings down")
+	if got := e.pressIn(t, r, 0, bobTG, "Still on it"); got != "Muster could not run this command; nothing was "+
+		"changed." || e.last(t, "telegram_press")["error"] != "bindings down" {
+		t.Errorf("a failed binding = %q", got)
 	}
 }
