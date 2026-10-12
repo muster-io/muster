@@ -1431,8 +1431,9 @@ func probeTelegramAdapter(ctx context.Context, svc *connections.Service, clocks 
 }
 
 // probeTelegramPresses routes Telegram button presses of conn, whose client answers through the stand-in server: one
-// that cannot be verified, one from an account without an Account link and one whose Command is refused, each
-// answered with answerCallbackQuery, which the stand-in refuses with the bot token in its error, and each logged.
+// that cannot be verified, one from an account without an Account link and one whose Command is refused, on a Root
+// message and on a Reminder, each answered with answerCallbackQuery, which the stand-in refuses with the bot token in
+// its error, and each logged.
 func probeTelegramPresses(ctx context.Context, router *telegram.Router, k *keyring.Keyring, clocks clock.Clocks,
 	logger *logging.Logger, conn telegram.Conn) error {
 	action, _, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectRoot, PublicID: "AGAAAAAAAAAAA1",
@@ -1440,11 +1441,17 @@ func probeTelegramPresses(ctx context.Context, router *telegram.Router, k *keyri
 	if err != nil {
 		return err
 	}
+	reminder, _, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectReply, PublicID: "AGAAAAAAAAAAA1",
+		Command: buttons.CommandStillOnIt})
+	if err != nil {
+		return err
+	}
 	router.Handle(telegram.KindCallbackQuery, (&telegram.Presses{Bindings: probeTGBindings{}, Links: probeTGLinks{},
 		Commands: probeCommands{}, Keys: k, Path: deliverytest.Unlimited(1, clocks), Business: clocks.Business,
 		PublicURL: "http://localhost:8080", Log: logger}).Handle)
 	var errs []error
-	for i, p := range []struct{ from, data string }{{"5001", "x" + action[1:]}, {"6001", action}, {"5001", action}} {
+	for i, p := range []struct{ from, data string }{{"5001", "x" + action[1:]}, {"6001", action}, {"5001", action},
+		{"6001", reminder}, {"5001", reminder}} {
 		u, err := telegram.ParseUpdate(fmt.Appendf(nil, `{"update_id":%d,"callback_query":{"id":"q%d","from":{"id":%s},
 			"message":{"message_id":1,"chat":{"id":-1001000000001,"type":"channel"}},"data":%q}}`, 100+i, i, p.from,
 			p.data))
@@ -1476,14 +1483,24 @@ func (probeTGBindings) TelegramPressBinding(context.Context, int64, string, int6
 		Type: delivery.TypeTelegram, Connection: &conn}, ChannelID: "-1001000000001", Language: "en"}, nil
 }
 
+func (probeTGBindings) TelegramReplyBinding(ctx context.Context, conn int64, group string, chat, message int64) (
+	delivery.Binding, error) {
+	return probeTGBindings{}.TelegramPressBinding(ctx, conn, group, chat, message)
+}
+
 // probePresses sends button presses to the callback of the Connection publicID: one that cannot be verified, one from
-// an account without an Account link and one whose Command is refused, each answered with an ephemeral post that the
-// stand-in server refuses with the bot token in its error, each logged, and returns the answers, whose ephemeral_text
-// must carry no secret.
+// an account without an Account link and one whose Command is refused, on a Root message and on a Reminder, whose
+// answers go to the Thread of its Root message, each answered with an ephemeral post that the stand-in server refuses
+// with the bot token in its error, each logged, and returns the answers, whose ephemeral_text must carry no secret.
 func probePresses(ctx context.Context, svc *connections.Service, k *keyring.Keyring, clocks clock.Clocks,
 	logger *logging.Logger, publicID string) error {
 	action, keyID, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectRoot, PublicID: "AGAAAAAAAAAAA1",
 		Command: buttons.CommandAcknowledge})
+	if err != nil {
+		return err
+	}
+	reminder, _, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectReply, PublicID: "AGAAAAAAAAAAA1",
+		Command: buttons.CommandStillOnIt})
 	if err != nil {
 		return err
 	}
@@ -1494,7 +1511,7 @@ func probePresses(ctx context.Context, svc *connections.Service, k *keyring.Keyr
 		Log: logger}))
 	var errs []error
 	for _, p := range []struct{ user, action string }{{"u-linked", "x" + action[1:]}, {"u-unlinked", action},
-		{"u-linked", action}} {
+		{"u-linked", action}, {"u-unlinked", reminder}, {"u-linked", reminder}} {
 		body := fmt.Sprintf(`{"user_id":%q,"channel_id":"c","post_id":"p","context":{"action":%q,"key_id":%q}}`,
 			p.user, p.action, keyID)
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, mattermost.CallbackPath+publicID,
@@ -1550,6 +1567,12 @@ func (probeBindings) PressBinding(context.Context, int64, string, string) (deliv
 		Type: delivery.TypeMattermost, Connection: &conn}, ChannelID: "c", Language: "en"}, nil
 }
 
+func (probeBindings) ReplyBinding(ctx context.Context, conn int64, group, post string) (delivery.Binding, error) {
+	b, err := probeBindings{}.PressBinding(ctx, conn, group, post)
+	b.RootMessageID = "p-root"
+	return b, err
+}
+
 func (probeBindings) PostDestination(context.Context, int64, string, string) (delivery.Destination, bool, error) {
 	conn := int64(1)
 	return delivery.Destination{ID: 1, PublicID: "DSAAAAAAAAAAA1", Type: delivery.TypeMattermost,
@@ -1594,6 +1617,10 @@ func (probeCommands) Snooze(ctx context.Context, c groups.Caller, id string, _ g
 }
 
 func (probeCommands) Unsnooze(ctx context.Context, c groups.Caller, id string) (groups.Result, error) {
+	return probeCommands{}.Acknowledge(ctx, c, id)
+}
+
+func (probeCommands) AnswerReminder(ctx context.Context, c groups.Caller, id string) (groups.Result, error) {
 	return probeCommands{}.Acknowledge(ctx, c, id)
 }
 

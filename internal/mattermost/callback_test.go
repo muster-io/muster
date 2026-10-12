@@ -35,13 +35,16 @@ import (
 )
 
 // The fixtures of the callback: Connection 3, whose Destinations 31 and 32 post into ch-alerts and ch-alerts-prod;
-// Alert Group A posted as post-a in ch-alerts, Alert Group B as post-b, and post-c in ch-alerts-prod.
+// Alert Group A posted as post-a in ch-alerts, Alert Group B as post-b, and post-c in ch-alerts-prod; the Reminders
+// reply-a of Alert Group A and reply-b of Alert Group B in the Threads of post-a and post-b.
 const (
 	groupA = "AG0000000000A1"
 	groupB = "AG0000000000B1"
 	postA  = "post-a"
 	postB  = "post-b"
 	postC  = "post-c"
+	replyA = "reply-a"
+	replyB = "reply-b"
 )
 
 var (
@@ -75,7 +78,13 @@ func (s *keyState) CreateKeyringState(_ context.Context, p kdb.CreateKeyringStat
 
 func openKeyring(t *testing.T) *keyring.Keyring {
 	t.Helper()
-	k, err := keyring.New([][]byte{bytes.Repeat([]byte{'b'}, keyring.KeySize)}, false)
+	return openKeyringOf(t, 'b')
+}
+
+// openKeyringOf is an opened Keyring of one key of the material m.
+func openKeyringOf(t *testing.T, m byte) *keyring.Keyring {
+	t.Helper()
+	k, err := keyring.New([][]byte{bytes.Repeat([]byte{m}, keyring.KeySize)}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +123,7 @@ type postKey struct{ post, channel string }
 
 type fakeBindings struct {
 	bound        map[bindingKey]delivery.Binding
+	replies      map[bindingKey]delivery.Binding
 	posts        map[postKey]delivery.Destination
 	err, postErr error
 	// tests are the Destinations whose test messages may be pressed, by public_id and channel.
@@ -126,6 +136,17 @@ func (f *fakeBindings) PressBinding(_ context.Context, conn int64, group, post s
 		return delivery.Binding{}, f.err
 	}
 	b, ok := f.bound[bindingKey{conn, group, post}]
+	if !ok {
+		return delivery.Binding{}, delivery.ErrNotBound
+	}
+	return b, nil
+}
+
+func (f *fakeBindings) ReplyBinding(_ context.Context, conn int64, group, post string) (delivery.Binding, error) {
+	if f.err != nil {
+		return delivery.Binding{}, f.err
+	}
+	b, ok := f.replies[bindingKey{conn, group, post}]
 	if !ok {
 		return delivery.Binding{}, delivery.ErrNotBound
 	}
@@ -203,6 +224,10 @@ func (f *fakeCommands) Unsnooze(_ context.Context, c groups.Caller, id string) (
 	return f.run(dispatched{command: "unsnooze", group: id, caller: c})
 }
 
+func (f *fakeCommands) AnswerReminder(_ context.Context, c groups.Caller, id string) (groups.Result, error) {
+	return f.run(dispatched{command: "still_on_it", group: id, caller: c})
+}
+
 type callbackEnv struct {
 	fake     *fakemattermost.Fake
 	keys     *keyring.Keyring
@@ -229,6 +254,12 @@ func newCallback(t *testing.T) *callbackEnv {
 					SnoozeSeconds: []int64{3600, 14400}},
 				{connID, groupB, postB}: {Destination: destA, ChannelID: fakemattermost.ChannelAlerts, Language: "ru",
 					SnoozeSeconds: []int64{3600}},
+			},
+			replies: map[bindingKey]delivery.Binding{
+				{connID, groupA, replyA}: {Destination: destA, ChannelID: fakemattermost.ChannelAlerts,
+					RootMessageID: postA, Language: "en", SnoozeSeconds: []int64{3600, 14400}},
+				{connID, groupB, replyB}: {Destination: destA, ChannelID: fakemattermost.ChannelAlerts,
+					RootMessageID: postB, Language: "ru", SnoozeSeconds: []int64{3600}},
 			},
 			posts: map[postKey]delivery.Destination{{postA, fakemattermost.ChannelAlerts}: destA,
 				{postB, fakemattermost.ChannelAlerts}: destA, {postC, fakemattermost.ChannelAlertsProd}: destB},
@@ -358,6 +389,13 @@ func expectAnswer(t *testing.T, got, want string) {
 // without an error.
 func (e *callbackEnv) expectAnswered(t *testing.T, got, user, channel, message string) {
 	t.Helper()
+	e.expectAnsweredIn(t, got, user, channel, "", message)
+}
+
+// expectAnsweredIn is expectAnswered for an answer whose ephemeral post has the root_id root: in the Thread of the
+// Root message root for a press on a Reminder, in the channel view for an empty one.
+func (e *callbackEnv) expectAnsweredIn(t *testing.T, got, user, channel, root, message string) {
+	t.Helper()
 	calls := e.ephemeralCalls()
 	eph := e.fake.Ephemeral()
 	if len(calls) == 0 {
@@ -379,8 +417,9 @@ func (e *callbackEnv) expectAnswered(t *testing.T, got, user, channel, message s
 		t.Fatalf("calls %v, ephemeral posts %+v, line %v", calls, eph, m)
 	}
 	last := eph[len(eph)-1]
-	if last.UserID != user || last.ChannelID != channel || last.RootID != "" ||
-		last.ShownIn != fakemattermost.ShownInChannel || last.Message != message {
+	shown := map[bool]string{true: fakemattermost.ShownInChannel, false: fakemattermost.ShownInThread}[root == ""]
+	if last.UserID != user || last.ChannelID != channel || last.RootID != root || last.ShownIn != shown ||
+		last.Message != message {
 		t.Errorf("ephemeral %+v, want %q to %s in %s", last, message, user, channel)
 	}
 }
@@ -529,9 +568,9 @@ func TestPressNotVerified(t *testing.T) {
 			alerts, postA, id, "k-ffffffffffffffff")), alerts, "", "")
 		check("another post", e.pressAs(t, fakemattermost.BobUserID, alerts, postB, groupA,
 			buttons.CommandAcknowledge, 0), alerts, groupA, buttons.CommandAcknowledge)
-		reply, rkid := e.action(t, buttons.SubjectReply, groupA, buttons.CommandAcknowledge, 0)
-		check("a Thread reply", e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID,
-			alerts, postA, reply, rkid)), alerts, "", "")
+		reply, rkid := e.action(t, buttons.SubjectReply, groupA, buttons.CommandStillOnIt, 0)
+		check("a Reminder's button on a Root message", e.press(t, http.MethodPost, connectionPublicID,
+			body(fakemattermost.BobUserID, alerts, postA, reply, rkid)), alerts, groupA, buttons.CommandStillOnIt)
 		check("a Snooze duration out of range", e.pressAs(t, fakemattermost.BobUserID, alerts, postA, groupA,
 			buttons.CommandSnooze, 2), alerts, groupA, buttons.CommandSnooze)
 		check("a Command of Thread replies", e.pressAs(t, fakemattermost.BobUserID, alerts, postA, groupA,
@@ -682,4 +721,139 @@ func TestPressPanics(t *testing.T) {
 	if len(e.commands.calls) != 1 || len(e.fake.Requests()) != 0 || strings.Contains(e.log.String(), "xoxb") {
 		t.Errorf("calls %+v, requests %+v, log %s", e.commands.calls, e.fake.Requests(), e.log)
 	}
+}
+
+// pressReply presses the Reminder button command of group on post in channel as user, signed by keys, and returns the
+// answer's ephemeral_text.
+func (e *callbackEnv) pressReply(t *testing.T, keys buttons.Keys, user, channel, post, group, command string) string {
+	t.Helper()
+	id, kid, err := buttons.Sign(keys, buttons.Action{Subject: buttons.SubjectReply, PublicID: group, Command: command})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e.press(t, http.MethodPost, connectionPublicID, body(user, channel, post, id, kid))
+}
+
+const textExpired = "This button has expired; use the buttons on the Alert Group's message"
+
+// TestReplyPress is C-17.FR-10, C-17.AC-7 and C-13.FR-4 on Reminders: "Still on it" from the Owner's linked account
+// answers the Reminder as that User with the Transport mattermost and is answered "Done: Still on it" in the Thread of
+// the Root message, in the language of the Route; "Unack" unacknowledges the Alert Group and gets an empty answer. The
+// "not linked" text, a refusal and a failure are answered in the Thread too: as an ephemeral post with the Root message
+// as root_id with an admin bot, as the answer's ephemeral_text with a Member bot (D284).
+func TestReplyPress(t *testing.T) {
+	bots(t, func(t *testing.T, e *callbackEnv) {
+		alerts := fakemattermost.ChannelAlerts
+		e.expectAnsweredIn(t, e.pressReply(t, e.keys, fakemattermost.BobUserID, alerts, replyA, groupA,
+			buttons.CommandStillOnIt), fakemattermost.BobUserID, alerts, postA, "Done: Still on it")
+		e.expectLine(t, groupA, buttons.CommandStillOnIt, "done")
+		d := e.commands.calls[len(e.commands.calls)-1]
+		if len(e.commands.calls) != 1 || d.command != "still_on_it" || d.group != groupA ||
+			d.caller.Actor != audit.User(7, "SR0000000000B1") || d.caller.Transport != audit.TransportMattermost {
+			t.Fatalf("dispatched %+v", e.commands.calls)
+		}
+		e.expectAnsweredIn(t, e.pressReply(t, e.keys, fakemattermost.BobUserID, alerts, replyB, groupB,
+			buttons.CommandStillOnIt), fakemattermost.BobUserID, alerts, postB, "Готово: Ещё работаю")
+
+		n := len(e.ephemeralCalls())
+		e.expectUnanswered(t, e.pressReply(t, e.keys, fakemattermost.BobUserID, alerts, replyA, groupA,
+			buttons.CommandUnacknowledge), n)
+		e.expectLine(t, groupA, buttons.CommandUnacknowledge, "done")
+		if d := e.commands.calls[len(e.commands.calls)-1]; d.command != "unacknowledge" || d.group != groupA ||
+			d.caller.Transport != audit.TransportMattermost {
+			t.Errorf("dispatched %+v", d)
+		}
+
+		e.expectAnsweredIn(t, e.pressReply(t, e.keys, fakemattermost.AliceUserID, alerts, replyA, groupA,
+			buttons.CommandStillOnIt), fakemattermost.AliceUserID, alerts, postA, textNotLinked)
+		e.expectLine(t, groupA, buttons.CommandStillOnIt, "not_linked")
+
+		e.commands.err = &groups.RefusedError{Code: groups.CodeNotOwner, Message: "only the Owner can answer"}
+		e.expectAnsweredIn(t, e.pressReply(t, e.keys, fakemattermost.BobUserID, alerts, replyA, groupA,
+			buttons.CommandStillOnIt), fakemattermost.BobUserID, alerts, postA,
+			(&groups.RefusedError{Code: groups.CodeNotOwner, Message: "only the Owner can answer"}).Detail())
+		e.expectLine(t, groupA, buttons.CommandStillOnIt, "refused")
+
+		e.commands.err = errors.New("the database is down")
+		got := e.pressReply(t, e.keys, fakemattermost.BobUserID, alerts, replyA, groupA, buttons.CommandStillOnIt)
+		if m := e.expectLine(t, groupA, buttons.CommandStillOnIt, "failed"); m["error"] != "the database is down" {
+			t.Errorf("line %v", m)
+		}
+		expectAnswer(t, got, map[bool]string{true: "",
+			false: "Muster could not run this command; nothing was changed."}[e.admin])
+		if eph := e.fake.Ephemeral(); e.admin && (len(eph) == 0 || eph[len(eph)-1].RootID != postA) {
+			t.Errorf("the failure was not answered in the Thread: %+v", eph)
+		}
+		e.commands.err = nil
+	})
+}
+
+// TestReplyPressBinding is C-13.FR-4 on Reminders: a press on a Reminder is bound to it — the post must be a Reminder
+// of the Alert Group its action id names in a Destination of the Connection, and the channel that Destination's — and
+// a Reminder carries only "Still on it" and Unack; anything else changes nothing and is answered like a bad signature.
+func TestReplyPressBinding(t *testing.T) {
+	bots(t, func(t *testing.T, e *callbackEnv) {
+		alerts := fakemattermost.ChannelAlerts
+		// The Reminder's action id on the Root message is answered there, in the channel view.
+		e.expectAnswered(t, e.pressReply(t, e.keys, fakemattermost.BobUserID, alerts, postA, groupA,
+			buttons.CommandStillOnIt), fakemattermost.BobUserID, alerts, textNotVerified)
+		e.expectLine(t, groupA, buttons.CommandStillOnIt, "not_verified")
+		// A Reminder of another Alert Group, and the Reminder in another channel, are not posts Muster answers on.
+		n := len(e.ephemeralCalls())
+		e.expectUnanswered(t, e.pressReply(t, e.keys, fakemattermost.BobUserID, alerts, replyB, groupA,
+			buttons.CommandStillOnIt), n)
+		e.expectLine(t, groupA, buttons.CommandStillOnIt, "not_verified")
+		e.expectUnanswered(t, e.pressReply(t, e.keys, fakemattermost.BobUserID, fakemattermost.ChannelAlertsProd,
+			replyA, groupA, buttons.CommandStillOnIt), n)
+		e.expectLine(t, groupA, buttons.CommandStillOnIt, "not_verified")
+		// A Reminder that carries another Command is not verified, in the Thread.
+		e.expectAnsweredIn(t, e.pressReply(t, e.keys, fakemattermost.BobUserID, alerts, replyA, groupA,
+			buttons.CommandAcknowledge), fakemattermost.BobUserID, alerts, postA, textNotVerified)
+		e.expectLine(t, groupA, buttons.CommandAcknowledge, "not_verified")
+		if len(e.commands.calls) != 0 {
+			t.Fatalf("an unbound press ran %+v", e.commands.calls)
+		}
+	})
+}
+
+// TestExpiredButton is C-17.FR-6 with a Keyring that lacks the signing key: a press on a Reminder is answered "This
+// button has expired; use the buttons on the Alert Group's message" in the Thread of the Root message and changes
+// nothing, while a Root message button signed by the same key keeps "This button could not be verified; nothing was
+// changed."; an expired Reminder button on a post that is not that Reminder is not verified.
+func TestExpiredButton(t *testing.T) {
+	bots(t, func(t *testing.T, e *callbackEnv) {
+		gone := openKeyringOf(t, 'z')
+		alerts := fakemattermost.ChannelAlerts
+		e.expectAnsweredIn(t, e.pressReply(t, gone, fakemattermost.BobUserID, alerts, replyA, groupA,
+			buttons.CommandStillOnIt), fakemattermost.BobUserID, alerts, postA, textExpired)
+		e.expectLine(t, "", "", "expired")
+		e.expectAnsweredIn(t, e.pressReply(t, gone, fakemattermost.BobUserID, alerts, replyA, groupA,
+			buttons.CommandUnacknowledge), fakemattermost.BobUserID, alerts, postA, textExpired)
+
+		id, kid, err := buttons.Sign(gone, buttons.Action{Subject: buttons.SubjectRoot, PublicID: groupA,
+			Command: buttons.CommandAcknowledge})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.expectAnswered(t, e.press(t, http.MethodPost, connectionPublicID, body(fakemattermost.BobUserID, alerts,
+			postA, id, kid)), fakemattermost.BobUserID, alerts, textNotVerified)
+		e.expectLine(t, "", "", "not_verified")
+
+		e.expectAnswered(t, e.pressReply(t, gone, fakemattermost.BobUserID, alerts, postA, groupA,
+			buttons.CommandStillOnIt), fakemattermost.BobUserID, alerts, textNotVerified)
+		e.expectLine(t, "", "", "not_verified")
+		n := len(e.ephemeralCalls())
+		e.expectUnanswered(t, e.pressReply(t, gone, fakemattermost.BobUserID, fakemattermost.ChannelAlertsProd,
+			replyA, groupA, buttons.CommandStillOnIt), n)
+		e.expectLine(t, "", "", "not_verified")
+		if len(e.commands.calls) != 0 {
+			t.Fatalf("an expired press ran %+v", e.commands.calls)
+		}
+		e.bindings.err = errors.New("binding read failed")
+		e.expectUnanswered(t, e.pressReply(t, gone, fakemattermost.BobUserID, alerts, replyA, groupA,
+			buttons.CommandStillOnIt), n)
+		if m := e.expectLine(t, "", "", "failed"); m["error"] != "binding read failed" {
+			t.Errorf("line %v", m)
+		}
+	})
 }

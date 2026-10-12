@@ -6,7 +6,8 @@
 // public_id, the Command and its argument, the first bytes of the id of the key that signed it, and an HMAC-SHA256 with
 // the button-signature sub-key of that key truncated to 128 bits — at most 64 bytes in its compact base64url form, so
 // that Telegram's callback_data holds it. Verification finds the key in the Keyring by its id, which may be any key
-// of the Keyring, and compares the HMAC in constant time.
+// of the Keyring, and compares the HMAC in constant time. An action id whose key prefix names no key of the Keyring is
+// expired (C-17.FR-6): its key left the Keyring, which a Reminder button, never re-rendered, outlives.
 package buttons
 
 import (
@@ -104,8 +105,13 @@ type Keys interface {
 
 var _ Keys = (*keyring.Keyring)(nil)
 
-// ErrInvalid is an action id that is malformed, names no key of the Keyring or whose signature does not match.
+// ErrInvalid is an action id that is malformed or whose signature does not match.
 var ErrInvalid = errors.New("the action id is not valid")
+
+// ErrExpired is a well-formed action id whose key prefix names no key of the Keyring (C-17.FR-6): it cannot be told
+// from one signed with a key that left the Keyring. Verify returns the Action it reads alongside it, unverified: its
+// Subject and PublicID may only choose an answer and the lookup of what the press is bound to, never run a Command.
+var ErrExpired = errors.New("the action id names a key that is not in the keyring")
 
 // Sign is the action id of a, signed with the active key, and the full id of that key, which Mattermost receives as
 // context.key_id and deliveries.desired_button_key_id records.
@@ -169,7 +175,8 @@ func keyPrefix(keyID string) ([]byte, error) {
 }
 
 // Verify reads an action id and checks its signature with the key of the Keyring its prefix names; keyID, when
-// given, is the full key id Mattermost returns, which must agree with the prefix. Anything else is ErrInvalid.
+// given, is the full key id Mattermost returns, which must agree with the prefix. A prefix that names no key of the
+// Keyring is ErrExpired, with the unverified Action; anything else is ErrInvalid.
 func Verify(k Keys, id, keyID string) (Action, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(id)
 	if err != nil || len(raw) != actionLen || raw[0] != version {
@@ -191,10 +198,18 @@ func Verify(k Keys, id, keyID string) (Action, error) {
 		return Action{}, ErrInvalid
 	}
 	prefix := hex.EncodeToString(msg[signedLen-keyPrefixLen:])
-	candidates := slices.DeleteFunc(k.KeyIDs(), func(kid string) bool {
-		return !strings.HasPrefix(kid[min(keyIDHexStart, len(kid)):], prefix) || (keyID != "" && kid != keyID)
-	})
+	named := func(kid string) bool { return strings.HasPrefix(kid[min(keyIDHexStart, len(kid)):], prefix) }
+	if keyID != "" && !named(keyID) {
+		return Action{}, ErrInvalid
+	}
+	candidates := slices.DeleteFunc(k.KeyIDs(), func(kid string) bool { return !named(kid) })
+	if len(candidates) == 0 {
+		return a, ErrExpired
+	}
 	for _, kid := range candidates {
+		if keyID != "" && kid != keyID {
+			continue
+		}
 		if ok, err := k.VerifyPrefix(keyring.PurposeButtonSignature, kid, msg, mac); err == nil && ok {
 			return a, nil
 		}

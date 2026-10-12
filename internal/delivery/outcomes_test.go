@@ -342,6 +342,31 @@ func TestReplyOutcomeRules(t *testing.T) {
 	})
 }
 
+// TestReminderButtonKey (C-17.FR-4): a sent Reminder stores its message id and the key that signed its buttons, also
+// when it went as plain text after the messenger rejected its markup; a reply without buttons stores no key.
+func TestReminderButtonKey(t *testing.T) {
+	e := published(t)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, alertsAdded(2, groups.StatusFiring, "fp1"))
+	e.round(t)
+	if r := e.db.replies[0]; r.state != "sent" || r.messageID == nil || r.buttonKeyID != nil {
+		t.Errorf("alerts added %+v", r)
+	}
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System, reminder(3))
+	e.round(t)
+	r := e.db.replies[1]
+	rs := e.replies()
+	if r.event != "reminder" || r.state != "sent" || r.messageID == nil || *r.messageID == "" || r.buttonKeyID == nil ||
+		*r.buttonKeyID != "k-stub" || len(rs[len(rs)-1].Message.Buttons) != 2 {
+		t.Errorf("reminder %+v", r)
+	}
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System, reminder(4))
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Failure(delivery.OutcomeMarkupRejected, "bad"))
+	e.round(t)
+	if r := e.db.replies[2]; r.state != "sent" || r.buttonKeyID == nil || *r.buttonKeyID != "k-stub" {
+		t.Errorf("plain reminder %+v", r)
+	}
+}
+
 // TestOutcomesLeaseLost: an outcome recorded after the lease went to another replica changes nothing.
 func TestOutcomesLeaseLost(t *testing.T) {
 	for _, kind := range []delivery.OutcomeKind{delivery.OutcomeRetryAfter, delivery.OutcomeTransient,

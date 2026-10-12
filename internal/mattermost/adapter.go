@@ -93,7 +93,9 @@ func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string,
 	return edited(ctx, t.Client, c.Class, messageID, r)
 }
 
-// Reply posts m into the Thread of root, with the Mentions of a Loud call first.
+// Reply posts m into the Thread of root, with the Mentions of a Loud call first; a Reminder carries the buttons "Still
+// on it" and "Unack" (C-13.FR-4), which are never edited: a reply is posted once, and a key rotation re-signs Root
+// messages only.
 func (a *Adapter) Reply(ctx context.Context, c delivery.Call, root delivery.Root, m delivery.Message) delivery.Outcome {
 	t, fail := a.target(ctx, c)
 	if fail != nil {

@@ -15,15 +15,18 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 )
 
-// ErrNotBound is a button press whose post is not the Root message of the Alert Group in a Destination of the
-// Connection.
-var ErrNotBound = errors.New("the post is not the root message of the alert group")
+// ErrNotBound is a button press whose post is not the Root message, or a Reminder, of the Alert Group in a Destination
+// of the Connection.
+var ErrNotBound = errors.New("the post is not a message of the alert group")
 
-// Binding is what a button press on a Root message is bound to (C-13.FR-4): the Destination the message was delivered
-// to, its channel, and the language and Snooze durations of the Alert Group's Route.
+// Binding is what a button press on a Root message or a Reminder is bound to (C-13.FR-4): the Destination the message
+// was delivered to, its channel, and the language and Snooze durations of the Alert Group's Route. RootMessageID is,
+// for a press on a Reminder in Mattermost, the Root message it replies to, whose Thread the answers go to; empty for a
+// press on a Root message and in Telegram.
 type Binding struct {
 	Destination   Destination
 	ChannelID     string
+	RootMessageID string
 	Language      string
 	SnoozeSeconds []int64
 }
@@ -45,6 +48,46 @@ func (s *Service) PressBinding(ctx context.Context, connectionID int64, groupPub
 	return Binding{Destination: Destination{ID: r.DestinationID, PublicID: r.DestinationPublicID,
 		Name: r.DestinationName, Type: TypeMattermost, Connection: &connectionID}, ChannelID: r.ChannelID,
 		Language: r.Language, SnoozeSeconds: r.SnoozeDurationsSeconds}, nil
+}
+
+// ReplyBinding reads the binding of a press on the post postID of the Connection connectionID that names the Alert
+// Group groupPublicID in a Reminder's action id (C-13.FR-4): a sent Reminder of that Alert Group whose message id is
+// postID, delivered to a Mattermost Destination of the Connection, not deleted; ErrNotBound when there is none.
+func (s *Service) ReplyBinding(ctx context.Context, connectionID int64, groupPublicID, postID string) (Binding,
+	error) {
+	r, err := s.store.q().GetReplyPressBinding(ctx, dbgen.GetReplyPressBindingParams{OrgID: s.orgID,
+		ConnectionID: pgtype.Int8{Int64: connectionID, Valid: true}, GroupPublicID: groupPublicID, MessageID: postID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Binding{}, ErrNotBound
+	}
+	if err != nil {
+		return Binding{}, fmt.Errorf("read the binding of a press on a reminder of the alert group %s: %w",
+			groupPublicID, err)
+	}
+	return Binding{Destination: Destination{ID: r.DestinationID, PublicID: r.DestinationPublicID,
+		Name: r.DestinationName, Type: TypeMattermost, Connection: &connectionID}, ChannelID: r.ChannelID,
+		RootMessageID: r.RootMessageID, Language: r.Language, SnoozeSeconds: r.SnoozeDurationsSeconds}, nil
+}
+
+// TelegramReplyBinding reads the binding of a press on the message messageID of the chat chatID of the Telegram
+// Connection connectionID that names the Alert Group groupPublicID in a Reminder's data (C-14.FR-4): a sent Reminder of
+// that Alert Group whose message is messageID in the discussion group chatID of a Telegram Destination of the
+// Connection, not deleted; ErrNotBound when there is none. Its ChannelID is the chat id in decimal.
+func (s *Service) TelegramReplyBinding(ctx context.Context, connectionID int64, groupPublicID string, chatID,
+	messageID int64) (Binding, error) {
+	r, err := s.store.q().GetTelegramReplyPressBinding(ctx, dbgen.GetTelegramReplyPressBindingParams{OrgID: s.orgID,
+		ConnectionID: pgtype.Int8{Int64: connectionID, Valid: true}, ChatID: chatID, GroupPublicID: groupPublicID,
+		MessageID: strconv.FormatInt(messageID, 10)})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Binding{}, ErrNotBound
+	}
+	if err != nil {
+		return Binding{}, fmt.Errorf("read the binding of a press on a reminder of the alert group %s: %w",
+			groupPublicID, err)
+	}
+	return Binding{Destination: Destination{ID: r.DestinationID, PublicID: r.DestinationPublicID,
+		Name: r.DestinationName, Type: TypeTelegram, Connection: &connectionID},
+		ChannelID: strconv.FormatInt(chatID, 10), Language: r.Language, SnoozeSeconds: r.SnoozeDurationsSeconds}, nil
 }
 
 // PostDestination reads the Mattermost Destination of the Connection connectionID, not deleted, whose channel is

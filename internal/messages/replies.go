@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/messages/dbgen"
 )
 
@@ -114,10 +115,37 @@ func (r *Renderer) Reply(ctx context.Context, db DBTX, groupID int64, in ReplyIn
 			return Message{}, err
 		}
 		m.Lines = []string{T(lang, "reply.reminder", Args{"user": Value(cmp.Or(e.OwnerName, src.Owner))})}
+		m.Buttons = r.reminderButtons(src.PublicID, lang)
 	default:
 		m.Lines = []string{replyText(src, lang, in.Event)}
 	}
 	return m, nil
+}
+
+// reminderButtons are the buttons of a Reminder (C-17.FR-4): "Still on it" and "Unack", whose action ids of the
+// subject reply name the Alert Group publicID, signed with the active key when the reply is rendered. A Reminder whose
+// buttons cannot both be signed — no Keyring, or no active key — goes without buttons.
+func (r *Renderer) reminderButtons(publicID, lang string) []Button {
+	if r.keys == nil {
+		return []Button{}
+	}
+	out := make([]Button, 0, 2)
+	for _, cmd := range []string{buttons.CommandStillOnIt, buttons.CommandUnacknowledge} {
+		id, kid, err := buttons.Sign(r.keys, buttons.Action{Subject: buttons.SubjectReply, PublicID: publicID,
+			Command: cmd})
+		if err != nil {
+			return []Button{}
+		}
+		out = append(out, Button{Command: cmd, Label: buttonLabel(lang, buttons.Button{Command: cmd}, nil),
+			ActionID: id, KeyID: kid})
+	}
+	return out
+}
+
+// Done is the answer to a press whose Command ran: "Done: {command}", the Command named in lang.
+func Done(lang, command string) string {
+	key := map[string]string{buttons.CommandStillOnIt: "stillOnIt"}[command]
+	return T(lang, "press.done", Args{"command": T(lang, "command."+cmp.Or(key, command), nil)})
 }
 
 // replyText is the text of a Thread reply that needs nothing but the Alert Group.

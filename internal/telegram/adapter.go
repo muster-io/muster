@@ -122,6 +122,8 @@ func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string,
 // chain; or, as the first link of a chain, no reply at all. Muster never replies inside the channel (F-015). The
 // Mentions of a Loud call come first, and only a Loud one carries them (C-12.FR-8); a Quiet one carries
 // disable_notification (C-14.FR-6, F-012). A reply to a copy or link that is gone is refused, as a lost Thread (F-008).
+// A Reminder carries the keyboard "Still on it" and "Unack" on one row (C-14.FR-4), which is never edited: a reply is
+// sent once, and a key rotation re-signs Root messages only.
 func (a *Adapter) Reply(ctx context.Context, c delivery.Call, root delivery.Root, m delivery.Message) delivery.Outcome {
 	t, fail := a.target(ctx, c)
 	if fail != nil {

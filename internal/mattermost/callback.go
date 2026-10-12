@@ -48,6 +48,7 @@ type Connections interface {
 // Bindings are delivery's reads of what a press is bound to; *delivery.Service implements it.
 type Bindings interface {
 	PressBinding(ctx context.Context, connectionID int64, groupPublicID, postID string) (delivery.Binding, error)
+	ReplyBinding(ctx context.Context, connectionID int64, groupPublicID, postID string) (delivery.Binding, error)
 	PostDestination(ctx context.Context, connectionID int64, postID, channelID string) (delivery.Destination, bool,
 		error)
 	TestDestination(ctx context.Context, connectionID int64, publicID, channelID string) (delivery.Destination, bool,
@@ -66,6 +67,7 @@ type Commands interface {
 	Resolve(ctx context.Context, c groups.Caller, publicID string, note *string) (groups.Result, error)
 	Snooze(ctx context.Context, c groups.Caller, publicID string, end groups.SnoozeEnd) (groups.Result, error)
 	Unsnooze(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
+	AnswerReminder(ctx context.Context, c groups.Caller, publicID string) (groups.Result, error)
 }
 
 // CallbackConfig is what the callback of button presses needs.
@@ -113,6 +115,7 @@ const (
 	outcomeNotLinked         = "not_linked"
 	outcomeDisabled          = "disabled"
 	outcomeNotVerified       = "not_verified"
+	outcomeExpired           = "expired"
 	outcomeInvalidRequest    = "invalid_request"
 	outcomeUnknownConnection = "unknown_connection"
 	outcomeFailed            = "failed"
@@ -130,13 +133,15 @@ type pressHandler struct {
 }
 
 // NewCallback is the callback of the button presses of Mattermost Connections, mattermostAction (C-13.FR-4): it
-// verifies the signed action id, binds the press to the Root message it was issued for, maps the Mattermost user to
-// a User through its Account link, and runs the Command as that User with the Transport mattermost. Every request is
-// answered 200 with a JSON object, never with update. Whatever the person who pressed must read goes first as an
-// ephemeral post through the interactive path, which shows in the channel view (F-026), and the answer is empty; when
-// that post is not made — refused with 403 to a bot without the create_post_ephemeral permission (F-063), or failed
-// any other way — the text is the answer's ephemeral_text, which needs no permission and shows in the Thread (F-025,
-// F-062), so that it is never lost (D284).
+// verifies the signed action id, binds the press to the Root message or the Reminder it was issued for, maps the
+// Mattermost user to a User through its Account link, and runs the Command as that User with the Transport mattermost.
+// Every request is answered 200 with a JSON object, never with update. Whatever the person who pressed must read goes
+// first as an ephemeral post through the interactive path, which shows in the channel view (F-026) — or, for a press
+// on a Reminder, in the Thread of the Root message it replies to (F-025) — and the answer is empty; when that post is
+// not made — refused with 403 to a bot without the create_post_ephemeral permission (F-063), or failed any other way —
+// the text is the answer's ephemeral_text, which needs no permission and shows in the Thread (F-025, F-062), so that it
+// is never lost (D284). A press on a Reminder whose key left the Keyring is answered that the button has expired
+// (C-17.FR-6).
 func NewCallback(cfg CallbackConfig) http.Handler {
 	if cfg.BodyLimit <= 0 {
 		cfg.BodyLimit = ingest.BodyLimit
@@ -231,11 +236,18 @@ func (h *pressHandler) handle(ctx context.Context, w http.ResponseWriter, r *htt
 	if err == nil && a.Subject == buttons.SubjectTest {
 		return h.testPress(ctx, p, conn, req, a)
 	}
-	if err != nil || a.Subject != buttons.SubjectRoot {
+	if errors.Is(err, buttons.ErrExpired) && a.Subject == buttons.SubjectReply {
+		return h.expired(ctx, p, conn, req, a)
+	}
+	if err != nil || (a.Subject != buttons.SubjectRoot && a.Subject != buttons.SubjectReply) {
 		return h.notVerified(ctx, p, conn, req)
 	}
 	p.group, p.command = a.PublicID, a.Command
-	b, err := h.cfg.Bindings.PressBinding(ctx, conn.ID, a.PublicID, req.PostID)
+	bind := h.cfg.Bindings.PressBinding
+	if a.Subject == buttons.SubjectReply {
+		bind = h.cfg.Bindings.ReplyBinding
+	}
+	b, err := bind(ctx, conn.ID, a.PublicID, req.PostID)
 	if errors.Is(err, delivery.ErrNotBound) || (err == nil && b.ChannelID != req.ChannelID) {
 		return h.notVerified(ctx, p, conn, req)
 	}
@@ -245,7 +257,7 @@ func (h *pressHandler) handle(ctx context.Context, w http.ResponseWriter, r *htt
 	}
 	answer := func(outcome, text string, cause error) press {
 		p.outcome = outcome
-		return h.answer(ctx, p, conn, b.Destination, req, text, cause)
+		return h.answer(ctx, p, conn, b.Destination, req, b.RootMessageID, text, cause)
 	}
 	u, err := h.cfg.Links.Lookup(ctx, accountlinks.SpaceMattermost(conn.ID), req.UserID)
 	switch {
@@ -263,6 +275,9 @@ func (h *pressHandler) handle(ctx context.Context, w http.ResponseWriter, r *htt
 	var forbidden *groups.ForbiddenError
 	var refused *groups.RefusedError
 	switch {
+	case err == nil && a.Command == buttons.CommandStillOnIt:
+		// Nothing else shows that "Still on it" was taken: the Root message does not change.
+		return answer(string(res.Outcome), messages.Done(b.Language, a.Command), nil)
 	case err == nil:
 		p.outcome = string(res.Outcome)
 		return p
@@ -276,10 +291,16 @@ func (h *pressHandler) handle(ctx context.Context, w http.ResponseWriter, r *htt
 	return answer(outcomeFailed, messages.T(b.Language, "press.failed", nil), err)
 }
 
-// dispatch runs the Command of the button a as c; a Snooze lasts the duration of the Route at the button's index.
+// dispatch runs the Command of the button a as c; a Snooze lasts the duration of the Route at the button's index. A
+// Reminder carries only "Still on it" and Unacknowledge, and only a Reminder carries "Still on it".
 func (h *pressHandler) dispatch(ctx context.Context, c groups.Caller, a buttons.Action, b delivery.Binding) (
 	groups.Result, error) {
+	if !onSubject(a) {
+		return groups.Result{}, errUnverifiable
+	}
 	switch a.Command {
+	case buttons.CommandStillOnIt:
+		return h.cfg.Commands.AnswerReminder(ctx, c, a.PublicID)
 	case buttons.CommandAcknowledge:
 		return h.cfg.Commands.Acknowledge(ctx, c, a.PublicID)
 	case buttons.CommandUnacknowledge:
@@ -296,6 +317,34 @@ func (h *pressHandler) dispatch(ctx context.Context, c groups.Caller, a buttons.
 		return h.cfg.Commands.Snooze(ctx, c, a.PublicID, groups.SnoozeEnd{Until: &until})
 	}
 	return groups.Result{}, errUnverifiable
+}
+
+// onSubject is whether the Command of a is one its subject carries: "Still on it" and Unacknowledge on a Reminder,
+// any other on a Root message.
+func onSubject(a buttons.Action) bool {
+	if a.Subject == buttons.SubjectReply {
+		return a.Command == buttons.CommandStillOnIt || a.Command == buttons.CommandUnacknowledge
+	}
+	return a.Command != buttons.CommandStillOnIt
+}
+
+// expired answers a press on a Reminder whose action id names a key that is no longer in the Keyring (C-17.FR-6): it
+// changes nothing and, when the post is a sent Reminder of the Alert Group the action id names in a Destination of the
+// Connection in the channel of the press, is answered in the Thread of the Root message that the button has expired;
+// otherwise it is not verified. The action id is not verified, so neither its Alert Group nor its Command is logged.
+func (h *pressHandler) expired(ctx context.Context, p press, conn Connection, req pressRequest,
+	a buttons.Action) press {
+	b, err := h.cfg.Bindings.ReplyBinding(ctx, conn.ID, a.PublicID, req.PostID)
+	switch {
+	case errors.Is(err, delivery.ErrNotBound) || (err == nil && b.ChannelID != req.ChannelID):
+		return h.notVerified(ctx, p, conn, req)
+	case err != nil:
+		p.outcome, p.err = outcomeFailed, err.Error()
+		return p
+	}
+	p.outcome = outcomeExpired
+	return h.answer(ctx, p, conn, b.Destination, req, b.RootMessageID, messages.T(b.Language, "press.expired", nil),
+		nil)
 }
 
 // testPress handles a press of a test message, whose verified action id names the Destination under test and changes
@@ -325,7 +374,7 @@ func (h *pressHandler) testPress(ctx context.Context, p press, conn Connection, 
 		return p
 	}
 	p.outcome = outcomeTest
-	return h.answer(ctx, p, conn, d, req, messages.T(messages.LanguageEnglish, "press.test", nil), nil)
+	return h.answer(ctx, p, conn, d, req, "", messages.T(messages.LanguageEnglish, "press.test", nil), nil)
 }
 
 // notVerified refuses a press whose action id or binding does not hold. It is answered only on a post that Muster
@@ -342,22 +391,24 @@ func (h *pressHandler) notVerified(ctx context.Context, p press, conn Connection
 	if !ok {
 		return p
 	}
-	return h.answer(ctx, p, conn, d, req, messages.T(messages.LanguageEnglish, "press.notVerified", nil), nil)
+	return h.answer(ctx, p, conn, d, req, "", messages.T(messages.LanguageEnglish, "press.notVerified", nil), nil)
 }
 
 // answer shows text to the person who pressed (D284): first as one ephemeral post in the channel of the press through
 // the interactive path, limited by the Destination d and bounded by the budget, without root_id so that it shows in
-// the channel view (F-026). When the post is not made, text becomes the ephemeral_text of the callback's answer (F-062):
-// after a 403 for the missing permission, which a bot with the role Member always gets (F-063) and which is therefore
-// not an error, and after any other failure, which is logged with cause.
+// the channel view (F-026) — or, for a press on a Reminder, with the Root message rootID as root_id, so that it shows
+// in the Thread the Reminder is in (F-025). When the post is not made, text becomes the ephemeral_text of the
+// callback's answer (F-062), which the server shows in the Thread of the pressed post: after a 403 for the missing
+// permission, which a bot with the role Member always gets (F-063) and which is therefore not an error, and after any
+// other failure, which is logged with cause.
 func (h *pressHandler) answer(ctx context.Context, p press, conn Connection, d delivery.Destination, req pressRequest,
-	text string, cause error) press {
+	rootID, text string, cause error) press {
 	ctx, cancel := context.WithTimeout(ctx, h.cfg.Budget)
 	defer cancel()
 	var r Result
 	out, err := h.cfg.Path.Do(ctx, delivery.Subject{Destination: &d}, delivery.AnswerOp(
 		func(ctx context.Context, c delivery.Call) delivery.Outcome {
-			r = conn.Client.ephemeralPost(ctx, c.Class, req.UserID, req.ChannelID, "", text)
+			r = conn.Client.ephemeralPost(ctx, c.Class, req.UserID, req.ChannelID, rootID, text)
 			return r.Outcome
 		}))
 	switch {

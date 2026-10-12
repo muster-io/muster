@@ -62,6 +62,68 @@ func (f *fakeDB) GetTelegramPressBinding(_ context.Context, arg dbgen.GetTelegra
 	return dbgen.GetTelegramPressBindingRow{}, pgx.ErrNoRows
 }
 
+// reminderReply is the delivery, Destination and Alert Group of the sent Reminder whose message id is messageID, for
+// the reply bindings.
+func (f *fakeDB) reminderReply(messageID, group string, conn int64, typ string) (*fakeDelivery, *fakeDest,
+	*fakeGroup) {
+	for _, r := range f.replies {
+		var d *fakeDelivery
+		for _, x := range f.deliveries {
+			if x.id == r.delivery {
+				d = x
+			}
+		}
+		if d == nil {
+			continue
+		}
+		ds, g := f.dests[d.dest], f.groups[d.group]
+		if g == nil || ds == nil || r.event != "reminder" || r.state != "sent" || r.messageID == nil ||
+			*r.messageID != messageID || g.publicID != group || ds.typ != typ || ds.deleted || ds.connection == nil ||
+			*ds.connection != conn {
+			continue
+		}
+		return d, ds, g
+	}
+	return nil, nil, nil
+}
+
+func (f *fakeDB) GetReplyPressBinding(_ context.Context, arg dbgen.GetReplyPressBindingParams) (
+	dbgen.GetReplyPressBindingRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetReplyPressBinding"); err != nil {
+		return dbgen.GetReplyPressBindingRow{}, err
+	}
+	d, ds, g := f.reminderReply(arg.MessageID, arg.GroupPublicID, arg.ConnectionID.Int64, delivery.TypeMattermost)
+	if ds == nil {
+		return dbgen.GetReplyPressBindingRow{}, pgx.ErrNoRows
+	}
+	root := ""
+	if d.messageID != nil {
+		root = *d.messageID
+	}
+	r := f.routes[g.route]
+	return dbgen.GetReplyPressBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
+		DestinationName: ds.name, ChannelID: ds.channel, RootMessageID: root, Language: r.language,
+		SnoozeDurationsSeconds: slices.Clone(r.snooze)}, nil
+}
+
+func (f *fakeDB) GetTelegramReplyPressBinding(_ context.Context, arg dbgen.GetTelegramReplyPressBindingParams) (
+	dbgen.GetTelegramReplyPressBindingRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetTelegramReplyPressBinding"); err != nil {
+		return dbgen.GetTelegramReplyPressBindingRow{}, err
+	}
+	_, ds, g := f.reminderReply(arg.MessageID, arg.GroupPublicID, arg.ConnectionID.Int64, delivery.TypeTelegram)
+	if ds == nil || ds.tgGroup == nil || *ds.tgGroup != arg.ChatID {
+		return dbgen.GetTelegramReplyPressBindingRow{}, pgx.ErrNoRows
+	}
+	r := f.routes[g.route]
+	return dbgen.GetTelegramReplyPressBindingRow{DestinationID: ds.id, DestinationPublicID: ds.publicID,
+		DestinationName: ds.name, Language: r.language, SnoozeDurationsSeconds: slices.Clone(r.snooze)}, nil
+}
+
 func (f *fakeDB) GetPostDestination(_ context.Context, arg dbgen.GetPostDestinationParams) (
 	dbgen.GetPostDestinationRow, error) {
 	f.mu.Lock()
@@ -213,6 +275,94 @@ func TestTelegramPressBinding(t *testing.T) {
 	}
 	e.db.fail["GetTelegramPressBinding"] = errBoom
 	if _, err := e.svc.TelegramPressBinding(t.Context(), connID, "AGAAAAAAAAAA21", tgChannel, postID); !errors.Is(err,
+		errBoom) {
+		t.Errorf("a failed read = %v", err)
+	}
+}
+
+// TestReplyBinding is the binding of a press on a Reminder (C-13.FR-4): it is bound to a sent Reminder of the Alert
+// Group whose message id is the pressed post, delivered to a Mattermost Destination of the Connection, with the
+// Destination's channel, the Root message it replies to and the Route's language; another post, a reply that is not a
+// Reminder or not sent, another Alert Group, another Connection, a Telegram Destination or a deleted one is not bound.
+func TestReplyBinding(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].channel = "ch-alerts"
+	r := e.db.routes[routeID]
+	r.language = "ru"
+	e.db.routes[routeID] = r
+	root, rp, other := "root-1", "reply-1", "reply-2"
+	e.db.deliveries = append(e.db.deliveries, &fakeDelivery{id: 1, dest: destMM, group: groupID, state: "delivered",
+		messageID: &root, publishedAt: at(business0)})
+	e.db.replies = append(e.db.replies,
+		&fakeReply{id: 1, delivery: 1, group: groupID, dest: destMM, event: "reminder", state: "sent", messageID: &rp},
+		&fakeReply{id: 2, delivery: 1, group: groupID, dest: destMM, event: "alerts_added", state: "sent",
+			messageID: &other})
+	b, err := e.svc.ReplyBinding(t.Context(), connID, "AGAAAAAAAAAA21", rp)
+	if err != nil || b.Destination.ID != destMM || b.Destination.PublicID != "DSAAAAAAAAAA11" ||
+		b.Destination.Type != delivery.TypeMattermost || b.Destination.Connection == nil ||
+		*b.Destination.Connection != connID || b.ChannelID != "ch-alerts" || b.RootMessageID != root ||
+		b.Language != "ru" {
+		t.Fatalf("ReplyBinding = %+v, %v", b, err)
+	}
+	for _, c := range []struct {
+		conn        int64
+		group, post string
+	}{{connID, "AGAAAAAAAAAA21", root}, {connID, "AGAAAAAAAAAA21", other}, {connID, "AGAAAAAAAAAA99", rp},
+		{connID + 1, "AGAAAAAAAAAA21", rp}} {
+		if _, err := e.svc.ReplyBinding(t.Context(), c.conn, c.group, c.post); !errors.Is(err, delivery.ErrNotBound) {
+			t.Errorf("ReplyBinding(%d, %s, %s) = %v, want ErrNotBound", c.conn, c.group, c.post, err)
+		}
+	}
+	e.db.replies[0].state = "pending"
+	if _, err := e.svc.ReplyBinding(t.Context(), connID, "AGAAAAAAAAAA21", rp); !errors.Is(err, delivery.ErrNotBound) {
+		t.Errorf("an unsent Reminder = %v", err)
+	}
+	e.db.replies[0].state = "sent"
+	e.db.dests[destMM].deleted = true
+	if _, err := e.svc.ReplyBinding(t.Context(), connID, "AGAAAAAAAAAA21", rp); !errors.Is(err, delivery.ErrNotBound) {
+		t.Errorf("a deleted Destination = %v", err)
+	}
+	e.db.fail["GetReplyPressBinding"] = errBoom
+	if _, err := e.svc.ReplyBinding(t.Context(), connID, "AGAAAAAAAAAA21", rp); !errors.Is(err, errBoom) {
+		t.Errorf("a failed read = %v", err)
+	}
+}
+
+// TestTelegramReplyBinding is the binding of a press on a Reminder in Telegram (C-14.FR-4): it is bound to a sent
+// Reminder of the Alert Group whose message is the one pressed in the discussion group of a Telegram Destination of the
+// Connection; the channel, another message, another Alert Group, another Connection or a deleted Destination is not.
+func TestTelegramReplyBinding(t *testing.T) {
+	e := telegramEnv(t)
+	r := e.db.routes[routeID]
+	r.language = "ru"
+	e.db.routes[routeID] = r
+	post, rp := tgPost, "812"
+	e.db.deliveries = append(e.db.deliveries, &fakeDelivery{id: 1, dest: destTG, group: groupID, state: "delivered",
+		messageID: &post, publishedAt: at(business0)})
+	e.db.replies = append(e.db.replies,
+		&fakeReply{id: 1, delivery: 1, group: groupID, dest: destTG, event: "reminder", state: "sent", messageID: &rp})
+	b, err := e.svc.TelegramReplyBinding(t.Context(), connID, "AGAAAAAAAAAA21", tgGroup, 812)
+	if err != nil || b.Destination.ID != destTG || b.Destination.Type != delivery.TypeTelegram ||
+		b.ChannelID != "-1001000000002" || b.RootMessageID != "" || b.Language != "ru" {
+		t.Fatalf("TelegramReplyBinding = %+v, %v", b, err)
+	}
+	for _, c := range []struct {
+		conn, chat, post int64
+		group            string
+	}{{connID, tgChannel, 812, "AGAAAAAAAAAA21"}, {connID, tgGroup, 813, "AGAAAAAAAAAA21"},
+		{connID + 1, tgGroup, 812, "AGAAAAAAAAAA21"}, {connID, tgGroup, 812, "AGAAAAAAAAAA99"}} {
+		if _, err := e.svc.TelegramReplyBinding(t.Context(), c.conn, c.group, c.chat, c.post); !errors.Is(err,
+			delivery.ErrNotBound) {
+			t.Errorf("TelegramReplyBinding(%+v) = %v, want ErrNotBound", c, err)
+		}
+	}
+	e.db.dests[destTG].deleted = true
+	if _, err := e.svc.TelegramReplyBinding(t.Context(), connID, "AGAAAAAAAAAA21", tgGroup, 812); !errors.Is(err,
+		delivery.ErrNotBound) {
+		t.Errorf("a deleted Destination = %v", err)
+	}
+	e.db.fail["GetTelegramReplyPressBinding"] = errBoom
+	if _, err := e.svc.TelegramReplyBinding(t.Context(), connID, "AGAAAAAAAAAA21", tgGroup, 812); !errors.Is(err,
 		errBoom) {
 		t.Errorf("a failed read = %v", err)
 	}

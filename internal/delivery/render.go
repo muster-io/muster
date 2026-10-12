@@ -160,6 +160,17 @@ func encodeRoot(rd messages.Rendered) encoded {
 	return e
 }
 
+// buttonKeyOf is the id of the key that signed the buttons of a Thread reply — a Reminder's — or empty for a reply
+// without signed buttons. Thread replies are never edited, so their buttons are never signed again (C-17.FR-6).
+func buttonKeyOf(m Message) string {
+	for _, b := range m.Buttons {
+		if b.KeyID != "" {
+			return b.KeyID
+		}
+	}
+	return ""
+}
+
 // RequestState is the Desired state of an outgoing webhook in the template mode (C-15.FR-3): what its request templates
 // read of an Alert Group (Group, alert data as received) or of a Storm summary (Storm, and no Alert Group), and the
 // language of its final edit. Its hash is that of the rendered "update" request (Requests).

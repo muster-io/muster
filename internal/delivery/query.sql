@@ -534,11 +534,13 @@ FROM (SELECT l.id
 WHERE ds.org_id = @org_id AND ds.id = locked.id
 RETURNING ds.public_id;
 
--- RecordReplySent records a Thread reply the messenger accepted.
+-- RecordReplySent records a Thread reply the messenger accepted, with its message id and the key that signed its
+-- buttons (a Reminder's), for the presses on them.
 -- name: RecordReplySent :exec
 UPDATE thread_replies
-SET state = 'sent', sent_at = @now::timestamptz, message_id = sqlc.narg('message_id')::text, last_error_class = NULL,
-    last_error = NULL, lease_owner = NULL, lease_until = NULL
+SET state = 'sent', sent_at = @now::timestamptz, message_id = sqlc.narg('message_id')::text,
+    button_key_id = sqlc.narg('button_key_id')::text, last_error_class = NULL, last_error = NULL, lease_owner = NULL,
+    lease_until = NULL
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 
 -- RecordReplyRetry records an outcome of a Thread reply that is retried at @at; a Transient error is @counted against
@@ -1224,6 +1226,43 @@ WHERE d.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'te
   AND ds.telegram_channel_chat_id = @chat_id::bigint AND g.public_id = @group_public_id
   AND d.message_id = @message_id::text
 ORDER BY d.id
+LIMIT 1;
+
+-- GetReplyPressBinding reads what a press on the Reminder message_id of the Alert Group group_public_id is bound to
+-- (C-13.FR-4): a sent Reminder of that Alert Group to a Mattermost Destination of the Connection that is not deleted,
+-- with the Destination's channel, the Root message the Reminder replies to and the Route's language and Snooze
+-- durations.
+-- name: GetReplyPressBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       coalesce(ds.mattermost_channel_id, '')::text AS channel_id, coalesce(d.message_id, '')::text AS root_message_id,
+       r.language, r.snooze_durations_seconds
+FROM deliveries d
+JOIN thread_replies t ON t.org_id = d.org_id AND t.delivery_id = d.id
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE d.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'mattermost' AND ds.deleted_at IS NULL
+  AND g.public_id = @group_public_id AND t.event = 'reminder' AND t.state = 'sent'
+  AND t.message_id = @message_id::text
+ORDER BY t.id
+LIMIT 1;
+
+-- GetTelegramReplyPressBinding reads what a press on the message message_id of the chat chat_id that names the Alert
+-- Group group_public_id is bound to (C-14.FR-4): a sent Reminder of that Alert Group, the message message_id of the
+-- discussion group chat_id of a Telegram Destination of the Connection that is not deleted, with the Route's language
+-- and Snooze durations.
+-- name: GetTelegramReplyPressBinding :one
+SELECT ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name, r.language,
+       r.snooze_durations_seconds
+FROM deliveries d
+JOIN thread_replies t ON t.org_id = d.org_id AND t.delivery_id = d.id
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
+WHERE d.org_id = @org_id AND ds.connection_id = @connection_id AND ds.type = 'telegram' AND ds.deleted_at IS NULL
+  AND ds.telegram_discussion_chat_id = @chat_id::bigint AND g.public_id = @group_public_id
+  AND t.event = 'reminder' AND t.state = 'sent' AND t.message_id = @message_id::text
+ORDER BY t.id
 LIMIT 1;
 
 -- GetPostDestination reads the Mattermost Destination of the Connection, not deleted, whose channel is channel_id and
