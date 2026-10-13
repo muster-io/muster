@@ -17,6 +17,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/internalalerts"
+	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/metrics"
@@ -214,6 +215,9 @@ func (w *Worker) retired(ctx context.Context, q queries, org int64, a attempt, n
 	if err := hintGroup(ctx, q, org, a.row.AlertGroupPublicID); err != nil {
 		return false, err
 	}
+	if err := released(ctx, q, org, a.row.ActualButtonKeyID.String, ""); err != nil {
+		return false, err
+	}
 	if edited {
 		r := deliveryEvent(DeliveryFinalEdit)
 		if err := RecordEvent(ctx, q, org, Event{At: now, DestinationID: a.destination.ID, AlertGroupID: a.group(),
@@ -239,10 +243,11 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 			return false, err
 		}
 	}
+	key := buttonKeyOf(a.message)
 	_, err := q.RecordDelivered(ctx, dbgen.RecordDeliveredParams{OrgID: org, ID: a.row.ID, Owner: w.Lease.Owner,
 		Version: a.row.DesiredVersion, Hash: a.row.DesiredHash, MessageID: nonEmpty(out.MessageID),
 		MessageUrl: nonEmpty(out.MessageURL), Published: a.publication, ResponseValues: valuesJSON(out.Values),
-		Now: now})
+		ButtonKeyID: nonEmpty(key), Now: now})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -250,6 +255,9 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 		return false, fmt.Errorf("record the delivered message: %w", err)
 	}
 	if err := hintGroup(ctx, q, org, a.row.AlertGroupPublicID); err != nil {
+		return false, err
+	}
+	if err := released(ctx, q, org, a.row.ActualButtonKeyID.String, key); err != nil {
 		return false, err
 	}
 	if telegramPost {
@@ -285,6 +293,32 @@ func (w *Worker) delivered(ctx context.Context, q queries, org int64, a attempt,
 		return true, markHealthy(ctx, q, w.raiser(org), org, a.destination.ID, now, logs)
 	}
 	return true, nil
+}
+
+// buttonKeyLockClass is the first key of the transaction advisory lock of a key that signed buttons (LockButtonKey).
+const buttonKeyLockClass int32 = 0x6d75_0006
+
+// released sends the organization hint when the outcome just recorded replaced the key old, which signed the buttons
+// of the Root message before, with another one — after a rotation, the last re-signed message of the old key — and
+// no delivery of an open Alert Group that is not deleted in the messenger, retired or withheld still carries old: the
+// Keyring page then shows old as removable without a reload (C-20.FR-6). It takes the key's lock first, after the
+// delivery row, so that of two outcomes that replace its last two carriers concurrently the later one sees the other
+// committed.
+func released(ctx context.Context, q queries, org int64, old, key string) error {
+	if old == "" || old == key {
+		return nil
+	}
+	if err := q.LockButtonKey(ctx, dbgen.LockButtonKeyParams{LockClass: buttonKeyLockClass, KeyID: old}); err != nil {
+		return fmt.Errorf("lock the key %s: %w", old, err)
+	}
+	used, err := q.ButtonKeyInUse(ctx, dbgen.ButtonKeyInUseParams{OrgID: org, KeyID: old})
+	if err != nil {
+		return fmt.Errorf("look for the buttons of key %s: %w", old, err)
+	}
+	if used {
+		return nil
+	}
+	return q.Notify(ctx, db.Hint{OrgID: org, Type: live.HintOrganization})
 }
 
 // markPublished marks, once the transaction that recorded a Publication of the Alert Group groupID at at committed,

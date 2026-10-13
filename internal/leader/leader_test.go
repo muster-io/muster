@@ -325,7 +325,7 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	want := []string{"partition_maintenance", "alive_mark", "replica_pruning", "short_lived_pruning",
 		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges",
 		"alert_group_retention", "delivery_queue", "thread_reply_retention", "webhook_event_retention",
-		"telegram_polling", "oidc_secret_expiry", "outgoing_heartbeat"}
+		"telegram_polling", "oidc_secret_expiry", "outgoing_heartbeat", "rerender_after_rotation"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
@@ -363,6 +363,47 @@ func TestTasksAreTheClosedList(t *testing.T) {
 	// Without a retention of Alert Groups the task does nothing.
 	if tasks[9].Every != MaintenanceInterval || tasks[9].Wake != nil || tasks[9].Run(t.Context()) != nil {
 		t.Errorf("alert group retention without a retention")
+	}
+	// Without a re-render or a keyring notification the task does nothing and nothing wakes it.
+	if last := tasks[len(tasks)-1]; last.Every != MaintenanceInterval || last.Wake != nil || last.Run(t.Context()) != nil {
+		t.Errorf("re-render after a rotation without a re-render")
+	}
+}
+
+// TestRerenderAfterRotationTask: a key activation wakes the re-render after a rotation, which runs in every
+// Organization, goes on past one that fails and returns its error.
+func TestRerenderAfterRotationTask(t *testing.T) {
+	failed := errors.New("locked")
+	var orgs []int64
+	changed := &Wakes{}
+	tasks := Tasks(Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		RerenderAfterRotation: func(_ context.Context, org int64) error {
+			orgs = append(orgs, org)
+			if org == 1 {
+				return failed
+			}
+			return nil
+		},
+		KeyringChanged: changed,
+	})()
+	task := tasks[len(tasks)-1]
+	if task.Name != "rerender_after_rotation" || task.Every != MaintenanceInterval || task.Wake == nil {
+		t.Fatalf("task %s every %v", task.Name, task.Every)
+	}
+	changed.Wake()
+	select {
+	case <-task.Wake:
+	default:
+		t.Fatal("a key activation did not wake the re-render")
+	}
+	if err := task.Run(t.Context()); !errors.Is(err, failed) || !slices.Equal(orgs, []int64{1, 2}) {
+		t.Errorf("organizations %v, err %v", orgs, err)
+	}
+	broken := Tasks(Work{Organizations: func(context.Context) ([]int64, error) { return nil, failed },
+		RerenderAfterRotation: func(context.Context, int64) error { return nil }})()
+	if err := broken[len(broken)-1].Run(t.Context()); !errors.Is(err, failed) {
+		t.Errorf("listing the organizations failed with %v", err)
 	}
 }
 
@@ -603,7 +644,7 @@ func TestSelfObservationTasks(t *testing.T) {
 	}
 	orgsErr := errors.New("down")
 	work.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
-	for _, task := range Tasks(work)()[14:] {
+	for _, task := range Tasks(work)()[14:16] {
 		if err := task.Run(t.Context()); !errors.Is(err, orgsErr) {
 			t.Errorf("%s: organizations = %v", task.Name, err)
 		}

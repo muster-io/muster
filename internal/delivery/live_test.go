@@ -86,6 +86,8 @@ type live struct {
 	// renderer renders messages as the runtime does (C-12); mentions resolves the Mentions of Loud calls.
 	renderer *messages.Renderer
 	mentions *mentions.Service
+	// keys is the Keyring the buttons are signed with: k active, and n held for a rotation (rotate).
+	keys *keyring.Keyring
 }
 
 func setupLive(t *testing.T, s dbtest.Server) *live {
@@ -151,8 +153,9 @@ func setupLive(t *testing.T, s dbtest.Server) *live {
 			return routing.RestampAlerts(ctx, tx, org.ID, ids, routeID)
 		}})
 	// Messages are rendered as the runtime renders them: the sandbox, the buttons signed by an opened Keyring, and the
-	// templates of Routes dry-run on save.
-	keys, err := keyring.New([][]byte{bytes.Repeat([]byte{'k'}, keyring.KeySize)}, false)
+	// templates of Routes dry-run on save. Its second key is the one a rotation activates.
+	keys, err := keyring.New([][]byte{bytes.Repeat([]byte{'k'}, keyring.KeySize),
+		bytes.Repeat([]byte{'n'}, keyring.KeySize)}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,6 +166,7 @@ func setupLive(t *testing.T, s dbtest.Server) *live {
 	if err := keys.Open(ctx, logger, state); err != nil {
 		t.Fatal(err)
 	}
+	l.keys = keys
 	l.mentions = mentions.New(org.ID, d.Pool)
 	l.renderer = messages.New(messages.Config{OrgID: org.ID, DB: d.Pool, PublicURL: "http://localhost:8080",
 		Business: l.business, Real: l.real, Keys: keys, Log: logger, Names: l.mentions})
@@ -257,6 +261,19 @@ func (l *live) worker(owner string) *delivery.Worker {
 		Adapters:      delivery.Adapters{delivery.TypeMattermost: l.rec}, Log: l.logger,
 		PublicURL: "http://localhost:8080", Renderer: delivery.MessageRenderer{Renderer: l.renderer},
 		Mentions: l.mentions}
+}
+
+// rotate activates the second key of the Keyring, as muster secrets rotate-key does, and switches the Keyring to it as
+// a replica does without a restart; it returns the key's id.
+func (l *live) rotate(t *testing.T) string {
+	t.Helper()
+	id := keyring.KeyID(bytes.Repeat([]byte{'n'}, keyring.KeySize))
+	l.exec(t, `UPDATE keyring_state SET active_key_id = $1, canary_key_id = $1`, id)
+	if err := keyring.NewRecorder(l.keys, keyring.NewStore(l.d.Pool), clock.Real{}, l.logger, "test", "",
+		"dev").Switch(t.Context()); err != nil || l.keys.ActiveKeyID() != id {
+		t.Fatalf("switch to %s: %v", id, err)
+	}
+	return id
 }
 
 // attach puts Destinations on the Route, and only them.

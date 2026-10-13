@@ -22,6 +22,7 @@ import {
 } from '@faker-js/faker';
 
 import {
+  KeyringKeyState,
   ProxyType,
   SeverityLevel,
   TotpPolicy
@@ -42,7 +43,7 @@ export const getGetOutboundPolicyResponseMock = (overrideResponse: Partial<Extra
 
 export const getUpdateOutboundPolicyResponseMock = (overrideResponse: Partial<Extract<OutboundPolicy, object>> = {}): OutboundPolicy => ({policy: faker.helpers.arrayElement(['standard','strict'] as const), allowed: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), denied: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), always_blocked: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), etag: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
 
-export const getGetKeyringResponseMock = (overrideResponse: Partial<Extract<Keyring, object>> = {}): Keyring => ({keys: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({id: faker.string.alpha({length: {min: 10, max: 20}}), active: faker.datatype.boolean(), held_by: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), missing_on: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), needed: faker.datatype.boolean(), removable: faker.datatype.boolean()})), ...overrideResponse})
+export const getGetKeyringResponseMock = (overrideResponse: Partial<Extract<Keyring, object>> = {}): Keyring => ({keys: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({id: faker.string.alpha({length: {min: 10, max: 20}}), active: faker.datatype.boolean(), held_by: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), missing_on: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), needed: faker.datatype.boolean(), removable: faker.datatype.boolean(), state: faker.helpers.arrayElement(Object.values(KeyringKeyState))})), ...overrideResponse})
 
 export const getListSeverityValuesResponseMock = (overrideResponse: Partial<Extract<SeverityValueList, object>> = {}): SeverityValueList => ({items: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({value: faker.string.alpha({length: {min: 10, max: 20}}), count: faker.number.int(), level: faker.helpers.arrayElement(Object.values(SeverityLevel)), mapped: faker.datatype.boolean()})), window_days: faker.number.int(), ...overrideResponse})
 

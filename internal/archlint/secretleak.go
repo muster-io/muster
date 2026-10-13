@@ -37,6 +37,7 @@ import (
 	"github.com/muster-io/muster/internal/auth"
 	authdb "github.com/muster-io/muster/internal/auth/dbgen"
 	"github.com/muster-io/muster/internal/buttons"
+	"github.com/muster-io/muster/internal/cli"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/connections"
 	cdb "github.com/muster-io/muster/internal/connections/dbgen"
@@ -110,6 +111,7 @@ var registry = []Probe{
 	{Name: "outgoing_webhooks", Run: probeWebhooks},
 	{Name: "account_links", Run: probeAccountLinks},
 	{Name: "outgoing_heartbeat", Run: probeOutgoingHeartbeat},
+	{Name: "key_rotation", Run: probeKeyRotation},
 }
 
 // masterKey is a master key whose material holds secret, padded to keyring.KeySize, in base64 as MUSTER_SECRET_KEYS
@@ -1801,6 +1803,10 @@ func CheckProbe(ctx context.Context, p Probe) []Diagnostic {
 		{"the returned error", strings.Join(errorTexts(err, 0), "\n")},
 	}
 	var diags []Diagnostic
+	if incomplete, ok := errors.AsType[*probeIncomplete](err); ok {
+		diags = append(diags, Diagnostic{Rule: 5, Path: p.Name, Message: "the probe did not run its code path: " +
+			incomplete.what})
+	}
 	for i, secret := range secrets {
 		forms := leakForms(secret)
 		for _, sink := range sinks {
@@ -1817,6 +1823,13 @@ func CheckProbe(ctx context.Context, p Probe) []Diagnostic {
 	}
 	return diags
 }
+
+// probeIncomplete is the error of a probe whose code path did not run as the probe needs it to, for example an
+// activation that should have committed and did not; CheckProbe reports it, so a probe cannot pass by running nothing.
+// what never carries a secret.
+type probeIncomplete struct{ what string }
+
+func (e *probeIncomplete) Error() string { return "probe incomplete: " + e.what }
 
 type leakForm struct {
 	encoding string // empty for the secret itself
@@ -2685,4 +2698,173 @@ type probeHeartbeatStore struct{ *probeOrgSettings }
 
 func (s probeHeartbeatStore) InTx(_ context.Context, f func(outgoingheartbeat.Queries) error) error {
 	return f(s)
+}
+
+// probeKeyRotation runs muster secrets rotate-key with the secrets as master keys and as encrypted field values: an
+// activation of a key the process does not hold and one refused while a live replica lacks the key, both through the
+// command, one rolled back by a value that does not decrypt — altered, and under a key nobody holds — and, through the
+// command, the activation that re-encrypts the values; then the command against an address where nothing listens,
+// with the secrets as the master keys and the database password. Neither the log, the command's output, the errors
+// nor the Audit log may carry them, and the final activation must commit once.
+func probeKeyRotation(ctx context.Context, secrets []string, log io.Writer) error {
+	var logged bytes.Buffer
+	log = io.MultiWriter(log, &logged)
+	logger := logging.New(log, logging.LevelInfo)
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey(secrets[0]) + "," + masterKey(secrets[1])),
+		Source: keyring.SecretKeysVar}, false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, time.Unix(0, 0))
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	ids := k.KeyIDs()
+	const field = "connections.bot_token"
+	values := make([]keyring.EncryptedValue, 0, len(secrets)+2)
+	for i, secret := range secrets {
+		ct, id, err := k.Encrypt(field, []byte(secret))
+		if err != nil {
+			return err
+		}
+		values = append(values, keyring.EncryptedValue{Row: keyring.RowKey{ID: int64(i)}, Ciphertext: ct, KeyID: id})
+	}
+	altered := bytes.Clone(values[0].Ciphertext)
+	altered[len(altered)-1] ^= 1
+	store := &probeRotationStore{active: ids[0], values: slices.Clone(values),
+		replicas: []dbgen.Replica{{ReplicaID: "probe-a", KeyIds: ids}, {ReplicaID: "probe-b", KeyIds: ids[:1]}}}
+	rotation := keyring.Rotation{Store: store, Keys: k, Audit: audit.NewWriter(logger, clock.Real{}), Log: logger,
+		Business: clock.Real{}, Real: clock.Real{}}
+	var rotated keyring.Rotated
+	var rotateErrs []error
+	activate := func(ctx context.Context, _ runtime.Options, r runtime.KeyRotation) (keyring.Rotated, error) {
+		out, err := rotation.Activate(ctx, r.KeyID, r.Actor)
+		rotated = out
+		rotateErrs = append(rotateErrs, err)
+		return out, err
+	}
+	command := func(id string) int {
+		return cli.RotateKeyCommand(ctx, []string{"--activate", id, "--actor", "ops"}, runtime.Options{Stdout: log},
+			activate, log)
+	}
+	var errs []error
+	notHeld := keyring.KeyID(bytes.Repeat([]byte(secrets[2]), keyring.KeySize)[:keyring.KeySize])
+	if code := command(notHeld); code != 1 || !errors.Is(rotateErrs[len(rotateErrs)-1], keyring.ErrKeyNotHeld) {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("the activation of a key not held exited %d", code)})
+	}
+	if code := command(ids[1]); code != 1 { // refused: probe-b lacks the key
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("the refused activation exited %d", code)})
+	} else if _, lacking := errors.AsType[*keyring.ReplicasLackKeyError](rotateErrs[len(rotateErrs)-1]); !lacking {
+		errs = append(errs, &probeIncomplete{"the activation was not refused for the replica that lacks the key"})
+	}
+	store.replicas = store.replicas[:1]
+	store.values = append(slices.Clone(values), keyring.EncryptedValue{Row: keyring.RowKey{ID: 100},
+		Ciphertext: altered, KeyID: ids[0]})
+	_, err = rotation.Activate(ctx, ids[1], "ops") // rolled back: the altered value
+	errs = append(errs, err)
+	store.values = append(slices.Clone(values), keyring.EncryptedValue{Row: keyring.RowKey{ID: 101},
+		Ciphertext: values[1].Ciphertext, KeyID: "k-unknown"})
+	_, err = rotation.Activate(ctx, ids[1], "ops") // rolled back: a key nobody holds
+	errs = append(errs, err)
+	if store.active != ids[0] || len(store.audit) != 0 {
+		errs = append(errs, &probeIncomplete{"a failed activation was not rolled back"})
+	}
+	store.values = slices.Clone(values)
+	if code := command(ids[1]); code != 0 || store.active != ids[1] || len(store.audit) != 1 ||
+		rotated.Reencrypted == 0 || !strings.Contains(logged.String(), `"event":"key_activated"`) {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("the activation exited %d with %d audit entries",
+			code, len(store.audit))})
+	}
+	for _, a := range store.audit {
+		errs = append(errs, fmt.Errorf("audit %s %s", a.Diff, a.Details))
+	}
+
+	unreachable := runtime.Options{Environ: []string{"MUSTER_PUBLIC_URL=http://localhost:8080",
+		"MUSTER_SECRET_KEYS=" + masterKey(secrets[1]) + "," + masterKey(secrets[2]),
+		"MUSTER_DATABASE_HOST=127.0.0.1", "MUSTER_DATABASE_PORT=1", "MUSTER_DATABASE_NAME=muster",
+		"MUSTER_DATABASE_USER=muster", "MUSTER_DATABASE_PASSWORD=" + secrets[0], "MUSTER_DATABASE_SSLMODE=disable"},
+		Stdout: log}
+	_, err = runtime.RotateKey(ctx, unreachable, runtime.KeyRotation{KeyID: ids[1], Actor: "ops"})
+	if code := cli.RotateKeyCommand(ctx, []string{"--activate", ids[1], "--actor", "ops"}, unreachable,
+		runtime.RotateKey, log); code != 1 {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("the command against no database exited %d", code)})
+	}
+	return errors.Join(append(append(errs, rotateErrs...), err)...)
+}
+
+// probeRotationStore is the database of an activation in memory for probeKeyRotation: one connections.bot_token
+// field, the live replicas and the Audit log. A transaction whose function fails rolls back the active key, the values
+// and the Audit log.
+type probeRotationStore struct {
+	active   string
+	values   []keyring.EncryptedValue
+	replicas []dbgen.Replica
+	audit    []adb.InsertAuditEntryParams
+}
+
+func (s *probeRotationStore) InTx(_ context.Context, f func(keyring.RotationQueries) error) error {
+	active, values, entries := s.active, slices.Clone(s.values), len(s.audit)
+	if err := f(s); err != nil {
+		s.active, s.values, s.audit = active, values, s.audit[:entries]
+		return err
+	}
+	return nil
+}
+
+func (s *probeRotationStore) LockKeyringState(context.Context) (string, error) { return s.active, nil }
+
+func (s *probeRotationStore) ActivateKey(_ context.Context, arg dbgen.ActivateKeyParams) (int64, error) {
+	s.active = arg.KeyID
+	return 1, nil
+}
+
+func (s *probeRotationStore) ListLiveReplicas(context.Context, time.Time) ([]dbgen.Replica, error) {
+	return s.replicas, nil
+}
+
+func (s *probeRotationStore) ListOrganizationIDs(context.Context) ([]int64, error) {
+	return []int64{1}, nil
+}
+
+func (s *probeRotationStore) CountOpenDeliveriesSignedByOtherKey(context.Context,
+	dbgen.CountOpenDeliveriesSignedByOtherKeyParams) (int64, error) {
+	return 0, nil
+}
+
+func (s *probeRotationStore) NotifyKeyring(context.Context, dbgen.NotifyKeyringParams) error {
+	return nil
+}
+
+func (s *probeRotationStore) Notify(context.Context, db.Hint) error { return nil }
+
+func (s *probeRotationStore) InsertAuditEntry(_ context.Context, arg adb.InsertAuditEntryParams) error {
+	s.audit = append(s.audit, arg)
+	return nil
+}
+
+func (s *probeRotationStore) EncryptedValues(_ context.Context, field string, _ int64, keyID string) (
+	[]keyring.EncryptedValue, error) {
+	if field != "connections.bot_token" {
+		return nil, nil
+	}
+	var out []keyring.EncryptedValue
+	for _, v := range s.values {
+		if v.KeyID != keyID {
+			out = append(out, v)
+		}
+	}
+	return out, nil
+}
+
+func (s *probeRotationStore) Reencrypt(_ context.Context, _ string, _ int64, row keyring.RowKey, ct []byte, keyID,
+	_ string) (int64, error) {
+	for i := range s.values {
+		if s.values[i].Row.ID == row.ID {
+			s.values[i].Ciphertext, s.values[i].KeyID = ct, keyID
+		}
+	}
+	return 1, nil
 }

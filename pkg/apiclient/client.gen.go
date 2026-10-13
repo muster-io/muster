@@ -796,6 +796,30 @@ func (e IntegrationWarningKind) Valid() bool {
 	}
 }
 
+// Defines values for KeyringKeyState.
+const (
+	KeyringKeyStateActive       KeyringKeyState = "active"
+	KeyringKeyStateNeeded       KeyringKeyState = "needed"
+	KeyringKeyStateNotActiveYet KeyringKeyState = "not_active_yet"
+	KeyringKeyStateRemovable    KeyringKeyState = "removable"
+)
+
+// Valid indicates whether the value is a known member of the KeyringKeyState enum.
+func (e KeyringKeyState) Valid() bool {
+	switch e {
+	case KeyringKeyStateActive:
+		return true
+	case KeyringKeyStateNeeded:
+		return true
+	case KeyringKeyStateNotActiveYet:
+		return true
+	case KeyringKeyStateRemovable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Language.
 const (
 	LanguageEn Language = "en"
@@ -3559,9 +3583,15 @@ type KeyringKey struct {
 	// Needed A stored Secret or an open Root message still depends on the key.
 	Needed bool `json:"needed"`
 
-	// Removable The key is no longer used and can be removed from `MUSTER_SECRET_KEYS`.
+	// Removable The key is no longer used and can be removed from `MUSTER_SECRET_KEYS`. Only a key that was active before can be removable; a key that was never active is `not_active_yet`, to be activated, never removed.
 	Removable bool `json:"removable"`
+
+	// State `active`; else `needed` when a stored Secret or an open Root message still depends on the key; else `removable` when it was active before; else `not_active_yet`: a key that was never active, such as one added for a rotation.
+	State KeyringKeyState `json:"state"`
 }
+
+// KeyringKeyState `active`; else `needed` when a stored Secret or an open Root message still depends on the key; else `removable` when it was active before; else `not_active_yet`: a key that was never active, such as one added for a rotation.
+type KeyringKeyState string
 
 // Labels Label names and values.
 type Labels map[string]string

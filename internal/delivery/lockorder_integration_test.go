@@ -19,6 +19,8 @@ import (
 	deliverydb "github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/routing"
 	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
 )
@@ -303,5 +305,349 @@ func TestMembershipAgainstStormCalmLockOrder(t *testing.T) {
 		if ended != 1 || stuck != 0 || joined == 0 {
 			t.Errorf("storm ended %d, deliveries held by an ended storm %d, joined deliveries %d", ended, stuck, joined)
 		}
+	})
+}
+
+// gateRenderer holds the first render through it — of the Alert Group only when only is set — after reporting the
+// backend of its transaction, until proceed is closed: the re-render after a rotation holding its Alert Group, the
+// Route's membership lock and the deliveries.
+type gateRenderer struct {
+	delivery.Renderer
+	once     sync.Once
+	only     int64
+	pid      int32
+	entered  chan struct{}
+	proceed  chan struct{}
+	pidError error
+}
+
+func (g *gateRenderer) Roots(ctx context.Context, db messages.DBTX, v delivery.GroupView, markups []messages.Markup) (
+	delivery.Roots, error) {
+	if g.only != 0 && v.ID != g.only {
+		return g.Renderer.Roots(ctx, db, v, markups)
+	}
+	g.once.Do(func() {
+		g.pidError = db.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&g.pid)
+		close(g.entered)
+		<-g.proceed
+	})
+	return g.Renderer.Roots(ctx, db, v, markups)
+}
+
+// gateMentions holds the first resolution of Mentions, inside the worker's preparation of a Publication, which holds
+// its delivery and updated it twice, until proceed is closed.
+type gateMentions struct {
+	delivery.Mentioner
+	once    sync.Once
+	pid     int32
+	entered chan struct{}
+	proceed chan struct{}
+}
+
+func (g *gateMentions) Resolve(ctx context.Context, db mentions.DBTX, org int64, r mentions.Request) (
+	[]mentions.Target, error) {
+	g.once.Do(func() {
+		_ = db.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&g.pid)
+		close(g.entered)
+		<-g.proceed
+	})
+	return g.Mentioner.Resolve(ctx, db, org, r)
+}
+
+// waitFor waits until c is closed.
+func waitFor(t *testing.T, c <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-c:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s never happened", what)
+	}
+}
+
+// TestRerenderAgainstDispatcherLockOrder covers the lock order of the re-render after a rotation (D307, S-071): it
+// locks the Alert Group first, SKIP LOCKED, then the Route's membership lock, then the deliveries. Against an
+// acknowledgement of the same Alert Group that holds it, it skips the Alert Group without waiting, and the
+// acknowledgement signs with the active key; holding the Alert Group itself, the acknowledgement waits for it; against
+// the worker preparing a Publication or an edit of its delivery, which holds the delivery and through a second update
+// takes FOR KEY SHARE on the Alert Group, it waits for the delivery. Nothing ends in a deadlock.
+func TestRerenderAgainstDispatcherLockOrder(t *testing.T) {
+	setup := func(t *testing.T, s dbtest.Server, publish bool) (*live, string, string) {
+		t.Helper()
+		l := setupLive(t, s)
+		l.fresh(t, 1000, 1)
+		l.fire(t, "lockrerender", "LockRerender/a")
+		if publish {
+			l.round(t, l.a)
+		}
+		return l, l.group(t, "LockRerender"), l.rotate(t)
+	}
+	keyOf := func(t *testing.T, l *live, gid string) string {
+		t.Helper()
+		var key string
+		if err := l.d.Pool.QueryRow(t.Context(), `SELECT d.desired_button_key_id FROM deliveries d
+			JOIN alert_groups g ON g.id = d.alert_group_id WHERE g.public_id = $1`, gid).Scan(&key); err != nil {
+			t.Fatal(err)
+		}
+		return key
+	}
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		t.Run("a command holds the alert group", func(t *testing.T) {
+			l, gid, active := setup(t, s, true)
+			ctx := t.Context()
+			locked, proceed := make(chan struct{}), make(chan struct{})
+			var held int32
+			l.groups.SetRerender(func(ctx context.Context, tx groups.DBTX, r groups.Rendering) error {
+				err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&held)
+				close(locked)
+				<-proceed
+				if err != nil {
+					return err
+				}
+				return l.svc.Enqueue(ctx, tx, r)
+			})
+			var wg sync.WaitGroup
+			var ackErr, rerenderErr error
+			var n int
+			wg.Go(func() { _, ackErr = l.groups.Acknowledge(ctx, l.alice, gid) })
+			waitFor(t, locked, "the acknowledgement's Enqueue")
+			done := make(chan struct{})
+			wg.Go(func() {
+				defer close(done)
+				n, rerenderErr = l.svc.RerenderOpen(ctx, active)
+			})
+			blocked := l.blockedOrDone(t, done, held)
+			close(proceed)
+			wg.Wait()
+			l.groups.SetRerender(l.svc.Enqueue)
+			if blocked || n != 0 || ackErr != nil || rerenderErr != nil {
+				t.Errorf("the re-render waited %v, re-rendered %d, %v; the acknowledgement: %v", blocked, n,
+					rerenderErr, ackErr)
+			}
+			if key := keyOf(t, l, gid); key != active {
+				t.Errorf("the acknowledgement signed with %s", key)
+			}
+			if n, err := l.svc.RerenderOpen(ctx, active); err != nil || n != 0 {
+				t.Errorf("the next run re-rendered %d, %v", n, err)
+			}
+			l.noDeadlock(t)
+		})
+		t.Run("the re-render holds the alert group", func(t *testing.T) {
+			l, gid, active := setup(t, s, true)
+			ctx := t.Context()
+			gate := &gateRenderer{Renderer: delivery.MessageRenderer{Renderer: l.renderer}, entered: make(chan struct{}),
+				proceed: make(chan struct{})}
+			svc := delivery.New(delivery.Config{OrgID: l.orgID, Store: delivery.NewStore(l.d.Pool, l.d.Pool),
+				Business: l.business, Log: l.logger, Renderer: gate})
+			var wg sync.WaitGroup
+			var ackErr, rerenderErr, roundErr error
+			var n int
+			wg.Go(func() { n, rerenderErr = svc.RerenderOpen(ctx, active) })
+			waitFor(t, gate.entered, "the re-render's render")
+			acked, worked := make(chan struct{}), make(chan struct{})
+			wg.Go(func() {
+				defer close(acked)
+				_, ackErr = l.groups.Acknowledge(ctx, l.alice, gid)
+			})
+			blocked := l.blockedOrDone(t, acked, gate.pid)
+			wg.Go(func() {
+				defer close(worked)
+				_, roundErr = l.a.Round(ctx)
+			})
+			waitFor(t, worked, "the worker's round") // the claim skips the locked delivery
+			close(gate.proceed)
+			wg.Wait()
+			if !blocked || gate.pidError != nil || n != 1 || ackErr != nil || rerenderErr != nil || roundErr != nil {
+				t.Errorf("the acknowledgement waited %v; re-rendered %d, %v; acknowledgement %v; round %v", blocked, n,
+					rerenderErr, ackErr, roundErr)
+			}
+			if key := keyOf(t, l, gid); key != active {
+				t.Errorf("signed with %s", key)
+			}
+			l.noDeadlock(t)
+		})
+		t.Run("the worker prepares a publication", func(t *testing.T) {
+			l, gid, active := setup(t, s, false)
+			ctx := t.Context()
+			gate := &gateMentions{Mentioner: l.mentions, entered: make(chan struct{}), proceed: make(chan struct{})}
+			l.a.Mentions = gate
+			var wg sync.WaitGroup
+			var rerenderErr, roundErr error
+			var n int
+			wg.Go(func() { _, roundErr = l.a.Round(ctx) })
+			waitFor(t, gate.entered, "the worker's preparation")
+			done := make(chan struct{})
+			wg.Go(func() {
+				defer close(done)
+				n, rerenderErr = l.svc.RerenderOpen(ctx, active)
+			})
+			blocked := l.blockedOrDone(t, done, gate.pid)
+			close(gate.proceed)
+			wg.Wait()
+			if !blocked || n != 1 || rerenderErr != nil || roundErr != nil {
+				t.Errorf("the re-render waited %v; re-rendered %d, %v; round %v", blocked, n, rerenderErr, roundErr)
+			}
+			l.round(t, l.a)
+			if key := keyOf(t, l, gid); key != active || l.count(t, `SELECT count(*) FROM deliveries
+				WHERE actual_button_key_id = $1 AND state = 'delivered'`, active) != 1 {
+				t.Errorf("signed with %s\n%s", key, l.log)
+			}
+			l.noDeadlock(t)
+		})
+		t.Run("an edit is prepared", func(t *testing.T) {
+			l, gid, active := setup(t, s, true)
+			ctx := t.Context()
+			tx, err := l.d.Pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+			var held int32
+			var id int64
+			if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&held); err != nil {
+				t.Fatal(err)
+			}
+			// As prepare does: the delivery locked, then updated twice, which locks its Alert Group FOR KEY SHARE.
+			if err := tx.QueryRow(ctx, `SELECT d.id FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+				WHERE g.public_id = $1 FOR NO KEY UPDATE OF d`, gid).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if _, err := tx.Exec(ctx, `UPDATE deliveries SET updated_at = updated_at WHERE id = $1`, id); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var n int
+			var rerenderErr error
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				n, rerenderErr = l.svc.RerenderOpen(ctx, active)
+			}()
+			blocked := l.blockedOrDone(t, done, held)
+			if err := tx.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			<-done
+			if !blocked || n != 1 || rerenderErr != nil {
+				t.Errorf("the re-render waited %v; re-rendered %d, %v", blocked, n, rerenderErr)
+			}
+			l.noDeadlock(t)
+		})
+	})
+}
+
+// TestRerenderAgainstStormCalmLockOrder: the re-render after a rotation and the calm check of a Storm that holds an
+// Alert Group in two Destinations both lock that Alert Group's held deliveries by Destination — the calm check by
+// Alert Group, then by Destination (ReleaseHeldOpen) — so whichever holds them first, the other waits and nothing ends
+// in a deadlock: the Storm ends, nothing stays held, and the released deliveries carry the active key's buttons.
+func TestRerenderAgainstStormCalmLockOrder(t *testing.T) {
+	setup := func(t *testing.T, s dbtest.Server) (*live, int64, int64, string) {
+		t.Helper()
+		l := setupLive(t, s)
+		ctx := t.Context()
+		l.fresh(t, 1000, 1)
+		routeID, _ := l.newRoute(t, "lockcalm", 2, "DSAAAAAAAAAAA1", "DSAAAAAAAAAAA2")
+		for _, a := range []alert{{name: "LC0/a", team: "lockcalm"}, {name: "LC1/a", team: "lockcalm"},
+			{name: "LC2/a", team: "lockcalm"}, {name: "LC3/a", team: "lockcalm"}} {
+			l.fireAlerts(t, "lc-"+a.name, a)
+			l.business.Advance(time.Second)
+		}
+		var stormID, group int64
+		if err := l.d.Pool.QueryRow(ctx, `SELECT id FROM storms WHERE route_id = $1 AND ended_at IS NULL`,
+			routeID).Scan(&stormID); err != nil {
+			t.Fatalf("no storm: %v", err)
+		}
+		if err := l.d.Pool.QueryRow(ctx, `SELECT alert_group_id FROM deliveries WHERE held_by_storm_id = $1
+			AND desired_button_key_id IS NOT NULL GROUP BY alert_group_id HAVING count(*) = 2
+			ORDER BY alert_group_id LIMIT 1`, stormID).Scan(&group); err != nil {
+			t.Fatalf("the storm holds no alert group in two destinations: %v", err)
+		}
+		active := l.rotate(t)
+		l.business.Advance(delivery.StormWindow + delivery.StormCalmPeriod + time.Minute)
+		return l, stormID, group, active
+	}
+	calm := func(ctx context.Context, l *live, stormID int64) error {
+		tx, err := l.d.Pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+		if _, err := l.svc.CheckStormCalm(ctx, tx, stormID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+	check := func(t *testing.T, l *live, stormID, group int64, active string) {
+		t.Helper()
+		ended := l.count(t, `SELECT count(*) FROM storms WHERE id = $1 AND ended_at IS NOT NULL`, stormID)
+		stuck := l.count(t, `SELECT count(*) FROM deliveries WHERE held_by_storm_id IS NOT NULL`)
+		resigned := l.count(t, `SELECT count(*) FROM deliveries WHERE alert_group_id = $1
+			AND desired_button_key_id = $2`, group, active)
+		if ended != 1 || stuck != 0 || resigned != 2 {
+			t.Errorf("storm ended %d, deliveries still held %d, re-signed deliveries of the alert group %d\n%s",
+				ended, stuck, resigned, l.log)
+		}
+		if n, err := l.svc.RerenderOpen(t.Context(), active); err != nil || n != 0 {
+			t.Errorf("the next run re-rendered %d, %v", n, err)
+		}
+		l.noDeadlock(t)
+	}
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		t.Run("the re-render holds the deliveries", func(t *testing.T) {
+			l, stormID, group, active := setup(t, s)
+			ctx := t.Context()
+			gate := &gateRenderer{Renderer: delivery.MessageRenderer{Renderer: l.renderer}, only: group,
+				entered: make(chan struct{}), proceed: make(chan struct{})}
+			svc := delivery.New(delivery.Config{OrgID: l.orgID, Store: delivery.NewStore(l.d.Pool, l.d.Pool),
+				Business: l.business, Log: l.logger, Renderer: gate})
+			var wg sync.WaitGroup
+			var rerenderErr, calmErr error
+			wg.Go(func() { _, rerenderErr = svc.RerenderOpen(ctx, active) })
+			waitFor(t, gate.entered, "the re-render's render of the held alert group")
+			calmed := make(chan struct{})
+			wg.Go(func() {
+				defer close(calmed)
+				calmErr = calm(ctx, l, stormID)
+			})
+			blocked := l.blockedOrDone(t, calmed, gate.pid)
+			close(gate.proceed)
+			wg.Wait()
+			if !blocked || gate.pidError != nil || rerenderErr != nil || calmErr != nil {
+				t.Errorf("the calm check waited %v; the re-render: %v; the calm check: %v", blocked, rerenderErr,
+					calmErr)
+			}
+			check(t, l, stormID, group, active)
+		})
+		t.Run("the calm check holds the deliveries", func(t *testing.T) {
+			l, stormID, group, active := setup(t, s)
+			ctx := t.Context()
+			tx, err := l.d.Pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+			var held int32
+			if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&held); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := l.svc.CheckStormCalm(ctx, tx, stormID); err != nil {
+				t.Fatal(err)
+			}
+			var rerenderErr error
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				_, rerenderErr = l.svc.RerenderOpen(ctx, active)
+			}()
+			blocked := l.blockedOrDone(t, done, held)
+			if err := tx.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			<-done
+			if !blocked || rerenderErr != nil {
+				t.Errorf("the re-render waited %v; %v", blocked, rerenderErr)
+			}
+			check(t, l, stormID, group, active)
+		})
 	})
 }

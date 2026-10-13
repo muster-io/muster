@@ -48,7 +48,13 @@ const (
 // first Publication is marked through the dispatcher only after the outcome committed (markPublished), never inside it.
 // The preparation of a Telegram reply that waits for its copy is the one exception: it holds the reply, then takes the
 // post's copy lock and the delivery, the order of the learning of a copy and of the record of a Publication
-// (copies.go).
+// (copies.go). The re-render after a key rotation (rerender.go) takes the dispatcher's order — the Alert Group, SKIP
+// LOCKED, then the Route's membership lock shared, then its deliveries by Destination — and never a Storm. A key's
+// advisory lock (LockButtonKey) is taken only by the outcome that replaces the key of a Root message's buttons
+// (released), after its delivery; after it, that outcome still updates the delivery's Thread (publishedThread), records
+// delivery events (RecordEvent) and may lock its Destination's row to end the Broken state (markHealthy). No
+// transaction locks a Destination before a key's lock, so none waits for the key while holding what the outcome
+// waits for.
 //
 // PostgreSQL takes locks of its own that this order does not show: an UPDATE of a row version the same transaction made
 // — a second UPDATE of a row in one transaction, or an UPDATE after its INSERT — checks every foreign key of the row

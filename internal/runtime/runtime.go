@@ -106,6 +106,9 @@ type database interface {
 	Close()
 	WithMigrationLock(ctx context.Context, f func(context.Context) error) error
 	KeyringStore() keyring.Store
+	// KeyringStatus reads the Keyring status and KeyringRotation runs `muster secrets rotate-key`.
+	KeyringStatus() keyring.StatusQueries
+	KeyringRotation() keyring.RotationStore
 	OrganizationStore() organization.Store
 	UsersStore() users.Store
 	AdminStore() users.AdminStore
@@ -170,6 +173,10 @@ type pgDatabase struct {
 }
 
 func (d pgDatabase) KeyringStore() keyring.Store { return keyring.NewStore(d.Pool) }
+
+func (d pgDatabase) KeyringStatus() keyring.StatusQueries { return keyring.NewStatusQueries(d.Pool) }
+
+func (d pgDatabase) KeyringRotation() keyring.RotationStore { return keyring.NewRotationStore(d.Pool) }
 
 func (d pgDatabase) OrganizationStore() organization.Store { return organization.NewStore(d.Pool) }
 
@@ -418,6 +425,61 @@ func ReplayIngest(ctx context.Context, opts Options, r IngestReplay) (ingest.Rep
 		Actor: r.Actor})
 }
 
+// KeyRotation is what `muster secrets rotate-key` asks for: the id of the key to activate and the --actor name.
+type KeyRotation struct {
+	KeyID string
+	Actor string
+}
+
+// RotateKey is `muster secrets rotate-key` (C-20.FR-7, C-02.FR-15): settings, logger, the master keys — refused as the
+// server refuses them — connections and checks and the schema version check, then, under the migration lock, the
+// key canary check and the activation of the key (keyring.Rotation). The refusals — a key this process does not hold
+// (keyring.ErrKeyNotHeld) and live replicas that lack it (*keyring.ReplicasLackKeyError) — are returned as they are.
+// The command renders nothing: the Leader of the running replicas re-renders the open Root messages.
+func RotateKey(ctx context.Context, opts Options, r KeyRotation) (keyring.Rotated, error) {
+	cfg, log, err := setup(ctx, opts)
+	if err != nil {
+		return keyring.Rotated{}, err
+	}
+	k, err := loadKeyring(ctx, cfg, opts.Development)
+	if err != nil {
+		return keyring.Rotated{}, failed(ctx, log, err)
+	}
+	d, err := connect(ctx, opts, cfg, log)
+	if err != nil {
+		return keyring.Rotated{}, err
+	}
+	defer d.Close()
+	if err := d.CheckSchema(ctx, log); err != nil {
+		return keyring.Rotated{}, failed(ctx, log, err)
+	}
+	clocks, err := commandClocks(ctx, opts, d, log)
+	if err != nil {
+		return keyring.Rotated{}, failed(ctx, log, err)
+	}
+	var out keyring.Rotated
+	err = d.WithMigrationLock(ctx, func(ctx context.Context) error {
+		row, err := d.KeyringStore().GetKeyringState(ctx)
+		if err != nil {
+			return fmt.Errorf("read the key canary: %w", err)
+		}
+		if err := k.Open(ctx, log, keyring.State{ActiveKeyID: row.ActiveKeyID, CanaryKeyID: row.CanaryKeyID,
+			Canary: row.CanaryCiphertext}); err != nil {
+			return err
+		}
+		out, err = keyring.Rotation{Store: d.KeyringRotation(), Keys: k, Audit: audit.NewWriter(log, clocks.Business),
+			Log: log, Business: clocks.Business, Real: clocks.Real}.Activate(ctx, r.KeyID, r.Actor)
+		return err
+	})
+	if _, lacking := errors.AsType[*keyring.ReplicasLackKeyError](err); lacking || errors.Is(err, keyring.ErrKeyNotHeld) {
+		return keyring.Rotated{}, err
+	}
+	if err != nil {
+		return keyring.Rotated{}, failed(ctx, log, err)
+	}
+	return out, nil
+}
+
 // commandClocks are the clocks of a subcommand: under `muster dev` the business clock runs on the development clock
 // that the replicas of the database share, so that what the command writes agrees with them.
 func commandClocks(ctx context.Context, opts Options, d database, log *logging.Logger) (clock.Clocks, error) {
@@ -501,6 +563,8 @@ type process struct {
 	// Leader's Heartbeat check and Stale scan when it moves.
 	devClock   *devmode.Clock
 	clockMoved *leader.Wakes
+	// keyringChanged wakes the Leader's re-render after a rotation when a key was activated.
+	keyringChanged *leader.Wakes
 }
 
 func setup(ctx context.Context, opts Options) (config.Config, *logging.Logger, error) {
@@ -563,7 +627,7 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 		return nil, failed(ctx, log, err)
 	}
 	clocks, business := clock.System()
-	p := &process{opts: opts, cfg: cfg, log: log, db: d, clocks: clocks, keyring: k}
+	p := &process{opts: opts, cfg: cfg, log: log, db: d, clocks: clocks, keyring: k, keyringChanged: &leader.Wakes{}}
 	p.partitions = partitions.New(d.PartitionSession, clocks.Business, log)
 	p.worker = &ingest.Worker{Log: log, Real: clocks.Real}
 	p.timers = &timers.Worker{Log: log}
@@ -906,6 +970,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		AuditLog:     audit.NewReader(orgID, p.db.AuditReader()),
 		TOTP:         factors,
 		Organization: settings,
+		Keyring:      keyring.NewStatusReader(p.db.KeyringStatus(), p.keyring, p.clocks.Real),
 		Notices:      p.notices,
 		Live:         p.hub,
 		OIDC:         signIn,
@@ -1003,7 +1068,9 @@ func (p *process) newKeeper() *leader.Keeper {
 					}
 					return organization.NewOutboundPolicies(p.db.OrganizationStore(), orgID, p.clocks.Real)
 				}, Log: p.log, Real: p.clocks.Real}}).Send,
-		ClockMoved: p.clockMoved,
+		ClockMoved:            p.clockMoved,
+		KeyringChanged:        p.keyringChanged,
+		RerenderAfterRotation: p.rerenderAfterRotation,
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
 			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},
@@ -1030,6 +1097,41 @@ func (p *process) deliveryQueue(ctx context.Context, orgID int64) error {
 		return nil
 	}
 	return errors.Join(p.delivery.ExportQueue(ctx), p.delivery.ExportBroken(ctx), p.delivery.ExportStorms(ctx))
+}
+
+// rerenderAfterRotation is the Leader task rerender_after_rotation for the Organization orgID: this replica switches
+// to the active key first, so that its renderer signs with it, then the open Root messages signed by another key are
+// re-rendered (C-20.FR-7). A replica that does not hold the active key is woken to stop.
+func (p *process) rerenderAfterRotation(ctx context.Context, orgID int64) error {
+	if orgID != p.orgID {
+		return nil
+	}
+	switchKey := func(ctx context.Context) error {
+		err := p.replica.Switch(ctx)
+		if err != nil {
+			p.replica.Wake()
+		}
+		return err
+	}
+	return rerenderAfterSwitch(ctx, switchKey, p.keyring.ActiveKeyID, p.delivery.RerenderOpen)
+}
+
+// rerenderAfterSwitch switches to the active key, then re-renders with it. When the renderer signed with another key,
+// because a newer activation committed between the switch and the render, it switches again and retries once rather
+// than leave the open Root messages for the next maintenance interval.
+func rerenderAfterSwitch(ctx context.Context, switchKey func(context.Context) error, active func() string,
+	rerender func(context.Context, string) (int, error),
+) error {
+	var err error
+	for range 2 {
+		if err = switchKey(ctx); err != nil {
+			return err
+		}
+		if _, err = rerender(ctx, active()); !errors.Is(err, delivery.ErrButtonKeyNotActive) {
+			return err
+		}
+	}
+	return err
 }
 
 // prunePostCopies deletes the buffered copies of Telegram posts of the Organization orgID, for short-lived pruning.
@@ -1096,6 +1198,12 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	p.listener.Listen(mattermost.TestPressChannel, p.testPresses.Arrived)
 	// A change of the outbound address policy, maybe on another replica, applies here at once (C-20.FR-3).
 	p.listener.Listen(organization.OutboundPolicyChannel, func(string) { p.policies.Invalidate() })
+	// A key activated by `muster secrets rotate-key` switches this replica's key and wakes the Leader's re-render
+	// (C-20.FR-7).
+	p.listener.Listen(keyring.Channel, func(string) {
+		p.replica.Wake()
+		p.keyringChanged.Wake()
+	})
 	if p.devClock != nil {
 		p.listener.Listen(devmode.ClockChannel, func(string) {
 			p.loadDevClock(ctx)
@@ -1123,6 +1231,8 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 				p.routes.InfoChanged()
 				p.poller.Wake()
 				p.loadDevClock(ctx)
+				p.replica.Wake()
+				p.keyringChanged.Wake()
 			}
 			p.worker.Wake()
 			p.timers.Wake()

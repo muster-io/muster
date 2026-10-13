@@ -17,6 +17,7 @@
  * During 0.x breaking changes are allowed; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
  * OpenAPI spec version: 0.1.0
  */
+import type { KeyringKeyState } from './keyringKeyState';
 
 export interface KeyringKey {
   /** Key id derived from the key material. */
@@ -28,6 +29,7 @@ export interface KeyringKey {
   missing_on: string[];
   /** A stored Secret or an open Root message still depends on the key. */
   needed: boolean;
-  /** The key is no longer used and can be removed from `MUSTER_SECRET_KEYS`. */
+  /** The key is no longer used and can be removed from `MUSTER_SECRET_KEYS`. Only a key that was active before can be removable; a key that was never active is `not_active_yet`, to be activated, never removed. */
   removable: boolean;
+  state: KeyringKeyState;
 }

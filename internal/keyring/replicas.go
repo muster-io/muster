@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -79,12 +80,28 @@ type Recorder struct {
 	started  time.Time
 	// refreshed is the real time of the last record written, kept in memory.
 	refreshed time.Time
+	// wake makes Run refresh at once, such as after a key activation.
+	wake chan struct{}
+	// switchMu makes each Switch read the active key and switch to it as one step, so that switches apply in the order
+	// of their reads: a refresh that read the old key before an activation committed cannot switch back after a Switch
+	// that read the new one.
+	switchMu sync.Mutex
 }
 
 // NewRecorder prepares the record of the replica id; Start writes it.
 func NewRecorder(k *Keyring, s Store, realClock clock.Clock, log *logging.Logger, id, hostname, version string,
 ) *Recorder {
-	return &Recorder{keyring: k, store: s, real: realClock, log: log, id: id, hostname: hostname, version: version}
+	return &Recorder{keyring: k, store: s, real: realClock, log: log, id: id, hostname: hostname, version: version,
+		wake: make(chan struct{}, 1)}
+}
+
+// Wake makes Run refresh the record and switch keys at once: a key was activated, maybe on another replica, or the
+// LISTEN that would have told is back. Wakes that come meanwhile are merged.
+func (r *Recorder) Wake() {
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
 }
 
 // ID is the replica id.
@@ -118,12 +135,20 @@ func (r *Recorder) record(ctx context.Context, now time.Time) error {
 	return nil
 }
 
-// Refresh refreshes the record, then compares the active key with the keys held: a key that is not held logs
-// active_key_not_held and returns ErrKeyMismatch; another held key becomes the Keyring's active key.
+// Refresh refreshes the record, then switches to the active key (Switch).
 func (r *Recorder) Refresh(ctx context.Context) error {
 	if err := r.record(ctx, r.real.Now()); err != nil {
 		return err
 	}
+	return r.Switch(ctx)
+}
+
+// Switch compares the active key with the keys held: a key that is not held logs active_key_not_held and returns
+// ErrKeyMismatch; another held key becomes the Keyring's active key without a restart, and key_switched is logged
+// once per switch, whoever calls it.
+func (r *Recorder) Switch(ctx context.Context) error {
+	r.switchMu.Lock()
+	defer r.switchMu.Unlock()
 	active, err := r.store.GetActiveKeyID(ctx)
 	if err != nil {
 		return fmt.Errorf("read the active key: %w", err)
@@ -133,17 +158,22 @@ func (r *Recorder) Refresh(ctx context.Context) error {
 			logging.F("key_ids", r.keyring.KeyIDs()), logging.F("error", ErrKeyMismatch.Error()))
 		return ErrKeyMismatch
 	}
-	return r.keyring.setActive(active)
+	if r.keyring.switchTo(active) {
+		r.log.Log(ctx, logging.KeySwitched, logging.F("active", active))
+	}
+	return nil
 }
 
-// Run refreshes the record at every tick until ctx ends, when it returns nil, or until the active key is one this
-// replica does not hold, when it returns ErrKeyMismatch. A failed refresh is logged and retried at the next tick.
+// Run refreshes the record at every tick and whenever woken until ctx ends, when it returns nil, or until the active
+// key is one this replica does not hold, when it returns ErrKeyMismatch. A failed refresh is logged and retried at the
+// next tick.
 func (r *Recorder) Run(ctx context.Context, ticks <-chan time.Time) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticks:
+		case <-r.wake:
 		}
 		// A hung connection must not stall the watch beyond one refresh period.
 		refreshCtx, cancel := context.WithTimeout(ctx, KeyRecordRefresh)

@@ -242,7 +242,8 @@ export const GetKeyringResponse = zod.object({
   "held_by": zod.array(zod.string()).describe('Live replicas that hold the key.'),
   "missing_on": zod.array(zod.string()).describe('Live replicas that do not hold the key; activation is refused while this is not empty.'),
   "needed": zod.boolean().describe('A stored Secret or an open Root message still depends on the key.'),
-  "removable": zod.boolean().describe('The key is no longer used and can be removed from `MUSTER_SECRET_KEYS`.')
+  "removable": zod.boolean().describe('The key is no longer used and can be removed from `MUSTER_SECRET_KEYS`. Only a key that was active before can be removable; a key that was never active is `not_active_yet`, to be activated, never removed.'),
+  "state": zod.enum(['active', 'not_active_yet', 'needed', 'removable']).describe('`active`; else `needed` when a stored Secret or an open Root message still depends on the key; else `removable` when it was active before; else `not_active_yet`: a key that was never active, such as one added for a rotation.')
 }))
 })
 

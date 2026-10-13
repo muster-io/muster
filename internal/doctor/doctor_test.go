@@ -93,6 +93,9 @@ func newFakeDB(ssl bool) *fakeDB {
 		"clock_timestamp":            {values: [][]any{{time.Now()}}},
 		"FROM organizations":         {values: [][]any{{int64(1)}}},
 		"FROM encrypted_values":      {values: [][]any{}},
+		"FROM replicas":              {values: [][]any{}},
+		"FROM deliveries":            {values: [][]any{}},
+		"FROM audit_log":             {values: [][]any{}},
 		"ListConnections":            {values: [][]any{}},
 		"ListMattermostDestinations": {values: [][]any{}},
 		"ListTelegramDestinations":   {values: [][]any{}},
@@ -284,14 +287,43 @@ func TestOlderKeysInUse(t *testing.T) {
 		{pgtype.Text{String: goneID, Valid: true}, int64(1)},
 		{pgtype.Text{}, int64(9)},
 	}}
+	d.answers["FROM deliveries"] = &rows{values: [][]any{{oldID, int64(3)}}}
 	out, ok := run(t, d, environ(key+","+old))
 	ids := []string{oldID, goneID}
 	if oldID > goneID {
 		ids = []string{goneID, oldID}
 	}
-	parts := map[string]string{oldID: oldID + " (2 encrypted values)",
-		goneID: goneID + " (1 encrypted values, not in MUSTER_SECRET_KEYS)"}
+	parts := map[string]string{oldID: oldID + " (2 encrypted values, 3 open Root messages)",
+		goneID: goneID + " (1 encrypted values, 0 open Root messages, not in MUSTER_SECRET_KEYS)"}
 	want := "WARN keyring: active key " + id + "; older keys still in use: " + parts[ids[0]] + ", " + parts[ids[1]] + "\n"
+	if !ok || !strings.Contains(out, want) {
+		t.Errorf("ok %v, output:\n%s\nwant %s", ok, out, want)
+	}
+}
+
+// TestKeysNotActiveYetAndRemovable is C-20.FR-6 in muster doctor: a key that was never active is not active yet; one
+// that was active before, by a keyring.key_activated Audit entry, and that nothing needs any more can be removed; a
+// key needed meanwhile turns the line into a warning that still names the others.
+func TestKeysNotActiveYetAndRemovable(t *testing.T) {
+	key, id := keys('a')
+	old, oldID := keys('b')
+	added, addedID := keys('c')
+	d := newFakeDB(true)
+	d.answers["FROM keyring_state"] = &rows{values: [][]any{canary(t, key)}}
+	out, ok := run(t, d, environ(key+","+added))
+	if want := "OK   keyring: key " + addedID + " is not active yet\n"; !ok || !strings.Contains(out, want) {
+		t.Errorf("ok %v, output:\n%s\nwant %s", ok, out, want)
+	}
+	d.answers["FROM audit_log"] = &rows{values: [][]any{{oldID, id}}}
+	out, ok = run(t, d, environ(key+","+old))
+	if want := "OK   keyring: key " + oldID + " is no longer used and can be removed from MUSTER_SECRET_KEYS\n"; !ok ||
+		!strings.Contains(out, want) {
+		t.Errorf("ok %v, output:\n%s\nwant %s", ok, out, want)
+	}
+	d.answers["FROM deliveries"] = &rows{values: [][]any{{oldID, int64(1)}}}
+	out, ok = run(t, d, environ(key+","+old+","+added))
+	want := "WARN keyring: active key " + id + "; older keys still in use: " + oldID +
+		" (0 encrypted values, 1 open Root messages); key " + addedID + " is not active yet\n"
 	if !ok || !strings.Contains(out, want) {
 		t.Errorf("ok %v, output:\n%s\nwant %s", ok, out, want)
 	}

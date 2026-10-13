@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
@@ -230,5 +232,75 @@ func TestIntegrationDoctor(t *testing.T) {
 				t.Errorf("a write on a doctor connection: %v", err)
 			}
 		}
+	})
+}
+
+// TestIntegrationDoctorKeyStates is C-20.FR-6 in muster doctor on PostgreSQL: a key added for a rotation is not
+// active yet; once activated by muster secrets rotate-key, the old key, which nothing needs any more, can be removed.
+func TestIntegrationDoctorKeyStates(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		u := s.NewDatabase(t)
+		conn := config.Database{URL: logging.Secret(u), SSLMode: "disable"}
+		d, err := db.Open(ctx, conn, conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer d.Close()
+		log := logging.New(&bytes.Buffer{}, logging.LevelInfo)
+		if err := d.Migrate(ctx, log); err != nil {
+			t.Fatal(err)
+		}
+		now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+		if err := organization.Ensure(ctx, organization.NewStore(d.Pool), log, now); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Pool.Exec(ctx, `CREATE TABLE audit_log_p202610 PARTITION OF audit_log
+			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`); err != nil {
+			t.Fatal(err)
+		}
+		oldKey, oldID := keys('a')
+		newKey, newID := keys('b')
+		both := oldKey + "," + newKey
+		k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(both), Source: keyring.SecretKeysVar}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st, err := k.Establish(ctx, keyring.NewStore(d.Pool), now)
+		if err != nil || k.Open(ctx, log, st) != nil {
+			t.Fatal(err)
+		}
+		dsn, err := url.Parse(u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q := dsn.Query()
+		q.Set("sslmode", "disable")
+		dsn.RawQuery = q.Encode()
+		env := []string{"MUSTER_DATABASE_URL=" + dsn.String(), "MUSTER_PUBLIC_URL=http://localhost:8080",
+			"MUSTER_SECRET_KEYS=" + both}
+		doctor := func() string {
+			t.Helper()
+			var out bytes.Buffer
+			if _, err := Run(ctx, Options{Environ: env, Out: &out}); err != nil {
+				t.Fatal(err)
+			}
+			return out.String()
+		}
+		if out := doctor(); !strings.Contains(out, "OK   keyring: key "+newID+" is not active yet\n") {
+			t.Errorf("before the rotation:\n%s", out)
+		}
+		rotation := keyring.Rotation{Store: keyring.NewRotationStore(d.Pool), Keys: k,
+			Audit: audit.NewWriter(log, clock.NewManual(now)), Log: log, Business: clock.NewManual(now),
+			Real: clock.Real{}}
+		if _, err := rotation.Activate(ctx, newID, "ops"); err != nil {
+			t.Fatal(err)
+		}
+		out := doctor()
+		if !strings.Contains(out, "OK   keyring: key "+oldID+
+			" is no longer used and can be removed from MUSTER_SECRET_KEYS\n") {
+			t.Errorf("after the rotation:\n%s", out)
+		}
+		t.Logf("muster doctor after the rotation:\n%s", out)
 	})
 }

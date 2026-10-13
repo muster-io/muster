@@ -224,6 +224,29 @@ func (q *Queries) BreakDestination(ctx context.Context, arg BreakDestinationPara
 	return i, err
 }
 
+const buttonKeyInUse = `-- name: ButtonKeyInUse :one
+SELECT EXISTS (SELECT 1
+               FROM deliveries d
+               JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+               WHERE d.org_id = $1 AND d.actual_button_key_id = $2::text
+                 AND d.state NOT IN ('deleted_in_messenger', 'retired', 'withheld')
+                 AND g.status <> 'resolved')::boolean AS in_use
+`
+
+type ButtonKeyInUseParams struct {
+	OrgID int64
+	KeyID string
+}
+
+// ButtonKeyInUse reports whether a delivery of an open Alert Group that is not deleted in the messenger, retired or
+// withheld — the deliveries the re-render never re-signs — still carries buttons the key @key_id signed.
+func (q *Queries) ButtonKeyInUse(ctx context.Context, arg ButtonKeyInUseParams) (bool, error) {
+	row := q.db.QueryRow(ctx, buttonKeyInUse, arg.OrgID, arg.KeyID)
+	var in_use bool
+	err := row.Scan(&in_use)
+	return in_use, err
+}
+
 const claimBrokenProbes = `-- name: ClaimBrokenProbes :many
 WITH due AS MATERIALIZED (
     SELECT x.id
@@ -1070,7 +1093,7 @@ const getLeasedDelivery = `-- name: GetLeasedDelivery :one
 SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id, d.desired_version,
        d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
        d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
-       d.published_at, d.response_values, d.thread_opened, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       d.published_at, d.response_values, d.thread_opened, d.actual_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
        ds.telegram_discussion_chat_id,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
@@ -1110,6 +1133,7 @@ type GetLeasedDeliveryRow struct {
 	PublishedAt              pgtype.Timestamptz
 	ResponseValues           []byte
 	ThreadOpened             bool
+	ActualButtonKeyID        pgtype.Text
 	DestinationID            int64
 	DestinationPublicID      string
 	DestinationName          string
@@ -1160,6 +1184,7 @@ func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryPa
 		&i.PublishedAt,
 		&i.ResponseValues,
 		&i.ThreadOpened,
+		&i.ActualButtonKeyID,
 		&i.DestinationID,
 		&i.DestinationPublicID,
 		&i.DestinationName,
@@ -2318,6 +2343,55 @@ func (q *Queries) ListPendingGroups(ctx context.Context, arg ListPendingGroupsPa
 	return items, nil
 }
 
+const listRerenderGroups = `-- name: ListRerenderGroups :many
+
+SELECT DISTINCT g.id
+FROM deliveries d
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+WHERE d.org_id = $1 AND g.status <> 'resolved' AND g.id > $2::bigint
+  AND d.desired_button_key_id IS NOT NULL AND d.desired_button_key_id <> $3::text AND NOT d.desired_retire
+  AND (d.state IN ('pending', 'delivered') OR (d.state = 'not_delivered' AND d.published_at IS NOT NULL))
+ORDER BY g.id
+LIMIT $4
+`
+
+type ListRerenderGroupsParams struct {
+	OrgID       int64
+	After       int64
+	ActiveKeyID string
+	Lim         int32
+}
+
+// The re-render after a key rotation (C-20.FR-7, rerender.go): the deliveries of open Alert Groups whose Desired state
+// has buttons a key other than the active one signed and that have a Root message to edit or still to publish —
+// pending or delivered, or Not delivered with a Root message — held by a Storm or not; withheld, retired and deleted
+// deliveries and final edits are left alone. Outgoing webhooks carry no buttons and are never selected.
+// ListRerenderGroups lists, in id order after @after, the open Alert Groups with such a delivery.
+func (q *Queries) ListRerenderGroups(ctx context.Context, arg ListRerenderGroupsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listRerenderGroups,
+		arg.OrgID,
+		arg.After,
+		arg.ActiveKeyID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRouteDestinations = `-- name: ListRouteDestinations :many
 
 
@@ -2500,6 +2574,22 @@ func (q *Queries) LockActiveStorm(ctx context.Context, arg LockActiveStormParams
 	return i, err
 }
 
+const lockButtonKey = `-- name: LockButtonKey :exec
+SELECT pg_advisory_xact_lock($1::int, hashtext($2::text))
+`
+
+type LockButtonKeyParams struct {
+	LockClass int32
+	KeyID     string
+}
+
+// LockButtonKey takes, until the transaction ends, the lock of the key @key_id as the outcome of an edit replaces it on a
+// Root message, so that of two outcomes that replace the last two carriers of a key the later one sees the other.
+func (q *Queries) LockButtonKey(ctx context.Context, arg LockButtonKeyParams) error {
+	_, err := q.db.Exec(ctx, lockButtonKey, arg.LockClass, arg.KeyID)
+	return err
+}
+
 const lockDeliveryThread = `-- name: LockDeliveryThread :one
 SELECT thread_state, thread_anchor_id, thread_chain_last_id, message_id
 FROM deliveries
@@ -2579,6 +2669,105 @@ type LockReplyDeliveryParams struct {
 func (q *Queries) LockReplyDelivery(ctx context.Context, arg LockReplyDeliveryParams) error {
 	_, err := q.db.Exec(ctx, lockReplyDelivery, arg.OrgID, arg.ID)
 	return err
+}
+
+const lockRerenderDeliveries = `-- name: LockRerenderDeliveries :many
+SELECT d.id, d.desired_hash, d.desired_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id,
+       ds.name AS destination_name, ds.type AS destination_type, ds.connection_id
+FROM deliveries d
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+WHERE d.org_id = $1 AND d.alert_group_id = $2::bigint
+  AND d.desired_button_key_id IS NOT NULL AND d.desired_button_key_id <> $3::text AND NOT d.desired_retire
+  AND (d.state IN ('pending', 'delivered') OR (d.state = 'not_delivered' AND d.published_at IS NOT NULL))
+ORDER BY d.destination_id
+FOR NO KEY UPDATE OF d
+`
+
+type LockRerenderDeliveriesParams struct {
+	OrgID        int64
+	AlertGroupID int64
+	ActiveKeyID  string
+}
+
+type LockRerenderDeliveriesRow struct {
+	ID                  int64
+	DesiredHash         []byte
+	DesiredButtonKeyID  pgtype.Text
+	DestinationID       int64
+	DestinationPublicID string
+	DestinationName     string
+	DestinationType     string
+	ConnectionID        pgtype.Int8
+}
+
+// LockRerenderDeliveries locks the deliveries of the Alert Group to re-render, after its Route's membership lock, in
+// the order Enqueue locks them (by Destination), with their Destination.
+func (q *Queries) LockRerenderDeliveries(ctx context.Context, arg LockRerenderDeliveriesParams) ([]LockRerenderDeliveriesRow, error) {
+	rows, err := q.db.Query(ctx, lockRerenderDeliveries, arg.OrgID, arg.AlertGroupID, arg.ActiveKeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LockRerenderDeliveriesRow{}
+	for rows.Next() {
+		var i LockRerenderDeliveriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DesiredHash,
+			&i.DesiredButtonKeyID,
+			&i.DestinationID,
+			&i.DestinationPublicID,
+			&i.DestinationName,
+			&i.DestinationType,
+			&i.ConnectionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockRerenderGroup = `-- name: LockRerenderGroup :one
+SELECT id, public_id, number, title, status, urgent, route_id
+FROM alert_groups
+WHERE org_id = $1 AND id = $2 AND status <> 'resolved'
+FOR NO KEY UPDATE SKIP LOCKED
+`
+
+type LockRerenderGroupParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type LockRerenderGroupRow struct {
+	ID       int64
+	PublicID string
+	Number   int64
+	Title    string
+	Status   string
+	Urgent   bool
+	RouteID  int64
+}
+
+// LockRerenderGroup locks an open Alert Group as the dispatcher does, FOR NO KEY UPDATE, and reads what its Root
+// message is rendered from; no row when it resolved meanwhile or a Command holds it, which re-renders it itself.
+func (q *Queries) LockRerenderGroup(ctx context.Context, arg LockRerenderGroupParams) (LockRerenderGroupRow, error) {
+	row := q.db.QueryRow(ctx, lockRerenderGroup, arg.OrgID, arg.ID)
+	var i LockRerenderGroupRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Number,
+		&i.Title,
+		&i.Status,
+		&i.Urgent,
+		&i.RouteID,
+	)
+	return i, err
 }
 
 const lockStorm = `-- name: LockStorm :one
@@ -2904,16 +3093,17 @@ const recordDelivered = `-- name: RecordDelivered :one
 UPDATE deliveries d
 SET actual_version      = $1::bigint,
     actual_hash         = $2,
-    message_id          = coalesce($3::text, d.message_id),
-    message_url         = coalesce($4::text, d.message_url),
-    published_at        = CASE WHEN $5::boolean THEN coalesce(d.published_at, $6::timestamptz) ELSE d.published_at END,
-    publications        = d.publications + CASE WHEN $5::boolean THEN 1 ELSE 0 END,
+    actual_button_key_id = $3::text,
+    message_id          = coalesce($4::text, d.message_id),
+    message_url         = coalesce($5::text, d.message_url),
+    published_at        = CASE WHEN $6::boolean THEN coalesce(d.published_at, $7::timestamptz) ELSE d.published_at END,
+    publications        = d.publications + CASE WHEN $6::boolean THEN 1 ELSE 0 END,
     response_values     = CASE
-                              WHEN $5::boolean THEN coalesce($7::jsonb, '{}'::jsonb)
+                              WHEN $6::boolean THEN coalesce($8::jsonb, '{}'::jsonb)
                               ELSE d.response_values
                           END,
-    thread_opened       = d.thread_opened AND NOT $5::boolean,
-    last_delivered_at   = $6::timestamptz,
+    thread_opened       = d.thread_opened AND NOT $6::boolean,
+    last_delivered_at   = $7::timestamptz,
     state               = CASE
                               WHEN f.ended AND NOT f.raced THEN d.state
                               WHEN f.raced AND d.storm_id IS NOT NULL THEN 'retired'
@@ -2923,18 +3113,18 @@ SET actual_version      = $1::bigint,
                           END,
     desired_retire      = d.desired_retire OR (f.raced AND d.storm_id IS NULL AND f.left_destination),
     desired_received_at = NULL,
-    next_attempt_at     = $6::timestamptz,
+    next_attempt_at     = $7::timestamptz,
     attempts            = 0,
     first_failed_at     = NULL,
     last_error_class    = NULL,
     last_error          = NULL,
     lease_owner         = NULL,
     lease_until         = NULL,
-    updated_at          = $6::timestamptz
+    updated_at          = $7::timestamptz
 FROM (SELECT x.id,
              x.state IN ('withheld', 'retired', 'deleted_in_messenger') AS ended,
              (x.state IN ('withheld', 'retired', 'deleted_in_messenger') AND x.published_at IS NULL
-              AND $5::boolean) AS raced,
+              AND $6::boolean) AS raced,
              (EXISTS (SELECT 1
                       FROM destinations ds
                       WHERE ds.org_id = x.org_id AND ds.id = x.destination_id AND ds.deleted_at IS NOT NULL)
@@ -2944,14 +3134,15 @@ FROM (SELECT x.id,
                              WHERE g.org_id = x.org_id AND g.id = x.alert_group_id
                                AND rd.destination_id = x.destination_id)) AS left_destination
       FROM deliveries x
-      WHERE x.org_id = $8 AND x.id = $10) AS f
-WHERE d.org_id = $8 AND d.id = f.id AND d.lease_owner = $9::text
+      WHERE x.org_id = $9 AND x.id = $11) AS f
+WHERE d.org_id = $9 AND d.id = f.id AND d.lease_owner = $10::text
 RETURNING d.state
 `
 
 type RecordDeliveredParams struct {
 	Version        int64
 	Hash           []byte
+	ButtonKeyID    pgtype.Text
 	MessageID      pgtype.Text
 	MessageUrl     pgtype.Text
 	Published      bool
@@ -2973,11 +3164,13 @@ type RecordDeliveredParams struct {
 // actual message recorded, unless the call was a Publication that created a message on a row that had none (raced):
 // a Storm summary is then retired with it; an Alert Group whose Destination was deleted or left its Route meanwhile
 // gets the final edit of that message (pending, desired_retire); any other row follows the rule above, so that the
-// message that now exists is kept current.
+// message that now exists is kept current. The key that signed the buttons of the message sent becomes the actual one
+// (@button_key_id, none for a message without buttons).
 func (q *Queries) RecordDelivered(ctx context.Context, arg RecordDeliveredParams) (string, error) {
 	row := q.db.QueryRow(ctx, recordDelivered,
 		arg.Version,
 		arg.Hash,
+		arg.ButtonKeyID,
 		arg.MessageID,
 		arg.MessageUrl,
 		arg.Published,
@@ -3199,6 +3392,7 @@ func (q *Queries) RecordReplySent(ctx context.Context, arg RecordReplySentParams
 const recordRetired = `-- name: RecordRetired :one
 UPDATE deliveries
 SET state = CASE WHEN state IN ('withheld', 'deleted_in_messenger') THEN state ELSE 'retired' END, desired_retire = false, attempts = 0, first_failed_at = NULL, last_error_class = NULL,
+    actual_button_key_id = NULL,
     last_error = NULL, last_delivered_at = $1::timestamptz, lease_owner = NULL, lease_until = NULL,
     updated_at = $1::timestamptz
 WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text
@@ -3214,7 +3408,8 @@ type RecordRetiredParams struct {
 
 // RecordRetired records the final edit of a delivery, or a Root message found deleted at it: the row is retired,
 // keeps the link to its last message and receives nothing more; one withheld or deleted in the messenger while the
-// call was in flight stays so. No row when the lease went to another replica.
+// call was in flight stays so. The final edit carries no buttons, so no key is actual any more. No row when the lease
+// went to another replica.
 func (q *Queries) RecordRetired(ctx context.Context, arg RecordRetiredParams) (int64, error) {
 	row := q.db.QueryRow(ctx, recordRetired,
 		arg.Now,
@@ -3478,9 +3673,13 @@ func (q *Queries) ReleaseHeld(ctx context.Context, arg ReleaseHeldParams) error 
 const releaseHeldOpen = `-- name: ReleaseHeldOpen :exec
 UPDATE deliveries d
 SET held_by_storm_id = NULL, publication_loud = $1::boolean, next_attempt_at = $2, updated_at = $2
-FROM alert_groups g
-WHERE d.org_id = $3 AND d.held_by_storm_id = $4::bigint AND g.org_id = $3
-  AND g.id = d.alert_group_id AND g.status <> 'resolved'
+FROM (SELECT x.id
+      FROM deliveries x
+      JOIN alert_groups g ON g.org_id = x.org_id AND g.id = x.alert_group_id
+      WHERE x.org_id = $3 AND x.held_by_storm_id = $4::bigint AND g.status <> 'resolved'
+      ORDER BY x.alert_group_id, x.destination_id
+      FOR NO KEY UPDATE OF x) AS held
+WHERE d.org_id = $3 AND d.id = held.id
 `
 
 type ReleaseHeldOpenParams struct {
@@ -3490,7 +3689,8 @@ type ReleaseHeldOpenParams struct {
 	StormID int64
 }
 
-// ReleaseHeldOpen publishes the open Alert Groups a Storm held, Loud as @loud, within the limiters (C-11.FR-6).
+// ReleaseHeldOpen publishes the open Alert Groups a Storm held, Loud as @loud, within the limiters (C-11.FR-6). It locks
+// the held deliveries by Alert Group, then by Destination, the order of Enqueue and of the re-render after a rotation.
 func (q *Queries) ReleaseHeldOpen(ctx context.Context, arg ReleaseHeldOpenParams) error {
 	_, err := q.db.Exec(ctx, releaseHeldOpen,
 		arg.Loud,
@@ -3729,6 +3929,7 @@ func (q *Queries) ResetDestinationBudgets(ctx context.Context, arg ResetDestinat
 const resetForRepublish = `-- name: ResetForRepublish :execrows
 UPDATE deliveries
 SET message_id               = NULL,
+    actual_button_key_id     = NULL,
     message_url              = NULL,
     published_at             = NULL,
     response_values          = '{}',
@@ -4547,10 +4748,15 @@ func (q *Queries) WipeDestinationSecrets(ctx context.Context, arg WipeDestinatio
 const withholdHeldResolved = `-- name: WithholdHeldResolved :many
 UPDATE deliveries d
 SET held_by_storm_id = NULL, state = 'withheld', updated_at = $1
-FROM alert_groups g
-WHERE d.org_id = $2 AND d.held_by_storm_id = $3::bigint AND d.state = 'pending' AND g.org_id = $2
-  AND g.id = d.alert_group_id AND g.status = 'resolved'
-RETURNING g.public_id
+FROM (SELECT x.id, g.public_id
+      FROM deliveries x
+      JOIN alert_groups g ON g.org_id = x.org_id AND g.id = x.alert_group_id
+      WHERE x.org_id = $2 AND x.held_by_storm_id = $3::bigint AND x.state = 'pending'
+        AND g.status = 'resolved'
+      ORDER BY x.alert_group_id, x.destination_id
+      FOR NO KEY UPDATE OF x) AS held
+WHERE d.org_id = $2 AND d.id = held.id
+RETURNING held.public_id
 `
 
 type WithholdHeldResolvedParams struct {
@@ -4560,7 +4766,8 @@ type WithholdHeldResolvedParams struct {
 }
 
 // WithholdHeldResolved withholds the Alert Groups a Storm held that resolved meanwhile: never published. It returns
-// their public_ids, once per delivery, for their alert-group hints.
+// their public_ids, once per delivery, for their alert-group hints. It locks the held deliveries in the order of
+// ReleaseHeldOpen.
 func (q *Queries) WithholdHeldResolved(ctx context.Context, arg WithholdHeldResolvedParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, withholdHeldResolved, arg.Now, arg.OrgID, arg.StormID)
 	if err != nil {
