@@ -3336,7 +3336,7 @@ SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, g
 FROM alert_groups
 WHERE org_id = $1 AND id = ANY($2::bigint[])
 ORDER BY id
-FOR UPDATE
+FOR NO KEY UPDATE
 `
 
 type LockGroupsParams struct {
@@ -3402,7 +3402,11 @@ type LockGroupsRow struct {
 	OwnerAnsweredAt                pgtype.Timestamptz
 }
 
-// LockGroups locks Alert Groups for a change, in id order, so that two transactions never wait for each other.
+// LockGroups locks Alert Groups for a change, in id order, so that two transactions never wait for each other. The lock
+// is FOR NO KEY UPDATE, as a change never deletes an Alert Group or changes its id: it excludes every other change,
+// but not the FOR KEY SHARE that a foreign-key check of a row referencing the Alert Group takes, such as a delivery
+// row its transaction updates a second time while the dispatcher waits for that row (the lock order of the delivery
+// worker, internal/delivery/worker.go).
 func (q *Queries) LockGroups(ctx context.Context, arg LockGroupsParams) ([]LockGroupsRow, error) {
 	rows, err := q.db.Query(ctx, lockGroups, arg.OrgID, arg.Ids)
 	if err != nil {

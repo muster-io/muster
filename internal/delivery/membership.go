@@ -61,13 +61,25 @@ func (w *Worker) link(publicID string) string {
 // change, which holds the Route's membership lock: the Destinations added to the Route routeID publish its open Alert
 // Groups Quietly — during a Storm they get its Storm summary and hold the Alert Groups it holds — and those removed
 // give their open Root messages the final edit and retire the summary of an active Storm, with the alert-group hint of
-// each Alert Group whose delivery that retires or withholds. It wakes the delivery workers once tx commits.
+// each Alert Group whose delivery that retires or withholds. It wakes the delivery workers once tx commits. The
+// Route's active Storm is locked FOR SHARE before any delivery is written (LockActiveStorm), after the membership lock
+// and before the deliveries, as in the lock order of worker.go: a calm check waits until the deliveries this change
+// holds for the Storm are committed, or ends the Storm before this change reads it.
 func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, routeID int64, added,
 	removed []int64) error {
 	if len(added) == 0 && len(removed) == 0 {
 		return nil
 	}
 	q := s.store.queries(tx)
+	var st *storm
+	active, err := q.LockActiveStorm(ctx, dbgen.LockActiveStormParams{OrgID: s.orgID, RouteID: routeID})
+	switch {
+	case err == nil:
+		st = &storm{id: active.ID, started: active.StartedAt, count: active.AlertGroupCount,
+			urgent: active.UrgentCount}
+	case !errors.Is(err, pgx.ErrNoRows):
+		return fmt.Errorf("lock the storm of route %d: %w", routeID, err)
+	}
 	now := s.clock.Now().UTC()
 	for _, d := range removed {
 		rows, err := q.RetireRouteDeliveries(ctx, dbgen.RetireRouteDeliveriesParams{OrgID: s.orgID, RouteID: routeID,
@@ -91,7 +103,7 @@ func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, r
 		}
 	}
 	if len(added) > 0 {
-		if err := s.publishRoute(ctx, tx, q, routeID, added, now); err != nil {
+		if err := s.publishRoute(ctx, tx, q, routeID, st, added, now); err != nil {
 			return err
 		}
 	}
@@ -102,18 +114,9 @@ func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, r
 // Storm of the Route each of them gets its Storm summary, and the Alert Groups the Storm holds are held there too.
 // Each Alert Group is rendered once for the markups of the added Destinations, through tx; the counter and log lines
 // of a Route template that fails here are left to the next render through the dispatcher, which records them in the
-// Timeline too.
-func (s *Service) publishRoute(ctx context.Context, tx dbgen.DBTX, q queries, routeID int64, added []int64,
-	now time.Time) error {
-	var st *storm
-	active, err := q.GetActiveStorm(ctx, dbgen.GetActiveStormParams{OrgID: s.orgID, RouteID: routeID})
-	switch {
-	case err == nil:
-		st = &storm{id: active.ID, started: active.StartedAt, count: active.AlertGroupCount,
-			urgent: active.UrgentCount}
-	case !errors.Is(err, pgx.ErrNoRows):
-		return fmt.Errorf("read the storm of route %d: %w", routeID, err)
-	}
+// Timeline too. st is the Route's active Storm, locked, or nil.
+func (s *Service) publishRoute(ctx context.Context, tx dbgen.DBTX, q queries, routeID int64, st *storm,
+	added []int64, now time.Time) error {
 	p := dbgen.ListOpenGroupsOfRouteParams{OrgID: s.orgID, RouteID: routeID}
 	if st != nil {
 		p.StormID = pgtype.Int8{Int64: st.id, Valid: true}

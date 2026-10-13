@@ -189,6 +189,9 @@ type fakeDB struct {
 	// the worker tried, in order.
 	busyConns   map[int64]bool
 	updateLocks []int64
+	// replyLocks are the rows the transactions of Thread replies locked, in order: "delivery" for LockReplyDelivery,
+	// "reply" for GetLeasedReply, "sent" for RecordReplySent.
+	replyLocks []string
 }
 
 // sqlBool is a boolean of SQL — true, false or NULL — with its three-valued logic, so that the fake meets a NULL where
@@ -870,12 +873,25 @@ func (f *fakeDB) ClaimDueReplies(_ context.Context, arg dbgen.ClaimDueRepliesPar
 	return out, nil
 }
 
+func (f *fakeDB) LockReplyDelivery(_ context.Context, arg dbgen.LockReplyDeliveryParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("LockReplyDelivery"); err != nil {
+		return err
+	}
+	if arg.OrgID == orgID && f.reply(arg.ID) != nil {
+		f.replyLocks = append(f.replyLocks, "delivery")
+	}
+	return nil
+}
+
 func (f *fakeDB) GetLeasedReply(_ context.Context, arg dbgen.GetLeasedReplyParams) (dbgen.GetLeasedReplyRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.call("GetLeasedReply"); err != nil {
 		return dbgen.GetLeasedReplyRow{}, err
 	}
+	f.replyLocks = append(f.replyLocks, "reply")
 	r := f.reply(arg.ID)
 	if r == nil || r.owner != arg.Owner || !r.until.After(arg.Now) {
 		return dbgen.GetLeasedReplyRow{}, pgx.ErrNoRows
@@ -986,6 +1002,7 @@ func (f *fakeDB) RecordReplySent(_ context.Context, arg dbgen.RecordReplySentPar
 	if err := f.call("RecordReplySent"); err != nil {
 		return err
 	}
+	f.replyLocks = append(f.replyLocks, "sent")
 	if r := f.reply(arg.ID); r.owner == arg.Owner {
 		r.state, r.sentAt, r.messageID, r.owner, r.until = "sent", at(arg.Now), strOf(arg.MessageID), "", time.Time{}
 		r.buttonKeyID = strOf(arg.ButtonKeyID)

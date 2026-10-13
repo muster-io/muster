@@ -37,6 +37,31 @@ const (
 	kindFinalEdit    = "final_edit"
 )
 
+// Lock order. A transaction that locks rows of more than one of these tables locks them in this order, the
+// dispatcher's: the Alert Groups by id (groups' LockGroups), then their deliveries, then the Thread replies of a
+// delivery. Enqueue takes the Route's membership lock before its deliveries, and a Storm's row comes before the
+// deliveries it changes. A delivery is made held by a Storm only under a lock of that Storm that its calm check,
+// which locks it FOR NO KEY UPDATE, waits for: Enqueue's JoinStorm updates the Storm, and a change of the Route's
+// Destinations takes the membership lock, then the active Storm FOR SHARE (LockActiveStorm), then the deliveries;
+// otherwise a calm check could end the Storm before those deliveries commit, and they would stay held. The transactions
+// of the worker follow it: the record of a Thread reply's outcome locks its delivery first (LockReplyDelivery), and the
+// first Publication is marked through the dispatcher only after the outcome committed (markPublished), never inside it.
+// The preparation of a Telegram reply that waits for its copy is the one exception: it holds the reply, then takes the
+// post's copy lock and the delivery, the order of the learning of a copy and of the record of a Publication
+// (copies.go).
+//
+// PostgreSQL takes locks of its own that this order does not show: an UPDATE of a row version the same transaction made
+// — a second UPDATE of a row in one transaction, or an UPDATE after its INSERT — checks every foreign key of the row
+// again, and each check locks the referenced row FOR KEY SHARE: the Alert Group, the Storm and the Destination of a
+// delivery, the delivery of a Thread reply. Such a check runs against the order: the worker's prepare locks a delivery,
+// updates it twice and so locks its Alert Group after it. So an explicit lock on a row other rows reference —
+// alert_groups, deliveries, storms, destinations — is FOR NO KEY UPDATE, never FOR UPDATE, as no transaction here
+// deletes such a row or changes its key: FOR KEY SHARE conflicts only with FOR UPDATE, so these checks never wait for
+// the dispatcher, the worker, a Storm's calm check or a Destination's recovery, which still exclude each other. The
+// claims keep FOR UPDATE SKIP LOCKED: a claim holds its rows in a transaction of its own that waits for nothing. The
+// retention of Alert Groups deletes them, FOR UPDATE, and skips every one another transaction holds; only its cascade
+// to the deliveries of an Alert Group resolved retention.alert_group_summaries ago could still meet the worker.
+
 // Worker is the delivery worker of one replica (C-11.FR-1, FR-15; schema.md §5): it probes the Broken Destinations
 // that are due, claims the due deliveries of healthy Destinations, Urgent first, and the due Thread replies with FOR
 // UPDATE SKIP LOCKED and a lease, re-reads each in a short transaction, takes the limiter tokens, calls the adapter

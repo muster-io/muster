@@ -286,8 +286,18 @@ func changesThread(a replyAttempt, out Outcome, lost *Outcome) bool {
 	return a.chain && (out.Kind == OutcomeOK || lost != nil)
 }
 
-// lockThread locks the Thread of a reply's delivery, before the reply's row is recorded, so that a transaction that
-// records a reply takes the delivery's row before the reply's, as the deletion of a Root message does.
+// lockReplyDelivery locks the delivery of the Thread reply id before the reply's row, in the lock order of worker.go:
+// the dispatcher locks a delivery before its Thread replies, and the record of a reply's outcome may lock or update
+// its delivery after the reply — its Thread, or its Root message found deleted.
+func lockReplyDelivery(ctx context.Context, q queries, org, id int64) error {
+	if err := q.LockReplyDelivery(ctx, dbgen.LockReplyDeliveryParams{OrgID: org, ID: id}); err != nil {
+		return fmt.Errorf("lock the delivery of the thread reply: %w", err)
+	}
+	return nil
+}
+
+// lockThread reads the Thread of a reply's delivery, whose row the transaction locked before the reply's
+// (lockReplyDelivery), so that what it records about the Thread starts from the current one.
 func lockThread(ctx context.Context, q queries, org int64, a replyAttempt) (dbgen.LockDeliveryThreadRow, error) {
 	th, err := q.LockDeliveryThread(ctx, dbgen.LockDeliveryThreadParams{OrgID: org, ID: a.row.DeliveryID})
 	if err != nil {

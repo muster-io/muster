@@ -331,6 +331,7 @@ type queries interface {
 	TakeTokens(ctx context.Context, arg dbgen.TakeTokensParams) (dbgen.TakeTokensRow, error)
 	HoldBucket(ctx context.Context, arg dbgen.HoldBucketParams) error
 	ClaimDueReplies(ctx context.Context, arg dbgen.ClaimDueRepliesParams) ([]dbgen.ClaimDueRepliesRow, error)
+	LockReplyDelivery(ctx context.Context, arg dbgen.LockReplyDeliveryParams) error
 	GetLeasedReply(ctx context.Context, arg dbgen.GetLeasedReplyParams) (dbgen.GetLeasedReplyRow, error)
 	RenewReplyLease(ctx context.Context, arg dbgen.RenewReplyLeaseParams) error
 	RescheduleReply(ctx context.Context, arg dbgen.RescheduleReplyParams) error
