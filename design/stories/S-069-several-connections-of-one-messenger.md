@@ -45,7 +45,7 @@ acceptance:
   - "[C-18.FR-10] `listLinkableConnections` lists every Mattermost and Telegram Connection that is not deleted, two or more of each messenger, and the profile offers each of them in Playwright (`several-connections.spec.ts`), which also shows the Connections and Destinations lists, a Destination page, the Route's Destinations section, the delivery section of an Alert Group, the \"Delivery problem\" filter and the Account links of the user page with two Connections of each messenger, at 1280 and 360 px wide."
 verify: "make ci test-integration e2e"
 operator_attention: true
-issue: null
+issue: 208
 ---
 
 # S-069. Several Connections of one messenger: two Mattermost servers and two Telegram bots (BE)
