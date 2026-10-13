@@ -8,7 +8,11 @@
 // integration URL with the ephemeral_text of their answers, and the rate limit. Every other call is recorded and
 // answered 501. The control endpoints under /_fake/ list what happened and change the fixtures: posts, notifications,
 // ephemeral posts, presses, the server log, channel members, archived channels, the server configuration, and the
-// direct messages of the bot, which the posts leave out.
+// direct messages of the bots, which the posts leave out.
+//
+// The server has two bot users: SecondBotToken is the second bot, every other accepted token the first. The bot of the
+// request's token is the one the API acts as: it reads itself and its channels, posts, edits, sends ephemeral posts,
+// opens direct channels and presses. Both bots share the system admin flag of the configuration.
 package fakemattermost
 
 import (
@@ -30,6 +34,11 @@ import (
 const (
 	BotUserID   = "musterdevbotuserfake000000"
 	BotUsername = "muster-dev-bot"
+
+	// SecondBotUserID is the second bot user, of SecondBotToken; it is a member of ChannelAlerts only.
+	SecondBotUserID   = "musterdevbotbuserfake00000"
+	SecondBotUsername = "muster-dev-bot-b"
+	SecondBotToken    = "muster-dev-mattermost-token-b" //nolint:gosec // G101: the published development token of the fake
 
 	AliceUserID   = "u-alice"
 	AliceUsername = "alice"
@@ -162,6 +171,7 @@ type LogEntry struct {
 var (
 	users = []User{
 		{ID: BotUserID, Username: BotUsername, IsBot: true, Roles: "system_user"},
+		{ID: SecondBotUserID, Username: SecondBotUsername, IsBot: true, Roles: "system_user"},
 		{ID: AliceUserID, Username: AliceUsername, FirstName: "Alice", Roles: "system_user"},
 		{ID: BobUserID, Username: BobUsername, FirstName: "Bob", Roles: "system_user"},
 		{ID: DanaUserID, Username: DanaUsername, FirstName: "Dana", Roles: "system_user"},
@@ -206,13 +216,32 @@ func fixtures() state {
 		config:   Config{RevokedTokens: []string{}},
 		channels: channels,
 		members: map[string]map[string]bool{
-			ChannelAlerts:     everyone(true),
+			ChannelAlerts:     withSecondBot(everyone(true)),
 			ChannelAlertsProd: everyone(true),
 			ChannelNoBot:      everyone(false),
 		},
 		posts:   map[string]*post{},
 		buckets: map[string]*bucket{},
 	}
+}
+
+func withSecondBot(m map[string]bool) map[string]bool {
+	m[SecondBotUserID] = true
+	return m
+}
+
+// botOf returns the user id of the bot the request's token belongs to.
+func botOf(r *http.Request) string {
+	_, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+	if strings.TrimSpace(token) == SecondBotToken {
+		return SecondBotUserID
+	}
+	return BotUserID
+}
+
+func isBot(id string) bool {
+	u, ok := userByID(id)
+	return ok && u.IsBot
 }
 
 func New() *Fake {
@@ -528,8 +557,8 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) error {
 	return json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(v)
 }
 
-func (f *Fake) handleMe(w http.ResponseWriter, _ *http.Request) {
-	bot, _ := userByID(BotUserID)
+func (f *Fake) handleMe(w http.ResponseWriter, r *http.Request) {
+	bot, _ := userByID(botOf(r))
 	if f.Config().BotSystemAdmin {
 		bot.Roles = "system_admin system_user"
 	}
@@ -584,6 +613,7 @@ func (f *Fake) handleTeam(w http.ResponseWriter, r *http.Request) {
 
 // handleMyChannels lists the live channels of the team that the bot is a member of; everyone is in team dev.
 func (f *Fake) handleMyChannels(w http.ResponseWriter, r *http.Request) {
+	bot := botOf(r)
 	if r.PathValue("team_id") != TeamID {
 		writeAppError(w, http.StatusNotFound, "app.team.get.find.app_error", "Unable to find the existing team.")
 		return
@@ -592,7 +622,7 @@ func (f *Fake) handleMyChannels(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	out := []Channel{}
 	for _, c := range f.st.channels {
-		if c.TeamID == TeamID && c.DeleteAt == 0 && f.st.members[c.ID][BotUserID] {
+		if c.TeamID == TeamID && c.DeleteAt == 0 && f.st.members[c.ID][bot] {
 			out = append(out, *c)
 		}
 	}
@@ -609,7 +639,7 @@ func (f *Fake) handleChannel(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case !ok:
 		unknownChannel(w, id)
-	case c.TeamID == "" && !f.st.members[id][BotUserID]:
+	case c.TeamID == "" && !f.st.members[id][botOf(r)]:
 		forbidden(w)
 	default:
 		fakeserver.WriteJSON(w, http.StatusOK, *c)
@@ -617,21 +647,21 @@ func (f *Fake) handleChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *Fake) handleMyMembership(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("channel_id")
+	id, bot := r.PathValue("channel_id"), botOf(r)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.st.channels[id]; !ok {
 		unknownChannel(w, id)
 		return
 	}
-	if !f.st.members[id][BotUserID] {
+	if !f.st.members[id][bot] {
 		writeAppError(w, http.StatusNotFound, "app.channel.get_member.missing.app_error",
 			"No channel member found for that user ID and channel ID.")
 		return
 	}
 	fakeserver.WriteJSON(w, http.StatusOK, map[string]string{
 		"channel_id": id,
-		"user_id":    BotUserID,
+		"user_id":    bot,
 		"roles":      "channel_user",
 	})
 }
@@ -648,33 +678,40 @@ func (f *Fake) handleUserByName(w http.ResponseWriter, r *http.Request) {
 	fakeserver.WriteJSON(w, http.StatusOK, u)
 }
 
-// DM is a post in the direct channel of the bot and a person, as GET /_fake/dms lists it: the person, the post, its
-// message and when it was posted.
+// DM is a post in the direct channel of a bot and a person, as GET /_fake/dms lists it: the person, the bot, the post,
+// its message and when it was posted.
 type DM struct {
 	UserID   string `json:"user_id"`
+	BotID    string `json:"bot_id"`
 	PostID   string `json:"post_id"`
 	Message  string `json:"message"`
 	CreateAt int64  `json:"create_at"`
 }
 
-// DMs returns the posts of the direct channels of the bot in the order they were created, each with the member who is
-// not the bot.
+// DMs returns the posts of the direct channels of the bots in the order they were created, each with the member who
+// is not a bot and the bot.
 func (f *Fake) DMs() []DM {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := []DM{}
 	for _, id := range f.st.order {
 		p := f.st.posts[id]
-		if c, ok := f.st.channels[p.ChannelID]; !ok || c.Type != ChannelDirect || !f.st.members[c.ID][BotUserID] {
+		c, ok := f.st.channels[p.ChannelID]
+		if !ok || c.Type != ChannelDirect {
 			continue
 		}
-		person := ""
+		person, bot := "", ""
 		for m := range f.st.members[p.ChannelID] {
-			if m != BotUserID {
+			if isBot(m) {
+				bot = m
+			} else {
 				person = m
 			}
 		}
-		out = append(out, DM{UserID: person, PostID: p.ID, Message: p.Message, CreateAt: p.CreateAt})
+		if bot == "" {
+			continue
+		}
+		out = append(out, DM{UserID: person, BotID: bot, PostID: p.ID, Message: p.Message, CreateAt: p.CreateAt})
 	}
 	return out
 }

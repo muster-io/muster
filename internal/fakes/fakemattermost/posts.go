@@ -189,6 +189,7 @@ func (f *Fake) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		invalidBody(w, "post")
 		return
 	}
+	bot := botOf(r)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	c, ok := f.st.channels[in.ChannelID]
@@ -196,7 +197,7 @@ func (f *Fake) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		unknownChannel(w, in.ChannelID)
 		return
 	}
-	if !f.st.members[c.ID][BotUserID] {
+	if !f.st.members[c.ID][bot] {
 		forbidden(w)
 		return
 	}
@@ -217,7 +218,7 @@ func (f *Fake) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		ID:        newID(),
 		CreateAt:  now,
 		UpdateAt:  now,
-		UserID:    BotUserID,
+		UserID:    bot,
 		ChannelID: c.ID,
 		RootID:    in.RootID,
 		Message:   in.Message,
@@ -243,13 +244,13 @@ var kindRank = map[string]int{KindMention: 3, KindDirect: 2, KindChannel: 1, Kin
 
 // notifyLocked records the notifications of a new post: the post's message and the texts of its attachments are
 // searched for Mentions (F-056), a Mention makes the user a follower of the Thread (F-027), and everyone else in a
-// direct channel is notified of every post (F-028). Each person gets one notification, of the strongest kind.
-// f.mu is held.
+// direct channel is notified of every post (F-028). Each person gets one notification, of the strongest kind; a bot
+// gets none. f.mu is held.
 func (f *Fake) notifyLocked(p *post, c *Channel, thread *post) {
 	members := f.st.members[c.ID]
 	kinds := map[string]string{}
 	notify := func(userID, kind string) {
-		if userID != p.UserID && members[userID] && kindRank[kind] > kindRank[kinds[userID]] {
+		if userID != p.UserID && members[userID] && !isBot(userID) && kindRank[kind] > kindRank[kinds[userID]] {
 			kinds[userID] = kind
 		}
 	}
@@ -312,7 +313,7 @@ func postTexts(p *post) []string {
 }
 
 // handlePatchPost edits a post; an edit never notifies, even when it adds a Mention (F-029), and posts can be edited at
-// any age (F-032).
+// any age (F-032). A bot that is not a system admin edits only its own posts, as a bot with the role Member.
 func (f *Fake) handlePatchPost(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Message *string          `json:"message"`
@@ -330,6 +331,7 @@ func (f *Fake) handlePatchPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	bot := botOf(r)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	p, ok := f.st.posts[r.PathValue("post_id")]
@@ -338,7 +340,7 @@ func (f *Fake) handlePatchPost(w http.ResponseWriter, r *http.Request) {
 		postNotFound(w)
 		return
 	// An edit of a deleted post is refused as a missing permission, not as an unknown post (F-058).
-	case p.DeleteAt != 0, !f.st.members[p.ChannelID][BotUserID]:
+	case p.DeleteAt != 0, !f.st.members[p.ChannelID][bot], p.UserID != bot && !f.st.config.BotSystemAdmin:
 		forbidden(w)
 		return
 	}
@@ -388,6 +390,7 @@ func (f *Fake) handleEphemeral(w http.ResponseWriter, r *http.Request) {
 		invalidBody(w, "user_id")
 		return
 	}
+	bot, _ := userByID(botOf(r))
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !f.st.config.BotSystemAdmin {
@@ -402,7 +405,7 @@ func (f *Fake) handleEphemeral(w http.ResponseWriter, r *http.Request) {
 	p := Post{
 		ID:        newID(),
 		CreateAt:  f.nowMs(),
-		UserID:    BotUserID,
+		UserID:    bot.ID,
 		ChannelID: c.ID,
 		RootID:    in.Post.RootID,
 		Message:   in.Post.Message,
@@ -417,7 +420,7 @@ func (f *Fake) handleEphemeral(w http.ResponseWriter, r *http.Request) {
 		AtMs:      p.CreateAt,
 		PostID:    p.ID,
 		UserID:    in.UserID,
-		From:      BotUsername,
+		From:      bot.Username,
 		ChannelID: p.ChannelID,
 		RootID:    p.RootID,
 		Message:   p.Message,

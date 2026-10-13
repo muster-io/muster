@@ -14,6 +14,15 @@ export const FAKE_IDP = "http://127.0.0.1:18090";
 export const ADMIN_LOGIN = "admin@example.org";
 /** The control API of the fake Alertmanager of `muster dev`. */
 export const FAM = "http://127.0.0.1:19093/_fake";
+/** The control APIs of the fake Telegram server and of the two fake Mattermost servers of `muster dev`. */
+export const FTG = "http://127.0.0.1:18081/_fake";
+export const FMM = "http://127.0.0.1:18065/_fake";
+export const FMM2 = "http://127.0.0.1:18066/_fake";
+/** The published token of the first Mattermost bot, the one of the demo Connection "Dev Mattermost". */
+export const MM_TOKEN = "muster-dev-mattermost-token";
+/** The published tokens of the second bots of the fake servers, for which `muster dev` creates no Connection. */
+export const MM_SECOND_TOKEN = "muster-dev-mattermost-token-b";
+export const TG_SECOND_TOKEN = "234567:dev-telegram-token-b";
 /** The ingestion endpoint that the fake Alertmanager's receivers send to. */
 export const INGEST_URL = "http://localhost:8081/api/v1/ingest";
 const CLOCK = "http://localhost:8082/_dev/clock";

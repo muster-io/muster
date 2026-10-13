@@ -2,8 +2,8 @@
 // Copyright The Muster Authors
 
 // Package devmode is the development mode of `muster dev`: its published defaults, the rule that lets the environment
-// replace them, the fake Alertmanager, Mattermost, Telegram and OIDC servers, the fake webhook receiver and the fake
-// HTTP and SOCKS5 proxies on
+// replace them, the fake Alertmanager, Mattermost (two servers), Telegram and OIDC servers, the fake webhook receiver
+// and the fake HTTP and SOCKS5 proxies on
 // fixed loopback addresses, the demo OIDC configuration, and Muster itself in the same process, against the
 // development database and migrated on start, with the demo Integration that the fake Alertmanager sends to; and the
 // development clock that every replica of the development database shares.
@@ -66,11 +66,13 @@ const (
 const (
 	AlertmanagerAddr = "127.0.0.1:19093"
 	MattermostAddr   = "127.0.0.1:18065"
-	TelegramAddr     = "127.0.0.1:18081"
-	OIDCAddr         = "127.0.0.1:18090"
-	HTTPProxyAddr    = "127.0.0.1:18091"
-	SOCKSProxyAddr   = "127.0.0.1:18092"
-	WebhookAddr      = "127.0.0.1:18093"
+	// MattermostSecondAddr is the second fake Mattermost server, for several Mattermost Connections.
+	MattermostSecondAddr = "127.0.0.1:18066"
+	TelegramAddr         = "127.0.0.1:18081"
+	OIDCAddr             = "127.0.0.1:18090"
+	HTTPProxyAddr        = "127.0.0.1:18091"
+	SOCKSProxyAddr       = "127.0.0.1:18092"
+	WebhookAddr          = "127.0.0.1:18093"
 	// LoopbackNetwork is added to the allowed networks of the development database, so that Muster may call the
 	// fakes; a real installation keeps the standard policy.
 	LoopbackNetwork = "127.0.0.0/8"
@@ -161,14 +163,15 @@ func Apply(env Env, replica bool) (Applied, error) {
 
 // Addresses are the listen addresses of the fake servers and the fake proxies.
 type Addresses struct {
-	Alertmanager, Mattermost, Telegram, OIDC, Webhook string
-	HTTPProxy, SOCKSProxy                             string
+	Alertmanager, Mattermost, MattermostSecond, Telegram, OIDC, Webhook string
+	HTTPProxy, SOCKSProxy                                               string
 }
 
 // FakeAddresses are the fixed addresses that later checks and the second replica rely on.
 func FakeAddresses() Addresses {
-	return Addresses{Alertmanager: AlertmanagerAddr, Mattermost: MattermostAddr, Telegram: TelegramAddr,
-		OIDC: OIDCAddr, Webhook: WebhookAddr, HTTPProxy: HTTPProxyAddr, SOCKSProxy: SOCKSProxyAddr}
+	return Addresses{Alertmanager: AlertmanagerAddr, Mattermost: MattermostAddr,
+		MattermostSecond: MattermostSecondAddr, Telegram: TelegramAddr, OIDC: OIDCAddr, Webhook: WebhookAddr,
+		HTTPProxy: HTTPProxyAddr, SOCKSProxy: SOCKSProxyAddr}
 }
 
 // OIDCDemo is the demo OIDC configuration that `muster dev` stores at its first start on a database: OIDC against the
@@ -203,6 +206,14 @@ func ConnectionDemo() connections.Demo {
 const (
 	TelegramConnectionName     = "Dev Telegram"
 	TelegramConnectionBotToken = "123456:dev-telegram-token"
+)
+
+// The published tokens of the second bots, which `muster dev` serves but configures no Connection for: the second bot
+// of the fake Mattermost servers and the second bot of the fake Telegram server. Tests and checks create their
+// Connections through the API.
+const (
+	MattermostSecondBotToken = fakemattermost.SecondBotToken
+	TelegramSecondBotToken   = faketelegram.SecondBotToken
 )
 
 // TelegramDemo is the demo Connection "Dev Telegram", to the fake Telegram server in the long-polling mode, without
@@ -251,35 +262,44 @@ func RegisterReceiver(f *fakealertmanager.Fake, ingestURL string) error {
 type Fakes struct {
 	Alertmanager *fakealertmanager.Fake
 	Mattermost   *fakemattermost.Fake
-	Telegram     *faketelegram.Fake
-	OIDC         *fakeoidc.Fake
-	Webhook      *fakewebhook.Fake
-	HTTPProxy    *fakeproxy.Server
-	SOCKSProxy   *fakeproxy.Server
+	// MattermostSecond is the second fake Mattermost server, with the same fixtures.
+	MattermostSecond *fakemattermost.Fake
+	Telegram         *faketelegram.Fake
+	OIDC             *fakeoidc.Fake
+	Webhook          *fakewebhook.Fake
+	HTTPProxy        *fakeproxy.Server
+	SOCKSProxy       *fakeproxy.Server
 }
 
 func (f *Fakes) servers() []*fakeserver.Server {
-	return []*fakeserver.Server{f.Alertmanager.Server, f.Mattermost.Server, f.Telegram.Server, f.OIDC.Server,
-		f.Webhook.Server}
+	return []*fakeserver.Server{f.Alertmanager.Server, f.Mattermost.Server, f.MattermostSecond.Server, f.Telegram.Server,
+		f.OIDC.Server, f.Webhook.Server}
 }
 
-// StartFakes starts the fake servers and the fake proxies, the fake Mattermost allowing presses to call back on
-// loopback; when one cannot listen, it closes those already started.
+// StartFakes starts the fake servers and the fake proxies, both fake Mattermost servers allowing presses to call back
+// on loopback; when one cannot listen, it closes those already started.
 func StartFakes(ctx context.Context, addrs Addresses) (*Fakes, error) {
 	f := &Fakes{
-		Alertmanager: fakealertmanager.New(),
-		Mattermost:   fakemattermost.New(),
-		Telegram:     faketelegram.New(),
-		OIDC:         fakeoidc.New(),
-		Webhook:      fakewebhook.New(),
+		Alertmanager:     fakealertmanager.New(),
+		Mattermost:       fakemattermost.New(),
+		MattermostSecond: fakemattermost.New(),
+		Telegram:         faketelegram.New(),
+		OIDC:             fakeoidc.New(),
+		Webhook:          fakewebhook.New(),
 	}
 	f.Mattermost.SetAllowedUntrustedInternalConnections(AllowedInternalConnections)
+	f.MattermostSecond.SetAllowedUntrustedInternalConnections(AllowedInternalConnections)
 	f.Telegram.SetCopyDelay(TelegramCopyDelay)
-	listen := []string{addrs.Alertmanager, addrs.Mattermost, addrs.Telegram, addrs.OIDC, addrs.Webhook}
+	listen := []string{addrs.Alertmanager, addrs.Mattermost, addrs.MattermostSecond, addrs.Telegram, addrs.OIDC,
+		addrs.Webhook}
 	for i, s := range f.servers() {
 		if err := s.Start(ctx, listen[i]); err != nil {
+			name := "fake " + s.Name()
+			if s == f.MattermostSecond.Server {
+				name = "second " + name
+			}
 			closeErr := closeAll(context.WithoutCancel(ctx), f.servers()[:i])
-			return nil, errors.Join(fmt.Errorf("start the fake %s on %s: %w", s.Name(), listen[i], err), closeErr)
+			return nil, errors.Join(fmt.Errorf("start the %s on %s: %w", name, listen[i], err), closeErr)
 		}
 	}
 	// The proxies live as long as the process: their own context is not the one of the start.
@@ -334,6 +354,7 @@ func Run(ctx context.Context, w io.Writer, addrs Addresses, serve func(context.C
 	// Telegram comes last: the end-to-end harness waits for its line, printed once every fake listens.
 	fmt.Fprintf(w, "muster dev: fake Alertmanager %s\n", f.Alertmanager.URL())
 	fmt.Fprintf(w, "muster dev: fake Mattermost %s\n", f.Mattermost.URL())
+	fmt.Fprintf(w, "muster dev: second fake Mattermost %s\n", f.MattermostSecond.URL())
 	fmt.Fprintf(w, "muster dev: fake OIDC %s\n", f.OIDC.URL())
 	fmt.Fprintf(w, "muster dev: fake HTTP proxy %s\n", f.HTTPProxy.Addr())
 	fmt.Fprintf(w, "muster dev: fake SOCKS5 proxy %s\n", f.SOCKSProxy.Addr())

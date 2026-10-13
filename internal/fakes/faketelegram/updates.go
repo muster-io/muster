@@ -40,6 +40,9 @@ type bot struct {
 	conflict   bool
 	changed    chan struct{}
 	delivering bool
+	// receiving says that the token called getUpdates or set a webhook, so that updates of other bots' copies and of
+	// comments reach it too.
+	receiving bool
 }
 
 // queued is an update waiting to be confirmed or posted.
@@ -247,6 +250,7 @@ func (f *Fake) longPoll(w http.ResponseWriter, r *http.Request, token string, a 
 	if b.poll != nil {
 		b.poll.end <- descriptionTerminated
 	}
+	b.receiving = true
 	me := &poll{end: make(chan string, 1)}
 	b.poll = me
 	if a.hasOffset && a.offset > 0 {
@@ -328,6 +332,7 @@ func (f *Fake) setWebhook(ctx context.Context, w http.ResponseWriter, token stri
 	}
 	b.webhook = &Webhook{Token: token, URL: raw, SecretToken: secret, AllowedUpdates: slices.Clone(b.allowed),
 		MaxConnections: maxConnections}
+	b.receiving = true
 	if b.poll != nil {
 		b.poll.end <- descriptionSetWebhook
 		b.poll = nil
@@ -425,7 +430,7 @@ func (f *Fake) post(ctx context.Context, hook Webhook, update json.RawMessage) b
 	return resp.StatusCode/100 == 2
 }
 
-// TypePrivate is the type of the private chat of a person with the bot.
+// TypePrivate is the type of the private chat of a person with a bot.
 const TypePrivate = "private"
 
 // Private is a person's message to the bot in their private chat, as POST /_fake/private takes it: the bot's token,
@@ -450,10 +455,10 @@ func (f *Fake) postPrivate(w http.ResponseWriter, r *http.Request) {
 	fakeserver.WriteJSON(w, http.StatusOK, map[string]any{"update_id": id, "message": m})
 }
 
-// SendPrivate opens the private chat of p.From with the bot on its first message — the chat's id is the person's user
-// id, as in Telegram — records the message there and queues it as a message update for the bot of p.Token; it returns
-// the message and the update_id. The bot can write to a private chat only once the person wrote to it: before,
-// sendMessage answers "chat not found".
+// SendPrivate opens the private chat of p.From with the bot of p.Token on its first message — the chat's id is the
+// person's user id, as in Telegram, and each bot has its own conversation in it, its messages carrying the bot —
+// records the message there and queues it as a message update for p.Token; it returns the message and the update_id.
+// A bot can write to a private chat only once the person wrote to it: before, sendMessage answers "chat not found".
 func (f *Fake) SendPrivate(ctx context.Context, p Private) (Message, int64, error) {
 	if p.Token == "" || p.From.ID <= 0 {
 		return Message{}, 0, errors.New("token and from.id are required")
@@ -472,14 +477,16 @@ func (f *Fake) SendPrivate(ctx context.Context, p Private) (Message, int64, erro
 func (c *chats) private(p Private) (Message, map[string]any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	bot := botOf(p.Token).ID
 	ch, ok := c.byID[p.From.ID]
 	if !ok {
 		ch = &Chat{ID: p.From.ID, Type: TypePrivate, Username: p.From.Username}
 		c.byID[ch.ID] = ch
-		c.members[ch.ID] = map[int64]Member{BotID: {Status: StatusMember}}
+		c.members[ch.ID] = map[int64]Member{}
 	}
+	c.members[ch.ID][bot] = Member{Status: StatusMember}
 	from := p.From
-	m := &Message{Chat: ch.ID, Date: c.now().Unix(), From: &from, Text: p.Text, Edits: []Edit{}}
+	m := &Message{Chat: ch.ID, Date: c.now().Unix(), From: &from, Text: p.Text, Edits: []Edit{}, Bot: bot}
 	c.next[ch.ID]++
 	m.ID = c.next[ch.ID]
 	c.messages[ch.ID] = append(c.messages[ch.ID], m)

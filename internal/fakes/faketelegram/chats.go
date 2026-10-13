@@ -19,7 +19,7 @@ import (
 )
 
 // The chats of the fake (C-01.FR-13): the channel @muster_alerts with comments enabled and its discussion group, and the
-// channel @no_comments without (F-002). The bot is an admin allowed to post and edit in all three.
+// channel @no_comments without (F-002). Both bots are admins allowed to post and edit in all three.
 const (
 	ChannelID       int64 = -1001000000001
 	ChannelUsername       = "muster_alerts"
@@ -53,7 +53,8 @@ const (
 	AccountSubscriber = "subscriber"
 )
 
-// ChatBudget is how many sends and edits a chat takes per ChatWindow before the next one answers 429 (F-016).
+// ChatBudget is how many sends and edits a chat takes from one bot per ChatWindow before the next one answers 429
+// (F-016); each bot has its own budget, as Telegram's limits are a bot's.
 const (
 	ChatBudget = 20
 	ChatWindow = time.Minute
@@ -72,6 +73,7 @@ const (
 	DescriptionTooLong         = "Bad Request: message is too long"
 	DescriptionNeedAdmin       = "Bad Request: need administrator rights in the channel chat"
 	DescriptionButtonData      = "Bad Request: BUTTON_DATA_INVALID"
+	DescriptionCantBeEdited    = "Bad Request: message can't be edited"
 	descriptionNotMember       = "Forbidden: bot is not a member of the %s chat"
 	descriptionKicked          = "Forbidden: bot was kicked from the %s chat"
 	descriptionTooManyRequests = "Too Many Requests: retry after "
@@ -97,7 +99,7 @@ type Member struct {
 
 // Message is a message of a chat, as GET /_fake/messages lists it: one the bot sent, the automatic copy of a channel
 // post in its discussion group, or a person's comment (copies.go). It carries its sender, the text, parse mode and
-// keyboard it has now, what it was sent with, and its edits.
+// keyboard it has now, what it was sent with, and its edits. Bot is the bot of a private chat's conversation.
 type Message struct {
 	ID                  int64           `json:"message_id"`
 	Chat                int64           `json:"chat"`
@@ -114,19 +116,23 @@ type Message struct {
 	MessageThreadID     int64           `json:"message_thread_id,omitempty"`
 	DisableNotification bool            `json:"disable_notification,omitempty"`
 	Edits               []Edit          `json:"edits"`
+	Bot                 int64           `json:"bot,omitempty"`
 
 	// token is the token that sent a channel post, which receives the updates of its copy and its comments; replyTo
 	// is the message a message replies to; copyID is the automatic copy of a channel post in its discussion group, 0
-	// until it exists; withheld says that the updates of a copy are kept back.
-	token    string
-	replyTo  int64
-	copyID   int64
-	withheld bool
+	// until it exists; withheld says that the updates of a copy are kept back from every bot, withheldFrom from the
+	// bots it names.
+	token        string
+	replyTo      int64
+	copyID       int64
+	withheld     bool
+	withheldFrom []int64
 }
 
 // Edit is one editMessageText of a message: the text, parse mode and keyboard it set — none removes the keyboard
-// (F-011).
+// (F-011) — and the bot that made it, 0 for Telegram's own edit of an automatic copy.
 type Edit struct {
+	By          int64           `json:"by,omitempty"`
 	Date        int64           `json:"date"`
 	Text        string          `json:"text"`
 	ParseMode   string          `json:"parse_mode,omitempty"`
@@ -147,7 +153,7 @@ type chats struct {
 	byID          map[int64]*Chat
 	members       map[int64]map[int64]Member
 	messages      map[int64][]*Message
-	calls         map[int64][]time.Time
+	calls         map[budgetKey][]time.Time
 	notifications []Notification
 	next          map[int64]int64
 	now           func() time.Time
@@ -155,7 +161,7 @@ type chats struct {
 
 func newChats() *chats {
 	c := &chats{byID: map[int64]*Chat{}, members: map[int64]map[int64]Member{}, messages: map[int64][]*Message{},
-		calls: map[int64][]time.Time{}, next: map[int64]int64{}, now: time.Now}
+		calls: map[budgetKey][]time.Time{}, next: map[int64]int64{}, now: time.Now}
 	admin := Member{Status: StatusAdministrator, CanPostMessages: true, CanEditMessages: true}
 	for _, ch := range []Chat{
 		{ID: ChannelID, Type: TypeChannel, Title: ChannelTitle, Username: ChannelUsername, LinkedChatID: GroupID},
@@ -163,7 +169,7 @@ func newChats() *chats {
 		{ID: NoCommentsID, Type: TypeChannel, Title: NoCommentsTitle, Username: NoCommentsName},
 	} {
 		c.byID[ch.ID] = &ch
-		c.members[ch.ID] = map[int64]Member{BotID: admin}
+		c.members[ch.ID] = map[int64]Member{BotID: admin, SecondBotID: admin}
 	}
 	return c
 }
@@ -208,7 +214,7 @@ func chatParam(p params) string {
 	return ""
 }
 
-// member is the bot's membership of the chat; c.mu is held.
+// member is the membership of a user, such as a bot, in the chat; c.mu is held.
 func (c *chats) member(chat, user int64) Member {
 	if m, ok := c.members[chat][user]; ok {
 		return m
@@ -311,7 +317,14 @@ func (f *Fake) handleChats() {
 	f.HandleControl("PUT /_fake/chats/{chat}", f.putChat)
 	f.HandleControl("PUT /_fake/chats/{chat}/members/{user}", f.putMember)
 	f.HandleControl("GET /_fake/messages", func(w http.ResponseWriter, r *http.Request) {
-		var chat int64
+		var chat, bot int64
+		if q := r.URL.Query().Get("bot"); q != "" {
+			var err error
+			if bot, err = strconv.ParseInt(q, 10, 64); err != nil {
+				fakeserver.WriteError(w, http.StatusBadRequest, "the bot is not an integer id")
+				return
+			}
+		}
 		if q := r.URL.Query().Get("chat"); q != "" {
 			f.chats.mu.Lock()
 			ch, ok := f.chats.resolve(q)
@@ -322,7 +335,11 @@ func (f *Fake) handleChats() {
 			}
 			chat = ch.ID
 		}
-		fakeserver.WriteJSON(w, http.StatusOK, f.Messages(chat))
+		msgs := f.Messages(chat)
+		if bot != 0 {
+			msgs = slices.DeleteFunc(msgs, func(m Message) bool { return m.Bot != bot })
+		}
+		fakeserver.WriteJSON(w, http.StatusOK, msgs)
 	})
 	f.HandleControl("GET /_fake/notifications", func(w http.ResponseWriter, _ *http.Request) {
 		fakeserver.WriteJSON(w, http.StatusOK, f.Notifications())
@@ -408,9 +425,9 @@ type chatMember struct {
 	User User `json:"user"`
 }
 
-// getChatMember answers a membership. The bot outside a supergroup gets 403 (F-003); outside a channel it is left
-// (F-001), which is also how a bot added to a channel without admin rights stays.
-func (f *Fake) getChatMember(w http.ResponseWriter, p params) {
+// getChatMember answers a membership. The calling bot outside a supergroup gets 403 (F-003); outside a channel it is
+// left (F-001), which is also how a bot added to a channel without admin rights stays.
+func (f *Fake) getChatMember(w http.ResponseWriter, p params, caller int64) {
 	user, ok, err := p.int("user_id")
 	if err != nil || !ok {
 		writeFailure(w, http.StatusBadRequest, "Bad Request: invalid user_id specified")
@@ -422,7 +439,7 @@ func (f *Fake) getChatMember(w http.ResponseWriter, p params) {
 	var m, bot Member
 	var kind string
 	if found {
-		m, bot, kind = c.member(ch.ID, user), c.member(ch.ID, BotID), ch.Type
+		m, bot, kind = c.member(ch.ID, user), c.member(ch.ID, caller), ch.Type
 	}
 	c.mu.Unlock()
 	switch {
@@ -434,8 +451,8 @@ func (f *Fake) getChatMember(w http.ResponseWriter, p params) {
 		return
 	}
 	u := User{ID: user}
-	if user == BotID {
-		u = User{ID: BotID, IsBot: true, FirstName: "Muster Dev", Username: BotUsername}
+	if b, isBot := botUser(user); isBot {
+		u = User{ID: b.ID, IsBot: true, FirstName: b.FirstName, Username: b.Username}
 	}
 	if m.Status != StatusAdministrator {
 		m.CanPostMessages, m.CanEditMessages = false, false
@@ -443,21 +460,29 @@ func (f *Fake) getChatMember(w http.ResponseWriter, p params) {
 	writeOK(w, chatMember{Member: m, User: u})
 }
 
-// take counts one send or edit of the chat at now against its budget (F-016): the delay until a call fits again when
-// the budget is spent, and 0 when the call is taken; c.mu is held.
-func (c *chats) take(chat int64, now time.Time) time.Duration {
-	calls := slices.DeleteFunc(c.calls[chat], func(t time.Time) bool { return now.Sub(t) >= ChatWindow })
-	c.calls[chat] = calls
+// budgetKey is the budget of sends and edits of one bot in one chat.
+type budgetKey struct{ chat, bot int64 }
+
+// take counts one send or edit of the bot in the chat at now against its budget (F-016): the delay until a call fits
+// again when the budget is spent, and 0 when the call is taken; c.mu is held.
+func (c *chats) take(chat, bot int64, now time.Time) time.Duration {
+	k := budgetKey{chat: chat, bot: bot}
+	calls := slices.DeleteFunc(c.calls[k], func(t time.Time) bool { return now.Sub(t) >= ChatWindow })
+	c.calls[k] = calls
 	if len(calls) >= ChatBudget {
 		return calls[0].Add(ChatWindow).Sub(now)
 	}
-	c.calls[chat] = append(calls, now)
+	c.calls[k] = append(calls, now)
 	return 0
 }
 
-// refusal is why the bot may not write to the chat, empty when it may; edit asks for the right to edit; c.mu is held.
-func (c *chats) refusal(ch *Chat, edit bool) (int, string) {
-	m := c.member(ch.ID, BotID)
+// refusal is why the bot may not write to the chat, empty when it may; edit asks for the right to edit. A private chat
+// the person opened with another bot is not found. c.mu is held.
+func (c *chats) refusal(ch *Chat, bot int64, edit bool) (int, string) {
+	m := c.member(ch.ID, bot)
+	if ch.Type == TypePrivate && m.Status == StatusLeft {
+		return http.StatusBadRequest, DescriptionChatNotFound
+	}
 	switch m.Status {
 	case StatusLeft:
 		return http.StatusForbidden, strings.Replace(descriptionNotMember, "%s", ch.Type, 1)
@@ -569,9 +594,10 @@ func (f *Fake) sendMessage(ctx context.Context, w http.ResponseWriter, token str
 	write(w)
 }
 
-// send stores a message the bot sends and returns the answer to write and, for a channel post, the post; c.mu is
-// taken.
+// send stores a message the bot of token sends and returns the answer to write and, for a channel post, the post; c.mu
+// is taken.
 func (c *chats) send(token string, p params) (func(http.ResponseWriter), *Message) {
+	bot := botOf(token)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ch, ok := c.resolve(chatParam(p))
@@ -579,18 +605,22 @@ func (c *chats) send(token string, p params) (func(http.ResponseWriter), *Messag
 		return failed(http.StatusBadRequest, DescriptionChatNotFound), nil
 	}
 	now := c.now()
-	if wait := c.take(ch.ID, now); wait > 0 {
+	if wait := c.take(ch.ID, bot.ID, now); wait > 0 {
 		return func(w http.ResponseWriter) { tooMany(w, wait) }, nil
 	}
-	if status, d := c.refusal(ch, false); status != 0 {
+	if status, d := c.refusal(ch, bot.ID, false); status != 0 {
 		return failed(status, d), nil
 	}
 	body, failure := contentOf(p)
 	if failure != "" {
 		return failed(http.StatusBadRequest, failure), nil
 	}
-	m := &Message{Chat: ch.ID, Date: now.Unix(), From: &botSender, Text: body.text, ParseMode: body.parseMode,
+	sender := senderOf(bot)
+	m := &Message{Chat: ch.ID, Date: now.Unix(), From: &sender, Text: body.text, ParseMode: body.parseMode,
 		ReplyMarkup: body.markup, DisableNotification: p.bool("disable_notification"), Edits: []Edit{}, token: token}
+	if ch.Type == TypePrivate {
+		m.Bot = bot.ID
+	}
 	if raw, ok := p["reply_parameters"]; ok && raw != nil {
 		b, err := markupJSON(raw)
 		if err != nil {
@@ -655,24 +685,28 @@ func (c *chats) find(chat, id int64) *Message {
 // editMessageText edits a message within the chat's budget: the edit sets its keyboard, and one without reply_markup
 // removes it (F-011); an edit that changes nothing fails with "message is not modified" (F-017). An edit notifies
 // nobody (F-012). The edit of a channel post edits its automatic copy too, which sends an edited_message for the copy
-// (F-006).
-func (f *Fake) editMessageText(ctx context.Context, w http.ResponseWriter, p params) {
-	write, edited := f.chats.edit(p)
+// (F-006) to every bot that receives the copy. A channel admin allowed to edit messages edits any post; in a group or
+// a private chat a bot edits only its own messages.
+func (f *Fake) editMessageText(ctx context.Context, w http.ResponseWriter, token string, p params) {
+	write, edited := f.chats.edit(token, p, f.receivers())
 	if edited != nil {
-		f.send(ctx, edited.token, "edited_message", edited.update)
+		for _, t := range edited.tokens {
+			f.send(ctx, t, "edited_message", edited.update)
+		}
 	}
 	write(w)
 }
 
-// editedCopy is the edited_message of a copy to deliver to the bot of token.
+// editedCopy is an update about a copy, or a comment under it, to deliver to the bots of tokens.
 type editedCopy struct {
-	token  string
+	tokens []string
 	update map[string]any
 }
 
-// edit edits a message and returns the answer to write and the edited_message of its copy to deliver, if any; c.mu
-// is taken.
-func (c *chats) edit(p params) (func(http.ResponseWriter), *editedCopy) {
+// edit edits a message as the bot of token and returns the answer to write and the edited_message of its copy to
+// deliver, if any; others are the tokens that receive updates; c.mu is taken.
+func (c *chats) edit(token string, p params, others []string) (func(http.ResponseWriter), *editedCopy) {
+	bot := botOf(token).ID
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ch, ok := c.resolve(chatParam(p))
@@ -680,16 +714,19 @@ func (c *chats) edit(p params) (func(http.ResponseWriter), *editedCopy) {
 		return failed(http.StatusBadRequest, DescriptionChatNotFound), nil
 	}
 	now := c.now()
-	if wait := c.take(ch.ID, now); wait > 0 {
+	if wait := c.take(ch.ID, bot, now); wait > 0 {
 		return func(w http.ResponseWriter) { tooMany(w, wait) }, nil
 	}
-	if status, d := c.refusal(ch, true); status != 0 {
+	if status, d := c.refusal(ch, bot, true); status != 0 {
 		return failed(status, d), nil
 	}
 	id, _, err := p.int("message_id")
 	m := c.find(ch.ID, id)
 	if err != nil || m == nil {
 		return failed(http.StatusBadRequest, DescriptionEditNotFound), nil
+	}
+	if ch.Type != TypeChannel && (m.From == nil || m.From.ID != bot) {
+		return failed(http.StatusBadRequest, DescriptionCantBeEdited), nil
 	}
 	body, failure := contentOf(p)
 	if failure != "" {
@@ -699,11 +736,11 @@ func (c *chats) edit(p params) (func(http.ResponseWriter), *editedCopy) {
 		return failed(http.StatusBadRequest, DescriptionNotModified), nil
 	}
 	m.Text, m.ParseMode, m.ReplyMarkup = body.text, body.parseMode, body.markup
-	m.Edits = append(m.Edits, Edit{Date: now.Unix(), Text: body.text, ParseMode: body.parseMode,
+	m.Edits = append(m.Edits, Edit{By: bot, Date: now.Unix(), Text: body.text, ParseMode: body.parseMode,
 		ReplyMarkup: body.markup})
 	answer := sentMessage{MessageID: m.ID, Date: m.Date, EditDate: now.Unix(), Chat: *ch, Text: body.text,
 		ReplyMarkup: m.ReplyMarkup}
-	return func(w http.ResponseWriter) { writeOK(w, answer) }, c.editCopy(ch, m, now)
+	return func(w http.ResponseWriter) { writeOK(w, answer) }, c.editCopy(ch, m, now, others)
 }
 
 // jsonEqual reports whether two keyboards are the same, an empty one being the same as none.

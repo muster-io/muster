@@ -419,6 +419,13 @@ snippet with and without the catch-all; Alertmanager routing documentation_ · U
 
 ## Pending
 
+- **Telegram and Mattermost, several bots** (S-069). Two admin bots of one channel and its discussion group: whether
+  each receives the automatic copies of the other's posts, their `edited_message` and people's comments, as the fake
+  Telegram server assumes from F-003 and F-005 (the copy comes from Telegram, not from a bot), and that neither receives
+  the other's messages (Bot API FAQ, "Why doesn't my bot see messages from other bots?"); whether a Mattermost bot with
+  the role Member is refused an edit of another bot's post, which the fake Mattermost server answers `403`; and whether
+  the budget of F-016 is each bot's own in a chat, as the fake assumes from Telegram's limits being a bot's. To check on
+  the test stand with a second bot.
 - **Mattermost.** How the client shows buttons on Thread replies, which the server accepts (F-055,
   [L1 open question 6](prd/L1.md#51-test-environment-facts)), and how phones are notified
   ([question 4](prd/L1.md#51-test-environment-facts)): the test server had push notifications off. Whether a bot
