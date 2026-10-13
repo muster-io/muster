@@ -268,8 +268,9 @@ func get(t *testing.T, url string, headers ...string) int {
 	return resp.StatusCode
 }
 
-var anyPort = devmode.Addresses{Alertmanager: "127.0.0.1:0", Mattermost: "127.0.0.1:0", Telegram: "127.0.0.1:0",
-	OIDC: "127.0.0.1:0", Webhook: "127.0.0.1:0", HTTPProxy: "127.0.0.1:0", SOCKSProxy: "127.0.0.1:0"}
+var anyPort = devmode.Addresses{Alertmanager: "127.0.0.1:0", Mattermost: "127.0.0.1:0",
+	MattermostSecond: "127.0.0.1:0", Telegram: "127.0.0.1:0", OIDC: "127.0.0.1:0", Webhook: "127.0.0.1:0",
+	HTTPProxy: "127.0.0.1:0", SOCKSProxy: "127.0.0.1:0"}
 
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
@@ -285,10 +286,11 @@ func TestRun(t *testing.T) {
 		})
 	}()
 
-	got := waitFor(t, out, 7, done)
+	got := waitFor(t, out, 8, done)
 	<-served
 	re := regexp.MustCompile(`^muster dev: fake Alertmanager (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake Mattermost (http://127\.0\.0\.1:\d+)\n` +
+		`muster dev: second fake Mattermost (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake OIDC (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake HTTP proxy (127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake SOCKS5 proxy (127\.0\.0\.1:\d+)\n` +
@@ -298,16 +300,16 @@ func TestRun(t *testing.T) {
 	if m == nil {
 		t.Fatalf("output %q, want the fake servers and proxies", got)
 	}
-	if status := get(t, m[3]+"/.well-known/openid-configuration"); status != http.StatusOK {
+	if status := get(t, m[4]+"/.well-known/openid-configuration"); status != http.StatusOK {
 		t.Errorf("OIDC discovery = %d", status)
 	}
-	for _, proxy := range []string{m[4], m[5]} {
+	for _, proxy := range []string{m[5], m[6]} {
 		if status := get(t, "http://"+proxy+"/_fake/requests"); status != http.StatusOK {
 			t.Errorf("GET %s/_fake/requests = %d", proxy, status)
 		}
 	}
-	// the fake servers: Alertmanager, Mattermost, Telegram, OIDC, webhook receiver
-	m = []string{m[0], m[1], m[2], m[7], m[3], m[6]}
+	// the fake servers: Alertmanager, Mattermost, Telegram, OIDC, webhook receiver, second Mattermost
+	m = []string{m[0], m[1], m[2], m[8], m[4], m[7], m[3]}
 	for _, base := range m[1:] {
 		if status := get(t, base+"/_fake/requests"); status != http.StatusOK {
 			t.Errorf("GET %s/_fake/requests = %d", base, status)
@@ -319,6 +321,15 @@ func TestRun(t *testing.T) {
 	if status := get(t, m[2]+"/api/v4/users/me", "Authorization", "Bearer "+devmode.ConnectionBotToken); status !=
 		http.StatusOK {
 		t.Errorf("Mattermost users/me = %d", status)
+	}
+	for _, base := range []string{m[2], m[6]} {
+		if status := get(t, base+"/api/v4/users/me", "Authorization", "Bearer "+devmode.MattermostSecondBotToken); status !=
+			http.StatusOK {
+			t.Errorf("%s users/me with the second bot's token = %d", base, status)
+		}
+	}
+	if status := get(t, m[3]+"/bot"+devmode.TelegramSecondBotToken+"/getMe"); status != http.StatusOK {
+		t.Errorf("Telegram getMe of the second bot = %d", status)
 	}
 
 	cancel()
@@ -372,7 +383,7 @@ func TestRunServeFails(t *testing.T) {
 	if !errors.Is(err, failed) {
 		t.Errorf("Run = %v, want the error of serve", err)
 	}
-	if len(fakes) != 5 {
+	if len(fakes) != 6 {
 		t.Fatalf("the fake servers were not running while serving: %q", out.String())
 	}
 	for _, base := range fakes {
@@ -411,8 +422,9 @@ func TestStartFakes(t *testing.T) {
 	if err := f.Close(t.Context()); err != nil {
 		t.Errorf("Close: %v", err)
 	}
-	want := devmode.Addresses{Alertmanager: "127.0.0.1:19093", Mattermost: "127.0.0.1:18065", Telegram: "127.0.0.1:18081",
-		OIDC: "127.0.0.1:18090", Webhook: "127.0.0.1:18093", HTTPProxy: "127.0.0.1:18091", SOCKSProxy: "127.0.0.1:18092"}
+	want := devmode.Addresses{Alertmanager: "127.0.0.1:19093", Mattermost: "127.0.0.1:18065",
+		MattermostSecond: "127.0.0.1:18066", Telegram: "127.0.0.1:18081", OIDC: "127.0.0.1:18090",
+		Webhook: "127.0.0.1:18093", HTTPProxy: "127.0.0.1:18091", SOCKSProxy: "127.0.0.1:18092"}
 	if devmode.FakeAddresses() != want {
 		t.Errorf("FakeAddresses() = %+v, want %+v", devmode.FakeAddresses(), want)
 	}
@@ -644,5 +656,40 @@ func TestStartFakesAllowsLoopback(t *testing.T) {
 	if got := f.Mattermost.Config().AllowedUntrustedInternalConnections; got != want ||
 		devmode.AllowedInternalConnections != want {
 		t.Errorf("AllowedUntrustedInternalConnections = %q", got)
+	}
+	if got := f.MattermostSecond.Config().AllowedUntrustedInternalConnections; got != want {
+		t.Errorf("AllowedUntrustedInternalConnections of the second fake Mattermost = %q", got)
+	}
+}
+
+// TestRunBusySecondMattermostPort is S-069: a busy port of the second fake Mattermost fails the start, naming it, and
+// closes the fakes already started.
+func TestRunBusySecondMattermostPort(t *testing.T) {
+	var lc net.ListenConfig
+	busy, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	addrs := anyPort
+	addrs.MattermostSecond = busy.Addr().String()
+	var out bytes.Buffer
+	err = devmode.Run(t.Context(), &out, addrs, func(context.Context) error {
+		t.Error("Muster ran although the second fake Mattermost could not start")
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "start the second fake Mattermost on "+busy.Addr().String()) {
+		t.Errorf("Run = %v, want an error naming the second fake Mattermost and its address", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("printed %q before failing", out.String())
+	}
+}
+
+// TestSecondBotTokens is S-069: the published tokens of the second bots.
+func TestSecondBotTokens(t *testing.T) {
+	if devmode.MattermostSecondBotToken != "muster-dev-mattermost-token-b" ||
+		devmode.TelegramSecondBotToken != "234567:dev-telegram-token-b" {
+		t.Errorf("second bot tokens %q, %q", devmode.MattermostSecondBotToken, devmode.TelegramSecondBotToken)
 	}
 }

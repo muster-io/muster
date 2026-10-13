@@ -1139,3 +1139,148 @@ func TestControlLists(t *testing.T) {
 		t.Error("the reset dropped the harness's recorded requests")
 	}
 }
+
+// TestSecondBot covers the second bot of S-069: the bot of the token reads itself, posts, edits only its own posts
+// unless it is a system admin, sends ephemeral posts, opens its own direct channels and presses as itself, and no bot
+// is notified.
+func TestSecondBot(t *testing.T) {
+	fx := start(t)
+	asB := func(method, path, body string) response {
+		t.Helper()
+		return do(t, method, fx.fake.URL()+path, body, "Authorization", "Bearer "+fakemattermost.SecondBotToken)
+	}
+
+	t.Run("users me", func(t *testing.T) {
+		if u := decode[fakemattermost.User](t, asB(http.MethodGet, "/api/v4/users/me", "")); u.ID !=
+			fakemattermost.SecondBotUserID || u.Username != fakemattermost.SecondBotUsername || !u.IsBot {
+			t.Errorf("users/me as bot B %+v", u)
+		}
+		if u := decode[fakemattermost.User](t, fx.api(http.MethodGet, "/api/v4/users/me", "")); u.ID !=
+			fakemattermost.BotUserID || u.Username != fakemattermost.BotUsername {
+			t.Errorf("users/me with any other token %+v", u)
+		}
+	})
+
+	t.Run("channels and memberships", func(t *testing.T) {
+		chans := decode[[]fakemattermost.Channel](t, asB(http.MethodGet, "/api/v4/users/me/teams/team-dev/channels", ""))
+		if len(chans) != 1 || chans[0].ID != fakemattermost.ChannelAlerts {
+			t.Errorf("bot B's channels %+v", chans)
+		}
+		m := decode[map[string]string](t, asB(http.MethodGet, "/api/v4/channels/ch-alerts/members/me", ""))
+		if m["user_id"] != fakemattermost.SecondBotUserID {
+			t.Errorf("bot B's membership %+v", m)
+		}
+		wantAppError(t, asB(http.MethodGet, "/api/v4/channels/ch-alerts-prod/members/me", ""), http.StatusNotFound,
+			"app.channel.get_member.missing.app_error")
+	})
+
+	var postA, postB fakemattermost.Post
+	t.Run("posts and patches", func(t *testing.T) {
+		postA = fx.post(fakemattermost.ChannelAlerts, "by A", "", "")
+		r := asB(http.MethodPost, "/api/v4/posts", `{"channel_id":"ch-alerts","message":"by B"}`)
+		if r.status != http.StatusCreated {
+			t.Fatalf("bot B posts = %s", r)
+		}
+		postB = decode[fakemattermost.Post](t, r)
+		if postA.UserID != fakemattermost.BotUserID || postB.UserID != fakemattermost.SecondBotUserID {
+			t.Errorf("post authors %s, %s", postA.UserID, postB.UserID)
+		}
+		wantAppError(t, asB(http.MethodPost, "/api/v4/posts", `{"channel_id":"ch-alerts-prod","message":"x"}`),
+			http.StatusForbidden, "api.context.permissions.app_error")
+
+		wantAppError(t, asB(http.MethodPut, "/api/v4/posts/"+postA.ID+"/patch", `{"message":"B edits A"}`),
+			http.StatusForbidden, "api.context.permissions.app_error")
+		wantAppError(t, fx.api(http.MethodPut, "/api/v4/posts/"+postB.ID+"/patch", `{"message":"A edits B"}`),
+			http.StatusForbidden, "api.context.permissions.app_error")
+		if r := fx.api(http.MethodPut, "/api/v4/posts/"+postA.ID+"/patch", `{"message":"A edits A"}`); r.status !=
+			http.StatusOK {
+			t.Errorf("bot A edits its own post = %s", r)
+		}
+		if r := asB(http.MethodPut, "/api/v4/posts/"+postB.ID+"/patch", `{"message":"B edits B"}`); r.status !=
+			http.StatusOK {
+			t.Errorf("bot B edits its own post = %s", r)
+		}
+		fx.setConfig(`{"bot_system_admin":true}`)
+		if r := asB(http.MethodPut, "/api/v4/posts/"+postA.ID+"/patch", `{"message":"admin B edits A"}`); r.status !=
+			http.StatusOK {
+			t.Errorf("bot B as a system admin edits bot A's post = %s", r)
+		}
+	})
+
+	t.Run("ephemeral", func(t *testing.T) {
+		r := asB(http.MethodPost, "/api/v4/posts/ephemeral",
+			`{"user_id":"u-bob","post":{"channel_id":"ch-alerts","message":"psst"}}`)
+		if r.status != http.StatusCreated {
+			t.Fatalf("ephemeral by bot B = %s", r)
+		}
+		if p := decode[fakemattermost.Post](t, r); p.UserID != fakemattermost.SecondBotUserID {
+			t.Errorf("ephemeral post %+v", p)
+		}
+		if e := fx.ephemeral(); len(e) != 1 || e[0].From != fakemattermost.SecondBotUsername {
+			t.Errorf("ephemeral records %+v", e)
+		}
+		fx.setConfig(`{"bot_system_admin":false}`)
+	})
+
+	t.Run("direct messages", func(t *testing.T) {
+		ca := decode[fakemattermost.Channel](t, fx.api(http.MethodPost, "/api/v4/channels/direct",
+			`["`+fakemattermost.BotUserID+`","u-bob"]`))
+		cb := decode[fakemattermost.Channel](t, asB(http.MethodPost, "/api/v4/channels/direct",
+			`["`+fakemattermost.SecondBotUserID+`","u-bob"]`))
+		if ca.ID == cb.ID {
+			t.Fatalf("one direct channel for both bots: %s", ca.ID)
+		}
+		if r := fx.api(http.MethodGet, "/api/v4/channels/"+cb.ID, ""); r.status != http.StatusForbidden {
+			t.Errorf("bot A reads bot B's direct channel = %s", r)
+		}
+		fx.post(ca.ID, "code A", "", "")
+		if r := asB(http.MethodPost, "/api/v4/posts", `{"channel_id":"`+cb.ID+`","message":"code B"}`); r.status !=
+			http.StatusCreated {
+			t.Fatalf("bot B's direct message = %s", r)
+		}
+		dms := decode[[]fakemattermost.DM](t, fx.control(http.MethodGet, "/_fake/dms", ""))
+		if len(dms) != 2 || dms[0].BotID != fakemattermost.BotUserID || dms[1].BotID != fakemattermost.SecondBotUserID ||
+			dms[0].UserID != "u-bob" || dms[1].UserID != "u-bob" || dms[1].Message != "code B" {
+			t.Errorf("dms %+v", dms)
+		}
+	})
+
+	t.Run("press as the bot of the token", func(t *testing.T) {
+		rc := newReceiver(t, http.StatusOK, `{}`)
+		fx.fake.SetAllowedUntrustedInternalConnections("127.0.0.1")
+		p := fx.post(fakemattermost.ChannelAlerts, "buttons", "", buttons(rc.srv.URL))
+		if r := asB(http.MethodPost, "/api/v4/posts/"+p.ID+"/actions/ack", ""); r.status != http.StatusOK {
+			t.Fatalf("bot B presses = %s", r)
+		}
+		got := rc.received()
+		if len(got) != 1 || str(t, got[0]["user_id"]) != fakemattermost.SecondBotUserID {
+			t.Errorf("integration requests %v", got)
+		}
+	})
+
+	t.Run("no notification for a bot", func(t *testing.T) {
+		fx.control(http.MethodDelete, "/_fake/notifications", "")
+		fx.post(fakemattermost.ChannelAlerts, "@channel @muster-dev-bot-b look", "", "")
+		var who []string
+		for _, n := range fx.notifications() {
+			who = append(who, n.UserID)
+		}
+		slices.Sort(who)
+		if !slices.Equal(who, []string{"u-alice", "u-bob"}) {
+			t.Errorf("notified %v, want alice and bob only", who)
+		}
+	})
+
+	t.Run("membership of bot B changes", func(t *testing.T) {
+		if r := fx.control(http.MethodDelete, "/_fake/channels/ch-alerts/members/"+fakemattermost.SecondBotUserID,
+			""); r.status != http.StatusNoContent {
+			t.Fatalf("remove bot B = %s", r)
+		}
+		wantAppError(t, asB(http.MethodPost, "/api/v4/posts", `{"channel_id":"ch-alerts","message":"x"}`),
+			http.StatusForbidden, "api.context.permissions.app_error")
+		if r := fx.api(http.MethodPost, "/api/v4/posts", `{"channel_id":"ch-alerts","message":"x"}`); r.status !=
+			http.StatusCreated {
+			t.Errorf("bot A still posts = %s", r)
+		}
+	})
+}

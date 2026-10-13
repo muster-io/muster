@@ -505,7 +505,8 @@ func TestNotificationsOfChannelPosts(t *testing.T) {
 	}
 }
 
-// F-016: sends and edits share a budget of 20 per minute per chat; the 21st answers 429 with the exact retry_after.
+// F-016: sends and edits share a budget of 20 per minute per chat and bot; the 21st answers 429 with the exact
+// retry_after, while another chat and another bot have their own budgets.
 func TestChatBudget(t *testing.T) {
 	f, base := start(t)
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
@@ -544,6 +545,10 @@ func TestChatBudget(t *testing.T) {
 	}
 	if s, _ := bot(t, base, "sendMessage", `{"chat_id":-1001000000001,"text":"other chat"}`); s != http.StatusOK {
 		t.Fatalf("another chat has its own budget: %d", s)
+	}
+	if s, _ := as(t, base, faketelegram.SecondBotToken, "sendMessage", `{"chat_id":-1001000000002,"text":"bot B"}`); s !=
+		http.StatusOK {
+		t.Fatalf("another bot has its own budget in the chat: %d", s)
 	}
 	advance(30 * time.Second)
 	if s, a := bot(t, base, "sendMessage", `{"chat_id":-1001000000002,"text":"again"}`); s != http.StatusOK {
@@ -1146,5 +1151,302 @@ func TestPrivateChats(t *testing.T) {
 		if s, _, _ := call(t, http.MethodPost, base+"/_fake/private", body); s != http.StatusBadRequest {
 			t.Errorf("%s = %d", body, s)
 		}
+	}
+}
+
+// as calls a Bot API method with a token.
+func as(t *testing.T, base, tok, method, body string) (int, answer) {
+	t.Helper()
+	status, _, a := call(t, http.MethodPost, base+"/bot"+tok+"/"+method, body)
+	return status, a
+}
+
+// updatesOf reads and confirms the queued updates of a token.
+func updatesOf(t *testing.T, base, tok string) []map[string]json.RawMessage {
+	t.Helper()
+	_, a := as(t, base, tok, "getUpdates", `{"timeout":0}`)
+	var out []map[string]json.RawMessage
+	if err := json.Unmarshal(a.Result, &out); err != nil {
+		t.Fatalf("updates of %s %s: %v", tok, a.Result, err)
+	}
+	if len(out) > 0 {
+		var id int64
+		_ = json.Unmarshal(out[len(out)-1]["update_id"], &id)
+		as(t, base, tok, "getUpdates", fmt.Sprintf(`{"timeout":0,"offset":%d}`, id+1))
+	}
+	return out
+}
+
+// postAs posts to the channel @muster_alerts as the bot of tok.
+func postAs(t *testing.T, base, tok, text string) int64 {
+	t.Helper()
+	s, a := as(t, base, tok, "sendMessage", `{"chat_id":-1001000000001,"text":"`+text+`","reply_markup":`+keyboard+`}`)
+	var m struct {
+		MessageID int64 `json:"message_id"`
+	}
+	_ = json.Unmarshal(a.Result, &m)
+	if s != http.StatusOK || m.MessageID == 0 {
+		t.Fatalf("post as %s = %d %+v", tok, s, a)
+	}
+	return m.MessageID
+}
+
+func kinds(t *testing.T, u []map[string]json.RawMessage) []string {
+	t.Helper()
+	out := []string{}
+	for _, x := range u {
+		for k := range x {
+			if k != "update_id" {
+				out = append(out, k)
+			}
+		}
+	}
+	return out
+}
+
+// S-069: the second bot has its own identity for every token that starts with 234567:, its own sender and edits;
+// bot A's other tokens keep the first bot.
+func TestSecondBotIdentity(t *testing.T) {
+	f, base := start(t)
+	for tok, want := range map[string]int64{"123456:x": faketelegram.BotID, token: faketelegram.BotID,
+		"777101:second-bot-token": faketelegram.BotID, faketelegram.SecondBotToken: faketelegram.SecondBotID,
+		"234567:other": faketelegram.SecondBotID} {
+		_, a := as(t, base, tok, "getMe", "")
+		var me faketelegram.User
+		_ = json.Unmarshal(a.Result, &me)
+		if me.ID != want || !me.IsBot {
+			t.Errorf("getMe with %s = %+v, want %d", tok, me, want)
+		}
+		if want == faketelegram.SecondBotID && me.Username != faketelegram.SecondBotUsername {
+			t.Errorf("bot B's username %q", me.Username)
+		}
+	}
+
+	_, a := as(t, base, faketelegram.SecondBotToken, "getChatMember",
+		fmt.Sprintf(`{"chat_id":%d,"user_id":%d}`, faketelegram.GroupID, faketelegram.SecondBotID))
+	var cm struct {
+		Status string            `json:"status"`
+		User   faketelegram.User `json:"user"`
+	}
+	_ = json.Unmarshal(a.Result, &cm)
+	if cm.Status != faketelegram.StatusAdministrator || cm.User.Username != faketelegram.SecondBotUsername {
+		t.Errorf("bot B in the group %+v", cm)
+	}
+
+	postAs(t, base, token, "by A")
+	pb := postAs(t, base, faketelegram.SecondBotToken, "by B")
+	ch := f.Messages(faketelegram.ChannelID)
+	if len(ch) != 2 || ch[0].From.ID != faketelegram.BotID || ch[1].From.ID != faketelegram.SecondBotID ||
+		ch[1].From.Username != faketelegram.SecondBotUsername {
+		t.Fatalf("channel %+v", ch)
+	}
+	edit := func(tok string, chat, id int64, text string) (int, answer) {
+		return as(t, base, tok, "editMessageText", fmt.Sprintf(`{"chat_id":%d,"message_id":%d,"text":%q}`, chat, id,
+			text))
+	}
+	if s, a := edit(faketelegram.SecondBotToken, faketelegram.ChannelID, pb, "B edits B"); s != http.StatusOK {
+		t.Fatalf("bot B edits its post = %d %+v", s, a)
+	}
+	if s, a := edit(token, faketelegram.ChannelID, pb, "A edits B as a channel admin"); s != http.StatusOK {
+		t.Fatalf("bot A edits bot B's channel post = %d %+v", s, a)
+	}
+	ch = f.Messages(faketelegram.ChannelID)
+	if e := ch[1].Edits; len(e) != 2 || e[0].By != faketelegram.SecondBotID || e[1].By != faketelegram.BotID {
+		t.Errorf("edits of post B %+v", e)
+	}
+
+	copyB := f.Messages(faketelegram.GroupID)[1].ID
+	s, a := as(t, base, faketelegram.SecondBotToken, "sendMessage",
+		fmt.Sprintf(`{"chat_id":%d,"text":"reply B","reply_parameters":{"message_id":%d}}`, faketelegram.GroupID, copyB))
+	var reply struct {
+		MessageID int64 `json:"message_id"`
+	}
+	_ = json.Unmarshal(a.Result, &reply)
+	if s != http.StatusOK {
+		t.Fatalf("bot B replies = %d %+v", s, a)
+	}
+	if s, a := edit(token, faketelegram.GroupID, reply.MessageID, "A edits B's reply"); s != http.StatusBadRequest ||
+		a.Description != faketelegram.DescriptionCantBeEdited {
+		t.Errorf("bot A edits bot B's group message = %d %+v", s, a)
+	}
+	if s, _ := edit(faketelegram.SecondBotToken, faketelegram.GroupID, reply.MessageID, "B edits B's reply"); s !=
+		http.StatusOK {
+		t.Errorf("bot B edits its own group message = %d", s)
+	}
+
+	member := fmt.Sprintf("%s/_fake/chats/%d/members/%d", base, faketelegram.GroupID, faketelegram.SecondBotID)
+	call(t, http.MethodPut, member, `{"status":"left"}`)
+	if s, _ := as(t, base, faketelegram.SecondBotToken, "getChatMember",
+		fmt.Sprintf(`{"chat_id":%d,"user_id":%d}`, faketelegram.GroupID, faketelegram.SecondBotID)); s !=
+		http.StatusForbidden {
+		t.Errorf("bot B outside the group = %d, want 403", s)
+	}
+	if s, _ := as(t, base, token, "getChatMember",
+		fmt.Sprintf(`{"chat_id":%d,"user_id":%d}`, faketelegram.GroupID, faketelegram.SecondBotID)); s != http.StatusOK {
+		t.Errorf("bot A asks about bot B = %d, want 200", s)
+	}
+}
+
+// S-069: the automatic copy, its edited_message and people's comments reach every admin bot of the discussion group
+// that receives updates; a bot's own messages reach no other bot; another token of the posting bot gets nothing;
+// withhold_copies_from keeps copies from the bots it names.
+func TestCopyFanOut(t *testing.T) {
+	_, base := start(t)
+	tokA, tokB, tokA2 := token, faketelegram.SecondBotToken, "777101:second-token-of-a"
+	for _, tok := range []string{tokA, tokB, tokA2} {
+		updatesOf(t, base, tok)
+	}
+
+	p := postAs(t, base, tokA, "post A")
+	for tok, want := range map[string]int{tokA: 1, tokB: 1, tokA2: 0} {
+		u := updatesOf(t, base, tok)
+		if len(u) != want {
+			t.Fatalf("%s got %v after post A, want %d", tok, kinds(t, u), want)
+		}
+		if want == 1 && messageOf(t, u[0], "message").ForwardOrigin.MessageID != p {
+			t.Errorf("%s got the wrong copy", tok)
+		}
+	}
+
+	as(t, base, tokA, "editMessageText", fmt.Sprintf(`{"chat_id":%d,"message_id":%d,"text":"post A edited"}`,
+		faketelegram.ChannelID, p))
+	for _, tok := range []string{tokA, tokB} {
+		if u := updatesOf(t, base, tok); len(u) != 1 || u[0]["edited_message"] == nil {
+			t.Errorf("%s got %v after the edit, want an edited_message", tok, kinds(t, u))
+		}
+	}
+
+	if s, b, _ := call(t, http.MethodPost, base+"/_fake/comment",
+		fmt.Sprintf(`{"post_id":%d,"from":{"id":5001},"text":"looking"}`, p)); s != http.StatusOK {
+		t.Fatalf("comment = %d %s", s, b)
+	}
+	for _, tok := range []string{tokA, tokB} {
+		if u := updatesOf(t, base, tok); len(u) != 1 || messageOf(t, u[0], "message").Text != "looking" {
+			t.Errorf("%s got %v after the comment", tok, kinds(t, u))
+		}
+	}
+	if u := updatesOf(t, base, tokA2); len(u) != 0 {
+		t.Errorf("another token of bot A got %v", kinds(t, u))
+	}
+
+	copyID := int64(1)
+	as(t, base, tokA, "sendMessage", fmt.Sprintf(`{"chat_id":%d,"text":"thread reply","reply_parameters":{"message_id":%d}}`,
+		faketelegram.GroupID, copyID))
+	for _, tok := range []string{tokA, tokB} {
+		if u := updatesOf(t, base, tok); len(u) != 0 {
+			t.Errorf("bot A's own reply reached %s: %v", tok, kinds(t, u))
+		}
+	}
+
+	if s, b, _ := call(t, http.MethodPut, base+"/_fake/config", `{"withhold_copies_from":[234567]}`); s !=
+		http.StatusOK || !strings.Contains(b, `"withhold_copies_from":[234567]`) {
+		t.Fatalf("withhold_copies_from = %d %s", s, b)
+	}
+	p2 := postAs(t, base, tokA, "post A2")
+	if u := updatesOf(t, base, tokA); len(u) != 1 {
+		t.Errorf("bot A got %v, want its copy", kinds(t, u))
+	}
+	if u := updatesOf(t, base, tokB); len(u) != 0 {
+		t.Errorf("a copy withheld from bot B reached it: %v", kinds(t, u))
+	}
+	call(t, http.MethodPost, base+"/_fake/comment", fmt.Sprintf(`{"post_id":%d,"from":{"id":5001},"text":"c2"}`, p2))
+	for _, tok := range []string{tokA, tokB} {
+		if u := updatesOf(t, base, tok); len(u) != 1 {
+			t.Errorf("the comment under a withheld copy did not reach %s: %v", tok, kinds(t, u))
+		}
+	}
+	call(t, http.MethodPut, base+"/_fake/config", `{"withhold_copies_from":[]}`)
+
+	call(t, http.MethodPut, fmt.Sprintf("%s/_fake/chats/%d/members/%d", base, faketelegram.GroupID,
+		faketelegram.SecondBotID), `{"status":"member"}`)
+	postAs(t, base, tokA, "post A3")
+	if u := updatesOf(t, base, tokA); len(u) != 1 {
+		t.Errorf("bot A got %v", kinds(t, u))
+	}
+	if u := updatesOf(t, base, tokB); len(u) != 0 {
+		t.Errorf("bot B, a mere member of the group, got %v", kinds(t, u))
+	}
+	call(t, http.MethodPut, fmt.Sprintf("%s/_fake/chats/%d/members/%d", base, faketelegram.GroupID,
+		faketelegram.SecondBotID), `{"status":"administrator","can_post_messages":true,"can_edit_messages":true}`)
+
+	pb := postAs(t, base, tokB, "post B")
+	for _, tok := range []string{tokA, tokB} {
+		u := updatesOf(t, base, tok)
+		if len(u) != 1 || messageOf(t, u[0], "message").ForwardOrigin.MessageID != pb {
+			t.Errorf("%s got %v after post B, want its copy", tok, kinds(t, u))
+		}
+	}
+}
+
+// S-069: a person's private chats with two bots are two conversations: each bot sees and writes only its own.
+func TestPrivateChatsPerBot(t *testing.T) {
+	_, base := start(t)
+	tokB := faketelegram.SecondBotToken
+	for _, tok := range []string{token, tokB} {
+		if s, b, _ := call(t, http.MethodPost, base+"/_fake/private",
+			`{"token":"`+tok+`","from":{"id":5001},"text":"/start `+tok[:6]+`"}`); s != http.StatusOK {
+			t.Fatalf("private to %s = %d %s", tok, s, b)
+		}
+	}
+	call(t, http.MethodPost, base+"/_fake/private", `{"token":"`+token+`","from":{"id":6001},"text":"/start"}`)
+	if u := updatesOf(t, base, tokB); len(u) != 1 || messageOf(t, u[0], "message").Text != "/start 234567" {
+		t.Errorf("bot B's updates %v", u)
+	}
+	if s, a := as(t, base, tokB, "sendMessage", `{"chat_id":5001,"text":"hi from B"}`); s != http.StatusOK {
+		t.Fatalf("bot B answers 5001 = %d %+v", s, a)
+	}
+	if s, a := as(t, base, tokB, "sendMessage", `{"chat_id":6001,"text":"hi"}`); s != http.StatusBadRequest ||
+		a.Description != faketelegram.DescriptionChatNotFound {
+		t.Errorf("bot B writes to a person who wrote only to bot A = %d %+v", s, a)
+	}
+	read := func(q string) []faketelegram.Message {
+		_, b, _ := call(t, http.MethodGet, base+"/_fake/messages?"+q, "")
+		var msgs []faketelegram.Message
+		if err := json.Unmarshal([]byte(b), &msgs); err != nil {
+			t.Fatalf("messages %s: %s", q, b)
+		}
+		return msgs
+	}
+	if m := read("chat=5001&bot=234567"); len(m) != 2 || m[1].Text != "hi from B" ||
+		m[1].From.ID != faketelegram.SecondBotID {
+		t.Errorf("bot B's conversation %+v", m)
+	}
+	if m := read("chat=5001&bot=123456"); len(m) != 1 || m[0].Text != "/start 777001" {
+		t.Errorf("bot A's conversation %+v", m)
+	}
+	if m := read("chat=5001"); len(m) != 3 {
+		t.Errorf("the whole chat %+v", m)
+	}
+	if s, _, _ := call(t, http.MethodGet, base+"/_fake/messages?chat=5001&bot=x", ""); s != http.StatusBadRequest {
+		t.Errorf("a bot that is not an id = %d", s)
+	}
+}
+
+// S-069: a press goes to the bot that sent the message pressed, also with the data of another bot's message.
+func TestPressGoesToTheBotOfTheMessage(t *testing.T) {
+	_, base := start(t)
+	tokB := faketelegram.SecondBotToken
+	pa, pb := postAs(t, base, token, "post A"), postAs(t, base, tokB, "post B")
+	updatesOf(t, base, token)
+	updatesOf(t, base, tokB)
+	if s, _ := press(t, base, fmt.Sprintf(`{"chat":%d,"message_id":%d,"from":{"id":5001},"button":"Ack","data_from":%d}`,
+		faketelegram.ChannelID, pb, pa)); s != http.StatusOK {
+		t.Fatalf("press = %d", s)
+	}
+	if u := updatesOf(t, base, token); len(u) != 0 {
+		t.Errorf("bot A got the press on bot B's post: %v", kinds(t, u))
+	}
+	u := updatesOf(t, base, tokB)
+	if len(u) != 1 || u[0]["callback_query"] == nil {
+		t.Fatalf("bot B's updates %v", kinds(t, u))
+	}
+	var q struct {
+		Message struct {
+			MessageID int64 `json:"message_id"`
+		} `json:"message"`
+	}
+	_ = json.Unmarshal(u[0]["callback_query"], &q)
+	if q.Message.MessageID != pb {
+		t.Errorf("the press names message %d, want %d", q.Message.MessageID, pb)
 	}
 }

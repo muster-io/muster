@@ -37,7 +37,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-15 Outgoing webhook | Shadow | 25 | S-044, S-045, S-046 | yes | 25 of 25 |
 | C-16 Destination test | Shadow | 14 | S-047, S-048 | yes | 14 of 14 |
 | C-17 Timers | Actions | 20 | S-049, S-068, S-050 | yes | 20 of 20 |
-| C-18 Account links | Actions | 18 | S-051, S-052 | yes | 18 of 18 |
+| C-18 Account links | Actions | 18 | S-051, S-052, S-069 | yes | 18 of 18 |
 | C-19 Self-observation | Operations | 15 | S-053, S-054, S-059 | yes | 15 of 15 |
 | C-20 Organization settings and security | Operations | 12 | S-055, S-056 | yes | 12 of 12 |
 | C-21 Documentation site and runbooks | Operations | 9 | S-057, S-058, S-060 | yes | 9 of 9 |
@@ -60,7 +60,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-01.FR-10 | S-003 | complete |  |
 | C-01.FR-11 | S-002 (part), S-003 (part) | complete |  |
 | C-01.FR-12 | S-001 (part), S-005 (part), S-006 | complete |  |
-| C-01.FR-13 | S-004 (part), S-006 (part), S-009 (part), S-013 (part), S-018 (part), S-020 (part), S-023 (part), S-037 (part), S-039 (part), S-041 (part), S-042 (part), S-066 (part), S-067 (part), S-044 (part), S-045 (part), S-047 (part) | complete | later capabilities extend their fake servers and the demo configuration |
+| C-01.FR-13 | S-004 (part), S-006 (part), S-009 (part), S-013 (part), S-018 (part), S-020 (part), S-023 (part), S-037 (part), S-039 (part), S-041 (part), S-042 (part), S-066 (part), S-067 (part), S-044 (part), S-045 (part), S-047 (part), S-069 (part) | complete | later capabilities extend their fake servers and the demo configuration; re-verified with several Connections of one messenger in S-069 (D305) |
 | C-01.FR-14 | S-001, S-058 (part) | complete | the README demo animation is added after the frontend stories, with S-058 |
 | C-01.FR-15 | S-003 (part), S-004 (part) | complete |  |
 | C-01.AC-1 | S-001 (part), S-002 (part) | complete |  |
@@ -421,7 +421,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-11.FR-1 | S-034 | complete |  |
+| C-11.FR-1 | S-034, S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
 | C-11.FR-2 | S-034 (part), S-039 (part), S-061 (part), S-047 (part) | complete | its callers: checks from S-039, ephemeral answers from S-061, `limited` test steps from S-047 |
 | C-11.FR-3 | S-034 | complete |  |
 | C-11.FR-4 | S-034 | complete |  |
@@ -492,7 +492,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-13.FR-1 | S-039 (part), S-040 (part) | complete |  |
 | C-13.FR-2 | S-039 (part), S-040 (part), S-061 (part), S-064 (part) | complete | the warning `press_answers_in_thread` in S-061, shown on the Connection page in S-040 |
 | C-13.FR-3 | S-039 (part), S-061 (part) | complete |  |
-| C-13.FR-4 | S-061 (part), S-068 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminder buttons of S-068 |
+| C-13.FR-4 | S-061 (part), S-068 (part), S-069 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminder buttons of S-068; re-verified with several Connections of one messenger in S-069 (D305) |
 | C-13.FR-5 | S-061 | complete |  |
 | C-13.FR-6 | S-039 | complete |  |
 | C-13.FR-7 | S-061 | complete |  |
@@ -526,9 +526,9 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-14.FR-1 | S-041 (part), S-043 (part) | complete |  |
-| C-14.FR-2 | S-042 (part), S-066 (part), S-043 (part) | complete |  |
-| C-14.FR-3 | S-066 | complete |  |
-| C-14.FR-4 | S-067, S-068 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminder buttons of S-068 |
+| C-14.FR-2 | S-042 (part), S-066 (part), S-043 (part), S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
+| C-14.FR-3 | S-066, S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
+| C-14.FR-4 | S-067, S-068 (part), S-069 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminder buttons of S-068; re-verified with several Connections of one messenger in S-069 (D305) |
 | C-14.FR-5 | S-067 | complete | the answer to a linked account is checked with link rows set up directly (S-051 creates links) |
 | C-14.FR-6 | S-042 (part), S-066 (part) | complete |  |
 | C-14.FR-7 | S-042 | complete |  |
@@ -553,7 +553,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-14.AC-10 | S-041 | complete |  |
 | C-14.AC-11 | S-041 (part), S-067 (part) | complete |  |
 | C-14.AC-12 | S-042 | complete |  |
-| C-14.AC-13 | S-042 (part), S-043 (part) | complete |  |
+| C-14.AC-13 | S-042 (part), S-043 (part), S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
 | C-14.AC-14 | S-042 | complete |  |
 | C-14.AC-15 | S-066 | complete |  |
 | C-14.AC-16 | S-066 (part), S-043 (part) | complete |  |
@@ -621,9 +621,9 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-17.FR-1 | S-049 | complete |  |
-| C-17.FR-2 | S-049 (part), S-050 (part) | complete |  |
+| C-17.FR-2 | S-049 (part), S-050 (part), S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
 | C-17.FR-3 | S-049 (part), S-050 (part) | complete |  |
-| C-17.FR-4 | S-049 (part), S-068 (part) | complete | the buttons on Reminders are S-068 |
+| C-17.FR-4 | S-049 (part), S-068 (part), S-069 (part) | complete | the buttons on Reminders are S-068; re-verified with several Connections of one messenger in S-069 (D305) |
 | C-17.FR-5 | S-049 | complete |  |
 | C-17.FR-6 | S-068, S-055 (part) | complete | S-055 repeats the expiry after a real key rotation |
 | C-17.FR-7 | S-049 | complete |  |
@@ -643,28 +643,28 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-18
 
-[Account links](../prd/l1/C-18-account-links.md) · Actions · stories: S-051, S-052
+[Account links](../prd/l1/C-18-account-links.md) · Actions · stories: S-051, S-052, S-069
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-18.FR-1 | S-051 | complete |  |
-| C-18.FR-2 | S-051 (part), S-052 (part) | complete |  |
+| C-18.FR-2 | S-051 (part), S-052 (part), S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
 | C-18.FR-3 | S-051 (part), S-052 (part) | complete |  |
-| C-18.FR-4 | S-051 | complete |  |
+| C-18.FR-4 | S-051, S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
 | C-18.FR-5 | S-051 | complete |  |
 | C-18.FR-6 | S-051 (part), S-052 (part) | complete |  |
 | C-18.FR-7 | S-051 | complete |  |
-| C-18.FR-8 | S-051 | complete |  |
+| C-18.FR-8 | S-051, S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
 | C-18.FR-9 | S-051 | complete |  |
-| C-18.FR-10 | S-051 (part), S-052 (part) | complete |  |
+| C-18.FR-10 | S-051 (part), S-052 (part), S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
 | C-18.FR-11 | S-051 | complete |  |
 | C-18.AC-1 | S-051 | complete |  |
 | C-18.AC-2 | S-051 | complete |  |
-| C-18.AC-3 | S-051 | complete |  |
+| C-18.AC-3 | S-051, S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
 | C-18.AC-4 | S-051 | complete |  |
 | C-18.AC-5 | S-051 | complete | the Reminder buttons are C-17 (S-068) |
 | C-18.AC-6 | S-051 | complete |  |
-| C-18.AC-7 | S-051 | complete |  |
+| C-18.AC-7 | S-051, S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
 
 ## C-19
 

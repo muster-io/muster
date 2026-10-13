@@ -37,8 +37,8 @@ const (
 // Press is a press as POST /_fake/press takes it: the chat (an id or an @username) and the message pressed, the person
 // who pressed and the label of the button. DataFrom takes the button's data from another message of the chat, to press
 // a valid button on the wrong message; Data, when set, is the data itself, for a forged button. PressedMsAgo makes the
-// press that long ago, as an update that arrives late. Token receives the update instead of the bot that sent the
-// message.
+// press that long ago, as an update that arrives late. The update goes to the bot that sent the message pressed, as on
+// Telegram, also when the data come from a message of another bot; Token receives it instead.
 type Press struct {
 	Chat         json.RawMessage `json:"chat"`
 	MessageID    int64           `json:"message_id"`
@@ -133,7 +133,11 @@ func (f *Fake) Press(ctx context.Context, p Press) (Pressed, int, string) {
 		message = c.apiMessage(m, false)
 	}
 	token := p.Token
-	if token == "" {
+	switch {
+	case token != "":
+	case m != nil:
+		token = m.token
+	default:
 		token = source.token
 	}
 	at := c.now().Add(-time.Duration(p.PressedMsAgo) * time.Millisecond)

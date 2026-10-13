@@ -58,7 +58,7 @@ const (
 
 // FakeURLs are the base URLs of the fake servers.
 type FakeURLs struct {
-	Alertmanager, Mattermost, Telegram string
+	Alertmanager, Mattermost, MattermostSecond, Telegram string
 }
 
 type Harness struct {
@@ -95,14 +95,15 @@ func (h *Harness) startDevProcess(replicas int) {
 	h.t.Helper()
 	a := devmode.FakeAddresses()
 	h.Fakes = FakeURLs{
-		Alertmanager: "http://" + a.Alertmanager,
-		Mattermost:   "http://" + a.Mattermost,
-		Telegram:     "http://" + a.Telegram,
+		Alertmanager:     "http://" + a.Alertmanager,
+		Mattermost:       "http://" + a.Mattermost,
+		MattermostSecond: "http://" + a.MattermostSecond,
+		Telegram:         "http://" + a.Telegram,
 	}
 	first := h.newReplica([]string{"dev"}, h.databaseEnv(), ":8080", ":8081", ":8082", fakesReadyLine)
 	first.Start(h.t)
 	first.waitFor(h.t, "the fake servers to answer", func() bool {
-		for _, u := range []string{h.Fakes.Alertmanager, h.Fakes.Mattermost, h.Fakes.Telegram} {
+		for _, u := range []string{h.Fakes.Alertmanager, h.Fakes.Mattermost, h.Fakes.MattermostSecond, h.Fakes.Telegram} {
 			if !answers(h.t.Context(), u+"/_fake/requests") {
 				return false
 			}
@@ -131,9 +132,10 @@ func (h *Harness) startFakesInProcess() {
 	})
 	h.InProcess = fakes
 	h.Fakes = FakeURLs{
-		Alertmanager: fakes.Alertmanager.URL(),
-		Mattermost:   fakes.Mattermost.URL(),
-		Telegram:     fakes.Telegram.URL(),
+		Alertmanager:     fakes.Alertmanager.URL(),
+		Mattermost:       fakes.Mattermost.URL(),
+		MattermostSecond: fakes.MattermostSecond.URL(),
+		Telegram:         fakes.Telegram.URL(),
 	}
 }
 

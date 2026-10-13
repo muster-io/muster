@@ -188,8 +188,10 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 
 - `make dev` starts PostgreSQL on `127.0.0.1:55432` with Docker Compose, builds the binary and runs `muster dev`: app
   on `:8080`, ingest on `:8081`, internal on `:8082` (health, `/metrics`, `/_dev/`) from S-006, which adds the runtime.
-  The fake Alertmanager, Mattermost and Telegram servers listen on `127.0.0.1:19093`, `:18065` and `:18081`; each
-  records requests at `/_fake/requests` and takes scripted faults at `/_fake/faults`.
+  The fake Alertmanager, Mattermost and Telegram servers listen on `127.0.0.1:19093`, `:18065` and `:18081`, and a
+  second fake Mattermost server on `:18066`; each records requests at `/_fake/requests` and takes scripted faults at
+  `/_fake/faults`. Both Mattermost servers and the Telegram server also serve a second bot, with the published tokens
+  `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, for which `muster dev` creates no Connection.
 - Development defaults: the bootstrap Admin `admin@example.org` with the password `muster-dev-password`, and a fixed,
   published master key that the server refuses outside development mode. A `MUSTER_*` variable that is set, even
   empty, replaces its default; the database default also yields to any field of the main connection, and the key and

@@ -17,10 +17,14 @@ import (
 // Comment Threads (C-01.FR-13): every channel post with a discussion group gets its automatic copy there, copy_delay_ms
 // after the post, from Telegram (777000) on behalf of the channel, with is_automatic_forward, forward_origin naming the
 // post, edit_date equal to its date and no keyboard (F-005). Only a bot that is an admin of the group receives it as a
-// message update (F-003), and withhold_copies keeps it back. An edit of the post edits the copy and sends an
-// edited_message for it at once (F-006). A reply to the copy is a comment in its Thread (F-007), and a reply to a
-// deleted copy fails (F-008). The copy notifies member with sound, even for a Quiet post (F-013); a reply in a Thread
-// notifies member only (F-014); a reply inside the channel is a new post with a copy of its own (F-015).
+// message update (F-003): the bot that posted, and every other bot that is an admin there and receives updates (it
+// called getUpdates or set a webhook), since the copy comes from Telegram, not from a bot; withhold_copies keeps it
+// back from every bot and withhold_copies_from from the bots it names. An edit of the post edits the copy and sends an
+// edited_message for it at once to the same bots (F-006), and a person's comment reaches them too; a bot's own messages
+// reach no other bot, as bots do not see each other's messages. A reply to the copy is a comment in its Thread (F-007),
+// and a reply to a deleted copy fails (F-008). The copy notifies member with sound, even for a Quiet post (F-013); a
+// reply in a Thread notifies member only (F-014); a reply inside the channel is a new post with a copy of its own
+// (F-015).
 
 // TelegramUserID is the sender of automatic copies: Telegram itself.
 const TelegramUserID int64 = 777000
@@ -55,11 +59,8 @@ type ForwardOrigin struct {
 	Date      int64   `json:"date"`
 }
 
-// The senders of the bot's messages and of automatic copies.
-var (
-	botSender      = Sender{ID: BotID, IsBot: true, FirstName: "Muster Dev", Username: BotUsername}
-	telegramSender = Sender{ID: TelegramUserID, FirstName: "Telegram"}
-)
+// telegramSender is the sender of automatic copies.
+var telegramSender = Sender{ID: TelegramUserID, FirstName: "Telegram"}
 
 func refOf(ch *Chat) ChatRef {
 	return ChatRef{ID: ch.ID, Type: ch.Type, Title: ch.Title, Username: ch.Username}
@@ -76,22 +77,63 @@ func (f *Fake) copyLater(ctx context.Context, post *Message) {
 	time.AfterFunc(time.Duration(cfg.CopyDelayMS)*time.Millisecond, func() { f.makeCopy(ctx, post) })
 }
 
-// makeCopy adds the automatic copy of a channel post to its discussion group and delivers it to the bot that posted,
-// when the bot is an admin of the group and copies are not withheld. A post deleted meanwhile, or of a channel without
-// comments, gets none.
+// makeCopy adds the automatic copy of a channel post to its discussion group and delivers it to the bots that receive
+// it. A post deleted meanwhile, or of a channel without comments, gets none.
 func (f *Fake) makeCopy(ctx context.Context, post *Message) {
-	withhold := f.Config().WithholdCopies
+	cfg := f.Config()
+	others := f.receivers()
 	c := f.chats
 	c.mu.Lock()
-	update := c.addCopy(post, withhold)
+	update := c.addCopy(post, cfg.WithholdCopies, cfg.WithholdCopiesFrom, others)
 	c.mu.Unlock()
 	if update != nil {
-		f.send(ctx, post.token, "message", update)
+		for _, t := range update.tokens {
+			f.send(ctx, t, "message", update.update)
+		}
 	}
 }
 
-// addCopy adds the copy of post and returns its update for the bot, nil when it gets none; c.mu is held.
-func (c *chats) addCopy(post *Message, withhold bool) map[string]any {
+// receivers are the tokens that receive updates — those that called getUpdates or set a webhook — and are not
+// revoked, in order; f.mu is taken.
+func (f *Fake) receivers() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []string{}
+	for token, b := range f.bots {
+		if b.receiving && !slices.Contains(f.config.RevokedTokens, token) {
+			out = append(out, token)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// copyRecipients are the tokens that receive an update about the copy cp of a post sent by poster: poster, and every
+// token of others whose bot is not poster's; each only when its bot is an admin of the group and the copy is not
+// withheld from it. A comment reaches poster in any case and is never withheld. c.mu is held.
+func (c *chats) copyRecipients(cp *Message, poster string, others []string, comment bool) []string {
+	gets := func(token string) bool {
+		bot := botOf(token).ID
+		if !comment && (cp.withheld || slices.Contains(cp.withheldFrom, bot)) {
+			return false
+		}
+		return c.receivesCopies(cp.Chat, bot)
+	}
+	out := []string{}
+	if poster != "" && (comment || gets(poster)) {
+		out = append(out, poster)
+	}
+	for _, t := range others {
+		if t != poster && botOf(t).ID != botOf(poster).ID && gets(t) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// addCopy adds the copy of post and returns its update and the tokens that receive it, nil when there is no copy;
+// c.mu is held.
+func (c *chats) addCopy(post *Message, withhold bool, withheldFrom []int64, others []string) *editedCopy {
 	channel := c.byID[post.Chat]
 	if channel == nil || c.find(channel.ID, post.ID) == nil || post.copyID != 0 {
 		return nil
@@ -104,29 +146,27 @@ func (c *chats) addCopy(post *Message, withhold bool) map[string]any {
 	m := &Message{Chat: group.ID, Date: now, EditDate: now, From: &telegramSender, SenderChat: new(refOf(channel)),
 		IsAutomaticForward: true, ForwardOrigin: &ForwardOrigin{Type: "channel", Chat: refOf(channel),
 			MessageID: post.ID, Date: post.Date},
-		Text: post.Text, ParseMode: post.ParseMode, Edits: []Edit{}, token: post.token, withheld: withhold}
+		Text: post.Text, ParseMode: post.ParseMode, Edits: []Edit{}, token: post.token, withheld: withhold,
+		withheldFrom: slices.Clone(withheldFrom)}
 	c.next[group.ID]++
 	m.ID = c.next[group.ID]
 	c.messages[group.ID] = append(c.messages[group.ID], m)
 	post.copyID = m.ID
 	c.notifications = append(c.notifications, Notification{Account: AccountMember, Chat: group.ID, MessageID: m.ID,
 		Sound: true})
-	if withhold || !c.receivesCopies(group.ID) {
-		return nil
-	}
-	return c.apiMessage(m, true)
+	return &editedCopy{tokens: c.copyRecipients(m, post.token, others, false), update: c.apiMessage(m, true)}
 }
 
 // receivesCopies reports whether the bot receives the automatic copies of the group: only as its admin (F-003); c.mu
 // is held.
-func (c *chats) receivesCopies(group int64) bool {
-	s := c.member(group, BotID).Status
+func (c *chats) receivesCopies(group, bot int64) bool {
+	s := c.member(group, bot).Status
 	return s == StatusAdministrator || s == StatusCreator
 }
 
-// editCopy mirrors the edit of a channel post onto its automatic copy and returns the edited_message for the bot, nil
-// when there is no copy or the bot does not receive it; c.mu is held.
-func (c *chats) editCopy(ch *Chat, post *Message, now time.Time) *editedCopy {
+// editCopy mirrors the edit of a channel post onto its automatic copy and returns the edited_message for the bots that
+// receive the copy, nil when there is no copy; c.mu is held.
+func (c *chats) editCopy(ch *Chat, post *Message, now time.Time, others []string) *editedCopy {
 	if ch.Type != TypeChannel || post.copyID == 0 {
 		return nil
 	}
@@ -136,10 +176,7 @@ func (c *chats) editCopy(ch *Chat, post *Message, now time.Time) *editedCopy {
 	}
 	m.Text, m.ParseMode, m.EditDate = post.Text, post.ParseMode, now.Unix()
 	m.Edits = append(m.Edits, Edit{Date: now.Unix(), Text: post.Text, ParseMode: post.ParseMode})
-	if m.withheld || !c.receivesCopies(m.Chat) {
-		return nil
-	}
-	return &editedCopy{token: m.token, update: c.apiMessage(m, true)}
+	return &editedCopy{tokens: c.copyRecipients(m, m.token, others, false), update: c.apiMessage(m, true)}
 }
 
 // apiMessage is m as an update carries it, with the message it replies to when nested; c.mu is held.
@@ -169,7 +206,7 @@ func (c *chats) apiMessage(m *Message, nested bool) map[string]any {
 	return out
 }
 
-// send queues the update {kind: message} for the bot of token; without a token nobody receives it.
+// send queues the update {kind: message} for token; without a token nobody receives it.
 func (f *Fake) send(ctx context.Context, token, kind string, message map[string]any) {
 	if token == "" {
 		return
@@ -179,7 +216,8 @@ func (f *Fake) send(ctx context.Context, token, kind string, message map[string]
 }
 
 // Comment is a person's comment under a channel post, as POST /_fake/comment takes it: the post, its channel (the
-// channel @muster_alerts when empty), the person and the text; Token receives the update instead of the bot that posted.
+// channel @muster_alerts when empty), the person and the text; Token alone receives the update instead of the bots that
+// receive the copy's updates.
 type Comment struct {
 	PostID int64  `json:"post_id"`
 	Chat   string `json:"chat"`
@@ -195,24 +233,27 @@ func (f *Fake) handleCopies() {
 }
 
 // postComment posts a person's comment under a channel post: a reply to its automatic copy in the discussion group,
-// in the copy's Thread (F-007), delivered to the bot even when the copy was withheld. A deleted copy cannot be replied
-// to (F-008).
+// in the copy's Thread (F-007), delivered to the bot that posted even when the copy was withheld, and to every other
+// admin bot of the group that receives updates. A deleted copy cannot be replied to (F-008).
 func (f *Fake) postComment(w http.ResponseWriter, r *http.Request) {
 	var cm Comment
 	if err := decodeControl(w, r, &cm); err != nil {
 		return
 	}
-	m, update, status, failure := f.chats.comment(cm)
+	m, update, status, failure := f.chats.comment(cm, f.receivers())
 	if failure != "" {
 		fakeserver.WriteError(w, status, failure)
 		return
 	}
-	f.send(r.Context(), update.token, "message", update.update)
+	for _, t := range update.tokens {
+		f.send(r.Context(), t, "message", update.update)
+	}
 	fakeserver.WriteJSON(w, http.StatusOK, m)
 }
 
-// comment adds a comment and returns it, its update for the bot, or the status and text of a failure; c.mu is taken.
-func (c *chats) comment(cm Comment) (Message, editedCopy, int, string) {
+// comment adds a comment and returns it, its update and the tokens that receive it, or the status and text of a
+// failure; others are the tokens that receive updates; c.mu is taken.
+func (c *chats) comment(cm Comment, others []string) (Message, editedCopy, int, string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	name := cm.Chat
@@ -249,13 +290,13 @@ func (c *chats) comment(cm Comment) (Message, editedCopy, int, string) {
 	c.messages[cp.Chat] = append(c.messages[cp.Chat], m)
 	c.notifications = append(c.notifications, Notification{Account: AccountMember, Chat: cp.Chat, MessageID: m.ID,
 		Sound: true})
-	token := cm.Token
-	if token == "" {
-		token = post.token
+	tokens := []string{cm.Token}
+	if cm.Token == "" {
+		tokens = c.copyRecipients(cp, post.token, others, true)
 	}
 	out := *m
 	out.Edits = slices.Clone(m.Edits)
-	return out, editedCopy{token: token, update: c.apiMessage(m, true)}, 0, ""
+	return out, editedCopy{tokens: tokens, update: c.apiMessage(m, true)}, 0, ""
 }
 
 // deleteMessage deletes a message of a chat, as a person deleting the automatic copy of a post does: replies to it

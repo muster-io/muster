@@ -115,6 +115,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   Destination page (C-13.FR-9) — both through the interactive path, because a person waits for them — as the Broken
   probe when nothing is waiting (C-11.FR-9), in the delivery client class and never on the interactive path, and in
   `muster doctor` (C-02.FR-14); a successful check of a Broken Destination ends the Broken state.
+  A saved Destination whose channel later loses its discussion group, or whose bot loses its rights there, keeps
+  its Root messages, their edits and presses; its Thread replies go unattached (FR-3), the Destination check and
+  `muster doctor` fail, and the Destination does not become Broken from that alone.
 - **C-14.FR-15** Every edit of a Telegram message carries the whole inline keyboard of its new state, even when only
   the text changed: an edit without `reply_markup` removes the buttons (F-011).
 - **C-14.FR-16** The Root message is a regular message with Telegram HTML markup. The Alerts are a list, one line per

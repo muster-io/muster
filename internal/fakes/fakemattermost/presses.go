@@ -316,9 +316,9 @@ func (f *Fake) handlePress(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleAction is a press by the bot itself through the API (F-054).
+// handleAction is a press by the bot of the token itself through the API (F-054).
 func (f *Fake) handleAction(w http.ResponseWriter, r *http.Request) {
-	res, err := f.Press(r.Context(), r.PathValue("post_id"), r.PathValue("action_id"), BotUserID)
+	res, err := f.Press(r.Context(), r.PathValue("post_id"), r.PathValue("action_id"), botOf(r))
 	switch {
 	case errors.Is(err, ErrUnknownPost):
 		postNotFound(w)

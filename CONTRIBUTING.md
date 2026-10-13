@@ -54,8 +54,11 @@ The Makefile is the only entry point:
 | `make clean` | removes `bin/`: the binary, the coverage profile and the installed tools |
 
 `muster dev` starts the fake Alertmanager, Mattermost and Telegram servers on `127.0.0.1:19093`, `127.0.0.1:18065`
-and `127.0.0.1:18081` and prints their addresses; each records its requests at `/_fake/requests` and takes scripted
-faults at `/_fake/faults`. Muster itself joins them with the runtime, which a later story adds: from the runtime on,
+and `127.0.0.1:18081`, and a second fake Mattermost server on `127.0.0.1:18066`, and prints their addresses; each
+records its requests at `/_fake/requests` and takes scripted faults at `/_fake/faults`. Both Mattermost servers and the
+Telegram server also serve a second bot, with the published tokens `muster-dev-mattermost-token-b` and
+`234567:dev-telegram-token-b`, so that several Connections of one messenger can be tried; `muster dev` creates no
+Connection for them. Muster itself joins them with the runtime, which a later story adds: from the runtime on,
 `muster dev` also listens on `:8080` (app), `:8081` (ingest) and `:8082` (internal) and connects to the development
 database, and `muster dev --replica` runs an additional replica on `:9080`, `:9081` and `:9082`, without fake servers,
 against the same database; until then the replica only prints that it started and waits. Every `MUSTER_*` variable
