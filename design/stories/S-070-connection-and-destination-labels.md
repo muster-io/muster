@@ -51,7 +51,7 @@ acceptance:
   - "Every new text exists in English and Russian, the pages of the acceptance statements show no horizontal scrolling at 360 px wide in either language, and no Content Security Policy violation is reported (`several-connections.spec.ts`)."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 209
 ---
 
 # S-070. Connection and Destination labels, the Telegram link row and the duplicate-chat warning (FE)
