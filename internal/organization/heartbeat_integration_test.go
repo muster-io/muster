@@ -8,6 +8,7 @@ package organization_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -77,8 +78,17 @@ func readHeartbeat(t *testing.T, d *db.DB, orgID int64) heartbeatRow {
 // settings is an update of the organization row that sets the URL of the outgoing heartbeat to ciphertext, nil to
 // clear it.
 func settings(orgID int64, ciphertext []byte, changed bool, now time.Time) dbgen.UpdateSettingsParams {
-	p := dbgen.UpdateSettingsParams{OrgID: orgID, TotpRequired: "nobody", Proxy: []byte(`{"enabled": false}`),
-		UrlCiphertext: ciphertext, UrlChanged: changed, Now: now}
+	d := organization.Defaults()
+	mapping, _ := json.Marshal(d.SeverityMapping)
+	styles, _ := json.Marshal(d.SeverityStyles)
+	p := dbgen.UpdateSettingsParams{OrgID: orgID, Name: d.Name, TimeZone: d.TimeZone, SeverityLabel: d.SeverityLabel,
+		SeverityMapping: mapping, SeverityStyles: styles, CriticalIsUrgent: d.CriticalIsUrgent,
+		InstanceLabels: d.InstanceLabels, RetentionStoredSnapshotsDays: d.Retention.StoredSnapshotsDays,
+		RetentionAlertDetailsDays:        d.Retention.AlertDetailsDays,
+		RetentionAlertGroupSummariesDays: d.Retention.AlertGroupSummariesDays,
+		RetentionAuditLogDays:            d.Retention.AuditLogDays,
+		OidcTokenGraceSeconds:            int64(d.OIDCTokenGrace / time.Second), TotpRequired: "nobody",
+		Proxy: []byte(`{"enabled": false}`), UrlCiphertext: ciphertext, UrlChanged: changed, Now: now}
 	if ciphertext != nil {
 		p.UrlKeyID = pgtype.Text{String: "k1", Valid: true}
 		p.UrlUpdatedAt = pgtype.Timestamptz{Time: now, Valid: true}

@@ -1767,9 +1767,13 @@ paths:
       summary: Update the Organization
       description: Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps
         its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null`
-        on `outgoing_heartbeat.url` or a proxy `password` clears it. The settings become editable in stages, starting
-        with `totp_required`; while a field is not editable yet, a changed value in it gets `422` with `unsupported`
-        pointing at that field.
+        on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422`
+        at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`,
+        with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`.
+        A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request
+        validation; `out_of_range` is the second, defensive check of the same bounds.
+        A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with
+        the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
       x-permission: organization:write
       x-listener: app
       security:
@@ -1841,6 +1845,12 @@ paths:
       tags:
       - Organization
       summary: Update the outbound address policy
+      description: Replaces the policy and its lists. Requires `If-Match`; a stale ETag gets `412`. Each entry is a
+        network in CIDR form or a bare address, a host name, or a domain written `*.example.org`; an entry that does not
+        parse gets `422` with `invalid_format` and a repeated one `duplicate`, at `/allowed/<i>` or `/denied/<i>`.
+        `always_blocked` is read-only and ignored. The change takes effect at once on every replica, idle pooled
+        connections included, is recorded in the Audit log as `outbound_policy.updated` and is announced with the
+        `organization` hint. Needs `organization:write`.
       x-permission: organization:write
       x-listener: app
       security:
@@ -1911,8 +1921,8 @@ paths:
       tags:
       - Organization
       summary: List severity values seen
-      description: Values of the severity label seen in the last `organization.severity_values_window`, with counts; unmapped
-        values count as warning.
+      description: Values of the severity label seen in the last `organization.severity_values_window`, with counts, the
+        most frequent first and at most 500 values; unmapped values count as warning.
       x-permission: organization:read
       x-listener: app
       security:
@@ -8836,10 +8846,10 @@ components:
           description: CSS hex colour, for example `#d32f2f`.
     RetentionSettings:
       type: object
-      description: 'Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details
-        are always removed before the summary rows they belong to, and an update that breaks this gets `422` with
-        `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not
-        details: they are kept with the summary rows and deleted with them.'
+      description: 'Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least
+        `alert_details_days`: details are always removed before the summary rows they belong to, and an update that
+        breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and
+        delivery events; Notes are not details: they are kept with the summary rows and deleted with them.'
       required:
       - stored_snapshots_days
       - alert_details_days
@@ -8849,19 +8859,23 @@ components:
         stored_snapshots_days:
           type: integer
           minimum: 1
+          maximum: 36500
         alert_details_days:
           type: integer
           minimum: 1
+          maximum: 36500
           description: Alerts inside Alert Groups, Timeline entries and delivery events (`retention.alert_details`). Never
             Notes.
         alert_group_summaries_days:
           type: integer
           minimum: 1
+          maximum: 36500
           description: Alert Group summary rows with their Notes (`retention.alert_group_summaries`); at least
             `alert_details_days`.
         audit_log_days:
           type: integer
           minimum: 1
+          maximum: 36500
     OrganizationBase:
       type: object
       required:
@@ -8907,6 +8921,7 @@ components:
         oidc_token_grace_seconds:
           type: integer
           minimum: 1
+          maximum: 3153600000
           description: '`auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which
             the IdP granted no offline token: their Personal access tokens work while the owner''s last OIDC sign-in is no
             older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC

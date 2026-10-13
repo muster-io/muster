@@ -210,14 +210,20 @@ func TestCurrentErrors(t *testing.T) {
 	}
 }
 
-// fakeSettings is the organization resource in memory; fail makes the named method fail.
+// fakeSettings is the organization resource and the outbound address policy in memory; fail makes the named method
+// fail.
 type fakeSettings struct {
-	row     dbgen.GetSettingsRow
-	secrets dbgen.GetOutgoingHeartbeatSecretsRow
-	updates []dbgen.UpdateSettingsParams
-	audit   []auditdb.InsertAuditEntryParams
-	hints   []db.Hint
-	fail    map[string]error
+	row       dbgen.GetSettingsRow
+	secrets   dbgen.GetOutgoingHeartbeatSecretsRow
+	updates   []dbgen.UpdateSettingsParams
+	audit     []auditdb.InsertAuditEntryParams
+	hints     []db.Hint
+	policy    dbgen.GetOutboundPolicySettingsRow
+	policyUps []dbgen.UpdateOutboundPolicyParams
+	notified  []int64
+	values    []dbgen.ListSeverityValuesRow
+	valueArgs []dbgen.ListSeverityValuesParams
+	fail      map[string]error
 }
 
 func newFakeSettings(t *testing.T) *fakeSettings {
@@ -231,7 +237,8 @@ func newFakeSettings(t *testing.T) *fakeSettings {
 		RetentionStoredSnapshotsDays: 14, RetentionAlertDetailsDays: 90, RetentionAlertGroupSummariesDays: 730,
 		RetentionAuditLogDays: 365, TotpRequired: "nobody", OidcTokenGraceSeconds: 7 * 24 * 3600,
 		OutgoingHeartbeatProxy: []byte(`{"enabled": false}`), Version: 1,
-	}, fail: map[string]error{}}
+	}, policy: dbgen.GetOutboundPolicySettingsRow{Policy: "standard", Allowed: []string{"127.0.0.0/8"},
+		Denied: []string{}, Version: 1}, fail: map[string]error{}}
 }
 
 func (s *fakeSettings) InTx(_ context.Context, f func(SettingsQueries) error) error {
@@ -267,6 +274,14 @@ func (s *fakeSettings) UpdateSettings(_ context.Context, arg dbgen.UpdateSetting
 		return 0, err
 	}
 	s.updates = append(s.updates, arg)
+	s.row.Name, s.row.TimeZone, s.row.SeverityLabel = arg.Name, arg.TimeZone, arg.SeverityLabel
+	s.row.SeverityMapping, s.row.SeverityStyles = arg.SeverityMapping, arg.SeverityStyles
+	s.row.CriticalIsUrgent, s.row.InstanceLabels = arg.CriticalIsUrgent, arg.InstanceLabels
+	s.row.RetentionStoredSnapshotsDays = arg.RetentionStoredSnapshotsDays
+	s.row.RetentionAlertDetailsDays = arg.RetentionAlertDetailsDays
+	s.row.RetentionAlertGroupSummariesDays = arg.RetentionAlertGroupSummariesDays
+	s.row.RetentionAuditLogDays = arg.RetentionAuditLogDays
+	s.row.OidcTokenGraceSeconds = arg.OidcTokenGraceSeconds
 	s.row.TotpRequired, s.row.Version = arg.TotpRequired, s.row.Version+1
 	s.row.OutgoingHeartbeatProxy = arg.Proxy
 	s.row.OutgoingHeartbeatUrlSet, s.row.OutgoingHeartbeatUrlUpdatedAt = arg.UrlCiphertext != nil, arg.UrlUpdatedAt
@@ -295,6 +310,42 @@ func (s *fakeSettings) Notify(_ context.Context, h db.Hint) error {
 		return err
 	}
 	s.hints = append(s.hints, h)
+	return nil
+}
+
+func (s *fakeSettings) GetOutboundPolicySettings(_ context.Context, orgID int64) (dbgen.GetOutboundPolicySettingsRow,
+	error) {
+	if err := s.fail["GetOutboundPolicySettings"]; err != nil || orgID != 7 {
+		return dbgen.GetOutboundPolicySettingsRow{}, errors.Join(err, pgx.ErrNoRows)
+	}
+	return s.policy, nil
+}
+
+func (s *fakeSettings) LockOutboundPolicy(context.Context, int64) (int64, error) {
+	return s.policy.Version, s.fail["LockOutboundPolicy"]
+}
+
+func (s *fakeSettings) UpdateOutboundPolicy(_ context.Context, arg dbgen.UpdateOutboundPolicyParams) (int64, error) {
+	if err := s.fail["UpdateOutboundPolicy"]; err != nil {
+		return 0, err
+	}
+	s.policyUps = append(s.policyUps, arg)
+	s.policy = dbgen.GetOutboundPolicySettingsRow{Policy: arg.Policy, Allowed: arg.Allowed, Denied: arg.Denied,
+		Version: s.policy.Version + 1}
+	return 1, nil
+}
+
+func (s *fakeSettings) ListSeverityValues(_ context.Context, arg dbgen.ListSeverityValuesParams) (
+	[]dbgen.ListSeverityValuesRow, error) {
+	s.valueArgs = append(s.valueArgs, arg)
+	return s.values, s.fail["ListSeverityValues"]
+}
+
+func (s *fakeSettings) NotifyOutboundPolicy(_ context.Context, orgID int64) error {
+	if err := s.fail["NotifyOutboundPolicy"]; err != nil {
+		return err
+	}
+	s.notified = append(s.notified, orgID)
 	return nil
 }
 
@@ -361,21 +412,22 @@ func TestOrganizationGet(t *testing.T) {
 	}
 }
 
-// TestOrganizationUpdate is C-03.FR-20: an Admin changes the TOTP policy with If-Match, recorded as
-// organization.updated with its before/after diff and announced with an organization hint; a stale version is
-// ErrVersionMismatch; a changed value of any other field is an UnsupportedError naming each such field, and changes
-// nothing; an update that changes nothing writes nothing.
+// TestOrganizationUpdate is C-20.FR-1, FR-8 and C-04.FR-8: an Admin changes each setting of the Organization with
+// If-Match; the change is written, moves the version, is recorded as organization.updated with the diff at the
+// field's pointer, announced with one organization hint and logged as organization_updated. A stale version is
+// ErrVersionMismatch and changes nothing; an update that changes nothing writes nothing.
 func TestOrganizationUpdate(t *testing.T) {
 	s := newFakeSettings(t)
 	var log bytes.Buffer
-	svc := NewService(7, s, audit.NewWriter(logging.New(&log, logging.LevelInfo), clock.NewManual(t0)),
-		clock.NewManual(t0))
+	logger := logging.New(&log, logging.LevelInfo)
+	svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
+		clock.NewManual(t0)).WithLog(logger)
 	o, _ := svc.Get(t.Context())
 	in := inputOf(o)
 	in.TOTPRequired = TOTPEveryone
 	stale := int64(9)
 	if _, err := svc.Update(t.Context(), actor, audit.TransportUI, netip.Addr{}, &stale, in); !errors.Is(err,
-		ErrVersionMismatch) {
+		ErrVersionMismatch) || len(s.updates) != 0 {
 		t.Errorf("a stale version: %v", err)
 	}
 	v := int64(1)
@@ -390,36 +442,67 @@ func TestOrganizationUpdate(t *testing.T) {
 	if len(s.hints) != 1 || s.hints[0] != (db.Hint{OrgID: 7, Type: HintOrganization}) {
 		t.Errorf("hints = %+v", s.hints)
 	}
+	if !strings.Contains(log.String(), `"event":"organization_updated"`) ||
+		!strings.Contains(log.String(), `"fields":"/totp_required"`) {
+		t.Errorf("log %s", log.String())
+	}
+	log.Reset()
 	if got, err := svc.Update(t.Context(), actor, audit.TransportUI, netip.Addr{}, nil, in); err != nil ||
-		got.Version != 2 || len(s.audit) != 1 || len(s.hints) != 1 {
-		t.Errorf("an update without a change = %+v, %v, %d entries", got, err, len(s.audit))
+		got.Version != 2 || len(s.audit) != 1 || len(s.hints) != 1 || log.Len() != 0 {
+		t.Errorf("an update without a change = %+v, %v, %d entries, log %s", got, err, len(s.audit), log.String())
 	}
-	changes := map[string]func(*Input){
-		"/name":                                 func(in *Input) { in.Name = "Other" },
-		"/time_zone":                            func(in *Input) { in.TimeZone = "Europe/Berlin" },
-		"/severity_label":                       func(in *Input) { in.SeverityLabel = "level" },
-		"/severity_mapping":                     func(in *Input) { in.SeverityMapping = in.SeverityMapping[:1] },
-		"/severity_styles":                      func(in *Input) { in.SeverityStyles = nil },
-		"/critical_is_urgent":                   func(in *Input) { in.CriticalIsUrgent = false },
-		"/instance_labels":                      func(in *Input) { in.InstanceLabels = []string{"pod"} },
-		"/retention/stored_snapshots_days":      func(in *Input) { in.Retention.StoredSnapshotsDays = 1 },
-		"/retention/alert_details_days":         func(in *Input) { in.Retention.AlertDetailsDays = 1 },
-		"/retention/alert_group_summaries_days": func(in *Input) { in.Retention.AlertGroupSummariesDays = 1 },
-		"/retention/audit_log_days":             func(in *Input) { in.Retention.AuditLogDays = 1 },
-		"/oidc_token_grace_seconds":             func(in *Input) { in.OIDCTokenGraceSeconds = 60 },
+	changes := []struct {
+		pointer string
+		change  func(*Input)
+		check   func(Organization) bool
+	}{
+		{"/name", func(in *Input) { in.Name = " Ops " }, func(o Organization) bool { return o.Name == "Ops" }},
+		{"/time_zone", func(in *Input) { in.TimeZone = "Europe/Berlin" },
+			func(o Organization) bool { return o.TimeZone == "Europe/Berlin" }},
+		{"/severity_label", func(in *Input) { in.SeverityLabel = "level" },
+			func(o Organization) bool { return o.SeverityLabel == "level" }},
+		{"/severity_mapping", func(in *Input) {
+			in.SeverityMapping = append(slices.Clone(in.SeverityMapping), SeverityMapping{"P1", SeverityCritical})
+		}, func(o Organization) bool { return len(o.SeverityMapping) == 5 && o.SeverityMapping[4].Value == "P1" }},
+		{"/severity_styles", func(in *Input) {
+			in.SeverityStyles = slices.Clone(in.SeverityStyles)
+			in.SeverityStyles[1].Color = "#000000"
+		}, func(o Organization) bool { return o.SeverityStyles[1].Color == "#000000" }},
+		{"/critical_is_urgent", func(in *Input) { in.CriticalIsUrgent = false },
+			func(o Organization) bool { return !o.CriticalIsUrgent }},
+		{"/instance_labels", func(in *Input) { in.InstanceLabels = []string{"node"} },
+			func(o Organization) bool { return slices.Equal(o.InstanceLabels, []string{"node"}) }},
+		{"/retention/stored_snapshots_days", func(in *Input) { in.Retention.StoredSnapshotsDays = 1 },
+			func(o Organization) bool { return o.Retention.StoredSnapshotsDays == 1 }},
+		{"/retention/alert_details_days", func(in *Input) { in.Retention.AlertDetailsDays = 30 },
+			func(o Organization) bool { return o.Retention.AlertDetailsDays == 30 }},
+		{"/retention/alert_group_summaries_days", func(in *Input) { in.Retention.AlertGroupSummariesDays = 400 },
+			func(o Organization) bool { return o.Retention.AlertGroupSummariesDays == 400 }},
+		{"/retention/audit_log_days", func(in *Input) { in.Retention.AuditLogDays = 36500 },
+			func(o Organization) bool { return o.Retention.AuditLogDays == 36500 }},
+		{"/oidc_token_grace_seconds", func(in *Input) { in.OIDCTokenGraceSeconds = 3600 },
+			func(o Organization) bool { return o.OIDCTokenGrace == time.Hour }},
+		{"/totp_required", func(in *Input) { in.TOTPRequired = TOTPLocalUsers },
+			func(o Organization) bool { return o.TOTPRequired == TOTPLocalUsers }},
 	}
-	for pointer, change := range changes {
+	for _, c := range changes {
+		entries, hints, version := len(s.audit), len(s.hints), got.Version
 		in := inputOf(got)
-		in.TOTPRequired = TOTPLocalUsers
-		change(&in)
-		_, err := svc.Update(t.Context(), actor, audit.TransportUI, netip.Addr{}, nil, in)
-		u, ok := errors.AsType[*UnsupportedError](err)
-		if !ok || len(u.Pointers) != 1 || u.Pointers[0] != pointer || !strings.Contains(u.Error(), pointer) {
-			t.Errorf("%s: %v", pointer, err)
+		c.change(&in)
+		got, err = svc.Update(t.Context(), actor, audit.TransportUI, netip.Addr{}, &version, in)
+		if err != nil || !c.check(got) || got.Version != version+1 {
+			t.Fatalf("%s: %+v, %v", c.pointer, got, err)
 		}
-	}
-	if s.row.TotpRequired != "everyone" || len(s.audit) != 1 {
-		t.Error("a refused update changed the policy or wrote an entry")
+		var diff []audit.Change
+		if err := json.Unmarshal(s.audit[len(s.audit)-1].Diff, &diff); err != nil || len(s.audit) != entries+1 ||
+			len(diff) != 1 || diff[0].Pointer != c.pointer || len(s.hints) != hints+1 {
+			t.Errorf("%s: diff %s, %d entries, %d hints", c.pointer, s.audit[len(s.audit)-1].Diff, len(s.audit),
+				len(s.hints))
+		}
+		// The change is stored: a new read shows it.
+		if read, err := svc.Get(t.Context()); err != nil || !c.check(read) {
+			t.Errorf("%s: read back %+v, %v", c.pointer, read, err)
+		}
 	}
 	// Clearing Secrets that are not set and keeping the omitted ones change nothing.
 	in = inputOf(got)
@@ -443,6 +526,153 @@ func TestOrganizationUpdate(t *testing.T) {
 		if _, err := svc.Update(t.Context(), actor, audit.TransportUI, netip.Addr{}, nil, in); err == nil {
 			t.Errorf("%s: no error", method)
 		}
+	}
+}
+
+// TestOrganizationUpdateValidation: each field that is not valid is refused at its full JSON pointer with its code,
+// and nothing is written, recorded or announced.
+func TestOrganizationUpdateValidation(t *testing.T) {
+	long := strings.Repeat("x", 201)
+	for _, c := range []struct {
+		pointer, code string
+		change        func(*Input)
+	}{
+		{"/name", CodeTooShort, func(in *Input) { in.Name = "  " }},
+		{"/name", CodeTooLong, func(in *Input) { in.Name = long }},
+		{"/name", CodeInvalidFormat, func(in *Input) { in.Name = "a\nb" }},
+		{"/time_zone", CodeInvalidFormat, func(in *Input) { in.TimeZone = "Mars/Olympus" }},
+		{"/time_zone", CodeInvalidFormat, func(in *Input) { in.TimeZone = "Local" }},
+		{"/severity_label", CodeInvalidFormat, func(in *Input) { in.SeverityLabel = "2severity" }},
+		{"/severity_mapping/4/value", CodeTooShort, func(in *Input) {
+			in.SeverityMapping = append(in.SeverityMapping, SeverityMapping{"", SeverityInfo})
+		}},
+		{"/severity_mapping/4/value", CodeDuplicate, func(in *Input) {
+			in.SeverityMapping = append(in.SeverityMapping, SeverityMapping{"warning", SeverityCritical})
+		}},
+		{"/severity_mapping/4/level", CodeInvalidFormat, func(in *Input) {
+			in.SeverityMapping = append(in.SeverityMapping, SeverityMapping{"P1", "urgent"})
+		}},
+		{"/severity_styles/2/level", CodeInvalidFormat, func(in *Input) { in.SeverityStyles[2].Level = "debug" }},
+		{"/severity_styles/2/level", CodeDuplicate, func(in *Input) { in.SeverityStyles[2].Level = SeverityWarning }},
+		{"/severity_styles/1/emoji", CodeTooShort, func(in *Input) { in.SeverityStyles[1].Emoji = " " }},
+		{"/severity_styles/1/emoji", CodeTooLong, func(in *Input) { in.SeverityStyles[1].Emoji = long }},
+		{"/severity_styles/1/color", CodeInvalidFormat, func(in *Input) { in.SeverityStyles[1].Color = "red" }},
+		{"/severity_styles", CodeRequired, func(in *Input) { in.SeverityStyles = in.SeverityStyles[:2] }},
+		{"/instance_labels/1", CodeInvalidFormat, func(in *Input) { in.InstanceLabels = []string{"pod", "a-b"} }},
+		{"/instance_labels/1", CodeDuplicate, func(in *Input) { in.InstanceLabels = []string{"pod", "pod"} }},
+		{"/retention/stored_snapshots_days", CodeOutOfRange, func(in *Input) { in.Retention.StoredSnapshotsDays = 0 }},
+		{"/retention/alert_details_days", CodeOutOfRange, func(in *Input) { in.Retention.AlertDetailsDays = -1 }},
+		{"/retention/alert_group_summaries_days", CodeOutOfRange,
+			func(in *Input) { in.Retention.AlertGroupSummariesDays = MaxRetentionDays + 1 }},
+		{"/retention/audit_log_days", CodeOutOfRange, func(in *Input) { in.Retention.AuditLogDays = 9999999 }},
+		{"/totp_required", CodeInvalidFormat, func(in *Input) { in.TOTPRequired = "sometimes" }},
+		{"/oidc_token_grace_seconds", CodeOutOfRange, func(in *Input) { in.OIDCTokenGraceSeconds = 0 }},
+		{"/oidc_token_grace_seconds", CodeOutOfRange,
+			func(in *Input) { in.OIDCTokenGraceSeconds = MaxOIDCTokenGraceSeconds + 1 }},
+	} {
+		s := newFakeSettings(t)
+		svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo),
+			clock.NewManual(t0)), clock.NewManual(t0))
+		o, _ := svc.Get(t.Context())
+		in := inputOf(o)
+		in.SeverityMapping, in.SeverityStyles = slices.Clone(in.SeverityMapping), slices.Clone(in.SeverityStyles)
+		c.change(&in)
+		_, err := svc.Update(t.Context(), actor, audit.TransportUI, netip.Addr{}, nil, in)
+		if f, ok := errors.AsType[*FieldError](err); !ok || f.Pointer != c.pointer || f.Code != c.code ||
+			f.Detail == "" {
+			t.Errorf("%s %s: %v", c.pointer, c.code, err)
+		}
+		if len(s.updates) != 0 || len(s.audit) != 0 || len(s.hints) != 0 {
+			t.Errorf("%s: a refused update was written", c.pointer)
+		}
+	}
+	// The limits themselves are accepted, and an empty mapping counts every value as warning.
+	s := newFakeSettings(t)
+	svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
+		clock.NewManual(t0))
+	o, _ := svc.Get(t.Context())
+	in := inputOf(o)
+	in.Name, in.SeverityMapping, in.InstanceLabels = strings.Repeat("я", 200), nil, nil
+	in.Retention = Retention{MaxRetentionDays, 1, 1, 1}
+	in.OIDCTokenGraceSeconds = MaxOIDCTokenGraceSeconds
+	got, err := svc.Update(t.Context(), actor, audit.TransportUI, netip.Addr{}, nil, in)
+	if err != nil || got.SeverityMapping == nil || len(got.SeverityMapping) != 0 || got.InstanceLabels == nil ||
+		string(s.updates[0].SeverityMapping) != "[]" {
+		t.Errorf("the limits: %+v, %v", got, err)
+	}
+}
+
+// TestRetentionOrder is C-20.AC-6: summaries kept shorter than details are refused with retention_order at
+// /retention/alert_group_summaries_days and change nothing; equal periods are accepted.
+func TestRetentionOrder(t *testing.T) {
+	s := newFakeSettings(t)
+	svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
+		clock.NewManual(t0))
+	o, _ := svc.Get(t.Context())
+	in := inputOf(o)
+	in.Retention.AlertGroupSummariesDays, in.Retention.AlertDetailsDays = 30, 90
+	_, err := svc.Update(t.Context(), actor, audit.TransportUI, netip.Addr{}, nil, in)
+	if f, ok := errors.AsType[*FieldError](err); !ok || f.Pointer != "/retention/alert_group_summaries_days" ||
+		f.Code != CodeRetentionOrder || !strings.Contains(f.Detail, "(90 days)") {
+		t.Errorf("summaries below details: %v", err)
+	}
+	if len(s.updates) != 0 || s.row.RetentionAlertGroupSummariesDays != 730 {
+		t.Error("a refused order changed the row")
+	}
+	in.Retention.AlertGroupSummariesDays = 90
+	got, err := svc.Update(t.Context(), actor, audit.TransportUI, netip.Addr{}, nil, in)
+	if err != nil || got.Retention.AlertGroupSummariesDays != 90 || got.Retention.AlertDetailsDays != 90 {
+		t.Fatalf("equal periods: %+v, %v", got.Retention, err)
+	}
+	if string(s.audit[0].Diff) != `[{"pointer":"/retention/alert_group_summaries_days","before":730,"after":90}]` {
+		t.Errorf("diff %s", s.audit[0].Diff)
+	}
+}
+
+// TestValidTimeZone: the rule the Organization and User profiles share.
+func TestValidTimeZone(t *testing.T) {
+	for name, want := range map[string]bool{
+		"UTC": true, "Europe/Berlin": true, "America/Argentina/Buenos_Aires": true, "": false, "Local": false,
+		"Mars/Olympus": false, "../../etc/passwd": false, strings.Repeat("A", 65): false,
+	} {
+		if got := ValidTimeZone(name); got != want {
+			t.Errorf("ValidTimeZone(%q) = %v", name, got)
+		}
+	}
+}
+
+// TestSeverityValues is C-20.AC-4 on the service: the values of the current severity label within the 14 days of the
+// business clock, each with its count and the level of the current mapping; an unmapped value is warning, not mapped.
+func TestSeverityValues(t *testing.T) {
+	s := newFakeSettings(t)
+	s.values = []dbgen.ListSeverityValuesRow{{Value: "P5", Alerts: 2}, {Value: "critical", Alerts: 1}}
+	svc := NewService(7, s, nil, clock.NewManual(t0))
+	got, err := svc.SeverityValues(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := SeverityValues{WindowDays: 14, Items: []SeverityValue{
+		{Value: "P5", Count: 2, Level: SeverityWarning}, {Value: "critical", Count: 1, Level: SeverityCritical,
+			Mapped: true},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("SeverityValues = %+v", got)
+	}
+	if a := s.valueArgs[0]; a.OrgID != 7 || a.Label != "severity" || !a.Since.Equal(t0.Add(-14*24*time.Hour)) ||
+		a.MaxValues != maxSeverityValues {
+		t.Errorf("query %+v", a)
+	}
+	s.values = nil
+	if got, err := svc.SeverityValues(t.Context()); err != nil || got.Items == nil || len(got.Items) != 0 {
+		t.Errorf("no values = %+v, %v", got, err)
+	}
+	s.fail["ListSeverityValues"] = errors.New("db down")
+	if _, err := svc.SeverityValues(t.Context()); err == nil {
+		t.Error("a failed query: no error")
+	}
+	s.fail["GetSettings"] = errors.New("db down")
+	if _, err := svc.SeverityValues(t.Context()); err == nil {
+		t.Error("a failed read: no error")
 	}
 }
 

@@ -19,21 +19,29 @@
  */
 
 /**
- * Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
+ * Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
  */
 export interface RetentionSettings {
-  /** @minimum 1 */
+  /**
+     * @minimum 1
+     * @maximum 36500
+     */
   stored_snapshots_days: number;
   /**
      * Alerts inside Alert Groups, Timeline entries and delivery events (`retention.alert_details`). Never Notes.
      * @minimum 1
+     * @maximum 36500
      */
   alert_details_days: number;
   /**
      * Alert Group summary rows with their Notes (`retention.alert_group_summaries`); at least `alert_details_days`.
      * @minimum 1
+     * @maximum 36500
      */
   alert_group_summaries_days: number;
-  /** @minimum 1 */
+  /**
+     * @minimum 1
+     * @maximum 36500
+     */
   audit_log_days: number;
 }

@@ -7,6 +7,7 @@ layer: L1
 depends_on: [S-047, S-051, S-053]
 covers: [C-20.FR-1, C-20.FR-2, C-20.FR-3, C-20.FR-8, C-20.AC-1, C-20.AC-3, C-20.AC-4, C-20.AC-6, C-02.FR-21, C-04.FR-8]
 files_touched:
+  - api/openapi.yaml
   - internal/organization/organization.go
   - internal/organization/severityvalues.go
   - internal/organization/outbound.go
@@ -15,9 +16,13 @@ files_touched:
   - internal/organization/outbound_test.go
   - internal/organization/outbound_integration_test.go
   - internal/organization/severityvalues_integration_test.go
+  - internal/organization/heartbeat_integration_test.go
   - internal/outbound/client.go
   - internal/outbound/client_test.go
+  - internal/outbound/proxy_test.go
   - internal/users/users.go
+  - internal/live/live_integration_test.go
+  - internal/archlint/secretleak.go
   - internal/routing/routing_integration_test.go
   - internal/api/organization.go
   - internal/api/organization_test.go
@@ -26,7 +31,6 @@ files_touched:
   - internal/api/server_test.go
   - internal/runtime/runtime.go
   - internal/logging/events.go
-  - test/e2e/harness.go
   - test/e2e/organization_test.go
 acceptance:
   - "[C-20.FR-1, C-20.FR-8, C-04.FR-8] `updateOrganization` with `If-Match` changes the name, time zone, Severity levels with their emoji and colours, \"critical is Urgent\", Instance labels, retention periods, the TOTP policy, the token grace and the outgoing heartbeat; every change is recorded as `organization.updated` with a before/after diff, a stale `If-Match` answers `412`, and nothing answers `unsupported` any more."
@@ -67,12 +71,16 @@ issue: 55
   `organization`. `getKeyring` stays `501` until S-071.
 - **Organization** (C-20.FR-1, FR-8, C-04.FR-8; `Service.Update` and `unsupported()` in `organization/organization.go`,
   `organizations`): validation — `name` not empty; `time_zone` an IANA zone (`invalid_format`), checked by the rule User
-  profiles already use (`validTimeZone` in `internal/users/users.go`, exported for this as `users.ValidTimeZone`, so
-  both refuse the same names); `severity_label` a label name; `severity_mapping` values unique (`duplicate` at
+  profiles already use, moved from `validTimeZone` in `internal/users/users.go` to `organization.ValidTimeZone`, which
+  `users` now calls, so both refuse the same names (`organization` cannot import `users`: `users` → `auth` →
+  `organization`); `severity_label` a label name; `severity_mapping` values unique (`duplicate` at
   `/severity_mapping/<i>/value`); `severity_styles` exactly one entry per level with a non-empty emoji and a `#rrggbb`
-  colour; `instance_labels` label names without duplicates; retention periods of at least one day, with
+  colour; `instance_labels` label names without duplicates; retention periods from 1 to 36500 days, with
   `alert_group_summaries_days` ≥ `alert_details_days` (`422` `retention_order` at
-  `/retention/alert_group_summaries_days`, checked before the database `CHECK`); `oidc_token_grace_seconds` ≥ 1. Every
+  `/retention/alert_group_summaries_days`, checked before the database `CHECK`); `oidc_token_grace_seconds` from 1 to
+  3153600000 (36500 days). The upper bounds keep the periods far from the overflow of a Go duration, which would move a
+  retention cutoff into the future; they are `maximum` in `api/openapi.yaml`, so request validation refuses a larger
+  number with `400` before it reaches the domain, whose `422` `out_of_range` is the second, defensive check. Every
   field error carries the full JSON pointer of the field (`/retention/alert_details_days`,
   `/severity_styles/<i>/color`), never only its first segment, because the shared form of S-056 shows each error at its
   field. A valid update writes the row, increments `version` (the ETag), records `organization.updated` with the diff
@@ -80,8 +88,9 @@ issue: 55
 - **Later evaluations only** (C-20.FR-2): routing already reads the severity label and mapping in each evaluation's
   transaction (`GetRoutingStamp` in `routing/evaluate.go`), and the dispatcher reads "critical is Urgent" and the
   Instance labels the same way (`groups/query.sql`), so a change applies from the next evaluation on every replica
-  without a cache and without a notification of its own; levels, urgency and statuses already stored are never
-  recomputed by a settings change. Retention tasks and message rendering read the current values at their next run.
+  without a cache and without a notification of its own; stored Severity levels and statuses are never recomputed by a
+  settings change, and urgency follows the stored level and the current "critical is Urgent" at read time (C-08.FR-6).
+  Retention tasks and message rendering read the current values at their next run.
 - **Values seen** (C-20.FR-1, AC-4; `organization/severityvalues.go`): the distinct values of the label
   `severity_label` among Alerts whose `last_seen_at` is within `organization.severity_values_window`, each with the
   number of Alerts, the level of the current mapping (an unmapped value counts as warning) and `mapped`;
@@ -90,18 +99,24 @@ issue: 55
   `strict`; `allowed` and `denied` entries must parse with the policy's own parser of S-009 (`invalid_format` at
   `/allowed/<i>` or `/denied/<i>`, `duplicate` for repeats); `always_blocked` is `outbound.AlwaysBlocked()` (already
   exported by `internal/outbound/policy.go`: link-local, cloud metadata, unspecified, multicast) and is read-only. An
-  update records `outbound_policy.updated` with the diff, sends the `organization` hint and `NOTIFY
-  muster_outbound_policy` in its transaction. On that notification every replica drops the per-replica cache of S-009
-  at once (its 10-second age stays as a fallback), answering S-009's open question 1.
+  update records `outbound_policy.updated` with the diff, sends `NOTIFY muster_outbound_policy`
+  (`organization.OutboundPolicyChannel`) and then the `organization` hint in its transaction — a replica handles its
+  notifications in order, so a replica whose streams have the hint already applies the new policy. On that
+  notification, and when its LISTEN is back after a loss, every replica drops its per-replica cache of S-009 at once
+  (one cache per replica, shared by every outbound client; its 10-second age stays as a fallback), and the replica that
+  made the change does so as soon as it commits, answering S-009's open question 1.
 - **Idle connections** (C-20.AC-1, FR-3; `outbound/client.go`): the policy is checked when a connection is dialled, so
   an idle pooled connection opened under the old policy would carry the next request past a stricter one.
-  `internal/outbound` keeps a registry of the clients it builds — a client leaves it when its owner drops it, so
-  rebuilt clients do not accumulate — and `outbound.CloseIdleConnections()` closes the idle connections of every
-  registered client. Each replica calls it on `NOTIFY muster_outbound_policy`, and also when its cache re-reads a policy
-  that differs from the cached one (a missed notification). A request already in flight finishes; the next one dials
-  and is checked against the new policy. `client_test.go` covers it: a request to an allowed loopback server leaves a
-  warm connection, the policy then denies that network, and the next request through the same client fails with
-  `blocked` without reaching the server.
+  `outbound.CloseIdleConnections()` moves a policy generation; each client builds its transport for one generation,
+  and its next request after the generation moved goes through a fresh transport, which dials and checks the address
+  against the new policy, while the old transport's idle connections are closed. Requests in flight finish on the old
+  transport, which no new request reaches — neither a connection returned to its pool afterwards nor an HTTP/2
+  connection with an open stream carries a later request — and its remaining connections close once idle. Nothing
+  keeps the clients, so rebuilt ones do not accumulate. Each replica calls it on `NOTIFY muster_outbound_policy`, and
+  also when its cache re-reads a policy that differs from the cached one (a missed notification). `client_test.go`
+  covers it: a warm connection to an allowed loopback server, then a stricter policy, and the next request fails with
+  `blocked` without reaching the server; and a request in flight across the change, over HTTP/1.1 and over HTTP/2,
+  after which the requests made during it and the next two are all `blocked` and never reach the server.
 - **Canceled requests** (`api/problem.go`): an error that is `context.Canceled` while the request's own context is done
   — the client went away — is not logged as `api_request_failed` at ERROR; nothing reaches the client, and the request
   metric still counts it. Any other error keeps the ERROR line. A unit test in `server_test.go` covers both.
@@ -129,8 +144,9 @@ issue: 55
 ```sh
 make dev > dev.log 2>&1 &
 # As in S-053: the Admin's session (`jar`, `H`), the Mattermost Destination "alerts" on the Route "t", the Integration
-# "lab" with FIRE, PUTA, NOTIFY and AG of S-049, and the outgoing webhook "auto" (WD) of S-044 pointing at
-# http://127.0.0.1:18093/hook/auto
+# "lab" with FIRE, PUTA, NOTIFY and AG of S-049, the Mention settings M (none for every event) of S-044, and the
+# outgoing webhook "auto" (WD) of S-044 pointing at http://127.0.0.1:18093/hook/auto:
+# WD=$(curl -s "${H[@]}" $API/destinations -d "{\"type\":\"webhook\",\"name\":\"auto\",\"mode\":\"events\",\"events\":{\"url\":\"http://127.0.0.1:18093/hook/auto\",\"headers\":[]},\"proxy\":{\"enabled\":false},\"mentions\":$M,\"limiter\":{\"limit\":5,\"per_seconds\":1}}" | jq -r .destination.id)
 API=localhost:8080/api/v1; FAM=127.0.0.1:19093/_fake; FMM=127.0.0.1:18065/_fake
 ORG() { O=$(curl -s -b jar $API/organization); curl -s "${H[@]}" -X PUT -H "If-Match: $(jq -r .etag <<<"$O")" $API/organization -d "$(jq -c "del(.id, .etag) | $1" <<<"$O")"; }
 POL() { Q=$(curl -s -b jar $API/organization/outbound-policy); curl -s "${H[@]}" -X PUT -H "If-Match: $(jq -r .etag <<<"$Q")" $API/organization/outbound-policy -d "$(jq -c "del(.etag, .always_blocked) | $1" <<<"$Q")" > /dev/null; }
@@ -161,11 +177,11 @@ curl -s $FMM/posts | jq -r '[.[] | select(.root_id == "")] | last | .props.attac
 # C-20.AC-1, FR-3: the outbound address policy, a warm connection and the hint
 curl -s -b jar $API/organization/outbound-policy | jq -c '{policy, allowed, a: (.always_blocked | length > 0)}'   # {"policy":"standard","allowed":["127.0.0.0/8"],"a":true}
 TEST $WD                                                     # {"c":null}   (leaves an idle connection to 127.0.0.1:18093)
-(timeout 5 curl -sN -b jar $API/live-updates > sse.txt &); sleep 1
+(curl -m 5 -sN -b jar $API/live-updates > sse.txt &); sleep 1
 POL '.allowed = []'; TEST $WD                                # {"c":"blocked"}
 sleep 1; grep -c '"type":"organization"' sse.txt             # 1
 POL '.allowed = ["127.0.0.0/8"]'; TEST $WD                   # {"c":null}
-MD=$(curl -s "${H[@]}" $API/destinations -d '{"type":"webhook","name":"meta","mode":"events","events":{"url":"http://169.254.169.254/latest","headers":[]},"limiter":{"limit":5,"per_seconds":1}}' | jq -r .destination.id)
+MD=$(curl -s "${H[@]}" $API/destinations -d "{\"type\":\"webhook\",\"name\":\"meta\",\"mode\":\"events\",\"events\":{\"url\":\"http://169.254.169.254/latest\",\"headers\":[]},\"proxy\":{\"enabled\":false},\"mentions\":$M,\"limiter\":{\"limit\":5,\"per_seconds\":1}}" | jq -r .destination.id)
 POL '.allowed = ["127.0.0.0/8", "169.254.0.0/16"]'; TEST $MD  # {"c":"blocked"}
 grep -c '"event":"outbound_blocked".*169.254.169.254' dev.log   # 1
 grep -c '"event":"api_request_failed"' dev.log                 # 0

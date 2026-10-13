@@ -98,15 +98,15 @@ func TestIntegrationHints(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		in := organization.Input{Name: "Renamed", TimeZone: o.TimeZone, SeverityLabel: o.SeverityLabel,
+		in := organization.Input{Name: o.Name, TimeZone: "Mars/Olympus", SeverityLabel: o.SeverityLabel,
 			SeverityMapping: o.SeverityMapping, SeverityStyles: o.SeverityStyles, CriticalIsUrgent: o.CriticalIsUrgent,
 			InstanceLabels: o.InstanceLabels, Retention: o.Retention, TOTPRequired: organization.TOTPLocalUsers,
 			OIDCTokenGraceSeconds: int64(o.OIDCTokenGrace / time.Second)}
 		if _, err := svc.Update(ctx, audit.System, audit.TransportUI, netip.Addr{}, nil, in); !errors.As(err,
-			new(*organization.UnsupportedError)) {
-			t.Fatalf("a changed name: %v", err)
+			new(*organization.FieldError)) {
+			t.Fatalf("an unknown time zone: %v", err)
 		}
-		in.Name = o.Name
+		in.TimeZone = o.TimeZone
 		if _, err := svc.Update(ctx, audit.System, audit.TransportUI, netip.Addr{}, &o.Version, in); err != nil {
 			t.Fatal(err)
 		}

@@ -25,10 +25,15 @@ import * as zod from 'zod';
  * @summary Read the Organization
  */
 
+export const getOrganizationResponseOneRetentionStoredSnapshotsDaysMax = 36500;
 
+export const getOrganizationResponseOneRetentionAlertDetailsDaysMax = 36500;
 
+export const getOrganizationResponseOneRetentionAlertGroupSummariesDaysMax = 36500;
 
+export const getOrganizationResponseOneRetentionAuditLogDaysMax = 36500;
 
+export const getOrganizationResponseOneOidcTokenGraceSecondsMax = 3153600000;
 
 export const getOrganizationResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
@@ -49,13 +54,13 @@ export const GetOrganizationResponse = zod.object({
   "critical_is_urgent": zod.boolean(),
   "instance_labels": zod.array(zod.string()),
   "retention": zod.object({
-  "stored_snapshots_days": zod.int().min(1),
-  "alert_details_days": zod.int().min(1).describe('Alerts inside Alert Groups, Timeline entries and delivery events (`retention.alert_details`). Never Notes.'),
-  "alert_group_summaries_days": zod.int().min(1).describe('Alert Group summary rows with their Notes (`retention.alert_group_summaries`); at least `alert_details_days`.'),
-  "audit_log_days": zod.int().min(1)
-}).describe('Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.'),
+  "stored_snapshots_days": zod.int().min(1).max(getOrganizationResponseOneRetentionStoredSnapshotsDaysMax),
+  "alert_details_days": zod.int().min(1).max(getOrganizationResponseOneRetentionAlertDetailsDaysMax).describe('Alerts inside Alert Groups, Timeline entries and delivery events (`retention.alert_details`). Never Notes.'),
+  "alert_group_summaries_days": zod.int().min(1).max(getOrganizationResponseOneRetentionAlertGroupSummariesDaysMax).describe('Alert Group summary rows with their Notes (`retention.alert_group_summaries`); at least `alert_details_days`.'),
+  "audit_log_days": zod.int().min(1).max(getOrganizationResponseOneRetentionAuditLogDaysMax)
+}).describe('Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.'),
   "totp_required": zod.enum(['nobody', 'local_users', 'everyone']).describe('Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.'),
-  "oidc_token_grace_seconds": zod.int().min(1).describe('`auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner\'s last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.')
+  "oidc_token_grace_seconds": zod.int().min(1).max(getOrganizationResponseOneOidcTokenGraceSecondsMax).describe('`auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner\'s last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.')
 }).and(zod.object({
   "id": zod.string().regex(getOrganizationResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "outgoing_heartbeat": zod.object({
@@ -78,7 +83,7 @@ export const GetOrganizationResponse = zod.object({
 }))
 
 /**
- * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. The settings become editable in stages, starting with `totp_required`; while a field is not editable yet, a changed value in it gets `422` with `unsupported` pointing at that field.
+ * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
  * @summary Update the Organization
  */
 export const UpdateOrganizationHeader = zod.object({
@@ -86,10 +91,15 @@ export const UpdateOrganizationHeader = zod.object({
 })
 
 
+export const updateOrganizationBodyOneRetentionStoredSnapshotsDaysMax = 36500;
 
+export const updateOrganizationBodyOneRetentionAlertDetailsDaysMax = 36500;
 
+export const updateOrganizationBodyOneRetentionAlertGroupSummariesDaysMax = 36500;
 
+export const updateOrganizationBodyOneRetentionAuditLogDaysMax = 36500;
 
+export const updateOrganizationBodyOneOidcTokenGraceSecondsMax = 3153600000;
 
 
 
@@ -109,13 +119,13 @@ export const UpdateOrganizationBody = zod.object({
   "critical_is_urgent": zod.boolean(),
   "instance_labels": zod.array(zod.string()),
   "retention": zod.object({
-  "stored_snapshots_days": zod.int().min(1),
-  "alert_details_days": zod.int().min(1).describe('Alerts inside Alert Groups, Timeline entries and delivery events (`retention.alert_details`). Never Notes.'),
-  "alert_group_summaries_days": zod.int().min(1).describe('Alert Group summary rows with their Notes (`retention.alert_group_summaries`); at least `alert_details_days`.'),
-  "audit_log_days": zod.int().min(1)
-}).describe('Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.'),
+  "stored_snapshots_days": zod.int().min(1).max(updateOrganizationBodyOneRetentionStoredSnapshotsDaysMax),
+  "alert_details_days": zod.int().min(1).max(updateOrganizationBodyOneRetentionAlertDetailsDaysMax).describe('Alerts inside Alert Groups, Timeline entries and delivery events (`retention.alert_details`). Never Notes.'),
+  "alert_group_summaries_days": zod.int().min(1).max(updateOrganizationBodyOneRetentionAlertGroupSummariesDaysMax).describe('Alert Group summary rows with their Notes (`retention.alert_group_summaries`); at least `alert_details_days`.'),
+  "audit_log_days": zod.int().min(1).max(updateOrganizationBodyOneRetentionAuditLogDaysMax)
+}).describe('Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.'),
   "totp_required": zod.enum(['nobody', 'local_users', 'everyone']).describe('Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.'),
-  "oidc_token_grace_seconds": zod.int().min(1).describe('`auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner\'s last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.')
+  "oidc_token_grace_seconds": zod.int().min(1).max(updateOrganizationBodyOneOidcTokenGraceSecondsMax).describe('`auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner\'s last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.')
 }).and(zod.object({
   "outgoing_heartbeat": zod.object({
   "url": zod.url().nullish().describe('Write-only Secret; such URLs carry tokens. Omit to keep the stored one; `null` clears it.'),
@@ -130,10 +140,15 @@ export const UpdateOrganizationBody = zod.object({
 }))
 
 
+export const updateOrganizationResponseOneRetentionStoredSnapshotsDaysMax = 36500;
 
+export const updateOrganizationResponseOneRetentionAlertDetailsDaysMax = 36500;
 
+export const updateOrganizationResponseOneRetentionAlertGroupSummariesDaysMax = 36500;
 
+export const updateOrganizationResponseOneRetentionAuditLogDaysMax = 36500;
 
+export const updateOrganizationResponseOneOidcTokenGraceSecondsMax = 3153600000;
 
 export const updateOrganizationResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
@@ -154,13 +169,13 @@ export const UpdateOrganizationResponse = zod.object({
   "critical_is_urgent": zod.boolean(),
   "instance_labels": zod.array(zod.string()),
   "retention": zod.object({
-  "stored_snapshots_days": zod.int().min(1),
-  "alert_details_days": zod.int().min(1).describe('Alerts inside Alert Groups, Timeline entries and delivery events (`retention.alert_details`). Never Notes.'),
-  "alert_group_summaries_days": zod.int().min(1).describe('Alert Group summary rows with their Notes (`retention.alert_group_summaries`); at least `alert_details_days`.'),
-  "audit_log_days": zod.int().min(1)
-}).describe('Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.'),
+  "stored_snapshots_days": zod.int().min(1).max(updateOrganizationResponseOneRetentionStoredSnapshotsDaysMax),
+  "alert_details_days": zod.int().min(1).max(updateOrganizationResponseOneRetentionAlertDetailsDaysMax).describe('Alerts inside Alert Groups, Timeline entries and delivery events (`retention.alert_details`). Never Notes.'),
+  "alert_group_summaries_days": zod.int().min(1).max(updateOrganizationResponseOneRetentionAlertGroupSummariesDaysMax).describe('Alert Group summary rows with their Notes (`retention.alert_group_summaries`); at least `alert_details_days`.'),
+  "audit_log_days": zod.int().min(1).max(updateOrganizationResponseOneRetentionAuditLogDaysMax)
+}).describe('Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.'),
   "totp_required": zod.enum(['nobody', 'local_users', 'everyone']).describe('Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.'),
-  "oidc_token_grace_seconds": zod.int().min(1).describe('`auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner\'s last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.')
+  "oidc_token_grace_seconds": zod.int().min(1).max(updateOrganizationResponseOneOidcTokenGraceSecondsMax).describe('`auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner\'s last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.')
 }).and(zod.object({
   "id": zod.string().regex(updateOrganizationResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "outgoing_heartbeat": zod.object({
@@ -195,6 +210,7 @@ export const GetOutboundPolicyResponse = zod.object({
 })
 
 /**
+ * Replaces the policy and its lists. Requires `If-Match`; a stale ETag gets `412`. Each entry is a network in CIDR form or a bare address, a host name, or a domain written `*.example.org`; an entry that does not parse gets `422` with `invalid_format` and a repeated one `duplicate`, at `/allowed/<i>` or `/denied/<i>`. `always_blocked` is read-only and ignored. The change takes effect at once on every replica, idle pooled connections included, is recorded in the Audit log as `outbound_policy.updated` and is announced with the `organization` hint. Needs `organization:write`.
  * @summary Update the outbound address policy
  */
 export const UpdateOutboundPolicyHeader = zod.object({
@@ -231,7 +247,7 @@ export const GetKeyringResponse = zod.object({
 })
 
 /**
- * Values of the severity label seen in the last `organization.severity_values_window`, with counts; unmapped values count as warning.
+ * Values of the severity label seen in the last `organization.severity_values_window`, with counts, the most frequent first and at most 500 values; unmapped values count as warning.
  * @summary List severity values seen
  */
 export const ListSeverityValuesResponse = zod.object({

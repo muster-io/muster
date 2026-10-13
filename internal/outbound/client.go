@@ -22,6 +22,8 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/muster-io/muster/internal/clock"
@@ -57,14 +59,71 @@ type Config struct {
 	MaxBodyBytes int64
 }
 
+// policyGeneration moves each time the outbound address policy may have changed (CloseIdleConnections).
+var policyGeneration atomic.Uint64
+
+// CloseIdleConnections makes every client use a new transport from its next request on, so that the request dials
+// again and its address is checked against the policy in force: the policy is checked when a connection is dialled,
+// and a pooled connection opened under an older policy, idle or still serving another request, would otherwise carry
+// a request past a stricter one. Each client compares the generation this moves with the one its transport was built
+// for; when it moved, the client builds a fresh transport and closes the idle connections of the old one. Requests in
+// flight finish on the old transport, which no new request reaches, and its remaining connections close when idle.
+// Nothing keeps the clients, so a client its owner dropped is not kept alive.
+func CloseIdleConnections() { policyGeneration.Add(1) }
+
+// generationTransport is a transport and the policy generation it was built for.
+type generationTransport struct {
+	generation uint64
+	tr         *http.Transport
+}
+
+// transports is the round tripper of a client: it sends each request through the transport of the current policy
+// generation, building a new one when the generation moved.
+type transports struct {
+	mu      sync.Mutex
+	current atomic.Pointer[generationTransport]
+	build   func() *http.Transport
+}
+
+func newTransports(build func() *http.Transport) *transports {
+	t := &transports{build: build}
+	t.current.Store(&generationTransport{generation: policyGeneration.Load(), tr: build()})
+	return t
+}
+
+// transport is the transport of the current policy generation.
+func (t *transports) transport() *http.Transport {
+	if cur := t.current.Load(); cur.generation == policyGeneration.Load() {
+		return cur.tr
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	g := policyGeneration.Load()
+	cur := t.current.Load()
+	if cur.generation == g {
+		return cur.tr
+	}
+	next := &generationTransport{generation: g, tr: t.build()}
+	t.current.Store(next)
+	cur.tr.CloseIdleConnections()
+	return next.tr
+}
+
+func (t *transports) RoundTrip(req *http.Request) (*http.Response, error) {
+	return t.transport().RoundTrip(req)
+}
+
+func (t *transports) CloseIdleConnections() { t.current.Load().tr.CloseIdleConnections() }
+
 // Client makes the requests of one client configuration.
 type Client struct {
-	cfg      Config
-	base     *url.URL
-	http     *http.Client
-	resolver Resolver
-	redactor redactor
-	maxBody  int64
+	cfg        Config
+	base       *url.URL
+	http       *http.Client
+	transports *transports
+	resolver   Resolver
+	redactor   redactor
+	maxBody    int64
 	// sleep waits between the attempts of the background class, and jitter spreads its backoff; tests replace both.
 	sleep  func(context.Context, time.Duration) error
 	jitter func(time.Duration) time.Duration
@@ -111,24 +170,28 @@ func (c *Client) build() error {
 		c.base = u
 	}
 	d := &dialer{policy: cfg.Policy, resolver: c.resolver, timeout: cfg.ConnectTimeout, proxy: cfg.Proxy != nil}
-	tr := &http.Transport{
-		DialContext:         d.DialContext,
-		ForceAttemptHTTP2:   true,
-		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
-		TLSHandshakeTimeout: cfg.ConnectTimeout,
-		IdleConnTimeout:     30 * time.Second,
-		MaxIdleConnsPerHost: 4,
-	}
 	// Proxy stays nil without a proxy of the client's own, so the environment is never consulted.
+	var proxy func(*http.Request) (*url.URL, error)
 	if cfg.Proxy != nil {
 		pu, err := cfg.Proxy.url()
 		if err != nil {
 			return err
 		}
-		tr.Proxy = c.proxyFunc(pu)
+		proxy = c.proxyFunc(pu)
 	}
+	c.transports = newTransports(func() *http.Transport {
+		return &http.Transport{
+			DialContext:         d.DialContext,
+			Proxy:               proxy,
+			ForceAttemptHTTP2:   true,
+			TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+			TLSHandshakeTimeout: cfg.ConnectTimeout,
+			IdleConnTimeout:     30 * time.Second,
+			MaxIdleConnsPerHost: 4,
+		}
+	})
 	c.http = &http.Client{
-		Transport:     tr,
+		Transport:     c.transports,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	return nil

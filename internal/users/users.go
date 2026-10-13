@@ -25,6 +25,7 @@ import (
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/users/dbgen"
 )
 
@@ -188,21 +189,13 @@ func (p Profile) Validate() error {
 		return &FieldError{Pointer: "/name", Code: "too_long",
 			Detail: fmt.Sprintf("The name is longer than %d characters.", maxNameLength)}
 	}
-	if p.TimeZone != nil && !validTimeZone(*p.TimeZone) {
+	if p.TimeZone != nil && !organization.ValidTimeZone(*p.TimeZone) {
 		return &FieldError{Pointer: "/time_zone", Code: "invalid_format", Detail: "The time zone is not an IANA name."}
 	}
 	if p.Language != nil && !slices.Contains(Languages, *p.Language) {
 		return &FieldError{Pointer: "/language", Code: "invalid_format", Detail: "The language is not en or ru."}
 	}
 	return nil
-}
-
-func validTimeZone(name string) bool {
-	if name == "" || name == "Local" || len(name) > 64 {
-		return false
-	}
-	_, err := time.LoadLocation(name)
-	return err == nil
 }
 
 // UpdateProfile changes the profile of the user id, which is the actor, and records user.profile_updated with the

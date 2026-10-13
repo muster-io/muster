@@ -71,7 +71,14 @@ func trust(c *Client, certs ...*x509.Certificate) {
 	for _, cert := range certs {
 		pool.AddCert(cert)
 	}
-	c.http.Transport.(*http.Transport).TLSClientConfig.RootCAs = pool
+	ts := c.transports
+	build := ts.build
+	ts.build = func() *http.Transport {
+		tr := build()
+		tr.TLSClientConfig.RootCAs = pool
+		return tr
+	}
+	ts.current.Store(&generationTransport{generation: policyGeneration.Load(), tr: ts.build()})
 }
 
 // assertThroughProxy checks that every connection the target saw came from the proxy.

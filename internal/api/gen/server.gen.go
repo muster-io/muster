@@ -4169,7 +4169,7 @@ type Organization struct {
 		UrlStatus SecretStatus `json:"url_status"`
 	} `json:"outgoing_heartbeat"`
 
-	// Retention Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
+	// Retention Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
 	Retention RetentionSettings `json:"retention"`
 
 	// SeverityLabel Label that carries severity.
@@ -4195,7 +4195,7 @@ type OrganizationBase struct {
 	// OidcTokenGraceSeconds `auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner's last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.
 	OidcTokenGraceSeconds int `json:"oidc_token_grace_seconds"`
 
-	// Retention Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
+	// Retention Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
 	Retention RetentionSettings `json:"retention"`
 
 	// SeverityLabel Label that carries severity.
@@ -4228,7 +4228,7 @@ type OrganizationInput struct {
 		Url nullable.Nullable[string] `json:"url,omitempty"`
 	} `json:"outgoing_heartbeat"`
 
-	// Retention Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
+	// Retention Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
 	Retention RetentionSettings `json:"retention"`
 
 	// SeverityLabel Label that carries severity.
@@ -4553,7 +4553,7 @@ type ResolvedBy struct {
 // ResolverKind Who resolved an Alert Group: a person or the system.
 type ResolverKind string
 
-// RetentionSettings Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
+// RetentionSettings Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
 type RetentionSettings struct {
 	// AlertDetailsDays Alerts inside Alert Groups, Timeline entries and delivery events (`retention.alert_details`). Never Notes.
 	AlertDetailsDays int `json:"alert_details_days"`
