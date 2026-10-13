@@ -26,7 +26,7 @@ files_touched:
 acceptance:
   - "[C-19.FR-3] With `alerting.prometheusRule.enabled` the chart renders a `PrometheusRule`, with `alerting.vmRule.enabled` a `VMRule`, both holding the twelve rules of reference.md with their severity, `description`, `runbook_url` and default expression; thresholds, windows, `for` and the job selector are chart values; without either flag no rule is rendered."
   - "[C-19.AC-8, C-19.AC-1] `make rules-test` runs `promtool test rules` over the rendered rules: each rule fires on its documented condition — `MusterNoLeader` after 2 minutes of `max(muster_leader) == 0` — and stays silent without it."
-  - "[C-19.FR-9, C-19.AC-4, C-21.FR-3, C-21.AC-1] Every rendered rule's `runbook_url` is `alerting.runbookBaseURL`/<the chart's major.minor, or `latest` for development builds>/operations/runbooks/<alertname>/, and `make docs-check` fails unless rendered rules, Internal alerts and runbook pages match one to one; the chart passes `alerting.runbookBaseURL` to Muster as `MUSTER_RUNBOOK_BASE_URL`."
+  - "[C-19.FR-9, C-19.AC-4, C-21.FR-3, C-21.AC-1] Every rendered rule's `runbook_url` is `alerting.runbookBaseURL`/<the major.minor of the chart's `appVersion`, or `latest` for development builds>/operations/runbooks/<alertname>/, and `make docs-check` fails unless rendered rules, Internal alerts and runbook pages match one to one; the chart passes `alerting.runbookBaseURL` to Muster as `MUSTER_RUNBOOK_BASE_URL`."
   - "[C-19.FR-4] The chart ships one \"Muster\" dashboard with the uid `muster`, a data source variable and the variables `namespace`, `job`, `integration`, `route` and `destination` with names joined from `*_info`, and the rows Overview, Ingestion, Delivery and Platform; it is rendered as a ConfigMap for the Grafana sidecar with `dashboard.configMap.enabled` and as a `GrafanaDashboard` that references that ConfigMap with `dashboard.grafanaDashboard.enabled`."
   - "[C-19.FR-4] Every query of the dashboard uses only metrics of the catalogue, checked by `make helm-check`."
 verify: "make ci helm-check rules-test docs-check"
@@ -59,7 +59,12 @@ issue: 59
   with the same `spec.groups`, each behind its flag and with extra labels from values. The twelve rules of the
   [chart rules table](../prd/l1/reference.md#chart-rules) with their default expressions, `for` and severity; each has
   the labels `severity`, the annotations `summary`, `description` (what fired and the first thing to check) and
-  `runbook_url`. Values: `alerting.jobSelector` (default `job="muster"`), and per rule under `alerting.rules.<name>`:
+  `runbook_url`. The job selector is part of every series selector of every rule — `up{job="muster"}`,
+  `muster_delivery_queue{job="muster"}`, `muster_delivery_attempts_total{job="muster",outcome="delivered"}` — as the
+  updated table of reference.md shows, so that another job's metrics of the same names never fire Muster's rules.
+  Values: `alerting.jobSelector` (default `job="<muster.name>"`, the scrape job's name, which the ServiceMonitor takes
+  from the `app.kubernetes.io/name` label: `muster` unless `nameOverride` changes it), and per rule under
+  `alerting.rules.<name>`:
   `enabled`, `for`, and its thresholds and windows (`MusterDeliveryFailing.window`, `MusterDeliverySlow.seconds` and
   `.window`, `MusterDeliveryQueueGrowing.size` and `.window`, `MusterIngestBacklog.backlog`, `.delaySeconds` and
   `.window`, `MusterIngestRejected.unauthorized` and `.window`, `MusterTemplateError.window`, `MusterClockSkew.seconds`,
@@ -71,7 +76,9 @@ issue: 59
   oversized request but not with ten unauthorized ones.
 - **`runbook_url`** (C-19.FR-9; `_helpers.tpl`): `{{ alerting.runbookBaseURL }}/{{ major.minor of appVersion, or
   "latest" for 0.0.0-dev }}/operations/runbooks/<alertname>/`; the Deployment sets `MUSTER_RUNBOOK_BASE_URL` from the same
-  value, so Internal alerts of S-053 point into the same site.
+  value, so Internal alerts of S-053 point into the same site. The version is the chart's `appVersion` — the Muster
+  version it deploys, which the Internal alerts take from the binary — never the chart's own `version`, so both point
+  at the documentation of the same release (C-19.FR-9 as amended).
 - **Dashboard** (C-19.FR-4; `files/dashboard.json`, `templates/dashboard.yaml`): uid `muster`, title "Muster", the
   variables `datasource` (Prometheus type), `namespace`, `job`, `integration`, `route`, `destination` — entity variables
   from `muster_integration_info`, `muster_route_info` and `muster_destination_info` showing names and filtering by id —
@@ -81,19 +88,26 @@ issue: 59
   messenger API latency by client class), **Platform** (Leader, API requests and latency, sign-in failures, template
   errors and rendering time, clock skew, database pool, memory and goroutines). Rendered as a ConfigMap with the sidecar
   label from `dashboard.configMap.labels` (default `grafana_dashboard: "1"`) when `dashboard.configMap.enabled`, and as a
-  `GrafanaDashboard` (`grafana.integreatly.org/v1beta1`) with `configMapRef` to that ConfigMap, `instanceSelector` and
-  `folder` from values when `dashboard.grafanaDashboard.enabled`, which fails to render without the ConfigMap.
+  `GrafanaDashboard` (`grafana.integreatly.org/v1beta1`) with `configMapRef` to that ConfigMap — `name` and `key`
+  (`muster.json`), both required by the CRD — `instanceSelector`, which the CRD requires too
+  (`dashboard.grafanaDashboard.instanceSelector`, default `matchLabels: {dashboards: grafana}`), and `folder` from
+  values when `dashboard.grafanaDashboard.enabled`, which fails to render without the ConfigMap.
 - **Checks** (`internal/tools/chartcheck`, in `make helm-check`): the rendered rule names equal the chart rules table of
   reference.md; each rule has a severity label, a `description` and a `runbook_url` of the form above; the dashboard has
-  the uid, the variables and the four rows, and every metric name in its queries is in the metric registry (S-053).
-  `make helm-check` validates the rendered CRD resources with kubeconform and their published schemas: the default
-  schema location knows only the built-in kinds, so the Makefile adds a `-schema-location` for the CRD schemas of
-  `PrometheusRule`, `VMRule` and `GrafanaDashboard` in the layout of the CRDs catalog
-  (`{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json`) at a pinned commit, instead of skipping missing
-  schemas.
+  the uid, the variables and the four rows, and every metric name in its queries and in the rule expressions is in the
+  metric registry (S-053). Before the lookup a name loses the `_bucket`, `_sum` and `_count` suffixes of a histogram,
+  and the series every Prometheus scrape or Go process exports without being in the catalogue — `up`, `process_*`
+  and `go_*` — are allowed. `make helm-check` validates the rendered CRD resources with kubeconform and their
+  published schemas through the CRDs catalog location already pinned in the Makefile (`KUBECONFORM_FLAGS`, which
+  ServiceMonitor uses); the story checks that the catalog has `PrometheusRule`, `VMRule` and `GrafanaDashboard` at that
+  commit, moves the pin forward if one is missing, and never skips missing schemas.
 - **Packaging**: `.helmignore` gains `tests/`, so that the rule unit tests are not part of the packaged chart.
+- **Value descriptions**: every new value under `alerting.*` and `dashboard.*` has a `description` in
+  `values.schema.json`, which the chart values reference of S-057 renders and checks.
 - **Runbook check** (C-21.FR-3, C-19.AC-4; `internal/tools/runbookcheck`): the rule names and the paths of the
-  `runbook_url`s rendered with the all-options values join the one-to-one check of S-058.
+  `runbook_url`s rendered with the all-options values join the one-to-one check of S-058. It renders with the helm of
+  the Makefile's pinned tool target, so `make docs-check`, which runs on every pull request (S-057), fails a pull
+  request that adds a chart rule without its page.
 - **Defaults**: `alerting.runbookBaseURL`, "Chart rule thresholds, windows and job selector".
 
 ## Steps
@@ -114,7 +128,9 @@ helm template m deploy/helm/muster --set existingSecret=s -f deploy/helm/muster/
 yq 'select(.kind == "PrometheusRule") | .spec.groups[].rules[].alert' /tmp/all.yaml | wc -l   # 12
 yq 'select(.kind == "VMRule") | .spec.groups[].rules[].alert' /tmp/all.yaml | wc -l          # 12
 yq 'select(.kind == "PrometheusRule") | .spec.groups[].rules[] | select(.alert == "MusterNoLeader") | [.expr, .for, .labels.severity, .annotations.runbook_url] | join(" | ")' /tmp/all.yaml
-# max(muster_leader{job="muster"}) == 0 | 2m | critical | https://muster-io.github.io/muster/<major.minor>/operations/runbooks/MusterNoLeader/
+# max(muster_leader{job="muster"}) == 0 | 2m | critical | https://muster-io.github.io/muster/latest/operations/runbooks/MusterNoLeader/
+#   (appVersion 0.0.0-dev; a release chart has its major.minor)
+yq 'select(.kind == "PrometheusRule") | .spec.groups[].rules[] | select(.alert == "MusterDeliveryFailing") | .expr' /tmp/all.yaml | grep -o 'job="muster"' | wc -l   # 2
 helm template m deploy/helm/muster --set existingSecret=s -f deploy/helm/muster/ci/all-options-values.yaml \
   --set alerting.rules.MusterClockSkew.seconds=5 | yq 'select(.kind == "PrometheusRule") | .spec.groups[].rules[] | select(.alert == "MusterClockSkew") | .expr'
 # max by (instance) (abs(muster_clock_skew_seconds{job="muster"})) > 5
@@ -137,8 +153,12 @@ make docs-check; echo "exit=$?"                              # exit=0
 ```
 
 **Optional manual check in a test cluster** (operator): install the chart with the Prometheus or VictoriaMetrics operator
-and the Grafana operator present and both flags on; see the twelve rules loaded, the dashboard imported with its
-variables filled from a running Muster, and `MusterNoLeader` firing two minutes after scaling Muster to zero.
+and the Grafana operator present and both flags on; see the twelve rules loaded and the dashboard imported with its
+variables filled from a running Muster. Then make the replicas run without a Leader: in a `psql` session to Muster's
+database run `SELECT pg_advisory_lock(x'6d75737465720003'::bigint)` (`leader.LockKey`), which waits until the current
+Leader lets go, and restart the Deployment; the replicas come up and keep being scraped with `muster_leader` 0, and
+`MusterNoLeader` fires two minutes later; ending the `psql` session lets a replica lead again. Scaling Muster to zero
+would not do: without targets there is neither a `muster_leader` nor an `up` series, so no rule fires.
 
 ## Open questions
 

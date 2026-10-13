@@ -65,7 +65,7 @@ issue: 7
 
 **OUT**
 
-- Key activation and re-encryption (`muster secrets rotate-key`) and the Keyring page (S-055).
+- Key activation and re-encryption (`muster secrets rotate-key`, S-071) and the Keyring page (S-056).
 - Pruning replica records of gone replicas and the System status list of replicas (S-008, S-053).
 - Button signatures (C-12/C-13) and CSRF tokens (S-010), which use the sub-keys defined here.
 - Editing Organization settings (S-012 for the TOTP policy, S-053 and S-055 for the rest).

@@ -39,7 +39,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-17 Timers | Actions | 20 | S-049, S-068, S-050 | yes | 20 of 20 |
 | C-18 Account links | Actions | 18 | S-051, S-052, S-069, S-070 | yes | 18 of 18 |
 | C-19 Self-observation | Operations | 15 | S-053, S-054, S-059 | yes | 15 of 15 |
-| C-20 Organization settings and security | Operations | 12 | S-055, S-056 | yes | 12 of 12 |
+| C-20 Organization settings and security | Operations | 12 | S-055, S-071, S-056 | yes | 12 of 12 |
 | C-21 Documentation site and runbooks | Operations | 9 | S-057, S-058, S-060 | yes | 9 of 9 |
 
 ## C-01
@@ -88,7 +88,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-02.FR-12 | S-008 (part), S-028 (part), S-049 (part) | complete | collapsed overdue timers and Timeline entries are C-09 and C-17 (S-028, S-049) |
 | C-02.FR-13 | S-008 | complete |  |
 | C-02.FR-14 | S-006 (part), S-008 (part), S-061 (part), S-041 (part), S-042 (part) | complete | Connection and Destination checks join with S-061, S-041 and S-042 |
-| C-02.FR-15 | S-006 (part), S-008 (part), S-011 (part), S-012 (part), S-021 (part), S-055 (part) | complete | the other subcommands come with S-011, S-012, S-021 and S-055 |
+| C-02.FR-15 | S-006 (part), S-008 (part), S-011 (part), S-012 (part), S-021 (part), S-071 (part) | complete | the other subcommands come with S-011, S-012, S-021 and S-071 |
 | C-02.FR-16 | S-006 | complete |  |
 | C-02.FR-17 | S-005 | complete |  |
 | C-02.FR-18 | S-005 | complete |  |
@@ -190,7 +190,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-04.FR-5 | S-016 | complete |  |
 | C-04.FR-6 | S-016, S-017 | complete |  |
 | C-04.FR-7 | S-016, S-017 | complete |  |
-| C-04.FR-8 | S-016 (part), S-017, S-056 (part) | complete | editing the grace period on the Security page is S-056 (C-20.FR-1) |
+| C-04.FR-8 | S-016 (part), S-017, S-055 (part), S-056 (part) | complete | editing the grace period is S-055 in the API and S-056 on the Security page (C-20.FR-1) |
 | C-04.AC-1 | S-016 | complete |  |
 | C-04.AC-2 | S-016, S-017 | complete |  |
 | C-04.AC-3 | S-016 | complete |  |
@@ -625,7 +625,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-17.FR-3 | S-049 (part), S-050 (part) | complete |  |
 | C-17.FR-4 | S-049 (part), S-068 (part), S-069 (part) | complete | the buttons on Reminders are S-068; re-verified with several Connections of one messenger in S-069 (D305) |
 | C-17.FR-5 | S-049 | complete |  |
-| C-17.FR-6 | S-068, S-055 (part) | complete | S-055 repeats the expiry after a real key rotation |
+| C-17.FR-6 | S-068, S-071 (part) | complete | S-071 repeats the expiry after a real key rotation |
 | C-17.FR-7 | S-049 | complete |  |
 | C-17.FR-8 | S-049 | complete | the release itself is S-063 (C-03.FR-13) |
 | C-17.FR-9 | S-049 (part), S-050 (part) | complete |  |
@@ -690,21 +690,21 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-20
 
-[Organization settings and security](../prd/l1/C-20-organization-settings-and-security.md) · Operations · stories: S-055, S-056
+[Organization settings and security](../prd/l1/C-20-organization-settings-and-security.md) · Operations · stories: S-055, S-071, S-056
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-20.FR-1 | S-055 (part), S-056 (part) | complete |  |
 | C-20.FR-2 | S-055 | complete |  |
 | C-20.FR-3 | S-055 (part), S-056 (part) | complete |  |
-| C-20.FR-6 | S-055 (part), S-056 (part) | complete |  |
-| C-20.FR-7 | S-055 | complete |  |
+| C-20.FR-6 | S-071 (part), S-056 (part) | complete |  |
+| C-20.FR-7 | S-071 | complete |  |
 | C-20.FR-8 | S-055 | complete |  |
 | C-20.AC-1 | S-055 | complete |  |
-| C-20.AC-2 | S-055 (part), S-056 (part) | complete |  |
+| C-20.AC-2 | S-071 (part), S-056 (part) | complete |  |
 | C-20.AC-3 | S-055 | complete |  |
 | C-20.AC-4 | S-055 (part), S-056 (part) | complete |  |
-| C-20.AC-5 | S-055 | complete |  |
+| C-20.AC-5 | S-071 | complete |  |
 | C-20.AC-6 | S-055 | complete |  |
 
 ## C-21
@@ -735,7 +735,7 @@ the stories that implement and check its parts. A story that proves an NFR says 
 | NFR-3 Footprint | S-003, S-004 | the compose example with PostgreSQL's memory capped (S-003); the nightly measurement of the peak working sets (S-004) |
 | NFR-4 Availability | S-004, S-006, S-008, S-018, S-020, S-028, S-034, S-035 | the nightly two-replica end-to-end run with `muster dev --replica` (S-004); readiness on the database only (S-006); the Leader replaced within a minute and the recovery notice (S-008); `202` only after the Snapshot is stored (S-018); ingestion, timers and delivery on every replica (S-020, S-028, S-034); Broken Destinations that recover to the current state (S-035) |
 | NFR-5 Durability and backup | S-008, S-060 | `muster doctor` with the key canary check (S-008); the backup and restore page with the restore order (S-060) |
-| NFR-6 Security | S-001, S-002, S-003, S-007, S-009, S-010, S-012, S-013, S-062, S-016, S-018, S-036, S-041, S-044, S-055 | the secret-leak lint (S-001); dependency scanning (S-002); signed images and the SBOM (S-003); AES-256-GCM under the Keyring (S-007) and its rotation (S-055); the outbound address policy, no redirects, per-client proxies (S-009); secure cookies, CSRF, the Content Security Policy, argon2id and sign-in throttling (S-010); TOTP (S-012); write-only secret fields and OIDC refusing users without a mapped group (S-013); OIDC re-checks at the IdP (S-062); hashed tokens (S-016, S-018); escaping, neutralized Mentions and signed buttons (S-036); the Telegram token sent only to the saved Bot API address (S-041); outgoing webhook Secrets (S-044) |
+| NFR-6 Security | S-001, S-002, S-003, S-007, S-009, S-010, S-012, S-013, S-062, S-016, S-018, S-036, S-041, S-044, S-055, S-071 | the secret-leak lint (S-001); dependency scanning (S-002); signed images and the SBOM (S-003); AES-256-GCM under the Keyring (S-007) and its rotation (S-071); the outbound address policy, no redirects, per-client proxies (S-009), and a policy change effective at once, idle connections included (S-055); secure cookies, CSRF, the Content Security Policy, argon2id and sign-in throttling (S-010); TOTP (S-012); write-only secret fields and OIDC refusing users without a mapped group (S-013); OIDC re-checks at the IdP (S-062); hashed tokens (S-016, S-018); escaping, neutralized Mentions and signed buttons (S-036); the Telegram token sent only to the saved Bot API address (S-041); outgoing webhook Secrets (S-044) |
 | NFR-7 Privacy | S-005, S-011 | metric labels without alert labels, users or Alert Group numbers (S-005); pseudonymized deletion (S-011); no telemetry and no email are properties of the whole design, kept by review |
 | NFR-8 Internationalization | S-014, S-036, S-057 | the UI in English and Russian with plural forms and a lint for missing keys (S-014); built-in message texts in both languages, chosen per Route (S-036); the documentation in English (S-057) |
 | NFR-9 Time | S-008, S-010, S-014, S-036, S-060 | the clock skew check (S-008); UTC in the API (S-010); the user's time zone in the UI (S-014); absolute times in the Organization's time zone in messages (S-036); NTP on the nodes in the high-availability page (S-060) |
