@@ -87,7 +87,7 @@ issue: 4
   never adds to it; the database default yields to `MUSTER_DATABASE_URL` or to any field of the main connection
   (`MUSTER_DATABASE_HOST`, `_PORT`, `_NAME`, `_USER`, `_PASSWORD`, `_PASSWORD_FILE`, `_SSLMODE`), and the key and the
   Admin password to their `_FILE` variables too. A `MUSTER_SECRET_KEYS` given to `muster dev` is the whole Keyring, so
-  it must list the development key for as long as the database's key canary needs it (S-055 sets both keys
+  it must list the development key for as long as the database's key canary needs it (S-071 sets both keys
   explicitly). The demo configuration — Integrations, Routes and Destinations wired to the fakes — is added by the
   capabilities that own those resources.
 - **CLI against the development database** (C-01.FR-13): `muster dev <subcommand>` runs another subcommand of the

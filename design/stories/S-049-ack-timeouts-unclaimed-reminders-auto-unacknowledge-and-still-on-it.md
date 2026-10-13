@@ -110,7 +110,7 @@ issue: 49
 - The buttons "Still on it" and "Unack" on Reminder Thread replies, presses on them and the expired-button answer
   (S-068, split from this story). Here a Reminder reaches the messengers as a plain Thread reply mentioning the Owner.
 - Creating Account links (S-051).
-- Buttons signed with a key that a real rotation removed (S-055).
+- Buttons signed with a key that a real rotation removed (S-071).
 
 ## Contracts
 

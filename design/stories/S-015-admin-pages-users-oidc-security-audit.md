@@ -62,7 +62,8 @@ issue: 15
 **OUT**
 
 - Account links on the user page (S-052); Service accounts (S-017).
-- The token grace period and the Keyring on the Security page (S-056); the other Organization settings (S-054, S-056).
+- The token grace period on the Security page and the Keyring page (S-056); the other Organization settings (S-054,
+  S-056).
 
 ## Contracts
 

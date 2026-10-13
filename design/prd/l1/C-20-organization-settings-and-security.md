@@ -27,7 +27,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   `retention_order`. Notes are kept with the summary rows, not with the details (C-09.FR-16). The Severity levels page
   lists the values of the severity label seen in the last `organization.severity_values_window` with their counts, and
   marks those without a mapping, which count as warning. On the Security page Admins also edit the grace period of
-  Personal access tokens of OIDC accounts without an offline token (`auth.oidc_token_grace`, C-04.FR-8). The TOTP policy
+  Personal access tokens of OIDC users without an offline token (`auth.oidc_token_grace`, C-04.FR-8). The TOTP policy
   (C-03) and the outgoing heartbeat (C-19) are edited in their capabilities.
 - **C-20.FR-2** Changing Severity levels or Instance labels affects later evaluations only and never changes the status
   of an open Alert Group.
@@ -36,19 +36,22 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   that a denied entry always wins.
 - **C-20.FR-6** The Keyring page shows every key id in the environment, which one is active, which live replicas hold
   which keys, and for each older key whether any secret or open Root message still depends on it. When none does, it
-  says the key can be removed from `MUSTER_SECRET_KEYS`.
+  says the key can be removed from `MUSTER_SECRET_KEYS`. Only a key that was active before is ever called removable; a
+  key that was never active, such as one added for a rotation, is shown as not active yet.
 - **C-20.FR-7** `muster secrets rotate-key --activate <id> --actor <name>` activates a key only if every live replica
   holds it, and otherwise refuses, naming the replicas that lack it. On activation it re-encrypts all secrets and the
-  key canary and recomputes the Desired state of every open Alert Group so their buttons are re-signed; replicas switch
-  without a restart. The activation is recorded in the Audit log.
+  key canary; replicas switch without a restart; after activation the Leader recomputes the Desired state of every open
+  Alert Group whose buttons another key signed, so their buttons are re-signed. The activation is recorded in the Audit
+  log.
 - **C-20.FR-8** Every settings change is audited with a before/after diff and uses optimistic locking.
 
 ## UI
 
-Organization settings: General (name, time zone), Severity levels (mapping, emoji and colours, values seen), Alert
-handling ("critical is Urgent", Instance labels), Retention, Network (outbound address policy, allowed and denied
-entries), Security (Keyring status; the TOTP policy of C-03; the token grace period for OIDC accounts without an offline
-token).
+One "Organization" entry in the main navigation opens a sub-navigation of the Organization pages: General (name, time
+zone), Severity levels (mapping, emoji and colours, values seen), Alert handling ("critical is Urgent", Instance
+labels), Security (the TOTP policy of C-03; the token grace period for OIDC users without an offline token), Outbound
+addresses (outbound address policy, allowed and denied entries), Retention, Keyring (Keyring status), and the pages of
+other capabilities kept with them: Outgoing heartbeat and System status (C-19), Lookup tables and Link rules (C-12).
 
 ## API surface
 
@@ -82,5 +85,6 @@ re-signed buttons.
 
 ## Suggested story split
 
-- **BE** — Organization settings update, values seen, outbound policy editing, Keyring status, `rotate-key`.
+- **BE** — Organization settings update, values seen, outbound policy editing.
+- **BE** — Keyring status, `rotate-key` and the re-render after a rotation.
 - **FE** — Organization settings pages.
