@@ -321,20 +321,28 @@ func (r *Replica) waitFor(t testing.TB, what string, cond func() bool) {
 // runCLIStdout runs `muster dev <args>` against the harness's database and returns its exit code and standard output.
 func (h *Harness) runCLIStdout(t *testing.T, args ...string) (int, string) {
 	t.Helper()
+	code, stdout, _ := h.runCLIEnv(t, nil, args...)
+	return code, stdout
+}
+
+// runCLIEnv runs `muster dev <args>` against the harness's database with the variables env added to the test process's
+// environment, and returns its exit code, standard output and standard error.
+func (h *Harness) runCLIEnv(t *testing.T, env []string, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
 	//nolint:gosec // G204: the binary under test, from MUSTER_E2E_BINARY
 	cmd := exec.CommandContext(t.Context(), h.binary, append([]string{"dev"}, args...)...)
-	cmd.Env = append(os.Environ(), h.databaseEnv()...)
-	var stdout, stderr strings.Builder
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	cmd.Env = append(append(os.Environ(), h.databaseEnv()...), env...)
+	var out, errOut strings.Builder
+	cmd.Stdout, cmd.Stderr = &out, &errOut
 	err := cmd.Run()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
-		return exit.ExitCode(), stdout.String()
+		return exit.ExitCode(), out.String(), errOut.String()
 	}
 	if err != nil {
-		t.Fatalf("run muster dev %v: %v; standard error:\n%s", args, err, stderr.String())
+		t.Fatalf("run muster dev %v: %v; standard error:\n%s", args, err, errOut.String())
 	}
-	return 0, stdout.String()
+	return 0, out.String(), errOut.String()
 }
 
 func (h *Harness) databaseEnv() []string {

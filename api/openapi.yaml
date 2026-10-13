@@ -9017,6 +9017,7 @@ components:
       - missing_on
       - needed
       - removable
+      - state
       properties:
         id:
           type: string
@@ -9038,7 +9039,20 @@ components:
           description: A stored Secret or an open Root message still depends on the key.
         removable:
           type: boolean
-          description: The key is no longer used and can be removed from `MUSTER_SECRET_KEYS`.
+          description: The key is no longer used and can be removed from `MUSTER_SECRET_KEYS`. Only a key that was active
+            before can be removable; a key that was never active is `not_active_yet`, to be activated, never removed.
+        state:
+          $ref: '#/components/schemas/KeyringKeyState'
+    KeyringKeyState:
+      type: string
+      description: '`active`; else `needed` when a stored Secret or an open Root message still depends on the key; else
+        `removable` when it was active before; else `not_active_yet`: a key that was never active, such as one added for
+        a rotation.'
+      enum:
+      - active
+      - not_active_yet
+      - needed
+      - removable
     Keyring:
       type: object
       required:

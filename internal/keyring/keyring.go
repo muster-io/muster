@@ -164,6 +164,21 @@ func (k *Keyring) setActive(id string) error {
 	return nil
 }
 
+// switchTo makes the held key id active and reports whether that switched from another active key: of callers that
+// race, one sees the switch. Before the canary check set an active key there is nothing to switch from.
+func (k *Keyring) switchTo(id string) bool {
+	kk := k.byID[id]
+	for {
+		old := k.active.Load()
+		if old == kk {
+			return false
+		}
+		if k.active.CompareAndSwap(old, kk) {
+			return old != nil
+		}
+	}
+}
+
 // Encrypt encrypts a secret field with the active key: a random nonce and AES-256-GCM, with the field name bound as
 // associated data, so that the ciphertext opens only for that field. It returns the ciphertext and the key id to
 // store next to it.

@@ -120,6 +120,8 @@ type (
 		// responseValues are the values an outgoing webhook extracted, and threadOpened that "open thread" ran.
 		responseValues map[string]string
 		threadOpened   bool
+		// actualKey is actual_button_key_id: the key that signed the buttons of the message sent, empty for none.
+		actualKey *string
 	}
 	fakeReply struct {
 		id, delivery, group, dest int64
@@ -589,7 +591,8 @@ func (f *fakeDB) GetLeasedDelivery(_ context.Context, arg dbgen.GetLeasedDeliver
 		PublicationStartedAt: tz(d.started), Attempts: d.attempts, DestinationID: ds.id,
 		DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
 		ConnectionID: nullInt(ds.connection), DestinationHealth: ds.health, GroupCreatedAt: d.updated,
-		TelegramChannelChatID: nullInt(ds.tgChannel), TelegramDiscussionChatID: nullInt(ds.tgGroup)}
+		TelegramChannelChatID: nullInt(ds.tgChannel), TelegramDiscussionChatID: nullInt(ds.tgGroup),
+		ActualButtonKeyID: txt(d.actualKey)}
 	if d.storm != 0 {
 		out.StormID = pgtype.Int8{Int64: d.storm, Valid: true}
 		return out, nil
@@ -694,7 +697,7 @@ func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredPar
 	if err != nil {
 		return "", err
 	}
-	d.actualVersion, d.actualHash = arg.Version, arg.Hash
+	d.actualVersion, d.actualHash, d.actualKey = arg.Version, arg.Hash, strOf(arg.ButtonKeyID)
 	if arg.MessageID.Valid {
 		d.messageID = strOf(arg.MessageID)
 	}
@@ -1253,7 +1256,7 @@ func (f *fakeDB) ResetForRepublish(_ context.Context, arg dbgen.ResetForRepublis
 		return 0, nil
 	}
 	d.messageID, d.messageURL, d.actualVersion, d.actualHash, d.started = nil, nil, 0, nil, nil
-	d.publishedAt, d.responseValues, d.threadOpened = nil, nil, false
+	d.publishedAt, d.responseValues, d.threadOpened, d.actualKey = nil, nil, false, nil
 	d.threadState, d.anchorID, d.chainLastID, d.republished = "none", nil, nil, true
 	d.loud, d.lateNote, d.state, d.attempts, d.firstFailed = pgtype.Bool{Bool: false, Valid: true}, false, "pending",
 		0, nil

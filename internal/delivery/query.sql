@@ -158,7 +158,7 @@ RETURNING d.id, d.urgent, d.next_attempt_at, d.last_delivered_at;
 SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id, d.desired_version,
        d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
        d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
-       d.published_at, d.response_values, d.thread_opened, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       d.published_at, d.response_values, d.thread_opened, d.actual_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
        ds.telegram_discussion_chat_id,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
@@ -214,11 +214,13 @@ WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text;
 -- actual message recorded, unless the call was a Publication that created a message on a row that had none (raced):
 -- a Storm summary is then retired with it; an Alert Group whose Destination was deleted or left its Route meanwhile
 -- gets the final edit of that message (pending, desired_retire); any other row follows the rule above, so that the
--- message that now exists is kept current.
+-- message that now exists is kept current. The key that signed the buttons of the message sent becomes the actual one
+-- (@button_key_id, none for a message without buttons).
 -- name: RecordDelivered :one
 UPDATE deliveries d
 SET actual_version      = @version::bigint,
     actual_hash         = @hash,
+    actual_button_key_id = sqlc.narg('button_key_id')::text,
     message_id          = coalesce(sqlc.narg('message_id')::text, d.message_id),
     message_url         = coalesce(sqlc.narg('message_url')::text, d.message_url),
     published_at        = CASE WHEN @published::boolean THEN coalesce(d.published_at, @now::timestamptz) ELSE d.published_at END,
@@ -322,6 +324,7 @@ WHERE org_id = @org_id AND alert_group_id = @alert_group_id::bigint AND destinat
 -- name: ResetForRepublish :execrows
 UPDATE deliveries
 SET message_id               = NULL,
+    actual_button_key_id     = NULL,
     message_url              = NULL,
     published_at             = NULL,
     response_values          = '{}',
@@ -948,23 +951,34 @@ JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
 WHERE d.org_id = @org_id AND d.held_by_storm_id = @storm_id::bigint AND d.state = 'pending'
   AND g.status <> 'resolved';
 
--- ReleaseHeldOpen publishes the open Alert Groups a Storm held, Loud as @loud, within the limiters (C-11.FR-6).
+-- ReleaseHeldOpen publishes the open Alert Groups a Storm held, Loud as @loud, within the limiters (C-11.FR-6). It locks
+-- the held deliveries by Alert Group, then by Destination, the order of Enqueue and of the re-render after a rotation.
 -- name: ReleaseHeldOpen :exec
 UPDATE deliveries d
 SET held_by_storm_id = NULL, publication_loud = @loud::boolean, next_attempt_at = @now, updated_at = @now
-FROM alert_groups g
-WHERE d.org_id = @org_id AND d.held_by_storm_id = @storm_id::bigint AND g.org_id = @org_id
-  AND g.id = d.alert_group_id AND g.status <> 'resolved';
+FROM (SELECT x.id
+      FROM deliveries x
+      JOIN alert_groups g ON g.org_id = x.org_id AND g.id = x.alert_group_id
+      WHERE x.org_id = @org_id AND x.held_by_storm_id = @storm_id::bigint AND g.status <> 'resolved'
+      ORDER BY x.alert_group_id, x.destination_id
+      FOR NO KEY UPDATE OF x) AS held
+WHERE d.org_id = @org_id AND d.id = held.id;
 
 -- WithholdHeldResolved withholds the Alert Groups a Storm held that resolved meanwhile: never published. It returns
--- their public_ids, once per delivery, for their alert-group hints.
+-- their public_ids, once per delivery, for their alert-group hints. It locks the held deliveries in the order of
+-- ReleaseHeldOpen.
 -- name: WithholdHeldResolved :many
 UPDATE deliveries d
 SET held_by_storm_id = NULL, state = 'withheld', updated_at = @now
-FROM alert_groups g
-WHERE d.org_id = @org_id AND d.held_by_storm_id = @storm_id::bigint AND d.state = 'pending' AND g.org_id = @org_id
-  AND g.id = d.alert_group_id AND g.status = 'resolved'
-RETURNING g.public_id;
+FROM (SELECT x.id, g.public_id
+      FROM deliveries x
+      JOIN alert_groups g ON g.org_id = x.org_id AND g.id = x.alert_group_id
+      WHERE x.org_id = @org_id AND x.held_by_storm_id = @storm_id::bigint AND x.state = 'pending'
+        AND g.status = 'resolved'
+      ORDER BY x.alert_group_id, x.destination_id
+      FOR NO KEY UPDATE OF x) AS held
+WHERE d.org_id = @org_id AND d.id = held.id
+RETURNING held.public_id;
 
 -- QuietStormSummaries makes the Storm summaries of a Storm that were never published Quiet: a summary first published
 -- after its Storm ended announces nothing new.
@@ -1122,10 +1136,12 @@ WHERE org_id = @org_id AND destination_id = @destination_id AND state IN ('colle
 
 -- RecordRetired records the final edit of a delivery, or a Root message found deleted at it: the row is retired,
 -- keeps the link to its last message and receives nothing more; one withheld or deleted in the messenger while the
--- call was in flight stays so. No row when the lease went to another replica.
+-- call was in flight stays so. The final edit carries no buttons, so no key is actual any more. No row when the lease
+-- went to another replica.
 -- name: RecordRetired :one
 UPDATE deliveries
 SET state = CASE WHEN state IN ('withheld', 'deleted_in_messenger') THEN state ELSE 'retired' END, desired_retire = false, attempts = 0, first_failed_at = NULL, last_error_class = NULL,
+    actual_button_key_id = NULL,
     last_error = NULL, last_delivered_at = @now::timestamptz, lease_owner = NULL, lease_until = NULL,
     updated_at = @now::timestamptz
 WHERE org_id = @org_id AND id = @id AND lease_owner = @owner::text
@@ -1574,3 +1590,55 @@ SELECT (EXISTS (SELECT 1
                    WHERE ds.org_id = @org_id AND ds.type = 'webhook' AND e.org_id = @org_id
                      AND e.alert_group_id = @alert_group_id::bigint AND e.sequence = @seq::bigint
                      AND e.state = 'delivered'))::boolean AS reached;
+
+-- The re-render after a key rotation (C-20.FR-7, rerender.go): the deliveries of open Alert Groups whose Desired state
+-- has buttons a key other than the active one signed and that have a Root message to edit or still to publish —
+-- pending or delivered, or Not delivered with a Root message — held by a Storm or not; withheld, retired and deleted
+-- deliveries and final edits are left alone. Outgoing webhooks carry no buttons and are never selected.
+
+-- ListRerenderGroups lists, in id order after @after, the open Alert Groups with such a delivery.
+-- name: ListRerenderGroups :many
+SELECT DISTINCT g.id
+FROM deliveries d
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+WHERE d.org_id = @org_id AND g.status <> 'resolved' AND g.id > @after::bigint
+  AND d.desired_button_key_id IS NOT NULL AND d.desired_button_key_id <> @active_key_id::text AND NOT d.desired_retire
+  AND (d.state IN ('pending', 'delivered') OR (d.state = 'not_delivered' AND d.published_at IS NOT NULL))
+ORDER BY g.id
+LIMIT @lim;
+
+-- LockRerenderGroup locks an open Alert Group as the dispatcher does, FOR NO KEY UPDATE, and reads what its Root
+-- message is rendered from; no row when it resolved meanwhile or a Command holds it, which re-renders it itself.
+-- name: LockRerenderGroup :one
+SELECT id, public_id, number, title, status, urgent, route_id
+FROM alert_groups
+WHERE org_id = @org_id AND id = @id AND status <> 'resolved'
+FOR NO KEY UPDATE SKIP LOCKED;
+
+-- LockRerenderDeliveries locks the deliveries of the Alert Group to re-render, after its Route's membership lock, in
+-- the order Enqueue locks them (by Destination), with their Destination.
+-- name: LockRerenderDeliveries :many
+SELECT d.id, d.desired_hash, d.desired_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id,
+       ds.name AS destination_name, ds.type AS destination_type, ds.connection_id
+FROM deliveries d
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+WHERE d.org_id = @org_id AND d.alert_group_id = @alert_group_id::bigint
+  AND d.desired_button_key_id IS NOT NULL AND d.desired_button_key_id <> @active_key_id::text AND NOT d.desired_retire
+  AND (d.state IN ('pending', 'delivered') OR (d.state = 'not_delivered' AND d.published_at IS NOT NULL))
+ORDER BY d.destination_id
+FOR NO KEY UPDATE OF d;
+
+-- LockButtonKey takes, until the transaction ends, the lock of the key @key_id as the outcome of an edit replaces it on a
+-- Root message, so that of two outcomes that replace the last two carriers of a key the later one sees the other.
+-- name: LockButtonKey :exec
+SELECT pg_advisory_xact_lock(@lock_class::int, hashtext(@key_id::text));
+
+-- ButtonKeyInUse reports whether a delivery of an open Alert Group that is not deleted in the messenger, retired or
+-- withheld — the deliveries the re-render never re-signs — still carries buttons the key @key_id signed.
+-- name: ButtonKeyInUse :one
+SELECT EXISTS (SELECT 1
+               FROM deliveries d
+               JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+               WHERE d.org_id = @org_id AND d.actual_button_key_id = @key_id::text
+                 AND d.state NOT IN ('deleted_in_messenger', 'retired', 'withheld')
+                 AND g.status <> 'resolved')::boolean AS in_use;

@@ -15,6 +15,7 @@ import (
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/organization"
 )
 
@@ -401,5 +402,45 @@ func TestListSeverityValues(t *testing.T) {
 	if a := x.call(t, http.MethodGet, "/api/v1/organization/severity-values", "", "Cookie", adminCookie); a.status !=
 		http.StatusInternalServerError {
 		t.Errorf("a failed list = %d", a.status)
+	}
+}
+
+// fakeKeyring is the Keyring status of the API tests.
+type fakeKeyring struct {
+	status keyring.Status
+	err    error
+}
+
+func (f fakeKeyring) Status(context.Context) (keyring.Status, error) { return f.status, f.err }
+
+// TestGetKeyring is C-20.FR-6: with organization:read, the Keyring lists every key with the live replicas that hold
+// and lack it, what depends on it and its state, in the order of the status, valid against the specification; a
+// Viewer is 403, and a failed read is a 500 problem.
+func TestGetKeyring(t *testing.T) {
+	x := newTestAPI(t)
+	x.srv.keyring = fakeKeyring{status: keyring.Status{ActiveKeyID: "k-1", Keys: []keyring.KeyStatus{
+		{ID: "k-1", Active: true, HeldBy: []string{"r-a", "r-b"}, MissingOn: []string{}, Needed: true,
+			State: keyring.KeyActive},
+		{ID: "k-0", HeldBy: []string{"r-a"}, MissingOn: []string{"r-b"}, Removable: true, State: keyring.KeyRemovable},
+		{ID: "k-2", HeldBy: []string{"r-a", "r-b"}, MissingOn: []string{}, Needed: true, State: keyring.KeyNeeded},
+		{ID: "k-3", HeldBy: []string{}, MissingOn: []string{"r-a", "r-b"}, State: keyring.KeyNotActiveYet},
+	}}}
+	a := x.call(t, http.MethodGet, "/api/v1/organization/keyring", "", "Cookie", adminCookie)
+	want := `{"keys":[` +
+		`{"active":true,"held_by":["r-a","r-b"],"id":"k-1","missing_on":[],"needed":true,"removable":false,"state":"active"},` +
+		`{"active":false,"held_by":["r-a"],"id":"k-0","missing_on":["r-b"],"needed":false,"removable":true,"state":"removable"},` +
+		`{"active":false,"held_by":["r-a","r-b"],"id":"k-2","missing_on":[],"needed":true,"removable":false,"state":"needed"},` +
+		`{"active":false,"held_by":[],"id":"k-3","missing_on":["r-a","r-b"],"needed":false,"removable":false,"state":"not_active_yet"}]}`
+	if a.status != http.StatusOK || strings.TrimSpace(string(a.body)) != want {
+		t.Errorf("GET = %d %s", a.status, a.body)
+	}
+	if a := x.call(t, http.MethodGet, "/api/v1/organization/keyring", "", "Cookie", viewerCookie); a.status !=
+		http.StatusForbidden {
+		t.Errorf("a viewer = %d", a.status)
+	}
+	x.srv.keyring = fakeKeyring{err: errors.New("database down")}
+	if a := x.call(t, http.MethodGet, "/api/v1/organization/keyring", "", "Cookie", adminCookie); a.status !=
+		http.StatusInternalServerError {
+		t.Errorf("a failed read = %d %s", a.status, a.body)
 	}
 }

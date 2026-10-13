@@ -208,7 +208,7 @@ func (f *fakeDB) RecordRetired(_ context.Context, arg dbgen.RecordRetiredParams)
 		d.state = "retired"
 	}
 	d.desiredRetire, d.attempts, d.firstFailed, d.errorClass, d.lastError = false, 0, nil, nil, nil
-	d.lastDelivered, d.owner, d.until, d.updated = at(arg.Now), "", time.Time{}, arg.Now
+	d.lastDelivered, d.owner, d.until, d.updated, d.actualKey = at(arg.Now), "", time.Time{}, arg.Now, nil
 	return d.id, nil
 }
 

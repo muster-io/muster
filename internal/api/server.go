@@ -27,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/integrations"
+	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
@@ -103,6 +104,11 @@ type Organization interface {
 	UpdateOutboundPolicy(ctx context.Context, actor audit.Actor, t audit.Transport, addr netip.Addr, version *int64,
 		in organization.OutboundPolicyInput) (organization.OutboundPolicyResource, error)
 	SeverityValues(ctx context.Context) (organization.SeverityValues, error)
+}
+
+// KeyringStatus is what the API needs of the Keyring status in internal/keyring.
+type KeyringStatus interface {
+	Status(ctx context.Context) (keyring.Status, error)
 }
 
 // Notices is what the API needs of the Organization-wide notices in internal/live.
@@ -192,6 +198,7 @@ type Config struct {
 	AuditLog     AuditLog
 	TOTP         TOTP
 	Organization Organization
+	Keyring      KeyringStatus
 	Notices      Notices
 	Live         Live
 	OIDC         OIDC
@@ -228,6 +235,7 @@ type Server struct {
 	auditLog       AuditLog
 	totp           TOTP
 	organization   Organization
+	keyring        KeyringStatus
 	notices        Notices
 	live           Live
 	oidc           OIDC
@@ -300,7 +308,7 @@ var implemented = map[string]bool{
 	"RetirePreviousSigningSecret": true, "TestDestination": true, "PreviewDestination": true,
 	"ListMyAccountLinks": true, "ListLinkableConnections": true, "DeleteMyAccountLink": true,
 	"StartTelegramLink": true, "StartMattermostLink": true, "ConfirmMattermostLink": true,
-	"ListUserAccountLinks": true, "DeleteUserAccountLink": true, "GetSystemStatus": true,
+	"ListUserAccountLinks": true, "DeleteUserAccountLink": true, "GetSystemStatus": true, "GetKeyring": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -327,7 +335,7 @@ func New(cfg Config) (*Server, error) {
 	}
 	s := &Server{
 		sessions: cfg.Sessions, users: cfg.Users, admin: cfg.Admin, auditLog: cfg.AuditLog, totp: cfg.TOTP,
-		organization: cfg.Organization, notices: cfg.Notices, live: cfg.Live, oidc: cfg.OIDC, tokens: cfg.Tokens,
+		organization: cfg.Organization, keyring: cfg.Keyring, notices: cfg.Notices, live: cfg.Live, oidc: cfg.OIDC, tokens: cfg.Tokens,
 		integrations: cfg.Integrations, snapshots: cfg.Snapshots, alerts: cfg.Alerts, routes: cfg.Routes,
 		alertGroups: cfg.AlertGroups, commands: cfg.Commands, directory: cfg.Directory,
 		connections: cfg.Connections, destinations: cfg.Destinations, webhooks: cfg.Webhooks, deliveries: cfg.Deliveries, templates: cfg.Templates, links: cfg.Links,

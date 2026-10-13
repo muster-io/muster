@@ -16,8 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
-	"slices"
 	"strings"
 	"time"
 
@@ -286,7 +284,9 @@ func (c *checks) canary(ctx context.Context) (keyring.State, bool) {
 	return st, true
 }
 
-// keyring checks that the Keyring holds the active key and reports the older keys that encrypted values still need.
+// keyring checks that the Keyring holds the active key and reports the other keys by the rule of the Keyring status
+// (C-20.FR-6): an older key a Secret or an open Root message still needs is a warning; a key that was active before
+// and is no longer used can be removed; a key that was never active is not active yet.
 func (c *checks) keyring(ctx context.Context, st keyring.State, read bool) {
 	switch {
 	case !read:
@@ -299,52 +299,42 @@ func (c *checks) keyring(ctx context.Context, st keyring.State, read bool) {
 		c.print(Fail, CheckKeyring, fmt.Sprintf("the active key %s is not in %s", st.ActiveKeyID, keySource(c.cfg)))
 		return
 	}
-	usage, err := keyUsage(ctx, c.conns.Main)
+	status, err := keyring.ReadStatus(ctx, keyring.NewStatusQueries(c.conns.Main), c.keys.KeyIDs(), c.real.Now())
 	if err != nil {
 		c.print(Fail, CheckKeyring, err.Error())
 		return
 	}
-	delete(usage, st.ActiveKeyID)
-	if len(usage) == 0 {
-		c.print(OK, CheckKeyring, fmt.Sprintf("active key %s, no older key in use", st.ActiveKeyID))
-		return
-	}
-	var older []string
-	for _, id := range slices.Sorted(maps.Keys(usage)) {
-		held := ""
-		if !c.keys.Holds(id) {
-			held = ", not in " + keySource(c.cfg)
+	var older, others []string
+	for _, k := range status.Keys {
+		switch k.State {
+		case keyring.KeyNeeded:
+			held := ""
+			if !c.keys.Holds(k.ID) {
+				held = ", not in " + keySource(c.cfg)
+			}
+			older = append(older, fmt.Sprintf("%s (%d encrypted values, %d open Root messages%s)", k.ID,
+				k.EncryptedValues, k.OpenMessages, held))
+		case keyring.KeyRemovable:
+			others = append(others, fmt.Sprintf("key %s is no longer used and can be removed from %s", k.ID,
+				keySource(c.cfg)))
+		case keyring.KeyNotActiveYet:
+			others = append(others, fmt.Sprintf("key %s is not active yet", k.ID))
+		case keyring.KeyActive:
 		}
-		older = append(older, fmt.Sprintf("%s (%d encrypted values%s)", id, usage[id], held))
 	}
-	c.print(Warn, CheckKeyring, fmt.Sprintf("active key %s; older keys still in use: %s", st.ActiveKeyID,
-		strings.Join(older, ", ")))
+	switch {
+	case len(older) > 0:
+		c.print(Warn, CheckKeyring, strings.Join(append([]string{fmt.Sprintf("active key %s; older keys still in use: %s",
+			st.ActiveKeyID, strings.Join(older, ", "))}, others...), "; "))
+	case len(others) > 0:
+		c.print(OK, CheckKeyring, strings.Join(others, "; "))
+	default:
+		c.print(OK, CheckKeyring, fmt.Sprintf("active key %s, no older key in use", st.ActiveKeyID))
+	}
 }
 
 func keySource(cfg config.Config) string {
 	return cmp.Or(cfg.SecretKeysSource, keyring.SecretKeysVar)
-}
-
-// keyUsage counts the encrypted values of every Organization by key id.
-func keyUsage(ctx context.Context, q Conn) (map[string]int64, error) {
-	store := kdb.New(q)
-	orgs, err := store.ListOrganizationIDs(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list the organizations: %w", err)
-	}
-	usage := map[string]int64{}
-	for _, org := range orgs {
-		rows, err := store.CountEncryptedValuesByKey(ctx, org)
-		if err != nil {
-			return nil, fmt.Errorf("count the encrypted values: %w", err)
-		}
-		for _, r := range rows {
-			if r.KeyID.Valid {
-				usage[r.KeyID.String] += r.Encrypted
-			}
-		}
-	}
-	return usage, nil
 }
 
 func (c *checks) clockSkew(ctx context.Context) {

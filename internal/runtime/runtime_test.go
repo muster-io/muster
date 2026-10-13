@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net"
@@ -96,6 +97,8 @@ type fakeDB struct {
 	devErr    error
 	// replayAudit records the Audit log entries of muster ingest replay.
 	replayAudit []auditdb.InsertAuditEntryParams
+	// rotation runs the transaction of muster secrets rotate-key.
+	rotation keyring.RotationStore
 }
 
 // fakeIntegrationsStore records the demo Integration of development mode: the Integration once, then its token.
@@ -372,6 +375,15 @@ func (f *fakeDB) WithMigrationLock(ctx context.Context, fn func(context.Context)
 }
 
 func (f *fakeDB) KeyringStore() keyring.Store { return &f.keys }
+
+func (f *fakeDB) KeyringStatus() keyring.StatusQueries { return nil }
+
+func (f *fakeDB) KeyringRotation() keyring.RotationStore { return f.rotation }
+
+// fakeRotation answers the transaction of an activation with err without running it.
+type fakeRotation struct{ err error }
+
+func (r fakeRotation) InTx(context.Context, func(keyring.RotationQueries) error) error { return r.err }
 
 func (f *fakeDB) OrganizationStore() organization.Store { return &f.org }
 
@@ -1729,5 +1741,133 @@ func TestPGDatabaseStores(t *testing.T) {
 	if d.MessagesDB() != messages.DBTX(d.Pool) || d.AccountLinksDB() != accountlinks.DBTX(d.Pool) ||
 		d.Clock() != rowQuerier(d.Pool) {
 		t.Error("a direct read is not over the main pool")
+	}
+}
+
+// TestRotateKey is muster secrets rotate-key in the runtime: the checks, the key canary under the migration lock, then
+// the activation; the refusals come back as they are, other failures are logged as startup_failed.
+func TestRotateKey(t *testing.T) {
+	material := bytes.Repeat([]byte("k"), keyring.KeySize)
+	id := keyring.KeyID(material)
+	newFake := func(err error) *fakeDB {
+		f := &fakeDB{rotation: fakeRotation{err: err}}
+		k, kerr := keyring.New([][]byte{bytes.Clone(material)}, false)
+		if kerr != nil {
+			t.Fatal(kerr)
+		}
+		if _, kerr := k.Establish(t.Context(), &f.keys, time.Now()); kerr != nil {
+			t.Fatal(kerr)
+		}
+		return f
+	}
+	var out syncBuffer
+	fake := newFake(nil)
+	got, err := RotateKey(t.Context(), options(fake, &out, env()), KeyRotation{KeyID: id, Actor: "ops"})
+	if err != nil || got.AlreadyActive || !fake.checked || !fake.schema || fake.locked != 1 || fake.closed != 1 {
+		t.Fatalf("= %+v, %v, database %+v", got, err, fake)
+	}
+	refusal := &keyring.ReplicasLackKeyError{KeyID: id, Replicas: []string{"ghost-1"}}
+	out.mu.Lock()
+	out.buf.Reset()
+	out.mu.Unlock()
+	if _, err := RotateKey(t.Context(), options(newFake(refusal), &out, env()), KeyRotation{KeyID: id,
+		Actor: "ops"}); !errors.Is(err, refusal) {
+		t.Errorf("a refusal = %v", err)
+	}
+	if _, err := RotateKey(t.Context(), options(newFake(nil), &out, env()), KeyRotation{KeyID: "k-unknown",
+		Actor: "ops"}); !errors.Is(err, keyring.ErrKeyNotHeld) {
+		t.Errorf("a key not held = %v", err)
+	}
+	out.mu.Lock()
+	logged := out.buf.String()
+	out.mu.Unlock()
+	if strings.Contains(logged, "startup_failed") {
+		t.Errorf("a refusal was logged as a failure: %s", logged)
+	}
+	failing := newFake(errors.New("deadlock"))
+	noCanary := &fakeDB{rotation: fakeRotation{}}
+	otherCanary := newFake(nil)
+	otherCanary.keys.state.ActiveKeyID = "k-other"
+	for name, f := range map[string]*fakeDB{
+		"check":      {checkErr: errors.New("pooler")},
+		"schema":     {schemaErr: errors.New("newer")},
+		"dev clock":  {devErr: errors.New("down")},
+		"lock":       {lockErr: errors.New("busy")},
+		"no canary":  noCanary,
+		"mismatch":   otherCanary,
+		"activation": failing,
+	} {
+		o := options(f, &out, env())
+		o.Development = name == "dev clock"
+		if _, err := RotateKey(t.Context(), o, KeyRotation{KeyID: id, Actor: "ops"}); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+	if _, err := RotateKey(t.Context(), options(fake, &out, env("MUSTER_SECRET_KEYS=")), KeyRotation{KeyID: id,
+		Actor: "ops"}); err == nil {
+		t.Error("without master keys")
+	}
+	if _, err := RotateKey(t.Context(), options(fake, &out, nil), KeyRotation{KeyID: id, Actor: "ops"}); err == nil {
+		t.Error("without settings")
+	}
+}
+
+// TestRerenderAfterRotationSwitchesFirst: the Leader task serves only this process's Organization, and a replica
+// that does not hold the active key stops instead of re-rendering.
+func TestRerenderAfterRotationSwitchesFirst(t *testing.T) {
+	k, err := keyring.New([][]byte{bytes.Repeat([]byte("k"), keyring.KeySize)}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeKeyringStore{}
+	if _, err := k.Establish(t.Context(), store, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	store.setActive("k-unknown")
+	p := &process{orgID: 1, replica: keyring.NewRecorder(k, store, clock.Real{},
+		logging.New(&bytes.Buffer{}, logging.LevelInfo), "r1", "", "dev")}
+	if err := p.rerenderAfterRotation(t.Context(), 2); err != nil {
+		t.Errorf("another organization = %v", err)
+	}
+	if err := p.rerenderAfterRotation(t.Context(), 1); !errors.Is(err, keyring.ErrKeyMismatch) {
+		t.Errorf("an active key not held = %v", err)
+	}
+}
+
+// TestRerenderAfterSwitchRetriesOnce: a render signed with another key than the one switched to, because an activation
+// committed between the switch and the render, switches again and retries once; a second mismatch, a failed switch or
+// another error is returned as it is.
+func TestRerenderAfterSwitchRetriesOnce(t *testing.T) {
+	stale := fmt.Errorf("render: %w", delivery.ErrButtonKeyNotActive)
+	boom := errors.New("boom")
+	for _, tc := range []struct {
+		name      string
+		results   []error
+		switchErr error
+		want      error
+		switches  int
+		renders   []string
+	}{
+		{"first try", []error{nil}, nil, nil, 1, []string{"k1"}},
+		{"retried", []error{stale, nil}, nil, nil, 2, []string{"k1", "k2"}},
+		{"twice stale", []error{stale, stale}, nil, delivery.ErrButtonKeyNotActive, 2, []string{"k1", "k2"}},
+		{"another error", []error{boom}, nil, boom, 1, []string{"k1"}},
+		{"failed switch", nil, keyring.ErrKeyMismatch, keyring.ErrKeyMismatch, 1, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			switches := 0
+			var renders []string
+			err := rerenderAfterSwitch(t.Context(),
+				func(context.Context) error { switches++; return tc.switchErr },
+				func() string { return fmt.Sprintf("k%d", switches) },
+				func(_ context.Context, active string) (int, error) {
+					renders = append(renders, active)
+					return 0, tc.results[len(renders)-1]
+				})
+			if !errors.Is(err, tc.want) || (tc.want == nil && err != nil) || switches != tc.switches ||
+				!slices.Equal(renders, tc.renders) {
+				t.Errorf("err %v, %d switches, renders %v", err, switches, renders)
+			}
+		})
 	}
 }

@@ -54,6 +54,21 @@ func (s *Server) UpdateOrganization(ctx context.Context, req gen.UpdateOrganizat
 		Headers: gen.UpdateOrganization200ResponseHeaders{ETag: &tag}}, nil
 }
 
+// GetKeyring is getKeyring: every key held by this replica or a live replica, which is active, which live replicas
+// hold or lack it, what still depends on it and its state (C-20.FR-6).
+func (s *Server) GetKeyring(ctx context.Context, _ gen.GetKeyringRequestObject) (gen.GetKeyringResponseObject, error) {
+	st, err := s.keyring.Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.Keyring{Keys: make([]gen.KeyringKey, 0, len(st.Keys))}
+	for _, k := range st.Keys {
+		out.Keys = append(out.Keys, gen.KeyringKey{Id: k.ID, Active: k.Active, HeldBy: k.HeldBy,
+			MissingOn: k.MissingOn, Needed: k.Needed, Removable: k.Removable, State: gen.KeyringKeyState(k.State)})
+	}
+	return gen.GetKeyring200JSONResponse(out), nil
+}
+
 // organizationOf is the API form of the organization resource.
 func organizationOf(o organization.Organization) gen.Organization {
 	tag := etag(o.Version)

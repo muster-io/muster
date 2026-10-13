@@ -11,20 +11,32 @@ files_touched:
   - internal/keyring/status.go
   - internal/keyring/status_test.go
   - internal/keyring/rotate.go
+  - internal/keyring/rotate_test.go
   - internal/keyring/replicas.go
+  - internal/keyring/keyring.go
+  - internal/keyring/keyring_test.go
   - internal/keyring/query.sql
   - internal/keyring/rotate_integration_test.go
   - internal/delivery/rerender.go
+  - internal/delivery/rerender_test.go
+  - internal/delivery/delivery.go
   - internal/delivery/outcomes.go
+  - internal/delivery/worker.go
+  - internal/delivery/worker_test.go
+  - internal/delivery/membership_test.go
   - internal/delivery/query.sql
   - internal/delivery/rerender_integration_test.go
   - internal/delivery/lockorder_integration_test.go
+  - internal/delivery/live_test.go
   - internal/leader/tasks.go
+  - internal/leader/leader_test.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/cli/secrets.go
   - internal/cli/cli.go
   - internal/cli/secrets_test.go
   - internal/doctor/doctor.go
+  - internal/doctor/doctor_test.go
   - internal/doctor/doctor_integration_test.go
   - internal/api/organization.go
   - internal/api/organization_test.go
@@ -68,9 +80,11 @@ issue: 215
   this pull request: `KeyringKey` gains the required `state` — `active`, `not_active_yet`, `needed` or `removable` — and
   the description of `removable` says that only a key that was active before can be removable.
 - **Keyring status** (C-20.FR-6; `keyring/status.go`): the keys are the ids of this replica's Keyring and of every live
-  replica's record; `active` from `keyring_state`; `held_by` and `missing_on` over live replicas; `needed` when a row of
-  `encrypted_values` carries the key id, or a delivery of an open Alert Group that is not `deleted_in_messenger` has it
-  as `actual_button_key_id` (a Root message gone from the messenger depends on nothing). A key was **active before**
+  replica's record, and a key a Secret or an open Root message still needs although nobody holds it (listed `needed`,
+  held by none); `active` from `keyring_state`; `held_by` and `missing_on` over live replicas; `needed` when a row of
+  `encrypted_values` carries the key id, or a delivery of an open Alert Group that is not `deleted_in_messenger`,
+  `retired` or `withheld` has it as `actual_button_key_id` (those deliveries are never re-signed, so they must not keep
+  a key needed; a Root message gone from the messenger depends on nothing). A key was **active before**
   when it is the active key, when it is the before or after value of `/active_key_id` in a `keyring.key_activated`
   Audit entry, or when it is `needed` (only an active key encrypts or signs). `removable` when it was active before and
   is neither active nor needed. `state` is `active`, else `needed`, else `removable`, else `not_active_yet` — a key
@@ -87,7 +101,7 @@ issue: 215
   `encrypted_values` is decrypted with its key and encrypted with the new one, keeping its `*_updated_at` (for the
   previous Signing secret, `previous_signing_secret_since`); `keyring.key_activated` is recorded with the actor `cli`,
   the name, the diff of `/active_key_id`, the count of re-encrypted fields and the count of open deliveries whose
-  `desired_button_key_id` is another key; the transaction sends the `organization` and `system-status` hints
+  `desired_button_key_id` is another key and that the re-render below selects; the transaction sends the `organization` and `system-status` hints
   (`db.NotifyHint`) and `NOTIFY muster_keyring`, all delivered when it commits. The CLI renders nothing: rendering needs
   the runtime's renderer, templates and adapters, which a CLI process does not build. Replicas switch to the new active
   key on that notification and at their next key record refresh, without a restart (`keyring/replicas.go`); a replica
@@ -104,17 +118,18 @@ issue: 215
   deliveries as `Enqueue` locks them — and never locks a delivery before its Alert Group, as the `publishRoute` path of
   `delivery/membership.go` does for Route changes. An Alert Group a Command holds is skipped: that Command's own
   re-render signs with the active key, and whatever a replica signed with the old key before it switched is selected
-  again by the next run. A delivery held by a Storm (`held_by_storm_id` set) is never re-rendered: the Storm summary
-  stands for it, and its Root message is rendered with the active key when the Storm releases it.
+  again by the next run. It never locks a Storm. A delivery held by a Storm (`held_by_storm_id` set) is re-rendered as
+  `Enqueue` renders it and stays held: the Storm summary still stands for it, and the release publishes the stored
+  Desired state, now signed with the active key; skipping it would publish the old key's buttons on release.
   `lockorder_integration_test.go` gains a case that runs `RerenderOpen` against an acknowledgement of the same Alert
   Group and against the worker preparing an edit of its delivery; neither may end in a deadlock.
 - **Safe to run twice** (ADR-0007): a delivery already re-signed is no longer selected, and two overlapping Leaders
   lock the same Alert Group in turn; the second finds nothing to do. Thread reply buttons, such as those of Reminders,
   are not re-rendered and expire once the old key is removed (C-17.FR-6, S-068).
 - **Last re-signed message** (`delivery/outcomes.go`): when the outcome of an edit replaces an `actual_button_key_id`
-  that is not the active key and no other delivery of an open Alert Group that is not `deleted_in_messenger` still
-  carries that key, the outcome's transaction sends the `organization` hint, so the Keyring page shows the key as
-  removable without a reload.
+  that is not the active key and no other delivery of an open Alert Group that is not `deleted_in_messenger`,
+  `retired` or `withheld` still carries that key, the outcome's transaction sends the `organization` hint, so the
+  Keyring page shows the key as removable without a reload.
 - **Secrets in errors and logs** (lint 5; `internal/archlint/secretleak.go`): a probe `key_rotation` runs the
   rotation with the secrets as master keys and as encrypted field values — a field that fails to decrypt, a key the
   process does not hold, a refused activation — and checks that no secret reaches a log line, the CLI output or a
@@ -132,13 +147,15 @@ issue: 215
 ## Steps
 
 1. Change `KeyringKey` in the specification and write the Keyring status. Check: `status_test.go` covers every
-   `state`, a never-activated key and a `deleted_in_messenger` delivery; `make generate-check` passes.
+   `state` and a never-activated key, `rerender_integration_test.go` the `deleted_in_messenger`, `retired` and
+   `withheld` deliveries that need no key; `make generate-check` passes.
 2. Write the rotation with re-encryption, the hints and the replica switch, and the CLI. Check:
    `rotate_integration_test.go` with two replicas covers the refusal, the activation, the canary, every encrypted field,
    the hints and the switch without a restart; `secrets_test.go` covers the exit codes; the lint-5 probe passes.
 3. Write `RerenderOpen`, the Leader task and the hint of the last re-signed message. Check:
-   `rerender_integration_test.go` covers selecting only deliveries signed by another key, skipping Storm-held and
-   `deleted_in_messenger` deliveries and a second run that changes nothing; `lockorder_integration_test.go` passes.
+   `rerender_integration_test.go` covers selecting only deliveries signed by another key, re-rendering Storm-held
+   deliveries that stay held, skipping `deleted_in_messenger` deliveries and a second run that changes nothing;
+   `lockorder_integration_test.go` passes.
 4. Extend `muster doctor`. Check: `doctor_integration_test.go` covers the removable and the not-yet-active lines.
 5. Write the end-to-end test. Check: Verification below.
 
@@ -183,7 +200,7 @@ RP=$(curl -s $FMM/posts | jq -r --arg r "$OROOT" '[.[] | select(.root_id == $r a
 RCTX=$(curl -s $FMM/posts | jq -c --arg rp "$RP" '.[] | select(.id == $rp) | .props.attachments[0].actions[0].integration.context')
 
 # C-20.FR-7: the activation, with its hints
-(timeout 20 curl -sN -b jar $API/live-updates > sse.txt &); sleep 1
+(curl -sN --max-time 20 -b jar $API/live-updates > sse.txt &); sleep 1
 ./bin/muster dev secrets rotate-key --activate $K1ID --actor ops; echo "exit=$?"    # exit=0
 psql "$MUSTER_DATABASE_URL" -Atc "SELECT count(*) FROM encrypted_values WHERE key_id <> '$K1ID'"   # 0
 sleep 3; curl -s -b jar $API/organization/keyring | jq -c --arg k "$K0ID" '.keys[] | select(.id == $k) | {active, needed, removable, state}'
@@ -191,7 +208,7 @@ sleep 3; curl -s -b jar $API/organization/keyring | jq -c --arg k "$K0ID" '.keys
 grep -o '"type":"[a-z-]*"' sse.txt | sort -u | grep -cE 'organization|system-status'   # 2
 curl -s -b jar "$API/audit-log?action=keyring.key_activated&limit=1" | jq -c '.items[0] | {k: .actor.kind, n: .actor.name}'   # {"k":"cli","n":"ops"}
 grep -c '"event":"key_switched"' dev.log                    # 1
-./bin/muster dev doctor | grep '^OK keyring'                # OK keyring: key <K0ID> is no longer used and can be removed from MUSTER_SECRET_KEYS
+./bin/muster dev doctor | grep -E '^OK +keyring'            # OK   keyring: key <K0ID> is no longer used and can be removed from MUSTER_SECRET_KEYS
 
 # C-20.AC-5: every open Root message — both Mattermost servers and Telegram — is re-signed, and a press works
 psql "$MUSTER_DATABASE_URL" -Atc "SELECT string_agg(DISTINCT dst.name, ',' ORDER BY dst.name) FROM deliveries d
@@ -202,8 +219,9 @@ psql "$MUSTER_DATABASE_URL" -Atc "SELECT count(*) FROM deliveries d JOIN alert_g
 curl -s $FMM2/posts | jq -r --arg g "$OPEN" '.[] | select(.root_id == "" and (.props.attachments[0].title_link | test($g))) | .props.attachments[0].actions[0].integration.context.key_id' | grep -c "$K1ID"   # 1
 ROOT=$(curl -s $FMM/posts | jq -r --arg g "$OPEN" '.[] | select(.root_id == "" and (.props.attachments[0].title_link | test($g))) | .id')
 curl -s $FMM/posts | jq -r --arg r "$ROOT" '.[] | select(.id == $r) | .props.attachments[0].actions[0].integration.context.key_id' | grep -c "$K1ID"   # 1
-curl -s -X POST $FMM/press -d "{\"post_id\":\"$ROOT\",\"action_id\":\"ack\",\"user_id\":\"u-bob\"}" > /dev/null; sleep 1
-curl -s -b jar $API/alert-groups/$OPEN | jq -r .owner.login  # bob
+curl -s -X POST $FMM/press -d "{\"post_id\":\"$ROOT\",\"action_id\":\"unack\",\"user_id\":\"u-bob\"}" > /dev/null; sleep 1
+curl -s -b jar "$API/alert-groups/$OPEN/timeline?limit=1" | jq -c '.items[0] | {event, t: .actor.transport, u: .actor.name}'
+# {"event":"unacknowledged","t":"mattermost","u":"bob"}
 
 # C-17.FR-6: restart with the new key only; the Reminder sent before the activation has expired. The fake servers
 # restart empty with muster dev, so the press is the callback the fake would have sent, with the context saved above.
@@ -219,8 +237,10 @@ without a restart; the Root messages in both fake Mattermost servers and the fak
 buttons signed by K1 (the Telegram `callback_data` carries K1's prefix); after both restart with K1 only, startup
 passes the canary, a press on a Root message works, and a press on a Reminder button sent before the activation is
 answered "This button has expired; use the buttons on the Alert Group's message" (C-17.FR-6). It also covers a Leader
-handover during `rerender_after_rotation`, after which every open Root message is still re-signed once, and a Storm
-that holds an Alert Group during the rotation, whose delivery is rendered with K1 when the Storm releases it.
+handover during `rerender_after_rotation`, after which every open Root message is still re-signed once — the Desired
+state of each delivery is recomputed once, and every edit after the activation carries K1; an edit the stopped
+replica's worker sent but had not recorded is sent again, unchanged, once its lease ends — and a Storm that holds an
+Alert Group during the rotation, whose delivery is rendered with K1 when the Storm releases it.
 
 ## Open questions
 

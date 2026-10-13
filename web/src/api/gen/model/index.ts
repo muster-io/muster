@@ -160,6 +160,7 @@ export * from './integrationWarningKind';
 export * from './internalErrorResponse';
 export * from './keyring';
 export * from './keyringKey';
+export * from './keyringKeyState';
 export * from './labelMatchersParameter';
 export * from './labels';
 export * from './language';

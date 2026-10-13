@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -779,5 +780,134 @@ func TestRecorderReregistersAfterLosingTheDatabase(t *testing.T) {
 	realClock.Advance(KeyRecordRefresh)
 	if err := r.Refresh(ctx); err != nil || !startedAt().Equal(back) {
 		t.Fatalf("a regular refresh moved the start time: %v, %v", err, startedAt())
+	}
+}
+
+// TestRecorderSwitch is C-20.FR-7: replicas switch to a key activated meanwhile without a restart, each logging
+// key_switched once however many callers race, and Run switches as soon as it is woken, without a tick.
+func TestRecorderSwitch(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	s := &fakeStore{}
+	var logs [2]bytes.Buffer
+	var mu sync.Mutex
+	var recorders [2]*Recorder
+	var keyrings [2]*Keyring
+	for i := range recorders {
+		keyrings[i] = newKeyring(t, 'a', 'b')
+		st, err := keyrings[i].Establish(ctx, s, time.Now())
+		if err != nil || keyrings[i].Open(ctx, logging.New(&bytes.Buffer{}, logging.LevelInfo), st) != nil {
+			t.Fatal(err)
+		}
+		recorders[i] = NewRecorder(keyrings[i], s, clock.Real{},
+			logging.New(&lockedWriter{w: &logs[i], mu: &mu}, logging.LevelInfo), fmt.Sprintf("r%d", i), "", "dev")
+	}
+	if err := recorders[0].Switch(ctx); err != nil || logs[0].Len() != 0 {
+		t.Fatalf("a switch to the key already active = %v, log %s", err, logs[0].String())
+	}
+	b := KeyID(material('b'))
+	s.mu.Lock()
+	s.state.ActiveKeyID = b
+	s.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			if err := recorders[0].Switch(ctx); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	ticks := make(chan time.Time)
+	done := make(chan error, 1)
+	go func() { done <- recorders[1].Run(ctx, ticks) }()
+	recorders[1].Wake()
+	recorders[1].Wake()
+	for deadline := time.Now().Add(5 * time.Second); keyrings[1].ActiveKeyID() != b; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the woken replica did not switch")
+		}
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("Run = %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for i := range logs {
+		l := lines(t, &logs[i])
+		if keyrings[i].ActiveKeyID() != b || len(l) != 1 || l[0]["event"] != "key_switched" || l[0]["active"] != b ||
+			l[0]["level"] != "INFO" {
+			t.Errorf("replica %d: active %s, log %v", i, keyrings[i].ActiveKeyID(), l)
+		}
+	}
+	s.readErr = errors.New("boom")
+	if err := recorders[0].Switch(t.Context()); err == nil || errors.Is(err, ErrKeyMismatch) {
+		t.Errorf("a failed read = %v", err)
+	}
+}
+
+// staleRead is a store whose first GetActiveKeyID read returns the key active then and waits for release before it
+// returns: a refresh that read the old key just before an activation committed.
+type staleRead struct {
+	*fakeStore
+	once    sync.Once
+	read    chan struct{}
+	release chan struct{}
+}
+
+func (s *staleRead) GetActiveKeyID(ctx context.Context) (string, error) {
+	id, err := s.fakeStore.GetActiveKeyID(ctx)
+	s.once.Do(func() {
+		close(s.read)
+		<-s.release
+	})
+	return id, err
+}
+
+// TestRecorderSwitchAppliesReadsInOrder: a Switch that read the old key before an activation committed and a Switch
+// that read the new key after it never interleave, so the replica never switches back to the old key and logs
+// key_switched once.
+func TestRecorderSwitchAppliesReadsInOrder(t *testing.T) {
+	base := &fakeStore{}
+	k := newKeyring(t, 'a', 'b')
+	st, err := k.Establish(t.Context(), base, time.Now())
+	if err != nil || k.Open(t.Context(), logging.New(&bytes.Buffer{}, logging.LevelInfo), st) != nil {
+		t.Fatal(err)
+	}
+	old, b := k.ActiveKeyID(), KeyID(material('b'))
+	s := &staleRead{fakeStore: base, read: make(chan struct{}), release: make(chan struct{})}
+	var log bytes.Buffer
+	var mu sync.Mutex
+	r := NewRecorder(k, s, clock.Real{}, logging.New(&lockedWriter{w: &log, mu: &mu}, logging.LevelInfo), "r1", "",
+		"dev")
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		if err := r.Switch(t.Context()); err != nil {
+			t.Error(err)
+		}
+	})
+	<-s.read
+	base.mu.Lock()
+	base.state.ActiveKeyID = b
+	base.mu.Unlock()
+	if r.switchMu.TryLock() {
+		r.switchMu.Unlock()
+		t.Fatal("the stale read does not hold the switch")
+	}
+	wg.Go(func() {
+		if err := r.Switch(t.Context()); err != nil {
+			t.Error(err)
+		}
+	})
+	close(s.release)
+	wg.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	l := lines(t, &log)
+	if k.ActiveKeyID() != b || len(l) != 1 || l[0]["event"] != "key_switched" || l[0]["active"] != b {
+		t.Errorf("active %s (old %s), log %v", k.ActiveKeyID(), old, l)
 	}
 }

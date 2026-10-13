@@ -432,21 +432,43 @@ func TestNotFoundAndNotImplemented(t *testing.T) {
 			t.Errorf("%s %s = %d %s %s", c.method, c.path, a.status, a.header.Get("Allow"), a.body)
 		}
 	}
-	// getKeyring arrives with S-071; a Role with organization:read reaches the handler.
-	roles["reader"] = []auth.Permission{"organization:read"}
-	t.Cleanup(func() { delete(roles, "reader") })
-	reader := user(8, "SRCCCCCCCCCCCC", "reader", "reader")
-	x.users.users[8] = reader
-	x.sessions.sessions["reader-cookie"] = session(8, reader, auth.StateActive)
-	x.sessions.cookies[8] = "reader-cookie"
-	keyringPath := "/api/v1/organization/keyring"
-	a := x.call(t, http.MethodGet, keyringPath, "", "Cookie", "reader-cookie")
-	if a.status != http.StatusNotImplemented || a.json(t)["type"] != problemBase+"not-implemented" {
-		t.Errorf("GET %s = %d %s", keyringPath, a.status, a.body)
+}
+
+// TestNotImplemented: an operation that no story has implemented answers 501 not-implemented before its handler runs;
+// with getKeyring, every operation of the app listener has a story, so the check uses an operation id the
+// specification does not have. Every operation of the app listener in the specification is implemented.
+func TestNotImplemented(t *testing.T) {
+	called := false
+	handler := func(context.Context, http.ResponseWriter, *http.Request, any) (any, error) {
+		called = true
+		return "done", nil
 	}
-	a = x.call(t, http.MethodGet, keyringPath, "")
-	if a.status != http.StatusUnauthorized {
-		t.Errorf("an unimplemented operation without credentials = %d", a.status)
+	if _, err := notImplemented(handler, "MadeUpOperation")(t.Context(), nil, nil, nil); !errors.Is(err,
+		errNotImplemented) || called {
+		t.Errorf("an operation without a story = %v, handler called %v", err, called)
+	}
+	if out, err := notImplemented(handler, "GetKeyring")(t.Context(), nil, nil, nil); err != nil || out != "done" ||
+		!called {
+		t.Errorf("an implemented operation = %v, %v", out, err)
+	}
+	x := newTestAPI(t)
+	p := x.srv.problemFor(t.Context(), "MadeUpOperation", errNotImplemented)
+	if p.Status != http.StatusNotImplemented || p.Type != typeNotImplemented {
+		t.Errorf("problem %+v", p)
+	}
+	doc, err := LoadSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, item := range doc.Paths.Map() {
+		for method, op := range item.Operations() {
+			if op.Extensions["x-listener"] != "app" {
+				continue
+			}
+			if id := strings.ToUpper(op.OperationID[:1]) + op.OperationID[1:]; !implemented[id] {
+				t.Errorf("%s %s (%s) has no story", method, path, op.OperationID)
+			}
+		}
 	}
 }
 

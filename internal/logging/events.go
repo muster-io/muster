@@ -121,6 +121,19 @@ var ReplicaRecordFailed = newEvent("replica_record_failed", LevelWarn, "C-02",
 		"At shutdown, the record could not be deleted; it stops counting as live after replica.live_expiry.",
 	"replica", "error")
 
+// KeyActivated is logged once `muster secrets rotate-key` committed the activation of a master key.
+var KeyActivated = newEvent("key_activated", LevelWarn, "C-20",
+	"muster secrets rotate-key activated a master key: every Secret and the key canary are now encrypted with it, the "+
+		"replicas switch to it and the Leader re-signs the buttons of the open Root messages. The old key stays in "+
+		"MUSTER_SECRET_KEYS until the Keyring shows it as removable.",
+	"from", "to", "actor")
+
+// KeySwitched is logged by each replica that switched to a newly activated master key without a restart.
+var KeySwitched = newEvent("key_switched", LevelInfo, "C-20",
+	"This replica switched to the active master key without a restart, after muster secrets rotate-key activated it: "+
+		"it now encrypts and signs with that key.",
+	"active")
+
 // OrganizationCreated is logged when the first start creates the Organization with its defaults.
 var OrganizationCreated = newEvent("organization_created", LevelInfo, "C-02",
 	"The first start created the Organization with the defaults of its settings and its outbound address policy.",

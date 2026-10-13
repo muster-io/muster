@@ -12,6 +12,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const activateKey = `-- name: ActivateKey :execrows
+UPDATE keyring_state
+SET active_key_id = $1::text, activated_at = $2, canary_ciphertext = $3,
+    canary_key_id = $1::text
+WHERE active_key_id = $4::text
+`
+
+type ActivateKeyParams struct {
+	KeyID            string
+	ActivatedAt      time.Time
+	CanaryCiphertext []byte
+	PreviousKeyID    string
+}
+
+// ActivateKey makes @key_id the active key at @activated_at with the canary re-encrypted with it, in the transaction
+// that re-encrypts every Secret; no row when the active key is no longer @previous_key_id.
+func (q *Queries) ActivateKey(ctx context.Context, arg ActivateKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, activateKey,
+		arg.KeyID,
+		arg.ActivatedAt,
+		arg.CanaryCiphertext,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countEncryptedValuesByKey = `-- name: CountEncryptedValuesByKey :many
 SELECT key_id, count(*) AS encrypted
 FROM encrypted_values
@@ -44,6 +73,69 @@ func (q *Queries) CountEncryptedValuesByKey(ctx context.Context, orgID int64) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const countOpenButtonKeys = `-- name: CountOpenButtonKeys :many
+SELECT d.actual_button_key_id::text AS key_id, count(*) AS messages
+FROM deliveries d
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+WHERE d.org_id = $1 AND d.actual_button_key_id IS NOT NULL
+  AND d.state NOT IN ('deleted_in_messenger', 'retired', 'withheld') AND g.status <> 'resolved'
+GROUP BY d.actual_button_key_id
+ORDER BY 1
+`
+
+type CountOpenButtonKeysRow struct {
+	KeyID    string
+	Messages int64
+}
+
+// CountOpenButtonKeys counts, by key id, the deliveries of the Organization's open Alert Groups whose Root message
+// carries buttons that key signed (C-20.FR-6). A delivery deleted in the messenger, retired or withheld depends on
+// nothing: the re-render after a rotation never re-signs it.
+func (q *Queries) CountOpenButtonKeys(ctx context.Context, orgID int64) ([]CountOpenButtonKeysRow, error) {
+	rows, err := q.db.Query(ctx, countOpenButtonKeys, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountOpenButtonKeysRow{}
+	for rows.Next() {
+		var i CountOpenButtonKeysRow
+		if err := rows.Scan(&i.KeyID, &i.Messages); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countOpenDeliveriesSignedByOtherKey = `-- name: CountOpenDeliveriesSignedByOtherKey :one
+SELECT count(*)
+FROM deliveries d
+JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+WHERE d.org_id = $1 AND g.status <> 'resolved' AND d.desired_button_key_id IS NOT NULL
+  AND d.desired_button_key_id <> $2::text AND NOT d.desired_retire
+  AND (d.state IN ('pending', 'delivered') OR (d.state = 'not_delivered' AND d.published_at IS NOT NULL))
+`
+
+type CountOpenDeliveriesSignedByOtherKeyParams struct {
+	OrgID int64
+	KeyID string
+}
+
+// CountOpenDeliveriesSignedByOtherKey counts the deliveries of the Organization's open Alert Groups whose Desired state
+// has buttons signed by a key other than @key_id and that the Leader re-renders after an activation (the selection of
+// the delivery package's ListRerenderGroups): pending or delivered, or Not delivered with a Root message, and no final
+// edit.
+func (q *Queries) CountOpenDeliveriesSignedByOtherKey(ctx context.Context, arg CountOpenDeliveriesSignedByOtherKeyParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOpenDeliveriesSignedByOtherKey, arg.OrgID, arg.KeyID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createKeyringState = `-- name: CreateKeyringState :execrows
@@ -116,6 +208,40 @@ func (q *Queries) GetKeyringState(ctx context.Context) (GetKeyringStateRow, erro
 	return i, err
 }
 
+const listActivatedKeys = `-- name: ListActivatedKeys :many
+SELECT coalesce(c.change ->> 'before', '')::text AS before_key_id, coalesce(c.change ->> 'after', '')::text AS after_key_id
+FROM audit_log a
+CROSS JOIN LATERAL jsonb_array_elements(a.diff) AS c (change)
+WHERE a.org_id = $1 AND a.action = 'keyring.key_activated' AND c.change ->> 'pointer' = '/active_key_id'
+`
+
+type ListActivatedKeysRow struct {
+	BeforeKeyID string
+	AfterKeyID  string
+}
+
+// ListActivatedKeys reads the before and after values of /active_key_id in the Organization's keyring.key_activated
+// Audit entries: every key named there was active before (C-20.FR-6).
+func (q *Queries) ListActivatedKeys(ctx context.Context, orgID int64) ([]ListActivatedKeysRow, error) {
+	rows, err := q.db.Query(ctx, listActivatedKeys, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActivatedKeysRow{}
+	for rows.Next() {
+		var i ListActivatedKeysRow
+		if err := rows.Scan(&i.BeforeKeyID, &i.AfterKeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLiveReplicas = `-- name: ListLiveReplicas :many
 SELECT replica_id, hostname, version, key_ids, started_at, refreshed_at
 FROM replicas
@@ -176,6 +302,620 @@ func (q *Queries) ListOrganizationIDs(ctx context.Context) ([]int64, error) {
 	return items, nil
 }
 
+const listRotateBotToken = `-- name: ListRotateBotToken :many
+SELECT id, bot_token_ciphertext AS ciphertext, bot_token_key_id::text AS key_id
+FROM connections
+WHERE org_id = $1 AND bot_token_ciphertext IS NOT NULL AND bot_token_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateBotTokenParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateBotTokenRow struct {
+	ID         int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateBotToken(ctx context.Context, arg ListRotateBotTokenParams) ([]ListRotateBotTokenRow, error) {
+	rows, err := q.db.Query(ctx, listRotateBotToken, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateBotTokenRow{}
+	for rows.Next() {
+		var i ListRotateBotTokenRow
+		if err := rows.Scan(&i.ID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateConnectionProxyPassword = `-- name: ListRotateConnectionProxyPassword :many
+SELECT id, proxy_password_ciphertext AS ciphertext, proxy_password_key_id::text AS key_id
+FROM connections
+WHERE org_id = $1 AND proxy_password_ciphertext IS NOT NULL AND proxy_password_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateConnectionProxyPasswordParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateConnectionProxyPasswordRow struct {
+	ID         int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateConnectionProxyPassword(ctx context.Context, arg ListRotateConnectionProxyPasswordParams) ([]ListRotateConnectionProxyPasswordRow, error) {
+	rows, err := q.db.Query(ctx, listRotateConnectionProxyPassword, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateConnectionProxyPasswordRow{}
+	for rows.Next() {
+		var i ListRotateConnectionProxyPasswordRow
+		if err := rows.Scan(&i.ID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateDestinationProxyPassword = `-- name: ListRotateDestinationProxyPassword :many
+SELECT id, proxy_password_ciphertext AS ciphertext, proxy_password_key_id::text AS key_id
+FROM destinations
+WHERE org_id = $1 AND proxy_password_ciphertext IS NOT NULL AND proxy_password_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateDestinationProxyPasswordParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateDestinationProxyPasswordRow struct {
+	ID         int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateDestinationProxyPassword(ctx context.Context, arg ListRotateDestinationProxyPasswordParams) ([]ListRotateDestinationProxyPasswordRow, error) {
+	rows, err := q.db.Query(ctx, listRotateDestinationProxyPassword, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateDestinationProxyPasswordRow{}
+	for rows.Next() {
+		var i ListRotateDestinationProxyPasswordRow
+		if err := rows.Scan(&i.ID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateDestinationSecret = `-- name: ListRotateDestinationSecret :many
+SELECT destination_id, name, value_ciphertext AS ciphertext, value_key_id::text AS key_id
+FROM destination_secrets
+WHERE org_id = $1 AND value_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateDestinationSecretParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateDestinationSecretRow struct {
+	DestinationID int64
+	Name          string
+	Ciphertext    []byte
+	KeyID         string
+}
+
+func (q *Queries) ListRotateDestinationSecret(ctx context.Context, arg ListRotateDestinationSecretParams) ([]ListRotateDestinationSecretRow, error) {
+	rows, err := q.db.Query(ctx, listRotateDestinationSecret, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateDestinationSecretRow{}
+	for rows.Next() {
+		var i ListRotateDestinationSecretRow
+		if err := rows.Scan(
+			&i.DestinationID,
+			&i.Name,
+			&i.Ciphertext,
+			&i.KeyID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateHeartbeatProxyPassword = `-- name: ListRotateHeartbeatProxyPassword :many
+SELECT id, outgoing_heartbeat_proxy_password_ciphertext AS ciphertext,
+       outgoing_heartbeat_proxy_password_key_id::text AS key_id
+FROM organizations
+WHERE id = $1 AND outgoing_heartbeat_proxy_password_ciphertext IS NOT NULL
+  AND outgoing_heartbeat_proxy_password_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateHeartbeatProxyPasswordParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateHeartbeatProxyPasswordRow struct {
+	ID         int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateHeartbeatProxyPassword(ctx context.Context, arg ListRotateHeartbeatProxyPasswordParams) ([]ListRotateHeartbeatProxyPasswordRow, error) {
+	rows, err := q.db.Query(ctx, listRotateHeartbeatProxyPassword, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateHeartbeatProxyPasswordRow{}
+	for rows.Next() {
+		var i ListRotateHeartbeatProxyPasswordRow
+		if err := rows.Scan(&i.ID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateHeartbeatURL = `-- name: ListRotateHeartbeatURL :many
+
+SELECT id, outgoing_heartbeat_url_ciphertext AS ciphertext, outgoing_heartbeat_url_key_id::text AS key_id
+FROM organizations
+WHERE id = $1 AND outgoing_heartbeat_url_ciphertext IS NOT NULL AND outgoing_heartbeat_url_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateHeartbeatURLParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateHeartbeatURLRow struct {
+	ID         int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+// The re-encryption of `muster secrets rotate-key`: for every field of the encrypted_values view, the values of the
+// Organization that another key encrypted, locked, and the update of one value with its new ciphertext and key id.
+// An update keeps the field's *_updated_at (previous_signing_secret_since for the previous Signing secret): the
+// Secret itself did not change.
+func (q *Queries) ListRotateHeartbeatURL(ctx context.Context, arg ListRotateHeartbeatURLParams) ([]ListRotateHeartbeatURLRow, error) {
+	rows, err := q.db.Query(ctx, listRotateHeartbeatURL, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateHeartbeatURLRow{}
+	for rows.Next() {
+		var i ListRotateHeartbeatURLRow
+		if err := rows.Scan(&i.ID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateOIDCClientSecret = `-- name: ListRotateOIDCClientSecret :many
+SELECT org_id, client_secret_ciphertext AS ciphertext, client_secret_key_id::text AS key_id
+FROM oidc_settings
+WHERE org_id = $1 AND client_secret_ciphertext IS NOT NULL AND client_secret_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateOIDCClientSecretParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateOIDCClientSecretRow struct {
+	OrgID      int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateOIDCClientSecret(ctx context.Context, arg ListRotateOIDCClientSecretParams) ([]ListRotateOIDCClientSecretRow, error) {
+	rows, err := q.db.Query(ctx, listRotateOIDCClientSecret, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateOIDCClientSecretRow{}
+	for rows.Next() {
+		var i ListRotateOIDCClientSecretRow
+		if err := rows.Scan(&i.OrgID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateOIDCCodeVerifier = `-- name: ListRotateOIDCCodeVerifier :many
+SELECT state_hash, code_verifier_ciphertext AS ciphertext, code_verifier_key_id::text AS key_id
+FROM oidc_auth_requests
+WHERE org_id = $1 AND code_verifier_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateOIDCCodeVerifierParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateOIDCCodeVerifierRow struct {
+	StateHash  []byte
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateOIDCCodeVerifier(ctx context.Context, arg ListRotateOIDCCodeVerifierParams) ([]ListRotateOIDCCodeVerifierRow, error) {
+	rows, err := q.db.Query(ctx, listRotateOIDCCodeVerifier, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateOIDCCodeVerifierRow{}
+	for rows.Next() {
+		var i ListRotateOIDCCodeVerifierRow
+		if err := rows.Scan(&i.StateHash, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateOIDCProxyPassword = `-- name: ListRotateOIDCProxyPassword :many
+SELECT org_id, proxy_password_ciphertext AS ciphertext, proxy_password_key_id::text AS key_id
+FROM oidc_settings
+WHERE org_id = $1 AND proxy_password_ciphertext IS NOT NULL AND proxy_password_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateOIDCProxyPasswordParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateOIDCProxyPasswordRow struct {
+	OrgID      int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateOIDCProxyPassword(ctx context.Context, arg ListRotateOIDCProxyPasswordParams) ([]ListRotateOIDCProxyPasswordRow, error) {
+	rows, err := q.db.Query(ctx, listRotateOIDCProxyPassword, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateOIDCProxyPasswordRow{}
+	for rows.Next() {
+		var i ListRotateOIDCProxyPasswordRow
+		if err := rows.Scan(&i.OrgID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateOfflineToken = `-- name: ListRotateOfflineToken :many
+SELECT id, oidc_offline_token_ciphertext AS ciphertext, oidc_offline_token_key_id::text AS key_id
+FROM users
+WHERE org_id = $1 AND oidc_offline_token_ciphertext IS NOT NULL AND oidc_offline_token_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateOfflineTokenParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateOfflineTokenRow struct {
+	ID         int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateOfflineToken(ctx context.Context, arg ListRotateOfflineTokenParams) ([]ListRotateOfflineTokenRow, error) {
+	rows, err := q.db.Query(ctx, listRotateOfflineToken, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateOfflineTokenRow{}
+	for rows.Next() {
+		var i ListRotateOfflineTokenRow
+		if err := rows.Scan(&i.ID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotatePreviousSigningSecret = `-- name: ListRotatePreviousSigningSecret :many
+SELECT id, previous_signing_secret_ciphertext AS ciphertext, previous_signing_secret_key_id::text AS key_id
+FROM destinations
+WHERE org_id = $1 AND previous_signing_secret_ciphertext IS NOT NULL
+  AND previous_signing_secret_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotatePreviousSigningSecretParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotatePreviousSigningSecretRow struct {
+	ID         int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotatePreviousSigningSecret(ctx context.Context, arg ListRotatePreviousSigningSecretParams) ([]ListRotatePreviousSigningSecretRow, error) {
+	rows, err := q.db.Query(ctx, listRotatePreviousSigningSecret, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotatePreviousSigningSecretRow{}
+	for rows.Next() {
+		var i ListRotatePreviousSigningSecretRow
+		if err := rows.Scan(&i.ID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateSigningSecret = `-- name: ListRotateSigningSecret :many
+SELECT id, signing_secret_ciphertext AS ciphertext, signing_secret_key_id::text AS key_id
+FROM destinations
+WHERE org_id = $1 AND signing_secret_ciphertext IS NOT NULL AND signing_secret_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateSigningSecretParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateSigningSecretRow struct {
+	ID         int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateSigningSecret(ctx context.Context, arg ListRotateSigningSecretParams) ([]ListRotateSigningSecretRow, error) {
+	rows, err := q.db.Query(ctx, listRotateSigningSecret, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateSigningSecretRow{}
+	for rows.Next() {
+		var i ListRotateSigningSecretRow
+		if err := rows.Scan(&i.ID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateTOTPPendingSeed = `-- name: ListRotateTOTPPendingSeed :many
+SELECT user_id, pending_seed_ciphertext AS ciphertext, pending_seed_key_id::text AS key_id
+FROM user_totp
+WHERE org_id = $1 AND pending_seed_ciphertext IS NOT NULL AND pending_seed_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateTOTPPendingSeedParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateTOTPPendingSeedRow struct {
+	UserID     int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateTOTPPendingSeed(ctx context.Context, arg ListRotateTOTPPendingSeedParams) ([]ListRotateTOTPPendingSeedRow, error) {
+	rows, err := q.db.Query(ctx, listRotateTOTPPendingSeed, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateTOTPPendingSeedRow{}
+	for rows.Next() {
+		var i ListRotateTOTPPendingSeedRow
+		if err := rows.Scan(&i.UserID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateTOTPSeed = `-- name: ListRotateTOTPSeed :many
+SELECT user_id, seed_ciphertext AS ciphertext, seed_key_id::text AS key_id
+FROM user_totp
+WHERE org_id = $1 AND seed_ciphertext IS NOT NULL AND seed_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateTOTPSeedParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateTOTPSeedRow struct {
+	UserID     int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateTOTPSeed(ctx context.Context, arg ListRotateTOTPSeedParams) ([]ListRotateTOTPSeedRow, error) {
+	rows, err := q.db.Query(ctx, listRotateTOTPSeed, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateTOTPSeedRow{}
+	for rows.Next() {
+		var i ListRotateTOTPSeedRow
+		if err := rows.Scan(&i.UserID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRotateTelegramWebhookSecret = `-- name: ListRotateTelegramWebhookSecret :many
+SELECT id, telegram_webhook_secret_ciphertext AS ciphertext, telegram_webhook_secret_key_id::text AS key_id
+FROM connections
+WHERE org_id = $1 AND telegram_webhook_secret_ciphertext IS NOT NULL
+  AND telegram_webhook_secret_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateTelegramWebhookSecretParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateTelegramWebhookSecretRow struct {
+	ID         int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateTelegramWebhookSecret(ctx context.Context, arg ListRotateTelegramWebhookSecretParams) ([]ListRotateTelegramWebhookSecretRow, error) {
+	rows, err := q.db.Query(ctx, listRotateTelegramWebhookSecret, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateTelegramWebhookSecretRow{}
+	for rows.Next() {
+		var i ListRotateTelegramWebhookSecretRow
+		if err := rows.Scan(&i.ID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockKeyringState = `-- name: LockKeyringState :one
+SELECT active_key_id
+FROM keyring_state
+FOR UPDATE
+`
+
+// LockKeyringState reads and locks the active key for its activation by `muster secrets rotate-key`.
+func (q *Queries) LockKeyringState(ctx context.Context) (string, error) {
+	row := q.db.QueryRow(ctx, lockKeyringState)
+	var active_key_id string
+	err := row.Scan(&active_key_id)
+	return active_key_id, err
+}
+
+const notifyKeyring = `-- name: NotifyKeyring :exec
+SELECT pg_notify($1::text, $2::text)
+`
+
+type NotifyKeyringParams struct {
+	Channel string
+	Payload string
+}
+
+// NotifyKeyring wakes every replica on the keyring channel once the transaction commits.
+func (q *Queries) NotifyKeyring(ctx context.Context, arg NotifyKeyringParams) error {
+	_, err := q.db.Exec(ctx, notifyKeyring, arg.Channel, arg.Payload)
+	return err
+}
+
 const pruneReplicas = `-- name: PruneReplicas :execrows
 DELETE FROM replicas
 WHERE refreshed_at < $1
@@ -218,4 +958,418 @@ func (q *Queries) RecordReplica(ctx context.Context, arg RecordReplicaParams) er
 		arg.RefreshedAt,
 	)
 	return err
+}
+
+const reencryptBotToken = `-- name: ReencryptBotToken :execrows
+UPDATE connections
+SET bot_token_ciphertext = $1, bot_token_key_id = $2::text
+WHERE org_id = $3 AND id = $4 AND bot_token_key_id = $5::text
+`
+
+type ReencryptBotTokenParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	ID            int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptBotToken(ctx context.Context, arg ReencryptBotTokenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptBotToken,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.ID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptConnectionProxyPassword = `-- name: ReencryptConnectionProxyPassword :execrows
+UPDATE connections
+SET proxy_password_ciphertext = $1, proxy_password_key_id = $2::text
+WHERE org_id = $3 AND id = $4 AND proxy_password_key_id = $5::text
+`
+
+type ReencryptConnectionProxyPasswordParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	ID            int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptConnectionProxyPassword(ctx context.Context, arg ReencryptConnectionProxyPasswordParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptConnectionProxyPassword,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.ID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptDestinationProxyPassword = `-- name: ReencryptDestinationProxyPassword :execrows
+UPDATE destinations
+SET proxy_password_ciphertext = $1, proxy_password_key_id = $2::text
+WHERE org_id = $3 AND id = $4 AND proxy_password_key_id = $5::text
+`
+
+type ReencryptDestinationProxyPasswordParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	ID            int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptDestinationProxyPassword(ctx context.Context, arg ReencryptDestinationProxyPasswordParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptDestinationProxyPassword,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.ID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptDestinationSecret = `-- name: ReencryptDestinationSecret :execrows
+UPDATE destination_secrets
+SET value_ciphertext = $1, value_key_id = $2::text
+WHERE org_id = $3 AND destination_id = $4 AND name = $5 AND value_key_id = $6::text
+`
+
+type ReencryptDestinationSecretParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	DestinationID int64
+	Name          string
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptDestinationSecret(ctx context.Context, arg ReencryptDestinationSecretParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptDestinationSecret,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.DestinationID,
+		arg.Name,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptHeartbeatProxyPassword = `-- name: ReencryptHeartbeatProxyPassword :execrows
+UPDATE organizations
+SET outgoing_heartbeat_proxy_password_ciphertext = $1, outgoing_heartbeat_proxy_password_key_id = $2::text
+WHERE id = $3 AND outgoing_heartbeat_proxy_password_key_id = $4::text
+`
+
+type ReencryptHeartbeatProxyPasswordParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptHeartbeatProxyPassword(ctx context.Context, arg ReencryptHeartbeatProxyPasswordParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptHeartbeatProxyPassword,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptHeartbeatURL = `-- name: ReencryptHeartbeatURL :execrows
+UPDATE organizations
+SET outgoing_heartbeat_url_ciphertext = $1, outgoing_heartbeat_url_key_id = $2::text
+WHERE id = $3 AND outgoing_heartbeat_url_key_id = $4::text
+`
+
+type ReencryptHeartbeatURLParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptHeartbeatURL(ctx context.Context, arg ReencryptHeartbeatURLParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptHeartbeatURL,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptOIDCClientSecret = `-- name: ReencryptOIDCClientSecret :execrows
+UPDATE oidc_settings
+SET client_secret_ciphertext = $1, client_secret_key_id = $2::text
+WHERE org_id = $3 AND client_secret_key_id = $4::text
+`
+
+type ReencryptOIDCClientSecretParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptOIDCClientSecret(ctx context.Context, arg ReencryptOIDCClientSecretParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptOIDCClientSecret,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptOIDCCodeVerifier = `-- name: ReencryptOIDCCodeVerifier :execrows
+UPDATE oidc_auth_requests
+SET code_verifier_ciphertext = $1, code_verifier_key_id = $2::text
+WHERE org_id = $3 AND state_hash = $4 AND code_verifier_key_id = $5::text
+`
+
+type ReencryptOIDCCodeVerifierParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	StateHash     []byte
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptOIDCCodeVerifier(ctx context.Context, arg ReencryptOIDCCodeVerifierParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptOIDCCodeVerifier,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.StateHash,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptOIDCProxyPassword = `-- name: ReencryptOIDCProxyPassword :execrows
+UPDATE oidc_settings
+SET proxy_password_ciphertext = $1, proxy_password_key_id = $2::text
+WHERE org_id = $3 AND proxy_password_key_id = $4::text
+`
+
+type ReencryptOIDCProxyPasswordParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptOIDCProxyPassword(ctx context.Context, arg ReencryptOIDCProxyPasswordParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptOIDCProxyPassword,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptOfflineToken = `-- name: ReencryptOfflineToken :execrows
+UPDATE users
+SET oidc_offline_token_ciphertext = $1, oidc_offline_token_key_id = $2::text
+WHERE org_id = $3 AND id = $4 AND oidc_offline_token_key_id = $5::text
+`
+
+type ReencryptOfflineTokenParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	ID            int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptOfflineToken(ctx context.Context, arg ReencryptOfflineTokenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptOfflineToken,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.ID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptPreviousSigningSecret = `-- name: ReencryptPreviousSigningSecret :execrows
+UPDATE destinations
+SET previous_signing_secret_ciphertext = $1, previous_signing_secret_key_id = $2::text
+WHERE org_id = $3 AND id = $4 AND previous_signing_secret_key_id = $5::text
+`
+
+type ReencryptPreviousSigningSecretParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	ID            int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptPreviousSigningSecret(ctx context.Context, arg ReencryptPreviousSigningSecretParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptPreviousSigningSecret,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.ID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptSigningSecret = `-- name: ReencryptSigningSecret :execrows
+UPDATE destinations
+SET signing_secret_ciphertext = $1, signing_secret_key_id = $2::text
+WHERE org_id = $3 AND id = $4 AND signing_secret_key_id = $5::text
+`
+
+type ReencryptSigningSecretParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	ID            int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptSigningSecret(ctx context.Context, arg ReencryptSigningSecretParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptSigningSecret,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.ID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptTOTPPendingSeed = `-- name: ReencryptTOTPPendingSeed :execrows
+UPDATE user_totp
+SET pending_seed_ciphertext = $1, pending_seed_key_id = $2::text
+WHERE org_id = $3 AND user_id = $4 AND pending_seed_key_id = $5::text
+`
+
+type ReencryptTOTPPendingSeedParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	UserID        int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptTOTPPendingSeed(ctx context.Context, arg ReencryptTOTPPendingSeedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptTOTPPendingSeed,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.UserID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptTOTPSeed = `-- name: ReencryptTOTPSeed :execrows
+UPDATE user_totp
+SET seed_ciphertext = $1, seed_key_id = $2::text
+WHERE org_id = $3 AND user_id = $4 AND seed_key_id = $5::text
+`
+
+type ReencryptTOTPSeedParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	UserID        int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptTOTPSeed(ctx context.Context, arg ReencryptTOTPSeedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptTOTPSeed,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.UserID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptTelegramWebhookSecret = `-- name: ReencryptTelegramWebhookSecret :execrows
+UPDATE connections
+SET telegram_webhook_secret_ciphertext = $1, telegram_webhook_secret_key_id = $2::text
+WHERE org_id = $3 AND id = $4 AND telegram_webhook_secret_key_id = $5::text
+`
+
+type ReencryptTelegramWebhookSecretParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	ID            int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptTelegramWebhookSecret(ctx context.Context, arg ReencryptTelegramWebhookSecretParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptTelegramWebhookSecret,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.ID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

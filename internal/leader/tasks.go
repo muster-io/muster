@@ -18,7 +18,8 @@ import (
 )
 
 // MaintenanceInterval is how often the hourly Leader tasks run: partition maintenance, replica pruning, short-lived
-// pruning, the retention of the Alerts view and the Alert Group retention.
+// pruning, the retention of the Alerts view and the Alert Group retention, and the re-render after a key rotation,
+// whose interval is the fallback of a lost notification.
 const MaintenanceInterval = time.Hour
 
 // BacklogInterval is how often the Leader counts the pending Stored Snapshots for muster_ingest_backlog.
@@ -158,6 +159,12 @@ type Work struct {
 	// TelegramPolling runs the long polling of the Telegram Connections of the Organization orgID until ctx ends
 	// (C-14.FR-1): it stops every poller before it returns, and a failed read of the Connections returns early.
 	TelegramPolling func(ctx context.Context, orgID int64) error
+	// RerenderAfterRotation recomputes, in batches, the Desired state of the deliveries of the open Alert Groups of
+	// the Organization orgID whose buttons a key other than the active one signed, after a key activation (C-20.FR-7,
+	// ADR-0011); it first switches this replica to the active key.
+	RerenderAfterRotation func(ctx context.Context, orgID int64) error
+	// KeyringChanged wakes the re-render after a rotation when a key was activated, on any replica's notification.
+	KeyringChanged *Wakes
 	// ClockMoved, in development mode, wakes the alive mark, the Heartbeat check, the Stale scan, the Alert Group
 	// retention, the retention of Thread replies and of outgoing webhook events, the short-lived pruning, the OIDC client
 	// secret expiry check and the outgoing heartbeat when the development clock moved, so that the alive mark keeps up
@@ -221,7 +228,8 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 // pruning of replica records, the pruning of short-lived state, the ingestion backlog, the retention of the Alerts
 // view, the Heartbeat check, the Stale scan, the count of open Alert Groups, the Alert Group retention, the count of
 // pending deliveries, the retention of Thread replies and of outgoing webhook events, the long polling of Telegram
-// Connections, the OIDC client secret expiry check and the outgoing heartbeat (C-02.FR-10). Later capabilities add
+// Connections, the OIDC client secret expiry check, the outgoing heartbeat (C-02.FR-10) and the re-render of the open
+// Root messages after a key rotation (C-20.FR-7), which also runs when a key was activated. Later capabilities add
 // theirs at the end of the list. The Keeper calls the result at every leadership, so each one
 // starts with a takeover; the Heartbeat check waits for it, so that it measures the timeouts from the end of a
 // downtime the takeover records (C-07.FR-4).
@@ -231,6 +239,7 @@ func Tasks(w Work) func() []Task {
 	shortLivedWake := w.ClockMoved.channel()
 	oidcExpiryWake, outgoingHeartbeatWake := w.ClockMoved.channel(), w.ClockMoved.channel()
 	aliveWake := w.ClockMoved.channel()
+	keyringWake := w.KeyringChanged.channel()
 	return func() []Task {
 		var takenOver atomic.Bool
 		return []Task{
@@ -276,6 +285,10 @@ func Tasks(w Work) func() []Task {
 			{Name: "outgoing_heartbeat", Every: OutgoingHeartbeatPoll, Wake: outgoingHeartbeatWake,
 				Run: func(ctx context.Context) error {
 					return w.perOrganization(ctx, "the outgoing heartbeat", w.OutgoingHeartbeat)
+				}},
+			{Name: "rerender_after_rotation", Every: MaintenanceInterval, Wake: keyringWake,
+				Run: func(ctx context.Context) error {
+					return w.perOrganization(ctx, "the re-render after a key rotation", w.RerenderAfterRotation)
 				}},
 		}
 	}
