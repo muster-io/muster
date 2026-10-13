@@ -31,7 +31,7 @@ func (q *Queries) DeleteDestinationRoutes(ctx context.Context, arg DeleteDestina
 const getDestination = `-- name: GetDestination :one
 SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d.mattermost_team_id,
        d.mattermost_channel_id, d.mattermost_team_name, d.mattermost_channel_name, d.telegram_channel_id,
-       d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title, d.webhook_mode,
+       d.telegram_channel_chat_id, d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
@@ -58,6 +58,7 @@ type GetDestinationRow struct {
 	MattermostTeamName           pgtype.Text
 	MattermostChannelName        pgtype.Text
 	TelegramChannelID            pgtype.Text
+	TelegramChannelChatID        pgtype.Int8
 	TelegramDiscussionChatID     pgtype.Int8
 	TelegramChannelTitle         pgtype.Text
 	TelegramDiscussionGroupTitle pgtype.Text
@@ -97,6 +98,7 @@ func (q *Queries) GetDestination(ctx context.Context, arg GetDestinationParams) 
 		&i.MattermostTeamName,
 		&i.MattermostChannelName,
 		&i.TelegramChannelID,
+		&i.TelegramChannelChatID,
 		&i.TelegramDiscussionChatID,
 		&i.TelegramChannelTitle,
 		&i.TelegramDiscussionGroupTitle,
@@ -365,7 +367,7 @@ const listDestinations = `-- name: ListDestinations :many
 
 SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d.mattermost_team_id,
        d.mattermost_channel_id, d.mattermost_team_name, d.mattermost_channel_name, d.telegram_channel_id,
-       d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title, d.webhook_mode,
+       d.telegram_channel_chat_id, d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
@@ -407,6 +409,7 @@ type ListDestinationsRow struct {
 	MattermostTeamName           pgtype.Text
 	MattermostChannelName        pgtype.Text
 	TelegramChannelID            pgtype.Text
+	TelegramChannelChatID        pgtype.Int8
 	TelegramDiscussionChatID     pgtype.Int8
 	TelegramChannelTitle         pgtype.Text
 	TelegramDiscussionGroupTitle pgtype.Text
@@ -463,6 +466,7 @@ func (q *Queries) ListDestinations(ctx context.Context, arg ListDestinationsPara
 			&i.MattermostTeamName,
 			&i.MattermostChannelName,
 			&i.TelegramChannelID,
+			&i.TelegramChannelChatID,
 			&i.TelegramDiscussionChatID,
 			&i.TelegramChannelTitle,
 			&i.TelegramDiscussionGroupTitle,

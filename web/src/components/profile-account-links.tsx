@@ -4,7 +4,8 @@
 // "Messenger accounts" of the profile (C-18.FR-2, FR-3, FR-6, FR-10, C-03.FR-12): the signed-in user's Account links
 // with "Unlink", and "Link Telegram" and "Link Mattermost" for the Connections of each messenger. The Connections come
 // from listLinkableConnections, which needs no Permission and gives only their id, name and messenger; the profile never
-// reads the Connections themselves. The account-links hint keeps the list current when a bot links an account.
+// reads the Connections themselves. The account-links hint keeps the list current when a bot links an account. With a
+// Telegram link the button reads "Relink Telegram"; a hint says that Mattermost links are per Connection (D305).
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -29,6 +30,7 @@ export function ProfileAccountLinks() {
   const all = connections.data?.items ?? [];
   const telegram = all.filter((c) => c.messenger === "telegram");
   const mattermost = all.filter((c) => c.messenger === "mattermost");
+  const items = links.data?.items ?? [];
   return (
     <Card className="lg:col-span-2">
       <CardHeader>
@@ -40,7 +42,7 @@ export function ProfileAccountLinks() {
       <CardContent className="flex flex-col gap-4">
         <AccountLinksTable
           label={t("accountLinks.list.label")}
-          links={links.data?.items ?? []}
+          links={items}
           loading={links.isPending}
           error={links.error}
           empty={t("accountLinks.empty")}
@@ -59,9 +61,21 @@ export function ProfileAccountLinks() {
           </p>
         )}
         {(telegram.length > 0 || mattermost.length > 0) && (
-          <div className="flex flex-wrap gap-2">
-            {telegram.length > 0 && <LinkTelegramDialog connections={telegram} />}
-            {mattermost.length > 0 && <LinkMattermostDialog connections={mattermost} />}
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap gap-2">
+              {telegram.length > 0 && (
+                <LinkTelegramDialog
+                  connections={telegram}
+                  relink={items.some((l) => l.messenger === "telegram")}
+                />
+              )}
+              {mattermost.length > 0 && <LinkMattermostDialog connections={mattermost} />}
+            </div>
+            {mattermost.length > 0 && (
+              <p className="text-sm text-muted-foreground" data-testid="mattermost-links-hint">
+                {t("accountLinks.mattermost.perConnection")}
+              </p>
+            )}
           </div>
         )}
       </CardContent>

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Connections (C-13.FR-1): the Connections with their type, name and the number of Destinations that use them, page by
-// page, and "Create connection" with connections:write.
+// Connections (C-13.FR-1, C-14.FR-1): the Connections with their type, name — with the host of a Mattermost server or
+// the @username of a Telegram bot once a Connection check found it (D309) — and the number of Destinations that use
+// them, page by page, and "Create connection" with connections:write.
 
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
@@ -27,15 +28,35 @@ function connectionTypeName(type: Connection["type"]): string {
   return type === "telegram" ? "Telegram" : "Mattermost";
 }
 
+/** The host of a Mattermost Connection's server URL, or the @username of a Telegram bot a check found. */
+function connectionAccount(row: Connection): string | undefined {
+  if (row.type === "telegram") {
+    return row.bot_username ? `@${row.bot_username}` : undefined;
+  }
+  try {
+    return new URL(row.server_url).host || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function NameCell({ row }: { row: Connection }) {
+  const account = connectionAccount(row);
   return (
-    <Link
-      to="/connections/$connectionId"
-      params={{ connectionId: row.id }}
-      className="font-medium wrap-anywhere text-primary underline-offset-4 hover:underline focus-visible:underline"
-    >
-      {row.name}
-    </Link>
+    <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+      <Link
+        to="/connections/$connectionId"
+        params={{ connectionId: row.id }}
+        className="font-medium wrap-anywhere text-primary underline-offset-4 hover:underline focus-visible:underline"
+      >
+        {row.name}
+      </Link>
+      {account !== undefined && (
+        <span className="text-muted-foreground wrap-anywhere" data-testid="connection-account">
+          {account}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -59,7 +80,7 @@ function ConnectionsTable() {
         header: t("connections.fields.type"),
         text: (row) => connectionTypeName(row.type),
       },
-      { id: "name", header: t("connections.fields.name"), className: "min-w-32", Cell: NameCell },
+      { id: "name", header: t("connections.fields.name"), className: "min-w-40", Cell: NameCell },
       { id: "destinations", header: t("connections.fields.destinations"), Cell: DestinationsCell },
     ],
     [t],

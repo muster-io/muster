@@ -5,7 +5,8 @@
 // dialog asks for a deep link and shows it as "Open Telegram" and as a QR code, with the time it expires. When the bot
 // links the account, the account-links hint closes the dialog and the list shows the link; once the link expired, the
 // dialog offers a new one. The deep link lives only in this dialog's state: the request's result keeps none, and
-// closing the dialog drops it.
+// closing the dialog drops it. With a Telegram link already made, the button and the dialog read "Relink Telegram":
+// the link is valid for every Telegram bot, and a new one replaces it.
 
 import { useMutation } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -41,11 +42,15 @@ export function startProblemText(t: TFunction, err: unknown): string {
 
 export function LinkTelegramDialog({
   connections,
+  relink = false,
 }: {
   connections: readonly LinkableConnection[];
+  /** The user has a Telegram link already. */
+  relink?: boolean;
 }) {
   const { t } = useTranslation();
   const { time } = useTimeFormat();
+  const title = relink ? t("accountLinks.telegram.relink") : t("accountLinks.telegram.start");
   const [open, setOpen] = useState(false);
   const [chosen, setChosen] = useState("");
   const [link, setLink] = useState<TelegramLinkStart | null>(null);
@@ -113,7 +118,7 @@ export function LinkTelegramDialog({
           }
         }}
       >
-        {t("accountLinks.telegram.start")}
+        {title}
       </Button>
       <Dialog
         open={open}
@@ -129,7 +134,7 @@ export function LinkTelegramDialog({
           className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
         >
           <DialogHeader>
-            <DialogTitle>{t("accountLinks.telegram.start")}</DialogTitle>
+            <DialogTitle>{title}</DialogTitle>
             <DialogDescription>{t("accountLinks.telegram.hint")}</DialogDescription>
           </DialogHeader>
           {link === null && connections.length > 1 && (

@@ -3,16 +3,23 @@
 
 // The Delivery section of the Alert Group page in a real browser: the text of every delivery state and mark, a
 // message link that opens only http and https addresses in a new tab without the opener, the error of the messenger as
-// text, and a section that follows the alert-group hint instead of polling.
+// text, a section that follows the alert-group hint instead of polling, and a Destination's name whose tooltip and
+// accessible description are its full label with destinations:read (a deleted Destination keeps its name alone).
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+} from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
-import type { AlertGroupDelivery, Session } from "../api/gen/model";
+import type { AlertGroupDelivery, Permission, Session } from "../api/gen/model";
 import i18n from "../i18n";
 import { getListAlertGroupDeliveriesQueryKey } from "../api/gen/endpoints/alert-groups/alert-groups";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
@@ -37,6 +44,7 @@ function delivery(extra: Partial<AlertGroupDelivery>): AlertGroupDelivery {
 function providers(
   children: ReactNode,
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  permissions: Permission[] = ["alert-groups:read"],
 ) {
   const read: SessionRead = {
     session: {
@@ -47,7 +55,7 @@ function providers(
       expires_at: "2026-10-09T09:00:00Z",
       idle_expires_at: "2026-10-09T09:00:00Z",
       method: "local",
-      permissions: ["alert-groups:read"],
+      permissions,
     },
     ended: false,
   };
@@ -67,6 +75,53 @@ afterEach(async () => {
   vi.restoreAllMocks();
   await i18n.changeLanguage("en");
 });
+
+/** The section with the Destinations and Connections lists, in a router for the Destinations' links. */
+async function renderLabelled(permissions: Permission[], items: AlertGroupDelivery[]) {
+  vi.spyOn(window, "fetch").mockImplementation((input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const body = url.startsWith("/api/v1/destinations")
+      ? {
+          items: [
+            {
+              id: "DS0000000000AA",
+              type: "mattermost",
+              name: "alerts",
+              connection_id: "CN000000000MMB",
+              team_id: "team-dev",
+              channel_id: "ch-alerts",
+              channel_name: "alerts",
+              health: { state: "healthy" },
+              routes: [],
+            },
+          ],
+          next_cursor: null,
+        }
+      : url.startsWith("/api/v1/connections")
+        ? {
+            items: [
+              { id: "CN000000000MMB", type: "mattermost", name: "mm-b", server_url: "http://mm" },
+            ],
+            next_cursor: null,
+          }
+        : { items };
+    return Promise.resolve(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  });
+  const rootRoute = createRootRoute({
+    component: () => <AlertGroupDeliveries alertGroupId="AG0000000000AA" />,
+  });
+  const router = createRouter({
+    routeTree: rootRoute,
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  await render(providers(<RouterProvider router={router} />, queryClient, permissions));
+}
 
 function text(extra: Partial<AlertGroupDelivery>): string {
   return deliveryStateText(i18n.t, delivery(extra));
@@ -183,5 +238,39 @@ describe("the Delivery section", () => {
     expect(deliveryStateText(i18n.t, delivery({ state: "retired" }))).toBe(
       "Здесь больше не обновляется",
     );
+  });
+  test("gives the name its full label as tooltip and description, a deleted Destination none", async () => {
+    await renderLabelled(
+      ["alert-groups:read", "destinations:read", "connections:read"],
+      [
+        delivery({}),
+        delivery({
+          destination: {
+            id: "DS00000000GONE",
+            name: "gone",
+            type: "telegram",
+            health: { state: "healthy" },
+          },
+          state: "retired",
+        }),
+      ],
+    );
+    const label = "alerts · Mattermost · via mm-b · #alerts";
+    const link = page.getByRole("link", { name: "alerts", exact: true });
+    await expect.element(link).toHaveAttribute("href", "/destinations/DS0000000000AA");
+    await expect.element(link).toHaveAttribute("title", label);
+    await expect.element(link).toHaveAccessibleDescription(label);
+    const gone = page.getByRole("link", { name: "gone", exact: true });
+    await expect.element(gone).toBeVisible();
+    await expect.element(gone).not.toHaveAttribute("title");
+    await expect.element(gone).not.toHaveAttribute("aria-describedby");
+  });
+
+  test("shows the name alone without destinations:read", async () => {
+    await renderLabelled(["alert-groups:read"], [delivery({})]);
+    const name = page.getByTestId("delivery-destination");
+    await expect.element(name).toHaveTextContent("alerts");
+    await expect.element(name).not.toHaveAttribute("title");
+    expect(page.getByRole("link", { name: "alerts", exact: true }).elements()).toHaveLength(0);
   });
 });

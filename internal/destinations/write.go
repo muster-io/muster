@@ -938,8 +938,8 @@ func (s *Service) checkTelegram(ctx context.Context, in Input, destinationID *in
 // telegramFound sets on d what the check of its channel found: the ids and titles of the channel and of its
 // discussion group.
 func telegramFound(d *Destination, c telegram.DestinationCheck) {
-	group := strconv.FormatInt(c.GroupID, 10)
-	d.TelegramDiscussionGroupID, d.TelegramChannelTitle = &group, &c.ChannelTitle
+	channel, group := strconv.FormatInt(c.ChannelID, 10), strconv.FormatInt(c.GroupID, 10)
+	d.TelegramChannelChatID, d.TelegramDiscussionGroupID, d.TelegramChannelTitle = &channel, &group, &c.ChannelTitle
 	d.TelegramDiscussionGroupTitle = &c.GroupTitle
 }
 
@@ -1015,7 +1015,8 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 		return Destination{}, err
 	}
 	diff := audit.Diff(old, after)
-	found := deref(before.TelegramDiscussionGroupID) != deref(d.TelegramDiscussionGroupID) ||
+	found := deref(before.TelegramChannelChatID) != deref(d.TelegramChannelChatID) ||
+		deref(before.TelegramDiscussionGroupID) != deref(d.TelegramDiscussionGroupID) ||
 		deref(before.TelegramChannelTitle) != deref(d.TelegramChannelTitle) ||
 		deref(before.TelegramDiscussionGroupTitle) != deref(d.TelegramDiscussionGroupTitle)
 	if len(diff) > 0 || found {

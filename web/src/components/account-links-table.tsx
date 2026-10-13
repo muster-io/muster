@@ -2,8 +2,10 @@
 // Copyright The Muster Authors
 
 // The list of a User's Account links (C-18.FR-10), shared by the profile and the Admin's user page: each link with its
-// messenger, Connection, username (or the external id without one), last use and the date it was linked. With remove,
-// each row has a button ("Unlink" on the profile, "Remove" on the user page) that asks first.
+// messenger, Connection, username (or the external id without one), last use and the date it was linked. A Mattermost
+// link belongs to its Connection; a Telegram link is valid for every Telegram bot (D305), so its row reads "Telegram ·
+// @<username> · for all Telegram bots" with "linked via <Connection>" and the last use on its secondary line. With
+// remove, each row has a button ("Unlink" on the profile, "Remove" on the user page) that asks first.
 
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
@@ -53,21 +55,41 @@ function LinkRow({ link }: { link: AccountLink }) {
         duration: formatElapsed(t, elapsedSeconds(link.last_used_at, null, now)),
       })
     : t("accountLinks.list.never");
-  const summary = [
-    messengerName(link.messenger),
-    link.connection?.name,
-    accountName(link),
-    lastUse,
-  ].filter((part): part is string => part !== undefined && part !== "");
+  const lastUseTitle = link.last_used_at ? dateTime(link.last_used_at) : undefined;
+  const telegram = link.messenger === "telegram";
+  const summary = (
+    telegram
+      ? [messengerName(link.messenger), accountName(link), t("accountLinks.list.allTelegramBots")]
+      : [messengerName(link.messenger), link.connection?.name, accountName(link), lastUse]
+  ).filter((part): part is string => part !== undefined && part !== "");
+  const via = (
+    telegram
+      ? [
+          link.connection === undefined
+            ? undefined
+            : t("accountLinks.list.linkedVia", { connection: link.connection.name }),
+          lastUse,
+        ]
+      : []
+  ).filter((part): part is string => part !== undefined);
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1">
       <span
         className="font-medium break-words"
         data-testid="account-link-summary"
-        title={link.last_used_at ? dateTime(link.last_used_at) : undefined}
+        title={telegram ? undefined : lastUseTitle}
       >
         {summary.join(" · ")}
       </span>
+      {via.length > 0 && (
+        <span
+          className="break-words text-muted-foreground"
+          data-testid="account-link-via"
+          title={lastUseTitle}
+        >
+          {via.join(" · ")}
+        </span>
+      )}
       <span className="text-muted-foreground">
         {t("accountLinks.list.linked", {
           date: date(dayIn(new Date(link.created_at), timeZone)),

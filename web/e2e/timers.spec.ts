@@ -415,7 +415,7 @@ test("the Route editor shows the ack timeout and Reminders of the profile and cr
   await page.getByRole("button", { name: "Add matcher" }).click();
   await page.getByRole("textbox", { name: "Label of matcher 1" }).fill("team");
   await page.getByRole("textbox", { name: "Value of matcher 1" }).fill("tm");
-  await page.getByLabel("Add a Destination").selectOption({ label: "tm-alerts (Mattermost)" });
+  await page.getByLabel("Add a Destination").selectOption(destinationId);
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page).toHaveURL(/\/routes$/);
 

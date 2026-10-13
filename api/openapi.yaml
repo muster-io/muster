@@ -11712,6 +11712,13 @@ components:
             type:
             - string
             - 'null'
+          channel_chat_id:
+            type:
+            - string
+            - 'null'
+            readOnly: true
+            description: The channel's numeric chat id, found by the Destination check (`getChat` on the channel). Null until
+              a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.
           discussion_group_id:
             type:
             - string

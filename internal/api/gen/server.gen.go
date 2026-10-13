@@ -5118,6 +5118,9 @@ type TelegramConnectionInputType string
 
 // TelegramDestination defines model for TelegramDestination.
 type TelegramDestination struct {
+	// ChannelChatId The channel's numeric chat id, found by the Destination check (`getChat` on the channel). Null until a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.
+	ChannelChatId nullable.Nullable[string] `json:"channel_chat_id,omitempty"`
+
 	// ChannelId Telegram chat id or `@username` of the channel. Comments must be enabled on the channel.
 	ChannelId    string                    `json:"channel_id"`
 	ChannelTitle nullable.Nullable[string] `json:"channel_title,omitempty"`

@@ -234,9 +234,9 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Foundation | C-01 – C-04 | S-001 – S-017, S-062 | 18 |
 | Observation | C-05 – C-10 | S-018 – S-033, S-063 | 17 |
 | Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 – S-067 | 20 |
-| Actions | C-17, C-18 | S-049 – S-052, S-068, S-069 | 6 |
+| Actions | C-17, C-18 | S-049 – S-052, S-068 – S-070 | 7 |
 | Operations | C-19 – C-21 | S-053 – S-060 | 8 |
-| **L1** | 21 | | **69** |
+| **L1** | 21 | | **70** |
 
 ### Foundation
 
@@ -318,6 +318,7 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-051](S-051-account-links-telegram-deep-links-mattermost-codes-press-attribution-and-audit-log.md) | C-18 | Account links: Telegram deep links, Mattermost codes, press attribution and Audit log (BE) | be | S-068 |
 | [S-052](S-052-messenger-accounts-in-the-profile-and-account-links-on-the-user-page.md) | C-18 | Messenger accounts in the profile and Account links on the user page (FE) | fe | S-015, S-051 |
 | [S-069](S-069-several-connections-of-one-messenger.md) | C-18 | Several Connections of one messenger: two Mattermost servers and two Telegram bots (BE) | be | S-061, S-066, S-067, S-068, S-043, S-044, S-064, S-051, S-052 |
+| [S-070](S-070-connection-and-destination-labels.md) | C-18 | Connection and Destination labels, the Telegram link row and the duplicate-chat warning (FE) | fe | S-069 |
 
 ### Operations
 
@@ -362,7 +363,9 @@ and S-051 follows S-068, whose buttons its Reminder presses need. S-069 was adde
 Connections of one messenger a supported setup (D305): it adds a second fake Mattermost server and bot and a second
 Telegram bot, and covers two Connections of each messenger, two Destinations in one chat and the Identity spaces of
 Account links end to end. It belongs to C-18 and follows S-052 in the Actions phase, because its checks need Account
-links made through the profile and the pages of S-052.
+links made through the profile and the pages of S-052. S-070 was added with S-069 (D305, D309): it labels Connections
+and Destinations across the UI, rewords the Telegram Account link and warns about two Destinations in one chat; it
+follows S-069.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

@@ -7,12 +7,14 @@
 // "Not posted: …" or "No longer updated here" — and the marks "Thread not attached to the Root message" and "Possible
 // duplicate". The error comes from the messenger and is text only; a link opens in a new tab, and only an http or https
 // one. The alert-group hint reads the section again: the dispatcher sends it with every change of the Alert Group, and
-// the delivery worker when a delivery ends or starts or stops waiting for a Broken Destination, so nothing polls.
+// the delivery worker when a delivery ends or starts or stops waiting for a Broken Destination, so nothing polls. A
+// Destination shows its name; its full label (D309) is the name's tooltip and accessible description, and a Destination
+// the Destinations list does not show keeps its name alone.
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
 import { ExternalLinkIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useListAlertGroupDeliveries } from "../api/gen/endpoints/alert-groups/alert-groups";
@@ -20,6 +22,7 @@ import type { AlertGroupDelivery } from "../api/gen/model";
 import { problemText } from "../lib/api";
 import { useCan } from "./app-shell";
 import { HealthBadge } from "./destination-health";
+import { useDestinationLabels } from "./destination-label";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { cn } from "./ui/utils";
 
@@ -88,20 +91,38 @@ function State({ delivery }: { delivery: AlertGroupDelivery }) {
   );
 }
 
-function DestinationName({ delivery }: { delivery: AlertGroupDelivery }) {
+function DestinationName({ delivery, label }: { delivery: AlertGroupDelivery; label?: string }) {
   const canRead = useCan("destinations:read");
+  const descriptionId = useId();
   const { destination } = delivery;
-  if (!canRead) {
-    return <span className="font-medium wrap-anywhere">{destination.name}</span>;
-  }
+  const described = label === undefined ? {} : { title: label, "aria-describedby": descriptionId };
   return (
-    <Link
-      to="/destinations/$destinationId"
-      params={{ destinationId: destination.id }}
-      className="font-medium wrap-anywhere text-primary underline-offset-4 hover:underline focus-visible:underline"
-    >
-      {destination.name}
-    </Link>
+    <>
+      {canRead ? (
+        <Link
+          to="/destinations/$destinationId"
+          params={{ destinationId: destination.id }}
+          className="font-medium wrap-anywhere text-primary underline-offset-4 hover:underline focus-visible:underline"
+          data-testid="delivery-destination"
+          {...described}
+        >
+          {destination.name}
+        </Link>
+      ) : (
+        <span
+          className="font-medium wrap-anywhere"
+          data-testid="delivery-destination"
+          {...described}
+        >
+          {destination.name}
+        </span>
+      )}
+      {label !== undefined && (
+        <span id={descriptionId} hidden>
+          {label}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -116,7 +137,7 @@ function Mark({ children, testId }: { children: ReactNode; testId: string }) {
   );
 }
 
-function Row({ delivery }: { delivery: AlertGroupDelivery }) {
+function Row({ delivery, label }: { delivery: AlertGroupDelivery; label?: string }) {
   const { t } = useTranslation();
   return (
     <li
@@ -125,7 +146,7 @@ function Row({ delivery }: { delivery: AlertGroupDelivery }) {
       data-state={delivery.state}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-        <DestinationName delivery={delivery} />
+        <DestinationName delivery={delivery} label={label} />
         <HealthBadge health={delivery.destination.health} />
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
@@ -144,6 +165,7 @@ function Row({ delivery }: { delivery: AlertGroupDelivery }) {
 export function AlertGroupDeliveries({ alertGroupId }: { alertGroupId: string }) {
   const { t } = useTranslation();
   const query = useListAlertGroupDeliveries(alertGroupId);
+  const labels = useDestinationLabels();
   const items = query.data?.items ?? [];
   return (
     <Card data-testid="alert-group-deliveries">
@@ -162,7 +184,7 @@ export function AlertGroupDeliveries({ alertGroupId }: { alertGroupId: string })
         ) : (
           <ul className="flex flex-col" aria-label={t("deliveries.title")}>
             {items.map((d) => (
-              <Row key={d.destination.id} delivery={d} />
+              <Row key={d.destination.id} delivery={d} label={labels.get(d.destination.id)?.full} />
             ))}
           </ul>
         )}

@@ -1,22 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Destinations (C-13.FR-9, C-11.FR-9): every Destination of every type with its type, name, health and Routes, page
-// by page, and the Broken banner of each Broken Destination above them; "Create destination" with
-// destinations:write. The destination hint reads the list again as health changes.
+// Destinations (C-13.FR-9, C-11.FR-9): every Destination of every type with its type, name, "Connection · channel"
+// (an outgoing webhook: the host of its URL; D309), health and Routes, page by page, and the Broken banner of each
+// Broken Destination above them; "Create destination" with destinations:write. The destination hint reads the list
+// again as health changes.
 
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { createContext, useContext, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
   getListDestinationsQueryKey,
   listDestinations,
 } from "../api/gen/endpoints/destinations/destinations";
-import type { Destination } from "../api/gen/model";
+import type { Connection, Destination } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
 import { BrokenBanner, HealthBadge, destinationTypeName } from "../components/destination-health";
+import { connectionPlace, useConnectionsById } from "../components/destination-label";
 import { buttonVariants } from "../components/ui/button";
 
 export const Route = createFileRoute("/destinations/")({
@@ -38,6 +40,18 @@ function DestinationLink({ destination }: { destination: Destination }) {
 
 function NameCell({ row }: { row: Destination }) {
   return <DestinationLink destination={row} />;
+}
+
+/** The Connections by id, read once by the table for every row's place. */
+const ConnectionsById = createContext<ReadonlyMap<string, Connection>>(new Map());
+
+function PlaceCell({ row }: { row: Destination }) {
+  const place = connectionPlace(row, useContext(ConnectionsById));
+  return place === undefined ? null : (
+    <span className="wrap-anywhere" data-testid="destination-place">
+      {place}
+    </span>
+  );
 }
 
 function HealthCell({ row }: { row: Destination }) {
@@ -75,6 +89,7 @@ function DestinationsTable() {
   const list = useCursorList<Destination>(getListDestinationsQueryKey(), (cursor, signal) =>
     listDestinations({ cursor }, { signal }),
   );
+  const connections = useConnectionsById();
   const columns = useMemo(
     (): DataColumn<Destination>[] => [
       {
@@ -83,6 +98,12 @@ function DestinationsTable() {
         text: (row) => destinationTypeName(t, row.type),
       },
       { id: "name", header: t("destinations.fields.name"), className: "min-w-32", Cell: NameCell },
+      {
+        id: "place",
+        header: t("destinations.fields.place"),
+        className: "min-w-40",
+        Cell: PlaceCell,
+      },
       { id: "health", header: t("destinations.fields.health"), Cell: HealthCell },
       {
         id: "routes",
@@ -107,13 +128,15 @@ function DestinationsTable() {
           ))}
         </section>
       )}
-      <DataTable
-        label={t("destinations.title")}
-        columns={columns}
-        list={list}
-        rowId={(row) => row.id}
-        empty={t("destinations.list.empty")}
-      />
+      <ConnectionsById value={connections}>
+        <DataTable
+          label={t("destinations.title")}
+          columns={columns}
+          list={list}
+          rowId={(row) => row.id}
+          empty={t("destinations.list.empty")}
+        />
+      </ConnectionsById>
     </div>
   );
 }
