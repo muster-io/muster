@@ -451,6 +451,9 @@ type process struct {
 	// orgID and signIn are the Organization and its OIDC service, for the background re-checks.
 	orgID  int64
 	signIn *oidc.Service
+	// policies is the Organization's outbound address policy as this replica caches it for every outbound client;
+	// a notification on organization.OutboundPolicyChannel drops it.
+	policies *organization.OutboundPolicies
 	// integrations and snapshots serve ingestion on the ingest listener besides the API, and signals the Heartbeat
 	// endpoint; worker processes the Stored Snapshots, and scanner runs the Leader's Stale scan.
 	integrations *integrations.Service
@@ -759,11 +762,12 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		return leader.Notices(ctx, leaderStore, now)
 	}, p.clocks.Business, p.hub, p.log)
 	p.listener = db.NewListener(p.db.SessionListenConn, p.log)
+	p.policies = organization.NewOutboundPolicies(p.db.OrganizationStore(), orgID, p.clocks.Real)
 	signIn := oidc.NewService(oidc.Config{
 		OrgID: orgID, Store: p.db.OIDCStore(), Keyring: p.keyring, Audit: w, Clocks: p.clocks, Log: p.log,
 		Sessions: sessions, PublicURL: p.cfg.PublicURL,
 		Network: oidc.Network{
-			Policy: organization.NewOutboundPolicies(p.db.OrganizationStore(), orgID, p.clocks.Real),
+			Policy: p.policies,
 			Log:    p.log, Real: p.clocks.Real,
 		},
 	})
@@ -805,8 +809,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.webhooks = webhooks.New(orgID, webhooks.Config{Store: p.db.WebhooksStore(), Writer: p.db.WebhooksWriter(),
 		Keyring: p.keyring, Audit: w, Business: p.clocks.Business, PublicURL: p.cfg.PublicURL.String()})
 	p.requests = &webhooks.Adapter{Service: p.webhooks, Sandbox: p.sandbox,
-		Network: webhooks.Network{Policy: organization.NewOutboundPolicies(p.db.OrganizationStore(), orgID,
-			p.clocks.Real), Log: p.log, Real: p.clocks.Real}}
+		Network: webhooks.Network{Policy: p.policies, Log: p.log, Real: p.clocks.Real}}
 	p.renderer.SetRequests(p.requests)
 	// The dispatcher's re-render step sets the Desired state of each Root message — the rendered "update" request of an
 	// outgoing webhook in the template mode — and queues the events of outgoing webhooks (ADR-0005).
@@ -825,8 +828,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	interactive := &delivery.Interactive{OrgID: orgID, Store: p.db.DeliveryStore(), Clocks: p.clocks}
 	conns := connections.New(connections.Config{OrgID: orgID, Store: p.db.ConnectionsStore(), Keyring: p.keyring,
 		Audit: w, Clocks: p.clocks, Interactive: interactive, IngestURL: p.cfg.IngestURL, Log: p.log,
-		Network: mattermost.Network{Policy: organization.NewOutboundPolicies(p.db.OrganizationStore(), orgID,
-			p.clocks.Real), Log: p.log, Real: p.clocks.Real},
+		Network: mattermost.Network{Policy: p.policies, Log: p.log, Real: p.clocks.Real},
 		Abandon: func(ctx context.Context, tx connectionsdb.DBTX, id int64) (func(context.Context), error) {
 			return p.delivery.AbandonConnection(ctx, tx, id)
 		}})
@@ -894,13 +896,16 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	admin := users.NewAdmin(orgID, p.db.AdminStore(), w, p.clocks.Business, p.cfg.PublicURL)
 	admin.SetOwnerReleaser(p.groups)
 	admin.SetLinkRemover(p.links)
+	// A change of the outbound address policy applies on this replica as soon as it commits.
+	settings := organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business).WithKeyring(p.keyring).
+		WithLog(p.log).WithOutboundPolicyChanged(p.policies.Invalidate)
 	return api.New(api.Config{
 		Sessions:     sessions,
 		Users:        users.NewService(orgID, p.db.UsersStore(), w, p.clocks.Business),
 		Admin:        admin,
 		AuditLog:     audit.NewReader(orgID, p.db.AuditReader()),
 		TOTP:         factors,
-		Organization: organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business).WithKeyring(p.keyring),
+		Organization: settings,
 		Notices:      p.notices,
 		Live:         p.hub,
 		OIDC:         signIn,
@@ -993,6 +998,9 @@ func (p *process) newKeeper() *leader.Keeper {
 		OutgoingHeartbeat: (&outgoingheartbeat.Sender{Store: p.db.OutgoingHeartbeatStore(), Keyring: p.keyring,
 			Business: p.clocks.Business, Log: p.log, Network: outgoingheartbeat.Network{
 				Policy: func(orgID int64) outbound.PolicySource {
+					if orgID == p.orgID && p.policies != nil {
+						return p.policies
+					}
 					return organization.NewOutboundPolicies(p.db.OrganizationStore(), orgID, p.clocks.Real)
 				}, Log: p.log, Real: p.clocks.Real}}).Send,
 		ClockMoved: p.clockMoved,
@@ -1086,6 +1094,8 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	p.listener.Listen(groups.TimersChannel, func(string) { p.timers.Wake() })
 	p.listener.Listen(delivery.Channel, func(string) { p.deliverer.Wake() })
 	p.listener.Listen(mattermost.TestPressChannel, p.testPresses.Arrived)
+	// A change of the outbound address policy, maybe on another replica, applies here at once (C-20.FR-3).
+	p.listener.Listen(organization.OutboundPolicyChannel, func(string) { p.policies.Invalidate() })
 	if p.devClock != nil {
 		p.listener.Listen(devmode.ClockChannel, func(string) {
 			p.loadDevClock(ctx)
@@ -1107,6 +1117,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 		}, func(restored bool) {
 			p.hub.Listening(restored)
 			if restored {
+				p.policies.Invalidate()
 				p.integrations.InfoChanged()
 				p.router.Invalidate()
 				p.routes.InfoChanged()

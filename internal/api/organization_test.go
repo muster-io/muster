@@ -18,14 +18,18 @@ import (
 	"github.com/muster-io/muster/internal/organization"
 )
 
-// fakeOrganization stands for the organization resource of internal/organization: it changes the TOTP policy and
-// refuses a changed name, the one field it compares; err answers every call.
+// fakeOrganization stands for the organization resource of internal/organization: it changes the TOTP policy and the
+// name, refuses an invalid colour and a retention order at their nested pointers, and keeps the outbound address
+// policy; err answers every call.
 type fakeOrganization struct {
-	org      organization.Organization
-	inputs   []organization.Input
-	versions []*int64
-	actors   []audit.Actor
-	err      error
+	org          organization.Organization
+	inputs       []organization.Input
+	versions     []*int64
+	actors       []audit.Actor
+	policy       organization.OutboundPolicyResource
+	policyInputs []organization.OutboundPolicyInput
+	values       organization.SeverityValues
+	err          error
 }
 
 func newFakeOrganization() *fakeOrganization {
@@ -41,7 +45,9 @@ func newFakeOrganization() *fakeOrganization {
 			URL:   organization.SecretState{Set: true, UpdatedAt: &at},
 			Proxy: organization.Proxy{Enabled: true, Type: "http", Address: "proxy:3128", Username: &user},
 		},
-	}}
+	}, policy: organization.OutboundPolicyResource{Mode: organization.OutboundStandard,
+		Allowed: []string{"127.0.0.0/8"}, Denied: []string{}, AlwaysBlocked: []string{"link-local: 169.254.0.0/16"},
+		Version: 2}}
 }
 
 func (f *fakeOrganization) Get(context.Context) (organization.Organization, error) {
@@ -56,13 +62,17 @@ func (f *fakeOrganization) Update(_ context.Context, actor audit.Actor, _ audit.
 		return organization.Organization{}, f.err
 	case version != nil && *version != f.org.Version:
 		return organization.Organization{}, organization.ErrVersionMismatch
-	case in.Name != f.org.Name:
-		return organization.Organization{}, &organization.UnsupportedError{Pointers: []string{"/name", "/time_zone"}}
+	case len(in.SeverityStyles) > 1 && in.SeverityStyles[1].Color == "red":
+		return organization.Organization{}, &organization.FieldError{Pointer: "/severity_styles/1/color",
+			Code: organization.CodeInvalidFormat, Detail: "The colour is not a CSS hex colour such as #d32f2f."}
+	case in.Retention.AlertGroupSummariesDays < in.Retention.AlertDetailsDays:
+		return organization.Organization{}, &organization.FieldError{Pointer: "/retention/alert_group_summaries_days",
+			Code: organization.CodeRetentionOrder, Detail: "Keep Alert Group summaries at least as long as alert details."}
 	case strings.HasPrefix(string(in.HeartbeatURL.Value), "ftp:"):
 		return organization.Organization{}, &organization.FieldError{Pointer: "/outgoing_heartbeat/url",
 			Code: fieldInvalidFormat, Detail: "The URL is not an absolute http or https URL."}
 	}
-	f.org.TOTPRequired = in.TOTPRequired
+	f.org.TOTPRequired, f.org.Name = in.TOTPRequired, in.Name
 	if in.HeartbeatURL.Given {
 		f.org.OutgoingHeartbeat.URL.Set = !in.HeartbeatURL.Null
 	}
@@ -72,6 +82,31 @@ func (f *fakeOrganization) Update(_ context.Context, actor audit.Actor, _ audit.
 	}
 	f.org.Version++
 	return f.org, nil
+}
+
+func (f *fakeOrganization) OutboundPolicy(context.Context) (organization.OutboundPolicyResource, error) {
+	return f.policy, f.err
+}
+
+func (f *fakeOrganization) UpdateOutboundPolicy(_ context.Context, _ audit.Actor, _ audit.Transport, _ netip.Addr,
+	version *int64, in organization.OutboundPolicyInput) (organization.OutboundPolicyResource, error) {
+	f.policyInputs = append(f.policyInputs, in)
+	switch {
+	case f.err != nil:
+		return organization.OutboundPolicyResource{}, f.err
+	case version != nil && *version != f.policy.Version:
+		return organization.OutboundPolicyResource{}, organization.ErrVersionMismatch
+	case len(in.Allowed) > 0 && in.Allowed[0] == "bad entry":
+		return organization.OutboundPolicyResource{}, &organization.FieldError{Pointer: "/allowed/0",
+			Code: organization.CodeInvalidFormat, Detail: "The entry is not a network."}
+	}
+	f.policy.Mode, f.policy.Allowed, f.policy.Denied = in.Mode, in.Allowed, in.Denied
+	f.policy.Version++
+	return f.policy, nil
+}
+
+func (f *fakeOrganization) SeverityValues(context.Context) (organization.SeverityValues, error) {
+	return f.values, f.err
 }
 
 func newOrganizationAPI(t *testing.T) (*testAPI, *fakeOrganization) {
@@ -124,8 +159,8 @@ func TestGetOrganization(t *testing.T) {
 	}
 }
 
-// TestUpdateOrganization is C-03.FR-20: an Admin changes the TOTP policy with If-Match; a stale ETag is 412, a
-// missing one 428, a changed value of another field 422 with unsupported at each such field, a Viewer 403.
+// TestUpdateOrganization is C-03.FR-20 and C-20.FR-1, FR-8: an Admin changes the settings with If-Match; a stale ETag
+// is 412, a missing one 428, an invalid field 422 at its full nested pointer, a Viewer 403.
 func TestUpdateOrganization(t *testing.T) {
 	x, f := newOrganizationAPI(t)
 	read := x.call(t, http.MethodGet, "/api/v1/organization", "", "Cookie", adminCookie).body
@@ -152,23 +187,44 @@ func TestUpdateOrganization(t *testing.T) {
 	}
 	a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization",
 		updateBody(t, read, func(m map[string]any) { m["name"] = "Other" }), "If-Match", "*")
-	if a.status != http.StatusUnprocessableEntity {
+	if a.status != http.StatusOK || a.json(t)["name"] != "Other" || strings.Contains(string(a.body), "unsupported") {
 		t.Fatalf("another field = %d %s", a.status, a.body)
 	}
-	var p struct {
-		Errors []struct{ Pointer, Code string }
+	for _, c := range []struct {
+		change        func(map[string]any)
+		pointer, code string
+	}{
+		{func(m map[string]any) { m["severity_styles"].([]any)[1].(map[string]any)["color"] = "red" },
+			"/severity_styles/1/color", fieldInvalidFormat},
+		{func(m map[string]any) {
+			m["retention"].(map[string]any)["alert_group_summaries_days"] = 30
+			m["retention"].(map[string]any)["alert_details_days"] = 90
+		}, "/retention/alert_group_summaries_days", "retention_order"},
+	} {
+		a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, read, c.change),
+			"If-Match", "*")
+		var p struct {
+			Errors []struct{ Pointer, Code string }
+		}
+		_ = json.Unmarshal(a.body, &p)
+		if a.status != http.StatusUnprocessableEntity || len(p.Errors) != 1 || p.Errors[0].Pointer != c.pointer ||
+			p.Errors[0].Code != c.code {
+			t.Errorf("%s = %d %s", c.pointer, a.status, a.body)
+		}
 	}
-	_ = json.Unmarshal(a.body, &p)
-	if len(p.Errors) != 2 || p.Errors[0].Pointer != "/name" || p.Errors[0].Code != fieldUnsupported ||
-		p.Errors[1].Pointer != "/time_zone" {
-		t.Errorf("errors = %+v", p.Errors)
+	// The limits of the spec answer 400 before the service.
+	a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, read, func(m map[string]any) {
+		m["retention"].(map[string]any)["audit_log_days"] = 36501
+	}), "If-Match", "*")
+	if a.status != http.StatusBadRequest || !strings.Contains(string(a.body), "/retention/audit_log_days") {
+		t.Errorf("a retention past the limit = %d %s", a.status, a.body)
 	}
-	a = x.mutate(t, viewerCookie, http.MethodPut, "/api/v1/organization", body, "If-Match", `"4"`)
+	a = x.mutate(t, viewerCookie, http.MethodPut, "/api/v1/organization", body, "If-Match", `"5"`)
 	if a.status != http.StatusForbidden {
 		t.Errorf("a Viewer = %d %s", a.status, a.body)
 	}
 	a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization",
-		updateBody(t, read, func(m map[string]any) { m["totp_required"] = "sometimes" }), "If-Match", `"4"`)
+		updateBody(t, read, func(m map[string]any) { m["totp_required"] = "sometimes" }), "If-Match", `"5"`)
 	if a.status != http.StatusBadRequest {
 		t.Errorf("an unknown policy = %d %s", a.status, a.body)
 	}
@@ -250,5 +306,100 @@ func TestOrganizationHandlersWithoutIdentity(t *testing.T) {
 	}
 	if got := secretInputOf(gen.UpdateOrganizationJSONRequestBody{}.OutgoingHeartbeat.Url); got.Given {
 		t.Errorf("an omitted Secret = %+v", got)
+	}
+}
+
+// TestOutboundPolicyAPI is C-20.FR-3 on the API: an Admin reads the policy with its ETag and the rules that always
+// apply, and replaces it with If-Match; always_blocked in the body is ignored; a stale ETag is 412, a missing one 428,
+// an invalid entry 422 at its pointer; a Viewer is 403 on both.
+func TestOutboundPolicyAPI(t *testing.T) {
+	x, f := newOrganizationAPI(t)
+	const path = "/api/v1/organization/outbound-policy"
+	a := x.call(t, http.MethodGet, path, "", "Cookie", adminCookie)
+	if a.status != http.StatusOK || a.header.Get("ETag") != `"2"` || a.json(t)["etag"] != `"2"` ||
+		a.json(t)["policy"] != "standard" || len(a.json(t)["always_blocked"].([]any)) != 1 {
+		t.Fatalf("read = %d %s", a.status, a.body)
+	}
+	if a := x.call(t, http.MethodGet, path, "", "Cookie", viewerCookie); a.status != http.StatusForbidden {
+		t.Errorf("a Viewer reads = %d", a.status)
+	}
+	body := `{"policy":"strict","allowed":["10.0.0.0/8"],"denied":[],"always_blocked":["nothing"]}`
+	a = x.mutate(t, adminCookie, http.MethodPut, path, body, "If-Match", `"2"`)
+	if a.status != http.StatusOK || a.header.Get("ETag") != `"3"` || a.json(t)["policy"] != "strict" ||
+		a.json(t)["always_blocked"].([]any)[0] != "link-local: 169.254.0.0/16" {
+		t.Fatalf("update = %d %s", a.status, a.body)
+	}
+	if in := f.policyInputs[0]; in.Mode != organization.OutboundStrict || len(in.Allowed) != 1 || in.Denied == nil {
+		t.Errorf("input %+v", in)
+	}
+	for _, c := range []struct {
+		headers []string
+		body    string
+		status  int
+	}{
+		{[]string{"If-Match", `"2"`}, body, http.StatusPreconditionFailed},
+		{nil, body, http.StatusPreconditionRequired},
+		{[]string{"If-Match", "*"}, `{"policy":"open","allowed":[],"denied":[]}`, http.StatusBadRequest},
+		{[]string{"If-Match", "*"}, `{"policy":"standard","allowed":["bad entry"],"denied":[]}`,
+			http.StatusUnprocessableEntity},
+	} {
+		a := x.mutate(t, adminCookie, http.MethodPut, path, c.body, c.headers...)
+		if a.status != c.status {
+			t.Errorf("%s %v = %d %s", c.body, c.headers, a.status, a.body)
+		}
+		if c.status == http.StatusUnprocessableEntity && !strings.Contains(string(a.body), `"pointer":"/allowed/0"`) {
+			t.Errorf("the pointer of an invalid entry: %s", a.body)
+		}
+	}
+	if a := x.mutate(t, viewerCookie, http.MethodPut, path, body, "If-Match", "*"); a.status != http.StatusForbidden {
+		t.Errorf("a Viewer updates = %d", a.status)
+	}
+	if a := x.call(t, http.MethodPut, path, body, "Cookie", adminCookie, "If-Match", "*"); a.status !=
+		http.StatusForbidden {
+		t.Errorf("without the CSRF token = %d", a.status)
+	}
+	f.err = errors.New("db down")
+	if a := x.call(t, http.MethodGet, path, "", "Cookie", adminCookie); a.status != http.StatusInternalServerError {
+		t.Errorf("a failed read = %d", a.status)
+	}
+	if a := x.mutate(t, adminCookie, http.MethodPut, path, body, "If-Match", "*"); a.status !=
+		http.StatusInternalServerError {
+		t.Errorf("a failed update = %d", a.status)
+	}
+	if a := x.mutate(t, adminCookie, http.MethodPut, path, body, "If-Match", `W/"x"`); a.status !=
+		http.StatusPreconditionFailed {
+		t.Errorf("an If-Match that names no version = %d", a.status)
+	}
+	req := gen.UpdateOutboundPolicyRequestObject{Params: gen.UpdateOutboundPolicyParams{IfMatch: "*"}}
+	if _, err := x.srv.UpdateOutboundPolicy(t.Context(), req); !errors.Is(err, errUnauthenticated) {
+		t.Errorf("without an identity: %v", err)
+	}
+	id := &auth.Identity{Session: session(1, x.users.users[1], auth.StateActive), Transport: audit.TransportUI}
+	if _, err := x.srv.UpdateOutboundPolicy(auth.WithIdentity(t.Context(), id), req); err == nil {
+		t.Error("without a body: no error")
+	}
+}
+
+// TestListSeverityValues is C-20.AC-4 on the API: the values seen with their counts, levels and whether they are
+// mapped, and the window; Admins only.
+func TestListSeverityValues(t *testing.T) {
+	x, f := newOrganizationAPI(t)
+	f.values = organization.SeverityValues{WindowDays: 14, Items: []organization.SeverityValue{
+		{Value: "P5", Count: 2, Level: organization.SeverityWarning},
+		{Value: "critical", Count: 1, Level: organization.SeverityCritical, Mapped: true},
+	}}
+	a := x.call(t, http.MethodGet, "/api/v1/organization/severity-values", "", "Cookie", adminCookie)
+	if a.status != http.StatusOK || string(a.body) != `{"items":[{"count":2,"level":"warning","mapped":false,`+
+		`"value":"P5"},{"count":1,"level":"critical","mapped":true,"value":"critical"}],"window_days":14}`+"\n" {
+		t.Errorf("list = %d %s", a.status, a.body)
+	}
+	if a := x.call(t, http.MethodGet, "/api/v1/organization/severity-values", "", "Cookie", viewerCookie); a.status !=
+		http.StatusForbidden {
+		t.Errorf("a Viewer = %d", a.status)
+	}
+	f.err = errors.New("db down")
+	if a := x.call(t, http.MethodGet, "/api/v1/organization/severity-values", "", "Cookie", adminCookie); a.status !=
+		http.StatusInternalServerError {
+		t.Errorf("a failed list = %d", a.status)
 	}
 }

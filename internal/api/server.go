@@ -99,6 +99,10 @@ type Organization interface {
 	Get(ctx context.Context) (organization.Organization, error)
 	Update(ctx context.Context, actor audit.Actor, t audit.Transport, addr netip.Addr, version *int64,
 		in organization.Input) (organization.Organization, error)
+	OutboundPolicy(ctx context.Context) (organization.OutboundPolicyResource, error)
+	UpdateOutboundPolicy(ctx context.Context, actor audit.Actor, t audit.Transport, addr netip.Addr, version *int64,
+		in organization.OutboundPolicyInput) (organization.OutboundPolicyResource, error)
+	SeverityValues(ctx context.Context) (organization.SeverityValues, error)
 }
 
 // Notices is what the API needs of the Organization-wide notices in internal/live.
@@ -263,7 +267,8 @@ var implemented = map[string]bool{
 	"EnableUser": true, "CreatePasswordSetupLink": true, "CompletePasswordSetup": true, "ListAuditLog": true,
 	"GetMyTotp": true, "BeginTotpEnrolment": true, "ConfirmTotpEnrolment": true, "RemoveTotp": true,
 	"RegenerateTotpRecoveryCodes": true, "SubmitSessionTotp": true, "ResetUserTotp": true, "GetOrganization": true,
-	"UpdateOrganization": true, "ListSystemNotices": true, "StreamLiveUpdates": true,
+	"UpdateOrganization": true, "GetOutboundPolicy": true, "UpdateOutboundPolicy": true, "ListSeverityValues": true,
+	"ListSystemNotices": true, "StreamLiveUpdates": true,
 	"GetOidcSettings": true, "UpdateOidcSettings": true, "CheckOidcSettings": true, "StartOidcSignIn": true,
 	"CompleteOidcSignIn": true, "StartOidcLink": true, "CompleteOidcLink": true, "ConvertUserToLocal": true,
 	"ListPersonalAccessTokens": true, "CreatePersonalAccessToken": true, "RevokePersonalAccessToken": true,

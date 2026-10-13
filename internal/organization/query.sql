@@ -35,6 +35,35 @@ SELECT policy, allowed, denied
 FROM outbound_policies
 WHERE org_id = @org_id;
 
+-- GetOutboundPolicySettings reads the outbound address policy as the API shows it, with its version, the ETag.
+-- name: GetOutboundPolicySettings :one
+SELECT policy, allowed, denied, version
+FROM outbound_policies
+WHERE org_id = @org_id;
+
+-- LockOutboundPolicy locks the outbound address policy until the transaction ends and returns its version.
+-- name: LockOutboundPolicy :one
+SELECT version
+FROM outbound_policies
+WHERE org_id = @org_id
+FOR UPDATE;
+
+-- UpdateOutboundPolicy replaces the outbound address policy and its lists and moves its version.
+-- name: UpdateOutboundPolicy :execrows
+UPDATE outbound_policies
+SET policy = @policy, allowed = @allowed, denied = @denied, version = version + 1, updated_at = @updated_at
+WHERE org_id = @org_id;
+
+-- ListSeverityValues counts the Alerts last seen at @since or later by their value of the label @label, the most
+-- frequent first; Alerts without the label or with an empty value are left out. At most @max_values values.
+-- name: ListSeverityValues :many
+SELECT (labels ->> @label::text)::text AS value, count(*)::bigint AS alerts
+FROM alerts
+WHERE org_id = @org_id AND last_seen_at >= @since::timestamptz AND labels ->> @label::text <> ''
+GROUP BY 1
+ORDER BY alerts DESC, value
+LIMIT @max_values;
+
 -- GetSettings reads the organization resource, with the state of its Secrets but not their values.
 -- name: GetSettings :one
 SELECT id, public_id, name, time_zone, severity_label, severity_mapping, severity_styles, critical_is_urgent,
@@ -66,7 +95,19 @@ WHERE id = @org_id;
 -- URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL.
 -- name: UpdateSettings :execrows
 UPDATE organizations
-SET totp_required                                = @totp_required,
+SET name                                         = @name,
+    time_zone                                    = @time_zone,
+    severity_label                               = @severity_label,
+    severity_mapping                             = @severity_mapping,
+    severity_styles                              = @severity_styles,
+    critical_is_urgent                           = @critical_is_urgent,
+    instance_labels                              = @instance_labels,
+    retention_stored_snapshots_days              = @retention_stored_snapshots_days,
+    retention_alert_details_days                 = @retention_alert_details_days,
+    retention_alert_group_summaries_days         = @retention_alert_group_summaries_days,
+    retention_audit_log_days                     = @retention_audit_log_days,
+    oidc_token_grace_seconds                     = @oidc_token_grace_seconds,
+    totp_required                                = @totp_required,
     outgoing_heartbeat_url_ciphertext            = @url_ciphertext,
     outgoing_heartbeat_url_key_id                = @url_key_id,
     outgoing_heartbeat_url_updated_at            = @url_updated_at,

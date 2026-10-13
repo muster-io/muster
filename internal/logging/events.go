@@ -126,6 +126,18 @@ var OrganizationCreated = newEvent("organization_created", LevelInfo, "C-02",
 	"The first start created the Organization with the defaults of its settings and its outbound address policy.",
 	"organization")
 
+// OrganizationUpdated is logged when the Organization's settings changed.
+var OrganizationUpdated = newEvent("organization_updated", LevelInfo, "C-20",
+	"The Organization's settings changed; fields lists the JSON pointers of the changed fields, and the Audit log "+
+		"entry organization.updated has the values before and after (a Secret only as changed).",
+	"fields")
+
+// OutboundPolicyUpdated is logged when the outbound address policy changed.
+var OutboundPolicyUpdated = newEvent("outbound_policy_updated", LevelInfo, "C-20",
+	"The outbound address policy changed: every replica drops its cached policy and closes its idle outbound "+
+		"connections at once, so the next request is checked against the new policy. The Audit log entry "+
+		"outbound_policy.updated has the values before and after.")
+
 // PartitionsMaintained is logged when partition maintenance created or dropped partitions.
 var PartitionsMaintained = newEvent("partitions_maintained", LevelInfo, "C-02",
 	"Partition maintenance created the partitions Muster will need (daily for Stored Snapshots and their bodies, "+

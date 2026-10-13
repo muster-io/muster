@@ -349,14 +349,6 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	if f, ok := errors.AsType[*organization.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
-	if u, ok := errors.AsType[*organization.UnsupportedError](err); ok {
-		p := problem(http.StatusUnprocessableEntity, typeValidationFailed, "", detailSemanticValidation)
-		detail := "This setting cannot be changed yet."
-		for _, pointer := range u.Pointers {
-			p.Errors = append(p.Errors, gen.ProblemError{Pointer: pointer, Code: fieldUnsupported, Detail: &detail})
-		}
-		return p
-	}
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		return errInvalidCredentials
@@ -508,6 +500,10 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		p.RetryAfter = int(live.CheckInterval.Seconds())
 		return p
 	}
+	// A client that went away cancels its request: nothing reaches it, and the request metric still counts the 500.
+	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+		return errInternal
+	}
 	s.log.Log(ctx, logging.APIRequestFailed, logging.F("operation", operation), logging.F("error", err.Error()))
 	return errInternal
 }
@@ -649,7 +645,6 @@ var fieldDetails = map[string]string{
 	fieldInvalidFormat: "The value does not have the expected type, format or one of the allowed values.",
 	fieldTooShort:      "The value is too short.",
 	fieldTooLong:       "The value is too long.",
-	fieldUnsupported:   "This setting cannot be changed yet.",
 }
 
 func item(pointer, code string) gen.ProblemError {

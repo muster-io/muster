@@ -2537,6 +2537,7 @@ func probeOutgoingHeartbeat(ctx context.Context, secrets []string, log io.Writer
 		}
 		_, err = svc.Update(ctx, audit.System, audit.TransportAPI, netip.Addr{}, nil, organization.Input{
 			Name: o.Name, TimeZone: o.TimeZone, SeverityLabel: o.SeverityLabel, CriticalIsUrgent: o.CriticalIsUrgent,
+			SeverityMapping: o.SeverityMapping, SeverityStyles: o.SeverityStyles, Retention: o.Retention,
 			InstanceLabels: o.InstanceLabels, TOTPRequired: o.TOTPRequired,
 			OIDCTokenGraceSeconds: int64(o.OIDCTokenGrace / time.Second),
 			HeartbeatURL:          keyring.Replace(logging.Secret(target)), HeartbeatProxy: p})
@@ -2598,9 +2599,18 @@ func (s *probeOrgSettings) InTx(_ context.Context, f func(organization.SettingsQ
 }
 
 func (s *probeOrgSettings) GetSettings(context.Context, int64) (orgdb.GetSettingsRow, error) {
-	return orgdb.GetSettingsRow{ID: 1, PublicID: "RGAAAAAAAAAAA1", Name: "Muster", TimeZone: "UTC",
-		SeverityLabel: "severity", SeverityMapping: []byte("[]"), SeverityStyles: []byte("[]"),
-		InstanceLabels: []string{}, TotpRequired: "nobody", OutgoingHeartbeatUrlSet: s.url.Set(),
+	d := organization.Defaults()
+	styles, err := json.Marshal(d.SeverityStyles)
+	if err != nil {
+		return orgdb.GetSettingsRow{}, err
+	}
+	return orgdb.GetSettingsRow{ID: 1, PublicID: "RGAAAAAAAAAAA1", Name: d.Name, TimeZone: d.TimeZone,
+		SeverityLabel: d.SeverityLabel, SeverityMapping: []byte("[]"), SeverityStyles: styles,
+		InstanceLabels: []string{}, RetentionStoredSnapshotsDays: d.Retention.StoredSnapshotsDays,
+		RetentionAlertDetailsDays:        d.Retention.AlertDetailsDays,
+		RetentionAlertGroupSummariesDays: d.Retention.AlertGroupSummariesDays,
+		RetentionAuditLogDays:            d.Retention.AuditLogDays, TotpRequired: "nobody",
+		OidcTokenGraceSeconds: int64(d.OIDCTokenGrace / time.Second), OutgoingHeartbeatUrlSet: s.url.Set(),
 		OutgoingHeartbeatProxy: s.proxy, OutgoingHeartbeatProxyPasswordSet: s.password.Set(), Version: s.version}, nil
 }
 
@@ -2629,6 +2639,27 @@ func (s *probeOrgSettings) InsertAuditEntry(_ context.Context, arg adb.InsertAud
 }
 
 func (s *probeOrgSettings) Notify(context.Context, db.Hint) error { return nil }
+
+// The outbound address policy and the values seen are not part of the probe: no Secret passes through them.
+func (s *probeOrgSettings) GetOutboundPolicySettings(context.Context, int64) (orgdb.GetOutboundPolicySettingsRow,
+	error) {
+	return orgdb.GetOutboundPolicySettingsRow{}, errors.New("not used by the probe")
+}
+
+func (s *probeOrgSettings) LockOutboundPolicy(context.Context, int64) (int64, error) {
+	return 0, errors.New("not used by the probe")
+}
+
+func (s *probeOrgSettings) UpdateOutboundPolicy(context.Context, orgdb.UpdateOutboundPolicyParams) (int64, error) {
+	return 0, errors.New("not used by the probe")
+}
+
+func (s *probeOrgSettings) ListSeverityValues(context.Context, orgdb.ListSeverityValuesParams) (
+	[]orgdb.ListSeverityValuesRow, error) {
+	return nil, errors.New("not used by the probe")
+}
+
+func (s *probeOrgSettings) NotifyOutboundPolicy(context.Context, int64) error { return nil }
 
 func (s *probeOrgSettings) ClaimOutgoingHeartbeat(_ context.Context, arg orgdb.ClaimOutgoingHeartbeatParams) (
 	orgdb.ClaimOutgoingHeartbeatRow, error) {

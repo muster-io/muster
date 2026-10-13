@@ -36,7 +36,7 @@ var t0 = time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 
 var roles = auth.Roles{
 	auth.RoleAdmin: {"alert-groups:acknowledge", "alert-groups:read", "alert-groups:resolve", "alert-groups:snooze", "destinations:read",
-		"integrations:read", "integrations:write", "organization:write",
+		"integrations:read", "integrations:write", "organization:read", "organization:write",
 		"service-accounts:read", "service-accounts:write", "stored-snapshots:read", "system-status:read", "users:read",
 		"users:write"},
 	auth.RoleResponder: {"alert-groups:acknowledge", "alert-groups:read", "integrations:read"},
@@ -432,7 +432,7 @@ func TestNotFoundAndNotImplemented(t *testing.T) {
 			t.Errorf("%s %s = %d %s %s", c.method, c.path, a.status, a.header.Get("Allow"), a.body)
 		}
 	}
-	// getKeyring arrives with S-055; a Role with organization:read reaches the handler.
+	// getKeyring arrives with S-071; a Role with organization:read reaches the handler.
 	roles["reader"] = []auth.Permission{"organization:read"}
 	t.Cleanup(func() { delete(roles, "reader") })
 	reader := user(8, "SRCCCCCCCCCCCC", "reader", "reader")
@@ -633,7 +633,7 @@ func TestPermissions(t *testing.T) {
 	}
 	_ = json.Unmarshal(a.body, &list)
 	if len(list.Items) != 3 || list.Items[0].Name != "admin" || list.Items[2].Name != "viewer" ||
-		len(list.Items[0].Permissions) != 14 || len(list.Items[2].Permissions) != 2 {
+		len(list.Items[0].Permissions) != 15 || len(list.Items[2].Permissions) != 2 {
 		t.Errorf("roles = %+v", list)
 	}
 	id := &auth.Identity{Permissions: []auth.Permission{"users:read"}}
@@ -775,5 +775,48 @@ func TestRequestHardening(t *testing.T) {
 	}
 	if a := x.call(t, http.MethodGet, "/api/v1/sign-in-options", "", "Sec-Fetch-Site", "cross-site"); a.status != 200 {
 		t.Errorf("a cross-site read = %d", a.status)
+	}
+}
+
+// TestCanceledRequestNotLogged: a request whose client went away — context.Canceled while the request's own context is
+// done — is not logged as api_request_failed, and the request metric still counts it; the same error on a live
+// request, or another error, keeps the ERROR line.
+func TestCanceledRequestNotLogged(t *testing.T) {
+	serve := func(x *testAPI, ctx context.Context) {
+		t.Helper()
+		r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/me", nil)
+		r.RemoteAddr = "192.0.2.1:5000"
+		r.AddCookie(&http.Cookie{Name: auth.CookieName, Value: "admin-cookie"}) //nolint:gosec // G124: a request cookie carries no attributes
+		w := httptest.NewRecorder()
+		x.srv.ServeHTTP(w, r)
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("status %d", w.Code)
+		}
+	}
+	failed := metrics.APIRequests.With("/me", http.MethodGet, "500")
+	gone, cancel := context.WithCancel(t.Context())
+	cancel()
+	for _, err := range []error{context.Canceled, fmt.Errorf("read the session: %w", context.Canceled)} {
+		x := newTestAPI(t)
+		x.sessions.authErr = err
+		before := failed.Get()
+		serve(x, gone)
+		if strings.Contains(x.log.String(), `"event":"api_request_failed"`) {
+			t.Errorf("%v: logged %s", err, x.log.String())
+		}
+		if failed.Get()-before != 1 {
+			t.Errorf("%v: counted %d", err, failed.Get()-before)
+		}
+	}
+	for _, c := range []struct {
+		err error
+		ctx context.Context
+	}{{context.Canceled, t.Context()}, {errors.New("db down"), gone}} {
+		x := newTestAPI(t)
+		x.sessions.authErr = c.err
+		serve(x, c.ctx)
+		if !strings.Contains(x.log.String(), `"event":"api_request_failed"`) {
+			t.Errorf("%v: not logged", c.err)
+		}
 	}
 }

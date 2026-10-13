@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"slices"
 	"strings"
@@ -463,6 +464,46 @@ func TestIntegrationPreviewAndSuggestions(t *testing.T) {
 		}
 		if list, err := svc.Suggestions(ctx, nil); err != nil || len(list) != 0 {
 			t.Errorf("after accepting both %+v, %v", list, err)
+		}
+	})
+}
+
+// TestIntegrationSeverityMappingChange is C-20.FR-2 and AC-3 on routing: after the Organization maps P1 to critical
+// through its settings, the same Router routes a new Alert with severity="P1" as critical in its next evaluation, without
+// an invalidation of its own, while the Alert routed before keeps the level warning and its raw value.
+func TestIntegrationSeverityMappingChange(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		e := setup(t, s)
+		router := routing.NewRouter(e.orgID)
+		before := e.alert(t, `{"alertname":"Disk","severity":"P1"}`)
+		e.route(t, router, before)
+		if got := e.routeOf(t, before); got != "Default/warning/P1" {
+			t.Fatalf("before the mapping = %s", got)
+		}
+		c := clock.NewManual(t0)
+		settings := organization.NewService(e.orgID, organization.NewSettingsStore(e.d.Pool),
+			audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), c), c)
+		o, err := settings.Get(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		in := organization.Input{Name: o.Name, TimeZone: o.TimeZone, SeverityLabel: o.SeverityLabel,
+			SeverityMapping: append(slices.Clone(o.SeverityMapping), organization.SeverityMapping{Value: "P1",
+				Level: organization.SeverityCritical}),
+			SeverityStyles: o.SeverityStyles, CriticalIsUrgent: o.CriticalIsUrgent, InstanceLabels: o.InstanceLabels,
+			Retention: o.Retention, TOTPRequired: o.TOTPRequired,
+			OIDCTokenGraceSeconds: int64(o.OIDCTokenGrace / time.Second)}
+		if _, err := settings.Update(ctx, audit.System, audit.TransportAPI, netip.Addr{}, &o.Version, in); err != nil {
+			t.Fatal(err)
+		}
+		after := e.alert(t, `{"alertname":"Disk","severity":"P1","host":"b"}`)
+		e.route(t, router, after)
+		if got := e.routeOf(t, after); got != "Default/critical/-" {
+			t.Errorf("after the mapping = %s", got)
+		}
+		if got := e.routeOf(t, before); got != "Default/warning/P1" {
+			t.Errorf("the Alert routed before = %s", got)
 		}
 	})
 }

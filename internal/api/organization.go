@@ -29,9 +29,9 @@ func (s *Server) GetOrganization(ctx context.Context, _ gen.GetOrganizationReque
 		Headers: gen.GetOrganization200ResponseHeaders{ETag: &tag}}, nil
 }
 
-// UpdateOrganization is updateOrganization with If-Match: in this release it changes the TOTP policy and the outgoing
-// heartbeat, its write-only URL (null clears it) and its proxy (C-19.FR-7), and a changed value of any other field is
-// 422 with unsupported at that field (C-03.FR-20).
+// UpdateOrganization is updateOrganization with If-Match: it changes every setting of the Organization (C-20.FR-1,
+// FR-8, C-04.FR-8), the TOTP policy (C-03.FR-20) and the outgoing heartbeat, its write-only URL (null clears it) and its
+// proxy (C-19.FR-7); an invalid field is 422 at its full JSON pointer.
 func (s *Server) UpdateOrganization(ctx context.Context, req gen.UpdateOrganizationRequestObject) (
 	gen.UpdateOrganizationResponseObject, error) {
 	r, err := requester(ctx)
@@ -153,4 +153,67 @@ func secretInputOf(v nullable.Nullable[string]) organization.SecretInput {
 		return keyring.Clear
 	}
 	return keyring.Replace(logging.Secret(v.MustGet()))
+}
+
+// GetOutboundPolicy is getOutboundPolicy: the outbound address policy with the rules that always apply (C-20.FR-3).
+func (s *Server) GetOutboundPolicy(ctx context.Context, _ gen.GetOutboundPolicyRequestObject) (
+	gen.GetOutboundPolicyResponseObject, error) {
+	p, err := s.organization.OutboundPolicy(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tag := etag(p.Version)
+	return gen.GetOutboundPolicy200JSONResponse{Body: outboundPolicyOf(p),
+		Headers: gen.GetOutboundPolicy200ResponseHeaders{ETag: &tag}}, nil
+}
+
+// UpdateOutboundPolicy is updateOutboundPolicy with If-Match: it replaces the policy and its lists, effective at once on
+// every replica (C-20.FR-3, C-02.FR-21); always_blocked and etag in the body are ignored.
+func (s *Server) UpdateOutboundPolicy(ctx context.Context, req gen.UpdateOutboundPolicyRequestObject) (
+	gen.UpdateOutboundPolicyResponseObject, error) {
+	r, err := requester(ctx)
+	if err != nil {
+		return nil, err
+	}
+	version, err := ifMatch(req.Params.IfMatch)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil {
+		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
+	}
+	p, err := s.organization.UpdateOutboundPolicy(ctx, r.Actor, r.Transport, r.Address, version,
+		organization.OutboundPolicyInput{Mode: organization.OutboundMode(req.Body.Policy), Allowed: req.Body.Allowed,
+			Denied: req.Body.Denied})
+	if err != nil {
+		return nil, err
+	}
+	tag := etag(p.Version)
+	return gen.UpdateOutboundPolicy200JSONResponse{Body: outboundPolicyOf(p),
+		Headers: gen.UpdateOutboundPolicy200ResponseHeaders{ETag: &tag}}, nil
+}
+
+// outboundPolicyOf is the API form of the outbound address policy.
+func outboundPolicyOf(p organization.OutboundPolicyResource) gen.OutboundPolicy {
+	tag := etag(p.Version)
+	blocked := append([]string{}, p.AlwaysBlocked...)
+	return gen.OutboundPolicy{Policy: gen.OutboundPolicyPolicy(p.Mode), Allowed: append([]string{}, p.Allowed...),
+		Denied: append([]string{}, p.Denied...), AlwaysBlocked: &blocked, Etag: &tag}
+}
+
+// ListSeverityValues is listSeverityValues: the values of the severity label seen within
+// organization.severity_values_window, with their counts and levels (C-20.FR-1, AC-4).
+func (s *Server) ListSeverityValues(ctx context.Context, _ gen.ListSeverityValuesRequestObject) (
+	gen.ListSeverityValuesResponseObject, error) {
+	v, err := s.organization.SeverityValues(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.ListSeverityValues200JSONResponse{Items: make([]gen.SeverityValue, 0, len(v.Items)),
+		WindowDays: v.WindowDays}
+	for _, i := range v.Items {
+		out.Items = append(out.Items, gen.SeverityValue{Value: i.Value, Count: int(i.Count),
+			Level: gen.SeverityLevel(i.Level), Mapped: i.Mapped})
+	}
+	return out, nil
 }

@@ -218,6 +218,32 @@ func (q *Queries) GetOutboundPolicy(ctx context.Context, orgID int64) (GetOutbou
 	return i, err
 }
 
+const getOutboundPolicySettings = `-- name: GetOutboundPolicySettings :one
+SELECT policy, allowed, denied, version
+FROM outbound_policies
+WHERE org_id = $1
+`
+
+type GetOutboundPolicySettingsRow struct {
+	Policy  string
+	Allowed []string
+	Denied  []string
+	Version int64
+}
+
+// GetOutboundPolicySettings reads the outbound address policy as the API shows it, with its version, the ETag.
+func (q *Queries) GetOutboundPolicySettings(ctx context.Context, orgID int64) (GetOutboundPolicySettingsRow, error) {
+	row := q.db.QueryRow(ctx, getOutboundPolicySettings, orgID)
+	var i GetOutboundPolicySettingsRow
+	err := row.Scan(
+		&i.Policy,
+		&i.Allowed,
+		&i.Denied,
+		&i.Version,
+	)
+	return i, err
+}
+
 const getOutgoingHeartbeatSecrets = `-- name: GetOutgoingHeartbeatSecrets :one
 SELECT outgoing_heartbeat_url_ciphertext, outgoing_heartbeat_url_key_id, outgoing_heartbeat_url_updated_at,
        outgoing_heartbeat_proxy_password_ciphertext, outgoing_heartbeat_proxy_password_key_id,
@@ -316,6 +342,69 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (GetSettingsRow,
 	return i, err
 }
 
+const listSeverityValues = `-- name: ListSeverityValues :many
+SELECT (labels ->> $1::text)::text AS value, count(*)::bigint AS alerts
+FROM alerts
+WHERE org_id = $2 AND last_seen_at >= $3::timestamptz AND labels ->> $1::text <> ''
+GROUP BY 1
+ORDER BY alerts DESC, value
+LIMIT $4
+`
+
+type ListSeverityValuesParams struct {
+	Label     string
+	OrgID     int64
+	Since     time.Time
+	MaxValues int32
+}
+
+type ListSeverityValuesRow struct {
+	Value  string
+	Alerts int64
+}
+
+// ListSeverityValues counts the Alerts last seen at @since or later by their value of the label @label, the most
+// frequent first; Alerts without the label or with an empty value are left out. At most @max_values values.
+func (q *Queries) ListSeverityValues(ctx context.Context, arg ListSeverityValuesParams) ([]ListSeverityValuesRow, error) {
+	rows, err := q.db.Query(ctx, listSeverityValues,
+		arg.Label,
+		arg.OrgID,
+		arg.Since,
+		arg.MaxValues,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSeverityValuesRow{}
+	for rows.Next() {
+		var i ListSeverityValuesRow
+		if err := rows.Scan(&i.Value, &i.Alerts); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockOutboundPolicy = `-- name: LockOutboundPolicy :one
+SELECT version
+FROM outbound_policies
+WHERE org_id = $1
+FOR UPDATE
+`
+
+// LockOutboundPolicy locks the outbound address policy until the transaction ends and returns its version.
+func (q *Queries) LockOutboundPolicy(ctx context.Context, orgID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockOutboundPolicy, orgID)
+	var version int64
+	err := row.Scan(&version)
+	return version, err
+}
+
 const lockSettings = `-- name: LockSettings :one
 SELECT version
 FROM organizations
@@ -366,44 +455,109 @@ func (q *Queries) RecordOutgoingHeartbeat(ctx context.Context, arg RecordOutgoin
 	return previous, err
 }
 
+const updateOutboundPolicy = `-- name: UpdateOutboundPolicy :execrows
+UPDATE outbound_policies
+SET policy = $1, allowed = $2, denied = $3, version = version + 1, updated_at = $4
+WHERE org_id = $5
+`
+
+type UpdateOutboundPolicyParams struct {
+	Policy    string
+	Allowed   []string
+	Denied    []string
+	UpdatedAt time.Time
+	OrgID     int64
+}
+
+// UpdateOutboundPolicy replaces the outbound address policy and its lists and moves its version.
+func (q *Queries) UpdateOutboundPolicy(ctx context.Context, arg UpdateOutboundPolicyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateOutboundPolicy,
+		arg.Policy,
+		arg.Allowed,
+		arg.Denied,
+		arg.UpdatedAt,
+		arg.OrgID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateSettings = `-- name: UpdateSettings :execrows
 UPDATE organizations
-SET totp_required                                = $1,
-    outgoing_heartbeat_url_ciphertext            = $2,
-    outgoing_heartbeat_url_key_id                = $3,
-    outgoing_heartbeat_url_updated_at            = $4,
-    outgoing_heartbeat_proxy                     = $5,
-    outgoing_heartbeat_proxy_password_ciphertext = $6,
-    outgoing_heartbeat_proxy_password_key_id     = $7,
-    outgoing_heartbeat_proxy_password_updated_at = $8,
-    outgoing_heartbeat_last_attempt_at = CASE WHEN $9::boolean THEN NULL
+SET name                                         = $1,
+    time_zone                                    = $2,
+    severity_label                               = $3,
+    severity_mapping                             = $4,
+    severity_styles                              = $5,
+    critical_is_urgent                           = $6,
+    instance_labels                              = $7,
+    retention_stored_snapshots_days              = $8,
+    retention_alert_details_days                 = $9,
+    retention_alert_group_summaries_days         = $10,
+    retention_audit_log_days                     = $11,
+    oidc_token_grace_seconds                     = $12,
+    totp_required                                = $13,
+    outgoing_heartbeat_url_ciphertext            = $14,
+    outgoing_heartbeat_url_key_id                = $15,
+    outgoing_heartbeat_url_updated_at            = $16,
+    outgoing_heartbeat_proxy                     = $17,
+    outgoing_heartbeat_proxy_password_ciphertext = $18,
+    outgoing_heartbeat_proxy_password_key_id     = $19,
+    outgoing_heartbeat_proxy_password_updated_at = $20,
+    outgoing_heartbeat_last_attempt_at = CASE WHEN $21::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_attempt_at END,
-    outgoing_heartbeat_last_ok         = CASE WHEN $9::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
-    outgoing_heartbeat_last_error      = CASE WHEN $9::boolean THEN NULL
+    outgoing_heartbeat_last_ok         = CASE WHEN $21::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
+    outgoing_heartbeat_last_error      = CASE WHEN $21::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_error END,
-    updated_at = $10,
+    updated_at = $22,
     version = version + 1
-WHERE id = $11
+WHERE id = $23
 `
 
 type UpdateSettingsParams struct {
-	TotpRequired            string
-	UrlCiphertext           []byte
-	UrlKeyID                pgtype.Text
-	UrlUpdatedAt            pgtype.Timestamptz
-	Proxy                   []byte
-	ProxyPasswordCiphertext []byte
-	ProxyPasswordKeyID      pgtype.Text
-	ProxyPasswordUpdatedAt  pgtype.Timestamptz
-	UrlChanged              bool
-	Now                     time.Time
-	OrgID                   int64
+	Name                             string
+	TimeZone                         string
+	SeverityLabel                    string
+	SeverityMapping                  []byte
+	SeverityStyles                   []byte
+	CriticalIsUrgent                 bool
+	InstanceLabels                   []string
+	RetentionStoredSnapshotsDays     int64
+	RetentionAlertDetailsDays        int64
+	RetentionAlertGroupSummariesDays int64
+	RetentionAuditLogDays            int64
+	OidcTokenGraceSeconds            int64
+	TotpRequired                     string
+	UrlCiphertext                    []byte
+	UrlKeyID                         pgtype.Text
+	UrlUpdatedAt                     pgtype.Timestamptz
+	Proxy                            []byte
+	ProxyPasswordCiphertext          []byte
+	ProxyPasswordKeyID               pgtype.Text
+	ProxyPasswordUpdatedAt           pgtype.Timestamptz
+	UrlChanged                       bool
+	Now                              time.Time
+	OrgID                            int64
 }
 
 // UpdateSettings writes the editable fields of the organization resource and moves its version. A new or cleared
 // URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL.
 func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateSettings,
+		arg.Name,
+		arg.TimeZone,
+		arg.SeverityLabel,
+		arg.SeverityMapping,
+		arg.SeverityStyles,
+		arg.CriticalIsUrgent,
+		arg.InstanceLabels,
+		arg.RetentionStoredSnapshotsDays,
+		arg.RetentionAlertDetailsDays,
+		arg.RetentionAlertGroupSummariesDays,
+		arg.RetentionAuditLogDays,
+		arg.OidcTokenGraceSeconds,
 		arg.TotpRequired,
 		arg.UrlCiphertext,
 		arg.UrlKeyID,

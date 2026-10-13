@@ -11,10 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -628,5 +630,210 @@ func TestEnvironmentProxyIgnored(t *testing.T) {
 	}
 	if proxied != 0 || n.Load() != 1 {
 		t.Fatalf("proxied %d, direct %d", proxied, n.Load())
+	}
+}
+
+// mutablePolicy is a policy source whose policy a test changes.
+type mutablePolicy struct{ p atomic.Pointer[Policy] }
+
+func (m *mutablePolicy) OutboundPolicy(context.Context) (Policy, error) { return *m.p.Load(), nil }
+
+// countingServer answers 200 and counts the requests and the connections it accepted.
+func countingServer(t *testing.T) (*httptest.Server, *atomic.Int32, *atomic.Int32) {
+	t.Helper()
+	var requests, conns atomic.Int32
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_, _ = io.WriteString(w, "ok")
+	}))
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			conns.Add(1)
+		}
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return srv, &requests, &conns
+}
+
+// TestCloseIdleConnectionsBlocksWarmConnection is C-20.AC-1 against the dialer: a request to an allowed loopback
+// server leaves a warm connection, which the pool reuses; the policy then denies that network, and once
+// CloseIdleConnections ran, the next request through the same client dials again and fails with blocked without
+// reaching the server. Without it, the warm connection would carry the request past the stricter policy.
+func TestCloseIdleConnectionsBlocksWarmConnection(t *testing.T) {
+	srv, requests, conns := countingServer(t)
+	src := &mutablePolicy{}
+	allowed := Policy{Mode: ModeStandard, Allowed: []Entry{{text: "127.0.0.0/8", network: mustPrefix("127.0.0.0/8")}}}
+	src.p.Store(&allowed)
+	c, log := newTestClient(t, Config{Policy: src})
+	get := func() error {
+		t.Helper()
+		_, err := c.Do(t.Context(), Request{URL: srv.URL + "/hook"})
+		return err
+	}
+	if err := get(); err != nil {
+		t.Fatal(err)
+	}
+	if err := get(); err != nil || conns.Load() != 1 || requests.Load() != 2 {
+		t.Fatalf("the second request: %v, %d connections, %d requests", err, conns.Load(), requests.Load())
+	}
+	src.p.Store(&Policy{Mode: ModeStandard})
+	// The hazard: the policy is checked when a connection is dialled, and the warm one is not dialled again.
+	if err := get(); err != nil || requests.Load() != 3 {
+		t.Fatalf("over the warm connection: %v, %d requests", err, requests.Load())
+	}
+	CloseIdleConnections()
+	err := get()
+	var e *Error
+	if !errors.As(err, &e) || e.Outcome != OutcomeBlocked || !strings.Contains(e.Rule, "loopback") {
+		t.Fatalf("after CloseIdleConnections: %v", err)
+	}
+	if requests.Load() != 3 || conns.Load() != 1 {
+		t.Errorf("the blocked request reached the server: %d requests, %d connections", requests.Load(), conns.Load())
+	}
+	if !strings.Contains(log.String(), `"event":"outbound_blocked"`) {
+		t.Errorf("log %s", log.String())
+	}
+	// Allowed again, the next request dials a new connection.
+	src.p.Store(&allowed)
+	if err := get(); err != nil || conns.Load() != 2 {
+		t.Errorf("allowed again: %v, %d connections", err, conns.Load())
+	}
+}
+
+// TestCloseIdleConnectionsEveryClient: one call reaches every client on its next request, and a client that saw it
+// once does not close its connections again.
+func TestCloseIdleConnectionsEveryClient(t *testing.T) {
+	srv, _, conns := countingServer(t)
+	a, _ := newTestClient(t, Config{})
+	b, _ := newTestClient(t, Config{})
+	for _, c := range []*Client{a, b, a, b} {
+		if _, err := c.Do(t.Context(), Request{URL: srv.URL}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if conns.Load() != 2 {
+		t.Fatalf("%d connections while warm", conns.Load())
+	}
+	CloseIdleConnections()
+	for _, c := range []*Client{a, b, a, b} {
+		if _, err := c.Do(t.Context(), Request{URL: srv.URL}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if conns.Load() != 4 {
+		t.Errorf("%d connections after CloseIdleConnections, want 4", conns.Load())
+	}
+}
+
+// blockingServer answers 200 and counts requests and connections; a request to /slow waits for release first and
+// announces its arrival on arrived.
+func blockingServer(t *testing.T, http2 bool) (srv *httptest.Server, requests, conns *atomic.Int32,
+	arrived <-chan struct{}, release chan<- struct{}) {
+	t.Helper()
+	var reqs, cs atomic.Int32
+	arr, rel := make(chan struct{}, 1), make(chan struct{})
+	srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqs.Add(1)
+		if r.URL.Path == "/slow" {
+			arr <- struct{}{}
+			<-rel
+		}
+		_, _ = io.WriteString(w, "HTTP/"+strconv.Itoa(r.ProtoMajor))
+	}))
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			cs.Add(1)
+		}
+	}
+	if http2 {
+		srv.EnableHTTP2 = true
+		srv.StartTLS()
+	} else {
+		srv.Start()
+	}
+	t.Cleanup(srv.Close)
+	return srv, &reqs, &cs, arr, rel
+}
+
+// TestCloseIdleConnectionsInFlight is C-20.AC-1 for a connection that is busy when the policy changes: a request is
+// in flight on an allowed connection while the policy is made stricter and CloseIdleConnections runs. Requests made
+// during it and after it has finished never reach the server, over HTTP/1.1, where the busy connection returns to
+// the pool when it finishes, and over HTTP/2, where new requests would otherwise share the busy connection.
+func TestCloseIdleConnectionsInFlight(t *testing.T) {
+	for _, h2 := range []bool{false, true} {
+		t.Run(map[bool]string{false: "http1", true: "http2"}[h2], func(t *testing.T) {
+			srv, requests, conns, arrived, release := blockingServer(t, h2)
+			src := &mutablePolicy{}
+			allowed := Policy{Mode: ModeStandard,
+				Allowed: []Entry{{text: "127.0.0.0/8", network: mustPrefix("127.0.0.0/8")}}}
+			src.p.Store(&allowed)
+			c, _ := newTestClient(t, Config{Policy: src})
+			wantProto := "HTTP/1"
+			if h2 {
+				trust(c, srv.Certificate())
+				wantProto = "HTTP/2"
+			}
+			res, err := c.Do(t.Context(), Request{URL: srv.URL + "/warm"})
+			if err != nil || string(res.Body) != wantProto {
+				t.Fatalf("warm request: %v, %q", err, res.Body)
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := c.Do(t.Context(), Request{URL: srv.URL + "/slow"})
+				done <- err
+			}()
+			<-arrived
+			src.p.Store(&Policy{Mode: ModeStandard})
+			CloseIdleConnections()
+			blocked := func(when string) {
+				t.Helper()
+				_, err := c.Do(t.Context(), Request{URL: srv.URL + "/hook"})
+				var e *Error
+				if !errors.As(err, &e) || e.Outcome != OutcomeBlocked {
+					t.Fatalf("%s: %v", when, err)
+				}
+			}
+			blocked("while a request is in flight")
+			close(release)
+			if err := <-done; err != nil {
+				t.Fatalf("the request in flight: %v", err)
+			}
+			blocked("the first request after it finished")
+			blocked("the second request after it finished")
+			if requests.Load() != 2 || conns.Load() != 1 {
+				t.Errorf("a blocked request reached the server: %d requests, %d connections", requests.Load(),
+					conns.Load())
+			}
+		})
+	}
+}
+
+// TestCloseIdleConnectionsConcurrent: requests racing a policy change build one transport per generation and keep
+// working.
+func TestCloseIdleConnectionsConcurrent(t *testing.T) {
+	srv, _, _ := countingServer(t)
+	c, _ := newTestClient(t, Config{})
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for range 10 {
+				if _, err := c.Do(t.Context(), Request{URL: srv.URL}); err != nil {
+					t.Error(err)
+				}
+			}
+		})
+	}
+	wg.Go(func() {
+		for range 10 {
+			CloseIdleConnections()
+		}
+	})
+	wg.Wait()
+	if _, err := c.Do(t.Context(), Request{URL: srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.transports.current.Load().generation; got != policyGeneration.Load() {
+		t.Errorf("transport of generation %d, want %d", got, policyGeneration.Load())
 	}
 }

@@ -4171,7 +4171,7 @@ type Organization struct {
 		UrlStatus SecretStatus `json:"url_status"`
 	} `json:"outgoing_heartbeat"`
 
-	// Retention Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
+	// Retention Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
 	Retention RetentionSettings `json:"retention"`
 
 	// SeverityLabel Label that carries severity.
@@ -4197,7 +4197,7 @@ type OrganizationBase struct {
 	// OidcTokenGraceSeconds `auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner's last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.
 	OidcTokenGraceSeconds int `json:"oidc_token_grace_seconds"`
 
-	// Retention Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
+	// Retention Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
 	Retention RetentionSettings `json:"retention"`
 
 	// SeverityLabel Label that carries severity.
@@ -4230,7 +4230,7 @@ type OrganizationInput struct {
 		Url nullable.Nullable[string] `json:"url,omitempty"`
 	} `json:"outgoing_heartbeat"`
 
-	// Retention Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
+	// Retention Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
 	Retention RetentionSettings `json:"retention"`
 
 	// SeverityLabel Label that carries severity.
@@ -4555,7 +4555,7 @@ type ResolvedBy struct {
 // ResolverKind Who resolved an Alert Group: a person or the system.
 type ResolverKind string
 
-// RetentionSettings Retention periods in days. `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
+// RetentionSettings Retention periods in days, from 1 to 36500 (100 years). `alert_group_summaries_days` must be at least `alert_details_days`: details are always removed before the summary rows they belong to, and an update that breaks this gets `422` with `retention_order`. Details are the Alerts inside Alert Groups, Timeline entries and delivery events; Notes are not details: they are kept with the summary rows and deleted with them.
 type RetentionSettings struct {
 	// AlertDetailsDays Alerts inside Alert Groups, Timeline entries and delivery events (`retention.alert_details`). Never Notes.
 	AlertDetailsDays int `json:"alert_details_days"`
@@ -9099,7 +9099,7 @@ type ClientInterface interface {
 
 	// UpdateOrganizationWithBody Update the Organization
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. The settings become editable in stages, starting with `totp_required`; while a field is not editable yet, a changed value in it gets `422` with `unsupported` pointing at that field.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -9108,7 +9108,7 @@ type ClientInterface interface {
 
 	// UpdateOrganization Update the Organization
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. The settings become editable in stages, starting with `totp_required`; while a field is not editable yet, a changed value in it gets `422` with `unsupported` pointing at that field.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -9131,12 +9131,16 @@ type ClientInterface interface {
 
 	// UpdateOutboundPolicyWithBody Update the outbound address policy
 	//
+	// Replaces the policy and its lists. Requires `If-Match`; a stale ETag gets `412`. Each entry is a network in CIDR form or a bare address, a host name, or a domain written `*.example.org`; an entry that does not parse gets `422` with `invalid_format` and a repeated one `duplicate`, at `/allowed/<i>` or `/denied/<i>`. `always_blocked` is read-only and ignored. The change takes effect at once on every replica, idle pooled connections included, is recorded in the Audit log as `outbound_policy.updated` and is announced with the `organization` hint. Needs `organization:write`.
+	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with PUT /organization/outbound-policy (the `UpdateOutboundPolicy` operationId).
 	UpdateOutboundPolicyWithBody(ctx context.Context, params *UpdateOutboundPolicyParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// UpdateOutboundPolicy Update the outbound address policy
+	//
+	// Replaces the policy and its lists. Requires `If-Match`; a stale ETag gets `412`. Each entry is a network in CIDR form or a bare address, a host name, or a domain written `*.example.org`; an entry that does not parse gets `422` with `invalid_format` and a repeated one `duplicate`, at `/allowed/<i>` or `/denied/<i>`. `always_blocked` is read-only and ignored. The change takes effect at once on every replica, idle pooled connections included, is recorded in the Audit log as `outbound_policy.updated` and is announced with the `organization` hint. Needs `organization:write`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -9145,7 +9149,7 @@ type ClientInterface interface {
 
 	// ListSeverityValues List severity values seen
 	//
-	// Values of the severity label seen in the last `organization.severity_values_window`, with counts; unmapped values count as warning.
+	// Values of the severity label seen in the last `organization.severity_values_window`, with counts, the most frequent first and at most 500 values; unmapped values count as warning.
 	//
 	// Corresponds with GET /organization/severity-values (the `ListSeverityValues` operationId).
 	ListSeverityValues(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -11884,7 +11888,7 @@ func (c *Client) GetOrganization(ctx context.Context, reqEditors ...RequestEdito
 
 // UpdateOrganizationWithBody Update the Organization
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. The settings become editable in stages, starting with `totp_required`; while a field is not editable yet, a changed value in it gets `422` with `unsupported` pointing at that field.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 //
 // Takes any type of body and a specified content type.
 //
@@ -11903,7 +11907,7 @@ func (c *Client) UpdateOrganizationWithBody(ctx context.Context, params *UpdateO
 
 // UpdateOrganization Update the Organization
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. The settings become editable in stages, starting with `totp_required`; while a field is not editable yet, a changed value in it gets `422` with `unsupported` pointing at that field.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -11956,6 +11960,8 @@ func (c *Client) GetOutboundPolicy(ctx context.Context, reqEditors ...RequestEdi
 
 // UpdateOutboundPolicyWithBody Update the outbound address policy
 //
+// Replaces the policy and its lists. Requires `If-Match`; a stale ETag gets `412`. Each entry is a network in CIDR form or a bare address, a host name, or a domain written `*.example.org`; an entry that does not parse gets `422` with `invalid_format` and a repeated one `duplicate`, at `/allowed/<i>` or `/denied/<i>`. `always_blocked` is read-only and ignored. The change takes effect at once on every replica, idle pooled connections included, is recorded in the Audit log as `outbound_policy.updated` and is announced with the `organization` hint. Needs `organization:write`.
+//
 // Takes any type of body and a specified content type.
 //
 // Corresponds with PUT /organization/outbound-policy (the `UpdateOutboundPolicy` operationId).
@@ -11972,6 +11978,8 @@ func (c *Client) UpdateOutboundPolicyWithBody(ctx context.Context, params *Updat
 }
 
 // UpdateOutboundPolicy Update the outbound address policy
+//
+// Replaces the policy and its lists. Requires `If-Match`; a stale ETag gets `412`. Each entry is a network in CIDR form or a bare address, a host name, or a domain written `*.example.org`; an entry that does not parse gets `422` with `invalid_format` and a repeated one `duplicate`, at `/allowed/<i>` or `/denied/<i>`. `always_blocked` is read-only and ignored. The change takes effect at once on every replica, idle pooled connections included, is recorded in the Audit log as `outbound_policy.updated` and is announced with the `organization` hint. Needs `organization:write`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -11990,7 +11998,7 @@ func (c *Client) UpdateOutboundPolicy(ctx context.Context, params *UpdateOutboun
 
 // ListSeverityValues List severity values seen
 //
-// Values of the severity label seen in the last `organization.severity_values_window`, with counts; unmapped values count as warning.
+// Values of the severity label seen in the last `organization.severity_values_window`, with counts, the most frequent first and at most 500 values; unmapped values count as warning.
 //
 // Corresponds with GET /organization/severity-values (the `ListSeverityValues` operationId).
 func (c *Client) ListSeverityValues(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -21360,7 +21368,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateOrganizationWithBodyWithResponse Update the Organization
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. The settings become editable in stages, starting with `totp_required`; while a field is not editable yet, a changed value in it gets `422` with `unsupported` pointing at that field.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21369,7 +21377,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateOrganizationWithResponse Update the Organization
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. The settings become editable in stages, starting with `totp_required`; while a field is not editable yet, a changed value in it gets `422` with `unsupported` pointing at that field.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21396,12 +21404,16 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateOutboundPolicyWithBodyWithResponse Update the outbound address policy
 	//
+	// Replaces the policy and its lists. Requires `If-Match`; a stale ETag gets `412`. Each entry is a network in CIDR form or a bare address, a host name, or a domain written `*.example.org`; an entry that does not parse gets `422` with `invalid_format` and a repeated one `duplicate`, at `/allowed/<i>` or `/denied/<i>`. `always_blocked` is read-only and ignored. The change takes effect at once on every replica, idle pooled connections included, is recorded in the Audit log as `outbound_policy.updated` and is announced with the `organization` hint. Needs `organization:write`.
+	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /organization/outbound-policy (the `UpdateOutboundPolicy` operationId).
 	UpdateOutboundPolicyWithBodyWithResponse(ctx context.Context, params *UpdateOutboundPolicyParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateOutboundPolicyResponse, error)
 
 	// UpdateOutboundPolicyWithResponse Update the outbound address policy
+	//
+	// Replaces the policy and its lists. Requires `If-Match`; a stale ETag gets `412`. Each entry is a network in CIDR form or a bare address, a host name, or a domain written `*.example.org`; an entry that does not parse gets `422` with `invalid_format` and a repeated one `duplicate`, at `/allowed/<i>` or `/denied/<i>`. `always_blocked` is read-only and ignored. The change takes effect at once on every replica, idle pooled connections included, is recorded in the Audit log as `outbound_policy.updated` and is announced with the `organization` hint. Needs `organization:write`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21410,7 +21422,7 @@ type ClientWithResponsesInterface interface {
 
 	// ListSeverityValuesWithResponse List severity values seen
 	//
-	// Values of the severity label seen in the last `organization.severity_values_window`, with counts; unmapped values count as warning.
+	// Values of the severity label seen in the last `organization.severity_values_window`, with counts, the most frequent first and at most 500 values; unmapped values count as warning.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -36006,7 +36018,7 @@ func (c *ClientWithResponses) GetOrganizationWithResponse(ctx context.Context, r
 
 // UpdateOrganizationWithBodyWithResponse Update the Organization
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. The settings become editable in stages, starting with `totp_required`; while a field is not editable yet, a changed value in it gets `422` with `unsupported` pointing at that field.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36021,7 +36033,7 @@ func (c *ClientWithResponses) UpdateOrganizationWithBodyWithResponse(ctx context
 
 // UpdateOrganizationWithResponse Update the Organization
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. The settings become editable in stages, starting with `totp_required`; while a field is not editable yet, a changed value in it gets `422` with `unsupported` pointing at that field.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36066,6 +36078,8 @@ func (c *ClientWithResponses) GetOutboundPolicyWithResponse(ctx context.Context,
 
 // UpdateOutboundPolicyWithBodyWithResponse Update the outbound address policy
 //
+// Replaces the policy and its lists. Requires `If-Match`; a stale ETag gets `412`. Each entry is a network in CIDR form or a bare address, a host name, or a domain written `*.example.org`; an entry that does not parse gets `422` with `invalid_format` and a repeated one `duplicate`, at `/allowed/<i>` or `/denied/<i>`. `always_blocked` is read-only and ignored. The change takes effect at once on every replica, idle pooled connections included, is recorded in the Audit log as `outbound_policy.updated` and is announced with the `organization` hint. Needs `organization:write`.
+//
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /organization/outbound-policy (the `UpdateOutboundPolicy` operationId).
@@ -36078,6 +36092,8 @@ func (c *ClientWithResponses) UpdateOutboundPolicyWithBodyWithResponse(ctx conte
 }
 
 // UpdateOutboundPolicyWithResponse Update the outbound address policy
+//
+// Replaces the policy and its lists. Requires `If-Match`; a stale ETag gets `412`. Each entry is a network in CIDR form or a bare address, a host name, or a domain written `*.example.org`; an entry that does not parse gets `422` with `invalid_format` and a repeated one `duplicate`, at `/allowed/<i>` or `/denied/<i>`. `always_blocked` is read-only and ignored. The change takes effect at once on every replica, idle pooled connections included, is recorded in the Audit log as `outbound_policy.updated` and is announced with the `organization` hint. Needs `organization:write`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -36092,7 +36108,7 @@ func (c *ClientWithResponses) UpdateOutboundPolicyWithResponse(ctx context.Conte
 
 // ListSeverityValuesWithResponse List severity values seen
 //
-// Values of the severity label seen in the last `organization.severity_values_window`, with counts; unmapped values count as warning.
+// Values of the severity label seen in the last `organization.severity_values_window`, with counts, the most frequent first and at most 500 values; unmapped values count as warning.
 //
 // Returns a wrapper object for the known response body format(s).
 //

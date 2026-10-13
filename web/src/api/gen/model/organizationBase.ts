@@ -39,6 +39,7 @@ export interface OrganizationBase {
   /**
      * `auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner's last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.
      * @minimum 1
+     * @maximum 3153600000
      */
   oidc_token_grace_seconds: number;
 }

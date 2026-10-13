@@ -210,7 +210,7 @@ export const getUpdateOrganizationUrl = () => {
 }
 
 /**
- * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. The settings become editable in stages, starting with `totp_required`; while a field is not editable yet, a changed value in it gets `422` with `unsupported` pointing at that field.
+ * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on `outgoing_heartbeat.url` or a proxy `password` clears it. Every field is validated; an invalid one gets `422` at the full JSON pointer of the field, such as `/severity_styles/1/color` or `/retention/alert_details_days`, with `invalid_format`, `duplicate`, `required`, `too_short`, `too_long`, `out_of_range` or `retention_order`. A retention period or `oidc_token_grace_seconds` beyond its `maximum` is refused with `400` by request validation; `out_of_range` is the second, defensive check of the same bounds. A change is recorded in the Audit log as `organization.updated` with its before/after diff and announced with the `organization` hint; Severity levels and Instance labels apply to later evaluations only.
  * @summary Update the Organization
  */
 export const updateOrganization = async (organizationInput: OrganizationInput, options?: Parameters<typeof apiFetch>[1]): Promise<Organization> => {
@@ -399,6 +399,7 @@ export const getUpdateOutboundPolicyUrl = () => {
 }
 
 /**
+ * Replaces the policy and its lists. Requires `If-Match`; a stale ETag gets `412`. Each entry is a network in CIDR form or a bare address, a host name, or a domain written `*.example.org`; an entry that does not parse gets `422` with `invalid_format` and a repeated one `duplicate`, at `/allowed/<i>` or `/denied/<i>`. `always_blocked` is read-only and ignored. The change takes effect at once on every replica, idle pooled connections included, is recorded in the Audit log as `outbound_policy.updated` and is announced with the `organization` hint. Needs `organization:write`.
  * @summary Update the outbound address policy
  */
 export const updateOutboundPolicy = async (outboundPolicy: NonReadonly<OutboundPolicy>, options?: Parameters<typeof apiFetch>[1]): Promise<OutboundPolicy> => {
@@ -587,7 +588,7 @@ export const getListSeverityValuesUrl = () => {
 }
 
 /**
- * Values of the severity label seen in the last `organization.severity_values_window`, with counts; unmapped values count as warning.
+ * Values of the severity label seen in the last `organization.severity_values_window`, with counts, the most frequent first and at most 500 values; unmapped values count as warning.
  * @summary List severity values seen
  */
 export const listSeverityValues = async ( options?: Parameters<typeof apiFetch>[1]): Promise<SeverityValueList> => {
