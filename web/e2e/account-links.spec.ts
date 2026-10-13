@@ -195,8 +195,10 @@ test("links, unlinks and removes messenger accounts", async ({ browser, page }) 
   await priv(7001, "alice_t", `/start ${token}`);
   await expect(tg).toBeHidden({ timeout: 15_000 });
   await expect(alice.getByTestId("account-link-summary")).toHaveText(
-    "Telegram · Dev Telegram · @alice_t · Never",
+    "Telegram · @alice_t · for all Telegram bots",
   );
+  await expect(alice.getByTestId("account-link-via")).toHaveText("linked via Dev Telegram · Never");
+  await expect(alice.getByRole("button", { name: "Relink Telegram" })).toBeVisible();
 
   // 3. Mattermost: a wrong code counts down the attempts, the right one links.
   const before = (await dms("u-alice")).length;
@@ -249,7 +251,8 @@ test("links, unlinks and removes messenger accounts", async ({ browser, page }) 
   await page.goto(`/admin/users/${aliceId}`);
   await expect(page.getByRole("heading", { name: "Account links" })).toBeVisible();
   await expect(rows(page)).toHaveCount(1);
-  await expect(rows(page)).toContainText("Telegram · Dev Telegram · @alice_t");
+  await expect(rows(page)).toContainText("Telegram · @alice_t · for all Telegram bots");
+  await expect(rows(page)).toContainText("linked via Dev Telegram");
   await expect(page.getByRole("button", { name: /^Link/ })).toHaveCount(0);
   await shot(page, "account-links-admin");
   await page.getByRole("button", { name: "Remove @alice_t", exact: true }).click();

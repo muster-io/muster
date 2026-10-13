@@ -8,7 +8,7 @@
 -- name: ListDestinations :many
 SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d.mattermost_team_id,
        d.mattermost_channel_id, d.mattermost_team_name, d.mattermost_channel_name, d.telegram_channel_id,
-       d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title, d.webhook_mode,
+       d.telegram_channel_chat_id, d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
@@ -33,7 +33,7 @@ LIMIT @page_size;
 -- name: GetDestination :one
 SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d.mattermost_team_id,
        d.mattermost_channel_id, d.mattermost_team_name, d.mattermost_channel_name, d.telegram_channel_id,
-       d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title, d.webhook_mode,
+       d.telegram_channel_chat_id, d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,

@@ -5,20 +5,28 @@
 // type and health, the Broken banner of each Broken one, and a native select (D250) that adds a Destination of any
 // type to the list. While the Route's Storm is active it shows the Storm banner: "Storm since HH:MM: N new Alert
 // Groups. Destinations receive a Storm summary." Health follows the Destinations list, which the destination hint
-// reads again; the Route's own references name a Destination the list does not show.
+// reads again; the Route's own references name a Destination the list does not show. Each Destination reads
+// "<name> · <messenger> · via <Connection> · <channel>" (D309), and two or more Destinations that post in one chat get a
+// warning that does not block saving (D305).
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
-import { CloudLightningIcon, XIcon } from "lucide-react";
+import { CloudLightningIcon, CopyIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { useListDestinations } from "../api/gen/endpoints/destinations/destinations";
 import { useGetRoute } from "../api/gen/endpoints/routes/routes";
-import type { DestinationRef, Route } from "../api/gen/model";
+import type { Connection, Destination, DestinationRef, Route } from "../api/gen/model";
 import { fieldErrorText } from "../lib/api";
 import { useTimeFormat } from "../lib/time";
 import { useCan } from "./app-shell";
 import { BrokenBanner, HealthBadge, destinationTypeName, healthText } from "./destination-health";
+import {
+  duplicateChatGroups,
+  fullLabel,
+  labelParts,
+  useConnectionsById,
+} from "./destination-label";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
@@ -35,30 +43,63 @@ export function routeDestinationErrorText(t: TFunction, code: string): string {
   }
 }
 
-/** Every Destination the Route editor can offer, with its health; page size at most 500 (api.page_size). */
-export function useDestinationChoices(): { items: DestinationRef[]; loaded: boolean } {
+/**
+ * Every Destination the Route editor can offer, with its health, and the Connections that label them; page size at
+ * most 500 (api.page_size).
+ */
+export function useDestinationChoices(): {
+  items: Destination[];
+  connections: ReadonlyMap<string, Connection>;
+  loaded: boolean;
+} {
   const canRead = useCan("destinations:read");
   const list = useListDestinations({ limit: 500 }, { query: { enabled: canRead } });
-  return {
-    items: (list.data?.items ?? []).map((d) => ({
-      id: d.id,
-      name: d.name,
-      type: d.type,
-      health: d.health,
-    })),
-    loaded: list.isSuccess,
-  };
+  const connections = useConnectionsById();
+  return { items: list.data?.items ?? [], connections, loaded: list.isSuccess };
 }
 
-/** A Destination as an option of a picker: its name, type and, when Broken, its health. */
-export function destinationOptionLabel(t: TFunction, d: DestinationRef): string {
+/** A Destination as an option of a picker: its full label and, when Broken, its health. */
+export function destinationOptionLabel(
+  t: TFunction,
+  d: Destination,
+  connections: ReadonlyMap<string, Connection>,
+): string {
+  const label = fullLabel(t, d, connections);
   return d.health.state === "broken"
-    ? t("routes.destinations.optionBroken", {
-        name: d.name,
-        type: destinationTypeName(t, d.type),
-        health: healthText(t, d.health),
-      })
-    : t("routes.destinations.option", { name: d.name, type: destinationTypeName(t, d.type) });
+    ? t("routes.destinations.optionBroken", { label, health: healthText(t, d.health) })
+    : label;
+}
+
+/** The names of a duplicate chat as a list in the reader's language: "a and b", "a, b and c". */
+function namesList(language: string, names: readonly string[]): string {
+  try {
+    return new Intl.ListFormat(language, { type: "conjunction" }).format(names);
+  } catch {
+    return names.join(", ");
+  }
+}
+
+/** The warning about two or more Destinations of the Route that post in one chat; saving stays allowed. */
+function DuplicateChatWarning({ names }: { names: readonly string[] }) {
+  const { t, i18n } = useTranslation();
+  const list = namesList(i18n.language, names);
+  return (
+    <p
+      className="flex items-start gap-2 rounded-lg border border-warning/60 bg-warning-surface px-3 py-2 text-sm text-foreground"
+      role="status"
+      data-testid="duplicate-chat-warning"
+    >
+      <CopyIcon
+        aria-hidden="true"
+        className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-warning"
+      />
+      <span className="min-w-0 wrap-anywhere">
+        {names.length === 2
+          ? t("routes.destinations.sameChatTwo", { names: list })
+          : t("routes.destinations.sameChat", { names: list, count: names.length })}
+      </span>
+    </p>
+  );
 }
 
 /**
@@ -92,7 +133,7 @@ export function StormBanner({ route: stored }: { route: Route | undefined }) {
   );
 }
 
-function DestinationName({ destination }: { destination: DestinationRef }) {
+function DestinationName({ destination }: { destination: Destination | DestinationRef }) {
   const canRead = useCan("destinations:read");
   if (!canRead) {
     return <span className="font-medium wrap-anywhere">{destination.name}</span>;
@@ -139,6 +180,17 @@ export function RouteDestinations({
       route?.destinations.find((d) => d.id === destinationId),
   }));
   const rest = choices.items.filter((d) => !value.includes(d.id));
+  // The label after the name: from the Destinations list, or the type alone for one only the Route names.
+  const restOf = (ref: Destination | DestinationRef): string => {
+    const full = choices.items.find((d) => d.id === ref.id);
+    return full === undefined
+      ? destinationTypeName(t, ref.type)
+      : labelParts(t, full, choices.connections).slice(1).join(" · ");
+  };
+  const duplicates = duplicateChatGroups(
+    value.flatMap((destinationId) => choices.items.filter((d) => d.id === destinationId)),
+    choices.connections,
+  );
   const Heading = readOnly ? "h2" : "legend";
   const body = (
     <>
@@ -167,9 +219,9 @@ export function RouteDestinations({
                     <span className="font-mono text-sm wrap-anywhere">{destinationId}</span>
                   ) : (
                     <>
-                      <DestinationName destination={ref} />
-                      <span className="text-sm text-muted-foreground">
-                        {destinationTypeName(t, ref.type)}
+                      <span className="min-w-0 wrap-anywhere" data-testid="route-destination-label">
+                        <DestinationName destination={ref} />
+                        <span className="text-sm text-muted-foreground">{` · ${restOf(ref)}`}</span>
                       </span>
                       <HealthBadge health={ref.health} />
                     </>
@@ -198,8 +250,11 @@ export function RouteDestinations({
           })}
         </ul>
       )}
+      {duplicates.map((names) => (
+        <DuplicateChatWarning key={names.join("\n")} names={names} />
+      ))}
       {!readOnly && onChange !== undefined && (
-        <div className="flex max-w-md min-w-0 flex-col gap-1.5">
+        <div className="flex max-w-xl min-w-0 flex-col gap-1.5">
           <Label htmlFor={`${id}-add`}>{t("routes.destinations.add")}</Label>
           <NativeSelect
             id={`${id}-add`}
@@ -220,7 +275,7 @@ export function RouteDestinations({
             </NativeSelectOption>
             {rest.map((d) => (
               <NativeSelectOption key={d.id} value={d.id}>
-                {destinationOptionLabel(t, d)}
+                {destinationOptionLabel(t, d, choices.connections)}
               </NativeSelectOption>
             ))}
           </NativeSelect>

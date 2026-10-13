@@ -26,6 +26,11 @@ export type TelegramDestination = TelegramDestinationInput & DestinationReadFiel
   /** @nullable */
   channel_title?: string | null;
   /**
+     * The channel's numeric chat id, found by the Destination check (`getChat` on the channel). Null until a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.
+     * @nullable
+     */
+  readonly channel_chat_id?: string | null;
+  /**
      * The channel's linked discussion group, where comments live, found by the Destination check through `getChat` on the channel (`linked_chat_id`). Not an input. Null until a check has found it.
      * @nullable
      */

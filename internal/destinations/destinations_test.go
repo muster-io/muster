@@ -98,8 +98,9 @@ func newStore() *fakeStore {
 			Mentions: []byte(`{}`), LimiterLimit: 30, LimiterPerSeconds: 60, Health: "healthy", CreatedAt: t0,
 			Version: 2},
 		{ID: 2, PublicID: "DSAAAAAAAAAAA2", Type: "telegram", Name: "alerts", ConnectionPublicID: txt("CNAAAAAAAAAAA2"),
-			TelegramChannelID: txt("@alerts"), TelegramDiscussionChatID: pgtype.Int8{Int64: -100200, Valid: true},
-			Proxy: []byte(`{"enabled":false}`), Mentions: []byte(`{}`), LimiterLimit: 10, LimiterPerSeconds: 60,
+			TelegramChannelID: txt("@alerts"), TelegramChannelChatID: pgtype.Int8{Int64: -100100, Valid: true},
+			TelegramDiscussionChatID: pgtype.Int8{Int64: -100200, Valid: true},
+			Proxy:                    []byte(`{"enabled":false}`), Mentions: []byte(`{}`), LimiterLimit: 10, LimiterPerSeconds: 60,
 			Health: "broken", BrokenSince: since, BrokenReason: txt("chat not found"), CreatedAt: t0, Version: 1},
 		{ID: 3, PublicID: "DSAAAAAAAAAAA3", Type: "webhook", Name: "hook", WebhookMode: txt("events"),
 			WebhookEventsConfig: []byte(`{"url":"https://example.org","headers":[]}`),
@@ -123,11 +124,11 @@ func TestList(t *testing.T) {
 	}
 	mm, tg := page.Destinations[0], page.Destinations[1]
 	if *mm.Connection != "CNAAAAAAAAAAA1" || *mm.MattermostTeamID != "team" || len(mm.Routes) != 1 ||
-		mm.Routes[0].Name != "payments" || len(tg.Routes) != 0 || tg.Routes == nil {
+		mm.Routes[0].Name != "payments" || len(tg.Routes) != 0 || tg.Routes == nil || mm.TelegramChannelChatID != nil {
 		t.Errorf("mattermost %+v telegram routes %v", mm, tg.Routes)
 	}
 	if tg.Health.State != "broken" || tg.Health.Since == nil || *tg.Health.Reason != "chat not found" ||
-		*tg.TelegramDiscussionGroupID != "-100200" {
+		*tg.TelegramDiscussionGroupID != "-100200" || *tg.TelegramChannelChatID != "-100100" {
 		t.Errorf("telegram %+v", tg)
 	}
 	page, err = s.List(t.Context(), ListFilter{Limit: 2, After: page.Next})

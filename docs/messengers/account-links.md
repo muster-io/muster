@@ -19,7 +19,8 @@ remove a link of its own User.
 
 ## Link Telegram
 
-1. In your profile, open **Messenger accounts**, choose the Telegram Connection and select **Link Telegram**.
+1. In your profile, open **Messenger accounts**, choose the Telegram Connection and select **Link Telegram** — or
+   **Relink Telegram** once you have a Telegram link, which the new link replaces.
 2. Muster shows a link `https://t.me/<bot>?start=<token>`. Open it on the device where you use Telegram, within 10
    minutes; the link works once.
 3. Telegram opens a chat with the bot. Press **Start**.
@@ -45,6 +46,23 @@ codes an hour, whoever asks; beyond that, wait until the oldest request is an ho
 know, a bot account and a deactivated account cannot be linked. An account that is linked to another User is refused.
 
 The bot must be allowed to open direct messages with you; see [Direct messages](mattermost.md#direct-messages).
+
+## Several Connections of one messenger
+
+An Organization may have several Connections of one messenger, such as two Mattermost bots on one server or a second
+Telegram bot. What a link covers differs by messenger:
+
+- **Mattermost links are per Connection.** Each Mattermost Connection is its own Identity space, even when two
+  Connections use bots on the same server: two bots on one server need two links, made one after the other from
+  **Link Mattermost** with each Connection. Your profile lists one row per Connection.
+- **A Telegram link is valid for all Telegram bots.** Telegram has one Identity space, so the link you make through any
+  Telegram Connection lets you press buttons sent by every Telegram bot of Muster. Your profile shows it as
+  "Telegram · @<username> · for all Telegram bots", with "linked via <Connection>" below.
+
+One chat reached through two Connections is two Destinations, and each posts its own message for every Alert Group.
+This is allowed, but the Route editor warns when two or more of a Route's Destinations deliver to the same chat — one
+Telegram chat, or one Mattermost server and channel — since their messages appear twice. The Destinations list, the
+Route editor and the Alert Group page name each Destination's Connection and channel, so you can tell them apart.
 
 ## Unlink
 

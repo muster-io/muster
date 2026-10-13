@@ -89,6 +89,7 @@ type Destination struct {
 	MattermostChannelName *string
 
 	TelegramChannelID            *string
+	TelegramChannelChatID        *string
 	TelegramDiscussionGroupID    *string
 	TelegramChannelTitle         *string
 	TelegramDiscussionGroupTitle *string
@@ -307,6 +308,10 @@ func destinationOf(r dbgen.GetDestinationRow) Destination {
 		Mentions: r.Mentions, LimiterLimit: r.LimiterLimit, LimiterPerSeconds: r.LimiterPerSeconds,
 		Health:    Health{State: r.Health, Since: timeOf(r.BrokenSince), Reason: textOf(r.BrokenReason)},
 		CreatedAt: r.CreatedAt.UTC(), Version: r.Version}
+	if r.TelegramChannelChatID.Valid {
+		id := fmt.Sprint(r.TelegramChannelChatID.Int64)
+		d.TelegramChannelChatID = &id
+	}
 	if r.TelegramDiscussionChatID.Valid {
 		id := fmt.Sprint(r.TelegramDiscussionChatID.Int64)
 		d.TelegramDiscussionGroupID = &id

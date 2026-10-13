@@ -64,7 +64,7 @@ function DestinationChoice({
   const id = useId();
   const choices = useDestinationChoices();
   return (
-    <div className="flex max-w-sm min-w-0 flex-col gap-1.5">
+    <div className="flex max-w-xl min-w-0 flex-col gap-1.5">
       <Label htmlFor={id}>{t("routes.suggestions.destination")}</Label>
       <NativeSelect
         id={id}
@@ -80,7 +80,7 @@ function DestinationChoice({
         </NativeSelectOption>
         {choices.items.map((d) => (
           <NativeSelectOption key={d.id} value={d.id}>
-            {destinationOptionLabel(t, d)}
+            {destinationOptionLabel(t, d, choices.connections)}
           </NativeSelectOption>
         ))}
       </NativeSelect>

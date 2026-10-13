@@ -37,7 +37,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-15 Outgoing webhook | Shadow | 25 | S-044, S-045, S-046 | yes | 25 of 25 |
 | C-16 Destination test | Shadow | 14 | S-047, S-048 | yes | 14 of 14 |
 | C-17 Timers | Actions | 20 | S-049, S-068, S-050 | yes | 20 of 20 |
-| C-18 Account links | Actions | 18 | S-051, S-052, S-069 | yes | 18 of 18 |
+| C-18 Account links | Actions | 18 | S-051, S-052, S-069, S-070 | yes | 18 of 18 |
 | C-19 Self-observation | Operations | 15 | S-053, S-054, S-059 | yes | 15 of 15 |
 | C-20 Organization settings and security | Operations | 12 | S-055, S-056 | yes | 12 of 12 |
 | C-21 Documentation site and runbooks | Operations | 9 | S-057, S-058, S-060 | yes | 9 of 9 |
@@ -294,7 +294,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-08.FR-1 | S-025 (part), S-027 (part), S-031 (part), S-033 (part), S-034 (part), S-035 (part), S-036 (part), S-038 (part), S-064 (part), S-050 (part) | complete | later policy sections and the Destinations picker come with their capabilities (S-031, S-033, S-038, S-064, S-050); S-035 writes the Destinations of a Route |
+| C-08.FR-1 | S-025 (part), S-027 (part), S-031 (part), S-033 (part), S-034 (part), S-035 (part), S-036 (part), S-038 (part), S-064 (part), S-050 (part), S-070 (part) | complete | later policy sections and the Destinations picker come with their capabilities (S-031, S-033, S-038, S-064, S-050); S-035 writes the Destinations of a Route; the Route editor's Destination labels and duplicate-chat warning in S-070 (D309) |
 | C-08.FR-2 | S-025 (part), S-027 | complete |  |
 | C-08.FR-3 | S-025 (part), S-027 | complete |  |
 | C-08.FR-4 | S-025 (part), S-028 | complete | grouping by the key needs Alert Groups (C-09, S-028) |
@@ -334,7 +334,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-09.FR-8 | S-063 (part), S-049 | complete | the Snooze is C-10 (S-032, its end S-063); the ack timeout starting over is C-17 (S-049) |
 | C-09.FR-9 | S-028 (part), S-031 (part), S-032 | complete | the Loud cases need Acknowledge and Snooze (C-10, S-032) |
 | C-09.FR-10 | S-028 (part), S-030 (part), S-036 (part) | complete | from C-11 on also in messages |
-| C-09.FR-11 | S-028 (part), S-030 (part), S-032 (part), S-063 (part), S-034 (part), S-049 (part) | complete | each later capability adds its entry types (S-032, S-063, S-034, S-049) |
+| C-09.FR-11 | S-028 (part), S-030 (part), S-032 (part), S-063 (part), S-034 (part), S-049 (part), S-070 (part) | complete | each later capability adds its entry types (S-032, S-063, S-034, S-049); the Timeline's delivery entries' tooltips in S-070 (D309) |
 | C-09.FR-12 | S-028 (part), S-063 | complete | Snooze ends come with S-063 |
 | C-09.FR-18 | S-028 | complete |  |
 | C-09.FR-19 | S-028 (part), S-031, S-035 (part) | complete |  |
@@ -343,7 +343,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-09.FR-17 | S-030 | complete |  |
 | C-09.FR-24 | S-030 (part), S-033 | complete |  |
 | C-09.FR-25 | S-012 (part), S-029 (part), S-030 | complete | S-012 brought the stream forward with the notice and Organization hints |
-| C-09.FR-14 | S-028 (part), S-030, S-033, S-034 (part), S-037 (part), S-038 (part), S-064 (part), S-050 (part) | complete | later sections come with S-038, S-064 and S-050 |
+| C-09.FR-14 | S-028 (part), S-030, S-033, S-034 (part), S-037 (part), S-038 (part), S-064 (part), S-050 (part), S-070 (part) | complete | later sections come with S-038, S-064 and S-050; the delivery section's tooltips in S-070 (D309) |
 | C-09.FR-20 | S-029 (part), S-030 | complete |  |
 | C-09.FR-15 | S-029 (part), S-031 | complete |  |
 | C-09.FR-16 | S-029 (part), S-030 (part), S-063 | complete | Notes are C-10 (S-063) |
@@ -421,7 +421,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-11.FR-1 | S-034, S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
+| C-11.FR-1 | S-034, S-069 (part), S-070 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305); two Destinations in one chat are warned about and `channel_chat_id` is read in S-070 (D309) |
 | C-11.FR-2 | S-034 (part), S-039 (part), S-061 (part), S-047 (part) | complete | its callers: checks from S-039, ephemeral answers from S-061, `limited` test steps from S-047 |
 | C-11.FR-3 | S-034 | complete |  |
 | C-11.FR-4 | S-034 | complete |  |
@@ -436,7 +436,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-11.FR-13 | S-035 | complete |  |
 | C-11.FR-14 | S-035 (part), S-039 (part), S-044 (part), S-045 (part) | complete |  |
 | C-11.FR-15 | S-034 | complete |  |
-| C-11.FR-16 | S-034 (part), S-035 (part), S-064 (part), S-066 (part) | complete |  |
+| C-11.FR-16 | S-034 (part), S-035 (part), S-064 (part), S-066 (part), S-070 (part) | complete | the delivery section's tooltips in S-070 (D309) |
 | C-11.FR-17 | S-034 (part), S-035 (part) | complete |  |
 | C-11.FR-18 | S-034 (part), S-035 (part), S-039 (part), S-042 (part), S-044 (part) | complete |  |
 | C-11.FR-19 | S-035 (part), S-044 (part) | complete |  |
@@ -489,7 +489,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-13.FR-1 | S-039 (part), S-040 (part) | complete |  |
+| C-13.FR-1 | S-039 (part), S-040 (part), S-070 (part) | complete | the Connections list shows the Mattermost server in S-070 (D309) |
 | C-13.FR-2 | S-039 (part), S-040 (part), S-061 (part), S-064 (part) | complete | the warning `press_answers_in_thread` in S-061, shown on the Connection page in S-040 |
 | C-13.FR-3 | S-039 (part), S-061 (part) | complete |  |
 | C-13.FR-4 | S-061 (part), S-068 (part), S-069 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminder buttons of S-068; re-verified with several Connections of one messenger in S-069 (D305) |
@@ -497,9 +497,9 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-13.FR-6 | S-039 | complete |  |
 | C-13.FR-7 | S-061 | complete |  |
 | C-13.FR-8 | S-061 | complete |  |
-| C-13.FR-9 | S-064 | complete |  |
+| C-13.FR-9 | S-064, S-070 (part) | complete | the Destinations list's "Connection · channel" column in S-070 (D309) |
 | C-13.FR-10 | S-039 (part), S-061 (part), S-064 (part) | complete |  |
-| C-13.FR-11 | S-061 (part), S-064 (part) | complete |  |
+| C-13.FR-11 | S-061 (part), S-064 (part), S-070 (part) | complete | the Internal-alerts suggestion picker's labels in S-070 (D309) |
 | C-13.FR-12 | S-061 (part), S-064 (part) | complete |  |
 | C-13.FR-13 | S-039 (part), S-040 (part), S-047 (part), S-048 (part) | complete |  |
 | C-13.AC-1 | S-061 | complete |  |
@@ -525,7 +525,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-14.FR-1 | S-041 (part), S-043 (part) | complete |  |
+| C-14.FR-1 | S-041 (part), S-043 (part), S-070 (part) | complete | the Connections list shows the Telegram bot in S-070 (D309) |
 | C-14.FR-2 | S-042 (part), S-066 (part), S-043 (part), S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
 | C-14.FR-3 | S-066, S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
 | C-14.FR-4 | S-067, S-068 (part), S-069 (part) | complete | presses from linked accounts are tested with link rows set up directly; Account links are created from S-051; presses on Thread replies come with the Reminder buttons of S-068; re-verified with several Connections of one messenger in S-069 (D305) |
@@ -643,20 +643,20 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-18
 
-[Account links](../prd/l1/C-18-account-links.md) · Actions · stories: S-051, S-052, S-069
+[Account links](../prd/l1/C-18-account-links.md) · Actions · stories: S-051, S-052, S-069, S-070
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-18.FR-1 | S-051 | complete |  |
-| C-18.FR-2 | S-051 (part), S-052 (part), S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
+| C-18.FR-2 | S-051 (part), S-052 (part), S-069 (part), S-070 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305); "Relink Telegram" in S-070 (D309) |
 | C-18.FR-3 | S-051 (part), S-052 (part) | complete |  |
-| C-18.FR-4 | S-051, S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
+| C-18.FR-4 | S-051, S-069 (part), S-070 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305); the Identity spaces explained in the profile in S-070 (D309) |
 | C-18.FR-5 | S-051 | complete |  |
-| C-18.FR-6 | S-051 (part), S-052 (part) | complete |  |
+| C-18.FR-6 | S-051 (part), S-052 (part), S-070 (part) | complete | the user page's Telegram row in S-070 (D309) |
 | C-18.FR-7 | S-051 | complete |  |
 | C-18.FR-8 | S-051, S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
 | C-18.FR-9 | S-051 | complete |  |
-| C-18.FR-10 | S-051 (part), S-052 (part), S-069 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305) |
+| C-18.FR-10 | S-051 (part), S-052 (part), S-069 (part), S-070 (part) | complete | re-verified with several Connections of one messenger in S-069 (D305); the profile's Telegram row and the Mattermost hint in S-070 (D309) |
 | C-18.FR-11 | S-051 | complete |  |
 | C-18.AC-1 | S-051 | complete |  |
 | C-18.AC-2 | S-051 | complete |  |

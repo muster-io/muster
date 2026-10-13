@@ -206,6 +206,7 @@ export const ListDestinationsResponse = zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
   "channel_title": zod.string().nullish(),
+  "channel_chat_id": zod.string().nullish().describe('The channel\'s numeric chat id, found by the Destination check (`getChat` on the channel). Null until a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.'),
   "discussion_group_id": zod.string().nullish().describe('The channel\'s linked discussion group, where comments live, found by the Destination check through `getChat` on the channel (`linked_chat_id`). Not an input. Null until a check has found it.'),
   "discussion_group_title": zod.string().nullish()
 })).and(zod.object({
@@ -761,6 +762,7 @@ export const CreateDestinationResponse = zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
   "channel_title": zod.string().nullish(),
+  "channel_chat_id": zod.string().nullish().describe('The channel\'s numeric chat id, found by the Destination check (`getChat` on the channel). Null until a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.'),
   "discussion_group_id": zod.string().nullish().describe('The channel\'s linked discussion group, where comments live, found by the Destination check through `getChat` on the channel (`linked_chat_id`). Not an input. Null until a check has found it.'),
   "discussion_group_title": zod.string().nullish()
 })).and(zod.object({
@@ -1089,6 +1091,7 @@ export const GetDestinationResponse = zod.union([zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
   "channel_title": zod.string().nullish(),
+  "channel_chat_id": zod.string().nullish().describe('The channel\'s numeric chat id, found by the Destination check (`getChat` on the channel). Null until a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.'),
   "discussion_group_id": zod.string().nullish().describe('The channel\'s linked discussion group, where comments live, found by the Destination check through `getChat` on the channel (`linked_chat_id`). Not an input. Null until a check has found it.'),
   "discussion_group_title": zod.string().nullish()
 })).and(zod.object({
@@ -1652,6 +1655,7 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
   "channel_title": zod.string().nullish(),
+  "channel_chat_id": zod.string().nullish().describe('The channel\'s numeric chat id, found by the Destination check (`getChat` on the channel). Null until a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.'),
   "discussion_group_id": zod.string().nullish().describe('The channel\'s linked discussion group, where comments live, found by the Destination check through `getChat` on the channel (`linked_chat_id`). Not an input. Null until a check has found it.'),
   "discussion_group_title": zod.string().nullish()
 })).and(zod.object({

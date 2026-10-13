@@ -508,6 +508,7 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 		err = out.FromTelegramDestination(gen.TelegramDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.TelegramDestinationTypeTelegram, ConnectionId: deref(d.Connection),
 			ChannelId: deref(d.TelegramChannelID), ChannelTitle: nullableString(d.TelegramChannelTitle),
+			ChannelChatId:        nullableString(d.TelegramChannelChatID),
 			DiscussionGroupId:    nullableString(d.TelegramDiscussionGroupID),
 			DiscussionGroupTitle: nullableString(d.TelegramDiscussionGroupTitle),
 			Mentions:             mentions, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,

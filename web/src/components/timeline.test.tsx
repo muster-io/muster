@@ -3,7 +3,8 @@
 
 // The Timeline in a real browser, against a stubbed API: a text for every event and system entry (the timer entries of
 // C-17 among them), the actor with the Transport, the Loud or Quiet mark and the Mentions, the details, a Note with
-// markup shown as text, Russian plurals, the kind filter and the order sent to the API.
+// markup shown as text, Russian plurals, the kind filter and the order sent to the API. A delivery entry names its
+// Destination and, with destinations:read, carries the Destination's full label as its tooltip and description.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
@@ -14,6 +15,8 @@ import { render } from "vitest-browser-react";
 import type {
   DeliveryEventKind,
   LifecycleEvent,
+  Permission,
+  Session,
   TimelineAlertsEntry,
   TimelineDeliveryEntry,
   TimelineEntry,
@@ -136,10 +139,16 @@ const text = (entry: TimelineEntry) => entryText(i18n.t, entry, dateTime);
 
 let entries: TimelineEntry[] = [];
 let requests: URL[] = [];
+// The Destinations and Connections lists the labels of delivery entries come from.
+let lists: { destinations: unknown[]; connections: unknown[] } = {
+  destinations: [],
+  connections: [],
+};
 
 beforeEach(async () => {
   entries = [];
   requests = [];
+  lists = { destinations: [], connections: [] };
   await i18n.changeLanguage("en");
   vi.spyOn(window, "fetch").mockImplementation((input) => {
     const url = new URL(
@@ -147,6 +156,16 @@ beforeEach(async () => {
       window.location.origin,
     );
     requests.push(url);
+    if (url.pathname === "/api/v1/destinations" || url.pathname === "/api/v1/connections") {
+      const items =
+        url.pathname === "/api/v1/destinations" ? lists.destinations : lists.connections;
+      return Promise.resolve(
+        new Response(JSON.stringify({ items, next_cursor: null }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
     const kinds = url.searchParams.getAll("kind");
     const items = entries.filter((e) => kinds.length === 0 || kinds.includes(e.kind));
     return Promise.resolve(
@@ -280,9 +299,24 @@ describe("entryText", () => {
   });
 });
 
-async function renderTimeline() {
+async function renderTimeline(permissions: Permission[] = []) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const read: SessionRead = { session: null, ended: false };
+  const read: SessionRead =
+    permissions.length === 0
+      ? { session: null, ended: false }
+      : {
+          session: {
+            state: "active",
+            // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the Timeline reads only the Permissions
+            user: { id: "US0000000000ME", name: "Me" } as Session["user"],
+            csrf_token: "csrf",
+            expires_at: "2026-10-07T19:00:00Z",
+            idle_expires_at: "2026-10-07T19:00:00Z",
+            method: "local",
+            permissions,
+          },
+          ended: false,
+        };
   queryClient.setQueryData(SESSION_QUERY_KEY, read);
   return render(
     <I18nextProvider i18n={i18n}>
@@ -393,5 +427,59 @@ describe("Timeline", () => {
 
     await screen.getByLabelText("Order").selectOptions("asc");
     await expect.poll(() => requests.at(-1)?.searchParams.get("order")).toBe("asc");
+  });
+  test("gives a delivery entry the full label of its Destination as tooltip and description", async () => {
+    lists = {
+      destinations: [
+        {
+          id: "DS0000000000OP",
+          type: "telegram",
+          name: "ops",
+          connection_id: "CN000000000TGB",
+          channel_id: "@muster_alerts",
+          channel_title: "Muster alerts",
+          mentions: {},
+          limiter: { limit: 20, per_seconds: 60 },
+          health: { state: "healthy" },
+          routes: [],
+          created_at: AT,
+          etag: '"1"',
+        },
+      ],
+      connections: [{ id: "CN000000000TGB", type: "telegram", name: "tg-b" }],
+    };
+    const gone: TimelineDeliveryEntry = {
+      id: "DE2",
+      at: AT,
+      kind: "delivery",
+      actor: SYSTEM,
+      delivery_event: "not_delivered",
+      destination: { id: "DS00000000GONE", name: "gone" },
+      loudness: "quiet",
+      mentions: [],
+    };
+    entries = [delivery("publication"), gone];
+    await renderTimeline(["alert-groups:read", "destinations:read", "connections:read"]);
+    const published = item("Published in ops").getByTestId("timeline-text");
+    await expect.element(published).toHaveTextContent("Published in ops");
+    await expect
+      .element(published)
+      .toHaveAttribute("title", "ops · Telegram · via tg-b · Muster alerts");
+    await expect
+      .element(published)
+      .toHaveAccessibleDescription("ops · Telegram · via tg-b · Muster alerts");
+    const missing = item("Not delivered to gone").getByTestId("timeline-text");
+    await expect.element(missing).toHaveTextContent("Not delivered to gone");
+    await expect.element(missing).not.toHaveAttribute("title");
+    await expect.element(missing).not.toHaveAttribute("aria-describedby");
+  });
+
+  test("names the Destination alone without destinations:read", async () => {
+    entries = [delivery("publication")];
+    await renderTimeline(["alert-groups:read"]);
+    const published = item("Published in ops").getByTestId("timeline-text");
+    await expect.element(published).toHaveTextContent("Published in ops");
+    await expect.element(published).not.toHaveAttribute("title");
+    expect(requests.some((u) => u.pathname === "/api/v1/destinations")).toBe(false);
   });
 });

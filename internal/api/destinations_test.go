@@ -86,7 +86,8 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 	if in.Telegram != nil {
 		d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA7", Type: in.Type,
 			Name: in.Name, Connection: &in.Telegram.Connection, TelegramChannelID: &in.Telegram.ChannelID,
-			TelegramChannelTitle: ptr("Muster alerts"), TelegramDiscussionGroupID: ptr("-1001000000002"),
+			TelegramChannelTitle: ptr("Muster alerts"), TelegramChannelChatID: ptr("-1001000000001"),
+			TelegramDiscussionGroupID:    ptr("-1001000000002"),
 			TelegramDiscussionGroupTitle: ptr("Muster alerts Chat"), Mentions: set, LimiterLimit: in.Limiter.Limit,
 			LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
 			Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
@@ -283,6 +284,9 @@ func TestListDestinationsAPI(t *testing.T) {
 	if h := page.Items[1]["health"].(map[string]any); h["state"] != "broken" || h["reason"] != "chat not found" {
 		t.Errorf("health %v", h)
 	}
+	if id, ok := page.Items[1]["channel_chat_id"]; !ok || id != nil {
+		t.Errorf("a channel chat id before a check: %v %v", id, ok)
+	}
 	if r := page.Items[0]["routes"].([]any); len(r) != 1 || r[0].(map[string]any)["id"] != routeID {
 		t.Errorf("routes %v", r)
 	}
@@ -339,8 +343,9 @@ func TestGetDestinationAPI(t *testing.T) {
 			t.Errorf("%s = %d %s", id, a.status, a.body)
 		}
 	}
+	fd.list[1].TelegramChannelChatID = ptr("-100100")
 	a := x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/"+telegramID, "")
-	if a.json(t)["discussion_group_id"] != "-100200" {
+	if a.json(t)["discussion_group_id"] != "-100200" || a.json(t)["channel_chat_id"] != "-100100" {
 		t.Errorf("telegram %s", a.body)
 	}
 	a = x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/DS000000000000", "")
@@ -954,7 +959,7 @@ func TestTelegramDestinationAPI(t *testing.T) {
 		t.Errorf("input %+v", in)
 	}
 	if created["type"] != "telegram" || created["channel_id"] != "@muster_alerts" ||
-		created["discussion_group_id"] != "-1001000000002" || created["discussion_group_title"] != "Muster alerts Chat" ||
+		created["channel_chat_id"] != "-1001000000001" || created["discussion_group_id"] != "-1001000000002" || created["discussion_group_title"] != "Muster alerts Chat" ||
 		created["channel_title"] != "Muster alerts" {
 		t.Errorf("created %s", a.body)
 	}

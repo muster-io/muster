@@ -5,7 +5,9 @@
 // time, the actor ("Muster" for the system) with the Transport, a text for its event — the ack timeout notices,
 // Unclaimed, Reminders and their answer of C-17 among them —, a "Loud" or, for a lifecycle event, "Quiet" mark and the
 // symbolic Mentions it asked for, and its details: fingerprints, the replaced label, Static label conflicts, the period
-// of Muster's downtime, a Note's text, a delivery error. Notes, names and errors are untrusted text and show as such.
+// of Muster's downtime, a Note's text, a delivery error. Notes, names and errors are untrusted text and show as such. A
+// delivery entry names its Destination; the Destination's full label (D309) is the text's tooltip and accessible
+// description while the Destinations list shows it.
 
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -28,6 +30,7 @@ import {
 import { problemText } from "../lib/api";
 import { useTimeFormat } from "../lib/time";
 import { reasonLabel } from "./integration-alerts";
+import { useDestinationLabels } from "./destination-label";
 import { templateName } from "./template-editor";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -381,10 +384,19 @@ function soundOf(entry: TimelineEntry): { loud: boolean; quiet: boolean; mention
   return { loud, quiet, mentions: entry.mentions };
 }
 
-export function TimelineItem({ entry }: { entry: TimelineEntry }) {
+export function TimelineItem({
+  entry,
+  destinationLabel,
+}: {
+  entry: TimelineEntry;
+  /** The full label of a delivery entry's Destination, when the Destinations list shows it. */
+  destinationLabel?: string;
+}) {
   const { t } = useTranslation();
   const { dateTime } = useTimeFormat();
+  const descriptionId = useId();
   const { loud, quiet, mentions } = soundOf(entry);
+  const label = entry.kind === "delivery" ? destinationLabel : undefined;
   return (
     <li
       className="flex min-w-0 flex-col gap-1 border-l-2 py-2 pl-3"
@@ -399,9 +411,19 @@ export function TimelineItem({ entry }: { entry: TimelineEntry }) {
           {actorText(t, entry.actor)}
         </span>
       </div>
-      <p className="text-sm font-medium wrap-anywhere" data-testid="timeline-text">
+      <p
+        className="text-sm font-medium wrap-anywhere"
+        data-testid="timeline-text"
+        title={label}
+        aria-describedby={label === undefined ? undefined : descriptionId}
+      >
         {entryText(t, entry, dateTime)}
       </p>
+      {label !== undefined && (
+        <span id={descriptionId} hidden>
+          {label}
+        </span>
+      )}
       {(loud || quiet || mentions.length > 0) && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
           {loud && (
@@ -439,6 +461,7 @@ export function Timeline({ alertGroupId }: { alertGroupId: string }) {
     order,
     kind: kinds.length > 0 ? kinds : undefined,
   };
+  const labels = useDestinationLabels();
   const query = useInfiniteQuery({
     queryKey: [...getGetAlertGroupTimelineQueryKey(alertGroupId, params), "pages"],
     queryFn: ({ pageParam, signal }) =>
@@ -507,7 +530,13 @@ export function Timeline({ alertGroupId }: { alertGroupId: string }) {
         ) : (
           <ol className="flex flex-col gap-1" aria-label={t("timeline.title")}>
             {items.map((entry) => (
-              <TimelineItem key={entry.id} entry={entry} />
+              <TimelineItem
+                key={entry.id}
+                entry={entry}
+                destinationLabel={
+                  entry.kind === "delivery" ? labels.get(entry.destination.id)?.full : undefined
+                }
+              />
             ))}
           </ol>
         )}

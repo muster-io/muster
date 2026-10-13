@@ -198,7 +198,7 @@ test("creates a Mattermost Destination, refusing a channel without the bot next 
     .getByRole("row")
     .filter({ has: page.getByRole("link", { name: "alerts", exact: true }) });
   await expect(row.getByRole("cell").nth(0)).toHaveText("Mattermost");
-  await expect(row.getByRole("cell").nth(2)).toHaveText("Healthy");
+  await expect(row.getByRole("cell").nth(3)).toHaveText("Healthy");
   await expect(page.getByTestId("broken-destinations")).toHaveCount(0);
   await shot(page, "destinations-list");
   expect(csp).toEqual([]);
@@ -212,7 +212,7 @@ test("adds the Destination to the Route db with its delivery settings, named in 
   await nav(page, "Routes").click();
   await page.getByRole("link", { name: "db", exact: true }).click();
   await expect(page.getByTestId("route-destinations-none")).toBeVisible();
-  await page.getByLabel("Add a Destination").selectOption({ label: "alerts (Mattermost)" });
+  await page.getByLabel("Add a Destination").selectOption(destinationId);
   await expect(page.getByTestId("route-destination")).toContainText("alerts");
   await expect(page.getByTestId("route-destination")).toContainText("Healthy");
   await page.getByLabel("Thread batching window", { exact: true }).fill("120");
@@ -259,7 +259,7 @@ test("accepts the suggestion to send Muster's own alerts to the Destination", as
   await expect(card).toBeVisible();
   await card.getByRole("button", { name: "Create the route" }).click();
   await expect(card.getByText("Choose the Destination for Muster's own alerts.")).toBeVisible();
-  await card.getByLabel("Destination").selectOption({ label: "alerts (Mattermost)" });
+  await card.getByLabel("Destination").selectOption(destinationId);
   await shot(page, "routes-internal-suggestion");
   await card.getByRole("button", { name: "Create the route" }).click();
   await expect(card).toHaveCount(0);
@@ -300,7 +300,7 @@ test("shows the Broken banner on the list and on the Route, and Check makes it h
   const row = page
     .getByRole("row")
     .filter({ has: page.getByRole("link", { name: "alerts", exact: true }) });
-  await expect(row.getByRole("cell").nth(2)).toHaveText("Broken");
+  await expect(row.getByRole("cell").nth(3)).toHaveText("Broken");
   await shot(page, "destinations-broken");
 
   await nav(page, "Routes").click();
@@ -375,7 +375,7 @@ async function russianAdmin(browser: Browser): Promise<void> {
   const row = page
     .getByRole("row")
     .filter({ has: page.getByRole("link", { name: "alerts", exact: true }) });
-  await expect(row.getByRole("cell").nth(2)).toHaveText("Работает");
+  await expect(row.getByRole("cell").nth(3)).toHaveText("Работает");
   await expectNoHorizontalScroll(page);
   await shot(page, "destinations-ru-360");
 

@@ -11,9 +11,11 @@
     },
     "hint": "Button presses from linked accounts act as you.",
     "list": {
+      "allTelegramBots": "for all Telegram bots",
       "label": "Linked messenger accounts",
       "lastUsedAgo": "{{duration}} ago",
       "linked": "Linked {{date}}",
+      "linkedVia": "linked via {{connection}}",
       "never": "Never"
     },
     "mattermost": {
@@ -29,6 +31,7 @@
         "userNotFound": "No user @{{username}} on this Mattermost server."
       },
       "newCode": "Request a new code",
+      "perConnection": "Mattermost links are per Connection: two bots on one server need two links.",
       "send": "Send code",
       "start": "Link Mattermost",
       "username": "Your Mattermost username"
@@ -46,6 +49,7 @@
       "newLink": "Get a new link",
       "open": "Open Telegram",
       "qrLabel": "QR code of the Telegram link",
+      "relink": "Relink Telegram",
       "start": "Link Telegram"
     },
     "title": "Messenger accounts",
@@ -662,6 +666,7 @@
     "fields": {
       "health": "Health",
       "name": "Name",
+      "place": "Connection · channel",
       "routes": "Routes",
       "type": "Type"
     },
@@ -679,6 +684,9 @@
       "noReason": "no details"
     },
     "hint": "Where Muster sends the messages of Alert Groups: a Route sends to its Destinations.",
+    "label": {
+      "via": "via {{connection}}"
+    },
     "list": {
       "broken": "Broken Destinations",
       "empty": "No Destinations yet."
@@ -1457,9 +1465,11 @@
       "list": "Destinations of the route",
       "none": "No Destinations: Muster sends no messages for this route.",
       "noneExist": "No Destinations yet",
-      "option": "{{name}} ({{type}})",
-      "optionBroken": "{{name}} ({{type}}, {{health}})",
+      "optionBroken": "{{label}} ({{health}})",
       "remove": "Remove {{name}}",
+      "sameChat_one": "{{count}} Destination delivers to the same chat: {{names}}. Each message will appear there {{count}} time.",
+      "sameChat_other": "{{count}} Destinations deliver to the same chat: {{names}}. Each message will appear there {{count}} times.",
+      "sameChatTwo": "Two Destinations deliver to the same chat: {{names}}. Each message will appear there twice.",
       "storm_one": "Storm since {{time}}: {{count}} new Alert Group. Destinations receive a Storm summary.",
       "storm_other": "Storm since {{time}}: {{count}} new Alert Groups. Destinations receive a Storm summary.",
       "title": "Destinations",

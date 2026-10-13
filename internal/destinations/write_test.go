@@ -826,7 +826,7 @@ func TestCreateTelegram(t *testing.T) {
 		t.Errorf("checks %+v", tg.calls)
 	}
 	if d.ID != 31 || d.Name != "alerts" || *d.Connection != "CNAAAAAAAAAAA2" || *d.TelegramChannelID != "@muster_alerts" ||
-		*d.TelegramDiscussionGroupID != "-1001000000002" || *d.TelegramDiscussionGroupTitle != "Muster alerts Chat" ||
+		*d.TelegramChannelChatID != "-1001000000001" || *d.TelegramDiscussionGroupID != "-1001000000002" || *d.TelegramDiscussionGroupTitle != "Muster alerts Chat" ||
 		*d.TelegramChannelTitle != "Muster alerts" || d.Health.State != "healthy" || d.Version != 1 {
 		t.Errorf("created %+v", d)
 	}
@@ -926,7 +926,7 @@ func TestUpdateTelegram(t *testing.T) {
 	if last := tg.calls[len(tg.calls)-1]; last.Destination == nil || *last.Destination != 2 {
 		t.Errorf("the check is not limited by the destination: %+v", last)
 	}
-	if d.Health.State != "healthy" || len(*healed) != 1 || len(w.tgSets) != 1 ||
+	if d.Health.State != "healthy" || len(*healed) != 1 || len(w.tgSets) != 1 || w.tgSets[0].ChannelChatID.Int64 != -1001000000001 ||
 		w.tgSets[0].ChannelID.String != "@muster_alerts" || w.tgSets[0].DiscussionChatID.Int64 != -1001000000002 ||
 		len(w.audit) != 1 || w.audit[0].Action != ActionUpdated {
 		t.Errorf("updated %+v, sets %+v, audit %+v", d, w.tgSets, w.audit)
@@ -936,7 +936,7 @@ func TestUpdateTelegram(t *testing.T) {
 	r.TelegramChannelID, r.Version, r.Health = txt("@muster_alerts"), 2, "healthy"
 	r.Mentions, _ = json.Marshal(telegramInput("x", "").Mentions)
 	r.LimiterLimit, r.LimiterPerSeconds = 5, 1
-	r.TelegramDiscussionChatID.Int64 = -1001000000002
+	r.TelegramChannelChatID.Int64, r.TelegramDiscussionChatID.Int64 = -1001000000001, -1001000000002
 	r.TelegramChannelTitle, r.TelegramDiscussionGroupTitle = txt("Muster alerts"), txt("Muster alerts Chat")
 	w.versions["DSAAAAAAAAAAA2"] = 2
 	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("alerts", "@muster_alerts")); err != nil ||
@@ -948,6 +948,12 @@ func TestUpdateTelegram(t *testing.T) {
 	if d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("alerts", "@muster_alerts")); err != nil ||
 		len(w.tgSets) != 2 || len(w.audit) != 1 || len(w.hints) != hints+1 || *d.TelegramChannelTitle != "Renamed channel" {
 		t.Errorf("a new title = %+v %v", d, err)
+	}
+	tg.title, r.TelegramChannelChatID.Int64 = "", -1001000000009
+	if d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("alerts", "@muster_alerts")); err != nil ||
+		len(w.tgSets) != 3 || w.tgSets[2].ChannelChatID.Int64 != -1001000000001 || len(w.audit) != 1 ||
+		*d.TelegramChannelChatID != "-1001000000001" {
+		t.Errorf("a new channel chat id = %+v %v", d, err)
 	}
 	w.versions["DSAAAAAAAAAAA2"] = 9
 	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("moved", "@muster_alerts")); !errors.Is(err,
