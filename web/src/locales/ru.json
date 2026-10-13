@@ -1309,11 +1309,13 @@
     "linkRules": "Правила ссылок",
     "lookupTables": "Таблицы соответствий",
     "oidc": "OIDC",
+    "outgoingHeartbeat": "Исходящий heartbeat",
     "profile": "Профиль",
     "routes": "Маршруты",
     "security": "Безопасность",
     "serviceAccounts": "Сервисные аккаунты",
     "statistics": "Статистика",
+    "systemStatus": "Состояние системы",
     "users": "Пользователи"
   },
   "notes": {
@@ -1389,6 +1391,19 @@
       "nobodyCanSignIn": "Никто не сможет войти через OIDC.",
       "secretExpiring": "Срок действия секрета клиента истекает {{date}}. Выпустите новый секрет в провайдере учётных записей и введите его здесь."
     }
+  },
+  "outgoingHeartbeat": {
+    "fixErrors": "Исправьте отмеченные поля и сохраните снова.",
+    "hint": "Muster обращается к этому адресу каждую минуту, пока есть ведущая реплика. Используйте dead man's switch, который поднимает тревогу, когда обращения прекращаются.",
+    "lastResult": {
+      "failed": "Последний результат: {{error}}, отправлен {{time}}",
+      "failedNoError": "Последний результат: ошибка, отправлен {{time}}",
+      "notConfigured": "Последний результат: без адреса ничего не отправляется",
+      "notSent": "Последний результат: ещё не отправлялся",
+      "ok": "Последний результат: OK, отправлен {{time}}"
+    },
+    "title": "Исходящий heartbeat",
+    "url": "Адрес heartbeat"
   },
   "passwordSetup": {
     "done": "Пароль установлен. Войдите со своим логином и новым паролем.",
@@ -1926,6 +1941,69 @@
       "byRoute": "Статистика по маршрутам"
     },
     "title": "Статистика"
+  },
+  "systemStatus": {
+    "attention": {
+      "heartbeatLost": "Нет связи по Heartbeat",
+      "heartbeatLostSince": "Нет связи по Heartbeat с {{time}}",
+      "snapshotTruncated": "Снимки обрезаются",
+      "title": "Интеграции, требующие внимания"
+    },
+    "broken": {
+      "title": "Сломанные места доставки"
+    },
+    "heartbeat": {
+      "failed": "Последняя отправка {{time}}: {{error}}",
+      "failedNoError": "Последняя отправка {{time}}: ошибка",
+      "notSent": "Ещё не отправлялся",
+      "ok": "Последняя отправка {{time}}: OK",
+      "suggestion": "Настройте исходящий heartbeat, чтобы остановку Muster заметили.",
+      "title": "Исходящий heartbeat"
+    },
+    "hint": "Эта страница только показывает состояние: исправляйте найденное на страницах, на которые она ссылается.",
+    "none": "Нет",
+    "queues": {
+      "queued_one": "{{count}} доставка в очереди",
+      "queued_few": "{{count}} доставки в очереди",
+      "queued_many": "{{count}} доставок в очереди",
+      "queued_other": "{{count}} доставки в очереди",
+      "title": "Очереди доставки"
+    },
+    "recovery": {
+      "active": "Восстановление до {{until}} после простоя с {{from}} до {{to}}",
+      "activeNoPeriod": "Восстановление до {{until}}",
+      "activeNoTime": "Идёт восстановление после простоя",
+      "inactive": "Восстановление не идёт",
+      "title": "Восстановление после простоя"
+    },
+    "replicas": {
+      "keys": "Ключи: {{keys}}",
+      "leader": "Ведущая",
+      "noKeys": "Нет ключей",
+      "refreshed": "Обновлена {{time}}",
+      "title": "Реплики"
+    },
+    "since": "с {{time}}",
+    "storms": {
+      "count_one": "{{count}} новая группа алертов",
+      "count_few": "{{count}} новые группы алертов",
+      "count_many": "{{count}} новых групп алертов",
+      "count_other": "{{count}} новой группы алертов",
+      "title": "Штормы"
+    },
+    "templates": {
+      "ackTimeoutNotice": "Уведомление о тайм-ауте подтверждения",
+      "destination": "Место доставки",
+      "line": "Строка алерта",
+      "linkRule": "Правило ссылок",
+      "rootMessage": "Корневое сообщение",
+      "route": "Маршрут",
+      "title": "Ошибки шаблонов",
+      "webhookRequest": "Шаблон запроса"
+    },
+    "title": "Состояние системы",
+    "version": "Muster {{version}} ({{commit}})",
+    "versionNoCommit": "Muster {{version}}"
   },
   "table": {
     "loadMore": "Показать ещё"

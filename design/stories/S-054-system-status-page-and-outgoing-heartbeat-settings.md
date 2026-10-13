@@ -12,12 +12,15 @@ files_touched:
   - web/src/components/system-status-sections.tsx
   - web/src/components/system-status-sections.test.tsx
   - web/src/components/outgoing-heartbeat-form.tsx
+  - web/src/components/secret-field.tsx
   - web/src/components/app-shell.tsx
+  - web/src/components/app-shell.test.tsx
   - web/src/lib/live.ts
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/e2e/system-status.spec.ts
   - web/e2e/outgoing-heartbeat.spec.ts
+  - web/e2e/link-rules.spec.ts
 acceptance:
   - "[C-19.FR-10, C-19.AC-6] The System status page shows the replicas with the Leader marked and their key ids, the recovery state, delivery queues, Broken Destinations with their reason, Integrations with Heartbeat lost or truncated Snapshots, template errors, active Storms and the last outgoing heartbeat; each entity links to its page, and the page has no button that changes anything."
   - "[C-19.AC-6] With a Broken Destination and a Heartbeat-lost Integration, both appear on the page; a Responder sees no \"System status\" entry and \"You do not have permission to see this page.\" at its address."
@@ -83,7 +86,7 @@ on whose signal never arrives after the first one (`ADV 360`). Then in Playwrigh
    since {time}", and "Outgoing heartbeat" with "Set up an outgoing heartbeat so that a stopped Muster is noticed.".
 2. The page has no button besides the navigation; "alerts" links to `/destinations/…`.
 3. Terminal: add the bot back and `ADV 300` → without a reload "Broken Destinations" says "None".
-4. "Set up an outgoing heartbeat" → Organization → Outgoing heartbeat → "Replace" →
+4. "Set up an outgoing heartbeat" → Organization → Outgoing heartbeat → "Set a value" →
    `http://127.0.0.1:18093/hook/dev/ping` → "Save" → "Set, changed {time}".
 5. Terminal: `ADV 60` → the page shows "Last result: OK"; System status shows "Last sent {time}: OK".
 6. As a Responder → no "System status" entry; `/admin/system-status` shows "You do not have permission to see this
@@ -102,6 +105,10 @@ None.
 - The page only reads; every fix happens on the page of the entity it links to.
 - S-056 also adds entries to `app-shell.tsx` and keys to the locales; whichever of the two lands second rebases onto the
   other and keeps the Organization entries together in the navigation.
+- `secret-field.tsx` takes an optional `describedBy`, so that the explanation under "Heartbeat URL" is read with the
+  input and its buttons; added to `files_touched` for it.
+- "Outgoing heartbeat" goes right after "Security" in the navigation, in the order S-056 fixes, so the tests that check
+  the entries after "Security" (`app-shell.test.tsx`, `link-rules.spec.ts`) change with it. "System status" goes last.
 
 ## Coverage
 

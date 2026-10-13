@@ -81,9 +81,11 @@ export type NavLabel =
   | "serviceAccounts"
   | "oidc"
   | "security"
+  | "outgoingHeartbeat"
   | "lookupTables"
   | "linkRules"
-  | "auditLog";
+  | "auditLog"
+  | "systemStatus";
 
 /** The pages register their entries here, in the order of the navigation. */
 export const NAVIGATION: readonly NavEntry[] = [
@@ -99,12 +101,18 @@ export const NAVIGATION: readonly NavEntry[] = [
   { to: "/admin/oidc", label: "oidc", permission: "oidc:read" },
   { to: "/admin/organization/security", label: "security", permission: "organization:write" },
   {
+    to: "/admin/organization/outgoing-heartbeat",
+    label: "outgoingHeartbeat",
+    permission: "organization:write",
+  },
+  {
     to: "/admin/organization/lookup-tables",
     label: "lookupTables",
     permission: "lookup-tables:read",
   },
   { to: "/admin/organization/link-rules", label: "linkRules", permission: "link-rules:read" },
   { to: "/admin/audit-log", label: "auditLog", permission: "audit-log:read" },
+  { to: "/admin/system-status", label: "systemStatus", permission: "system-status:read" },
 ];
 
 /** The entries whose Permission the session holds; an entry without one is shown to everybody. */
@@ -139,10 +147,14 @@ function navLabel(t: (key: string) => string, label: NavLabel): string {
       return t("nav.oidc");
     case "security":
       return t("nav.security");
+    case "outgoingHeartbeat":
+      return t("nav.outgoingHeartbeat");
     case "lookupTables":
       return t("nav.lookupTables");
     case "linkRules":
       return t("nav.linkRules");
+    case "systemStatus":
+      return t("nav.systemStatus");
     default:
       return t("nav.auditLog");
   }
