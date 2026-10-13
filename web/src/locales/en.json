@@ -1263,11 +1263,13 @@
     "linkRules": "Link rules",
     "lookupTables": "Lookup tables",
     "oidc": "OIDC",
+    "outgoingHeartbeat": "Outgoing heartbeat",
     "profile": "Profile",
     "routes": "Routes",
     "security": "Security",
     "serviceAccounts": "Service accounts",
     "statistics": "Statistics",
+    "systemStatus": "System status",
     "users": "Users"
   },
   "notes": {
@@ -1343,6 +1345,19 @@
       "nobodyCanSignIn": "Nobody will be able to sign in through OIDC.",
       "secretExpiring": "The client secret expires on {{date}}. Issue a new one in the identity provider and enter it here."
     }
+  },
+  "outgoingHeartbeat": {
+    "fixErrors": "Fix the marked fields and save again.",
+    "hint": "Muster calls this URL every minute while a replica leads. Use a dead man's switch that alerts when the calls stop.",
+    "lastResult": {
+      "failed": "Last result: {{error}}, sent {{time}}",
+      "failedNoError": "Last result: failed, sent {{time}}",
+      "notConfigured": "Last result: nothing is sent without a URL",
+      "notSent": "Last result: not sent yet",
+      "ok": "Last result: OK, sent {{time}}"
+    },
+    "title": "Outgoing heartbeat",
+    "url": "Heartbeat URL"
   },
   "passwordSetup": {
     "done": "Your password is set. Sign in with your login and the new password.",
@@ -1856,6 +1871,65 @@
       "byRoute": "Statistics by route"
     },
     "title": "Statistics"
+  },
+  "systemStatus": {
+    "attention": {
+      "heartbeatLost": "Heartbeat lost",
+      "heartbeatLostSince": "Heartbeat lost since {{time}}",
+      "snapshotTruncated": "Snapshots truncated",
+      "title": "Integrations needing attention"
+    },
+    "broken": {
+      "title": "Broken Destinations"
+    },
+    "heartbeat": {
+      "failed": "Last sent {{time}}: {{error}}",
+      "failedNoError": "Last sent {{time}}: failed",
+      "notSent": "Not sent yet",
+      "ok": "Last sent {{time}}: OK",
+      "suggestion": "Set up an outgoing heartbeat so that a stopped Muster is noticed.",
+      "title": "Outgoing heartbeat"
+    },
+    "hint": "This page only reads: fix what it lists on the pages it links to.",
+    "none": "None",
+    "queues": {
+      "queued_one": "{{count}} delivery queued",
+      "queued_other": "{{count}} deliveries queued",
+      "title": "Delivery queues"
+    },
+    "recovery": {
+      "active": "Recovering until {{until}} after downtime from {{from}} to {{to}}",
+      "activeNoPeriod": "Recovering until {{until}}",
+      "activeNoTime": "Recovering after downtime",
+      "inactive": "Not recovering",
+      "title": "Recovery after downtime"
+    },
+    "replicas": {
+      "keys": "Keys: {{keys}}",
+      "leader": "Leader",
+      "noKeys": "No keys",
+      "refreshed": "Refreshed {{time}}",
+      "title": "Replicas"
+    },
+    "since": "since {{time}}",
+    "storms": {
+      "count_one": "{{count}} new Alert Group",
+      "count_other": "{{count}} new Alert Groups",
+      "title": "Storms"
+    },
+    "templates": {
+      "ackTimeoutNotice": "Ack timeout notice",
+      "destination": "Destination",
+      "line": "Alert line",
+      "linkRule": "Link rule",
+      "rootMessage": "Root message",
+      "route": "Route",
+      "title": "Template errors",
+      "webhookRequest": "Request template"
+    },
+    "title": "System status",
+    "version": "Muster {{version}} ({{commit}})",
+    "versionNoCommit": "Muster {{version}}"
   },
   "table": {
     "loadMore": "Load more"

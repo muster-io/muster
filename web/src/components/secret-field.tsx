@@ -45,6 +45,8 @@ export interface SecretFieldProps {
   clearable?: boolean;
   disabled?: boolean;
   error?: string;
+  /** The id of a text outside the field that explains it, read with the input and its buttons. */
+  describedBy?: string;
 }
 
 export function SecretField({
@@ -56,12 +58,15 @@ export function SecretField({
   clearable = false,
   disabled = false,
   error,
+  describedBy,
 }: SecretFieldProps) {
   const { t } = useTranslation();
   const { dateTime } = useTimeFormat();
   const statusId = useId();
   const errorId = `${id}-error`;
   const set = status?.set === true;
+  const described = (...ids: (string | undefined | false)[]) =>
+    [...ids, describedBy].filter(Boolean).join(" ");
   // A button that goes away with the click hands the focus to "Replace", so that keyboard users keep their place.
   const replaceButton = useRef<HTMLButtonElement>(null);
   const refocus = useRef(false);
@@ -102,7 +107,7 @@ export function SecretField({
             value={value.value}
             disabled={disabled}
             aria-invalid={error !== undefined}
-            aria-describedby={error ? `${statusId} ${errorId}` : statusId}
+            aria-describedby={described(statusId, error && errorId)}
             onChange={(e) => onChange({ mode: "replace", value: e.target.value })}
           />
           <Button variant="outline" disabled={disabled} onClick={() => change(KEEP_SECRET)}>
@@ -124,7 +129,7 @@ export function SecretField({
               variant="outline"
               size="sm"
               ref={replaceButton}
-              aria-describedby={`${id}-label`}
+              aria-describedby={described(`${id}-label`)}
               onClick={() => change({ mode: "replace", value: "" })}
             >
               {set ? t("secret.replace") : t("secret.enter")}
@@ -134,7 +139,7 @@ export function SecretField({
             <Button
               variant="outline"
               size="sm"
-              aria-describedby={`${id}-label`}
+              aria-describedby={described(`${id}-label`)}
               onClick={() => change({ mode: "clear" })}
             >
               {t("secret.clear")}

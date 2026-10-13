@@ -17,6 +17,7 @@ import { Route as StatisticsRouteImport } from './routes/statistics'
 import { Route as TotpEnrolmentRouteImport } from './routes/totp-enrolment'
 import { Route as AdminAuditLogRouteImport } from './routes/admin.audit-log'
 import { Route as AdminOidcRouteImport } from './routes/admin.oidc'
+import { Route as AdminSystemStatusRouteImport } from './routes/admin.system-status'
 import { Route as AlertGroupsIndexRouteImport } from './routes/alert-groups.index'
 import { Route as AlertGroupsAlertGroupIdRouteImport } from './routes/alert-groups.$alertGroupId'
 import { Route as ConnectionsIndexRouteImport } from './routes/connections.index'
@@ -31,6 +32,7 @@ import { Route as RoutesIndexRouteImport } from './routes/routes.index'
 import { Route as RoutesRouteIdRouteImport } from './routes/routes.$routeId'
 import { Route as RoutesNewRouteImport } from './routes/routes.new'
 import { Route as SignInTotpRouteImport } from './routes/sign-in.totp'
+import { Route as AdminOrganizationOutgoingHeartbeatRouteImport } from './routes/admin.organization.outgoing-heartbeat'
 import { Route as AdminOrganizationSecurityRouteImport } from './routes/admin.organization.security'
 import { Route as AdminServiceAccountsIndexRouteImport } from './routes/admin.service-accounts.index'
 import { Route as AdminServiceAccountsServiceAccountIdRouteImport } from './routes/admin.service-accounts.$serviceAccountId'
@@ -84,6 +86,11 @@ const AdminAuditLogRoute = AdminAuditLogRouteImport.update({
 const AdminOidcRoute = AdminOidcRouteImport.update({
   id: '/admin/oidc',
   path: '/admin/oidc',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminSystemStatusRoute = AdminSystemStatusRouteImport.update({
+  id: '/admin/system-status',
+  path: '/admin/system-status',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AlertGroupsIndexRoute = AlertGroupsIndexRouteImport.update({
@@ -157,6 +164,12 @@ const SignInTotpRoute = SignInTotpRouteImport.update({
   path: '/totp',
   getParentRoute: () => SignInRoute,
 } as any)
+const AdminOrganizationOutgoingHeartbeatRoute =
+  AdminOrganizationOutgoingHeartbeatRouteImport.update({
+    id: '/admin/organization/outgoing-heartbeat',
+    path: '/admin/organization/outgoing-heartbeat',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AdminOrganizationSecurityRoute =
   AdminOrganizationSecurityRouteImport.update({
     id: '/admin/organization/security',
@@ -249,6 +262,7 @@ export interface FileRoutesByFullPath {
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
+  '/admin/system-status': typeof AdminSystemStatusRoute
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
   '/connections/new': typeof ConnectionsNewRoute
@@ -263,6 +277,7 @@ export interface FileRoutesByFullPath {
   '/destinations/': typeof DestinationsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
+  '/admin/organization/outgoing-heartbeat': typeof AdminOrganizationOutgoingHeartbeatRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
   '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
@@ -287,6 +302,7 @@ export interface FileRoutesByTo {
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
+  '/admin/system-status': typeof AdminSystemStatusRoute
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
   '/connections/new': typeof ConnectionsNewRoute
@@ -301,6 +317,7 @@ export interface FileRoutesByTo {
   '/destinations': typeof DestinationsIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
   '/routes': typeof RoutesIndexRoute
+  '/admin/organization/outgoing-heartbeat': typeof AdminOrganizationOutgoingHeartbeatRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
   '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
@@ -326,6 +343,7 @@ export interface FileRoutesById {
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
+  '/admin/system-status': typeof AdminSystemStatusRoute
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
   '/connections/new': typeof ConnectionsNewRoute
@@ -340,6 +358,7 @@ export interface FileRoutesById {
   '/destinations/': typeof DestinationsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
+  '/admin/organization/outgoing-heartbeat': typeof AdminOrganizationOutgoingHeartbeatRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
   '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
@@ -366,6 +385,7 @@ export interface FileRouteTypes {
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
+    | '/admin/system-status'
     | '/alert-groups/$alertGroupId'
     | '/connections/$connectionId'
     | '/connections/new'
@@ -380,6 +400,7 @@ export interface FileRouteTypes {
     | '/destinations/'
     | '/integrations/'
     | '/routes/'
+    | '/admin/organization/outgoing-heartbeat'
     | '/admin/organization/security'
     | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
@@ -404,6 +425,7 @@ export interface FileRouteTypes {
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
+    | '/admin/system-status'
     | '/alert-groups/$alertGroupId'
     | '/connections/$connectionId'
     | '/connections/new'
@@ -418,6 +440,7 @@ export interface FileRouteTypes {
     | '/destinations'
     | '/integrations'
     | '/routes'
+    | '/admin/organization/outgoing-heartbeat'
     | '/admin/organization/security'
     | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
@@ -442,6 +465,7 @@ export interface FileRouteTypes {
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
+    | '/admin/system-status'
     | '/alert-groups/$alertGroupId'
     | '/connections/$connectionId'
     | '/connections/new'
@@ -456,6 +480,7 @@ export interface FileRouteTypes {
     | '/destinations/'
     | '/integrations/'
     | '/routes/'
+    | '/admin/organization/outgoing-heartbeat'
     | '/admin/organization/security'
     | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
@@ -481,6 +506,7 @@ export interface RootRouteChildren {
   TotpEnrolmentRoute: typeof TotpEnrolmentRoute
   AdminAuditLogRoute: typeof AdminAuditLogRoute
   AdminOidcRoute: typeof AdminOidcRoute
+  AdminSystemStatusRoute: typeof AdminSystemStatusRoute
   AlertGroupsAlertGroupIdRoute: typeof AlertGroupsAlertGroupIdRoute
   ConnectionsConnectionIdRoute: typeof ConnectionsConnectionIdRoute
   ConnectionsNewRoute: typeof ConnectionsNewRoute
@@ -494,6 +520,7 @@ export interface RootRouteChildren {
   DestinationsIndexRoute: typeof DestinationsIndexRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
   RoutesIndexRoute: typeof RoutesIndexRoute
+  AdminOrganizationOutgoingHeartbeatRoute: typeof AdminOrganizationOutgoingHeartbeatRoute
   AdminOrganizationSecurityRoute: typeof AdminOrganizationSecurityRoute
   AdminServiceAccountsServiceAccountIdRoute: typeof AdminServiceAccountsServiceAccountIdRoute
   AdminUsersUserIdRoute: typeof AdminUsersUserIdRoute
@@ -566,6 +593,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/oidc'
       fullPath: '/admin/oidc'
       preLoaderRoute: typeof AdminOidcRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/system-status': {
+      id: '/admin/system-status'
+      path: '/admin/system-status'
+      fullPath: '/admin/system-status'
+      preLoaderRoute: typeof AdminSystemStatusRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/alert-groups/': {
@@ -665,6 +699,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/sign-in/totp'
       preLoaderRoute: typeof SignInTotpRouteImport
       parentRoute: typeof SignInRoute
+    }
+    '/admin/organization/outgoing-heartbeat': {
+      id: '/admin/organization/outgoing-heartbeat'
+      path: '/admin/organization/outgoing-heartbeat'
+      fullPath: '/admin/organization/outgoing-heartbeat'
+      preLoaderRoute: typeof AdminOrganizationOutgoingHeartbeatRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/admin/organization/security': {
       id: '/admin/organization/security'
@@ -787,6 +828,7 @@ const rootRouteChildren: RootRouteChildren = {
   TotpEnrolmentRoute: TotpEnrolmentRoute,
   AdminAuditLogRoute: AdminAuditLogRoute,
   AdminOidcRoute: AdminOidcRoute,
+  AdminSystemStatusRoute: AdminSystemStatusRoute,
   AlertGroupsAlertGroupIdRoute: AlertGroupsAlertGroupIdRoute,
   ConnectionsConnectionIdRoute: ConnectionsConnectionIdRoute,
   ConnectionsNewRoute: ConnectionsNewRoute,
@@ -800,6 +842,8 @@ const rootRouteChildren: RootRouteChildren = {
   DestinationsIndexRoute: DestinationsIndexRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
   RoutesIndexRoute: RoutesIndexRoute,
+  AdminOrganizationOutgoingHeartbeatRoute:
+    AdminOrganizationOutgoingHeartbeatRoute,
   AdminOrganizationSecurityRoute: AdminOrganizationSecurityRoute,
   AdminServiceAccountsServiceAccountIdRoute:
     AdminServiceAccountsServiceAccountIdRoute,

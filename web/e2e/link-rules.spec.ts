@@ -110,12 +110,18 @@ test("edits a Lookup table, creates a Link rule with its preview and keeps the t
   const csp = watchCsp(page);
   await signInAdmin(page);
 
-  // 10. The navigation lists "Lookup tables" and "Link rules" after "Security", under Organization.
+  // 10. The navigation lists "Lookup tables" and "Link rules" after "Security" and "Outgoing heartbeat", under
+  // Organization.
   await expect(nav(page, "Link rules")).toBeVisible();
   const entries = page.getByRole("navigation", { name: "Main" }).getByRole("link");
   const names = await entries.allTextContents();
   const security = names.indexOf("Security");
-  expect(names.slice(security, security + 3)).toEqual(["Security", "Lookup tables", "Link rules"]);
+  expect(names.slice(security, security + 4)).toEqual([
+    "Security",
+    "Outgoing heartbeat",
+    "Lookup tables",
+    "Link rules",
+  ]);
   await expect(nav(page, "Lookup tables")).toHaveAttribute(
     "href",
     "/admin/organization/lookup-tables",

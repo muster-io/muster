@@ -167,9 +167,14 @@ describe("navigation", () => {
       .not.toBeInTheDocument();
   });
 
-  test("Lookup tables and Link rules follow Security under Organization, each with its read Permission", async () => {
+  test("Outgoing heartbeat, Lookup tables and Link rules follow Security under Organization, each with its Permission", async () => {
     const index = NAVIGATION.findIndex((e) => e.to === "/admin/organization/security");
-    expect(NAVIGATION.slice(index + 1, index + 3)).toEqual([
+    expect(NAVIGATION.slice(index + 1, index + 4)).toEqual([
+      {
+        to: "/admin/organization/outgoing-heartbeat",
+        label: "outgoingHeartbeat",
+        permission: "organization:write",
+      },
       {
         to: "/admin/organization/lookup-tables",
         label: "lookupTables",
@@ -178,16 +183,41 @@ describe("navigation", () => {
       { to: "/admin/organization/link-rules", label: "linkRules", permission: "link-rules:read" },
     ]);
 
-    const shown = await renderNavigation(["lookup-tables:read", "link-rules:read"], NAVIGATION);
+    const shown = await renderNavigation(
+      ["organization:write", "lookup-tables:read", "link-rules:read"],
+      NAVIGATION,
+    );
+    await expect.element(shown.getByRole("link", { name: "Outgoing heartbeat" })).toBeVisible();
     await expect.element(shown.getByRole("link", { name: "Lookup tables" })).toBeVisible();
     await expect.element(shown.getByRole("link", { name: "Link rules" })).toBeVisible();
     await shown.unmount();
 
     const without = await renderNavigation(["link-rules:read"], NAVIGATION);
     await expect
+      .element(without.getByRole("link", { name: "Outgoing heartbeat" }))
+      .not.toBeInTheDocument();
+    await expect
       .element(without.getByRole("link", { name: "Lookup tables" }))
       .not.toBeInTheDocument();
     await expect.element(without.getByRole("link", { name: "Link rules" })).toBeVisible();
+  });
+
+  test("System status comes last and needs system-status:read", async () => {
+    expect(NAVIGATION.at(-1)).toEqual({
+      to: "/admin/system-status",
+      label: "systemStatus",
+      permission: "system-status:read",
+    });
+
+    const shown = await renderNavigation(["system-status:read"], NAVIGATION);
+    await expect.element(shown.getByRole("link", { name: "System status" })).toBeVisible();
+    await shown.unmount();
+
+    const without = await renderNavigation(["audit-log:read"], NAVIGATION);
+    await expect.element(without.getByRole("link", { name: "Audit log" })).toBeVisible();
+    await expect
+      .element(without.getByRole("link", { name: "System status" }))
+      .not.toBeInTheDocument();
   });
 
   test("Statistics follows Alert Groups and needs alert-groups:read", async () => {

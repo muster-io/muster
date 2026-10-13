@@ -40,7 +40,10 @@ import {
   getListRouteSuggestionsQueryKey,
   getListRoutesQueryKey,
 } from "../api/gen/endpoints/routes/routes";
-import { getListSystemNoticesQueryKey } from "../api/gen/endpoints/system/system";
+import {
+  getGetSystemStatusQueryKey,
+  getListSystemNoticesQueryKey,
+} from "../api/gen/endpoints/system/system";
 import { HintEventType, type HintEvent } from "../api/gen/model";
 
 const HINT_TYPES: readonly HintEventType[] = Object.values(HintEventType);
@@ -67,17 +70,27 @@ export function registerHint(type: HintEventType, queries: HintQueries): () => v
 }
 
 registerHint("system-notices", () => [getListSystemNoticesQueryKey()]);
-registerHint("organization", () => [getGetOrganizationQueryKey()]);
+// The Organization changed: its settings pages, and the System status, which shows whether an outgoing heartbeat URL
+// is set.
+registerHint("organization", () => [getGetOrganizationQueryKey(), getGetSystemStatusQueryKey()]);
+// The System status changed in a way the other hints do not name, such as the result of the outgoing heartbeat; the
+// server sends it only to the streams that may read the System status.
+registerHint("system-status", () => [getGetSystemStatusQueryKey()]);
 // An Integration or its tokens changed: the list, and the Integration's page with its tokens; a Heartbeat turned on
-// or off changes the Route suggestions.
+// or off changes the Route suggestions, and a Heartbeat lost the Integrations the System status lists.
 registerHint("integration", (id) =>
   id === null
-    ? [getListIntegrationsQueryKey(), getListRouteSuggestionsQueryKey()]
+    ? [
+        getListIntegrationsQueryKey(),
+        getListRouteSuggestionsQueryKey(),
+        getGetSystemStatusQueryKey(),
+      ]
     : [
         getListIntegrationsQueryKey(),
         getGetIntegrationQueryKey(id),
         getListIntegrationTokensQueryKey(id),
         getListRouteSuggestionsQueryKey(),
+        getGetSystemStatusQueryKey(),
       ],
 );
 // A Route changed, or the order of all of them: the list with its order, the suggestions it may answer, and an open
@@ -100,11 +113,13 @@ registerHint("connection", (id) =>
 );
 // A Destination changed, came or went, or became Broken or healthy: the list with its health, the Destination's page,
 // the Connections list, which counts the Destinations of each Connection, and the suggestion of a Route for Internal
-// alerts, which needs a Destination. The Route editor reads the health of its Destinations from the list.
+// alerts, which needs a Destination. The Route editor reads the health of its Destinations from the list, and the
+// System status lists the Broken Destinations and the delivery queues.
 registerHint("destination", (id) => [
   getListDestinationsQueryKey(),
   getListConnectionsQueryKey(),
   getListRouteSuggestionsQueryKey(),
+  getGetSystemStatusQueryKey(),
   ...(id === null ? [] : [getGetDestinationQueryKey(id)]),
 ]);
 
