@@ -824,8 +824,15 @@ Serves C-08, C-09.FR-19, C-11.FR-14, C-12, C-17; [ADR-0003](../adr/0003-route-fi
 
 Serves C-09, C-10, C-17; [ADR-0004](../adr/0004-alert-group-state-machine.md),
 [ADR-0016](../adr/0016-flat-domain-packages-command-layer-and-architecture-lints.md). Written only by `groups`, through
-the dispatcher; every command and system transition locks the Alert Group row (`SELECT ... FOR UPDATE`), which
-serializes commands on one Alert Group (C-10.FR-10).
+the dispatcher; every command and system transition locks the Alert Group row (`SELECT ... FOR NO KEY UPDATE`), which
+serializes commands on one Alert Group (C-10.FR-10). Rows are locked in one order: the Route's row and its membership
+advisory lock, `alert_groups` by id and the Route's `storms` row, then `deliveries`, then `thread_replies`; how the
+Alert Group locks interleave with the Route and Storm locks differs between the dispatcher and a change of a Route's
+Destinations, as `internal/delivery/worker.go` describes. PostgreSQL re-checks the foreign keys of a row that its own
+transaction updates a second time (or updates after inserting it), taking `FOR KEY SHARE` on each referenced row, which
+runs against that order; so explicit locks on `alert_groups`, `deliveries`, `storms` and `destinations` are `FOR NO KEY
+UPDATE`, which such checks never wait for, and never `FOR UPDATE` outside the `SKIP LOCKED` claims and deletes. The full
+rules are in `internal/delivery/worker.go`.
 
 **`alert_groups`** is at the same time the working row of an Alert Group and its **summary row**, kept for
 `retention.alert_group_summaries` (2 years): the list, search, statistics, `#N` lookup and the "details removed" page

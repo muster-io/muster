@@ -21,7 +21,7 @@ FROM (SELECT x.id, x.desired_retire, ds.public_id
       JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
       WHERE x.org_id = $3 AND x.state = 'pending' AND ds.connection_id = $4
         AND ds.deleted_at IS NOT NULL
-      FOR UPDATE OF x) AS old
+      FOR NO KEY UPDATE OF x) AS old
 WHERE d.org_id = $3 AND d.id = old.id
 RETURNING d.id, d.destination_id, d.alert_group_id, d.storm_id, old.public_id AS destination_public_id,
           old.desired_retire AS final_edit, (d.published_at IS NULL)::boolean AS unpublished,
@@ -347,7 +347,9 @@ type ClaimDueDeliveriesRow struct {
 // first, then the earliest, then the one delivered longest ago, so that deliveries waiting for the same token take
 // turns; another claimer skips the rows this one locked. A delivery a Storm holds waits for its Storm, and one of a
 // deleted Destination is claimed only for its final edit. The choice is a materialized CTE, run once: as a subquery in
-// FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row.
+// FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row. The claims of
+// ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers (internal/timers) copy this shape; a fix of it
+// applies to them too.
 func (q *Queries) ClaimDueDeliveries(ctx context.Context, arg ClaimDueDeliveriesParams) ([]ClaimDueDeliveriesRow, error) {
 	rows, err := q.db.Query(ctx, claimDueDeliveries,
 		arg.Owner,
@@ -524,7 +526,7 @@ SET template_error_since = NULL, template_error = NULL
 FROM (SELECT l.id
       FROM destinations l
       WHERE l.org_id = $1 AND l.id = $2 AND l.template_error IS NOT NULL
-      FOR UPDATE SKIP LOCKED) locked
+      FOR NO KEY UPDATE SKIP LOCKED) locked
 WHERE ds.org_id = $1 AND ds.id = locked.id
 RETURNING ds.public_id
 `
@@ -974,37 +976,6 @@ func (q *Queries) EnsureStormSummary(ctx context.Context, arg EnsureStormSummary
 	return i, err
 }
 
-const getActiveStorm = `-- name: GetActiveStorm :one
-SELECT id, started_at, alert_group_count, urgent_count
-FROM storms
-WHERE org_id = $1 AND route_id = $2 AND ended_at IS NULL
-`
-
-type GetActiveStormParams struct {
-	OrgID   int64
-	RouteID int64
-}
-
-type GetActiveStormRow struct {
-	ID              int64
-	StartedAt       time.Time
-	AlertGroupCount int64
-	UrgentCount     int64
-}
-
-// GetActiveStorm reads the active Storm of a Route. No row when there is none.
-func (q *Queries) GetActiveStorm(ctx context.Context, arg GetActiveStormParams) (GetActiveStormRow, error) {
-	row := q.db.QueryRow(ctx, getActiveStorm, arg.OrgID, arg.RouteID)
-	var i GetActiveStormRow
-	err := row.Scan(
-		&i.ID,
-		&i.StartedAt,
-		&i.AlertGroupCount,
-		&i.UrgentCount,
-	)
-	return i, err
-}
-
 const getCreatedEventDeliveredAt = `-- name: GetCreatedEventDeliveredAt :one
 SELECT delivered_at::timestamptz
 FROM webhook_events
@@ -1109,7 +1080,7 @@ FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
 LEFT JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
 WHERE d.org_id = $1 AND d.id = $2 AND d.lease_owner = $3::text AND d.lease_until > $4::timestamptz
-FOR UPDATE OF d
+FOR NO KEY UPDATE OF d
 `
 
 type GetLeasedDeliveryParams struct {
@@ -2379,7 +2350,9 @@ type ListRouteDestinationsRow struct {
 // Delivery (C-11, ADR-0005, schema.md §4.11 and §5): the Desired state per Alert Group and Destination, its
 // reconciliation by the delivery worker, Thread replies, the shared limiter buckets, the delivery events and the
 // Telegram copy buffer. Only this package writes deliveries, thread_replies, rate_limit_buckets, delivery_events and
-// telegram_post_copies. Due times are business times and leases real times; both come from Go.
+// telegram_post_copies. Due times are business times and leases real times; both come from Go. Row locks follow the
+// lock order of the delivery worker (worker.go): an explicit lock on a row of deliveries, storms or destinations is FOR
+// NO KEY UPDATE, so that the FOR KEY SHARE of a foreign-key check never waits for it, outside the SKIP LOCKED claims.
 // ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health, the mode of an
 // outgoing webhook and whether it has a "reply in thread" request, in id order, for Enqueue.
 func (q *Queries) ListRouteDestinations(ctx context.Context, arg ListRouteDestinationsParams) ([]ListRouteDestinationsRow, error) {
@@ -2493,11 +2466,45 @@ func (q *Queries) ListStormSummaries(ctx context.Context, arg ListStormSummaries
 	return items, nil
 }
 
+const lockActiveStorm = `-- name: LockActiveStorm :one
+SELECT id, started_at, alert_group_count, urgent_count
+FROM storms
+WHERE org_id = $1 AND route_id = $2 AND ended_at IS NULL
+FOR SHARE
+`
+
+type LockActiveStormParams struct {
+	OrgID   int64
+	RouteID int64
+}
+
+type LockActiveStormRow struct {
+	ID              int64
+	StartedAt       time.Time
+	AlertGroupCount int64
+	UrgentCount     int64
+}
+
+// LockActiveStorm reads the active Storm of a Route and locks it FOR SHARE until the transaction ends, for a change of
+// the Route's Destinations before it writes any delivery: the deliveries it holds for the Storm then commit before a
+// calm check, which locks the Storm FOR NO KEY UPDATE, ends it, and a Storm the calm check ended meanwhile is no row.
+func (q *Queries) LockActiveStorm(ctx context.Context, arg LockActiveStormParams) (LockActiveStormRow, error) {
+	row := q.db.QueryRow(ctx, lockActiveStorm, arg.OrgID, arg.RouteID)
+	var i LockActiveStormRow
+	err := row.Scan(
+		&i.ID,
+		&i.StartedAt,
+		&i.AlertGroupCount,
+		&i.UrgentCount,
+	)
+	return i, err
+}
+
 const lockDeliveryThread = `-- name: LockDeliveryThread :one
 SELECT thread_state, thread_anchor_id, thread_chain_last_id, message_id
 FROM deliveries
 WHERE org_id = $1 AND id = $2
-FOR UPDATE
+FOR NO KEY UPDATE
 `
 
 type LockDeliveryThreadParams struct {
@@ -2554,13 +2561,33 @@ func (q *Queries) LockPostCopy(ctx context.Context, arg LockPostCopyParams) erro
 	return err
 }
 
+const lockReplyDelivery = `-- name: LockReplyDelivery :exec
+SELECT d.id
+FROM deliveries d
+JOIN thread_replies r ON r.org_id = d.org_id AND r.delivery_id = d.id
+WHERE r.org_id = $1 AND r.id = $2 AND d.org_id = $1
+FOR NO KEY UPDATE OF d
+`
+
+type LockReplyDeliveryParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// LockReplyDelivery locks the delivery of a Thread reply, before the reply itself: a transaction that writes a Thread
+// reply takes its delivery's row first, in the lock order of worker.go. Nothing is locked when the reply is gone.
+func (q *Queries) LockReplyDelivery(ctx context.Context, arg LockReplyDeliveryParams) error {
+	_, err := q.db.Exec(ctx, lockReplyDelivery, arg.OrgID, arg.ID)
+	return err
+}
+
 const lockStorm = `-- name: LockStorm :one
 SELECT s.id, s.route_id, s.started_at, s.calm_since, s.alert_group_count, s.urgent_count, r.public_id AS route_public_id,
        r.name AS route_name, r.language AS route_language, r.storm_threshold
 FROM storms s
 JOIN routes r ON r.org_id = s.org_id AND r.id = s.route_id
 WHERE s.org_id = $1 AND s.id = $2 AND s.ended_at IS NULL
-FOR UPDATE OF s
+FOR NO KEY UPDATE OF s
 `
 
 type LockStormParams struct {
@@ -2653,7 +2680,7 @@ SET health = 'healthy', broken_since = NULL, broken_cause = NULL, broken_reason 
 FROM (SELECT x.id, x.broken_since
       FROM destinations x
       WHERE x.org_id = $1 AND x.id = $2 AND x.health = 'broken'
-      FOR UPDATE OF x) AS old
+      FOR NO KEY UPDATE OF x) AS old
 WHERE d.org_id = $1 AND d.id = old.id
 RETURNING d.public_id, d.name, old.broken_since::timestamptz AS was_broken_since,
           (d.deleted_at IS NOT NULL)::boolean AS deleted
@@ -4029,7 +4056,7 @@ SET template_error_since = $1::timestamptz, template_error = $2::text
 FROM (SELECT l.id
       FROM destinations l
       WHERE l.org_id = $3 AND l.id = $4 AND l.template_error IS NULL
-      FOR UPDATE SKIP LOCKED) locked
+      FOR NO KEY UPDATE SKIP LOCKED) locked
 WHERE ds.org_id = $3 AND ds.id = locked.id
 RETURNING ds.public_id, ds.name
 `

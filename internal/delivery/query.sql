@@ -4,7 +4,9 @@
 -- Delivery (C-11, ADR-0005, schema.md §4.11 and §5): the Desired state per Alert Group and Destination, its
 -- reconciliation by the delivery worker, Thread replies, the shared limiter buckets, the delivery events and the
 -- Telegram copy buffer. Only this package writes deliveries, thread_replies, rate_limit_buckets, delivery_events and
--- telegram_post_copies. Due times are business times and leases real times; both come from Go.
+-- telegram_post_copies. Due times are business times and leases real times; both come from Go. Row locks follow the
+-- lock order of the delivery worker (worker.go): an explicit lock on a row of deliveries, storms or destinations is FOR
+-- NO KEY UPDATE, so that the FOR KEY SHARE of a foreign-key check never waits for it, outside the SKIP LOCKED claims.
 
 -- ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health, the mode of an
 -- outgoing webhook and whether it has a "reply in thread" request, in id order, for Enqueue.
@@ -125,7 +127,9 @@ SELECT pg_notify(@channel::text, '');
 -- first, then the earliest, then the one delivered longest ago, so that deliveries waiting for the same token take
 -- turns; another claimer skips the rows this one locked. A delivery a Storm holds waits for its Storm, and one of a
 -- deleted Destination is claimed only for its final edit. The choice is a materialized CTE, run once: as a subquery in
--- FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row.
+-- FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row. The claims of
+-- ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers (internal/timers) copy this shape; a fix of it
+-- applies to them too.
 -- name: ClaimDueDeliveries :many
 WITH due AS MATERIALIZED (
     SELECT x.id
@@ -164,7 +168,7 @@ FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
 LEFT JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
 WHERE d.org_id = @org_id AND d.id = @id AND d.lease_owner = @owner::text AND d.lease_until > @now::timestamptz
-FOR UPDATE OF d;
+FOR NO KEY UPDATE OF d;
 
 -- RenewDeliveryLease extends the lease of a delivery this replica holds before its call, so that the call is made
 -- under a whole lease.
@@ -466,6 +470,15 @@ FROM due
 WHERE r.org_id = @org_id AND r.id = due.id
 RETURNING r.id, r.next_attempt_at;
 
+-- LockReplyDelivery locks the delivery of a Thread reply, before the reply itself: a transaction that writes a Thread
+-- reply takes its delivery's row first, in the lock order of worker.go. Nothing is locked when the reply is gone.
+-- name: LockReplyDelivery :exec
+SELECT d.id
+FROM deliveries d
+JOIN thread_replies r ON r.org_id = d.org_id AND r.delivery_id = d.id
+WHERE r.org_id = @org_id AND r.id = @id AND d.org_id = @org_id
+FOR NO KEY UPDATE OF d;
+
 -- GetLeasedReply reads, and locks, a Thread reply whose lease this replica still holds at the real time now, with its
 -- delivery's Root message, its Thread and the start of its Publication, for an outgoing webhook in the template mode
 -- the latest Desired state, the values extracted so far and whether "open thread" ran, its Destination with, for
@@ -517,7 +530,7 @@ SET template_error_since = @now::timestamptz, template_error = @error::text
 FROM (SELECT l.id
       FROM destinations l
       WHERE l.org_id = @org_id AND l.id = @id AND l.template_error IS NULL
-      FOR UPDATE SKIP LOCKED) locked
+      FOR NO KEY UPDATE SKIP LOCKED) locked
 WHERE ds.org_id = @org_id AND ds.id = locked.id
 RETURNING ds.public_id, ds.name;
 
@@ -530,7 +543,7 @@ SET template_error_since = NULL, template_error = NULL
 FROM (SELECT l.id
       FROM destinations l
       WHERE l.org_id = @org_id AND l.id = @id AND l.template_error IS NOT NULL
-      FOR UPDATE SKIP LOCKED) locked
+      FOR NO KEY UPDATE SKIP LOCKED) locked
 WHERE ds.org_id = @org_id AND ds.id = locked.id
 RETURNING ds.public_id;
 
@@ -765,7 +778,7 @@ SET health = 'healthy', broken_since = NULL, broken_cause = NULL, broken_reason 
 FROM (SELECT x.id, x.broken_since
       FROM destinations x
       WHERE x.org_id = @org_id AND x.id = @id AND x.health = 'broken'
-      FOR UPDATE OF x) AS old
+      FOR NO KEY UPDATE OF x) AS old
 WHERE d.org_id = @org_id AND d.id = old.id
 RETURNING d.public_id, d.name, old.broken_since::timestamptz AS was_broken_since,
           (d.deleted_at IS NOT NULL)::boolean AS deleted;
@@ -910,7 +923,7 @@ SELECT s.id, s.route_id, s.started_at, s.calm_since, s.alert_group_count, s.urge
 FROM storms s
 JOIN routes r ON r.org_id = s.org_id AND r.id = s.route_id
 WHERE s.org_id = @org_id AND s.id = @id AND s.ended_at IS NULL
-FOR UPDATE OF s;
+FOR NO KEY UPDATE OF s;
 
 -- GetStormRankTime is when the @rank-th most recent Alert Group of a Route created after @floor was created: one more
 -- than the Storm threshold, so that the count of the last minute fell to the threshold one minute after it.
@@ -960,11 +973,14 @@ UPDATE deliveries
 SET publication_loud = false, updated_at = @now
 WHERE org_id = @org_id AND storm_id = @storm_id::bigint AND published_at IS NULL;
 
--- GetActiveStorm reads the active Storm of a Route. No row when there is none.
--- name: GetActiveStorm :one
+-- LockActiveStorm reads the active Storm of a Route and locks it FOR SHARE until the transaction ends, for a change of
+-- the Route's Destinations before it writes any delivery: the deliveries it holds for the Storm then commit before a
+-- calm check, which locks the Storm FOR NO KEY UPDATE, ends it, and a Storm the calm check ended meanwhile is no row.
+-- name: LockActiveStorm :one
 SELECT id, started_at, alert_group_count, urgent_count
 FROM storms
-WHERE org_id = @org_id AND route_id = @route_id AND ended_at IS NULL;
+WHERE org_id = @org_id AND route_id = @route_id AND ended_at IS NULL
+FOR SHARE;
 
 -- RetireStormSummary ends the Storm summary of the active Storm of a Route in a Destination that left it: retired when
 -- published there, withheld otherwise; it receives nothing more.
@@ -1181,7 +1197,7 @@ FROM (SELECT x.id, x.desired_retire, ds.public_id
       JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
       WHERE x.org_id = @org_id AND x.state = 'pending' AND ds.connection_id = @connection_id
         AND ds.deleted_at IS NOT NULL
-      FOR UPDATE OF x) AS old
+      FOR NO KEY UPDATE OF x) AS old
 WHERE d.org_id = @org_id AND d.id = old.id
 RETURNING d.id, d.destination_id, d.alert_group_id, d.storm_id, old.public_id AS destination_public_id,
           old.desired_retire AS final_edit, (d.published_at IS NULL)::boolean AS unpublished,
@@ -1346,7 +1362,7 @@ WHERE r.org_id = @org_id AND d.org_id = @org_id AND d.id = r.delivery_id AND ds.
 SELECT thread_state, thread_anchor_id, thread_chain_last_id, message_id
 FROM deliveries
 WHERE org_id = @org_id AND id = @id
-FOR UPDATE;
+FOR NO KEY UPDATE;
 
 -- SetThread sets the Thread of a delivery: its state, the copy it is attached to, or lost, and the last reply of its
 -- unattached chain.

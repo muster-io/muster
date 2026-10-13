@@ -445,9 +445,13 @@ func (w *Worker) settleRequest(ctx context.Context, q queries, org int64, d Dest
 }
 
 // recordReply records the outcome of a Thread reply's call in the transaction of q, by the rules above, then what it
-// did to a Telegram Thread; lost is the first answer of a reply whose Thread was lost.
+// did to a Telegram Thread; lost is the first answer of a reply whose Thread was lost. The reply's delivery is locked
+// first, as a Root message found deleted changes the delivery after the reply.
 func (w *Worker) recordReply(ctx context.Context, q queries, org int64, a replyAttempt, out Outcome,
 	rejected, lost *Outcome, logs *after) error {
+	if err := lockReplyDelivery(ctx, q, org, a.row.ID); err != nil {
+		return err
+	}
 	thread := changesThread(a, out, lost)
 	var th dbgen.LockDeliveryThreadRow
 	if thread || out.ThreadOpened {

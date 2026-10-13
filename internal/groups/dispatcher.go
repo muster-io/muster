@@ -480,14 +480,14 @@ func (d *dispatcher) receivedAt(ctx context.Context, q Queries) (*time.Time, err
 	return ref.at, nil
 }
 
-// dispatcher is the one way an Alert Group changes (ADR-0004, ADR-0016): permission → precondition → transition →
-// Audit log → Timeline → re-render, inside the caller's transaction, on a row the caller locked FOR UPDATE, and the
-// live-update hints of the change once the transaction commits. System transitions need no Permission and write no
-// Audit log entry; a Command passes permit first and names its Audit log action in its change. Whatever path enters,
-// moves or leaves a Snooze with an end, the dispatcher keeps its snooze_end timer with it; whatever path makes a
-// published Alert Group firing, or stops it being firing, starts its ack timeout over or stops it, whatever path
-// acknowledges it, hands it over or ends its acknowledgement starts its Reminders, continues or stops them, and any
-// change by its Owner answers a Reminder (timers.go).
+// dispatcher is the one way an Alert Group changes (ADR-0004, ADR-0016): permission → precondition → transition → Audit
+// log → Timeline → re-render, inside the caller's transaction, on a row the caller locked FOR NO KEY UPDATE
+// (LockGroups), and the live-update hints of the change once the transaction commits. System transitions need no
+// Permission and write no Audit log entry; a Command passes permit first and names its Audit log action in its change.
+// Whatever path enters, moves or leaves a Snooze with an end, the dispatcher keeps its snooze_end timer with it;
+// whatever path makes a published Alert Group firing, or stops it being firing, starts its ack timeout over or stops
+// it, whatever path acknowledges it, hands it over or ends its acknowledgement starts its Reminders, continues or stops
+// them, and any change by its Owner answers a Reminder (timers.go).
 type dispatcher struct {
 	orgID int64
 	clock clock.Clock

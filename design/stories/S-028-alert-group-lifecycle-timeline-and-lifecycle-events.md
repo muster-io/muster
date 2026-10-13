@@ -113,7 +113,7 @@ issue: 28
   `MovedAlertGroups`.
 - **Dispatcher** (ADR-0004, ADR-0016; `internal/groups`): every change of an Alert Group passes through one function
   with the steps precondition → transition → Audit log → Timeline → re-render. It runs on Alert Group rows its caller
-  locked (`SELECT … FOR UPDATE`), all of a transaction's rows in id order, and in the caller's transaction
+  locked (`SELECT … FOR NO KEY UPDATE`), all of a transaction's rows in id order, and in the caller's transaction
   (processing's per Snapshot, a timer's, an API request's). System
   transitions run as the actor `system` with the Transport `system`, need no Permission and write no Audit log entry;
   S-032 adds the Permission and Audit log steps of Commands. Re-render is a hook that delivery fills from S-034. Only

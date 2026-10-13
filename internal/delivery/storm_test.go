@@ -274,17 +274,17 @@ func (f *fakeDB) QuietStormSummaries(_ context.Context, arg dbgen.QuietStormSumm
 	return nil
 }
 
-func (f *fakeDB) GetActiveStorm(_ context.Context, arg dbgen.GetActiveStormParams) (dbgen.GetActiveStormRow, error) {
+func (f *fakeDB) LockActiveStorm(_ context.Context, arg dbgen.LockActiveStormParams) (dbgen.LockActiveStormRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err := f.call("GetActiveStorm"); err != nil {
-		return dbgen.GetActiveStormRow{}, err
+	if err := f.call("LockActiveStorm"); err != nil {
+		return dbgen.LockActiveStormRow{}, err
 	}
 	st := f.activeStorm(arg.RouteID)
 	if st == nil {
-		return dbgen.GetActiveStormRow{}, pgx.ErrNoRows
+		return dbgen.LockActiveStormRow{}, pgx.ErrNoRows
 	}
-	return dbgen.GetActiveStormRow{ID: st.id, StartedAt: st.started, AlertGroupCount: st.alertGroupCount,
+	return dbgen.LockActiveStormRow{ID: st.id, StartedAt: st.started, AlertGroupCount: st.alertGroupCount,
 		UrgentCount: st.urgentCount}, nil
 }
 
@@ -820,7 +820,7 @@ func TestStormDestinationJoinsAndLeaves(t *testing.T) {
 	if whSummary.state != "retired" {
 		t.Errorf("summary revived %+v", whSummary)
 	}
-	for _, q := range []string{"GetActiveStorm", "RetireStormSummary"} {
+	for _, q := range []string{"LockActiveStorm", "RetireStormSummary"} {
 		e.db.fail[q] = errBoom
 		if err := e.svc.RouteDestinationsChanged(t.Context(), nil, routeID, []int64{destWH},
 			[]int64{destMM}); !errors.Is(err, errBoom) {

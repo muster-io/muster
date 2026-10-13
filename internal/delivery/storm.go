@@ -54,7 +54,7 @@ type stormQueries interface {
 	WithholdHeldResolved(ctx context.Context, arg dbgen.WithholdHeldResolvedParams) ([]string, error)
 	EndStorm(ctx context.Context, arg dbgen.EndStormParams) error
 	QuietStormSummaries(ctx context.Context, arg dbgen.QuietStormSummariesParams) error
-	GetActiveStorm(ctx context.Context, arg dbgen.GetActiveStormParams) (dbgen.GetActiveStormRow, error)
+	LockActiveStorm(ctx context.Context, arg dbgen.LockActiveStormParams) (dbgen.LockActiveStormRow, error)
 	RetireStormSummary(ctx context.Context, arg dbgen.RetireStormSummaryParams) error
 	ListStormActivity(ctx context.Context, orgID int64) ([]dbgen.ListStormActivityRow, error)
 }

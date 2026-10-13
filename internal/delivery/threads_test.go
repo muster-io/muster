@@ -564,3 +564,31 @@ func TestAckTimeoutNoticeReply(t *testing.T) {
 		t.Errorf("recording failed: replies %d, after ran %v", len(e.replies()), ran)
 	}
 }
+
+// TestReplyRecordLocksItsDeliveryFirst: the record of a Thread reply's outcome locks the reply's delivery before it
+// writes the reply (the lock order of worker.go); a failure of that lock fails the record, and the reply is attempted
+// again.
+func TestReplyRecordLocksItsDeliveryFirst(t *testing.T) {
+	e := published(t)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, alertsAdded(2, groups.StatusFiring, "fp"))
+	e.db.replyLocks = nil
+	e.round(t)
+	if len(e.replies()) != 1 || !slices.Equal(e.db.replyLocks, []string{"reply", "delivery", "sent"}) {
+		t.Fatalf("replies %d, locks %v", len(e.replies()), e.db.replyLocks)
+	}
+	e = published(t)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, alertsAdded(2, groups.StatusFiring, "fp"))
+	e.db.fail["LockReplyDelivery"] = errBoom
+	e.round(t)
+	rp := e.db.replies[len(e.db.replies)-1]
+	if rp.state == "sent" || len(e.replies()) != 1 ||
+		!strings.Contains(e.log.String(), "lock the delivery of the thread reply") {
+		t.Errorf("reply %s, %d sent\n%s", rp.state, len(e.replies()), e.log)
+	}
+	delete(e.db.fail, "LockReplyDelivery")
+	rp.owner, rp.next = "", e.business.Now()
+	e.round(t)
+	if rp.state != "sent" {
+		t.Errorf("again: reply %s", rp.state)
+	}
+}

@@ -82,7 +82,11 @@ SELECT route_id, grace_deadline
 FROM alert_groups
 WHERE org_id = @org_id AND id = @id;
 
--- LockGroups locks Alert Groups for a change, in id order, so that two transactions never wait for each other.
+-- LockGroups locks Alert Groups for a change, in id order, so that two transactions never wait for each other. The lock
+-- is FOR NO KEY UPDATE, as a change never deletes an Alert Group or changes its id: it excludes every other change,
+-- but not the FOR KEY SHARE that a foreign-key check of a row referencing the Alert Group takes, such as a delivery
+-- row its transaction updates a second time while the dispatcher waits for that row (the lock order of the delivery
+-- worker, internal/delivery/worker.go).
 -- name: LockGroups :many
 SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, group_key_values, group_key_sha256,
        title, title_from_group_key, summary, common_labels, common_annotations, integration_ids, status,
@@ -97,7 +101,7 @@ SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, g
 FROM alert_groups
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[])
 ORDER BY id
-FOR UPDATE;
+FOR NO KEY UPDATE;
 
 -- EnsureCounter creates the Organization's row of alert_group_counters on first use.
 -- name: EnsureCounter :exec

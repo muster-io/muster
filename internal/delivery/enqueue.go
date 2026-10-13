@@ -199,12 +199,14 @@ func (r Row) mentionsOf(e groups.Recorded) []string {
 //
 // It first takes the Route's membership lock shared (ShareRouteMembership), which a change of the Route's Destinations
 // and the deletion of one of them take exclusively, so that an Enqueue and such a change serialize: neither misses a
-// delivery the other creates or retires. The lock order cannot deadlock: grouping holds the Route's row FOR SHARE and
-// takes this lock after it, and a change of the Destinations takes the row before this lock, so it waits for grouping
-// before it takes the lock; a Command or a timer holds only its Alert Group, which a change of the Destinations never
-// locks; the move to the Default route holds the Route's row and then the Alert Groups, but never this lock, which an
+// delivery the other creates or retires. The membership lock closes no cycle: grouping holds the Route's row FOR SHARE
+// and takes this lock after it, and a change of the Destinations takes the row before this lock, so it waits for
+// grouping before it takes the lock; a Command or a timer holds only its Alert Group, FOR NO KEY UPDATE, which a change
+// of the Destinations never locks in a mode that waits for it — the foreign-key checks of its deliveries take FOR KEY
+// SHARE; the move to the Default route holds the Route's row and then the Alert Groups, but never this lock, which an
 // Enqueue takes without the row. While it waits nobody waits for a delivery row it holds: an Enqueue locks the
 // deliveries of its Route only after the lock, and a change of the Destinations locks those of its Route only after it.
+// The deliveries and Thread replies it then locks follow the lock order of worker.go.
 func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Rendering) error {
 	q := s.store.queries(tx)
 	g := r.Group
