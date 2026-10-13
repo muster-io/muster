@@ -179,6 +179,11 @@ func (i *Interactive) Do(ctx context.Context, s Subject, op Op) (Outcome, error)
 			return err
 		})
 		if err != nil {
+			// A context that ends during a poll, such as the budget of a Destination test, makes the database fail
+			// with an error of its own, the i/o timeout of a connection whose deadline it set: the call ended.
+			if ctx.Err() != nil {
+				return Outcome{}, fmt.Errorf("%w: %w", ctx.Err(), err)
+			}
 			return Outcome{}, err
 		}
 		if t.ok {

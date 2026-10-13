@@ -279,6 +279,54 @@ func TestInteractiveRetryAfter(t *testing.T) {
 	}
 }
 
+// TestInteractiveBudgetEndsInPoll: when the context ends while the limiters are polled at the end of the budget, the
+// database answers with an error of its own, such as the i/o timeout of a connection whose deadline the context set;
+// the call is still the end of the context, which a Destination test records as limited, not a failure of Muster.
+func TestInteractiveBudgetEndsInPoll(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 60
+	dest := delivery.Destination{ID: destMM, PublicID: "DSAAAAAAAAAA11", Type: delivery.TypeMattermost}
+	in := e.interactive()
+	ok := delivery.ReadOp(func(context.Context, delivery.Call) delivery.Outcome {
+		return delivery.Outcome{Kind: delivery.OutcomeOK}
+	})
+	if _, err := in.Do(t.Context(), delivery.Subject{Destination: &dest}, ok); err != nil {
+		t.Fatal(err)
+	}
+	ioTimeout := errors.New("write failed: write tcp 127.0.0.1:1->127.0.0.1:55432: i/o timeout")
+	ctx, cancel := context.WithCancelCause(t.Context())
+	in.Sleep = func(_ context.Context, d time.Duration) bool {
+		e.business.Advance(d)
+		e.real.Advance(d)
+		cancel(context.DeadlineExceeded)
+		e.begin.err = ioTimeout
+		return true
+	}
+	called := false
+	_, err := in.Do(ctx, delivery.Subject{Destination: &dest}, delivery.ReadOp(func(context.Context,
+		delivery.Call) delivery.Outcome {
+		called = true
+		return delivery.Outcome{}
+	}))
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, ioTimeout) || called {
+		t.Fatalf("a poll after the context ended = %v, called %v", err, called)
+	}
+	e.begin.err = nil
+	// The budget of a Destination test is a deadline: its end in a poll is the class limited.
+	expired, stop := context.WithDeadline(t.Context(), real0)
+	defer stop()
+	in.Sleep = func(_ context.Context, d time.Duration) bool {
+		e.business.Advance(d)
+		e.real.Advance(d)
+		e.begin.err = ioTimeout
+		return true
+	}
+	out, err := in.Do(expired, delivery.Subject{Destination: &dest}, ok)
+	if st, serr := delivery.Step("event", out, err, 0); serr != nil || st.ErrorClass != delivery.ClassLimited {
+		t.Errorf("a test whose budget ended in a poll = %+v, %v", st, serr)
+	}
+}
+
 // TestInteractiveAdapterOps: a send, an edit, a Thread reply and a Destination check on the interactive path each take
 // a token and call the adapter in the interactive client class.
 func TestInteractiveAdapterOps(t *testing.T) {
