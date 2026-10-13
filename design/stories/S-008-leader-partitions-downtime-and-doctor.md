@@ -247,7 +247,7 @@ curl -s localhost:8082/metrics | grep '^muster_leader '        # muster_leader 1
 | C-02.FR-12 | partial | downtime record and recovery window; Timeline entries are S-028, collapsed timers S-028 and S-049 |
 | C-02.FR-13 | full | |
 | C-02.FR-14 | partial | `muster doctor` without Connection and Destination checks (S-061, S-041) |
-| C-02.FR-15 | partial | `muster doctor`; the other subcommands come with S-011, S-012, S-021 and S-055 |
+| C-02.FR-15 | partial | `muster doctor`; the other subcommands come with S-011, S-012, S-021 and S-071 |
 | C-02.FR-19 | partial | `muster_leader`, `muster_clock_skew_seconds` and the Leader-only flag |
 | C-02.FR-24 | full | served by S-012 |
 | C-02.AC-3 | full | |

@@ -42,7 +42,7 @@ acceptance:
   - "[C-17.FR-10, C-13.FR-4, C-14.FR-4] A press on \"Still on it\" from the Owner's linked account records `reminder_answered` for that User with the Transport `mattermost` or `telegram` and does not move the next Reminder; a press on \"Unack\" unacknowledges the Alert Group; the Telegram callback answers are \"Done: Still on it\" and \"Done: Unacknowledge\"."
   - "[C-17.AC-7, C-13.FR-4] In Mattermost every private answer to a press on a Reminder reply — a refusal, the \"not linked\" text, or \"Done: Still on it\", the only successful press that gets an answer — first goes as an ephemeral post whose `root_id` is the Root message; when that post is refused with `403` (a bot without `create_post_ephemeral`, the fake server's default) or fails, the same text goes into the answer's `ephemeral_text`, which the server shows to that person in the Thread of the Root message (F-025, F-062, D284)."
   - "[C-13.FR-4, C-14.FR-4] A press on a reply is bound to it: in Mattermost `post_id` must be the `message_id` of a `reminder` reply of that Alert Group to a Destination of this Connection and `channel_id` that Destination's channel; in Telegram the press must come from that reply's chat and message; a mismatch is answered like a bad signature and changes nothing."
-  - "[C-17.FR-6] A press on a Reminder button whose key is not in the Keyring is answered privately with \"This button has expired; use the buttons on the Alert Group's message\" and changes nothing, while a Root message button in the same case keeps the answer \"This button could not be verified; nothing was changed.\" (tests with a Keyring that lacks the signing key; S-055 repeats it live after a real rotation)."
+  - "[C-17.FR-6] A press on a Reminder button whose key is not in the Keyring is answered privately with \"This button has expired; use the buttons on the Alert Group's message\" and changes nothing, while a Root message button in the same case keeps the answer \"This button could not be verified; nothing was changed.\" (tests with a Keyring that lacks the signing key; S-071 repeats it live after a real rotation)."
 verify: "make ci test-integration e2e"
 operator_attention: true
 issue: 197
@@ -65,7 +65,7 @@ issue: 197
 - The Reminders themselves, their schedule, the answer rule and `answerReminder` (S-049).
 - Creating Account links (S-051), which verifies these presses with links made through the profile; here presses come
   from link rows set up directly, as in S-061 and S-067.
-- The expired-button answer after a real key rotation (S-055).
+- The expired-button answer after a real key rotation (S-071).
 
 ## Contracts
 
@@ -82,7 +82,7 @@ issue: 197
   `still_on_it` or `unacknowledge`, signed with the active key when the reply is rendered. The delivery worker stores
   the reply's `message_id` (already recorded by `RecordReplySent`) and the `button_key_id` of its signature in
   `thread_replies` with its outcome (`outcomes.go`). Reply buttons are never re-rendered: a key rotation re-signs Root
-  messages only (S-055).
+  messages only (S-071).
 - **Expired buttons** (C-17.FR-6): `buttons.Verify` tells an action id whose key prefix names no key of the Keyring
   (`ErrExpired`) from one whose signature does not match or that is malformed (`ErrInvalid`). A `reply` action id with
   `ErrExpired` is answered "This button has expired; use the buttons on the Alert Group's message" (`press.expired`,
@@ -202,7 +202,7 @@ None.
 | ID | Covered | Note |
 |---|---|---|
 | C-17.FR-4 | partial | the buttons "Still on it" and "Unack" on Reminders; the Reminders are S-049 |
-| C-17.FR-6 | full | the expiry rule with a Keyring that lacks the key; S-055 repeats it after a real rotation |
+| C-17.FR-6 | full | the expiry rule with a Keyring that lacks the key; S-071 repeats it after a real rotation |
 | C-17.FR-10 | partial | "Still on it" from the messenger buttons; the API is S-049, the page S-050 |
 | C-17.AC-7 | full | |
 | C-13.FR-4 | partial | presses on Thread replies and their answers in the Thread |

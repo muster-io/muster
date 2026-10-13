@@ -4,6 +4,8 @@
 - Date: 2026-10-02
 - Amended: 2026-10-03 — the OIDC client secret expiry check (`MusterOIDCSecretExpiring`) is a Leader task
 - Amended: 2026-10-05 — pruning short-lived rows and the records of gone replicas are Leader tasks
+- Amended: 2026-10-13 — re-signing the buttons of open Root messages after a master key rotation
+  (`rerender_after_rotation`) is a Leader task: the rotation CLI has no renderer (ADR-0011)
 
 ## Context
 
@@ -19,7 +21,9 @@ Snooze ends, Grace periods). A few tasks must run exactly once across all replic
 - a periodic "alive" mark that tells a restarted Muster how long it was down;
 - Muster's own outgoing heartbeat to an external dead man's switch (ADR-0014);
 - the check of the OIDC client secret's expiry date, which raises the Internal alert `MusterOIDCSecretExpiring`
-  (ADR-0014).
+  (ADR-0014);
+- after a master key rotation, recomputing the Desired state of the open Alert Groups whose buttons an older key
+  signed, so their Root messages are re-signed (ADR-0011).
 
 Muster runs under docker-compose as well as on Kubernetes, often with PgBouncer in front of PostgreSQL. PgBouncer in
 transaction pooling mode breaks session-level features: session advisory locks and `LISTEN/NOTIFY` do not survive
@@ -38,9 +42,9 @@ replica delays nothing beyond its lease.
 
 **One Leader** holds a **session advisory lock with a constant key** on a dedicated connection and runs only the tasks
 listed in the Context: Telegram polling, the Heartbeat lost and Stale checks, partition maintenance, database gauges,
-the "alive" mark, the outgoing heartbeat and the OIDC secret expiry check (later also polling Alertmanager in the `pull`
-Connection mode). This list is closed: new singleton work is added to it by a reviewed change. Because only the Leader
-sends the outgoing heartbeat, it also stops when no replica leads.
+the "alive" mark, the outgoing heartbeat, the OIDC secret expiry check and the re-render after a key rotation (later
+also polling Alertmanager in the `pull` Connection mode). This list is closed: new singleton work is added to it by a
+reviewed change. Because only the Leader sends the outgoing heartbeat, it also stops when no replica leads.
 
 **A bounded lease on leadership.** The Leader proves it still holds the lock by pinging over the lock's own session at a
 fixed interval. The lock session sets `idle_session_timeout` (which is why PostgreSQL 14 is the oldest supported

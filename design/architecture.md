@@ -173,6 +173,7 @@ Telegram, a reverse proxy or a self-hosted Bot API server set as the Connection'
 | timer rows: ack timeouts, Reminders, Snooze ends, Reopen window ends, Grace period ends; background re-checks of OIDC users | database gauges (`muster_alert_groups`, queue depths, Broken) |
 | the key record of the replica, refreshed every 30 s | the "alive" mark and the downtime record after an outage |
 | | the outgoing heartbeat; the `MusterOIDCSecretExpiring` check ([C-19].FR-5) |
+| | re-signing the buttons of open Root messages after a key rotation (`rerender_after_rotation`, [C-20].FR-7) |
 
 ---
 
@@ -930,6 +931,7 @@ sequenceDiagram
     participant R as each replica
     participant CLI as muster secrets rotate-key
     participant DB as PostgreSQL
+    participant L as Leader
     participant DW as delivery worker
 
     OP->>OP: generate a key outside Muster, openssl rand -base64 32
@@ -945,16 +947,14 @@ sequenceDiagram
     alt a live replica lacks the new key
         CLI-->>OP: refused, naming the replicas that lack it
     else every live replica holds it
-        CLI->>DB: active key is NEW
-        CLI->>DB: re-encrypt every secret and the key canary with NEW
-        CLI->>DB: recompute the Desired state of every open Alert Group
-        CLI->>DB: Audit log entry with the actor
+        CLI->>DB: one transaction: active key is NEW, every secret and the key canary re-encrypted,<br/>Audit log entry with the actor, live hints, NOTIFY muster_keyring
         R->>DB: read the active key id, switch without a restart
+        L->>DB: rerender_after_rotation: recompute the Desired state of open Alert Groups<br/>whose buttons another key signed, in batches
         DW->>DW: reconcile: Root messages edited, buttons signed with NEW
     end
     Note over R,DB: A replica that sees an active key it does not hold stops with the canary error.
     OP->>R: Keyring page or muster doctor
-    R-->>OP: the old key is no longer used and can be removed
+    R-->>OP: the old key is no longer used and can be removed<br/>(a key never active is shown as not active yet)
     OP->>ENV: remove the old key, roll out
     Note over OP,DW: Buttons on Thread replies such as Reminders keep their old signature<br/>and are answered as expired once the old key is gone.
 ```

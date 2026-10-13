@@ -4,7 +4,7 @@ title: Runbooks, Telegram in restricted networks and the README demo
 capability: C-21
 kind: docs
 layer: L1
-depends_on: [S-056, S-057]
+depends_on: [S-056, S-057, S-054]
 covers: [C-21.FR-2, C-21.FR-3, C-21.FR-5, C-21.FR-7, C-21.AC-1, C-21.AC-3, C-19.FR-9, C-19.AC-4, C-14.FR-9, C-01.FR-14]
 files_touched:
   - docs/operations/runbooks/index.md
@@ -74,7 +74,8 @@ issue: 58
 - **Runbook check** (C-21.FR-3; `internal/tools/runbookcheck`, in `make docs-check`): the set of names from the Internal
   alert registry and from the Chart rules table of reference.md must equal the set of runbook pages; every page must
   have the four headings; a difference fails with the names. S-059 adds the rules rendered by `helm template` and their
-  `runbook_url`s to the same check.
+  `runbook_url`s to the same check. `make docs-check` runs on every pull request (S-057), so a pull request that adds
+  an Internal alert to the registry without its page fails even when it does not touch `docs/`.
 - **Internal alerts reference** (`internal/tools/refgen`): the "Runbook" column of `docs/reference/internal-alerts.md`,
   which today shows the page's path as code, becomes a link to the page, so the strict build of S-057 checks every
   link.
@@ -124,7 +125,7 @@ mv /tmp/MusterClockSkew.md docs/operations/runbooks/
 make dev > dev.log 2>&1 &   # then raise MusterOIDCSecretExpiring as in S-053
 URL=$(curl -s -b jar "localhost:8080/api/v1/integrations/$(curl -s -b jar localhost:8080/api/v1/integrations | jq -r '.items[] | select(.builtin) | .id')/alerts?state=firing" | jq -r '.items[0].annotations.runbook_url')
 test -f "site/${URL#https://muster-io.github.io/muster/latest/}index.html" && echo found   # found
-grep -c 'operations/runbooks/MusterOIDCSecretExpiring' site/reference/internal-alerts/index.html   # 1
+grep -q 'operations/runbooks/MusterOIDCSecretExpiring' site/reference/internal-alerts/index.html && echo ok   # ok
 
 # C-21.FR-7, C-21.AC-3: every warning of the list is on the page
 P=docs/messengers/telegram-restricted-networks.md

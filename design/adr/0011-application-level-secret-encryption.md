@@ -6,6 +6,9 @@
   Destination is created
 - Amended: 2026-10-04 — a third sub-key purpose: the CSRF token of a web session is derived from the session token
   with its own sub-key and never stored
+- Amended: 2026-10-13 — `rotate-key` activates the key, re-encrypts and notifies the replicas; the Leader recomputes
+  the Desired state of open Alert Groups (ADR-0007), because the CLI has no renderer; only a key that was active before
+  is reported as removable
 
 ## Context
 
@@ -49,10 +52,13 @@ the key id. A press is accepted if the signature verifies with the key it names,
    as live.
 2. `muster secrets rotate-key --activate <id>` makes that key active — but only when every live replica holds it;
    otherwise it refuses and names the replicas that lack it. It then re-encrypts all secrets and the key canary with the
-   new key and recomputes the Desired state of the messages of every open Alert Group, so reconciliation (ADR-0005)
-   re-renders them with buttons signed by the new key. Replicas switch to the new active key without a restart.
+   new key in the same transaction and notifies the replicas, which switch to the new active key without a restart.
+   The CLI builds no renderer, so the Leader then recomputes the Desired state of the messages of every open Alert
+   Group whose buttons an older key signed (ADR-0007), and reconciliation (ADR-0005) re-renders them with buttons
+   signed by the new key.
 3. Muster shows, in the UI and in `muster doctor`, when no secret and no Root message of an open Alert Group depends on
-   an older key any more. Only then does the operator remove that key from the environment.
+   an older key that was active before. Only then does the operator remove that key from the environment. A key that
+   was never active is shown as not active yet, never as removable.
 
 Resolved Alert Groups have no buttons, so old messages keep no signatures that matter. Buttons in Thread replies, such
 as the ones on Reminders, are not reconciled and keep the signature they were sent with; they do not hold back the

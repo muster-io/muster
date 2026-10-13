@@ -218,7 +218,8 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 ## Chart rules
 
 Rendered by the chart when the Prometheus or VictoriaMetrics CRDs are enabled (C-19.FR-3). Each rule has a
-`description` and a `runbook_url`; thresholds, windows and the job selector (`job="muster"` below) are chart values.
+`description` and a `runbook_url`; thresholds, windows and the job selector (`job="muster"` below, part of every
+series selector) are chart values.
 The default expressions are covered by rule unit tests (C-19.AC-8). The documentation tells
 users to send the critical rules through an Alertmanager route that bypasses Muster.
 
@@ -226,13 +227,13 @@ users to send the critical rules through an Alertmanager route that bypasses Mus
 |---|---|---|---|---|
 | `MusterDown` | critical | `up{job="muster"} == 0` | 2m | the scrape target is down |
 | `MusterNoLeader` | critical | `max(muster_leader{job="muster"}) == 0` | 2m | no replica leads: Telegram polling, Heartbeat lost and Stale checks, partitions and the outgoing heartbeat have stopped; ingestion, delivery and timers keep working |
-| `MusterDeliveryFailing` | critical | `max by (destination) (muster_delivery_queue) > 0 unless on (destination) sum by (destination) (increase(muster_delivery_attempts_total{outcome="delivered"}[10m])) > 0` | 5m | a Destination has queued deliveries and no successful delivery for 10 minutes |
-| `MusterDestinationBroken` | critical | `max by (destination) (muster_destination_broken) == 1` | 5m | a Destination is Broken |
-| `MusterHeartbeatLost` | critical | `max by (integration) (muster_heartbeat_lost) == 1` | 1m | an Integration is Heartbeat lost; the backup for the Internal alert |
-| `MusterDeliverySlow` | warning | `histogram_quantile(0.95, sum by (le) (rate(muster_delivery_latency_seconds_bucket[15m]))) > 5` | 15m | delivery p95 above the objective of NFR-2 |
-| `MusterDeliveryQueueGrowing` | warning | `max by (destination) (muster_delivery_queue) > 100 and max by (destination) (deriv(muster_delivery_queue[15m])) > 0` | 15m | a delivery queue keeps growing |
-| `MusterIngestBacklog` | warning | `max(muster_ingest_backlog) > 1000 or histogram_quantile(0.95, sum by (le) (rate(muster_ingest_processing_delay_seconds_bucket[5m]))) > 60` | 5m | processing falls behind |
-| `MusterIngestRejected` | warning | `sum by (integration, outcome) (increase(muster_ingest_requests_total{outcome="too_large"}[15m])) > 0 or sum by (integration, outcome) (increase(muster_ingest_requests_total{outcome="unauthorized"}[15m])) > 10` | 0m | an oversized ingestion request, or more than 10 unauthorized ones, arrived in the last 15 minutes |
-| `MusterTemplateError` | warning | `sum by (route, destination, template) (increase(muster_template_errors_total[15m])) > 0` | 0m | templates failed in the last 15 minutes |
-| `MusterClockSkew` | warning | `max by (instance) (abs(muster_clock_skew_seconds)) > 2` | 5m | a replica's clock is off |
-| `MusterLoginFailures` | warning | `sum by (method) (increase(muster_login_failures_total[10m])) > 20` | 0m | a burst of failed sign-ins |
+| `MusterDeliveryFailing` | critical | `max by (destination) (muster_delivery_queue{job="muster"}) > 0 unless on (destination) sum by (destination) (increase(muster_delivery_attempts_total{job="muster",outcome="delivered"}[10m])) > 0` | 5m | a Destination has queued deliveries and no successful delivery for 10 minutes |
+| `MusterDestinationBroken` | critical | `max by (destination) (muster_destination_broken{job="muster"}) == 1` | 5m | a Destination is Broken |
+| `MusterHeartbeatLost` | critical | `max by (integration) (muster_heartbeat_lost{job="muster"}) == 1` | 1m | an Integration is Heartbeat lost; the backup for the Internal alert |
+| `MusterDeliverySlow` | warning | `histogram_quantile(0.95, sum by (le) (rate(muster_delivery_latency_seconds_bucket{job="muster"}[15m]))) > 5` | 15m | delivery p95 above the objective of NFR-2 |
+| `MusterDeliveryQueueGrowing` | warning | `max by (destination) (muster_delivery_queue{job="muster"}) > 100 and max by (destination) (deriv(muster_delivery_queue{job="muster"}[15m])) > 0` | 15m | a delivery queue keeps growing |
+| `MusterIngestBacklog` | warning | `max(muster_ingest_backlog{job="muster"}) > 1000 or histogram_quantile(0.95, sum by (le) (rate(muster_ingest_processing_delay_seconds_bucket{job="muster"}[5m]))) > 60` | 5m | processing falls behind |
+| `MusterIngestRejected` | warning | `sum by (integration, outcome) (increase(muster_ingest_requests_total{job="muster",outcome="too_large"}[15m])) > 0 or sum by (integration, outcome) (increase(muster_ingest_requests_total{job="muster",outcome="unauthorized"}[15m])) > 10` | 0m | an oversized ingestion request, or more than 10 unauthorized ones, arrived in the last 15 minutes |
+| `MusterTemplateError` | warning | `sum by (route, destination, template) (increase(muster_template_errors_total{job="muster"}[15m])) > 0` | 0m | templates failed in the last 15 minutes |
+| `MusterClockSkew` | warning | `max by (instance) (abs(muster_clock_skew_seconds{job="muster"})) > 2` | 5m | a replica's clock is off |
+| `MusterLoginFailures` | warning | `sum by (method) (increase(muster_login_failures_total{job="muster"}[10m])) > 20` | 0m | a burst of failed sign-ins |

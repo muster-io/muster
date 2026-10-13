@@ -235,8 +235,8 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Observation | C-05 – C-10 | S-018 – S-033, S-063 | 17 |
 | Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 – S-067 | 20 |
 | Actions | C-17, C-18 | S-049 – S-052, S-068 – S-070 | 7 |
-| Operations | C-19 – C-21 | S-053 – S-060 | 8 |
-| **L1** | 21 | | **70** |
+| Operations | C-19 – C-21 | S-053 – S-060, S-071 | 9 |
+| **L1** | 21 | | **71** |
 
 ### Foundation
 
@@ -326,12 +326,13 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 |---|---|---|---|---|
 | [S-053](S-053-oidc-secret-expiry-alert-outgoing-heartbeat-system-status-and-metric-catalogue-check.md) | C-19 | OIDC secret expiry alert, outgoing heartbeat, System status, runbook URLs and the metric catalogue check (BE) | be | S-045, S-049 |
 | [S-054](S-054-system-status-page-and-outgoing-heartbeat-settings.md) | C-19 | System status page and outgoing heartbeat settings (FE) | fe | S-015, S-053 |
-| [S-055](S-055-organization-settings-outbound-policy-editing-keyring-status-and-key-rotation.md) | C-20 | Organization settings, outbound policy editing, Keyring status and key rotation (BE) | be | S-047, S-051, S-053 |
-| [S-056](S-056-organization-settings-pages.md) | C-20 | Organization settings pages (FE) | fe | S-015, S-055 |
+| [S-055](S-055-organization-settings-outbound-policy-editing-keyring-status-and-key-rotation.md) | C-20 | Organization settings, values seen and outbound policy editing (BE) | be | S-047, S-051, S-053 |
+| [S-071](S-071-keyring-status-key-rotation-and-re-render-after-rotation.md) | C-20 | Keyring status, key rotation and re-render after rotation (BE) | be | S-055, S-069 |
+| [S-056](S-056-organization-settings-pages.md) | C-20 | Organization settings pages (FE) | fe | S-015, S-055, S-071 |
 | [S-057](S-057-documentation-site-build-and-generated-references.md) | C-21 | Documentation site, its build and the generated references | docs | S-053, S-051 |
-| [S-058](S-058-runbooks-telegram-in-restricted-networks-and-the-readme-demo.md) | C-21 | Runbooks, Telegram in restricted networks and the README demo | docs | S-056, S-057 |
+| [S-058](S-058-runbooks-telegram-in-restricted-networks-and-the-readme-demo.md) | C-21 | Runbooks, Telegram in restricted networks and the README demo | docs | S-056, S-057, S-054 |
 | [S-059](S-059-chart-alert-rules-with-rule-unit-tests-and-the-grafana-dashboard.md) | C-19 | Chart alert rules with rule unit tests and the Grafana dashboard | infra | S-053, S-058 |
-| [S-060](S-060-quick-start-install-concepts-operations-and-remaining-documentation.md) | C-21 | Remaining documentation sections: Quick start, Install, Alertmanager, Sign-in, Concepts and Operations | docs | S-055, S-059, S-054 |
+| [S-060](S-060-quick-start-install-concepts-operations-and-remaining-documentation.md) | C-21 | Remaining documentation sections: Quick start, Install, Alertmanager, Sign-in, Concepts and Operations | docs | S-055, S-071, S-059, S-054 |
 
 S-059 and S-060 were split from S-053 and S-058 when their contracts were written; S-053 and S-058 keep their IDs. The
 chart rules follow the runbook pages, so that the check of rendered rules against the pages can run as soon as the
@@ -365,7 +366,11 @@ Telegram bot, and covers two Connections of each messenger, two Destinations in 
 Account links end to end. It belongs to C-18 and follows S-052 in the Actions phase, because its checks need Account
 links made through the profile and the pages of S-052. S-070 was added with S-069 (D305, D309): it labels Connections
 and Destinations across the UI, rewords the Telegram Account link and warns about two Destinations in one chat; it
-follows S-069.
+follows S-069. S-071 was split from S-055 by the plan review of the Operations phase, before its implementation,
+because with the files that review added S-055 touched about 40 files (D311). S-055 keeps the Organization settings,
+the values seen and the outbound policy; S-071 takes the Keyring status, `muster secrets rotate-key`, the Leader's
+re-render after a rotation and the repeated expiry of Reminder buttons. S-071 follows S-055 in the Operations phase,
+and S-056, whose Keyring page needs it, and S-060 follow it. S-055 keeps its file name.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group
