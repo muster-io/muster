@@ -50,7 +50,7 @@ acceptance:
   - "Every new text exists in English and Russian, and no Content Security Policy violation is reported (`navigation.spec.ts`)."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 220
 ---
 
 # S-072. Compact top navigation: Access entry, Profile in the user menu, Audit log under Organization (FE)
