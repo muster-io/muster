@@ -1,0 +1,1758 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Alert grouping and on-call after Alertmanager">
+      
+      
+      
+        <link rel="canonical" href="https://muster-io.github.io/muster/reference/metrics/">
+      
+      
+      
+        <link rel="prev" href="../">
+      
+      
+        <link rel="next" href="../log-events/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../brand/muster-mark-tile.svg">
+      <meta name="generator" content="zensical-0.0.70">
+    
+    
+      
+        <title>Metrics - Muster</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e442bf79.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Muster" class="md-header__button md-logo" aria-label="Muster" data-md-component="logo">
+      
+  <img src="../../brand/muster-mark.svg" alt="Muster">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Muster
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Metrics
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/muster-io/muster" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    muster-io/muster
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Muster" class="md-nav__button md-logo" aria-label="Muster" data-md-component="logo">
+      
+  <img src="../../brand/muster-mark.svg" alt="Muster">
+
+    </a>
+    Muster
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/muster-io/muster" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    muster-io/muster
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Alertmanager
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Alertmanager
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/alertmanager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Alertmanager
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Heartbeat
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Messengers
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Messengers
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/mattermost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Mattermost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Telegram
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/account-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Link your messenger accounts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhooks
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Outgoing webhooks
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhook: events mode
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhook: template mode
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_5">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Sign-in
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sign-in/oidc-keycloak/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in with Keycloak
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_6">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Metrics
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Metrics
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#label-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Label values
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../log-events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Log events
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../internal-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Internal alerts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Environment variables
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chart-values/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Chart values
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#label-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Label values
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+  
+
+
+<!-- Code generated by internal/tools/refgen from internal/metrics/catalogue.go. DO NOT EDIT. -->
+
+<h1 id="metrics">Metrics<a class="headerlink" href="#metrics" title="Permanent link">&para;</a></h1>
+<p>Muster serves these metrics in the Prometheus text format at <code>/metrics</code> on the internal listener and never pushes
+them; the endpoint also serves the process (<code>process_*</code>) and Go runtime (<code>go_*</code>) metrics. Configuration entities
+appear only by their <code>public_id</code> (<code>integration</code>, <code>route</code>, <code>destination</code>); the labels of an <code>*_info</code> metric carry
+what it describes, such as a name or the version; every other label takes its values from the closed set listed
+below. Histograms are Prometheus histograms with <code>le</code> buckets. A Leader-only metric is exported only by the
+replica that is the Leader. The capability is the one that exports the metric.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Type</th>
+<th>Labels</th>
+<th>Capability</th>
+<th>Leader only</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>muster_alert_group_time_to_ack_seconds</code></td>
+<td>histogram</td>
+<td>route</td>
+<td>C-10</td>
+<td>no</td>
+<td>Time from the start of an Alert Group to its first acknowledgement, observed once per Alert Group, by Route. Buckets (le): 60, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400.</td>
+</tr>
+<tr>
+<td><code>muster_alert_group_time_to_resolve_seconds</code></td>
+<td>histogram</td>
+<td>route</td>
+<td>C-09</td>
+<td>no</td>
+<td>Time from the start of an Alert Group to its resolution, observed at each resolution, by Route. Buckets (le): 60, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400.</td>
+</tr>
+<tr>
+<td><code>muster_alert_groups</code></td>
+<td>gauge</td>
+<td>route, status</td>
+<td>C-09</td>
+<td>yes</td>
+<td>Open Alert Groups by Route and status, counted by the Leader; an Alert Group moved to the Default route counts there.</td>
+</tr>
+<tr>
+<td><code>muster_alert_groups_created_total</code></td>
+<td>counter</td>
+<td>route</td>
+<td>C-09</td>
+<td>no</td>
+<td>Alert Groups that started, by Route.</td>
+</tr>
+<tr>
+<td><code>muster_alert_groups_reopened_total</code></td>
+<td>counter</td>
+<td>route</td>
+<td>C-09</td>
+<td>no</td>
+<td>Alert Groups that reopened within their Route's Reopen window, by Route.</td>
+</tr>
+<tr>
+<td><code>muster_alert_groups_resolved_total</code></td>
+<td>counter</td>
+<td>route, by</td>
+<td>C-09</td>
+<td>no</td>
+<td>Alert Groups that were resolved, by Route and by who resolved them.</td>
+</tr>
+<tr>
+<td><code>muster_alerts_resolved_total</code></td>
+<td>counter</td>
+<td>integration, reason</td>
+<td>C-06</td>
+<td>no</td>
+<td>Alerts that resolved, by Integration and reason.</td>
+</tr>
+<tr>
+<td><code>muster_api_request_duration_seconds</code></td>
+<td>histogram</td>
+<td>route_pattern, method</td>
+<td>C-03</td>
+<td>no</td>
+<td>Time from the arrival of an API request on the app listener to the end of its answer, by path template and method. Buckets (le): 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10.</td>
+</tr>
+<tr>
+<td><code>muster_api_requests_total</code></td>
+<td>counter</td>
+<td>route_pattern, method, code</td>
+<td>C-03</td>
+<td>no</td>
+<td>Requests to the API on the app listener, by the operation's path template, the method and the status code.</td>
+</tr>
+<tr>
+<td><code>muster_build_info</code></td>
+<td>gauge</td>
+<td>version, commit</td>
+<td>C-02</td>
+<td>no</td>
+<td>Always 1; the labels carry the version and commit of the running binary.</td>
+</tr>
+<tr>
+<td><code>muster_client_request_duration_seconds</code></td>
+<td>histogram</td>
+<td>client, outcome</td>
+<td>C-02</td>
+<td>no</td>
+<td>Duration of outbound HTTP requests, one per attempt, from the dial to the end of the body, by client class and outcome. Buckets (le): 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60.</td>
+</tr>
+<tr>
+<td><code>muster_client_requests_total</code></td>
+<td>counter</td>
+<td>client, outcome</td>
+<td>C-02</td>
+<td>no</td>
+<td>Outbound HTTP requests, one per attempt, by client class and classified outcome.</td>
+</tr>
+<tr>
+<td><code>muster_clock_skew_seconds</code></td>
+<td>gauge</td>
+<td>—</td>
+<td>C-02</td>
+<td>no</td>
+<td>This replica's clock minus the database clock, corrected by half the round trip; positive when the replica is ahead.</td>
+</tr>
+<tr>
+<td><code>muster_commands_total</code></td>
+<td>counter</td>
+<td>command, transport, outcome</td>
+<td>C-10</td>
+<td>no</td>
+<td>Commands run on Alert Groups, one per Alert Group, by command, Transport and outcome.</td>
+</tr>
+<tr>
+<td><code>muster_db_pool_acquire_wait_seconds_total</code></td>
+<td>counter</td>
+<td>—</td>
+<td>C-02</td>
+<td>no</td>
+<td>Seconds spent waiting for a connection of the main database pool of this replica, summed over every acquire.</td>
+</tr>
+<tr>
+<td><code>muster_db_pool_acquires_total</code></td>
+<td>counter</td>
+<td>—</td>
+<td>C-02</td>
+<td>no</td>
+<td>Connections taken from the main database pool of this replica.</td>
+</tr>
+<tr>
+<td><code>muster_db_pool_connections</code></td>
+<td>gauge</td>
+<td>state</td>
+<td>C-02</td>
+<td>no</td>
+<td>Connections of the main database pool of this replica, by state.</td>
+</tr>
+<tr>
+<td><code>muster_db_pool_max_connections</code></td>
+<td>gauge</td>
+<td>—</td>
+<td>C-02</td>
+<td>no</td>
+<td>The most connections the main database pool of this replica opens.</td>
+</tr>
+<tr>
+<td><code>muster_delivery_attempts_total</code></td>
+<td>counter</td>
+<td>destination, kind, outcome</td>
+<td>C-11</td>
+<td>no</td>
+<td>Calls of the delivery worker to a Destination, one per attempt, by Destination, what it sent and its outcome.</td>
+</tr>
+<tr>
+<td><code>muster_delivery_latency_seconds</code></td>
+<td>histogram</td>
+<td>destination</td>
+<td>C-11</td>
+<td>no</td>
+<td>Time from the receipt of the Snapshot behind a change of a Root message, or behind an event of an outgoing webhook, to the API call that delivered it, by Destination; changes made by Commands or timers are not observed. The service-level indicator of NFR-2. Buckets (le): 0.25, 0.5, 1, 2, 3, 5, 10, 30, 60, 300, 900.</td>
+</tr>
+<tr>
+<td><code>muster_delivery_queue</code></td>
+<td>gauge</td>
+<td>destination</td>
+<td>C-11</td>
+<td>yes</td>
+<td>Pending deliveries and Thread replies that are due, per Destination that is not deleted, counted by the Leader.</td>
+</tr>
+<tr>
+<td><code>muster_destination_broken</code></td>
+<td>gauge</td>
+<td>destination</td>
+<td>C-11</td>
+<td>yes</td>
+<td>1 while the Destination is Broken, 0 while it is healthy, per Destination that is not deleted; set by the Leader.</td>
+</tr>
+<tr>
+<td><code>muster_destination_info</code></td>
+<td>gauge</td>
+<td>destination, name</td>
+<td>C-11</td>
+<td>no</td>
+<td>Always 1, one series per Destination that is not deleted; the labels carry its public_id and name.</td>
+</tr>
+<tr>
+<td><code>muster_heartbeat_lost</code></td>
+<td>gauge</td>
+<td>integration</td>
+<td>C-07</td>
+<td>yes</td>
+<td>1 while the Integration is Heartbeat lost, 0 while its Heartbeat is on and not lost; set by the Leader's Heartbeat check.</td>
+</tr>
+<tr>
+<td><code>muster_ingest_backlog</code></td>
+<td>gauge</td>
+<td>—</td>
+<td>C-06</td>
+<td>yes</td>
+<td>Stored Snapshots waiting for processing in every Organization, counted by the Leader.</td>
+</tr>
+<tr>
+<td><code>muster_ingest_failed_snapshots_total</code></td>
+<td>counter</td>
+<td>integration</td>
+<td>C-06</td>
+<td>no</td>
+<td>Stored Snapshots that could not be processed and were marked failed — a body that is not an Alertmanager webhook, or an error of processing — by Integration.</td>
+</tr>
+<tr>
+<td><code>muster_ingest_processing_delay_seconds</code></td>
+<td>histogram</td>
+<td>integration</td>
+<td>C-06</td>
+<td>no</td>
+<td>Time from the receipt of a Stored Snapshot to the end of its processing, processed or failed, by Integration. Buckets (le): 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600.</td>
+</tr>
+<tr>
+<td><code>muster_ingest_request_duration_seconds</code></td>
+<td>histogram</td>
+<td>—</td>
+<td>C-05</td>
+<td>no</td>
+<td>Time from the arrival of an ingestion request to the end of its answer, the commit of the Stored Snapshot included. Buckets (le): 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10.</td>
+</tr>
+<tr>
+<td><code>muster_ingest_requests_total</code></td>
+<td>counter</td>
+<td>integration, outcome</td>
+<td>C-05</td>
+<td>no</td>
+<td>Requests to the ingestion endpoint, by the token's Integration and the outcome.</td>
+</tr>
+<tr>
+<td><code>muster_ingest_resolved_dropped_total</code></td>
+<td>counter</td>
+<td>integration</td>
+<td>C-06</td>
+<td>no</td>
+<td>Alerts sent as resolved whose fingerprint fires nowhere and that were dropped, by Integration; a re-sent resolve of an Alert already resolved is not counted.</td>
+</tr>
+<tr>
+<td><code>muster_ingest_truncated_snapshots_total</code></td>
+<td>counter</td>
+<td>integration</td>
+<td>C-06</td>
+<td>no</td>
+<td>Processed Snapshots that Alertmanager truncated (truncatedAlerts above 0), by Integration.</td>
+</tr>
+<tr>
+<td><code>muster_integration_info</code></td>
+<td>gauge</td>
+<td>integration, name</td>
+<td>C-05</td>
+<td>no</td>
+<td>Always 1, one series per Integration that is not deleted; the labels carry its public_id and name.</td>
+</tr>
+<tr>
+<td><code>muster_leader</code></td>
+<td>gauge</td>
+<td>—</td>
+<td>C-02</td>
+<td>no</td>
+<td>1 while this replica is the Leader and runs the Leader tasks, 0 otherwise.</td>
+</tr>
+<tr>
+<td><code>muster_login_failures_total</code></td>
+<td>counter</td>
+<td>method</td>
+<td>C-03</td>
+<td>no</td>
+<td>Failed sign-ins that were evaluated, by method; attempts refused by the sign-in throttle are not counted.</td>
+</tr>
+<tr>
+<td><code>muster_oidc_checks_total</code></td>
+<td>counter</td>
+<td>outcome</td>
+<td>C-03</td>
+<td>no</td>
+<td>Background re-checks of OIDC users at the identity provider, by outcome.</td>
+</tr>
+<tr>
+<td><code>muster_route_info</code></td>
+<td>gauge</td>
+<td>route, name</td>
+<td>C-08</td>
+<td>no</td>
+<td>Always 1, one series per Route that is not deleted, the Default route included; the labels carry its public_id and name.</td>
+</tr>
+<tr>
+<td><code>muster_short_lived_rows_pruned_total</code></td>
+<td>counter</td>
+<td>table</td>
+<td>C-02</td>
+<td>no</td>
+<td>Short-lived rows that could no longer be used and that the Leader deleted, by table.</td>
+</tr>
+<tr>
+<td><code>muster_storm_active</code></td>
+<td>gauge</td>
+<td>route</td>
+<td>C-11</td>
+<td>yes</td>
+<td>1 while the Route has an active Storm, 0 otherwise, per Route that is not deleted; set by the Leader.</td>
+</tr>
+<tr>
+<td><code>muster_template_errors_total</code></td>
+<td>counter</td>
+<td>route, destination, template</td>
+<td>C-12</td>
+<td>no</td>
+<td>Templates that failed while rendering, by the Route or the Destination that owns the template (the other label empty) and the kind of template; a message falls back to the Fallback template, a Link rule yields no link and is left out of the links, an outgoing webhook request is not sent.</td>
+</tr>
+<tr>
+<td><code>muster_template_render_duration_seconds</code></td>
+<td>histogram</td>
+<td>template</td>
+<td>C-12</td>
+<td>no</td>
+<td>Time to render a template in the sandbox, by the kind of template; a Root message is observed as a whole, its built-in default included. Buckets (le): 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="label-values">Label values<a class="headerlink" href="#label-values" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Label</th>
+<th>Values</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>muster_alert_group_time_to_ack_seconds</code></td>
+<td><code>route</code></td>
+<td>entity: the public_id of the route</td>
+</tr>
+<tr>
+<td><code>muster_alert_group_time_to_resolve_seconds</code></td>
+<td><code>route</code></td>
+<td>entity: the public_id of the route</td>
+</tr>
+<tr>
+<td><code>muster_alert_groups</code></td>
+<td><code>route</code></td>
+<td>entity: the public_id of the route</td>
+</tr>
+<tr>
+<td><code>muster_alert_groups</code></td>
+<td><code>status</code></td>
+<td><code>firing</code>, <code>acknowledged</code>, <code>snoozed</code> — the status of the open Alert Groups</td>
+</tr>
+<tr>
+<td><code>muster_alert_groups_created_total</code></td>
+<td><code>route</code></td>
+<td>entity: the public_id of the route</td>
+</tr>
+<tr>
+<td><code>muster_alert_groups_reopened_total</code></td>
+<td><code>route</code></td>
+<td>entity: the public_id of the route</td>
+</tr>
+<tr>
+<td><code>muster_alert_groups_resolved_total</code></td>
+<td><code>route</code></td>
+<td>entity: the public_id of the route</td>
+</tr>
+<tr>
+<td><code>muster_alert_groups_resolved_total</code></td>
+<td><code>by</code></td>
+<td><code>user</code>, <code>system</code> — user is a person's resolve, system the resolve when the last Alert resolved</td>
+</tr>
+<tr>
+<td><code>muster_alerts_resolved_total</code></td>
+<td><code>integration</code></td>
+<td>entity: the public_id of the integration</td>
+</tr>
+<tr>
+<td><code>muster_alerts_resolved_total</code></td>
+<td><code>reason</code></td>
+<td><code>resolved</code>, <code>gone</code>, <code>stale</code>, <code>integration_deleted</code> — resolved is a resolve from Alertmanager, for the Alert or its whole Alertmanager group; gone an Alert Alertmanager no longer lists; stale one not seen for stale_after with a live Heartbeat; integration_deleted one of a deleted Integration</td>
+</tr>
+<tr>
+<td><code>muster_api_request_duration_seconds</code></td>
+<td><code>route_pattern</code></td>
+<td><code>/sign-in-options</code>, <code>/sessions</code>, <code>/sessions/current</code>, <code>/sessions/current/totp</code>, <code>/sessions/oidc/start</code>, <code>/sessions/oidc/callback</code>, <code>/password-setups</code>, <code>/me</code>, <code>/me/password</code>, <code>/me/oidc-identity</code>, <code>/me/oidc-identity/callback</code>, <code>/me/sessions</code>, <code>/me/totp</code>, <code>/me/totp/removal</code>, <code>/me/totp/confirmation</code>, <code>/me/totp/recovery-codes</code>, <code>/system-notices</code>, <code>/users</code>, <code>/users/{user_id}</code>, <code>/users/{user_id}/disable</code>, <code>/users/{user_id}/enable</code>, <code>/users/{user_id}/reset-totp</code>, <code>/users/{user_id}/convert-to-local</code>, <code>/users/{user_id}/password-setup-links</code>, <code>/user-directory</code>, <code>/roles</code>, <code>/oidc-settings</code>, <code>/oidc-settings/checks</code>, <code>/audit-log</code>, <code>/me/personal-access-tokens</code>, <code>/me/personal-access-tokens/{token_id}</code>, <code>/service-accounts</code>, <code>/service-accounts/{service_account_id}</code>, <code>/service-accounts/{service_account_id}/disable</code>, <code>/service-accounts/{service_account_id}/enable</code>, <code>/service-accounts/{service_account_id}/tokens</code>, <code>/service-accounts/{service_account_id}/tokens/{token_id}</code>, <code>/organization</code>, <code>/organization/outbound-policy</code>, <code>/organization/keyring</code>, <code>/organization/severity-values</code>, <code>/integrations</code>, <code>/integrations/{integration_id}</code>, <code>/integrations/{integration_id}/tokens</code>, <code>/integrations/{integration_id}/tokens/{integration_token_id}</code>, <code>/integrations/{integration_id}/alertmanager-routes</code>, <code>/integrations/{integration_id}/alerts</code>, <code>/stored-snapshots</code>, <code>/stored-snapshots/{stored_snapshot_id}</code>, <code>/ingest</code>, <code>/ingest/{ingest_token}</code>, <code>/heartbeat</code>, <code>/heartbeat/{ingest_token}</code>, <code>/callbacks/mattermost/{connection_id}</code>, <code>/callbacks/telegram/{connection_id}</code>, <code>/routes</code>, <code>/routes/{route_id}</code>, <code>/route-order</code>, <code>/routes/{route_id}/move-open-alert-groups</code>, <code>/route-profiles</code>, <code>/group-key-previews</code>, <code>/route-suggestions</code>, <code>/route-suggestions/{suggestion_id}/accept</code>, <code>/route-suggestions/{suggestion_id}/dismiss</code>, <code>/alert-groups</code>, <code>/alert-group-counts</code>, <code>/alert-group-statistics</code>, <code>/alert-groups/{alert_group_id}</code>, <code>/alert-groups/{alert_group_id}/alerts</code>, <code>/alert-groups/{alert_group_id}/timeline</code>, <code>/alert-groups/{alert_group_id}/related</code>, <code>/alert-groups/{alert_group_id}/deliveries</code>, <code>/alert-groups/{alert_group_id}/acknowledge</code>, <code>/alert-groups/{alert_group_id}/unacknowledge</code>, <code>/alert-groups/{alert_group_id}/resolve</code>, <code>/alert-groups/{alert_group_id}/unresolve</code>, <code>/alert-groups/{alert_group_id}/snooze</code>, <code>/alert-groups/{alert_group_id}/unsnooze</code>, <code>/alert-groups/{alert_group_id}/notes</code>, <code>/alert-groups/{alert_group_id}/still-on-it</code>, <code>/alert-groups/bulk-commands</code>, <code>/live-updates</code>, <code>/connections</code>, <code>/connections/{connection_id}</code>, <code>/connections/{connection_id}/checks</code>, <code>/connections/{connection_id}/channels</code>, <code>/destinations</code>, <code>/destinations/{destination_id}</code>, <code>/destinations/{destination_id}/checks</code>, <code>/destinations/{destination_id}/tests</code>, <code>/destinations/{destination_id}/previews</code>, <code>/destinations/{destination_id}/secrets</code>, <code>/destinations/{destination_id}/secrets/{secret_name}</code>, <code>/destinations/{destination_id}/signing-secret</code>, <code>/destinations/{destination_id}/signing-secret/previous</code>, <code>/lookup-tables</code>, <code>/lookup-tables/{lookup_table_id}</code>, <code>/link-rules</code>, <code>/link-rules/{link_rule_id}</code>, <code>/template-previews</code>, <code>/me/account-links</code>, <code>/me/account-links/connections</code>, <code>/me/account-links/{account_link_id}</code>, <code>/me/account-links/telegram</code>, <code>/me/account-links/mattermost</code>, <code>/me/account-links/mattermost/confirmation</code>, <code>/users/{user_id}/account-links</code>, <code>/users/{user_id}/account-links/{account_link_id}</code>, <code>/system-status</code>, <code>/openapi.yaml</code>, <code>/health/live</code>, <code>/health/ready</code>, <code>/metrics</code>, <code>unmatched</code> — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has</td>
+</tr>
+<tr>
+<td><code>muster_api_request_duration_seconds</code></td>
+<td><code>method</code></td>
+<td><code>GET</code>, <code>HEAD</code>, <code>POST</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code>, <code>OPTIONS</code>, <code>OTHER</code> — the HTTP method of the request</td>
+</tr>
+<tr>
+<td><code>muster_api_requests_total</code></td>
+<td><code>route_pattern</code></td>
+<td><code>/sign-in-options</code>, <code>/sessions</code>, <code>/sessions/current</code>, <code>/sessions/current/totp</code>, <code>/sessions/oidc/start</code>, <code>/sessions/oidc/callback</code>, <code>/password-setups</code>, <code>/me</code>, <code>/me/password</code>, <code>/me/oidc-identity</code>, <code>/me/oidc-identity/callback</code>, <code>/me/sessions</code>, <code>/me/totp</code>, <code>/me/totp/removal</code>, <code>/me/totp/confirmation</code>, <code>/me/totp/recovery-codes</code>, <code>/system-notices</code>, <code>/users</code>, <code>/users/{user_id}</code>, <code>/users/{user_id}/disable</code>, <code>/users/{user_id}/enable</code>, <code>/users/{user_id}/reset-totp</code>, <code>/users/{user_id}/convert-to-local</code>, <code>/users/{user_id}/password-setup-links</code>, <code>/user-directory</code>, <code>/roles</code>, <code>/oidc-settings</code>, <code>/oidc-settings/checks</code>, <code>/audit-log</code>, <code>/me/personal-access-tokens</code>, <code>/me/personal-access-tokens/{token_id}</code>, <code>/service-accounts</code>, <code>/service-accounts/{service_account_id}</code>, <code>/service-accounts/{service_account_id}/disable</code>, <code>/service-accounts/{service_account_id}/enable</code>, <code>/service-accounts/{service_account_id}/tokens</code>, <code>/service-accounts/{service_account_id}/tokens/{token_id}</code>, <code>/organization</code>, <code>/organization/outbound-policy</code>, <code>/organization/keyring</code>, <code>/organization/severity-values</code>, <code>/integrations</code>, <code>/integrations/{integration_id}</code>, <code>/integrations/{integration_id}/tokens</code>, <code>/integrations/{integration_id}/tokens/{integration_token_id}</code>, <code>/integrations/{integration_id}/alertmanager-routes</code>, <code>/integrations/{integration_id}/alerts</code>, <code>/stored-snapshots</code>, <code>/stored-snapshots/{stored_snapshot_id}</code>, <code>/ingest</code>, <code>/ingest/{ingest_token}</code>, <code>/heartbeat</code>, <code>/heartbeat/{ingest_token}</code>, <code>/callbacks/mattermost/{connection_id}</code>, <code>/callbacks/telegram/{connection_id}</code>, <code>/routes</code>, <code>/routes/{route_id}</code>, <code>/route-order</code>, <code>/routes/{route_id}/move-open-alert-groups</code>, <code>/route-profiles</code>, <code>/group-key-previews</code>, <code>/route-suggestions</code>, <code>/route-suggestions/{suggestion_id}/accept</code>, <code>/route-suggestions/{suggestion_id}/dismiss</code>, <code>/alert-groups</code>, <code>/alert-group-counts</code>, <code>/alert-group-statistics</code>, <code>/alert-groups/{alert_group_id}</code>, <code>/alert-groups/{alert_group_id}/alerts</code>, <code>/alert-groups/{alert_group_id}/timeline</code>, <code>/alert-groups/{alert_group_id}/related</code>, <code>/alert-groups/{alert_group_id}/deliveries</code>, <code>/alert-groups/{alert_group_id}/acknowledge</code>, <code>/alert-groups/{alert_group_id}/unacknowledge</code>, <code>/alert-groups/{alert_group_id}/resolve</code>, <code>/alert-groups/{alert_group_id}/unresolve</code>, <code>/alert-groups/{alert_group_id}/snooze</code>, <code>/alert-groups/{alert_group_id}/unsnooze</code>, <code>/alert-groups/{alert_group_id}/notes</code>, <code>/alert-groups/{alert_group_id}/still-on-it</code>, <code>/alert-groups/bulk-commands</code>, <code>/live-updates</code>, <code>/connections</code>, <code>/connections/{connection_id}</code>, <code>/connections/{connection_id}/checks</code>, <code>/connections/{connection_id}/channels</code>, <code>/destinations</code>, <code>/destinations/{destination_id}</code>, <code>/destinations/{destination_id}/checks</code>, <code>/destinations/{destination_id}/tests</code>, <code>/destinations/{destination_id}/previews</code>, <code>/destinations/{destination_id}/secrets</code>, <code>/destinations/{destination_id}/secrets/{secret_name}</code>, <code>/destinations/{destination_id}/signing-secret</code>, <code>/destinations/{destination_id}/signing-secret/previous</code>, <code>/lookup-tables</code>, <code>/lookup-tables/{lookup_table_id}</code>, <code>/link-rules</code>, <code>/link-rules/{link_rule_id}</code>, <code>/template-previews</code>, <code>/me/account-links</code>, <code>/me/account-links/connections</code>, <code>/me/account-links/{account_link_id}</code>, <code>/me/account-links/telegram</code>, <code>/me/account-links/mattermost</code>, <code>/me/account-links/mattermost/confirmation</code>, <code>/users/{user_id}/account-links</code>, <code>/users/{user_id}/account-links/{account_link_id}</code>, <code>/system-status</code>, <code>/openapi.yaml</code>, <code>/health/live</code>, <code>/health/ready</code>, <code>/metrics</code>, <code>unmatched</code> — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has</td>
+</tr>
+<tr>
+<td><code>muster_api_requests_total</code></td>
+<td><code>method</code></td>
+<td><code>GET</code>, <code>HEAD</code>, <code>POST</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code>, <code>OPTIONS</code>, <code>OTHER</code> — the HTTP method of the request</td>
+</tr>
+<tr>
+<td><code>muster_api_requests_total</code></td>
+<td><code>code</code></td>
+<td><code>200</code>, <code>201</code>, <code>202</code>, <code>204</code>, <code>302</code>, <code>304</code>, <code>400</code>, <code>401</code>, <code>403</code>, <code>404</code>, <code>405</code>, <code>409</code>, <code>410</code>, <code>412</code>, <code>413</code>, <code>415</code>, <code>422</code>, <code>428</code>, <code>429</code>, <code>500</code>, <code>501</code>, <code>502</code>, <code>503</code>, <code>504</code> — the HTTP status code of the answer</td>
+</tr>
+<tr>
+<td><code>muster_build_info</code></td>
+<td><code>version</code></td>
+<td>info: the release version of the binary, such as 1.4.0</td>
+</tr>
+<tr>
+<td><code>muster_build_info</code></td>
+<td><code>commit</code></td>
+<td>info: the Git commit the binary was built from</td>
+</tr>
+<tr>
+<td><code>muster_client_request_duration_seconds</code></td>
+<td><code>client</code></td>
+<td><code>delivery</code>, <code>interactive</code>, <code>background</code>, <code>heartbeat</code> — the client class of ADR-0015</td>
+</tr>
+<tr>
+<td><code>muster_client_request_duration_seconds</code></td>
+<td><code>outcome</code></td>
+<td><code>ok</code>, <code>retry_after</code>, <code>transient</code>, <code>fatal</code>, <code>unknown</code>, <code>blocked</code>, <code>redirect</code> — the classified outcome of the request</td>
+</tr>
+<tr>
+<td><code>muster_client_requests_total</code></td>
+<td><code>client</code></td>
+<td><code>delivery</code>, <code>interactive</code>, <code>background</code>, <code>heartbeat</code> — the client class of ADR-0015</td>
+</tr>
+<tr>
+<td><code>muster_client_requests_total</code></td>
+<td><code>outcome</code></td>
+<td><code>ok</code>, <code>retry_after</code>, <code>transient</code>, <code>fatal</code>, <code>unknown</code>, <code>blocked</code>, <code>redirect</code> — the classified outcome of the request</td>
+</tr>
+<tr>
+<td><code>muster_commands_total</code></td>
+<td><code>command</code></td>
+<td><code>acknowledge</code>, <code>unacknowledge</code>, <code>resolve</code>, <code>unresolve</code>, <code>snooze</code>, <code>unsnooze</code>, <code>add_note</code>, <code>still_on_it</code> — the Command</td>
+</tr>
+<tr>
+<td><code>muster_commands_total</code></td>
+<td><code>transport</code></td>
+<td><code>ui</code>, <code>api</code>, <code>mattermost</code>, <code>telegram</code>, <code>system</code> — how the Command reached Muster</td>
+</tr>
+<tr>
+<td><code>muster_commands_total</code></td>
+<td><code>outcome</code></td>
+<td><code>done</code>, <code>unchanged</code>, <code>refused</code>, <code>skipped</code>, <code>failed</code> — done changed the Alert Group, unchanged was an idempotent repeat, refused a refusal or a missing Permission, skipped an Alert Group a bulk Acknowledge left to its Owner, failed an Alert Group that was not found</td>
+</tr>
+<tr>
+<td><code>muster_db_pool_connections</code></td>
+<td><code>state</code></td>
+<td><code>acquired</code>, <code>idle</code>, <code>constructing</code> — the state of the connection</td>
+</tr>
+<tr>
+<td><code>muster_delivery_attempts_total</code></td>
+<td><code>destination</code></td>
+<td>entity: the public_id of the destination</td>
+</tr>
+<tr>
+<td><code>muster_delivery_attempts_total</code></td>
+<td><code>kind</code></td>
+<td><code>publication</code>, <code>update</code>, <code>thread_reply</code>, <code>storm_summary</code>, <code>final_edit</code>, <code>webhook_event</code> — publication is a new Root message, update an edit of one, thread_reply a reply in its Thread, storm_summary and final_edit those messages, webhook_event an event of an outgoing webhook</td>
+</tr>
+<tr>
+<td><code>muster_delivery_attempts_total</code></td>
+<td><code>outcome</code></td>
+<td><code>delivered</code>, <code>markup_rejected</code>, <code>retry_after</code>, <code>transient</code>, <code>fatal</code>, <code>unknown</code>, <code>template_error</code> — delivered, or the error class of the answer</td>
+</tr>
+<tr>
+<td><code>muster_delivery_latency_seconds</code></td>
+<td><code>destination</code></td>
+<td>entity: the public_id of the destination</td>
+</tr>
+<tr>
+<td><code>muster_delivery_queue</code></td>
+<td><code>destination</code></td>
+<td>entity: the public_id of the destination</td>
+</tr>
+<tr>
+<td><code>muster_destination_broken</code></td>
+<td><code>destination</code></td>
+<td>entity: the public_id of the destination</td>
+</tr>
+<tr>
+<td><code>muster_destination_info</code></td>
+<td><code>destination</code></td>
+<td>entity: the public_id of the destination</td>
+</tr>
+<tr>
+<td><code>muster_destination_info</code></td>
+<td><code>name</code></td>
+<td>info: the name of the Destination</td>
+</tr>
+<tr>
+<td><code>muster_heartbeat_lost</code></td>
+<td><code>integration</code></td>
+<td>entity: the public_id of the integration</td>
+</tr>
+<tr>
+<td><code>muster_ingest_failed_snapshots_total</code></td>
+<td><code>integration</code></td>
+<td>entity: the public_id of the integration</td>
+</tr>
+<tr>
+<td><code>muster_ingest_processing_delay_seconds</code></td>
+<td><code>integration</code></td>
+<td>entity: the public_id of the integration</td>
+</tr>
+<tr>
+<td><code>muster_ingest_requests_total</code></td>
+<td><code>integration</code></td>
+<td>entity: the public_id of the token's Integration, a revoked token's included, or unknown when the token matches no Integration that is not deleted</td>
+</tr>
+<tr>
+<td><code>muster_ingest_requests_total</code></td>
+<td><code>outcome</code></td>
+<td><code>accepted</code>, <code>unauthorized</code>, <code>too_large</code> — accepted is a body stored as a Stored Snapshot, unauthorized a missing or wrong token, too_large a body above ingest.body_limit</td>
+</tr>
+<tr>
+<td><code>muster_ingest_resolved_dropped_total</code></td>
+<td><code>integration</code></td>
+<td>entity: the public_id of the integration</td>
+</tr>
+<tr>
+<td><code>muster_ingest_truncated_snapshots_total</code></td>
+<td><code>integration</code></td>
+<td>entity: the public_id of the integration</td>
+</tr>
+<tr>
+<td><code>muster_integration_info</code></td>
+<td><code>integration</code></td>
+<td>entity: the public_id of the integration</td>
+</tr>
+<tr>
+<td><code>muster_integration_info</code></td>
+<td><code>name</code></td>
+<td>info: the name of the Integration</td>
+</tr>
+<tr>
+<td><code>muster_login_failures_total</code></td>
+<td><code>method</code></td>
+<td><code>local</code>, <code>oidc</code>, <code>totp</code> — local is a wrong login or password, oidc a refused OIDC sign-in, totp a wrong TOTP or recovery code</td>
+</tr>
+<tr>
+<td><code>muster_oidc_checks_total</code></td>
+<td><code>outcome</code></td>
+<td><code>ok</code>, <code>refused</code>, <code>unavailable</code>, <code>skipped</code> — ok is a refresh the identity provider granted, refused one it refused (the user's sessions ended), unavailable one that reached no decision, skipped a user without a live session or a usable Personal access token, not sent to the identity provider</td>
+</tr>
+<tr>
+<td><code>muster_route_info</code></td>
+<td><code>route</code></td>
+<td>entity: the public_id of the route</td>
+</tr>
+<tr>
+<td><code>muster_route_info</code></td>
+<td><code>name</code></td>
+<td>info: the name of the Route</td>
+</tr>
+<tr>
+<td><code>muster_short_lived_rows_pruned_total</code></td>
+<td><code>table</code></td>
+<td><code>sessions</code>, <code>sign_in_throttles</code>, <code>password_setups</code>, <code>oidc_auth_requests</code>, <code>telegram_post_copies</code>, <code>account_link_requests</code> — the short-lived table the rows were deleted from</td>
+</tr>
+<tr>
+<td><code>muster_storm_active</code></td>
+<td><code>route</code></td>
+<td>entity: the public_id of the route</td>
+</tr>
+<tr>
+<td><code>muster_template_errors_total</code></td>
+<td><code>route</code></td>
+<td>entity: the public_id of the route</td>
+</tr>
+<tr>
+<td><code>muster_template_errors_total</code></td>
+<td><code>destination</code></td>
+<td>entity: the public_id of the destination</td>
+</tr>
+<tr>
+<td><code>muster_template_errors_total</code></td>
+<td><code>template</code></td>
+<td><code>root_message</code>, <code>line</code>, <code>ack_timeout_notice</code>, <code>link_rule</code>, <code>webhook_request</code> — the kind of template</td>
+</tr>
+<tr>
+<td><code>muster_template_render_duration_seconds</code></td>
+<td><code>template</code></td>
+<td><code>root_message</code>, <code>line</code>, <code>ack_timeout_notice</code>, <code>link_rule</code>, <code>webhook_request</code> — the kind of template</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright The Muster Authors
+    </div>
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["navigation.sections","navigation.indexes","navigation.top","search.suggest","search.highlight","content.code.copy"],"redirect":null,"search":"../../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.a2388154.min.js"></script>
+      
+    
+  </body>
+</html>

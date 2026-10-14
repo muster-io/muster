@@ -1,0 +1,1461 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Alert grouping and on-call after Alertmanager">
+      
+      
+      
+        <link rel="canonical" href="https://muster-io.github.io/muster/sign-in/oidc-keycloak/">
+      
+      
+      
+        <link rel="prev" href="../../outgoing-webhooks/templates/">
+      
+      
+        <link rel="next" href="../../reference/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../brand/muster-mark-tile.svg">
+      <meta name="generator" content="zensical-0.0.70">
+    
+    
+      
+        <title>Sign-in with Keycloak - Muster</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e442bf79.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Muster" class="md-header__button md-logo" aria-label="Muster" data-md-component="logo">
+      
+  <img src="../../brand/muster-mark.svg" alt="Muster">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Muster
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Sign-in with Keycloak
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/muster-io/muster" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    muster-io/muster
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Muster" class="md-nav__button md-logo" aria-label="Muster" data-md-component="logo">
+      
+  <img src="../../brand/muster-mark.svg" alt="Muster">
+
+    </a>
+    Muster
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/muster-io/muster" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    muster-io/muster
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Alertmanager
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Alertmanager
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/alertmanager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Alertmanager
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Heartbeat
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Messengers
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Messengers
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/mattermost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Mattermost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Telegram
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/account-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Link your messenger accounts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhooks
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Outgoing webhooks
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhook: events mode
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhook: template mode
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_5">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Sign-in
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in with Keycloak
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in with Keycloak
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-create-the-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        1. Create the client
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-add-the-groups-claim" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2. Add the groups claim
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-allow-offline_access" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3. Allow <code>offline_access</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Allow offline_access">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#without-offline_access" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Without <code>offline_access</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-configure-muster" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4. Configure Muster
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-sign-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5. Sign in
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-muster-cannot-reach-the-identity-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When Muster cannot reach the identity provider
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_6">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/metrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Metrics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/log-events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Log events
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/internal-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Internal alerts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Environment variables
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/chart-values/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Chart values
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-create-the-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        1. Create the client
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-add-the-groups-claim" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        2. Add the groups claim
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-allow-offline_access" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        3. Allow <code>offline_access</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Allow offline_access">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#without-offline_access" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Without <code>offline_access</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-configure-muster" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4. Configure Muster
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-sign-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5. Sign in
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-muster-cannot-reach-the-identity-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When Muster cannot reach the identity provider
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+  
+
+
+<h1 id="sign-in-with-keycloak">Sign-in with Keycloak<a class="headerlink" href="#sign-in-with-keycloak" title="Permanent link">&para;</a></h1>
+<p>This page sets up sign-in through <a href="https://www.keycloak.org/">Keycloak</a> with OpenID Connect (OIDC). Other identity
+providers work the same way: Muster needs a confidential client with the authorization code flow, a claim that lists
+the person's groups, and, for the background re-checks, the scope <code>offline_access</code>.</p>
+<p>Muster talks to Keycloak over the <strong>back channel</strong>: it fetches the provider metadata (discovery) and the signing keys,
+and exchanges the authorization code for tokens itself. Muster must therefore reach Keycloak over the network, directly
+or through the proxy of the OIDC settings. If it cannot — Keycloak sits in a closed network and Muster outside it — use
+<a href="#when-muster-cannot-reach-the-identity-provider">local users with TOTP</a> instead.</p>
+<p>In the examples, Keycloak runs at <code>https://keycloak.example.org</code> with the realm <code>ops</code>, and <code>MUSTER_PUBLIC_URL</code> is
+<code>https://muster.example.org</code>.</p>
+<h2 id="1-create-the-client">1. Create the client<a class="headerlink" href="#1-create-the-client" title="Permanent link">&para;</a></h2>
+<p>In the Keycloak admin console, open the realm, then <strong>Clients → Create client</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Client type</td>
+<td>OpenID Connect</td>
+</tr>
+<tr>
+<td>Client ID</td>
+<td><code>muster</code></td>
+</tr>
+<tr>
+<td>Client authentication</td>
+<td>On (a confidential client with a client secret)</td>
+</tr>
+<tr>
+<td>Authentication flow</td>
+<td><strong>Standard flow</strong> only; switch off Direct access grants, Implicit flow and Service accounts</td>
+</tr>
+<tr>
+<td>Valid redirect URIs</td>
+<td><code>https://muster.example.org/api/v1/sessions/oidc/callback</code> and <code>https://muster.example.org/api/v1/me/oidc-identity/callback</code></td>
+</tr>
+<tr>
+<td>Web origins</td>
+<td>leave empty: the browser never calls Keycloak from Muster's pages</td>
+</tr>
+</tbody>
+</table>
+<p>Both redirect URIs are <code>MUSTER_PUBLIC_URL</code> followed by a path: <code>/api/v1/sessions/oidc/callback</code> ends a sign-in, and
+<code>/api/v1/me/oidc-identity/callback</code> ends linking an existing account to Keycloak from its profile. Register both, with
+exactly the scheme, host and port of <code>MUSTER_PUBLIC_URL</code>.</p>
+<p>Under <strong>Advanced → Advanced settings</strong>, set <strong>Proof Key for Code Exchange Code Challenge Method</strong> to <code>S256</code>. Muster
+always sends a PKCE challenge, so this only makes Keycloak insist on it.</p>
+<p>Then open <strong>Credentials</strong> and copy the <strong>Client secret</strong>. Note when it expires, if your realm rotates client secrets:
+Muster warns two weeks before the date you enter (<code>oidc.secret_expiry_lead</code>).</p>
+<h2 id="2-add-the-groups-claim">2. Add the groups claim<a class="headerlink" href="#2-add-the-groups-claim" title="Permanent link">&para;</a></h2>
+<p>Muster gives each person a Role from their groups. Keycloak puts groups into tokens only through a mapper:</p>
+<ol>
+<li>Open the client → <strong>Client scopes</strong> → <code>muster-dedicated</code> → <strong>Add mapper → By configuration → Group Membership</strong>.</li>
+<li>Set <strong>Name</strong> to <code>groups</code> and <strong>Token Claim Name</strong> to <code>groups</code>.</li>
+<li>Switch <strong>Full group path</strong> off, so that the claim carries <code>oncall</code> rather than <code>/oncall</code>.</li>
+<li>Switch on <strong>Add to ID token</strong> and <strong>Add to userinfo</strong>.</li>
+</ol>
+<p>Muster reads the groups from the ID token, and from the userinfo endpoint when the ID token lacks the claim; the
+userinfo answer must be plain JSON, not a signed JWT. The name of the claim is the <strong>Groups claim</strong> of the OIDC
+settings; it is <code>groups</code> unless you change both.</p>
+<h2 id="3-allow-offline_access">3. Allow <code>offline_access</code><a class="headerlink" href="#3-allow-offline_access" title="Permanent link">&para;</a></h2>
+<p>Muster asks for the scope <code>offline_access</code> at every sign-in, besides the scopes of the settings. With it, Keycloak
+returns an offline token, which Muster keeps encrypted and uses to <strong>re-check every OIDC user in the background</strong>
+every 15 minutes (<code>auth.oidc_recheck_interval</code>): a person disabled or removed in Keycloak loses their Muster sessions
+at the next re-check, without waiting for them to end.</p>
+<p>To allow it:</p>
+<ol>
+<li>Make sure the realm role <code>offline_access</code> is a default role of the realm (<strong>Realm settings → User registration →
+   Default roles</strong>), which it is in a new realm, or give it to the groups that use Muster.</li>
+<li>Open the client → <strong>Client scopes</strong> and check that the client scope <code>offline_access</code> is assigned as <strong>Optional</strong>.</li>
+</ol>
+<h3 id="without-offline_access">Without <code>offline_access</code><a class="headerlink" href="#without-offline_access" title="Permanent link">&para;</a></h3>
+<p>Sign-in still works when Keycloak does not grant <code>offline_access</code>, but Muster cannot re-check the person in the
+background:</p>
+<ul>
+<li>there are no background re-checks for them;</li>
+<li>each of their OIDC sessions ends <code>auth.oidc_fallback_session_lifetime</code> (12 hours) after sign-in, even while in use,
+  so that a person disabled in Keycloak is signed out within that time;</li>
+<li>their Personal access tokens work only while their last OIDC sign-in is within <code>auth.oidc_token_grace</code> (7 days);
+  after that, the tokens are refused until they sign in through OIDC again.</li>
+</ul>
+<h2 id="4-configure-muster">4. Configure Muster<a class="headerlink" href="#4-configure-muster" title="Permanent link">&para;</a></h2>
+<p>Sign in to Muster as an Admin and open <strong>OIDC settings</strong>, or use <code>PUT /api/v1/oidc-settings</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Issuer URL</td>
+<td><code>https://keycloak.example.org/realms/ops</code> — the <code>issuer</code> of <code>https://keycloak.example.org/realms/ops/.well-known/openid-configuration</code>. Use <code>https</code>: over <code>http</code> the client secret and the tokens cross the network in clear text</td>
+</tr>
+<tr>
+<td>Client ID</td>
+<td><code>muster</code></td>
+</tr>
+<tr>
+<td>Client secret</td>
+<td>the secret of step 1; it is write-only: Muster shows only whether it is set and when it changed</td>
+</tr>
+<tr>
+<td>Client secret expires on</td>
+<td>the expiry date of the secret, if it has one</td>
+</tr>
+<tr>
+<td>Display name</td>
+<td>the name on the button "Sign in with {name}"; by default the host of the issuer URL</td>
+</tr>
+<tr>
+<td>Scopes</td>
+<td><code>profile email</code>; <code>openid</code> and <code>offline_access</code> are always added</td>
+</tr>
+<tr>
+<td>Groups claim</td>
+<td><code>groups</code></td>
+</tr>
+<tr>
+<td>Group mapping</td>
+<td>for example <code>muster-admins</code> → Admin, <code>oncall</code> → Responder; when a person's groups map to several Roles, the highest wins</td>
+</tr>
+<tr>
+<td>Role for users without a matching group</td>
+<td>none (the default) refuses their sign-in; Viewer or Responder lets them in</td>
+</tr>
+<tr>
+<td>Sync Role at sign-in</td>
+<td>on (the default): Keycloak decides the Role at every sign-in and re-check; off: the mapping applies only when the user is created</td>
+</tr>
+<tr>
+<td>Skip TOTP when the IdP asserted MFA</td>
+<td>off by default; on skips Muster's own TOTP step when the ID token's <code>amr</code> claim says that Keycloak used multi-factor authentication. Keycloak sends <code>amr</code> only when the client has an <em>Authentication Method Reference (AMR)</em> mapper</td>
+</tr>
+<tr>
+<td>Proxy</td>
+<td>the HTTP, HTTPS or SOCKS5 proxy through which Muster reaches Keycloak, if it needs one</td>
+</tr>
+</tbody>
+</table>
+<p>Then press <strong>Check connection</strong>. The check fetches discovery through the saved settings and proxy and shows how the
+request travelled (<code>direct</code> or <code>proxy</code>), how long it took and the endpoints Keycloak announced. When the outbound
+address policy blocks Keycloak or the proxy, the error names the rule.</p>
+<p>Keycloak lists only standard claims in <code>claims_supported</code>, so the check shows the warning <em>Nobody will be able to sign
+in through OIDC</em> (<code>groups_claim_missing</code>) although the mapper of step 2 exists. The warning goes away at the first
+sign-in whose token carries the groups claim. If it stays, the mapper is missing or not added to the ID token.</p>
+<p>The settings also warn when the mapping is empty and users without a matching group get no Role
+(<code>nobody_can_sign_in</code>), and two weeks before the client secret expires.</p>
+<h2 id="5-sign-in">5. Sign in<a class="headerlink" href="#5-sign-in" title="Permanent link">&para;</a></h2>
+<p>Open Muster and press <strong>Sign in with {display name}</strong>. The first sign-in of a person creates their Muster user with
+the Role of their groups. The login is Keycloak's <code>preferred_username</code>, else the email, else the subject. Muster never
+merges accounts by login or email: when a local user already has the login, the sign-in is refused with "An account
+with this login already exists. Sign in with it and link OIDC in your profile."</p>
+<p>A person whose groups map to no Role is refused with "You have no access to Muster. Contact your administrator.", and
+the Audit log entry <code>session.oidc_refused</code> lists the groups their token carried. A user with TOTP gives the code after
+Keycloak, unless Keycloak asserted multi-factor authentication and the setting above skips it.</p>
+<p>Other errors on the sign-in page: <code>account_disabled</code> (the Muster user is disabled or deleted), <code>oidc_disabled</code> (OIDC
+was switched off), <code>invalid_request</code> (the sign-in took longer than 10 minutes, <code>oidc.auth_request_ttl</code>, or was
+started in another browser) and <code>idp_error</code> (Keycloak reported an error, could not be reached, or answered with a
+token that did not verify; the log event <code>oidc_sign_in_failed</code> says which).</p>
+<h2 id="when-muster-cannot-reach-the-identity-provider">When Muster cannot reach the identity provider<a class="headerlink" href="#when-muster-cannot-reach-the-identity-provider" title="Permanent link">&para;</a></h2>
+<p>OIDC needs the back channel from Muster to Keycloak. When Keycloak is inside a closed network that Muster cannot
+reach, even through a proxy, use local users instead:</p>
+<ul>
+<li>an Admin creates each user and hands over the one-time password setup link (<strong>Users → Create</strong>);</li>
+<li>set <strong>Organization → Security → TOTP required</strong> to <em>everyone</em>, so that every user enrols TOTP at their first sign-in.</li>
+</ul>
+<p>Local sign-in is always available, also next to OIDC, and the bootstrap Admin or <code>muster admin reset-password --actor
+&lt;name&gt;</code> lets an operator in when the OIDC settings are broken.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright The Muster Authors
+    </div>
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["navigation.sections","navigation.indexes","navigation.top","search.suggest","search.highlight","content.code.copy"],"redirect":null,"search":"../../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.a2388154.min.js"></script>
+      
+    
+  </body>
+</html>
