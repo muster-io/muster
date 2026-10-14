@@ -8,29 +8,136 @@ other setting lives in the database and changes through the UI or the API. `HTTP
 setting. A variable that is not set takes its default; one that has a default and is set but empty is an error. A
 secret can instead come from the file that its file form names, without one trailing line break; setting both
 forms is an error. An invalid value stops the start with an error that names the variable and never repeats the
-value of a secret, a variable marked so in the Secret column.
+value of a secret, a variable marked so below.
 
-| Variable | Default | File form | Secret | Description |
-|---|---|---|---|---|
-| `MUSTER_DATABASE_URL` | — | — | yes | The main database connection as a `postgres://` or `postgresql://` URL with the host, the user, the password and the database. Required unless `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_NAME` and `MUSTER_DATABASE_USER` are set; when both are given, the URL is used and the fields are ignored with a warning. Its `pool_max_conns` sets the size of a replica's main pool, max(10, CPUs) when it sets none. |
-| `MUSTER_DATABASE_HOST` | — | — | — | The database host, when `MUSTER_DATABASE_URL` is not set. |
-| `MUSTER_DATABASE_PORT` | `5432` | — | — | The database port, when `MUSTER_DATABASE_URL` is not set. |
-| `MUSTER_DATABASE_NAME` | — | — | — | The database name; required unless `MUSTER_DATABASE_URL` is set. |
-| `MUSTER_DATABASE_USER` | — | — | — | The database user; required unless `MUSTER_DATABASE_URL` is set. |
-| `MUSTER_DATABASE_PASSWORD` | — | `MUSTER_DATABASE_PASSWORD_FILE` | yes | The password of the database user, when `MUSTER_DATABASE_URL` is not set. |
-| `MUSTER_DATABASE_SSLMODE` | `prefer` | — | — | The `sslmode` of the database connections, when `MUSTER_DATABASE_URL` is not set: `disable`, `allow`, `prefer`, `require`, `verify-ca` or `verify-full`. `muster doctor` and the startup log report whether each connection is encrypted. |
-| `MUSTER_DATABASE_SESSION_URL` | — | — | yes | The session connection, for advisory locks and LISTEN, as a `postgres://` URL. Set it when the main connection goes through a pooler in transaction mode; unset, Muster uses the main connection. |
-| `MUSTER_DATABASE_SESSION_HOST` | — | — | — | The host of the session connection; its other fields are those of the main connection. |
-| `MUSTER_DATABASE_SESSION_PORT` | — | — | — | The port of the session connection; its other fields are those of the main connection. |
-| `MUSTER_SECRET_KEYS` | — | `MUSTER_SECRET_KEYS_FILE` | yes | The master keys of the Keyring, which protect the secrets stored in the database: base64 keys of 32 bytes separated by commas, such as the output of `openssl rand -base64 32`; the file form holds one key per line. Required. |
-| `MUSTER_PUBLIC_URL` | — | — | — | The address of Muster for people and messengers, an absolute `http://` or `https://` URL. Required. |
-| `MUSTER_INGEST_URL` | — | — | — | The address Alertmanager sends its notifications to, an absolute `http://` or `https://` URL; unset, `MUSTER_PUBLIC_URL`. |
-| `MUSTER_LISTEN_APP` | `:8080` | — | — | The listen address of the app listener: the UI and the API. |
-| `MUSTER_LISTEN_INGEST` | `:8081` | — | — | The listen address of the ingest listener: ingestion, Heartbeats and messenger callbacks. |
-| `MUSTER_LISTEN_INTERNAL` | `:8082` | — | — | The listen address of the internal listener: the health checks and `/metrics`. |
-| `MUSTER_LOG_LEVEL` | `info` | — | — | The lowest level of the log lines written: `info`, `warn` or `error`. |
-| `MUSTER_MIGRATE_ON_START` | `false` | — | — | `true` applies the database migrations at start; the Helm chart migrates in an init container instead. |
-| `MUSTER_TRUSTED_PROXIES` | — | — | — | The CIDR networks of the trusted reverse proxies, separated by commas. Empty, the client address of a request is its socket address; with networks listed, a request whose socket address is inside them takes the first address of `X-Forwarded-For`, read from the right, that is outside them. |
-| `MUSTER_RUNBOOK_BASE_URL` | `https://muster-io.github.io/muster` | — | — | The base of the `runbook_url` of Internal alerts: the published documentation site. |
-| `MUSTER_BOOTSTRAP_ADMIN_EMAIL` | — | — | — | The email, also the login, of the bootstrap Admin, created at start when the Organization has no Admin; ignored once it has one. |
-| `MUSTER_BOOTSTRAP_ADMIN_PASSWORD` | — | `MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE` | yes | The password of the bootstrap Admin; required with `MUSTER_BOOTSTRAP_ADMIN_EMAIL` while the Organization has no Admin. |
+### `MUSTER_DATABASE_URL`
+
+no default · secret
+
+The main database connection as a `postgres://` or `postgresql://` URL with the host, the user, the password and the database. Required unless `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_NAME` and `MUSTER_DATABASE_USER` are set; when both are given, the URL is used and the fields are ignored with a warning. Its `pool_max_conns` sets the size of a replica's main pool, max(10, CPUs) when it sets none.
+
+### `MUSTER_DATABASE_HOST`
+
+no default
+
+The database host, when `MUSTER_DATABASE_URL` is not set.
+
+### `MUSTER_DATABASE_PORT`
+
+default: `5432`
+
+The database port, when `MUSTER_DATABASE_URL` is not set.
+
+### `MUSTER_DATABASE_NAME`
+
+no default
+
+The database name; required unless `MUSTER_DATABASE_URL` is set.
+
+### `MUSTER_DATABASE_USER`
+
+no default
+
+The database user; required unless `MUSTER_DATABASE_URL` is set.
+
+### `MUSTER_DATABASE_PASSWORD`
+
+no default · file form: `MUSTER_DATABASE_PASSWORD_FILE` · secret
+
+The password of the database user, when `MUSTER_DATABASE_URL` is not set.
+
+### `MUSTER_DATABASE_SSLMODE`
+
+default: `prefer`
+
+The `sslmode` of the database connections, when `MUSTER_DATABASE_URL` is not set: `disable`, `allow`, `prefer`, `require`, `verify-ca` or `verify-full`. `muster doctor` and the startup log report whether each connection is encrypted.
+
+### `MUSTER_DATABASE_SESSION_URL`
+
+no default · secret
+
+The session connection, for advisory locks and LISTEN, as a `postgres://` URL. Set it when the main connection goes through a pooler in transaction mode; unset, Muster uses the main connection.
+
+### `MUSTER_DATABASE_SESSION_HOST`
+
+no default
+
+The host of the session connection; its other fields are those of the main connection.
+
+### `MUSTER_DATABASE_SESSION_PORT`
+
+no default
+
+The port of the session connection; its other fields are those of the main connection.
+
+### `MUSTER_SECRET_KEYS`
+
+no default · file form: `MUSTER_SECRET_KEYS_FILE` · secret
+
+The master keys of the Keyring, which protect the secrets stored in the database: base64 keys of 32 bytes separated by commas, such as the output of `openssl rand -base64 32`; the file form holds one key per line. Required.
+
+### `MUSTER_PUBLIC_URL`
+
+no default
+
+The address of Muster for people and messengers, an absolute `http://` or `https://` URL. Required.
+
+### `MUSTER_INGEST_URL`
+
+no default
+
+The address Alertmanager sends its notifications to, an absolute `http://` or `https://` URL; unset, `MUSTER_PUBLIC_URL`.
+
+### `MUSTER_LISTEN_APP`
+
+default: `:8080`
+
+The listen address of the app listener: the UI and the API.
+
+### `MUSTER_LISTEN_INGEST`
+
+default: `:8081`
+
+The listen address of the ingest listener: ingestion, Heartbeats and messenger callbacks.
+
+### `MUSTER_LISTEN_INTERNAL`
+
+default: `:8082`
+
+The listen address of the internal listener: the health checks and `/metrics`.
+
+### `MUSTER_LOG_LEVEL`
+
+default: `info`
+
+The lowest level of the log lines written: `info`, `warn` or `error`.
+
+### `MUSTER_MIGRATE_ON_START`
+
+default: `false`
+
+`true` applies the database migrations at start; the Helm chart migrates in an init container instead.
+
+### `MUSTER_TRUSTED_PROXIES`
+
+no default
+
+The CIDR networks of the trusted reverse proxies, separated by commas. Empty, the client address of a request is its socket address; with networks listed, a request whose socket address is inside them takes the first address of `X-Forwarded-For`, read from the right, that is outside them.
+
+### `MUSTER_RUNBOOK_BASE_URL`
+
+default: `https://muster-io.github.io/muster`
+
+The base of the `runbook_url` of Internal alerts: the published documentation site.
+
+### `MUSTER_BOOTSTRAP_ADMIN_EMAIL`
+
+no default
+
+The email, also the login, of the bootstrap Admin, created at start when the Organization has no Admin; ignored once it has one.
+
+### `MUSTER_BOOTSTRAP_ADMIN_PASSWORD`
+
+no default · file form: `MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE` · secret
+
+The password of the bootstrap Admin; required with `MUSTER_BOOTSTRAP_ADMIN_EMAIL` while the Organization has no Admin.
