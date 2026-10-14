@@ -2,6 +2,11 @@
 
 - Status: Accepted
 - Date: 2026-10-14
+- Amended: 2026-10-14 — after the review of the Bridge stories (journal D323): the status mapping of problems without
+  a `class` is the bridge's own, never ADR-0005's; idempotency keys are scoped per token; an inbound event's id is
+  claimed before its Command runs, and a crash can repeat that Command once; `muster bridge check` is the one sender
+  outside delivery; a deep-link template is an `http` or `https` URL; CI fails on a breaking change of the
+  specification
 
 ## Context
 
@@ -42,7 +47,8 @@ Mattermost and Telegram stay native.
 
 **Versioning.** Every path is under `/v1/`. `GET /v1/info` returns `protocol_version` (`"1"`), the bridge's name and
 version, the messenger's name, the optional features the bridge offers and its limits. Additive changes — a new
-optional field or feature — keep version `1`; a change that breaks existing bridges is a new major path. Muster refuses
+optional field or feature — keep version `1`; a change that breaks existing bridges is a new major path, and CI
+compares every change of `api/bridge.yaml` with its base and fails on a breaking one. Muster refuses
 a Connection whose bridge speaks no version it knows, and re-reads `info` on every Connection check and when its copy
 is older than a few minutes.
 
@@ -81,7 +87,9 @@ failed request stores nothing, and a repeated key whose first request is still r
 Publication reuses its key, so a Publication that was cut off by a crash or a timeout is not posted twice; because the
 retry may carry a newer Desired state than the lost request, a replayed Publication is followed by an edit to the
 current state. Muster still records a possible duplicate (ADR-0005) when a retry after a started Publication gets an
-answer that is not a replay: the bridge lost the key, and a second Root message may exist.
+answer that is not a replay: the bridge lost the key, and a second Root message may exist. Keys are scoped per token:
+the same key under another Connection's token is another request, so two Muster installations, or two Connections, on
+one bridge never see each other's results.
 
 **Threads.** "Reply in the Thread of message X" is one operation. The bridge creates the Thread if its messenger needs
 that and returns an opaque `thread_ref`; Muster stores it with the Root message and sends it with every later reply, so
@@ -91,8 +99,15 @@ a bridge needs no store of its own to map posts to Threads.
 `GET /v1/events` with the last cursor and a wait, handles the batch, then stores the next cursor; **push** — the bridge
 posts each event to Muster's callback at `MUSTER_INGEST_URL`, signed as Standard Webhooks do (`webhook-id`,
 `webhook-timestamp`, `webhook-signature`, HMAC-SHA256 with the Connection's push secret). Every event has a stable id;
-Muster handles each id once and acknowledges only what it handled, so delivery is at least once in both modes. The
-event types are a press, a Thread message, an Account link request and a deleted message. Each Connection has a token
+Muster handles each id once and acknowledges only what it handled, so delivery is at least once in both modes. It
+claims the id under a transaction-scoped advisory lock — so two copies of one event, from overlapping polls or retried
+pushes, run one after the other — runs the event's Command through the dispatcher in the Command's own transaction,
+then records the id and answers. A crash between the Command and the record leaves the id unrecorded: the event comes
+again and its Command runs a second time, which the dispatcher's preconditions turn into a refusal or a no-op, so the
+worst case is a second answer to the person. Recording the id inside the Command's transaction would need a hook in the
+dispatcher for one transport; the claim keeps the dispatcher as it is. The event types are a press, a Thread message,
+an Account link request and a deleted message; Muster handles every type it knows whatever `info` declares, so an event
+sent just after a bridge switched a feature on is not lost. Each Connection has a token
 of its own, and a bridge that serves several Connections keeps their events apart by token; Muster ignores, without
 answering, an event about a message it did not post through that Connection.
 
@@ -107,8 +122,12 @@ ADR-0005), `forbidden` (the channel is missing, the bot was removed or lacks a r
 and `invalid` (the request cannot succeed as sent: Not delivered). A missing channel is `forbidden`, never `gone`, so
 that Muster does not republish into a chat that no longer exists. A `Retry-After` longer than a bounded maximum, or a
 `429` without one, counts as `transient`, so a bridge that asks for a day's pause makes the Destination Broken instead
-of stalling it unseen. A problem without a class is classified by its status as ADR-0005 classifies outgoing webhook
-answers.
+of stalling it unseen. A problem without a class, or an answer that is not a problem, is classified by the bridge
+protocol's own mapping, not by ADR-0005's mapping of outgoing webhook answers, whose `404` and `410` make a Destination
+Broken: `401` and `403` are `forbidden`; `408` is `transient`; `429`, and `503` with `Retry-After`, are `rate_limited`;
+other `5xx`, timeouts and network errors are `transient`; `404`, `410`, every other answer and a redirect are `invalid`.
+Muster never concludes from a status code that a message is `gone`: only the bridge knows whether a `404` means a
+deleted message, a missing channel or a wrong path.
 
 **Presses.** The bridge confirms a press to its messenger itself, within 3 seconds, before Muster sees it, and then
 reports the press as an event. Muster dispatches the Command with the Transport `bridge` and, when the person must read
@@ -125,7 +144,8 @@ for Bridges: Mattermost and Telegram have buttons.
 
 **Account links** follow ADR-0013 — started only in the signed-in web session, the secret travelling from that session
 to the messenger account — with the Identity space of one Bridge Connection. Every bridge supports the token: the
-profile shows a single-use token, and a link built from the bridge's deep-link template when it has one; the person
+profile shows a single-use token, and a link built from the bridge's deep-link template when it has one — an `http` or
+`https` URL, checked like every link Muster shows; the person
 sends the token to the bot, and the bridge reports it as an Account link request with the sender's id and name. A
 bridge that can start direct messages and look people up by a handle also offers the code: the person enters their
 handle, labelled by the kind the bridge declares; Muster looks it up through the bridge and sends a code by direct
@@ -140,9 +160,13 @@ last status until the next change of status. The old Root message keeps working:
 command in its Thread act on the Alert Group as before. An edit refused as `gone` with the reason
 `edit_window_closed` — a window shorter than the bridge declared — is handled the same way.
 
-**Placement in Muster.** Muster's delivery adapter for Bridges implements the delivery adapter interface, so posts,
-edits and Thread replies through a bridge are made only by the delivery worker and the interactive path; answers and
-direct messages are interactive calls; lint 3 (ADR-0016) names them with the other messenger calls. All requests go
+**Placement in Muster.** Bridge delivery implements the delivery adapter interface, so posts, edits and Thread replies
+through a bridge are made only by the delivery worker and the interactive path; answers and direct messages are
+interactive calls; lint 3 (ADR-0016) names them with the other messenger calls. The one exception is
+`muster bridge check`: a person runs it against a bridge they name, outside any Muster installation and without a
+database, Desired state or delivery row, so the rule of ADR-0005 that only delivery and the interactive path send has
+nothing to protect there. The command posts, edits and replies through the protocol client directly, and lint 3 allows
+its one file, `internal/bridge/conformance.go`, by name. All requests go
 through the outbound package (ADR-0015) — the delivery class for deliveries and the Broken probe, the interactive class
 for checks started by a person, answers and messages during linking, the background class for polling — under the
 outbound address policy and the Connection's proxy, with the token sent only to the saved base URL. Polling a bridge

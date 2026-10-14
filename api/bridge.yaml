@@ -31,9 +31,10 @@ info:
     **What every bridge implements.** `getInfo`, `postMessage`, `editMessage`, `replyInThread`, `checkChannel`,
     `answerEvent`, and inbound events through `pollEvents` or the `bridgeEvent` push, or both — at least `account_link`
     events, because every bridge takes Account link tokens. Everything else is optional and declared in
-    `info.capabilities`: Muster never calls an operation the bridge did not declare, never sends a button to a bridge
-    without `buttons`, and expects `press` events only with `buttons`, `thread_message` events only with
-    `thread_messages` and `message_deleted` events only with `deletion_events`.
+    `info.capabilities`: Muster never calls an operation the bridge did not declare and never sends a button to a bridge
+    without `buttons`. A bridge sends `press` events only with `buttons`, `thread_message` events only with
+    `thread_messages` and `message_deleted` events only with `deletion_events`; Muster handles every event type of this
+    protocol whatever its copy of `info` says, so an event sent just after a feature was switched on is not lost.
 
     **Rendering.** Muster sends a JSON envelope and the bridge renders it in its messenger's markup. The `body` is
     CommonMark 0.31 with one extension, strikethrough (`~~text~~`) as GitHub Flavored Markdown writes it. Muster uses
@@ -46,12 +47,13 @@ info:
     an entity, a tag or a surrogate pair — and reports it with `truncated`.
 
     **Idempotency.** Every request that creates something carries an `Idempotency-Key` header. The bridge stores each key
-    with its successful (`2xx`) result for at least 24 hours and answers a repeated key with that first result and
-    `replayed: true`, whatever the body of the repeated request, without creating anything again; a failed request
-    stores nothing, so its retry is a new attempt. A repeated key whose first request is still in progress is answered
-    `transient`. Where the messenger has an idempotency mechanism of its own, the bridge passes the key on. Muster
-    reuses a key when it retries a request, also after a crash or a timeout; because a retry may carry a newer state than
-    the first request, Muster follows a replayed `postMessage` with an `editMessage` of its current state.
+    per token — the same key sent with another Connection's token is another request — with its successful (`2xx`)
+    result for at least 24 hours and answers a repeated key with that first result and `replayed: true`, whatever the
+    body of the repeated request, without creating anything again; a failed request stores nothing, so its retry is a
+    new attempt. A repeated key whose first request is still in progress is answered `transient`. Where the messenger
+    has an idempotency mechanism of its own, the bridge passes the key on. Muster reuses a key when it retries a request,
+    also after a crash or a timeout; because a retry may carry a newer state than the first request, Muster follows a
+    replayed `postMessage` with an `editMessage` of its current state.
 
     **Errors** are RFC 9457 problems (`application/problem+json`) with a `class` member that the bridge chooses, because
     only the bridge knows what its messenger's codes mean:
@@ -64,9 +66,11 @@ info:
     | `forbidden` | the channel is missing, the bot was removed from it or lacks a right, the bot was blocked | marks the Destination Broken until a check succeeds |
     | `invalid` | the request cannot succeed as sent: too long, malformed, an unknown id | ends that delivery as Not delivered, without retrying |
 
-    A missing channel is `forbidden`, never `gone`. A problem without a `class` is classified by its status: `401` and
-    `403` as `forbidden`, `429` and `503` with `Retry-After` as `rate_limited`, `429` without it and other `5xx` as
-    `transient`, everything else as `invalid`. Timeouts and network errors are `transient`.
+    A missing channel is `forbidden`, never `gone`. A problem without a `class`, or an answer that is not a problem, is
+    classified by its status: `401` and `403` as `forbidden`; `408` as `transient`; `429`, and `503` with `Retry-After`,
+    as `rate_limited`; other `5xx` as `transient`; `404`, `410`, a redirect and everything else as `invalid`. Timeouts
+    and network errors are `transient`. Muster never treats a message as `gone` because of a status code: a bridge that
+    means `gone` says so in `class`.
 
     **Presses** are confirmed to the messenger by the bridge itself, within the messenger's deadline and at most 3
     seconds after the press, before Muster has seen it; the bridge then reports the press as an event. Muster answers the
@@ -395,11 +399,11 @@ paths:
       summary: Long-poll for events
       description: 'Offered when `event_delivery` contains `poll`. Returns the events after `cursor` — all of them when
         `cursor` is absent — oldest first, at once when there are any, otherwise as soon as one arrives or after `wait`
-        seconds with an empty list. Muster handles the batch and sends `next_cursor` with its next call, so an event is
-        delivered at least once; the bridge may then forget the events before that cursor. The bridge keeps events that
-        Muster has not passed for at least 24 hours. A cursor the bridge no longer knows is `invalid`, and Muster polls
-        again without one. Only one Muster replica polls a Connection at a time, but after a handover two calls may
-        overlap; events are deduplicated by `id`.'
+        seconds with an empty list; Muster waits for the answer up to `wait` plus 15 seconds. Muster handles the batch
+        and sends `next_cursor` with its next call, so an event is delivered at least once; the bridge may then forget
+        the events before that cursor. The bridge keeps events that Muster has not passed for at least 24 hours. A
+        cursor the bridge no longer knows is `invalid`, and Muster polls again without one. Only one Muster replica
+        polls a Connection at a time, but after a handover two calls may overlap; events are deduplicated by `id`.'
       parameters:
       - name: cursor
         in: query
@@ -462,8 +466,7 @@ webhooks:
         description: The event's `id`, kept across retries.
         schema:
           type: string
-          minLength: 1
-          maxLength: 200
+          pattern: ^[!-~]{1,200}$
       - name: webhook-timestamp
         in: header
         required: true
@@ -525,8 +528,8 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: Identifies the request across retries; a repeated key returns the first result without creating
-        anything again.
+      description: Identifies the request across retries; a repeated key with the same token returns the first result
+        without creating anything again. Keys are scoped per token.
       schema:
         type: string
         pattern: ^[!-~]{1,255}$
@@ -681,10 +684,11 @@ components:
           type:
           - string
           - 'null'
-          description: A link that opens a chat with the bot and hands it the Account link token, with `{token}` where the
-            token goes, such as `https://chat.example.org/bots/muster?start={token}`. Muster shows the link next to the
-            token in the profile; without one it shows only the token.
-          pattern: \{token\}
+          description: An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with
+            `{token}` where the token goes, such as `https://chat.example.org/bots/muster?start={token}`. Muster shows the
+            link next to the token in the profile; without one it shows only the token. Another scheme makes `info` fail
+            the Connection check.
+          pattern: ^https?://\S*\{token\}\S*$
           maxLength: 1024
     Capabilities:
       type: object
@@ -1123,8 +1127,7 @@ components:
       properties:
         event_id:
           type: string
-          minLength: 1
-          maxLength: 200
+          pattern: ^[!-~]{1,200}$
         text:
           type: string
           description: Plain text; a pop-up may shorten it.
@@ -1169,9 +1172,9 @@ components:
       properties:
         id:
           type: string
-          description: Stable across retries and polls; Muster handles each id once.
-          minLength: 1
-          maxLength: 200
+          description: Stable across retries and polls; Muster handles each id once. Printable ASCII without spaces, so
+            that it can travel as the `webhook-id` header.
+          pattern: ^[!-~]{1,200}$
         type:
           type: string
         occurred_at:

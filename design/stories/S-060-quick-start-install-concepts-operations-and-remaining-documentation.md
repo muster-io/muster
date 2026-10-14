@@ -57,7 +57,7 @@ issue: 60
 - Pages written with their capabilities: the Alertmanager receiver and Heartbeat (S-018, S-023), Mattermost and Telegram
   (S-061, S-042), Account links (S-051), outgoing webhooks (S-044, S-045), OIDC with Keycloak (S-013), the runbooks and
   "Telegram in restricted networks" (S-058), the Reference section (S-057), Bridge and Write a bridge with the protocol
-  reference (S-074, S-076, S-079).
+  reference (S-074, S-081, S-076, S-079).
 
 ## Contracts
 
@@ -79,7 +79,7 @@ issue: 60
   | Operations | `operations/high-availability.md` | active replicas and the Leader, what stops without one, the session connection, two replicas with a PodDisruptionBudget, NTP on every node and what a clock skew does (NFR-9) |
   | Operations | `operations/monitoring.md` | the chart rules and their values, the dashboard and its flags, `/metrics` on the internal listener, the Alertmanager route that bypasses Muster for critical rules with an example, the Internal alerts Route |
   | Operations | `operations/outgoing-heartbeat.md` | dead man's switch services, the URL as a Secret, the proxy, what the System status shows |
-  | Operations | `operations/cli.md` | `muster doctor`, `muster migrate`, `muster admin`, `muster ingest replay`, `muster secrets rotate-key`, `muster version`; `--actor` on the commands that change data |
+  | Operations | `operations/cli.md` | `muster doctor`, `muster migrate`, `muster admin`, `muster ingest replay`, `muster secrets rotate-key`, `muster bridge check` (with a link to Write a bridge, S-079), `muster version`; `--actor` on the commands that change data |
 
 - **Facts and requirements**: every behaviour a page describes is cited from the PRD and the facts, never invented;
   pages link to the Reference section for names of metrics, log events, variables and chart values instead of copying
@@ -102,8 +102,9 @@ issue: 60
   availability draws the Leader handover.
 - **Bridges** (C-22, D317): this story follows the Bridge stories, so that the pages name Bridges wherever they list
   messengers — Quick start's next steps, the Destination types in Concepts, Text commands beside buttons in "statuses and
-  commands", republication past an edit window in "Broken Destinations" and the Leader's Bridge polling in "High
-  availability" — and link to Messengers → Bridge and Write a bridge (S-074, S-079) instead of repeating them.
+  commands", republication past an edit window in "Broken Destinations", the Leader's Bridge polling in "High
+  availability" and `muster bridge check` in the CLI page — and link to Messengers → Bridge and Write a bridge (S-074,
+  S-081, S-079) instead of repeating them.
 
 ## Steps
 
@@ -130,7 +131,7 @@ T concepts/broken-destinations.md 'Broken'; T concepts/statuses-and-commands.md 
 T operations/backup-and-restore.md 'muster doctor'; T operations/upgrades.md downgrade
 T operations/key-rotation.md 'rotate-key'; T operations/key-rotation.md 'Not active yet'; T operations/key-rotation.md CSRF
 T operations/high-availability.md Leader; T operations/monitoring.md 'bypass'
-T operations/outgoing-heartbeat.md 'dead man'; T operations/cli.md -- '--actor'
+T operations/outgoing-heartbeat.md 'dead man'; T operations/cli.md -- '--actor'; T operations/cli.md 'muster bridge check'
 #                                                                       (no output)
 for s in 'Quick start' Install Alertmanager Messengers 'Outgoing webhooks' Sign-in Concepts Operations Runbooks Reference; do
   grep -q "$s" site/index.html || echo "missing section $s"; done      # (no output)
