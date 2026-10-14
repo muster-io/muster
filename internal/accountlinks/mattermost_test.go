@@ -94,9 +94,19 @@ func linkCodeInvalid(err error) bool {
 	return errors.As(err, &fe) && fe.Pointer == "/code" && fe.Code == CodeLinkCodeInvalid
 }
 
+// attemptsLeft is the attempts a link_code_invalid refusal says the request has left, -1 without the number.
+func attemptsLeft(err error) int {
+	var fe *FieldError
+	if !errors.As(err, &fe) || fe.AttemptsRemaining == nil {
+		return -1
+	}
+	return *fe.AttemptsRemaining
+}
+
 // TestMattermostLink is C-18.FR-3, FR-11 and AC-2: the bot sends an 8-character code with the warning to the account
-// found by its username; the right code links it and the bot confirms; after five wrong codes the sixth attempt is
-// refused even with the right code, the request is void, and each wrong code is recorded with wrong_code.
+// found by its username; the right code links it and the bot confirms; each wrong code says how many attempts are
+// left, after five the sixth attempt is refused even with the right code with none left, the request is void, and each
+// wrong code is recorded with wrong_code. A used or expired request has no attempts left.
 func TestMattermostLink(t *testing.T) {
 	e := newEnv(t)
 	st := e.startMM(t, bob, " @Bob ")
@@ -126,16 +136,16 @@ func TestMattermostLink(t *testing.T) {
 		t.Errorf("entry %+v, request %+v", got, e.store.reqs[0])
 	}
 	if _, err := e.s.ConfirmMattermost(t.Context(), bob, st.RequestPublicID, code); !linkCodeInvalid(err) ||
-		e.lastEntry().Details["reason"] != ReasonTokenUsed {
+		attemptsLeft(err) != 0 || e.lastEntry().Details["reason"] != ReasonTokenUsed {
 		t.Errorf("a used request = %v, %+v", err, e.lastEntry())
 	}
 	// C-18.AC-2: five wrong codes void the request.
 	st = e.startMM(t, alice, "dana")
 	code = e.mm.code(t)
 	for i := range 5 {
-		if _, err := e.s.ConfirmMattermost(t.Context(), alice, st.RequestPublicID, "22222222"); !linkCodeInvalid(err) ||
-			e.lastEntry().Details["reason"] != ReasonWrongCode {
-			t.Fatalf("wrong code %d = %v", i+1, err)
+		_, err := e.s.ConfirmMattermost(t.Context(), alice, st.RequestPublicID, "22222222")
+		if !linkCodeInvalid(err) || attemptsLeft(err) != 4-i || e.lastEntry().Details["reason"] != ReasonWrongCode {
+			t.Fatalf("wrong code %d = %v, %d left", i+1, err, attemptsLeft(err))
 		}
 	}
 	req := e.store.reqs[len(e.store.reqs)-1]
@@ -143,7 +153,7 @@ func TestMattermostLink(t *testing.T) {
 		t.Fatalf("after five wrong codes %+v", req)
 	}
 	if _, err := e.s.ConfirmMattermost(t.Context(), alice, st.RequestPublicID, code); !linkCodeInvalid(err) ||
-		len(e.store.links) != 1 || e.lastEntry().Details["reason"] != ReasonWrongCode {
+		attemptsLeft(err) != 0 || len(e.store.links) != 1 || e.lastEntry().Details["reason"] != ReasonWrongCode {
 		t.Errorf("the sixth attempt with the right code = %v, links %+v", err, e.store.links)
 	}
 	if strings.Count(e.log.String(), `"event":"account_link_rejected","messenger":"mattermost","connection":"`+mmPID+
@@ -155,7 +165,7 @@ func TestMattermostLink(t *testing.T) {
 	code = e.mm.code(t)
 	e.clock.Advance(10 * time.Minute)
 	if _, err := e.s.ConfirmMattermost(t.Context(), alice, st.RequestPublicID, code); !linkCodeInvalid(err) ||
-		e.lastEntry().Details["reason"] != ReasonTokenExpired {
+		attemptsLeft(err) != 0 || e.lastEntry().Details["reason"] != ReasonTokenExpired {
 		t.Errorf("an expired code = %v", err)
 	}
 }

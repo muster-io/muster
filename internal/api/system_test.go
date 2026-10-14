@@ -65,7 +65,7 @@ func TestGetSystemStatus(t *testing.T) {
 		ActiveStorms: []systemstatus.Storm{{Route: systemstatus.Entity{ID: "RTAAAAAAAAAAAA", Name: "t"}, Since: t0,
 			AlertGroupCount: 12}},
 		OutgoingHeartbeat: systemstatus.OutgoingHeartbeat{Configured: true, LastAttemptAt: ptr(t0),
-			LastOK: ptr(false), LastError: ptr("answered 503 (transient)")},
+			LastOK: ptr(false), LastError: ptr("answered 503 (transient)"), LastErrorClass: "transient", LastStatus: 503},
 	}
 	a := x.call(t, http.MethodGet, "/api/v1/system-status", "", "Cookie", adminCookie)
 	if a.status != http.StatusOK {
@@ -81,7 +81,7 @@ func TestGetSystemStatus(t *testing.T) {
 		`"issue":"snapshot_truncated","since":null`, `"subject_kind":"destination"`, `"template":"webhook_request"`,
 		`"alert_group_count":12`,
 		`"outgoing_heartbeat":{"configured":true,"last_attempt_at":"2026-10-05T12:00:00Z",` +
-			`"last_error":"answered 503 (transient)","last_ok":false}`} {
+			`"last_error":"answered 503 (transient)","last_error_class":"transient","last_ok":false,"last_status":503}`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the body lacks %s:\n%s", want, body)
 		}
@@ -91,7 +91,8 @@ func TestGetSystemStatus(t *testing.T) {
 	body = string(a.body)
 	for _, want := range []string{`"replicas":[]`, `"broken_destinations":[]`, `"active_storms":[]`,
 		`"recovery":{"active":false,"period_from":null,"period_to":null,"until":null}`,
-		`"outgoing_heartbeat":{"configured":false,"last_attempt_at":null,"last_error":null,"last_ok":null}`} {
+		`"outgoing_heartbeat":{"configured":false,"last_attempt_at":null,"last_error":null,"last_error_class":null,` +
+			`"last_ok":null,"last_status":null}`} {
 		if a.status != http.StatusOK || !strings.Contains(body, want) {
 			t.Errorf("an empty status lacks %s: %d %s", want, a.status, body)
 		}

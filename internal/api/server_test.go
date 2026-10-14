@@ -386,6 +386,7 @@ func TestProblemCodes(t *testing.T) {
 		{typeUnauthenticated, codeInvalidCredentials}, {typeUnauthenticated, codeSessionExpired},
 		{typeForbidden, codeCSRFInvalid}, {typeForbidden, codeSessionRequired}, {typeForbidden, codeTOTPRequired},
 		{typeForbidden, codeTOTPEnrolmentRequired}, {typeConflict, codeLocalUserOnly},
+		{typeConflict, codeAccountLinkedElsewhere}, {typeRateLimited, codeLinkCodeRequestsExceeded},
 	} {
 		if !has(c.typ, "code", c.code) {
 			t.Errorf("%s %s is not catalogued", c.typ, c.code)

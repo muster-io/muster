@@ -572,6 +572,11 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 		} else {
 			v.FromStatus.SetNull()
 		}
+		if e.ReasonCode != "" {
+			v.ReasonCode.Set(gen.NullableStatusChangeReason(e.ReasonCode))
+		} else {
+			v.ReasonCode.SetNull()
+		}
 		if e.To != "" {
 			to := gen.AlertGroupStatus(e.To)
 			v.ToStatus = &to

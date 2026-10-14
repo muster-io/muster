@@ -486,7 +486,8 @@ type DeliveryView struct {
 }
 
 // TimelineEntry is one entry of the Timeline (TimelineEntry): a lifecycle event or a system entry, a Note or a
-// delivery event. Event is empty for a system entry without a lifecycle event.
+// delivery event. Event is empty for a system entry without a lifecycle event; ReasonCode is StatusReasonCode of
+// Reason.
 type TimelineEntry struct {
 	PublicID       string
 	At             time.Time
@@ -497,6 +498,7 @@ type TimelineEntry struct {
 	System         string
 	Actor          TimelineActor
 	Reason         *string
+	ReasonCode     string
 	From, To       Status
 	Owner          *ActorRef
 	PreviousOwner  *ActorRef
@@ -620,7 +622,8 @@ func (s *Service) entries(ctx context.Context, gid int64, asc bool, kinds []stri
 			Loudness: Loudness(r.Loudness.String), System: r.SystemEvent.String,
 			Actor: TimelineActor{Kind: r.ActorKind, TokenName: textOf(r.TokenName), Transport: r.Transport,
 				Reason: textOf(r.Reason)},
-			Reason: textOf(r.Reason), From: Status(r.FromStatus.String), To: Status(r.ToStatus.String),
+			Reason: textOf(r.Reason), ReasonCode: StatusReasonCode(r.Reason.String),
+			From: Status(r.FromStatus.String), To: Status(r.ToStatus.String),
 			SnoozeUntil: timeOf(r.SnoozeUntil), Fingerprints: r.Fingerprints, ReplacedLabel: textOf(r.ReplacedLabel),
 			LabelConflicts: r.LabelConflicts, NoticeNumber: int8Of(r.NoticeNumber),
 			MissedCount: int8Of(r.MissedCount), PeriodFrom: timeOf(r.PeriodFrom), PeriodTo: timeOf(r.PeriodTo),

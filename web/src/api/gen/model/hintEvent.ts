@@ -30,7 +30,7 @@ import type { NullablePublicId } from './nullablePublicId';
  * | `integration`, `route`, `connection`, `destination` | the resource `public_id`, or null for the whole collection | A configuration resource changed. |
  * | `organization` | null | Organization settings changed. |
  * | `system-notices`, `system-status` | null | The Organization-wide notices, or the System status, changed. |
- * | `account-links` | null | An Account link of the signed-in user appeared or disappeared. |
+ * | `account-links` | the Account link `public_id`, or null when several changed at once | An Account link of the signed-in user appeared, changed or disappeared. |
  */
 export interface HintEvent {
   type: HintEventType;

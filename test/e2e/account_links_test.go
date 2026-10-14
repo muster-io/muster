@@ -222,6 +222,19 @@ func fieldError(t *testing.T, a answer) string {
 	return p.Errors[0].Code + " " + p.Errors[0].Pointer
 }
 
+// attemptsRemaining is the attempts_remaining of a link_code_invalid refusal, -1 without it.
+func attemptsRemaining(t *testing.T, a answer) int {
+	t.Helper()
+	var p struct {
+		AttemptsRemaining *int `json:"attempts_remaining"`
+	}
+	decode(t, a, &p)
+	if p.AttemptsRemaining == nil {
+		return -1
+	}
+	return *p.AttemptsRemaining
+}
+
 // links are the Account links of a list: messenger, Connection name, external id and username of each.
 func links(t *testing.T, m map[string]any) []string {
 	t.Helper()
@@ -264,11 +277,18 @@ func (e *linksEnv) countHints(s *stream) int {
 	return n
 }
 
-// retryAfter is the Retry-After of a 429.
+// hasHint reports whether the stream got the account-links hint that names the link id.
+func (e *linksEnv) hasHint(s *stream, id string) bool {
+	return slices.ContainsFunc(s.hints(), func(d string) bool {
+		return strings.Contains(d, `"type":"account-links"`) && strings.Contains(d, `"id":"`+id+`"`)
+	})
+}
+
+// retryAfter is the Retry-After of a 429 link_code_requests_exceeded.
 func retryAfter(t *testing.T, a answer) int {
 	t.Helper()
-	if a.status != http.StatusTooManyRequests {
-		t.Fatalf("answer %d %s, want 429", a.status, a.body)
+	if a.status != http.StatusTooManyRequests || !strings.Contains(string(a.body), `"code":"link_code_requests_exceeded"`) {
+		t.Fatalf("answer %d %s, want 429 link_code_requests_exceeded", a.status, a.body)
 	}
 	n, err := strconv.Atoi(a.header.Get("Retry-After"))
 	if err != nil {
@@ -326,9 +346,13 @@ func TestAccountLinks(t *testing.T) {
 	if n := e.countHints(bobHints); n != 0 {
 		t.Errorf("bob's stream got %d account-links hints", n)
 	}
-	if got := links(t, alice.session.json(http.MethodGet, "/api/v1/me/account-links", "", http.StatusOK)); !slices.Equal(
+	aliceLinks := alice.session.json(http.MethodGet, "/api/v1/me/account-links", "", http.StatusOK)
+	if got := links(t, aliceLinks); !slices.Equal(
 		got, []string{"telegram " + devmode.TelegramConnectionName + " 7001 alice_t"}) {
 		t.Errorf("alice's links %v", got)
+	}
+	if id, _ := linkOf(t, aliceLinks, "telegram")["id"].(string); !e.hasHint(aliceHints, id) {
+		t.Errorf("the hint does not name the link %s: %v", id, aliceHints.hints())
 	}
 	if d, _, transport := e.lastAudit("account_link.link"); d["messenger"] != "telegram" || d["external_id"] != "7001" ||
 		d["username"] != "alice_t" || d["connection"] != e.conn || transport != "telegram" {
@@ -365,12 +389,13 @@ func TestAccountLinks(t *testing.T) {
 		wrong = "33333333"
 	}
 	for i := range 5 {
-		if got := fieldError(t, e.confirm(bob, rid, wrong)); got != "link_code_invalid /code" {
-			t.Errorf("wrong code %d: %s", i+1, got)
+		a := e.confirm(bob, rid, wrong)
+		if got := fieldError(t, a); got != "link_code_invalid /code" || attemptsRemaining(t, a) != 4-i {
+			t.Errorf("wrong code %d: %s, %d left", i+1, got, attemptsRemaining(t, a))
 		}
 	}
-	if got := fieldError(t, e.confirm(bob, rid, code)); got != "link_code_invalid /code" {
-		t.Errorf("the right code after five wrong ones: %s", got)
+	if a := e.confirm(bob, rid, code); fieldError(t, a) != "link_code_invalid /code" || attemptsRemaining(t, a) != 0 {
+		t.Errorf("the right code after five wrong ones: %s", a.body)
 	}
 	e.wantRejection("wrong_code", "mattermost", fakemattermost.BobUserID)
 	wrongCodes := 0
@@ -395,8 +420,8 @@ func TestAccountLinks(t *testing.T) {
 		fakemattermost.BobUserID {
 		t.Errorf("the confirmation %+v", dms[len(dms)-1])
 	}
-	if got := fieldError(t, e.confirm(bob, rid, code)); got != "link_code_invalid /code" {
-		t.Errorf("a consumed request: %s", got)
+	if a := e.confirm(bob, rid, code); fieldError(t, a) != "link_code_invalid /code" || attemptsRemaining(t, a) != 0 {
+		t.Errorf("a consumed request: %s", a.body)
 	}
 	e.wantRejection("token_used", "mattermost", fakemattermost.BobUserID)
 	if d := e.clientRequests("interactive", "ok") - interactive; d < 7 {

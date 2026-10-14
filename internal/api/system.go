@@ -113,6 +113,16 @@ func systemStatusOf(st systemstatus.Status) gen.SystemStatus {
 	hb := st.OutgoingHeartbeat
 	out.OutgoingHeartbeat = gen.OutgoingHeartbeatResult{Configured: hb.Configured,
 		LastAttemptAt: nullableTime(hb.LastAttemptAt), LastOk: nullableBool(hb.LastOK), LastError: nullableString(hb.LastError)}
+	if hb.LastErrorClass != "" {
+		out.OutgoingHeartbeat.LastErrorClass.Set(gen.NullableOutgoingHeartbeatErrorClass(hb.LastErrorClass))
+	} else {
+		out.OutgoingHeartbeat.LastErrorClass.SetNull()
+	}
+	if hb.LastStatus != 0 {
+		out.OutgoingHeartbeat.LastStatus.Set(hb.LastStatus)
+	} else {
+		out.OutgoingHeartbeat.LastStatus.SetNull()
+	}
 	return out
 }
 

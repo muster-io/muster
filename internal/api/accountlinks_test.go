@@ -250,9 +250,9 @@ func TestAccountLinksAdmin(t *testing.T) {
 	}
 }
 
-// TestAccountLinksProblems: the refusals of the Account links as problems — 422 at the field, 409
-// account_linked_elsewhere, 429 with Retry-After, 409 for a refusal of the messenger, 503 with Retry-After without a
-// limiter token, 404 for an unknown link or request.
+// TestAccountLinksProblems: the refusals of the Account links as problems — 422 at the field, with the attempts left
+// for link_code_invalid, 409 account_linked_elsewhere, 429 link_code_requests_exceeded with Retry-After, 409 for a
+// refusal of the messenger, 503 with Retry-After without a limiter token, 404 for an unknown link or request.
 func TestAccountLinksProblems(t *testing.T) {
 	x, f := newAccountLinksAPI(t)
 	start := func() answer {
@@ -264,8 +264,18 @@ func TestAccountLinksProblems(t *testing.T) {
 	errs, _ := a.json(t)["errors"].([]any)
 	if a.status != http.StatusUnprocessableEntity || len(errs) != 1 ||
 		errs[0].(map[string]any)["code"] != "messenger_user_not_found" ||
-		errs[0].(map[string]any)["pointer"] != "/username" {
+		errs[0].(map[string]any)["pointer"] != "/username" || strings.Contains(string(a.body), "attempts_remaining") {
 		t.Errorf("a field error = %d %s", a.status, a.body)
+	}
+	left := 3
+	f.err = &accountlinks.FieldError{Pointer: "/code", Code: "link_code_invalid", Detail: "Wrong.",
+		AttemptsRemaining: &left}
+	a = x.call(t, http.MethodPost, "/api/v1/me/account-links/mattermost/confirmation",
+		`{"request_id":"ARAAAAAAAAAAA9","code":"x"}`, adminCSRF...)
+	errs, _ = a.json(t)["errors"].([]any)
+	if a.status != http.StatusUnprocessableEntity || len(errs) != 1 ||
+		errs[0].(map[string]any)["code"] != "link_code_invalid" || a.json(t)["attempts_remaining"] != float64(3) {
+		t.Errorf("a wrong code = %d %s", a.status, a.body)
 	}
 	f.err = accountlinks.ErrLinkedElsewhere
 	if a := start(); a.status != http.StatusConflict || a.code(t) != codeAccountLinkedElsewhere {
@@ -273,7 +283,8 @@ func TestAccountLinksProblems(t *testing.T) {
 	}
 	f.err = &accountlinks.RateLimitedError{RetryAfter: time.Hour}
 	if a := start(); a.status != http.StatusTooManyRequests || a.header.Get("Retry-After") != "3600" ||
-		a.json(t)["retry_after_seconds"] != float64(3600) || a.json(t)["type"] != problemBase+"rate-limited" {
+		a.json(t)["retry_after_seconds"] != float64(3600) || a.json(t)["type"] != problemBase+"rate-limited" ||
+		a.code(t) != codeLinkCodeRequestsExceeded {
 		t.Errorf("a limit = %d %s", a.status, a.body)
 	}
 	f.err = &accountlinks.MessengerError{Call: "the direct message", Outcome: "fatal", Status: 403}

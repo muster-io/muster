@@ -156,20 +156,20 @@ func (s *Sender) send(ctx context.Context, orgID int64, row orgdb.ClaimOutgoingH
 	target, err := s.Keyring.OpenSecret(organization.FieldHeartbeatURL, keyring.StoredSecret{
 		Ciphertext: row.OutgoingHeartbeatUrlCiphertext, KeyID: row.OutgoingHeartbeatUrlKeyID.String})
 	if err != nil {
-		return "the URL cannot be decrypted"
+		return failedURL
 	}
 	password, err := s.Keyring.OpenSecret(organization.FieldHeartbeatProxyPassword, keyring.StoredSecret{
 		Ciphertext: row.OutgoingHeartbeatProxyPasswordCiphertext, KeyID: row.OutgoingHeartbeatProxyPasswordKeyID.String})
 	if err != nil {
-		return "the proxy password cannot be decrypted"
+		return failedPassword
 	}
 	proxy, err := proxyconf.Parse(row.OutgoingHeartbeatProxy)
 	if err != nil {
-		return "the stored proxy cannot be read"
+		return failedProxy
 	}
 	client, err := s.client(orgID, target, proxy, password)
 	if err != nil {
-		return capped("the outbound client cannot be built: " + err.Error())
+		return capped(failedClient + err.Error())
 	}
 	if _, err := client.Do(ctx, outbound.Request{Method: Method, URL: string(target)}); err != nil {
 		return masked(err)
@@ -255,15 +255,16 @@ func secretsOf(target logging.Secret) []logging.Secret {
 
 // masked is what failed in a request, built from the fields of the outbound error and never from its text, which
 // names the URL: the status and outcome of an answer, the rule that blocked it, or what failed without an answer.
+// FailureOf reads its class back.
 func masked(err error) string {
 	e, ok := errors.AsType[*outbound.Error](err)
 	switch {
 	case !ok:
-		return "the request failed"
+		return failedRequest
 	case e.Status != 0:
-		return fmt.Sprintf("answered %d (%s)", e.Status, e.Outcome)
+		return fmt.Sprintf(answeredFormat, e.Status, e.Outcome)
 	case e.Outcome == outbound.OutcomeBlocked:
-		return capped("blocked by the outbound address policy: " + e.Rule)
+		return capped(blockedPrefix + e.Rule)
 	case e.Network != "":
 		return capped(e.Network + ": " + e.Detail)
 	}

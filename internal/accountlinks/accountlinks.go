@@ -68,7 +68,7 @@ const (
 	MessengerMattermost = "mattermost"
 )
 
-// HintType is the live-update hint of a User whose Account link appeared or disappeared.
+// HintType is the live-update hint of a User whose Account link appeared, changed or disappeared; it names the link.
 const HintType = "account-links"
 
 // The Audit log actions and resource of C-18.FR-9.
@@ -124,11 +124,13 @@ var (
 	ErrNoConnection = errors.New("no such connection")
 )
 
-// FieldError is a request field that is not valid; Detail never repeats a token or a code.
+// FieldError is a request field that is not valid; Detail never repeats a token or a code. AttemptsRemaining is set
+// on link_code_invalid: the codes the link request still takes, 0 once it takes none.
 type FieldError struct {
-	Pointer string
-	Code    string
-	Detail  string
+	Pointer           string
+	Code              string
+	Detail            string
+	AttemptsRemaining *int
 }
 
 func (e *FieldError) Error() string { return e.Pointer + ": " + e.Detail }
@@ -409,7 +411,7 @@ func (s *Service) unlink(ctx context.Context, r Requester, ownerID int64, ownerP
 			return err
 		}
 		gone = l
-		return q.Notify(ctx, s.hint(ownerPublicID))
+		return q.Notify(ctx, s.hint(ownerPublicID, l.PublicID))
 	})
 	if err != nil {
 		return err
@@ -451,7 +453,7 @@ func (s *Service) removeUserLinks(ctx context.Context, q Queries, userID int64, 
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	if err := q.Notify(ctx, s.hint(u.PublicID)); err != nil {
+	if err := q.Notify(ctx, s.hint(u.PublicID, "")); err != nil {
 		return nil, err
 	}
 	return func(ctx context.Context) {
@@ -557,7 +559,7 @@ func (s *Service) insertLink(ctx context.Context, q Queries, u dbgen.LockLinkUse
 		details(v, "", replaced, u.PublicID)); err != nil {
 		return Link{}, nil, err
 	}
-	return l, old, q.Notify(ctx, s.hint(u.PublicID))
+	return l, old, q.Notify(ctx, s.hint(u.PublicID, l.PublicID))
 }
 
 // relink keeps the link prev of the User u whose account a is linked again: the username and the Connection become
@@ -577,7 +579,7 @@ func (s *Service) relink(ctx context.Context, q Queries, u dbgen.LockLinkUserRow
 	l := Link{PublicID: prev.PublicID, Messenger: a.messenger, ConnectionPublicID: a.conn.publicID,
 		ConnectionName: a.conn.name, ExternalID: a.external, Username: a.username,
 		LastUsedAt: timePtr(prev.LastUsedAt), CreatedAt: prev.CreatedAt.UTC()}
-	return l, nil, q.Notify(ctx, s.hint(u.PublicID))
+	return l, nil, q.Notify(ctx, s.hint(u.PublicID, l.PublicID))
 }
 
 // logLinked logs a link that committed, with the link it replaced, and the error of the bot's confirmation, if any.
@@ -624,8 +626,10 @@ func (s *Service) record(ctx context.Context, q Queries, actor audit.Actor, t au
 		Resource: res, Diff: diff, Details: d, SourceAddress: addr})
 }
 
-func (s *Service) hint(userPublicID string) db.Hint {
-	return db.Hint{OrgID: s.cfg.OrgID, Type: HintType, User: userPublicID}
+// hint is the hint to the User userPublicID that the link linkPublicID appeared, changed or disappeared; "" names
+// none, when several links changed at once.
+func (s *Service) hint(userPublicID, linkPublicID string) db.Hint {
+	return db.Hint{OrgID: s.cfg.OrgID, Type: HintType, ID: linkPublicID, User: userPublicID}
 }
 
 func (s *Service) now() time.Time { return s.cfg.Business.Now().UTC() }

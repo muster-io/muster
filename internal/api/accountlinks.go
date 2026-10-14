@@ -13,8 +13,12 @@ import (
 	"github.com/muster-io/muster/internal/publicid"
 )
 
-// codeAccountLinkedElsewhere refuses linking a messenger account linked to another User (C-18.FR-5).
-const codeAccountLinkedElsewhere = "account_linked_elsewhere"
+const (
+	// codeAccountLinkedElsewhere refuses linking a messenger account linked to another User (C-18.FR-5).
+	codeAccountLinkedElsewhere = "account_linked_elsewhere"
+	// codeLinkCodeRequestsExceeded refuses a Mattermost link code beyond account_link.mattermost_code_requests.
+	codeLinkCodeRequestsExceeded = "link_code_requests_exceeded"
+)
 
 // AccountLinks is what the API needs of internal/accountlinks.
 type AccountLinks interface {
@@ -46,10 +50,12 @@ func linkRequester(ctx context.Context) (accountlinks.Requester, error) {
 // linkProblem maps the errors of internal/accountlinks to their problems; any other error is returned as it is.
 func linkProblem(err error) error {
 	if f, ok := errors.AsType[*accountlinks.FieldError](err); ok {
-		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+		p := fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+		p.AttemptsRemaining = f.AttemptsRemaining
+		return p
 	}
 	if l, ok := errors.AsType[*accountlinks.RateLimitedError](err); ok {
-		p := problem(http.StatusTooManyRequests, typeRateLimited, "",
+		p := problem(http.StatusTooManyRequests, typeRateLimited, codeLinkCodeRequestsExceeded,
 			"Too many link codes were requested within an hour; wait before the next one.")
 		p.RetryAfter = l.Seconds()
 		return p

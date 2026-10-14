@@ -204,8 +204,9 @@ func (s *Service) targetCodeLimit(ctx context.Context, q Queries, connID int64, 
 // ConfirmMattermost confirms the Mattermost link request requestPublicID of the requesting User with code
 // (C-18.FR-3, AC-2); a request of another User is ErrNotFound. With one limiter token of the interactive path, taken
 // before the code is checked: a consumed, void or expired request, or a wrong code, is a FieldError link_code_invalid
-// at /code, never saying which, recorded as link_rejected with token_used, wrong_code or token_expired; a wrong code
-// counts an attempt and the one that reaches account_link.mattermost_code's limit voids the request. A right code
+// at /code, never saying which, recorded as link_rejected with token_used, wrong_code or token_expired, with the
+// attempts the request has left; a wrong code counts an attempt and the one that reaches account_link.mattermost_code's
+// limit voids the request, so that it has none left, like a request that cannot be used. A right code
 // links as LinkTelegram does — conflict check, replacement, the link, the hint — consumes the request, and the bot
 // confirms "Linked to Muster user {name}" in the direct channel; a confirmation that fails is only logged.
 func (s *Service) ConfirmMattermost(ctx context.Context, r Requester, requestPublicID, code string) (Link, error) {
@@ -220,17 +221,19 @@ func (s *Service) ConfirmMattermost(ctx context.Context, r Requester, requestPub
 	if err != nil {
 		return Link{}, fmt.Errorf("read the link request: %w", err)
 	}
-	invalid := &FieldError{Pointer: pointerCode, Code: CodeLinkCodeInvalid,
-		Detail: "The code is wrong, used or expired; request a new one after five wrong codes."}
-	var link Link
+	var (
+		link Link
+		left int
+	)
 	err = s.cfg.Mattermost.Session(ctx, req.ConnectionPublicID, func(ctx context.Context, b MattermostBot) error {
 		var err error
-		link, err = s.confirmMattermost(ctx, b, r, req, code)
+		link, left, err = s.confirmMattermost(ctx, b, r, req, code)
 		return err
 	})
 	switch {
 	case errors.Is(err, ErrNoConnection), errors.Is(err, errRejected):
-		return Link{}, invalid
+		return Link{}, &FieldError{Pointer: pointerCode, Code: CodeLinkCodeInvalid, AttemptsRemaining: &left,
+			Detail: "The code is wrong, used or expired; request a new one after five wrong codes."}
 	case err != nil:
 		return Link{}, err
 	}
@@ -240,20 +243,22 @@ func (s *Service) ConfirmMattermost(ctx context.Context, r Requester, requestPub
 // errRejected is a confirmation that was rejected and recorded.
 var errRejected = errors.New("the link code was rejected")
 
-// confirmMattermost is the part of ConfirmMattermost that holds the limiter token.
+// confirmMattermost is the part of ConfirmMattermost that holds the limiter token; with errRejected it returns the
+// attempts the request has left.
 func (s *Service) confirmMattermost(ctx context.Context, b MattermostBot, r Requester, req dbgen.GetLinkRequestRow,
-	code string) (Link, error) {
+	code string) (Link, int, error) {
 	a := account{messenger: MessengerMattermost, conn: connRef{id: req.ConnectionID,
 		publicID: req.ConnectionPublicID, name: req.ConnectionName}, space: SpaceMattermost(req.ConnectionID),
 		external: req.TargetExternalID.String, username: textPtr(req.TargetUsername)}
 	var (
 		reason string
+		left   int
 		link   Link
 		old    *view
 		u      dbgen.LockLinkUserRow
 	)
 	err := s.cfg.Store.InTx(ctx, func(q Queries) error {
-		reason, old = "", nil
+		reason, left, old = "", 0, nil
 		row, err := q.LockLinkRequest(ctx, dbgen.LockLinkRequestParams{OrgID: s.cfg.OrgID, ID: req.ID})
 		if err != nil {
 			return fmt.Errorf("lock the link request: %w", err)
@@ -271,10 +276,12 @@ func (s *Service) confirmMattermost(ctx context.Context, b MattermostBot, r Requ
 			reason = ReasonTokenExpired
 		case subtle.ConstantTimeCompare(hash(normalizeCode(code)), row.SecretHash) != 1:
 			reason = ReasonWrongCode
-			if _, err := q.RecordWrongCode(ctx, dbgen.RecordWrongCodeParams{MaxAttempts: MaxAttempts, Now: now,
-				OrgID: s.cfg.OrgID, ID: row.ID}); err != nil {
+			attempts, err := q.RecordWrongCode(ctx, dbgen.RecordWrongCodeParams{MaxAttempts: MaxAttempts, Now: now,
+				OrgID: s.cfg.OrgID, ID: row.ID})
+			if err != nil {
 				return fmt.Errorf("count the wrong code: %w", err)
 			}
+			left = max(MaxAttempts-int(attempts), 0)
 		}
 		if reason != "" {
 			return s.reject(ctx, q, r.Actor, r.Transport, r.Address, a, reason, u.PublicID)
@@ -294,21 +301,21 @@ func (s *Service) confirmMattermost(ctx context.Context, b MattermostBot, r Requ
 		return nil
 	})
 	if err != nil {
-		return Link{}, err
+		return Link{}, 0, err
 	}
 	switch reason {
 	case "":
 	case ReasonConflict:
 		s.logRejected(ctx, MessengerMattermost, a.conn.publicID, reason, nil)
-		return Link{}, ErrLinkedElsewhere
+		return Link{}, 0, ErrLinkedElsewhere
 	default:
 		s.logRejected(ctx, MessengerMattermost, a.conn.publicID, reason, nil)
-		return Link{}, errRejected
+		return Link{}, left, errRejected
 	}
 	replyErr := b.SendDirect(ctx, a.external, messages.T(language(u.Language), "accountLink.linkedMattermost",
 		messages.Args{"name": u.Name}))
 	s.logLinked(ctx, link, old, u.PublicID, replyErr)
-	return link, nil
+	return link, 0, nil
 }
 
 // newCode draws a code of CodeLength characters of CodeAlphabet from random, without bias.

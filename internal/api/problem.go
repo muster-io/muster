@@ -136,6 +136,8 @@ type Problem struct {
 	RelatedAlertGroup *gen.AlertGroupRef
 	// LinkRules is set on the in_use refusal of a Lookup table: the Link rules that read it.
 	LinkRules []gen.EntityRef
+	// AttemptsRemaining is set on link_code_invalid: the codes the link request still takes.
+	AttemptsRemaining *int
 }
 
 func (p *Problem) Error() string {
@@ -257,6 +259,7 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 	if len(p.LinkRules) > 0 {
 		body.LinkRules = &p.LinkRules
 	}
+	body.AttemptsRemaining = p.AttemptsRemaining
 	if p.RetryAfter > 0 {
 		body.RetryAfterSeconds = &p.RetryAfter
 		w.Header().Set(retryAfterHeader, strconv.Itoa(p.RetryAfter))

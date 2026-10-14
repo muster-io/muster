@@ -17,6 +17,7 @@ import (
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/keyring"
+	"github.com/muster-io/muster/internal/outgoingheartbeat"
 	"github.com/muster-io/muster/internal/systemstatus/dbgen"
 )
 
@@ -132,12 +133,15 @@ type Storm struct {
 	AlertGroupCount int64
 }
 
-// OutgoingHeartbeat is the result of the last outgoing heartbeat; without a URL nothing else is set.
+// OutgoingHeartbeat is the result of the last outgoing heartbeat; without a URL nothing else is set. A failed one has
+// the class of its error and the status code of the answer, 0 without one (outgoingheartbeat.FailureOf).
 type OutgoingHeartbeat struct {
-	Configured    bool
-	LastAttemptAt *time.Time
-	LastOK        *bool
-	LastError     *string
+	Configured     bool
+	LastAttemptAt  *time.Time
+	LastOK         *bool
+	LastError      *string
+	LastErrorClass string
+	LastStatus     int
 }
 
 // Status is the System status.
@@ -275,6 +279,8 @@ func outgoingHeartbeat(ctx context.Context, q Queries, org int64) (OutgoingHeart
 	if r.OutgoingHeartbeatLastError.Valid {
 		e := r.OutgoingHeartbeatLastError.String
 		out.LastError = &e
+		f := outgoingheartbeat.FailureOf(e)
+		out.LastErrorClass, out.LastStatus = f.Class, f.Status
 	}
 	return out, nil
 }

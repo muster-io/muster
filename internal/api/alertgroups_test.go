@@ -114,7 +114,7 @@ func (f *fakeAlertGroups) Timeline(_ context.Context, id string, fl groups.Timel
 	system := groups.TimelineActor{Kind: "system", Transport: "system"}
 	page := groups.TimelinePage{Entries: []groups.TimelineEntry{
 		{PublicID: "TEAAAAAAAAAAA1", At: t0, Kind: groups.KindStatus, Event: "resolved", Loudness: groups.Quiet,
-			Mentions: []string{}, Actor: system, Reason: &reason, From: groups.StatusFiring,
+			Mentions: []string{}, Actor: system, Reason: &reason, ReasonCode: reason, From: groups.StatusFiring,
 			To: groups.StatusResolved, Fingerprints: []string{"a"}, Owner: alice, PreviousOwner: alice},
 		{PublicID: "TEAAAAAAAAAAA2", At: t0, Kind: groups.KindStatus, Event: "created", Loudness: groups.Loud,
 			Mentions: []string{"new_alert_group"}, Actor: system, To: groups.StatusFiring,
@@ -325,13 +325,15 @@ func TestGetAlertGroupTimelineAPI(t *testing.T) {
 	if err != nil || resolved.Event != gen.LifecycleEventResolved || resolved.Loudness != gen.Quiet ||
 		len(resolved.Mentions) != 0 || resolved.FromStatus.MustGet() != gen.NullableAlertGroupStatusFiring ||
 		*resolved.ToStatus != gen.AlertGroupStatusResolved || resolved.Reason.MustGet() != "resolved" ||
+		resolved.ReasonCode.MustGet() != gen.NullableStatusChangeReasonResolved ||
 		resolved.Owner == nil || resolved.Owner.Name != "Alice" || resolved.PreviousOwner == nil ||
 		resolved.Fingerprints == nil || (*resolved.Fingerprints)[0] != "a" || resolved.Actor.Kind != gen.ActorKindSystem ||
 		*resolved.Actor.Transport != gen.TransportSystem || !resolved.Actor.Id.IsNull() {
 		t.Errorf("resolved %+v, %v", resolved, err)
 	}
 	created, _ := list.Items[1].AsTimelineStatusEntry()
-	if !created.FromStatus.IsNull() || len(*created.LabelConflicts) != 1 || created.Mentions[0] != "new_alert_group" {
+	if !created.FromStatus.IsNull() || len(*created.LabelConflicts) != 1 || created.Mentions[0] != "new_alert_group" ||
+		!created.ReasonCode.IsNull() {
 		t.Errorf("created %+v", created)
 	}
 	replaced, _ := list.Items[2].AsTimelineAlertsEntry()

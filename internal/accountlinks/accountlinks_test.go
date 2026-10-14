@@ -768,8 +768,8 @@ func TestLists(t *testing.T) {
 }
 
 // TestUnlink is C-18.FR-6 and FR-9: a User unlinks their own link from the web session, an Admin any User's link;
-// each is recorded as account_link.unlink with the actor, the Transport and the client address, and the hint goes to
-// the link's User. A link of another User, or an unknown one, is ErrNotFound.
+// each is recorded as account_link.unlink with the actor, the Transport and the client address, and the hint that
+// names the link goes to the link's User. A link of another User, or an unknown one, is ErrNotFound.
 func TestUnlink(t *testing.T) {
 	e := newEnv(t)
 	tl := e.addLink(aliceID, MessengerTelegram, tgID, "7001", ptr("alice_t"))
@@ -791,7 +791,7 @@ func TestUnlink(t *testing.T) {
 		got[0].Details["user"] != alicePID || len(got[0].Diff) != 4 || got[0].Diff[0].After != nil {
 		t.Fatalf("unlink: links %+v, audit %+v", e.store.links, got)
 	}
-	if !slices.Equal(e.store.hints, []db.Hint{{OrgID: org, Type: HintType, User: alicePID}}) {
+	if !slices.Equal(e.store.hints, []db.Hint{{OrgID: org, Type: HintType, ID: tl.publicID, User: alicePID}}) {
 		t.Errorf("hints %+v", e.store.hints)
 	}
 	if !strings.Contains(e.log.String(), `"event":"account_link_unlinked","messenger":"telegram","connection":"`+
@@ -816,7 +816,7 @@ func TestUnlink(t *testing.T) {
 	got = entries(e.store)
 	if last := got[len(got)-1]; len(e.store.links) != 0 || last.Actor != "user:"+strconv.Itoa(carolID) ||
 		last.Transport != "api" || last.Address != "192.0.2.3" || last.Details["user"] != bobPID ||
-		e.store.hints[1].User != bobPID {
+		e.store.hints[1].User != bobPID || e.store.hints[1].ID != ml.publicID {
 		t.Errorf("an Admin's unlink: %+v, hints %+v", last, e.store.hints)
 	}
 	for _, name := range []string{"GetAccountLinkOfUser", "DeleteAccountLink"} {
@@ -831,8 +831,8 @@ func TestUnlink(t *testing.T) {
 }
 
 // TestRemoveUserLinks is C-03.FR-13 and C-18.FR-8: deleting a User removes their links, each recorded as
-// account_link.unlink with the reason user_deleted by the Admin, voids their pending requests and sends the hint;
-// the log lines come once the deletion committed.
+// account_link.unlink with the reason user_deleted by the Admin, voids their pending requests and sends one hint that
+// names no link; the log lines come once the deletion committed.
 func TestRemoveUserLinks(t *testing.T) {
 	e := newEnv(t)
 	e.addLink(bobID, MessengerTelegram, tgID, "7002", nil)

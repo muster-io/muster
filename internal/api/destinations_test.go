@@ -1015,14 +1015,20 @@ func TestTestDestinationAPI(t *testing.T) {
 			Headers: [][2]string{{"Authorization", "Bearer [redacted]"}}, Body: &body}, ResponseStatus: 200,
 			ResponseBody: &resp, Duration: 1500 * time.Millisecond, ErrorClass: "none"},
 		{Name: "create", Request: &delivery.TestRequest{Method: "POST", URL: "https://example.org/chat"},
-			Extracted: map[string]string{"id": "m1"}, ErrorClass: "limited", Error: "no token"}}}
+			Extracted: map[string]string{"id": "m1"}, ErrorClass: "limited", Error: "no token"},
+		{Name: "press", ErrorClass: "unknown", Error: "The button press did not reach Muster.",
+			ErrorCode: delivery.CodePressNotReached}}}
 	a := x.as(t, destinationsTester, http.MethodPost, path, `{"source":{"kind":"example"}}`)
 	var res gen.DestinationTestResult
 	decodeInto(t, a, &res)
-	if a.status != http.StatusOK || len(res.Steps) != 2 || res.Health.State != gen.Healthy {
+	if a.status != http.StatusOK || len(res.Steps) != 3 || res.Health.State != gen.Healthy {
 		t.Fatalf("test = %d %s", a.status, a.body)
 	}
-	ev, cr := res.Steps[0], res.Steps[1]
+	ev, cr, press := res.Steps[0], res.Steps[1], res.Steps[2]
+	if press.ErrorCode.MustGet() != gen.NullableTestStepErrorCodePressNotReached ||
+		press.Error.MustGet() != "The button press did not reach Muster." || !cr.ErrorCode.IsNull() {
+		t.Errorf("press %s", a.body)
+	}
 	if ev.Name != "event" || ev.ErrorClass != gen.DeliveryErrorClassNone || ev.DurationMs != 1500 ||
 		ev.ResponseStatus.MustGet() != 200 || ev.ResponseBody.MustGet() != resp || !ev.Error.IsNull() ||
 		ev.Request.Url != "https://example.org/hook?k=[redacted]" || ev.Request.Body.MustGet() != body ||

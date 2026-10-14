@@ -160,8 +160,8 @@ func TestGetFillsEverySection(t *testing.T) {
 		t.Errorf("storms %+v", s)
 	}
 	h := st.OutgoingHeartbeat
-	if !h.Configured || *h.LastOK || *h.LastError != "answered 503 (transient)" ||
-		!h.LastAttemptAt.Equal(now.Add(-time.Minute)) {
+	if !h.Configured || *h.LastOK || *h.LastError != "answered 503 (transient)" || h.LastErrorClass != "transient" ||
+		h.LastStatus != 503 || !h.LastAttemptAt.Equal(now.Add(-time.Minute)) {
 		t.Errorf("outgoing heartbeat %+v", h)
 	}
 	for _, org := range f.orgs {
@@ -210,7 +210,7 @@ func TestHeartbeatNotConfigured(t *testing.T) {
 	f.heartbeat.Configured = false
 	st, err := service(f, nil).Get(t.Context())
 	if h := st.OutgoingHeartbeat; err != nil || h.Configured || h.LastAttemptAt != nil || h.LastOK != nil ||
-		h.LastError != nil {
+		h.LastError != nil || h.LastErrorClass != "" || h.LastStatus != 0 {
 		t.Errorf("not configured: %+v, %v", h, err)
 	}
 	f.heartbeat = dbgen.GetOutgoingHeartbeatResultRow{Configured: true}

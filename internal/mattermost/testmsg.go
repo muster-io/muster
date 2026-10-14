@@ -177,7 +177,7 @@ func (t *Tester) Test(ctx context.Context, in delivery.TestInput) ([]delivery.Te
 	}
 	if tg.BotUserID == "" {
 		return append(steps, delivery.TestStep{Name: StepPress, ErrorClass: string(delivery.OutcomeUnknown),
-			Error: botUnknown}), nil
+			Error: botUnknown, ErrorCode: delivery.CodeBotUnknown}), nil
 	}
 	press, err := t.press(ctx, d, tg, pub.answer.ID, actions[0].ID, nonce)
 	if err != nil {
@@ -219,7 +219,7 @@ func (t *Tester) press(ctx context.Context, d delivery.Destination, tg Target, p
 	notReached := (out.Kind == delivery.OutcomeOK && !reached) ||
 		(r.Status == http.StatusBadRequest && r.ErrorID == errorActionIntegration)
 	if notReached {
-		st.ErrorClass = string(delivery.OutcomeUnknown)
+		st.ErrorClass, st.ErrorCode = string(delivery.OutcomeUnknown), delivery.CodePressNotReached
 		st.Error = fmt.Sprintf(pressNotReached, strings.TrimSuffix(t.Adapter.IngestURL, "/"))
 	}
 	return st, nil

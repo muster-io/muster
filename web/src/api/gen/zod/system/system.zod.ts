@@ -104,7 +104,9 @@ export const GetSystemStatusResponse = zod.object({
   "configured": zod.boolean().describe('False when no URL is set; the page suggests setting one.'),
   "last_attempt_at": zod.iso.datetime({"offset":true}).nullish(),
   "last_ok": zod.boolean().nullish(),
-  "last_error": zod.string().nullish()
+  "last_error": zod.string().nullish().describe('What failed, in English and without the URL; clients translate `last_error_class` and show this text as its detail.'),
+  "last_error_class": zod.union([zod.literal('transient'),zod.literal('retry_after'),zod.literal('fatal'),zod.literal('redirect'),zod.literal('unknown'),zod.literal('blocked'),zod.literal('dns'),zod.literal('connect'),zod.literal('tls'),zod.literal('timeout'),zod.literal('proxy_auth'),zod.literal('internal'),zod.literal(null)]).nullish().describe('Why the last outgoing heartbeat failed; null when it succeeded or was not sent. The URL answered `last_status` and the answer was classified `transient` (a server error, the next interval is the retry), `retry_after` (the URL asked to wait), `fatal` (a client error, such as a wrong URL), `redirect` (Muster follows no redirects) or `unknown`; or there was no answer: `blocked` (the outbound address policy refused the address), `dns`, `connect`, `tls`, `timeout`, `proxy_auth` (the proxy refused its credentials); or Muster could not prepare the request (`internal`, such as a URL it cannot decrypt).'),
+  "last_status": zod.int().nullish().describe('The status code the URL answered the last failed heartbeat with; null without an answer.')
 })
 }).describe('Read-only status for Admins.')
 

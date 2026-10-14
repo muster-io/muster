@@ -176,7 +176,7 @@ func TestSystemStatusQueries(t *testing.T) {
 			t.Errorf("active storms %+v", s)
 		}
 		if h := st.OutgoingHeartbeat; !h.Configured || !h.LastAttemptAt.Equal(t0) || *h.LastOK ||
-			*h.LastError != "answered 503 (transient)" {
+			*h.LastError != "answered 503 (transient)" || h.LastErrorClass != "transient" || h.LastStatus != 503 {
 			t.Errorf("outgoing heartbeat %+v", h)
 		}
 
