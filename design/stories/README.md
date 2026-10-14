@@ -238,8 +238,8 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 – S-067 | 20 |
 | Actions | C-17, C-18 | S-049 – S-052, S-068 – S-070 | 7 |
 | Operations | C-19 – C-21 | S-053 – S-059, S-071, S-072 | 9 |
-| Bridge | C-22, and S-060 of C-21 | S-073 – S-079, S-060 | 8 |
-| **L1** | 22 | | **79** |
+| Bridge | C-22, and S-060 of C-21 | S-073 – S-081, S-060 | 10 |
+| **L1** | 22 | | **81** |
 
 ### Foundation
 
@@ -341,9 +341,11 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 
 | ID | Capability | Title | Kind | Depends on |
 |---|---|---|---|---|
-| [S-073](S-073-bridge-connections-destinations-protocol-client-and-fake-bridge.md) | C-22 | Bridge Connections and Destinations, the protocol client, the Destination check and the fake bridge (BE) | be | S-069, S-071, S-059 |
-| [S-074](S-074-bridge-adapter-envelopes-idempotent-publications-threads-and-edit-windows.md) | C-22 | Bridge adapter: envelopes in CommonMark, idempotent Publications, Thread replies, error classes and edit windows (BE) | be | S-073 |
-| [S-075](S-075-bridge-events-by-polling-and-push-presses-answers-and-text-commands.md) | C-22 | Bridge events by polling and push: presses, answers, Text commands and deleted messages (BE) | be | S-074 |
+| [S-073](S-073-bridge-connections-destinations-protocol-client-and-fake-bridge.md) | C-22 | Bridge Connections, the protocol client with its error classes, `info` and the fake bridge (BE) | be | S-069, S-071, S-059 |
+| [S-080](S-080-bridge-destinations-channel-check-doctor-and-mention-settings.md) | C-22 | Bridge Destinations, the channel check, `muster doctor` and the Mention settings of Bridges (BE) | be | S-073 |
+| [S-074](S-074-bridge-adapter-envelopes-idempotent-publications-threads-and-edit-windows.md) | C-22 | Bridge delivery: envelopes in CommonMark, idempotent Publications, Thread replies, error classes, test messages and the Broken probe (BE) | be | S-080 |
+| [S-081](S-081-bridge-edit-windows-republication-pointer-reply-and-final-edit.md) | C-22 | Bridge edit windows: republication on a change of status, the pointer reply and the final edit as a Thread reply (BE) | be | S-074 |
+| [S-075](S-075-bridge-events-by-polling-and-push-presses-answers-and-text-commands.md) | C-22 | Bridge events by polling and push: presses, answers, Text commands and deleted messages (BE) | be | S-081 |
 | [S-076](S-076-bridge-account-links-by-token-and-code-and-mentions.md) | C-22 | Bridge Account links by a token sent to the bot or a code by direct message, and Mentions of linked people (BE) | be | S-075 |
 | [S-077](S-077-bridge-connection-and-destination-pages-and-profile-links.md) | C-22 | Bridge Connection and Destination pages, Account links through a Bridge in the profile, and labels (FE) | fe | S-076, S-070 |
 | [S-078](S-078-example-bridge-and-the-bridge-conformance-check.md) | C-22 | Example bridge under MIT and the conformance check `muster bridge check` (BE) | be | S-076 |
@@ -394,7 +396,15 @@ extends S-056's sub-navigation. S-073 to S-079 were added with C-22 after S-059 
 Connection reaches any messenger through a separate service that speaks the Bridge protocol of ADR-0017. They come
 after the Operations phase because they build on the Account links, Reminder buttons, labels and key rotation of the
 earlier phases and on the documentation site, and S-060 moves after them, so that its Quick start and Concepts name
-Bridges; S-060 keeps its file name and its capability, C-21.
+Bridges; S-060 keeps its file name and its capability, C-21. S-080 and S-081 were split from S-073 and S-074 by the plan
+review of the Bridge phase, before their implementation, because with the files that review added they touched about
+50 and 45 files (D323). S-073 keeps the Bridge Connection, the protocol client with its error classes, `info` and the
+fake bridge, and S-080 takes Destinations, the Destination check, `muster doctor` and the Mention settings of Bridges;
+S-074 keeps Bridge delivery — envelopes, idempotent Publications, edits, Thread replies, error classes, test messages
+and the Broken probe — and S-081 takes the edit windows. S-080 follows S-073 and S-081 follows S-074, so S-074 depends
+on S-080 and S-075 on S-081; S-073 and S-074 keep their file names. Style hints on the buttons of Mattermost and
+Telegram (D320), which the Bridge protocol brought in, are not a story of this map yet: they wait for their facts from
+the test environment and get a story of their own after the Bridge phase.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

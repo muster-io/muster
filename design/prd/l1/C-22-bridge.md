@@ -39,29 +39,32 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
 
 - **C-22.FR-1** A Bridge Connection has a name, the bridge's base URL — an absolute `http` or `https` URL without
   query, fragment or user information; a path prefix is allowed and a trailing `/` is normalized; requests go to
-  `<base>/v1/…` — a token (encrypted, write-only), the event delivery mode (`connection.bridge.event_delivery`: `poll`
-  or `push`), with `push` a push secret (encrypted, write-only, the Standard Webhooks `whsec_` form), a proxy
-  (C-03.FR-19) and its limiter (`connection.bridge.limiter`). Muster sends the token as `Authorization: Bearer` on every
+  `<base>/v1/…` — a token (`bot_token`, encrypted, write-only, as for the other Connection types: one token is one
+  bot), the event delivery mode (`connection.bridge.event_delivery`: `poll` or `push`), with `push` a push secret
+  (encrypted, write-only, the Standard Webhooks `whsec_` form), a proxy (C-03.FR-19) and its limiter
+  (`connection.bridge.limiter`). Muster sends the token as `Authorization: Bearer` on every
   request, only to the saved base URL; the base URL is an ordinary target under the outbound address policy and the
   Connection's proxy (ADR-0015). The token and the push secret never appear in a log line, an error shown in the UI, the
-  Timeline or a metric (C-02.FR-20). The Connection returns, read-only, the callback address of FR-11 for push and the
-  last `info` it read. Deleting a Bridge Connection follows C-13.FR-6.
+  Timeline or a metric (C-02.FR-20), and a key rotation re-encrypts both like every other Secret (C-20.FR-7). The
+  Connection returns, read-only, the callback address of FR-11 for push and the last `info` it read. Deleting a Bridge
+  Connection follows C-13.FR-6.
 - **C-22.FR-2** The connection check (interactive) calls `getInfo` and shows, with the latency and path (direct or
   through the proxy) of the call, the bridge's name and version, the messenger's name, `protocol_version`, what the
   bridge offers, its limits, its kind of user lookup and its event delivery modes. It fails, naming the cause, when the
   token is refused ("The bridge refused the token."), when `protocol_version` is not one Muster speaks — `1` — when the
-  answer does not match the protocol, or when the Connection's event delivery mode is not one the bridge offers.
-  Muster keeps the last `info` on the Connection, reads it again on every check and, before a call that depends on it,
-  when it is older than `bridge.info_max_age`, so a change in the bridge reaches Muster without a restart.
+  answer does not match the protocol or is larger than 64 KiB, or when the Connection's event delivery mode is not one
+  the bridge offers. Muster keeps the last `info` on the Connection, reads it again on every check and, before a call
+  that depends on it, when it is older than `bridge.info_max_age`, so a change in the bridge reaches Muster without a
+  restart.
 - **C-22.FR-3** A Bridge Destination has a Connection, a channel id — the channel as its messenger names it, an opaque
   string — its Mention settings (C-12.FR-8) and its limiter (`destination.bridge.limiter`). Its Destination check calls
-  `checkChannel`, which posts nothing: it passes when the bridge answers `200`, and stores and shows the channel's name;
-  it fails with the bridge's `detail` when the bridge answers `forbidden`, and with the error class otherwise. The check
-  runs when the Destination is saved, which refuses a failing one, from "Check" on the Destination page — both through
-  the interactive path — as the Broken probe when nothing is waiting (C-11.FR-9), in the delivery client class and
-  never on the interactive path, and in `muster doctor` (C-02.FR-14); a successful check of a Broken Destination ends
-  the Broken state. Mention settings take nobody or chosen users, as in Telegram; everyone in the chat and messenger
-  groups are refused.
+  `checkChannel`, which posts nothing, as its one check item `channel`: it passes when the bridge answers `200`, and
+  stores and shows the channel's name; it fails with the bridge's `detail` when the bridge answers `forbidden`, and
+  with the error class otherwise. The check runs when the Destination is saved, which refuses a failing one, from
+  "Check" on the Destination page — both through the interactive path — as the Broken probe when nothing is waiting
+  (C-11.FR-9), in the delivery client class and never on the interactive path, and in `muster doctor` (C-02.FR-14); a
+  successful check of a Broken Destination ends the Broken state. Mention settings take nobody or chosen users, as in
+  Telegram; everyone in the chat and messenger groups are refused.
 - **C-22.FR-4** Every message Muster posts through a bridge is an envelope (`MessageInput`): the kind (`root`,
   `storm_summary`, `test`), the status with its colour and emoji (item 1 of C-12.FR-1), the title — `#N` and the
   Alert Group's title (item 2) — the link to the Alert Group page as "Open in Muster", the body, the buttons, the
@@ -92,19 +95,21 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   `postMessage` or an earlier reply, `null` without one — and `notify`; Muster stores the `thread_ref` each answer
   returns. Loud new messages carry their Mentions (FR-16); a Quiet new message carries none, and the bridge sends it
   without a notification where it declares `quiet_messages`.
-- **C-22.FR-7** Muster's delivery adapter for Bridges declares `limits.max_body_length` of the Connection's `info` as its
-  length limit in code
-  points (C-12.FR-11), so a longer message is shortened by its Alert list first and always keeps its title, status,
-  footer, buttons and link. The bridge makes the final cut for its rendered markup and reports it with `truncated`.
+- **C-22.FR-7** Bridge delivery shortens each body to `limits.max_body_length` of the Connection's `info`, in code
+  points, as C-12.FR-11 shortens a message to its messenger's limit — by its Alert list first, always keeping its
+  title, status, footer, buttons and link — reading `info` again when it is older than `bridge.info_max_age`, so the
+  limit is that of the Destination's Connection, not one constant of the messenger type. The bridge makes the final cut
+  for its rendered markup and reports it with `truncated`.
 - **C-22.FR-8** Response mapping, by the problem's `class`: `transient` → Transient; `rate_limited` → RetryAfter for
   the seconds of `Retry-After`, for the Destination or, with `scope` `bot`, for every Destination of the Connection —
   Transient when `Retry-After` is missing or longer than `bridge.retry_after_max`;
   `gone` on an edit or a Thread reply → the deleted Root message flow (C-11.FR-13), or with the `reason`
   `edit_window_closed` on an edit → FR-9; `forbidden` → Fatal, with the problem's `detail` as the reason; `invalid` →
   unknown, which ends that delivery as Not delivered. A problem without a class, or an answer that is not a problem, is
-  classified by its status: `401` and `403` → Fatal, `429` and `503` with `Retry-After` → RetryAfter as above, `429`
-  without it, other `5xx`, timeouts and network errors → Transient, a redirect and everything else → unknown. Muster never decides that a message
-  is gone from a status code.
+  classified by the protocol's own mapping (ADR-0017), not by that of outgoing webhooks (C-15.FR-6): `401` and `403` →
+  Fatal; `408` → Transient; `429`, and `503` with `Retry-After`, → RetryAfter as above, Transient without it; other
+  `5xx`, timeouts and network errors → Transient; `404`, `410`, a redirect and everything else → unknown. Muster never
+  decides that a message is gone from a status code.
 - **C-22.FR-9** When `info` declares `limits.edit_max_age_seconds`, Muster does not edit a Root message once it is older
   than that less `bridge.edit_window_margin`, measured from its Publication on the business clock. When the status of
   its Alert Group changes after that, Muster publishes a new Root message Quietly, sends a Thread reply under the old one
@@ -121,19 +126,22 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   of the deletion from `gone` on the next edit or Thread reply.
 - **C-22.FR-11** Events — `press`, `thread_message`, `account_link` and `message_deleted` — carry a stable `id`, their
   `type`, `occurred_at` and their data, and Muster handles each `id` of a Connection once within
-  `bridge.event_dedup_window`. Each Connection has its own token, and a bridge serving several keeps their events apart
-  by token; a press or a Thread message about a message Muster did not post through that Connection is ignored without
-  an answer. Muster answers an event (FR-13), when it does, before it acknowledges it. A Connection receives events in
-  its event delivery mode. **Poll**: the Leader calls
-  `pollEvents` with the stored cursor and `bridge.poll_wait`, handles the batch, then stores `next_cursor` on the
-  Connection; a cursor the bridge refuses as `invalid` is dropped and the next poll starts without one; a failed poll
-  backs off in the background client class (ADR-0015) and never counts against the Connection or makes a Destination
-  Broken. **Push**: the bridge posts each event to `MUSTER_INGEST_URL/api/v1/callbacks/bridge/{connection_id}` on the
-  ingest listener with the Standard Webhooks headers; Muster verifies `webhook-signature` with the Connection's push
-  secret and refuses a `webhook-timestamp` further than `bridge.push_tolerance` from its real clock; it answers `204`
-  once the event is handled or was handled before, `400` to a body that is no event, and `401` to a bad signature, an
-  unknown or deleted Connection and a Connection in poll mode alike, so the endpoint reveals nothing about which
-  Connections exist.
+  `bridge.event_dedup_window`: it claims the id before the event's Command runs and records it afterwards, so two copies
+  of one event run one after the other, and a crash between the Command and the record repeats the Command once on
+  redelivery, which its preconditions turn into a refusal or a no-op (ADR-0017). Muster handles every event type of the
+  protocol, whatever its copy of `info` declares. Each Connection has its own token, and a bridge serving several keeps
+  their events apart by token; a press or a Thread message about a message Muster did not post through that Connection
+  is ignored without an answer. Muster answers an event (FR-13), when it does, before it acknowledges it. A Connection
+  receives events in its event delivery mode. **Poll**: the Leader calls `pollEvents` with the stored cursor and
+  `bridge.poll_wait`, waits for the answer up to `bridge.poll_wait` plus 15 seconds, handles the batch, then stores
+  `next_cursor` on the Connection; a cursor the bridge refuses as `invalid` is dropped and the next poll starts without
+  one; a failed poll backs off in the background client class (ADR-0015) and never counts against the Connection or
+  makes a Destination Broken. **Push**: the bridge posts each event to
+  `MUSTER_INGEST_URL/api/v1/callbacks/bridge/{connection_id}` on the ingest listener with the Standard Webhooks
+  headers; Muster verifies `webhook-signature` with the Connection's push secret and refuses a `webhook-timestamp`
+  further than `bridge.push_tolerance` from its real clock; it answers `204` once the event is handled or was handled
+  before, `400` to a body that is no event, and `401` to a bad signature, an unknown or deleted Connection and a
+  Connection in poll mode alike, so the endpoint reveals nothing about which Connections exist.
 - **C-22.FR-12** A `press` names the message whose button was pressed, the person (`external_id`, `display_name`) and
   the button's data. Muster verifies the signature with the key it names, checks that the data was issued for that
   message — a Root message or a Thread reply of a Destination of this Connection, a mismatch refused like a bad
@@ -147,8 +155,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
 - **C-22.FR-13** Muster answers the person behind an event with `answerEvent` — the event's `id` and a plain text of at
   most 500 characters — through the interactive path within `delivery.interactive_budget`; the bridge shows an answer
   to a press privately where its messenger allows, otherwise in the Thread; an answer to a Text command in its Thread;
-  an answer to an Account link request in the direct chat it came from. Answers never
-  go through delivery and never touch a Root message (ADR-0005); an answer that fails is logged and not retried.
+  an answer to an Account link request in the direct chat it came from. Answers are in the profile language of the User
+  the account is linked to, and in English for an account without a link, as the Mattermost and Telegram bots answer
+  during linking. Answers never go through delivery and never touch a Root message (ADR-0005); an answer that fails is
+  logged and not retried.
 - **C-22.FR-14** When `info` declares `thread_messages`, a `thread_message` under a Root message of the Connection is a
   Text command when its whole text — trimmed, case-insensitive, with an optional leading `/` — is one of `ack`, `unack`,
   `resolve`, `snooze <duration>`, `unsnooze` and `still on it`, or one of their Russian synonyms
@@ -165,14 +175,16 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   1. **Token**, offered by every bridge: the profile shows, for a chosen Bridge Connection, a token — 32 random bytes in
      base64url (43 characters), single use, valid for `account_link.bridge_token_ttl`, stored as a hash and bound to the
      User and the Connection — with "Send this token to the bot in a direct message", and a link built from
-     `link_url_template` when `info` has one. When the bridge reports an `account_link` event with the token, Muster
-     links the sender's account and answers through FR-13 with "Linked to Muster user {name} ({login})"; a token that
-     is unknown, used, expired or bound to another Connection links nothing and is answered "This link is invalid or
-     expired. Start again from your Muster profile."
+     `link_url_template` when `info` has one, an `http` or `https` URL checked like every link Muster shows. When the
+     bridge reports an `account_link` event with the token, Muster links the sender's account and answers through
+     FR-13 with "Linked to Muster user {name} ({login})"; a token that is unknown, used, expired or bound to another
+     Connection links nothing and is answered "This link is invalid or expired. Start again from your Muster
+     profile."
   2. **Code**, offered when `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than
-     `none`: the user enters their handle in a field labelled by the lookup kind — Email, Login, Username or User id;
-     Muster finds the account with `findUsers`, sends it a code with `sendDirectMessage` and the warning "You requested a
-     link to Muster. Do not share this code.", and the user types the code into the profile. Codes follow
+     `none` — never while Muster has not read `info` yet, when only the token is offered: the user enters their
+     handle in a field labelled by the lookup kind — Email, Login, Username or User id; Muster finds the account
+     with `findUsers`, sends it a code with `sendDirectMessage` and the warning "You requested a link to Muster. Do
+     not share this code.", and the user types the code into the profile. Codes follow
      `account_link.bridge_code` and are limited by `account_link.bridge_code_requests`, per requesting User and per
      target account. A handle the bridge does not find is refused with "No account with this {kind} was found." The
      link-making messages are interactive calls (C-18.FR-11).
@@ -195,7 +207,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   Broken itself; its Destinations do, through their deliveries and probes, and its Connection check shows the cause.
 - **C-22.FR-20** `api/bridge.yaml` is the contract of the protocol: OpenAPI 3.1, linted by `make lint`, versioned by
   its `/v1/` paths and `protocol_version` `1`. An additive change keeps version 1; a change that breaks bridges takes a
-  new major path. It is published on the documentation site as a rendered reference, and it is licensed MIT.
+  new major path, and CI fails a pull request that breaks it (oasdiff against the base branch). It is published on the
+  documentation site as a rendered reference, and it is licensed MIT.
 - **C-22.FR-21** `muster bridge check <url>` runs the protocol against a bridge, without a Muster database, with the
   token from `--token-file` and a channel from `--channel`: `getInfo`; `checkChannel`; `postMessage`, and the same
   request again with its `Idempotency-Key`, which must return the same `message_id` with `replayed`; `editMessage`;
@@ -205,7 +218,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   configuration; `checkChannel` of a channel given by `--forbidden-channel`, which must answer `forbidden`;
   and the optional operations the bridge declares. It prints one line per step — passed, failed with the reason, or
   skipped because the bridge does not offer it — and exits `1` when a step failed. Steps that need a person, such as a
-  press, wait for one with a prompt, or are skipped with `--no-interactive`.
+  press, wait for one with a prompt, or are skipped with `--no-interactive`. It is the one sender outside delivery and
+  the interactive path, an exception ADR-0017 allows because it runs outside any installation.
 - **C-22.FR-22** The repository ships an example bridge in Go under the MIT licence, in `examples/bridge/` with its own
   Go module and `LICENSE`, listed in `NOTICE` and never part of the binary, the image or the chart (ADR-0017, ADR-0001):
   a small chat server with its own web page — channels, Threads, buttons, direct messages, users found by login — that
@@ -239,11 +253,13 @@ Connections and Destinations across the UI (S-070) for the Bridge type, with the
 
 In `api/openapi.yaml`, added by the stories that implement them: `connections` of type `bridge` (list, create, read,
 update, delete; reads carry the callback address and the last `info`); `connections/{id}/checks`; `destinations` of type
-`bridge` (create, update); `destinations/{id}/checks`, `tests` and `previews` for the type; `me/account-links/bridge`
-(create → token and link), `me/account-links/bridge/codes` (create → code sent) and
-`me/account-links/bridge/confirmation` (confirm with the code); the push callback `callbacks/bridge/{connection_id}` on
-the ingest listener; `bridge` in the `Transport` enum and `commonmark` in the template markups. The protocol itself is
-`api/bridge.yaml`.
+`bridge` (create, update); `destinations/{id}/checks` with the check item `channel`, `tests` and `previews` for the
+type; `me/account-links/bridge` (`startBridgeLink` → token and link), `me/account-links/bridge/codes`
+(`startBridgeCodeLink` → code sent) and `me/account-links/bridge/confirmation` (`confirmBridgeLink`, with the code);
+`display_name` on Account links; the push callback `callbacks/bridge/{connection_id}` on the ingest listener; `bridge`
+in the `Transport` and `Messenger` enums, `commonmark` in the template formats of `previewTemplate`, the flag
+`past_edit_window` on Alert Group deliveries and the delivery event `republished_past_edit_window`. The protocol itself
+is `api/bridge.yaml`.
 
 ## Acceptance
 
@@ -341,12 +357,13 @@ timers and Account links of the Act stage.
 
 ## Suggested story split
 
-- **BE** — Connections and Destinations, the protocol client, `info`, the Destination check, the fake bridge and
-  `muster dev`.
-- **BE** — the adapter: envelopes and CommonMark, buttons, Mentions, idempotent Publications, edits, Thread replies,
-  error classes, edit windows, test messages; the Messengers → Bridge page.
+- **BE** — Connections, the protocol client with its error classes, `info`, the fake bridge and `muster dev`.
+- **BE** — Destinations, the Destination check, `muster doctor` and the Mention settings of Bridges.
+- **BE** — Bridge delivery: envelopes and CommonMark, buttons, idempotent Publications, edits, Thread replies, error
+  classes, test messages, the Broken probe; the Messengers → Bridge page.
+- **BE** — edit windows: republication on a change of status, the pointer reply, the final edit as a Thread reply.
 - **BE** — events by polling and push, presses and answers, Text commands, deleted messages.
-- **BE** — Account links by token and by code.
+- **BE** — Account links by token and by code, Mentions of linked people.
 - **FE** — the Bridge Connection and Destination pages, Account links in the profile, labels.
 - **BE** — the example bridge and `muster bridge check`.
 - **Docs** — "Write a bridge" and the protocol reference on the documentation site.

@@ -41,7 +41,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-19 Self-observation | Operations | 15 | S-053, S-054, S-059 | yes | 15 of 15 |
 | C-20 Organization settings and security | Operations | 12 | S-055, S-071, S-056, S-072 | yes | 12 of 12 |
 | C-21 Documentation site and runbooks | Operations | 9 | S-057, S-058, S-060 | yes | 9 of 9 |
-| C-22 Bridge | Bridge | 48 | S-073, S-074, S-075, S-076, S-077, S-078, S-079 | yes | 48 of 48 |
+| C-22 Bridge | Bridge | 48 | S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-079 | yes | 48 of 48 |
 
 ## C-01
 
@@ -726,22 +726,22 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-22
 
-[Bridge](../prd/l1/C-22-bridge.md) · Bridge · stories: S-073, S-074, S-075, S-076, S-077, S-078, S-079
+[Bridge](../prd/l1/C-22-bridge.md) · Bridge · stories: S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-079
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-22.FR-1 | S-073 (part), S-077 (part) | complete |  |
 | C-22.FR-2 | S-073 (part), S-077 (part) | complete |  |
-| C-22.FR-3 | S-073 (part), S-074 (part), S-077 (part) | complete |  |
+| C-22.FR-3 | S-080 (part), S-074 (part), S-077 (part) | complete |  |
 | C-22.FR-4 | S-074 | complete |  |
 | C-22.FR-5 | S-074 | complete |  |
 | C-22.FR-6 | S-074 | complete |  |
 | C-22.FR-7 | S-074 | complete |  |
-| C-22.FR-8 | S-073 (part), S-074 (part) | complete |  |
-| C-22.FR-9 | S-074 (part), S-077 (part) | complete |  |
+| C-22.FR-8 | S-073 (part), S-074 (part), S-081 (part) | complete |  |
+| C-22.FR-9 | S-081 (part), S-077 (part) | complete |  |
 | C-22.FR-10 | S-075 | complete |  |
 | C-22.FR-11 | S-075 | complete |  |
-| C-22.FR-12 | S-075 | complete |  |
+| C-22.FR-12 | S-075 (part), S-077 (part) | complete |  |
 | C-22.FR-13 | S-075 (part), S-076 (part) | complete |  |
 | C-22.FR-14 | S-075 | complete |  |
 | C-22.FR-15 | S-076 (part), S-077 (part) | complete |  |
@@ -752,17 +752,17 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-22.FR-20 | S-073 (part), S-079 (part) | complete |  |
 | C-22.FR-21 | S-078 | complete |  |
 | C-22.FR-22 | S-078 | complete | the deployment on the test environment is the maintainer's (S-078) |
-| C-22.FR-23 | S-074 (part), S-076 (part), S-079 (part) | complete |  |
-| C-22.FR-24 | S-073 (part), S-074 (part), S-075 (part) | complete |  |
+| C-22.FR-23 | S-074 (part), S-081 (part), S-076 (part), S-079 (part) | complete |  |
+| C-22.FR-24 | S-073 (part), S-081 (part), S-075 (part) | complete |  |
 | C-22.AC-1 | S-073 | complete |  |
-| C-22.AC-2 | S-073 | complete |  |
-| C-22.AC-3 | S-073 (part), S-075 (part) | complete |  |
+| C-22.AC-2 | S-080 | complete |  |
+| C-22.AC-3 | S-073 (part), S-080 (part), S-075 (part) | complete |  |
 | C-22.AC-4 | S-074 | complete |  |
 | C-22.AC-5 | S-074 | complete |  |
 | C-22.AC-6 | S-074 | complete |  |
 | C-22.AC-7 | S-074 | complete |  |
-| C-22.AC-8 | S-074 | complete |  |
-| C-22.AC-9 | S-074 | complete |  |
+| C-22.AC-8 | S-081 | complete |  |
+| C-22.AC-9 | S-081 | complete |  |
 | C-22.AC-10 | S-074 | complete |  |
 | C-22.AC-11 | S-074 | complete |  |
 | C-22.AC-12 | S-074 (part), S-075 (part) | complete |  |
@@ -773,7 +773,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-22.AC-17 | S-075 | complete |  |
 | C-22.AC-18 | S-076 (part), S-077 (part) | complete |  |
 | C-22.AC-19 | S-076 | complete |  |
-| C-22.AC-20 | S-073 (part), S-076 (part) | complete |  |
+| C-22.AC-20 | S-080 (part), S-076 (part) | complete |  |
 | C-22.AC-21 | S-077 | complete |  |
 | C-22.AC-22 | S-078 | complete |  |
 | C-22.AC-23 | S-078 | complete |  |

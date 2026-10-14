@@ -116,7 +116,9 @@ The full table, with every domain package and the list of generated paths, is
   Audit log → Timeline → re-render. Transports (UI, API, Mattermost, Telegram) are thin adapters that build a Command;
   system transitions use the same dispatcher with Muster as the actor and the Transport `system`.
 - **Messenger messages change only through delivery** (ADR-0005): the delivery worker reconciles Root messages to the
-  Desired state, and the interactive path answers people. Nothing else sends or edits.
+  Desired state, and the interactive path answers people. Nothing else sends or edits, with one exception: the CLI
+  command `muster bridge check` runs the Bridge protocol against a bridge that a person names, outside any installation
+  and without a database, from `internal/bridge/conformance.go` only (ADR-0017).
 - **Configuration lives in the database and changes only through the API** (ADR-0010). Never add an environment
   variable for a product setting; `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are never read. Data needed at first start
   (the Organization and its built-ins, the Keyring state, the bootstrap Admin) comes from idempotent start-up steps,
@@ -147,7 +149,7 @@ The full table, with every domain package and the list of generated paths, is
 |---|---|
 | 1 | a query on a table with `org_id` does not filter by it, at every query level, with a value from a parameter or an outer query |
 | 2 | `alert_groups`, `alert_group_alerts`, `timeline_entries`, `notes` or `alert_group_counters` is written outside `internal/groups`, or `internal/groups/dbgen` is imported outside it |
-| 3 | a messenger send or edit is called outside the delivery worker and the interactive path |
+| 3 | a messenger send or edit is called outside the delivery worker and the interactive path (the conformance check of `muster bridge check` excepted) |
 | 4 | an `http.Client` or `http.Transport`, `http.DefaultClient` or `http.Get`/`Post`/`Head`/`PostForm` is used outside `internal/outbound` (fakes, dev mode, the load test, the generated client and tests excepted) |
 | 5 | a known secret value reaches a log line or a returned error |
 | 6 | `context.Background()` or `context.TODO()` is used outside `cmd/`, `internal/runtime`, `internal/cli`, `test/load/main.go` and tests |
