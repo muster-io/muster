@@ -17,7 +17,7 @@ files_touched:
   - .gitignore
 acceptance:
   - "[C-22.FR-23] Messengers → Write a bridge covers every topic C-22.FR-23 lists for it — the protocol step by step, required and optional features, the envelope and its CommonMark, Mention markers, idempotency keys, confirming presses within 3 seconds, `thread_ref`, error classes and who decides `gone`, safe truncation, both event delivery modes with their signatures, testing with `muster bridge check` and the fake bridge, the example bridge and the MIT licence — with a Mermaid diagram of a press from the messenger to the answer, checked against the list in Verification."
-  - "[C-22.FR-20, C-22.AC-24] `make docs` renders `api/bridge.yaml` with Redocly into the site as Reference → Bridge protocol, beside the API reference, and `refgen` writes its page; both pages and Write a bridge are in the navigation, and `make docs-check` passes with no broken link or anchor."
+  - "[C-22.FR-20, C-22.AC-24] `make docs` renders `api/bridge.yaml` with Redocly into the site as Reference → Bridge protocol, beside the API reference, and fails when the rendered file is missing; `refgen` writes its page, which links to the rendered reference and to `api/bridge.yaml` on `master` (`refgen_test.go`); both pages and Write a bridge are in the navigation, and `make docs-check` passes with no broken link or anchor."
   - "[C-22.FR-23] The home page lists Bridges among the messengers, and Messengers → Bridge links to Write a bridge and to the protocol reference."
 verify: "make ci docs-check"
 operator_attention: false
@@ -35,8 +35,8 @@ issue: null
 
 **OUT**
 
-- Messengers → Bridge, for Admins (S-074), and the Bridge section of Account links (S-076); the remaining sections of
-  the site (S-060).
+- Messengers → Bridge, for Admins (S-074, with its edit windows from S-081), and the Bridge section of Account links
+  (S-076); the remaining sections of the site (S-060).
 
 ## Contracts
 
@@ -45,18 +45,21 @@ issue: null
   `postMessage`, `editMessage`, `replyInThread`, events — with the request and answer of each, taken from the
   examples of `api/bridge.yaml`; required and optional features and how Muster behaves without each (no buttons: the
   commands line and Text commands; no direct messages: tokens only); rendering the envelope: the CommonMark Muster
-  writes, Mention markers, colours and emoji, Quiet messages; `Idempotency-Key` and why a bridge must keep keys for 24
-  hours; `thread_ref`; confirming presses at once and answering later through `answerEvent`; the error classes with an
-  example mapping for a fictional messenger, who decides `gone`, why a missing channel is `forbidden`, the
-  `edit_window_closed` reason and what Muster does past an edit window; safe truncation; polling with cursors and
+  writes, Mention markers, colours and emoji, Quiet messages; `Idempotency-Key`, why a bridge must keep keys for 24
+  hours and keep them per token; `thread_ref`; confirming presses at once and answering later through `answerEvent`;
+  the error classes with an example mapping for a fictional messenger, who decides `gone`, why a missing channel is
+  `forbidden`, how Muster reads an answer without a `class` (and never as `gone`), the `edit_window_closed` reason and
+  what Muster does past an edit window; safe truncation; polling with cursors and
   pushing with Standard Webhooks signatures, with a verification snippet; testing with `muster bridge check`, the fake
   bridge of `muster dev` and the example bridge; running a bridge — its token and push secret, logs without secrets,
   monitoring through the Destination's health; the licence — the protocol and the example are MIT, a bridge may stay
   closed, and contributions to them fall under the CLA.
 - **Reference** (`Makefile`, `internal/tools/refgen`): `make docs` builds `docs/reference/bridge/spec/index.html` from
-  `api/bridge.yaml` with the same Redocly command as the API reference (ignored by git like it); `refgen` writes
+  `api/bridge.yaml` with the same Redocly command as the API reference (ignored by git like it), and fails when that
+  file is missing afterwards, so a skipped render cannot publish a page that links nowhere; `refgen` writes
   `docs/reference/bridge-protocol.md` — the protocol version, the link to the rendered reference and to the raw
-  `api/bridge.yaml` at the release tag — and lists it in the Reference index; `generate-check` covers the page.
+  `api/bridge.yaml` on `master`, since no release tag exists before L1 is released — and lists it in the Reference
+  index; `generate-check` covers the page.
 - **Navigation** (`mkdocs.yml`): Messengers gains Bridge (from S-074) and Write a bridge; Reference gains Bridge
   protocol.
 
@@ -91,5 +94,5 @@ None.
 | ID | Covered | Note |
 |---|---|---|
 | C-22.FR-20 | partial | the published reference; the spec and its generated models are S-073 |
-| C-22.FR-23 | partial | Write a bridge; Messengers → Bridge is S-074, Account links S-076 |
+| C-22.FR-23 | partial | Write a bridge; Messengers → Bridge is S-074 and S-081, Account links S-076 |
 | C-22.AC-24 | full | |
