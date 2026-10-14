@@ -11,19 +11,31 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 )
 
-const referencePath = "../../../design/prd/l1/reference.md"
+const (
+	referencePath = "../../../design/prd/l1/reference.md"
+	chartPath     = "../../../deploy/helm/muster"
+)
 
 func TestRunWritesPages(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "reference")
 	var stderr bytes.Buffer
-	if code := run([]string{"-out", dir, "-catalogue", referencePath}, &stderr); code != 0 {
+	if code := run([]string{"-out", dir, "-catalogue", referencePath, "-chart", chartPath}, &stderr); code != 0 {
 		t.Fatalf("run = %d: %s", code, stderr.String())
 	}
 	tests := map[string][]string{
+		environmentPage: {"DO NOT EDIT", "| `MUSTER_SECRET_KEYS` | — | `MUSTER_SECRET_KEYS_FILE` | yes | The master keys ",
+			"| `MUSTER_DATABASE_PORT` | `5432` | — | — | ", "`HTTP_PROXY`"},
+		chartValuesPage: {"DO NOT EDIT", "| `existingSecret` | string | `\"\"` | The Secret ",
+			"| `image.pullPolicy` | string (`Always`, `Never`, `IfNotPresent`) | `IfNotPresent` | ",
+			"| `database.sessionPort` | integer or null | `null` | ",
+			"| `podDisruptionBudget.maxUnavailable` | integer or string | `1` | ", "| `database` | object | — | "},
+		apiPage:       {"DO NOT EDIT", "[API reference](api/spec/index.html)", "`/api/v1/openapi.yaml`"},
+		indexPage:     {"DO NOT EDIT", "# Reference"},
 		logEventsPage: {"DO NOT EDIT", "| `process_started` | INFO | version, commit | C-02 | "},
 		metricsPage: {"DO NOT EDIT", "| `muster_build_info` | gauge | version, commit | C-02 | no | ",
 			"| `muster_build_info` | `version` | info: "},
@@ -55,11 +67,12 @@ func TestRunErrors(t *testing.T) {
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if code := run([]string{"-out", filepath.Join(file, "reference")}, &stderr); code != 1 {
+	if code := run([]string{"-out", filepath.Join(file, "reference"), "-chart", chartPath}, &stderr); code != 1 {
 		t.Errorf("an output directory under a file: run = %d", code)
 	}
 	stderr.Reset()
-	if code := run([]string{"-out", t.TempDir(), "-catalogue", filepath.Join(file, "none")}, &stderr); code != 1 ||
+	if code := run([]string{"-out", t.TempDir(), "-catalogue", filepath.Join(file, "none"), "-chart", chartPath},
+		&stderr); code != 1 ||
 		!strings.Contains(stderr.String(), "none") {
 		t.Errorf("a missing catalogue: run = %d: %s", code, stderr.String())
 	}
@@ -82,7 +95,7 @@ func TestRunFailsOnCatalogueMismatch(t *testing.T) {
 	}
 	dir := t.TempDir()
 	var stderr bytes.Buffer
-	if code := run([]string{"-out", dir, "-catalogue", path}, &stderr); code != 1 {
+	if code := run([]string{"-out", dir, "-catalogue", path, "-chart", chartPath}, &stderr); code != 1 {
 		t.Fatalf("run = %d: %s", code, stderr.String())
 	}
 	if want := `metric "muster_leader": type: counter in the catalogue, gauge in the registry`; !strings.Contains(
@@ -313,6 +326,142 @@ func TestMetricsMarkdown(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the page lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunIsDeterministic(t *testing.T) {
+	dirs := []string{t.TempDir(), t.TempDir()}
+	for _, dir := range dirs {
+		var stderr bytes.Buffer
+		if code := run([]string{"-out", dir, "-catalogue", referencePath, "-chart", chartPath}, &stderr); code != 0 {
+			t.Fatalf("run = %d: %s", code, stderr.String())
+		}
+	}
+	entries, err := os.ReadDir(dirs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != len(referencePages)+1 {
+		t.Errorf("%d pages, want %d", len(entries), len(referencePages)+1)
+	}
+	for _, e := range entries {
+		a, err := os.ReadFile(filepath.Join(dirs[0], e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(filepath.Join(dirs[1], e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(a, b) {
+			t.Errorf("%s differs between two runs", e.Name())
+		}
+	}
+}
+
+func TestIndexListsEveryPage(t *testing.T) {
+	index := indexMarkdown()
+	for _, p := range referencePages {
+		if want := "- [" + p.title + "](" + p.file + "): "; !strings.Contains(index, want) {
+			t.Errorf("the index lacks %q", want)
+		}
+	}
+}
+
+func TestEnvironmentNeedsDescriptions(t *testing.T) {
+	page, err := environmentMarkdown([]config.Variable{
+		{Name: "MUSTER_X", Description: "X."},
+		{Name: "MUSTER_Y", Default: "1", File: "MUSTER_Y_FILE"},
+		{Name: "MUSTER_Z", Description: "Z.", File: "MUSTER_Z_FILE", Secret: true},
+	})
+	if err == nil || !strings.Contains(err.Error(), "MUSTER_Y has no description") ||
+		strings.Contains(err.Error(), "MUSTER_X") {
+		t.Errorf("err = %v", err)
+	}
+	for _, want := range []string{"| `MUSTER_X` | — | — | — | X. |", "| `MUSTER_Z` | — | `MUSTER_Z_FILE` | yes | Z. |"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page lacks %q:\n%s", want, page)
+		}
+	}
+}
+
+func writeChart(t *testing.T, schema, values string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range map[string]string{"values.schema.json": schema, "values.yaml": values} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestChartValuesMarkdown(t *testing.T) {
+	dir := writeChart(t, `{"properties": {
+  "b": {"description": "B | pipe.", "type": "object", "properties": {
+    "s": {"description": "S.", "type": ["string", "null"], "enum": ["x", "y"]},
+    "missing": {"description": "Missing.", "type": "integer"}
+  }},
+  "a": {"description": "A.", "type": "object"},
+  "n": {"description": "N.", "oneOf": [{"type": "integer"}, {"type": "string"}]},
+  "f": {"description": "F.", "type": "boolean"},
+  "e": {"description": "E.", "type": "string"}
+}}`, "b:\n  s: x\na:\n  z: 1\n  k: [\"<v>\"]\nn: null\nf: false\ne: \"\"\n")
+	page, err := chartValuesMarkdown(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := []string{
+		"| `b` | object | — | B \\| pipe. |",
+		"| `b.s` | string or null (`x`, `y`) | `x` | S. |",
+		"| `b.missing` | integer | — | Missing. |",
+		"| `a` | object | `{\"k\":[\"<v>\"],\"z\":1}` | A. |",
+		"| `n` | integer or string | `null` | N. |",
+		"| `f` | boolean | `false` | F. |",
+		"| `e` | string | `\"\"` | E. |",
+	}
+	last := -1
+	for _, row := range rows {
+		i := strings.Index(page, row)
+		if i < 0 {
+			t.Errorf("the page lacks %q:\n%s", row, page)
+			continue
+		}
+		if i < last {
+			t.Errorf("%q is out of the order of the schema", row)
+		}
+		last = i
+	}
+}
+
+func TestChartValuesErrors(t *testing.T) {
+	dir := writeChart(t, `{"properties": {"a": {"type": "object", "properties": {"b": {"description": ""}}}}}`, "a: {}\n")
+	_, err := chartValuesMarkdown(dir)
+	for _, want := range []string{"values.schema.json: a has no description", "values.schema.json: a.b has no description"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want %q", err, want)
+		}
+	}
+	var stderr bytes.Buffer
+	if code := run([]string{"-out", t.TempDir(), "-catalogue", referencePath, "-chart", dir}, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), "a.b has no description") {
+		t.Errorf("run = %d: %s", code, stderr.String())
+	}
+	for name, chart := range map[string]string{
+		"no chart":         filepath.Join(t.TempDir(), "none"),
+		"invalid schema":   writeChart(t, "{", ""),
+		"no values":        writeChart(t, "{}", ""),
+		"invalid values":   writeChart(t, "{}", "a: [\n"),
+		"values not a map": writeChart(t, "{}", "- a\n"),
+	} {
+		if name == "no values" {
+			if err := os.Remove(filepath.Join(chart, "values.yaml")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := chartValuesMarkdown(chart); err == nil {
+			t.Errorf("%s: no error", name)
 		}
 	}
 }

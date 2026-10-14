@@ -1,0 +1,122 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# Publishes the documentation site to the gh-pages branch, which GitHub Pages serves (C-21.FR-1): every push to master
+# as latest/, a release tag vX.Y.Z as X.Y/, and a manual run from master as a documentation-only correction of the
+# newest released minor. internal/tools/docspublish keeps versions.json and the root redirect and refuses older minors.
+name: docs
+
+on:
+  push:
+    branches: [master]
+    # tags and tags-ignore cannot be combined for one event, so the negative pattern leaves out pre-release tags.
+    tags: ["v*.*.*", "!v*-*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          The newest released minor, such as 0.4. The run builds the site from master, its prose pages and its
+          generated references, and publishes it as that minor, so it is meant for documentation-only corrections
+          made right after a release.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One run per event and ref at a time, so a correction does not wait behind the push to master; runs that race on
+# gh-pages retry their push below.
+concurrency:
+  group: docs-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish
+    # Forks have no Pages site of the project to publish to.
+    if: github.repository == 'muster-io/muster'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The tags, for the newest released minor of a manual run.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: choose the version
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          if [ "$EVENT" = workflow_dispatch ]; then
+            { [ "$REF_TYPE" = branch ] && [ "$REF_NAME" = master ]; } || fail "run the correction from master"
+            newest=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)
+            [ -n "$newest" ] || fail "no release is published yet"
+            minor=$(printf '%s' "${newest#v}" | cut -d. -f1,2)
+            [ "$INPUT_VERSION" = "$minor" ] || fail "only the newest released minor $minor can be corrected, not $INPUT_VERSION"
+            version="$minor"
+          elif [ "$REF_TYPE" = tag ]; then
+            [[ "$REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]] || fail "$REF_NAME is not a release tag vX.Y.Z"
+            version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          else
+            version=latest
+          fi
+          echo "VERSION=$version" >>"$GITHUB_ENV"
+          echo "publishing $version" >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+      - run: make docs
+      # A fresh shallow clone of gh-pages for each attempt, or a new orphan branch on the first publish; a push that
+      # loses a race with another run is retried on top of it.
+      - name: publish to gh-pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh auth setup-git
+          url="https://github.com/$REPO.git"
+          pages="$RUNNER_TEMP/gh-pages"
+          for attempt in 1 2 3; do
+            rm -rf "$pages"
+            if git ls-remote --exit-code --heads "$url" gh-pages >/dev/null; then
+              git clone --quiet --depth 1 --branch gh-pages "$url" "$pages"
+            else
+              git init --quiet --initial-branch gh-pages "$pages"
+              git -C "$pages" remote add origin "$url"
+            fi
+            go run ./internal/tools/docspublish --site site --target "$pages" --version "$VERSION"
+            git -C "$pages" add --all
+            if git -C "$pages" diff --cached --quiet; then
+              echo "nothing changed"
+              exit 0
+            fi
+            git -C "$pages" -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit --quiet -m "docs: publish $VERSION from ${GITHUB_SHA::7}"
+            if git -C "$pages" push --quiet origin HEAD:gh-pages; then
+              echo "published $VERSION" >>"$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "the push lost a race with another run; retrying"
+            sleep $((attempt * 10))
+          done
+          exit 1

@@ -82,6 +82,15 @@ HELM_CHECK_SECRET_ERROR := the master keys are never generated: create a Secret 
 KUBECONFORM_FLAGS := -strict -summary -kubernetes-version $(HELM_CHECK_KUBE_VERSION) -schema-location default \
 	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/4c8dc296d32b06d15ccde9668ff136c951f4d539/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
+# The documentation toolchain (Zensical, pinned with hashes in docs/requirements.txt) lives in a virtual environment
+# under bin/, made with Python 3.11 or newer and re-made when the requirements change. make docs renders the API
+# reference from api/openapi.yaml into docs/, where git ignores it, so that the site carries it.
+PYTHON ?= python3
+DOCS_VENV := $(BIN)/docs-venv
+DOCS_DEPS := $(DOCS_VENV)/.installed
+ZENSICAL := $(DOCS_VENV)/bin/zensical
+API_REFERENCE := docs/reference/api/spec/index.html
+
 # make compose-check needs the Docker CLI with the compose plugin, not a running daemon; make dev-db and make dev
 # need the daemon too.
 DOCKER ?= docker
@@ -95,7 +104,8 @@ PLAYWRIGHT_INSTALL_FLAGS ?=
 LOAD_TEST_FLAGS ?=
 
 .PHONY: help fmt lint lint-arch test test-race test-web test-integration generate generate-check build licenses \
-	vulncheck mutation helm-check compose-check dev-db dev e2e load-test ci clean web-browsers
+	vulncheck mutation helm-check compose-check dev-db dev e2e load-test ci clean web-browsers docs docs-serve \
+	docs-check docs-api
 
 help: ## List the targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z0-9-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -186,8 +196,9 @@ build: $(WEB_DEPS) ## Build the SPA, then bin/muster with the version and commit
 # dependencies, after the tests of the SPA's licence script. Every step runs even when an earlier one fails.
 # The Go build tools are only reported, classified by the SPA's licence script: the tool directives of go.mod, and the
 # tools this Makefile installs, which go install builds outside go.mod, so they are resolved in a throwaway module
-# with the project's toolchain. A failure there is shown and never fails the target.
-licenses: $(GO_LICENSES) $(WEB_DEPS) ## Check dependency licences: shipped artifacts block, build tools are reported
+# with the project's toolchain. The packages of the documentation toolchain are reported with the licences of their
+# metadata. A failure in a report is shown and never fails the target.
+licenses: $(GO_LICENSES) $(WEB_DEPS) ## Check dependency licences: shipped artifacts block; build tools and the docs toolchain are reported
 	@failed=0; \
 	for step in "$(GO_LICENSES) check ./cmd/muster --ignore $(MODULE) $(addprefix --ignore ,$(LICENSES_CHECKED_BY_HAND)) --allowed_licenses=$(SHIPPED_LICENSES)" \
 		"$(PNPM) --dir web run test:scripts" \
@@ -205,10 +216,32 @@ licenses: $(GO_LICENSES) $(WEB_DEPS) ## Check dependency licences: shipped artif
 			{ echo "the report of the installed tools failed:"; cat "$$tmp/installed.log"; }; \
 		node web/scripts/check-licenses.mjs --go-tools "$$tmp/go-mod.csv" "$$tmp/installed.csv" || \
 			echo "the classification of the Go build tools failed"; \
+		echo "Documentation toolchain ($(DOCS_VENV), from docs/requirements.txt), reported only:"; \
+		if $(MAKE) --no-print-directory $(DOCS_DEPS) >"$$tmp/docs-venv.log" 2>&1; then \
+			$(DOCS_VENV)/bin/python -I -c "$$DOCS_LICENSES_PY" || echo "the report of the documentation toolchain failed"; \
+		else \
+			echo "the documentation toolchain could not be installed:"; cat "$$tmp/docs-venv.log"; \
+		fi; \
 	else \
-		echo "cannot create a temporary directory, the Go build tools are not reported"; \
+		echo "cannot create a temporary directory, the build tools are not reported"; \
 	fi; \
 	exit $$failed
+
+# Prints each package of the documentation toolchain with its licence: the License-Expression of its metadata, else
+# its licence classifiers, else the first line of its License field.
+define DOCS_LICENSES_PY
+import importlib.metadata as md
+rows = []
+for d in md.distributions():
+    m = d.metadata
+    classifiers = [c.split(" :: ")[-1] for c in m.get_all("Classifier") or [] if c.startswith("License :: ")]
+    licence = m.get("License-Expression") or ", ".join(classifiers) or (m.get("License") or "").strip().split("\n")[0]
+    rows.append((m["Name"].lower(), d.version, licence or "unknown"))
+for name, version, licence in sorted(rows):
+    print(f"  {name} {version}: {licence}")
+print(f"documentation toolchain: {len(rows)} packages, reported only (ADR-0001)")
+endef
+export DOCS_LICENSES_PY
 
 vulncheck: $(GOVULNCHECK) ## Find vulnerable code that is called (govulncheck) and high SPA advisories (pnpm audit)
 	@failed=0; \
@@ -292,6 +325,40 @@ e2e: dev-db build web-browsers ## Run the end-to-end suites (Go, then Playwright
 load-test: ## Run the load test against a running muster dev
 	$(GO) run ./test/load $(LOAD_TEST_FLAGS)
 
+# The API reference, rendered by the Redocly CLI that make lint runs; .redocly.yaml keeps its telemetry off, the
+# environment its update check quiet, and --disableGoogleFont the page from loading fonts from Google (NFR-7).
+docs-api: $(WEB_DEPS)
+	@mkdir -p $(dir $(API_REFERENCE))
+	REDOCLY_SUPPRESS_UPDATE_NOTICE=true $(PNPM) --dir web exec redocly build-docs ../api/openapi.yaml \
+		--config ../.redocly.yaml --disableGoogleFont --output ../$(API_REFERENCE)
+
+# Zensical checks the links to pages and their anchors, but not those to other files and not the navigation, so after
+# the build the rendered API reference is checked, then that every page the nav of mkdocs.yml names exists under docs/
+# and that every page under docs/, except those exclude_docs names, is in the nav.
+docs: generate docs-api $(DOCS_DEPS) ## Generate, render the API reference and build the site strictly into site/
+	$(ZENSICAL) build --strict --config-file mkdocs.yml
+	@test -s site/$(API_REFERENCE:docs/%=%) || \
+		{ echo "site/$(API_REFERENCE:docs/%=%) is missing: the API page links to it"; exit 1; }
+	@nav=$$(awk '/^nav:/ { n = 1; next } /^[^ #]/ { n = 0 } n' mkdocs.yml | grep -oE '[^ :]+\.md' | sort -u); \
+	excluded=$$(awk '/^exclude_docs:/ { n = 1; next } /^[^ #]/ { n = 0 } n' mkdocs.yml | grep -oE '[^ ]+\.md'); \
+	pages=$$(cd docs && find . -name '*.md' | sed 's|^\./||' | grep -vxF "$$excluded" | sort); \
+	failed=0; \
+	for p in $$nav; do \
+		test -f "docs/$$p" || { echo "mkdocs.yml: the nav names docs/$$p, which does not exist"; failed=1; }; \
+	done; \
+	for p in $$pages; do \
+		echo "$$nav" | grep -qxF "$$p" || { echo "docs/$$p is not in the nav of mkdocs.yml"; failed=1; }; \
+	done; \
+	exit $$failed
+
+docs-serve: generate docs-api $(DOCS_DEPS) ## Build the site and serve it on localhost:8000, rebuilding on changes
+	$(ZENSICAL) serve --config-file mkdocs.yml
+
+# generate-check runs first and on its own, so that the generate step of docs cannot hide a stale page.
+docs-check: ## Fail on stale generated files, then build the site strictly (broken links and anchors fail)
+	$(MAKE) --no-print-directory generate-check
+	$(MAKE) --no-print-directory docs
+
 ci: lint lint-arch generate-check licenses test-race build ## Run the pull-request tier locally
 
 clean: ## Remove build output and installed tools
@@ -300,6 +367,14 @@ clean: ## Remove build output and installed tools
 # Installs the SPA dependencies exactly as locked; every target that runs pnpm depends on it.
 $(WEB_DEPS): web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml
 	$(PNPM) --dir web install --frozen-lockfile
+	@touch $@
+
+# The documentation toolchain, installed exactly as pinned: only wheels whose hashes docs/requirements.txt lists.
+$(DOCS_DEPS): docs/requirements.txt
+	rm -rf $(DOCS_VENV)
+	$(PYTHON) -m venv $(DOCS_VENV)
+	$(DOCS_VENV)/bin/python -m pip install --quiet --disable-pip-version-check --require-hashes --only-binary=:all: \
+		-r docs/requirements.txt
 	@touch $@
 
 # $(call go-install,<package>@<version>,<binary>) installs a tool as $@ with the project's toolchain.

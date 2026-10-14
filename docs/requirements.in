@@ -1,0 +1,4 @@
+# The documentation toolchain of make docs. After a change, regenerate docs/requirements.txt, pinned with hashes for
+# every platform and every Python from 3.11, from the repository root:
+#   uv pip compile docs/requirements.in --universal --python-version 3.11 --generate-hashes -o docs/requirements.txt
+zensical==0.0.70

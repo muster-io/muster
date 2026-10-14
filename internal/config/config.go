@@ -130,6 +130,88 @@ var defaults = map[string]string{
 	"MUSTER_RUNBOOK_BASE_URL": DefaultRunbookBaseURL,
 }
 
+// descriptions are the texts of the reference page of the environment variables (docs/reference/environment.md), one
+// per variable of raw except the *_FILE variables, which appear as the file form of their secret.
+var descriptions = map[string]string{
+	"MUSTER_DATABASE_URL": "The main database connection as a `postgres://` or `postgresql://` URL with the host, " +
+		"the user, the password and the database. Required unless `MUSTER_DATABASE_HOST`, `MUSTER_DATABASE_NAME` " +
+		"and `MUSTER_DATABASE_USER` are set; when both are given, the URL is used and the fields are ignored with a " +
+		"warning. Its `pool_max_conns` sets the size of a replica's main pool, max(10, CPUs) when it sets none.",
+	"MUSTER_DATABASE_HOST":     "The database host, when `MUSTER_DATABASE_URL` is not set.",
+	"MUSTER_DATABASE_PORT":     "The database port, when `MUSTER_DATABASE_URL` is not set.",
+	"MUSTER_DATABASE_NAME":     "The database name; required unless `MUSTER_DATABASE_URL` is set.",
+	"MUSTER_DATABASE_USER":     "The database user; required unless `MUSTER_DATABASE_URL` is set.",
+	"MUSTER_DATABASE_PASSWORD": "The password of the database user, when `MUSTER_DATABASE_URL` is not set.",
+	"MUSTER_DATABASE_SSLMODE": "The `sslmode` of the database connections, when `MUSTER_DATABASE_URL` is not set: " +
+		"`disable`, `allow`, `prefer`, `require`, `verify-ca` or `verify-full`. `muster doctor` and the startup log " +
+		"report whether each connection is encrypted.",
+	"MUSTER_DATABASE_SESSION_URL": "The session connection, for advisory locks and LISTEN, as a `postgres://` URL. " +
+		"Set it when the main connection goes through a pooler in transaction mode; unset, Muster uses the main " +
+		"connection.",
+	"MUSTER_DATABASE_SESSION_HOST": "The host of the session connection; its other fields are those of the main " +
+		"connection.",
+	"MUSTER_DATABASE_SESSION_PORT": "The port of the session connection; its other fields are those of the main " +
+		"connection.",
+	"MUSTER_SECRET_KEYS": "The master keys of the Keyring, which protect the secrets stored in the database: " +
+		"base64 keys of 32 bytes separated by commas, such as the output of `openssl rand -base64 32`; the file " +
+		"form holds one key per line. Required.",
+	"MUSTER_PUBLIC_URL": "The address of Muster for people and messengers, an absolute `http://` or `https://` URL. " +
+		"Required.",
+	"MUSTER_INGEST_URL": "The address Alertmanager sends its notifications to, an absolute `http://` or `https://` " +
+		"URL; unset, `MUSTER_PUBLIC_URL`.",
+	"MUSTER_LISTEN_APP":      "The listen address of the app listener: the UI and the API.",
+	"MUSTER_LISTEN_INGEST":   "The listen address of the ingest listener: ingestion, Heartbeats and messenger callbacks.",
+	"MUSTER_LISTEN_INTERNAL": "The listen address of the internal listener: the health checks and `/metrics`.",
+	"MUSTER_LOG_LEVEL":       "The lowest level of the log lines written: `info`, `warn` or `error`.",
+	"MUSTER_MIGRATE_ON_START": "`true` applies the database migrations at start; the Helm chart migrates in an init " +
+		"container instead.",
+	"MUSTER_TRUSTED_PROXIES": "The CIDR networks of the trusted reverse proxies, separated by commas. Empty, the " +
+		"client address of a request is its socket address; with networks listed, a request whose socket address is " +
+		"inside them takes the first address of `X-Forwarded-For`, read from the right, that is outside them.",
+	"MUSTER_RUNBOOK_BASE_URL": "The base of the `runbook_url` of Internal alerts: the published documentation site.",
+	"MUSTER_BOOTSTRAP_ADMIN_EMAIL": "The email, also the login, of the bootstrap Admin, created at start when the " +
+		"Organization has no Admin; ignored once it has one.",
+	"MUSTER_BOOTSTRAP_ADMIN_PASSWORD": "The password of the bootstrap Admin; required with " +
+		"`MUSTER_BOOTSTRAP_ADMIN_EMAIL` while the Organization has no Admin.",
+}
+
+// Variable is a bootstrap setting as the reference page lists it.
+type Variable struct {
+	Name string
+	// Default is the value of a variable that is not set; empty when it has none.
+	Default     string
+	Description string
+	// File is the *_FILE variable that may hold the value instead; empty when there is none.
+	File string
+	// Secret is set for a value that is never repeated in an error or a log line.
+	Secret bool
+}
+
+// Variables lists the bootstrap settings in the order of their declaration. A *_FILE variable is not listed on its
+// own: it is the File of its secret.
+func Variables() []Variable {
+	files := map[string]string{}
+	for _, s := range secretFiles {
+		files[s.name] = s.name + "_FILE"
+	}
+	isFile := map[string]bool{}
+	for _, f := range files {
+		isFile[f] = true
+	}
+	t := reflect.TypeFor[raw]()
+	out := make([]Variable, 0, t.NumField())
+	for i := range t.NumField() {
+		f := t.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("env"), ",")
+		if isFile[name] {
+			continue
+		}
+		out = append(out, Variable{Name: name, Default: defaults[name], Description: descriptions[name],
+			File: files[name], Secret: f.Tag.Get("secret") == "true"})
+	}
+	return out
+}
+
 // databaseFields are the fields that MUSTER_DATABASE_URL replaces.
 var databaseFields = []string{
 	"MUSTER_DATABASE_HOST", "MUSTER_DATABASE_PORT", "MUSTER_DATABASE_NAME", "MUSTER_DATABASE_USER",

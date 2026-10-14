@@ -443,3 +443,43 @@ func TestErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestVariables(t *testing.T) {
+	vars := config.Variables()
+	byName := map[string]config.Variable{}
+	for _, v := range vars {
+		if _, dup := byName[v.Name]; dup {
+			t.Errorf("%s is listed twice", v.Name)
+		}
+		byName[v.Name] = v
+		if !strings.HasPrefix(v.Name, "MUSTER_") || strings.HasSuffix(v.Name, "_FILE") {
+			t.Errorf("%s is listed on its own", v.Name)
+		}
+		if v.Description == "" {
+			t.Errorf("%s has no description", v.Name)
+		}
+	}
+	if len(vars) != 22 {
+		t.Errorf("%d variables, want 22", len(vars))
+	}
+	tests := []config.Variable{
+		{Name: "MUSTER_SECRET_KEYS", File: "MUSTER_SECRET_KEYS_FILE", Secret: true},
+		{Name: "MUSTER_DATABASE_PASSWORD", File: "MUSTER_DATABASE_PASSWORD_FILE", Secret: true},
+		{Name: "MUSTER_BOOTSTRAP_ADMIN_PASSWORD", File: "MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE", Secret: true},
+		{Name: "MUSTER_DATABASE_URL", Secret: true},
+		{Name: "MUSTER_DATABASE_PORT", Default: config.DefaultDatabasePort},
+		{Name: "MUSTER_MIGRATE_ON_START", Default: "false"},
+		{Name: "MUSTER_PUBLIC_URL"},
+	}
+	for _, want := range tests {
+		got, ok := byName[want.Name]
+		if !ok {
+			t.Errorf("%s is not listed", want.Name)
+			continue
+		}
+		got.Description = ""
+		if got != want {
+			t.Errorf("%s = %+v, want %+v", want.Name, got, want)
+		}
+	}
+}
