@@ -11,6 +11,11 @@
   one limiter, a deleted copy leaves the Thread unattached, and Thread replies reach only the discussion group
 - Amended: 2026-10-04 — after a live Mattermost test ([verified facts](../facts.md#mattermost)): an edit notifies nobody
   there either, even one that adds a Mention
+- Amended: 2026-10-14 — Bridge Destinations ([ADR-0017](0017-bridge-protocol-for-messengers-without-native-support.md)):
+  a bridge takes an `Idempotency-Key`, so a retried Publication reuses its key and a possible duplicate is recorded only
+  when the bridge did not recognise it; a Root message past the bridge's edit window is republished on a change of
+  status instead of edited; answers to presses and Text commands are interactive calls that the bridge places privately
+  or in the Thread
 
 ## Context
 

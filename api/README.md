@@ -26,6 +26,17 @@ like code, and served by the binary at `/api/v1/openapi.yaml`. Generated code (`
   body, so they are excluded from request validation and never answer `400`. `AlertmanagerWebhook` documents the payload
   that processing expects; it is referenced by nothing, which is the one lint warning about a component.
 
+## The Bridge protocol (`bridge.yaml`)
+
+`bridge.yaml` is a second, separate specification: the HTTP protocol that a **bridge** implements so that Muster can
+reach a messenger it has no native support for (ADR-0017, capability C-22). Muster is its client, and the bridge its
+server; the `webhooks` entry `bridgeEvent` is the one request that goes the other way, an event the bridge pushes to
+Muster's ingest listener. It is versioned by its paths (`/v1/`) and by `protocol_version` in `GET /v1/info`, not by
+Muster's release, and it is licensed MIT (`info.license`), unlike the rest of the repository, so that a bridge may be
+derived from it and stay closed. `make lint` runs Redocly over it with the same rules. Muster's own operations for
+Bridge Connections and Destinations, and the push callback itself, are in `openapi.yaml`, added by the stories that
+implement them.
+
 ## Conventions (ADR-0008)
 
 | Topic | Rule |
@@ -106,8 +117,8 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 
 ## Tooling
 
-- **make lint** runs Redocly with `.redocly.yaml`, which applies the recommended ruleset; accepted warnings are listed
-  in `.redocly.lint-ignore.yaml` and explained here under "Spike result".
+- **make lint** runs Redocly with `.redocly.yaml` over `openapi.yaml` and `bridge.yaml`, which applies the recommended
+  ruleset; accepted warnings are listed in `.redocly.lint-ignore.yaml` and explained here under "Spike result".
 - **make generate** runs oapi-codegen with `api/codegen-server.yaml` (std-http-server + strict-server + models) and
   `api/codegen-client.yaml` (client + models), and orval for the TypeScript client. It regenerates the route tree and
   the Go and TypeScript clients.

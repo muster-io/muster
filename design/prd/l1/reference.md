@@ -39,14 +39,16 @@ recorded in its Timeline with the kind `delivery`, and none is sent as an outgoi
 | Thread replies that came due while a Destination was Broken | not sent | — | — |
 | Alert Group that resolved while its Destination was Broken, never published there | not published | Timeline and UI only | — |
 | Republication after a deleted Root message | Quiet | new Root message with a note; Thread starts over | — |
-| Final edit after the Destination left the Route | Quiet | one edit: "No longer updated here" | — |
+| Final edit after the Destination left the Route | Quiet | one edit: "No longer updated here"; for a Bridge Root message past its edit window, a Thread reply with the same text (C-22.FR-9) | — |
+| Republication past a bridge's edit window, on a change of status (C-22.FR-9) | Quiet | new Root message; a Thread reply under the old one links to it; the Thread continues under the new one | — |
 
 Telegram makes a Quiet new message with `disable_notification`, which silences the push but does not remove it
 (C-14.FR-6). In Telegram a Thread reply, Loud or Quiet and with or without a Mention, reaches only members of the
 channel's discussion group, and the automatic copy of a Root message rings them even when the Root message is Quiet
 (C-14.FR-9). In Mattermost a Thread reply notifies the Thread's followers by their own settings, so Quiet means "without
 a Mention" (C-13.FR-8); a Mention also makes the person a follower of the Thread
-([F-027](../../facts.md#threads-and-direct-messages)).
+([F-027](../../facts.md#threads-and-direct-messages)). A Bridge posts a Quiet new message without a notification
+where its bridge declares `quiet_messages`, and otherwise as an ordinary message without Mentions (C-22.FR-6).
 
 ## Buttons and links by status
 
@@ -61,7 +63,11 @@ Other messages: a Reminder carries "Still on it" and "Unack"; a Storm summary an
 a test message carries the buttons of its status, answered with "This is a test message; nothing was changed". The UI
 and the API offer every command allowed by the status, including Unresolve, which messengers never offer. Snooze
 durations appear as separate buttons or a menu, as the messenger allows. In Mattermost every link, "Open in Muster"
-included, is a link in the post, never a button (C-13.FR-3).
+included, is a link in the post, never a button (C-13.FR-3). A Bridge shows these buttons only when its bridge declares
+`buttons`, with the style hints Ack and "Still on it" `primary`, Resolve `success` and the rest `neutral`; without
+buttons, a Root message that is not resolved names the Text commands of its status in a line "Reply in the Thread: …"
+("Reply in the Thread, mentioning the bot: …" when the bridge forwards only those) when the bridge forwards Thread
+messages, and otherwise offers only the link to Muster (C-22.FR-5, C-22.FR-14).
 
 ## Banners, warnings and notices
 
@@ -94,6 +100,15 @@ included, is a link in the post, never a button (C-13.FR-3).
 | Telegram Connection, base URL field | always (hint) | "A self-hosted Bot API server keeps the bot on that server only. Do not call api.telegram.org with this token from anywhere else: even getMe moves the bot back to Telegram's cloud, and presses and comments start to go missing without an error." | C-14 |
 | Telegram Connection | the base URL uses `http` | "The bot token travels in clear text over http. Use https unless this path is a private network or a tunnel." | C-14 |
 | Telegram Destination check | the channel has no linked discussion group | "Comments are not enabled for this channel. Enable comments in the channel settings in Telegram; this creates its discussion group." | C-14 |
+| Bridge Connection | push mode (hint) | "The bridge posts events to {callback address}, signed with the push secret. Configure the same address and secret in the bridge." | C-22 |
+| Bridge Connection check | the token is refused · the protocol version is unknown · the answer does not match the protocol · the event delivery mode is not offered | "The bridge refused the token." · "The bridge speaks protocol version {version}; this Muster speaks 1." · "The bridge's answer does not match the protocol: {detail}" · "The bridge does not offer {mode} event delivery." | C-22 |
+| Thread reply | a Bridge Root message was republished past the edit window | "This message is no longer updated. The current one: {link}" | C-22 |
+| Alert Group page, delivery state | a Bridge Root message is past its edit window | "Past the edit window: updated on the next change of status" | C-22 |
+| Bridge answer to a person | a Text command ran · a Snooze duration is not one of the Route's | "Done: {command} #N" · "Snooze for one of: {durations}" | C-22 |
+| Bridge answer to a person | a press or Text command from an account without an Account link | "Your account is not linked to Muster. Link it in your profile: {link}" | C-22 |
+| Bridge answer to a person | a press whose button data fails verification or belongs to another message | "This button could not be verified; nothing was changed." | C-22 |
+| Profile, link through a Bridge | the bridge refuses the direct message with the code · no account has the handle | "The bot cannot send you a direct message. Send it the token instead." · "No account with this {kind} was found." | C-22 |
+| Bridge answer to a person | an Account link token was linked · was unknown, used, expired or of another Connection | "Linked to Muster user {name} ({login})" · "This link is invalid or expired. Start again from your Muster profile." | C-22 |
 | Telegram Destination check | the bot is not an admin of the discussion group | "The bot is not an admin of the discussion group {group}. Make the bot an admin there, allowed to post messages." | C-14 |
 | Outgoing webhook Destination | previous Signing secret not retired | "The previous secret still signs, since {date}." | C-15 |
 | Outgoing webhook Destination | a literal credential in a header or the URL | "Store credentials as Secrets: this value is shown to everyone who can read Destinations." | C-15 |

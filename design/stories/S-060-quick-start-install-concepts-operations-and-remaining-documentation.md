@@ -4,7 +4,7 @@ title: "Remaining documentation sections: Quick start, Install, Alertmanager, Si
 capability: C-21
 kind: docs
 layer: L1
-depends_on: [S-055, S-071, S-059, S-054]
+depends_on: [S-055, S-071, S-059, S-054, S-077, S-079]
 covers: [C-21.FR-2, C-21.FR-5, C-21.AC-2, C-19.FR-3]
 files_touched:
   - docs/quick-start.md
@@ -56,7 +56,8 @@ issue: 60
 
 - Pages written with their capabilities: the Alertmanager receiver and Heartbeat (S-018, S-023), Mattermost and Telegram
   (S-061, S-042), Account links (S-051), outgoing webhooks (S-044, S-045), OIDC with Keycloak (S-013), the runbooks and
-  "Telegram in restricted networks" (S-058), the Reference section (S-057).
+  "Telegram in restricted networks" (S-058), the Reference section (S-057), Bridge and Write a bridge with the protocol
+  reference (S-074, S-076, S-079).
 
 ## Contracts
 
@@ -99,6 +100,10 @@ issue: 60
   repository has no release (`gh release view` finds none).
 - **Mermaid** (C-21.FR-5): Concepts draws the Alert Group states and the path from Snapshot to message; High
   availability draws the Leader handover.
+- **Bridges** (C-22, D317): this story follows the Bridge stories, so that the pages name Bridges wherever they list
+  messengers — Quick start's next steps, the Destination types in Concepts, Text commands beside buttons in "statuses and
+  commands", republication past an edit window in "Broken Destinations" and the Leader's Bridge polling in "High
+  availability" — and link to Messengers → Bridge and Write a bridge (S-074, S-079) instead of repeating them.
 
 ## Steps
 
@@ -121,7 +126,8 @@ T install/database.md 'kind: Cluster'; T install/database.md 'managed PostgreSQL
 T integrations/alertmanager.md 'max_alerts: 0'; T integrations/alertmanager.md 'Static labels'; T integrations/alertmanager.md 'Instance labels'
 T integrations/alertmanager.md 'dispatch.start-delay'; T messengers/proxies.md SOCKS5; T sign-in/closed-networks.md TOTP
 T concepts/snapshot-semantics.md Stale; T concepts/loud-and-quiet.md Mention; T concepts/statuses-and-commands.md Reminder
-T concepts/broken-destinations.md 'Broken'; T operations/backup-and-restore.md 'muster doctor'; T operations/upgrades.md downgrade
+T concepts/broken-destinations.md 'Broken'; T concepts/statuses-and-commands.md 'Text command'; T operations/high-availability.md Bridge
+T operations/backup-and-restore.md 'muster doctor'; T operations/upgrades.md downgrade
 T operations/key-rotation.md 'rotate-key'; T operations/key-rotation.md 'Not active yet'; T operations/key-rotation.md CSRF
 T operations/high-availability.md Leader; T operations/monitoring.md 'bypass'
 T operations/outgoing-heartbeat.md 'dead man'; T operations/cli.md -- '--actor'
