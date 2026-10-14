@@ -1409,6 +1409,23 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Internal alerts
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="././" class="md-nav__link md-nav__link--active">
         
   
@@ -1424,6 +1441,81 @@
   
 
       </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#musterdestinationbroken" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>MusterDestinationBroken</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#musterheartbeatlost" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>MusterHeartbeatLost</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#musteroidcsecretexpiring" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>MusterOIDCSecretExpiring</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mustersnapshottruncated" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>MusterSnapshotTruncated</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mustertemplateerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>MusterTemplateError</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1536,6 +1628,11 @@
                       
                     
                     
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
                   
                   <div class="md-sidebar__inner">
                     
@@ -1547,6 +1644,69 @@
   
     
   
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#musterdestinationbroken" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>MusterDestinationBroken</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#musterheartbeatlost" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>MusterHeartbeatLost</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#musteroidcsecretexpiring" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>MusterOIDCSecretExpiring</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mustersnapshottruncated" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>MusterSnapshotTruncated</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mustertemplateerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>MusterTemplateError</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1579,60 +1739,21 @@ the id label only, so renaming the entity updates the open Internal alert instea
 Internal alert carries the annotations <code>summary</code>, <code>description</code> and <code>runbook_url</code>: <code>MUSTER_RUNBOOK_BASE_URL</code>, the
 <code>major.minor</code> of the binary (<code>latest</code> for a development build) and the runbook below, joined by <code>/</code>. The
 capability is the one that raises it.</p>
-<table>
-<thead>
-<tr>
-<th>Internal alert</th>
-<th>Severity</th>
-<th>Labels</th>
-<th>Capability</th>
-<th>Runbook</th>
-<th>Raised while</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>MusterDestinationBroken</code></td>
-<td>critical</td>
-<td><code>destination</code>, <code>destination_name</code></td>
-<td>C-11</td>
-<td><a href="../../operations/runbooks/MusterDestinationBroken/"><code>operations/runbooks/MusterDestinationBroken/</code></a></td>
-<td>A Destination is Broken: the messenger answered with a Fatal error, or with Transient errors until the budget ran out, so its deliveries wait. It resolves when a probe, a Destination check or a Destination test succeeds.</td>
-</tr>
-<tr>
-<td><code>MusterHeartbeatLost</code></td>
-<td>critical</td>
-<td><code>integration</code>, <code>integration_name</code>, the Integration's Static labels</td>
-<td>C-07</td>
-<td><a href="../../operations/runbooks/MusterHeartbeatLost/"><code>operations/runbooks/MusterHeartbeatLost/</code></a></td>
-<td>An Integration is Heartbeat lost: no Heartbeat signal arrived within its Heartbeat timeout, so the path from its Alertmanager to Muster may be broken and Stale resolution is paused. It resolves with the next signal, when the Heartbeat is turned off or when the Integration is deleted.</td>
-</tr>
-<tr>
-<td><code>MusterOIDCSecretExpiring</code></td>
-<td>warning</td>
-<td>—</td>
-<td>C-19</td>
-<td><a href="../../operations/runbooks/MusterOIDCSecretExpiring/"><code>operations/runbooks/MusterOIDCSecretExpiring/</code></a></td>
-<td>The OIDC client secret expires within oidc.secret_expiry_lead, by the expiry date an Admin entered in the OIDC settings. It resolves when the date moves further out or is removed.</td>
-</tr>
-<tr>
-<td><code>MusterSnapshotTruncated</code></td>
-<td>warning</td>
-<td><code>integration</code>, <code>integration_name</code></td>
-<td>C-06</td>
-<td><a href="../../operations/runbooks/MusterSnapshotTruncated/"><code>operations/runbooks/MusterSnapshotTruncated/</code></a></td>
-<td>An Integration has a truncated groupKey: Alertmanager cut a Snapshot with max_alerts, so Muster keeps the unlisted Alerts alive and cannot resolve them by absence. It resolves with the next untruncated Snapshot of every truncated groupKey.</td>
-</tr>
-<tr>
-<td><code>MusterTemplateError</code></td>
-<td>warning</td>
-<td><code>route</code>, <code>route_name</code>, <code>destination</code>, <code>destination_name</code>, <code>template</code></td>
-<td>C-12</td>
-<td><a href="../../operations/runbooks/MusterTemplateError/"><code>operations/runbooks/MusterTemplateError/</code></a></td>
-<td>A template of a Route failed while rendering a message, so its messages use the Fallback template; or a request template of an outgoing webhook Destination failed, so that request was not sent. It resolves when the template renders again or, for a Route, a new template is saved.</td>
-</tr>
-</tbody>
-</table>
+<h3 id="musterdestinationbroken"><code>MusterDestinationBroken</code><a class="headerlink" href="#musterdestinationbroken" title="Permanent link">&para;</a></h3>
+<p>critical · labels: <code>destination</code>, <code>destination_name</code> · C-11 · runbook: <a href="../../operations/runbooks/MusterDestinationBroken/"><code>operations/runbooks/MusterDestinationBroken/</code></a></p>
+<p>Raised while: A Destination is Broken: the messenger answered with a Fatal error, or with Transient errors until the budget ran out, so its deliveries wait. It resolves when a probe, a Destination check or a Destination test succeeds.</p>
+<h3 id="musterheartbeatlost"><code>MusterHeartbeatLost</code><a class="headerlink" href="#musterheartbeatlost" title="Permanent link">&para;</a></h3>
+<p>critical · labels: <code>integration</code>, <code>integration_name</code>, the Integration's Static labels · C-07 · runbook: <a href="../../operations/runbooks/MusterHeartbeatLost/"><code>operations/runbooks/MusterHeartbeatLost/</code></a></p>
+<p>Raised while: An Integration is Heartbeat lost: no Heartbeat signal arrived within its Heartbeat timeout, so the path from its Alertmanager to Muster may be broken and Stale resolution is paused. It resolves with the next signal, when the Heartbeat is turned off or when the Integration is deleted.</p>
+<h3 id="musteroidcsecretexpiring"><code>MusterOIDCSecretExpiring</code><a class="headerlink" href="#musteroidcsecretexpiring" title="Permanent link">&para;</a></h3>
+<p>warning · no labels · C-19 · runbook: <a href="../../operations/runbooks/MusterOIDCSecretExpiring/"><code>operations/runbooks/MusterOIDCSecretExpiring/</code></a></p>
+<p>Raised while: The OIDC client secret expires within oidc.secret_expiry_lead, by the expiry date an Admin entered in the OIDC settings. It resolves when the date moves further out or is removed.</p>
+<h3 id="mustersnapshottruncated"><code>MusterSnapshotTruncated</code><a class="headerlink" href="#mustersnapshottruncated" title="Permanent link">&para;</a></h3>
+<p>warning · labels: <code>integration</code>, <code>integration_name</code> · C-06 · runbook: <a href="../../operations/runbooks/MusterSnapshotTruncated/"><code>operations/runbooks/MusterSnapshotTruncated/</code></a></p>
+<p>Raised while: An Integration has a truncated groupKey: Alertmanager cut a Snapshot with max_alerts, so Muster keeps the unlisted Alerts alive and cannot resolve them by absence. It resolves with the next untruncated Snapshot of every truncated groupKey.</p>
+<h3 id="mustertemplateerror"><code>MusterTemplateError</code><a class="headerlink" href="#mustertemplateerror" title="Permanent link">&para;</a></h3>
+<p>warning · labels: <code>route</code>, <code>route_name</code>, <code>destination</code>, <code>destination_name</code>, <code>template</code> · C-12 · runbook: <a href="../../operations/runbooks/MusterTemplateError/"><code>operations/runbooks/MusterTemplateError/</code></a></p>
+<p>Raised while: A template of a Route failed while rendering a message, so its messages use the Fallback template; or a request template of an outgoing webhook Destination failed, so that request was not sent. It resolves when the template renders again or, for a Route, a new template is saved.</p>
 
 
 
