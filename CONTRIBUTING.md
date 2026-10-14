@@ -24,9 +24,9 @@ You need Go 1.27, Node 24 (see `.node-version`), pnpm 12, GNU make and git. With
 the exact version that `packageManager` in `web/package.json` pins. The Makefile runs pnpm from the repository root,
 which has no `package.json`, so with corepack also run `corepack install -g pnpm@<that version>`; otherwise corepack
 starts its default pnpm, which refuses the project. The Makefile installs its pinned tools (golangci-lint,
-go-test-coverage, go-licenses, govulncheck, gremlins, helm, kubeconform) into `bin/tools/` on first use, built with the
-project's toolchain. `make compose-check` also needs the Docker CLI with the compose plugin, but no running daemon;
-`make dev-db` and `make dev` need Docker with the compose plugin and a running daemon.
+go-test-coverage, go-licenses, govulncheck, gremlins, helm, kubeconform, promtool) into `bin/tools/` on first use, built
+with the project's toolchain. `make compose-check` also needs the Docker CLI with the compose plugin, but no running
+daemon; `make dev-db` and `make dev` need Docker with the compose plugin and a running daemon.
 
 The Makefile is the only entry point:
 
@@ -44,7 +44,8 @@ The Makefile is the only entry point:
 | `make licenses` | checks dependency licences for shipped artifacts and reports tooling licences |
 | `make vulncheck` | finds vulnerable Go code and high SPA advisories |
 | `make mutation` | runs mutation testing over the core packages |
-| `make helm-check` | lints the chart, renders it with default and all-options values, validates both with kubeconform |
+| `make helm-check` | lints the chart, renders it with default and all-options values, validates both with kubeconform, and checks its alert rules and dashboard against reference.md and the metric catalogue |
+| `make rules-test` | renders the chart's alert rules and runs their unit tests in `deploy/helm/muster/tests/rules/` with promtool |
 | `make compose-check` | checks the compose example with `docker compose config` |
 | `make dev-db` | starts the development PostgreSQL on `127.0.0.1:55432` with Docker Compose |
 | `make dev` | starts the development PostgreSQL, builds the binary and runs `muster dev` |
@@ -69,14 +70,14 @@ the Admin password to their `_FILE` variables. `docker compose -f deploy/dev/doc
 development database with its data.
 
 In CI, the `ci` workflow runs the jobs `lint`, `lint-arch`, `test`, `build`, `generate` (`make generate-check`),
-`licenses`, `vulncheck`, `helm-check`, `compose-check` (`make compose-check`, then the example's PostgreSQL settings)
-and `image-scan` (a snapshot release whose images are checked and scanned with Trivy) on every pull request, with
-`make test-race` in `test`, and on every push to `master`, with `make test`. A pull request also runs the `e2e` job
-(`make e2e`) and gets the non-blocking `oasdiff` report of breaking changes to the API spec, and the `codeql` workflow
-analyses the Go and TypeScript code. The `nightly` workflow runs `mutation` (`make mutation`, its report kept as an
-artifact), `vulncheck`, `e2e-two-replicas` (`make e2e E2E_REPLICAS=2`) and `load-test`: the load test against
-`muster dev`, then against the compose example started with the build under test, with the peak memory of its Muster
-and PostgreSQL containers in the job summary.
+`licenses`, `vulncheck`, `helm-check` (`make helm-check rules-test`), `compose-check` (`make compose-check`, then the
+example's PostgreSQL settings) and `image-scan` (a snapshot release whose images are checked and scanned with Trivy) on
+every pull request, with `make test-race` in `test`, and on every push to `master`, with `make test`. A pull request
+also runs the `e2e` job (`make e2e`) and gets the non-blocking `oasdiff` report of breaking changes to the API spec, and
+the `codeql` workflow analyses the Go and TypeScript code. The `nightly` workflow runs `mutation` (`make mutation`, its
+report kept as an artifact), `vulncheck`, `e2e-two-replicas` (`make e2e E2E_REPLICAS=2`) and `load-test`: the load test
+against `muster dev`, then against the compose example started with the build under test, with the peak memory of its
+Muster and PostgreSQL containers in the job summary.
 Pushes to other branches run nothing: open a pull request, a draft one if the work is not ready, to get the checks.
 
 ## Releases

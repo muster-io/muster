@@ -2,10 +2,11 @@
 // Copyright The Muster Authors
 
 // Command runbookcheck checks that the Runbooks section of the documentation site has exactly one page per alert
-// Muster can raise (C-21.FR-3, C-19.FR-9): the names of the Internal alert registry and of the chart rules of
-// reference.md must equal the pages <pages>/<alertname>.md, and every page must have the headings "## Meaning",
-// "## Impact", "## Diagnosis" and "## Fix", each once and in that order. It prints one line per problem and exits
-// with 1; make docs runs it before the build.
+// Muster can raise (C-21.FR-3, C-19.FR-9): the names of the Internal alert registry, of the chart rules of
+// reference.md and, with -manifest, of the rules of the rendered chart must equal the pages <pages>/<alertname>.md,
+// and every page must have the headings "## Meaning", "## Impact", "## Diagnosis" and "## Fix", each once and in that
+// order. The runbook_url of a rendered rule must end in operations/runbooks/<alertname>/. It prints one line per
+// problem and exits with 1; make docs runs it before the build, on the chart rendered with the all-options values.
 package main
 
 import (
@@ -20,6 +21,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 
 	"github.com/muster-io/muster/internal/internalalerts"
 )
@@ -45,6 +48,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	pages := flags.String("pages", "docs/operations/runbooks", "the directory of the runbook pages")
 	reference := flags.String("reference", "design/prd/l1/reference.md",
 		"the PRD page whose Chart rules table lists the chart rules")
+	manifest := flags.String("manifest", "",
+		"the chart rendered with the all-options values; its rule names and runbook_url paths join the check")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -53,19 +58,99 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "runbookcheck: %v\n", err)
 		return 1
 	}
+	var urlProblems []string
+	if *manifest != "" {
+		rules, err := renderedRules(*manifest)
+		if err != nil {
+			fmt.Fprintf(stderr, "runbookcheck: %v\n", err)
+			return 1
+		}
+		urlProblems = runbookURLProblems(rules)
+		for _, r := range rules {
+			names[r.Alert] = true
+		}
+	}
 	problems, err := check(names, *pages)
 	if err != nil {
 		fmt.Fprintf(stderr, "runbookcheck: %v\n", err)
 		return 1
 	}
-	if len(problems) > 0 {
+	if problems = slices.Concat(urlProblems, problems); len(problems) > 0 {
 		for _, p := range problems {
 			fmt.Fprintln(stdout, p)
 		}
 		return 1
 	}
+	if *manifest != "" {
+		fmt.Fprintf(stdout, "runbook pages match the Internal alerts, the chart rules and the rendered chart rules: %d\n",
+			len(names))
+		return 0
+	}
 	fmt.Fprintf(stdout, "runbook pages match the Internal alerts and the chart rules: %d\n", len(names))
 	return 0
+}
+
+// renderedRule is a rule of a PrometheusRule or a VMRule of the rendered chart.
+type renderedRule struct {
+	Alert       string            `yaml:"alert"`
+	Annotations map[string]string `yaml:"annotations"`
+}
+
+// renderedRules reads the rules of every PrometheusRule and VMRule of the rendered chart in path.
+func renderedRules(path string) ([]renderedRule, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var rules []renderedRule
+	for {
+		var doc struct {
+			Kind string    `yaml:"kind"`
+			Spec yaml.Node `yaml:"spec"`
+		}
+		err := dec.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if doc.Kind != "PrometheusRule" && doc.Kind != "VMRule" {
+			continue
+		}
+		var spec struct {
+			Groups []struct {
+				Rules []renderedRule `yaml:"rules"`
+			} `yaml:"groups"`
+		}
+		if err := doc.Spec.Decode(&spec); err != nil {
+			return nil, fmt.Errorf("%s: the spec of a %s: %w", path, doc.Kind, err)
+		}
+		for _, g := range spec.Groups {
+			for _, r := range g.Rules {
+				if !ruleNameRe.MatchString(r.Alert) {
+					return nil, fmt.Errorf("%s: chart rule %q is not Muster<Name>", path, r.Alert)
+				}
+				rules = append(rules, r)
+			}
+		}
+	}
+	if len(rules) == 0 {
+		return nil, fmt.Errorf("no chart rules in %s", path)
+	}
+	return rules, nil
+}
+
+// runbookURLProblems names the rendered rules whose runbook_url does not end in the path of their page, sorted.
+func runbookURLProblems(rules []renderedRule) []string {
+	set := map[string]bool{}
+	for _, r := range rules {
+		if url := r.Annotations["runbook_url"]; !strings.HasSuffix(url, "/"+runbookDir+r.Alert+"/") {
+			set[fmt.Sprintf("chart rule %s: runbook_url %q does not end in /%s%s/", r.Alert, url, runbookDir, r.Alert)] = true
+		}
+	}
+	return sortedKeys(set)
 }
 
 // expectedNames is the union of the Internal alerts and the chart rules; an Internal alert's runbook must be a page

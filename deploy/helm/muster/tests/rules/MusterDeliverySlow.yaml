@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterDeliverySlow fires when the 95th percentile of delivery latency over 15 minutes has been above 5 seconds for
+# 15 minutes; rate needs two samples, so the condition holds from the first minute.
+# Once deliveries are fast again, the alert ends when the last slow one leaves the 15 minutes: the last slow one between
+# 19m and 20m still counts at 33m, not at 34m. Another job's deliveries, slow enough to fire with Muster's, never count.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: deliveries between 5 and 10 seconds fire after 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_delivery_latency_seconds_bucket{job="muster",instance="10.0.0.1:8082",destination="dst_1",le="5"}'
+        values: '0x30'
+      - series: 'muster_delivery_latency_seconds_bucket{job="muster",instance="10.0.0.1:8082",destination="dst_1",le="10"}'
+        values: '0+10x30'
+      - series: 'muster_delivery_latency_seconds_bucket{job="muster",instance="10.0.0.1:8082",destination="dst_1",le="+Inf"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MusterDeliverySlow
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: MusterDeliverySlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Delivery is slower than 5 seconds
+              description: >-
+                The 95th percentile of the time from receiving a Snapshot to delivering its change is above 5 seconds
+                over 15m. First find the slow Destinations by muster_delivery_latency_seconds and look for rate limits,
+                the outcome retry_after of their attempts.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliverySlow/
+  - name: deliveries that are fast again end it once the last slow one leaves the 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_delivery_latency_seconds_bucket{job="muster",instance="10.0.0.1:8082",destination="dst_1",le="5"}'
+        values: '1000x20 1010+10x19'
+      - series: 'muster_delivery_latency_seconds_bucket{job="muster",instance="10.0.0.1:8082",destination="dst_1",le="10"}'
+        values: '1000+10x40'
+      - series: 'muster_delivery_latency_seconds_bucket{job="muster",instance="10.0.0.1:8082",destination="dst_1",le="+Inf"}'
+        values: '1000+10x40'
+    alert_rule_test:
+      - eval_time: 33m
+        alertname: MusterDeliverySlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Delivery is slower than 5 seconds
+              description: >-
+                The 95th percentile of the time from receiving a Snapshot to delivering its change is above 5 seconds
+                over 15m. First find the slow Destinations by muster_delivery_latency_seconds and look for rate limits,
+                the outcome retry_after of their attempts.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliverySlow/
+      - eval_time: 34m
+        alertname: MusterDeliverySlow
+        exp_alerts: []
+  - name: deliveries within a second, and another job's slow ones, stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_delivery_latency_seconds_bucket{job="muster",instance="10.0.0.1:8082",destination="dst_1",le="1"}'
+        values: '0+10x30'
+      - series: 'muster_delivery_latency_seconds_bucket{job="muster",instance="10.0.0.1:8082",destination="dst_1",le="5"}'
+        values: '0+10x30'
+      - series: 'muster_delivery_latency_seconds_bucket{job="muster",instance="10.0.0.1:8082",destination="dst_1",le="+Inf"}'
+        values: '0+10x30'
+      - series: 'muster_delivery_latency_seconds_bucket{job="other",instance="10.0.0.9:8082",destination="dst_1",le="5"}'
+        values: '0x30'
+      - series: 'muster_delivery_latency_seconds_bucket{job="other",instance="10.0.0.9:8082",destination="dst_1",le="10"}'
+        values: '0+10x30'
+      - series: 'muster_delivery_latency_seconds_bucket{job="other",instance="10.0.0.9:8082",destination="dst_1",le="+Inf"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MusterDeliverySlow
+        exp_alerts: []

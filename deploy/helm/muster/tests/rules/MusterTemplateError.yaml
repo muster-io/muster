@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterTemplateError fires at once when a template failed within 15 minutes. Ranges leave out their start, so a
+# failure between 0m and 1m counts until 14m and no longer at 15m.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: a failing template of a Route fires at once and counts for 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_template_errors_total{job="muster",instance="10.0.0.1:8082",route="rte_1",destination="",template="root_message"}'
+        values: '0 1x20'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MusterTemplateError
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              route: rte_1
+              template: root_message
+            exp_annotations:
+              summary: Templates failed to render
+              description: >-
+                A template of the Route or the Destination in the labels failed in the last 15m; the label template
+                names its kind. First open Template errors on the System status page for the error.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterTemplateError/
+      - eval_time: 14m
+        alertname: MusterTemplateError
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              route: rte_1
+              template: root_message
+            exp_annotations:
+              summary: Templates failed to render
+              description: >-
+                A template of the Route or the Destination in the labels failed in the last 15m; the label template
+                names its kind. First open Template errors on the System status page for the error.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterTemplateError/
+      - eval_time: 15m
+        alertname: MusterTemplateError
+        exp_alerts: []
+  - name: old template errors and another job's new ones stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_template_errors_total{job="muster",instance="10.0.0.1:8082",route="",destination="dst_1",template="webhook_request"}'
+        values: '3x20'
+      - series: 'muster_template_errors_total{job="other",instance="10.0.0.9:8082",route="rte_1",destination="",template="line"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MusterTemplateError
+        exp_alerts: []

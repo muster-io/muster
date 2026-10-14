@@ -161,3 +161,108 @@ func TestRunErrors(t *testing.T) {
 		t.Errorf("pages is a file = %d, want 1", code)
 	}
 }
+
+// writeManifest writes a rendered chart whose PrometheusRule and VMRule hold the rules of the repository's
+// reference.md and extra, with the runbook_url of each name's page unless urls gives another.
+func writeManifest(t *testing.T, extra []string, urls map[string]string) string {
+	t.Helper()
+	data, err := os.ReadFile(repoReference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := readRules(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rules strings.Builder
+	for _, n := range slices.Concat(names, extra) {
+		url, ok := urls[n]
+		if !ok {
+			url = "https://docs.example.org/latest/operations/runbooks/" + n + "/"
+		}
+		rules.WriteString("      - alert: " + n + "\n        expr: vector(1)\n        annotations:\n" +
+			"          runbook_url: " + url + "\n")
+	}
+	spec := "spec:\n  groups:\n    - name: muster\n      rules:\n" + rules.String()
+	content := "---\n# Source: muster/templates/empty.yaml\n---\nkind: Deployment\nspec:\n  replicas: 2\n" +
+		"---\nkind: PrometheusRule\n" + spec + "---\nkind: VMRule\n" + spec
+	return writeFile(t, content)
+}
+
+func writeFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "chart.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestRunWithManifest(t *testing.T) {
+	tests := map[string]struct {
+		manifest func(t *testing.T) string
+		code     int
+		want     string
+	}{
+		"rendered rules match": {
+			manifest: func(t *testing.T) string { return writeManifest(t, nil, nil) },
+			want:     "runbook pages match the Internal alerts, the chart rules and the rendered chart rules: ",
+		},
+		"rendered rule without a page": {
+			manifest: func(t *testing.T) string { return writeManifest(t, []string{"MusterExtraRule"}, nil) },
+			code:     1,
+			want:     "missing runbook page: MusterExtraRule\n",
+		},
+		"runbook_url of another page": {
+			manifest: func(t *testing.T) string {
+				return writeManifest(t, nil,
+					map[string]string{"MusterNoLeader": "https://docs.example.org/latest/operations/runbooks/MusterDown/"})
+			},
+			code: 1,
+			want: `chart rule MusterNoLeader: runbook_url "https://docs.example.org/latest/operations/runbooks/MusterDown/" ` +
+				"does not end in /operations/runbooks/MusterNoLeader/\n",
+		},
+		"runbook_url before a missing page": {
+			manifest: func(t *testing.T) string {
+				return writeManifest(t, []string{"MusterExtraRule"}, map[string]string{"MusterExtraRule": ""})
+			},
+			code: 1,
+			want: `chart rule MusterExtraRule: runbook_url "" does not end in /operations/runbooks/MusterExtraRule/` +
+				"\nmissing runbook page: MusterExtraRule\n",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run([]string{"-reference", repoReference, "-pages", repoPages, "-manifest", tc.manifest(t)},
+				&stdout, &stderr)
+			if code != tc.code || !strings.HasPrefix(stdout.String(), tc.want) ||
+				(tc.code != 0 && stdout.String() != tc.want) {
+				t.Errorf("run = %d:\n%s%s\nwant %d:\n%s", code, stdout.String(), stderr.String(), tc.code, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunManifestErrors(t *testing.T) {
+	tests := map[string]struct {
+		path string
+		want string
+	}{
+		"no rules":      {writeFile(t, "kind: Deployment\nspec:\n  replicas: 1\n"), "no chart rules in "},
+		"empty groups":  {writeFile(t, "kind: VMRule\nspec:\n  groups: []\n"), "no chart rules in "},
+		"invalid YAML":  {writeFile(t, "kind: [\n"), "chart.yaml"},
+		"invalid spec":  {writeFile(t, "kind: PrometheusRule\nspec:\n  groups: 3\n"), "the spec of a PrometheusRule"},
+		"bad rule name": {writeFile(t, "kind: PrometheusRule\nspec:\n  groups:\n    - rules:\n        - alert: KubeDown\n"), "is not Muster<Name>"},
+		"missing file":  {filepath.Join(t.TempDir(), "none.yaml"), "none.yaml"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run([]string{"-reference", repoReference, "-pages", repoPages, "-manifest", tc.path}, &stdout, &stderr)
+			if code != 1 || !strings.Contains(stderr.String(), tc.want) {
+				t.Errorf("run = %d: %s%s, want an error with %q", code, stdout.String(), stderr.String(), tc.want)
+			}
+		})
+	}
+}

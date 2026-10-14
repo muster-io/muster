@@ -473,3 +473,423 @@ Creates the PodDisruptionBudget.
 integer or string · default: `1`
 
 The number or percentage of pods that may be unavailable at a time.
+
+### `alerting`
+
+object
+
+The chart's alert rules about Muster itself, for the Prometheus Operator and the VictoriaMetrics Operator; send the critical ones through an Alertmanager route that bypasses Muster.
+
+### `alerting.runbookBaseURL`
+
+string · default: `https://muster-io.github.io/muster`
+
+The documentation site the runbook_url of every rule points into: this URL, then the major.minor of the appVersion (latest for a development build), operations/runbooks/ and the name of the rule. Muster gets it too, as MUSTER_RUNBOOK_BASE_URL, for the runbook_url of its Internal alerts; set it here, not through extraEnv, so that the rules and the Internal alerts point into the same site.
+
+### `alerting.jobSelector`
+
+string · default: `""`
+
+The label matchers that select Muster's series, part of every series selector of every rule, such as job="muster"; empty selects the job named after the chart, or after nameOverride when it is set, which is the job the ServiceMonitor scrapes into.
+
+### `alerting.prometheusRule`
+
+object
+
+A Prometheus Operator PrometheusRule with the rules.
+
+### `alerting.prometheusRule.enabled`
+
+boolean · default: `false`
+
+Creates the PrometheusRule.
+
+### `alerting.prometheusRule.labels`
+
+object · default: `{}`
+
+Extra labels of the PrometheusRule, such as the one the Prometheus selects rules by.
+
+### `alerting.vmRule`
+
+object
+
+A VictoriaMetrics Operator VMRule with the same rules.
+
+### `alerting.vmRule.enabled`
+
+boolean · default: `false`
+
+Creates the VMRule.
+
+### `alerting.vmRule.labels`
+
+object · default: `{}`
+
+Extra labels of the VMRule, such as the one the VMAlert selects rules by.
+
+### `alerting.rules`
+
+object
+
+Each rule: whether it is rendered, how long its condition holds before it fires (for) and its thresholds and windows.
+
+### `alerting.rules.MusterDown`
+
+object
+
+A scrape target of Muster is down (critical).
+
+### `alerting.rules.MusterDown.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterDown.for`
+
+string · default: `2m`
+
+How long the target is down before the rule fires.
+
+### `alerting.rules.MusterNoLeader`
+
+object
+
+No replica is the Leader (critical).
+
+### `alerting.rules.MusterNoLeader.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterNoLeader.for`
+
+string · default: `2m`
+
+How long no replica leads before the rule fires.
+
+### `alerting.rules.MusterDeliveryFailing`
+
+object
+
+A Destination has queued deliveries and no successful delivery (critical).
+
+### `alerting.rules.MusterDeliveryFailing.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterDeliveryFailing.for`
+
+string · default: `5m`
+
+How long the condition holds before the rule fires.
+
+### `alerting.rules.MusterDeliveryFailing.window`
+
+string · default: `10m`
+
+How far back a successful delivery counts.
+
+### `alerting.rules.MusterDestinationBroken`
+
+object
+
+A Destination is Broken (critical).
+
+### `alerting.rules.MusterDestinationBroken.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterDestinationBroken.for`
+
+string · default: `5m`
+
+How long the Destination is Broken before the rule fires.
+
+### `alerting.rules.MusterHeartbeatLost`
+
+object
+
+An Integration is Heartbeat lost (critical).
+
+### `alerting.rules.MusterHeartbeatLost.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterHeartbeatLost.for`
+
+string · default: `1m`
+
+How long the Integration is Heartbeat lost before the rule fires.
+
+### `alerting.rules.MusterDeliverySlow`
+
+object
+
+The 95th percentile of delivery latency is above its objective (warning).
+
+### `alerting.rules.MusterDeliverySlow.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterDeliverySlow.for`
+
+string · default: `15m`
+
+How long delivery is slow before the rule fires.
+
+### `alerting.rules.MusterDeliverySlow.seconds`
+
+number · default: `5`
+
+The latency objective in seconds.
+
+### `alerting.rules.MusterDeliverySlow.window`
+
+string · default: `15m`
+
+The window of the latency percentile.
+
+### `alerting.rules.MusterDeliveryQueueGrowing`
+
+object
+
+A delivery queue is large and keeps growing (warning).
+
+### `alerting.rules.MusterDeliveryQueueGrowing.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterDeliveryQueueGrowing.for`
+
+string · default: `15m`
+
+How long the queue keeps growing before the rule fires.
+
+### `alerting.rules.MusterDeliveryQueueGrowing.size`
+
+integer · default: `100`
+
+The number of waiting deliveries above which a queue counts as large.
+
+### `alerting.rules.MusterDeliveryQueueGrowing.window`
+
+string · default: `15m`
+
+The window over which the queue's growth is measured.
+
+### `alerting.rules.MusterIngestBacklog`
+
+object
+
+Processing falls behind ingestion (warning).
+
+### `alerting.rules.MusterIngestBacklog.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterIngestBacklog.for`
+
+string · default: `5m`
+
+How long processing falls behind before the rule fires.
+
+### `alerting.rules.MusterIngestBacklog.backlog`
+
+integer · default: `1000`
+
+The number of waiting Stored Snapshots above which the rule fires.
+
+### `alerting.rules.MusterIngestBacklog.delaySeconds`
+
+number · default: `60`
+
+The 95th percentile of the processing delay, in seconds, above which the rule fires.
+
+### `alerting.rules.MusterIngestBacklog.window`
+
+string · default: `5m`
+
+The window of the processing delay percentile.
+
+### `alerting.rules.MusterIngestRejected`
+
+object
+
+Oversized or unauthorized ingestion requests arrived (warning).
+
+### `alerting.rules.MusterIngestRejected.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterIngestRejected.for`
+
+string · default: `0m`
+
+How long the condition holds before the rule fires.
+
+### `alerting.rules.MusterIngestRejected.unauthorized`
+
+integer · default: `10`
+
+The number of unauthorized requests of an Integration within the window above which the rule fires; any oversized request fires it.
+
+### `alerting.rules.MusterIngestRejected.window`
+
+string · default: `15m`
+
+The window in which rejected requests count.
+
+### `alerting.rules.MusterTemplateError`
+
+object
+
+Templates failed to render (warning).
+
+### `alerting.rules.MusterTemplateError.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterTemplateError.for`
+
+string · default: `0m`
+
+How long the condition holds before the rule fires.
+
+### `alerting.rules.MusterTemplateError.window`
+
+string · default: `15m`
+
+The window in which template errors count.
+
+### `alerting.rules.MusterClockSkew`
+
+object
+
+A replica's clock is off (warning).
+
+### `alerting.rules.MusterClockSkew.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterClockSkew.for`
+
+string · default: `5m`
+
+How long the clock is off before the rule fires.
+
+### `alerting.rules.MusterClockSkew.seconds`
+
+number · default: `2`
+
+The clock skew against the database, in seconds, above which the rule fires.
+
+### `alerting.rules.MusterLoginFailures`
+
+object
+
+A burst of failed sign-ins (warning).
+
+### `alerting.rules.MusterLoginFailures.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterLoginFailures.for`
+
+string · default: `0m`
+
+How long the condition holds before the rule fires.
+
+### `alerting.rules.MusterLoginFailures.failures`
+
+integer · default: `20`
+
+The number of failed sign-ins of one method within the window above which the rule fires.
+
+### `alerting.rules.MusterLoginFailures.window`
+
+string · default: `10m`
+
+The window in which failed sign-ins count.
+
+### `dashboard`
+
+object
+
+The "Muster" Grafana dashboard.
+
+### `dashboard.configMap`
+
+object
+
+A ConfigMap with the dashboard for the Grafana sidecar, under the key muster.json.
+
+### `dashboard.configMap.enabled`
+
+boolean · default: `false`
+
+Creates the ConfigMap.
+
+### `dashboard.configMap.labels`
+
+object · default: `{"grafana_dashboard":"1"}`
+
+Labels of the ConfigMap besides the chart's; the Grafana sidecar finds dashboards by grafana_dashboard: "1" by default.
+
+### `dashboard.configMap.annotations`
+
+object · default: `{}`
+
+Annotations of the ConfigMap, such as the sidecar's folder annotation.
+
+### `dashboard.grafanaDashboard`
+
+object
+
+A Grafana Operator GrafanaDashboard that imports the dashboard from the ConfigMap; it needs dashboard.configMap.enabled.
+
+### `dashboard.grafanaDashboard.enabled`
+
+boolean · default: `false`
+
+Creates the GrafanaDashboard; rendering fails without dashboard.configMap.enabled.
+
+### `dashboard.grafanaDashboard.instanceSelector`
+
+object · default: `{"matchLabels":{"dashboards":"grafana"}}`
+
+The label selector of the Grafana instances that import the dashboard, as in a GrafanaDashboard spec.
+
+### `dashboard.grafanaDashboard.folder`
+
+string · default: `""`
+
+The Grafana folder of the dashboard; empty leaves it to the operator.
+
+### `dashboard.grafanaDashboard.allowCrossNamespaceImport`
+
+boolean · default: `false`
+
+Lets Grafana instances in other namespaces import the dashboard.

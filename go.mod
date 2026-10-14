@@ -6,6 +6,7 @@ toolchain go1.27.2
 
 require (
 	github.com/VictoriaMetrics/metrics v1.44.1
+	github.com/VictoriaMetrics/metricsql v0.87.5
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/getkin/kin-openapi v0.149.0
 	github.com/go-jose/go-jose/v4 v4.1.5

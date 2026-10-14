@@ -1,0 +1,195 @@
+{{- /*
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright The Muster Authors
+
+The chart rules of reference.md as one group, which templates/alert-rules.yaml renders through tpl into the
+PrometheusRule and the VMRule. $j, the job selector, is part of every series selector; thresholds, windows and for
+come from alerting.rules. The annotations carry no Prometheus template, so nothing here needs escaping from tpl.
+*/ -}}
+{{- $j := include "muster.jobSelector" . }}
+{{- $runbooks := include "muster.runbookBase" . }}
+{{- $r := .Values.alerting.rules }}
+{{- $any := false }}
+{{- range $r }}{{ if .enabled }}{{ $any = true }}{{ end }}{{ end }}
+groups:
+  - name: muster
+    rules:{{ if not $any }} []{{ end }}
+{{- with $r.MusterDown }}{{ if .enabled }}
+      - alert: MusterDown
+        expr: up{ {{- $j }}} == 0
+        for: {{ .for }}
+        labels:
+          severity: critical
+        annotations:
+          summary: A Muster replica cannot be scraped
+          description: >-
+            Prometheus cannot scrape the Muster replica in the label instance. First check that its pod runs and that
+            its internal listener answers GET /health/live.
+          runbook_url: {{ $runbooks }}/MusterDown/
+{{- end }}{{ end }}
+{{- with $r.MusterNoLeader }}{{ if .enabled }}
+      - alert: MusterNoLeader
+        expr: max(muster_leader{ {{- $j }}}) == 0
+        for: {{ .for }}
+        labels:
+          severity: critical
+        annotations:
+          summary: No Muster replica is the Leader
+          description: >-
+            No replica holds the Leader lock: Telegram polling, the Heartbeat and Stale checks, partition maintenance
+            and the outgoing heartbeat have stopped, while ingestion, delivery and timers keep working. First check
+            the replicas on the System status page and the database connection of each replica.
+          runbook_url: {{ $runbooks }}/MusterNoLeader/
+{{- end }}{{ end }}
+{{- with $r.MusterDeliveryFailing }}{{ if .enabled }}
+      - alert: MusterDeliveryFailing
+        expr: >-
+          max by (destination) (muster_delivery_queue{ {{- $j }}}) > 0
+          unless on (destination)
+          sum by (destination) (increase(muster_delivery_attempts_total{ {{- $j }},outcome="delivered"}[{{ .window }}])) > 0
+        for: {{ .for }}
+        labels:
+          severity: critical
+        annotations:
+          summary: A Destination has had no successful delivery for {{ .window }}
+          description: >-
+            The Destination in the label destination has queued deliveries and no successful delivery in the last
+            {{ .window }}. First check Delivery queues and Broken Destinations on the System status page, then the
+            outcomes of its delivery attempts.
+          runbook_url: {{ $runbooks }}/MusterDeliveryFailing/
+{{- end }}{{ end }}
+{{- with $r.MusterDestinationBroken }}{{ if .enabled }}
+      - alert: MusterDestinationBroken
+        expr: max by (destination) (muster_destination_broken{ {{- $j }}}) == 1
+        for: {{ .for }}
+        labels:
+          severity: critical
+        annotations:
+          summary: A Destination is Broken
+          description: >-
+            Muster stopped sending to the Destination in the label destination after a Fatal error or when its retry
+            budget ran out, and probes it until it answers. First read the reason on the Destination page.
+          runbook_url: {{ $runbooks }}/MusterDestinationBroken/
+{{- end }}{{ end }}
+{{- with $r.MusterHeartbeatLost }}{{ if .enabled }}
+      - alert: MusterHeartbeatLost
+        expr: max by (integration) (muster_heartbeat_lost{ {{- $j }}}) == 1
+        for: {{ .for }}
+        labels:
+          severity: critical
+        annotations:
+          summary: An Integration is Heartbeat lost
+          description: >-
+            No Heartbeat arrived in time for the Integration in the label integration: the path from Prometheus
+            through Alertmanager to Muster may be interrupted. First check the time of the last signal on the
+            Integration page, then whether Alertmanager can reach Muster's ingest listener.
+          runbook_url: {{ $runbooks }}/MusterHeartbeatLost/
+{{- end }}{{ end }}
+{{- with $r.MusterDeliverySlow }}{{ if .enabled }}
+      - alert: MusterDeliverySlow
+        expr: >-
+          histogram_quantile(0.95, sum by (le) (rate(muster_delivery_latency_seconds_bucket{ {{- $j }}}[{{ .window }}])))
+          > {{ .seconds }}
+        for: {{ .for }}
+        labels:
+          severity: warning
+        annotations:
+          summary: Delivery is slower than {{ .seconds }} seconds
+          description: >-
+            The 95th percentile of the time from receiving a Snapshot to delivering its change is above
+            {{ .seconds }} seconds over {{ .window }}. First find the slow Destinations by
+            muster_delivery_latency_seconds and look for rate limits, the outcome retry_after of their attempts.
+          runbook_url: {{ $runbooks }}/MusterDeliverySlow/
+{{- end }}{{ end }}
+{{- with $r.MusterDeliveryQueueGrowing }}{{ if .enabled }}
+      - alert: MusterDeliveryQueueGrowing
+        expr: >-
+          max by (destination) (muster_delivery_queue{ {{- $j }}}) > {{ .size }}
+          and
+          max by (destination) (deriv(muster_delivery_queue{ {{- $j }}}[{{ .window }}])) > 0
+        for: {{ .for }}
+        labels:
+          severity: warning
+        annotations:
+          summary: A delivery queue keeps growing
+          description: >-
+            The Destination in the label destination has more than {{ .size }} deliveries waiting, and the number
+            keeps growing. First check Delivery queues, Storms and Broken Destinations on the System status page.
+          runbook_url: {{ $runbooks }}/MusterDeliveryQueueGrowing/
+{{- end }}{{ end }}
+{{- with $r.MusterIngestBacklog }}{{ if .enabled }}
+      - alert: MusterIngestBacklog
+        expr: >-
+          max(muster_ingest_backlog{ {{- $j }}}) > {{ .backlog }}
+          or
+          histogram_quantile(0.95, sum by (le) (rate(muster_ingest_processing_delay_seconds_bucket{ {{- $j }}}[{{ .window }}])))
+          > {{ .delaySeconds }}
+        for: {{ .for }}
+        labels:
+          severity: warning
+        annotations:
+          summary: Processing falls behind ingestion
+          description: >-
+            More than {{ .backlog }} Stored Snapshots wait, or the 95th percentile of their processing delay over
+            {{ .window }} is above {{ .delaySeconds }} seconds. First find the slow Integrations by
+            muster_ingest_processing_delay_seconds, then check the load of the database.
+          runbook_url: {{ $runbooks }}/MusterIngestBacklog/
+{{- end }}{{ end }}
+{{- with $r.MusterIngestRejected }}{{ if .enabled }}
+      - alert: MusterIngestRejected
+        expr: >-
+          sum by (integration, outcome) (increase(muster_ingest_requests_total{ {{- $j }},outcome="too_large"}[{{ .window }}])) > 0
+          or
+          sum by (integration, outcome) (increase(muster_ingest_requests_total{ {{- $j }},outcome="unauthorized"}[{{ .window }}])) > {{ .unauthorized }}
+        for: {{ .for }}
+        labels:
+          severity: warning
+        annotations:
+          summary: Muster rejected ingestion requests
+          description: >-
+            In the last {{ .window }} the Integration in the label integration received an oversized request, or
+            more than {{ .unauthorized }} requests without a valid Integration token; the label outcome says which.
+            First read the log lines ingest_rejected for the client address.
+          runbook_url: {{ $runbooks }}/MusterIngestRejected/
+{{- end }}{{ end }}
+{{- with $r.MusterTemplateError }}{{ if .enabled }}
+      - alert: MusterTemplateError
+        expr: >-
+          sum by (route, destination, template) (increase(muster_template_errors_total{ {{- $j }}}[{{ .window }}])) > 0
+        for: {{ .for }}
+        labels:
+          severity: warning
+        annotations:
+          summary: Templates failed to render
+          description: >-
+            A template of the Route or the Destination in the labels failed in the last {{ .window }}; the label
+            template names its kind. First open Template errors on the System status page for the error.
+          runbook_url: {{ $runbooks }}/MusterTemplateError/
+{{- end }}{{ end }}
+{{- with $r.MusterClockSkew }}{{ if .enabled }}
+      - alert: MusterClockSkew
+        expr: max by (instance) (abs(muster_clock_skew_seconds{ {{- $j }}})) > {{ .seconds }}
+        for: {{ .for }}
+        labels:
+          severity: warning
+        annotations:
+          summary: A Muster replica's clock is off
+          description: >-
+            The clock of the replica in the label instance differs from the database clock by more than
+            {{ .seconds }} seconds. First check the time synchronisation of its node.
+          runbook_url: {{ $runbooks }}/MusterClockSkew/
+{{- end }}{{ end }}
+{{- with $r.MusterLoginFailures }}{{ if .enabled }}
+      - alert: MusterLoginFailures
+        expr: >-
+          sum by (method) (increase(muster_login_failures_total{ {{- $j }}}[{{ .window }}])) > {{ .failures }}
+        for: {{ .for }}
+        labels:
+          severity: warning
+        annotations:
+          summary: A burst of failed sign-ins
+          description: >-
+            More than {{ .failures }} sign-ins with the method in the label method failed in the last
+            {{ .window }}. First look for the failed sign-ins and their source addresses in the Audit log.
+          runbook_url: {{ $runbooks }}/MusterLoginFailures/
+{{- end }}{{ end }}

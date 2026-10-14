@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterClockSkew fires when a replica's clock has been more than 2 seconds off the database clock, either way, for 5
+# minutes.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: a clock 3 seconds behind fires after 5 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_clock_skew_seconds{job="muster",instance="10.0.0.1:8082"}'
+        values: '-3x10'
+      - series: 'muster_clock_skew_seconds{job="muster",instance="10.0.0.2:8082"}'
+        values: '0.1x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MusterClockSkew
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: MusterClockSkew
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: 10.0.0.1:8082
+            exp_annotations:
+              summary: A Muster replica's clock is off
+              description: >-
+                The clock of the replica in the label instance differs from the database clock by more than 2 seconds.
+                First check the time synchronisation of its node.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterClockSkew/
+  - name: a skew of 2 seconds or less, and another job's skew, stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_clock_skew_seconds{job="muster",instance="10.0.0.1:8082"}'
+        values: '2x10'
+      - series: 'muster_clock_skew_seconds{job="muster",instance="10.0.0.2:8082"}'
+        values: '-1.5x10'
+      - series: 'muster_clock_skew_seconds{job="other",instance="10.0.0.9:8082"}'
+        values: '10x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MusterClockSkew
+        exp_alerts: []

@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterDeliveryFailing fires when a Destination has had queued deliveries and no delivered attempt in 10 minutes, for
+# 5 minutes. Ranges leave out their start, so after a last delivered attempt between 9m and 10m the condition holds
+# from 19m and the alert fires at 24m.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: queued deliveries without a delivered attempt fire after 5 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_delivery_queue{job="muster",instance="10.0.0.1:8082",destination="dst_1"}'
+        values: '3x20'
+      - series: 'muster_delivery_attempts_total{job="muster",instance="10.0.0.1:8082",destination="dst_1",kind="publication",outcome="transient"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MusterDeliveryFailing
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: MusterDeliveryFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              destination: dst_1
+            exp_annotations:
+              summary: A Destination has had no successful delivery for 10m
+              description: >-
+                The Destination in the label destination has queued deliveries and no successful delivery in the last
+                10m. First check Delivery queues and Broken Destinations on the System status page, then the outcomes of
+                its delivery attempts.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryFailing/
+  - name: queued deliveries fire 5 minutes after their last delivered attempt left the 10 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_delivery_queue{job="muster",instance="10.0.0.1:8082",destination="dst_1"}'
+        values: '3x40'
+      - series: 'muster_delivery_attempts_total{job="muster",instance="10.0.0.1:8082",destination="dst_1",kind="update",outcome="delivered"}'
+        values: '0+1x10 10x30'
+    alert_rule_test:
+      - eval_time: 23m
+        alertname: MusterDeliveryFailing
+        exp_alerts: []
+      - eval_time: 24m
+        alertname: MusterDeliveryFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              destination: dst_1
+            exp_annotations:
+              summary: A Destination has had no successful delivery for 10m
+              description: >-
+                The Destination in the label destination has queued deliveries and no successful delivery in the last
+                10m. First check Delivery queues and Broken Destinations on the System status page, then the outcomes of
+                its delivery attempts.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryFailing/
+  - name: queued deliveries with delivered attempts, and another job's queue, stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_delivery_queue{job="muster",instance="10.0.0.1:8082",destination="dst_1"}'
+        values: '3x20'
+      - series: 'muster_delivery_attempts_total{job="muster",instance="10.0.0.1:8082",destination="dst_1",kind="update",outcome="delivered"}'
+        values: '0+1x20'
+      - series: 'muster_delivery_queue{job="other",instance="10.0.0.9:8082",destination="dst_2"}'
+        values: '5x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MusterDeliveryFailing
+        exp_alerts: []

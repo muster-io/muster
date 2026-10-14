@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterLoginFailures fires at once when more than 20 sign-ins of one method failed within 10 minutes, counted over
+# every replica. Ranges leave out their start, so failures between 0m and 1m count until 9m and no longer at 10m.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: twenty-one failed local sign-ins over two replicas fire at once and count for 10 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_login_failures_total{job="muster",instance="10.0.0.1:8082",method="local"}'
+        values: '0 11x20'
+      - series: 'muster_login_failures_total{job="muster",instance="10.0.0.2:8082",method="local"}'
+        values: '0 10x20'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MusterLoginFailures
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              method: local
+            exp_annotations:
+              summary: A burst of failed sign-ins
+              description: >-
+                More than 20 sign-ins with the method in the label method failed in the last 10m. First look for the
+                failed sign-ins and their source addresses in the Audit log.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterLoginFailures/
+      - eval_time: 9m
+        alertname: MusterLoginFailures
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              method: local
+            exp_annotations:
+              summary: A burst of failed sign-ins
+              description: >-
+                More than 20 sign-ins with the method in the label method failed in the last 10m. First look for the
+                failed sign-ins and their source addresses in the Audit log.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterLoginFailures/
+      - eval_time: 10m
+        alertname: MusterLoginFailures
+        exp_alerts: []
+  - name: twenty failed sign-ins, and another job's burst, stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_login_failures_total{job="muster",instance="10.0.0.1:8082",method="totp"}'
+        values: '0 20 20'
+      - series: 'muster_login_failures_total{job="other",instance="10.0.0.9:8082",method="local"}'
+        values: '0 100 100'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MusterLoginFailures
+        exp_alerts: []

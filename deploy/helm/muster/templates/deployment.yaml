@@ -76,6 +76,8 @@ Copyright The Muster Authors
 - name: MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE
   value: /etc/muster/secrets/{{ .Values.bootstrapAdmin.passwordKey }}
 {{- end }}
+- name: MUSTER_RUNBOOK_BASE_URL
+  value: {{ .Values.alerting.runbookBaseURL | quote }}
 {{- with .Values.extraEnv }}
 {{- toYaml . | nindent 0 }}
 {{- end }}
