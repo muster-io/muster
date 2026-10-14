@@ -629,9 +629,9 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destinatio
 	}
 	switch in.Type {
 	case TypeWebhook:
-		return s.createWebhook(ctx, r, in)
+		return created(s.createWebhook(ctx, r, in))
 	case TypeTelegram:
-		return s.createTelegram(ctx, r, in)
+		return created(s.createTelegram(ctx, r, in))
 	}
 	checked, err := s.check(ctx, in, nil)
 	if err != nil {
@@ -667,9 +667,16 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destinatio
 		d.ID = id
 		return s.record(ctx, q, r, ActionCreated, d, audit.Created(after))
 	})
+	return created(d, err)
+}
+
+// created creates the counter series of the Destination d that was just created, at once on this replica; the
+// others create them when the hint of the creation refreshes their info.
+func created(d Destination, err error) (Destination, error) {
 	if err != nil {
 		return Destination{}, err
 	}
+	exportCounters(d.PublicID, d.Type)
 	return d, nil
 }
 

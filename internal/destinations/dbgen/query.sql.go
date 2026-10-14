@@ -291,7 +291,7 @@ func (q *Queries) InsertWebhookDestination(ctx context.Context, arg InsertWebhoo
 }
 
 const listDestinationInfo = `-- name: ListDestinationInfo :many
-SELECT public_id, name
+SELECT public_id, name, type
 FROM destinations
 WHERE org_id = $1 AND deleted_at IS NULL
 `
@@ -299,9 +299,11 @@ WHERE org_id = $1 AND deleted_at IS NULL
 type ListDestinationInfoRow struct {
 	PublicID string
 	Name     string
+	Type     string
 }
 
-// ListDestinationInfo lists the Destinations that are not deleted, for muster_destination_info.
+// ListDestinationInfo lists the Destinations that are not deleted with their type, for muster_destination_info and
+// the series of the counters that start at zero.
 func (q *Queries) ListDestinationInfo(ctx context.Context, orgID int64) ([]ListDestinationInfoRow, error) {
 	rows, err := q.db.Query(ctx, listDestinationInfo, orgID)
 	if err != nil {
@@ -311,7 +313,7 @@ func (q *Queries) ListDestinationInfo(ctx context.Context, orgID int64) ([]ListD
 	items := []ListDestinationInfoRow{}
 	for rows.Next() {
 		var i ListDestinationInfoRow
-		if err := rows.Scan(&i.PublicID, &i.Name); err != nil {
+		if err := rows.Scan(&i.PublicID, &i.Name, &i.Type); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

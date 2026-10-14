@@ -59,9 +59,10 @@ JOIN destinations d ON d.org_id = rd.org_id AND d.id = rd.destination_id
 WHERE rd.org_id = @org_id AND rd.route_id = ANY(@route_ids::bigint[]) AND d.deleted_at IS NULL
 ORDER BY d.name, d.id;
 
--- ListDestinationInfo lists the Destinations that are not deleted, for muster_destination_info.
+-- ListDestinationInfo lists the Destinations that are not deleted with their type, for muster_destination_info and
+-- the series of the counters that start at zero.
 -- name: ListDestinationInfo :many
-SELECT public_id, name
+SELECT public_id, name, type
 FROM destinations
 WHERE org_id = @org_id AND deleted_at IS NULL;
 

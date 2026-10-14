@@ -82,9 +82,10 @@ UPDATE integrations
 SET deleted_at = @now::timestamptz, updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
--- ListIntegrationInfo lists the id and the name of every Integration that is not deleted, for muster_integration_info.
+-- ListIntegrationInfo lists the id, the name and whether it is built in of every Integration that is not deleted, for
+-- muster_integration_info and the series of muster_ingest_requests_total.
 -- name: ListIntegrationInfo :many
-SELECT public_id, name
+SELECT public_id, name, builtin
 FROM integrations
 WHERE org_id = @org_id AND deleted_at IS NULL
 ORDER BY id;

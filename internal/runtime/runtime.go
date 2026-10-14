@@ -1188,10 +1188,10 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 		defer stopNoticeTicks()
 		p.notices.Run(ctx, noticeTicks)
 	})
-	// A hint about an Integration, maybe changed on another replica, refreshes muster_integration_info; so does a
-	// LISTEN that is back after a loss, which may have missed hints. A stored Snapshot wakes the processing worker,
-	// and in development mode a change of the development clock reloads it; each LISTEN in place does both, in case
-	// a notification was missed.
+	// A hint about an Integration, a Route or a Destination, maybe changed on another replica, refreshes its info
+	// metric and its counter series; so does a LISTEN that is back after a loss, which may have missed hints. A stored
+	// Snapshot wakes the processing worker, and in development mode a change of the development clock reloads it; each
+	// LISTEN in place does both, in case a notification was missed.
 	p.listener.Listen(ingest.SnapshotChannel, func(string) { p.worker.Wake() })
 	p.listener.Listen(groups.TimersChannel, func(string) { p.timers.Wake() })
 	p.listener.Listen(delivery.Channel, func(string) { p.deliverer.Wake() })
@@ -1219,6 +1219,8 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 			case routing.Hint:
 				p.router.Invalidate()
 				p.routes.InfoChanged()
+			case destinations.Hint:
+				p.destinations.InfoChanged()
 			case connections.Hint:
 				p.poller.Wake()
 			}
@@ -1229,6 +1231,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 				p.integrations.InfoChanged()
 				p.router.Invalidate()
 				p.routes.InfoChanged()
+				p.destinations.InfoChanged()
 				p.poller.Wake()
 				p.loadDevClock(ctx)
 				p.replica.Wake()
