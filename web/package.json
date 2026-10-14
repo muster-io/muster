@@ -12,7 +12,7 @@
     "fmt:check": "oxfmt --check",
     "lint:i18n": "i18next-cli extract --ci --dry-run && i18next-cli status",
     "generate": "orval --config orval.config.ts && tsr generate",
-    "lint:spec": "redocly lint ../api/openapi.yaml --config ../.redocly.yaml",
+    "lint:spec": "redocly lint ../api/openapi.yaml ../api/bridge.yaml --config ../.redocly.yaml",
     "licenses": "node scripts/check-licenses.mjs",
     "test:scripts": "node --test \"scripts/*.test.mjs\"",
     "preview": "vite preview",

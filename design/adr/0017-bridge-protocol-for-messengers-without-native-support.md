@@ -1,0 +1,219 @@
+# 0017. Bridge protocol for messengers without native support
+
+- Status: Accepted
+- Date: 2026-10-14
+
+## Context
+
+Muster speaks to two messengers natively, Mattermost and Telegram, and to anything else only through outgoing webhooks,
+which send messages but cannot carry button presses, Thread messages or Account links back. Many teams use other
+messengers: hosted chat services, self-hosted servers, and corporate messengers whose bot API is published but whose
+servers outsiders cannot run. A native adapter in Muster for each of them is not realistic: the maintainers cannot test
+against servers they cannot reach, every quirk would need a Muster release, and a team whose messenger is internal
+could only keep its adapter in a fork, which the AGPL then obliges it to publish.
+
+What Muster needs from a messenger is small and the same everywhere (ADR-0005, ADR-0013): post a Root message, edit
+it, reply in its Thread, check that a channel is usable without posting, carry signed button data, report who pressed,
+send a direct message, and answer a person. A survey of the bot APIs of eleven widely used messengers, from their
+published documentation and source code, shows how they differ in the details that matter for that contract:
+
+- Every one of them lets a bot edit its own message, but some only within a window — ten minutes by default in one,
+  a setting of the workspace in others.
+- Only a few accept an idempotency key when posting; in the rest, a retried send is a second message.
+- A Thread is the id of the parent post in some, a separate object created by a call in others, a topic or an
+  address in the rest; replying "in the Thread of message X" means different calls everywhere.
+- A press must be confirmed to the messenger within 3 to 30 seconds, or the person sees an error.
+- Several have no buttons at all, or none an external service can use.
+- A deleted message shows up as an event in most, but in some only as an error on the next edit, and the error says
+  different things: a `403` in one, a generic `400` in another, a successful read with a deletion date in a third.
+- Errors, rate limits, private answers, mentions and user lookups each have their own shape.
+
+Muster also already uses two ways to receive events from a messenger: Telegram offers long polling or a webhook, and
+installations without an address the messenger can reach choose polling.
+
+## Decision
+
+**A Bridge is a Connection type.** Muster talks to a separate service, the bridge, over the **Bridge protocol**, an
+HTTP protocol specified in [`api/bridge.yaml`](../../api/bridge.yaml) (OpenAPI 3.1); the bridge talks to its
+messenger. A Bridge Connection has the bridge's base URL, a token, an event delivery mode, a proxy and a limiter; a
+Bridge Destination names one channel by the id its messenger uses. Muster ships no messenger-specific code for bridged
+messengers: everything a messenger does differently is the bridge's job, and the protocol says only what Muster needs.
+Mattermost and Telegram stay native.
+
+**Versioning.** Every path is under `/v1/`. `GET /v1/info` returns `protocol_version` (`"1"`), the bridge's name and
+version, the messenger's name, the optional features the bridge offers and its limits. Additive changes — a new
+optional field or feature — keep version `1`; a change that breaks existing bridges is a new major path. Muster refuses
+a Connection whose bridge speaks no version it knows, and re-reads `info` on every Connection check and when its copy
+is older than a few minutes.
+
+**What every bridge implements**: `info`; posting a message to a channel; editing it; replying in its Thread; checking a
+channel without posting (whether the bot can post and edit there); answering the person behind an event; and inbound
+events in at least one of the two delivery modes below, Account link requests at least. **What a bridge may offer**,
+declared in `info`: buttons (with their count limits, the `data_max_bytes` they carry — at least 64 — and the style
+hints its messenger can show); forwarding people's Thread messages to Muster (all of them, or only those that mention
+the bot); direct messages from the bot, and whether the bot may start a direct chat; private answers (ephemeral messages
+or pop-ups); native mentions; Quiet messages; a status colour; deleting its own messages, unused by L1; and
+`message_deleted` events. `info` also declares `max_body_length`, `edit_max_age_seconds` (`null` when edits never
+expire), the kind of handle it looks people up by (`email`, `login`, `username`, `user_id` or `none`), the event
+delivery modes it offers, an optional deep-link template for Account links, and optional rate hints.
+
+**Content.** Muster sends a JSON envelope and lets the bridge render it in its messenger's markup: the kind of message,
+the status with its colour and emoji, the title (`#N` and the Alert Group's title), the link to the Alert Group page,
+a body in CommonMark, the buttons, the Mentions and whether the message is Loud. The body holds what C-12.FR-1 puts
+between the heading and the buttons — the environment, labels, summary, Alerts, links, notices and footer — rendered
+from the Route's templates in CommonMark, with alert data escaped for CommonMark (output safety stays Muster's, as in
+ADR-0005). Muster shortens the body below `max_body_length`, counted in code points; the bridge makes the final cut
+safely for its markup and says when it did.
+
+**Buttons.** Each button has a label, a style hint — `primary`, `danger`, `neutral` or `success`, which a bridge maps to
+the closest style its messenger has or ignores — and opaque data of at most 64 ASCII bytes: the action id, the key id
+and the signature with the button-signature key (ADR-0011). The bridge returns the data unchanged with the press, and
+Muster verifies it and checks that it belongs to the pressed message, as for Mattermost and Telegram.
+
+**Mentions** name linked people only, as `{external_id, display_name}` in the envelope, each placed in the body by a
+marker that reads as the plain name where the bridge cannot mention natively. Mentions never appear in an edit
+(ADR-0005).
+
+**Idempotency.** Every request that creates a message carries an `Idempotency-Key`; the bridge stores the key with its
+successful result and answers a repeated key with that result, marked as replayed, without posting again — whatever
+the repeated request carries — and passes the key to its messenger where the messenger has a mechanism of its own. A
+failed request stores nothing, and a repeated key whose first request is still running is `transient`. A retry of a
+Publication reuses its key, so a Publication that was cut off by a crash or a timeout is not posted twice; because the
+retry may carry a newer Desired state than the lost request, a replayed Publication is followed by an edit to the
+current state. Muster still records a possible duplicate (ADR-0005) when a retry after a started Publication gets an
+answer that is not a replay: the bridge lost the key, and a second Root message may exist.
+
+**Threads.** "Reply in the Thread of message X" is one operation. The bridge creates the Thread if its messenger needs
+that and returns an opaque `thread_ref`; Muster stores it with the Root message and sends it with every later reply, so
+a bridge needs no store of its own to map posts to Threads.
+
+**Inbound events, two modes chosen per Connection**, among those the bridge offers: **poll** — the Leader calls
+`GET /v1/events` with the last cursor and a wait, handles the batch, then stores the next cursor; **push** — the bridge
+posts each event to Muster's callback at `MUSTER_INGEST_URL`, signed as Standard Webhooks do (`webhook-id`,
+`webhook-timestamp`, `webhook-signature`, HMAC-SHA256 with the Connection's push secret). Every event has a stable id;
+Muster handles each id once and acknowledges only what it handled, so delivery is at least once in both modes. The
+event types are a press, a Thread message, an Account link request and a deleted message. Each Connection has a token
+of its own, and a bridge that serves several Connections keeps their events apart by token; Muster ignores, without
+answering, an event about a message it did not post through that Connection.
+
+**Trust.** Muster authenticates to the bridge with the Connection's token as a bearer token; the bridge authenticates
+pushed events with the signature above; button data is signed by Muster. The token and the push secret are Secrets,
+encrypted under the Keyring and write-only in the API (ADR-0011), and are never logged.
+
+**Errors** are RFC 9457 problems with a `class` the bridge chooses, because only the bridge knows its messenger's codes:
+`transient` (Muster backs off), `rate_limited` with `Retry-After` (Muster waits exactly that long, for the channel or,
+when the problem says so, for the whole bot), `gone` (the message no longer exists: the deleted Root message flow of
+ADR-0005), `forbidden` (the channel is missing, the bot was removed or lacks a right: the Destination becomes Broken)
+and `invalid` (the request cannot succeed as sent: Not delivered). A missing channel is `forbidden`, never `gone`, so
+that Muster does not republish into a chat that no longer exists. A `Retry-After` longer than a bounded maximum, or a
+`429` without one, counts as `transient`, so a bridge that asks for a day's pause makes the Destination Broken instead
+of stalling it unseen. A problem without a class is classified by its status as ADR-0005 classifies outgoing webhook
+answers.
+
+**Presses.** The bridge confirms a press to its messenger itself, within 3 seconds, before Muster sees it, and then
+reports the press as an event. Muster dispatches the Command with the Transport `bridge` and, when the person must read
+something — a refusal, a failure, "not linked" — answers through a separate call naming the event. The bridge shows
+the answer to that person privately when its messenger allows it, otherwise in the Thread or the direct chat the event
+came from. Answers go through the interactive path and never touch a Root message (ADR-0005).
+
+**Text commands.** Where a bridge forwards Thread messages, a reply in a Thread whose whole text is a command — `ack`,
+`unack`, `resolve`, `snooze 4h`, `unsnooze`, `still on it`, or a Russian synonym — is a Command for that Alert Group by
+the writer's Account link, through the same dispatcher, answered "Done: …" or with the refusal in the Thread. Any other
+text is ignored, and so are Text commands and presses older than a bounded age, such as those a bridge kept while Muster
+was down. Without buttons, the Root message keeps its link to Muster and names the commands. Text commands exist only
+for Bridges: Mattermost and Telegram have buttons.
+
+**Account links** follow ADR-0013 — started only in the signed-in web session, the secret travelling from that session
+to the messenger account — with the Identity space of one Bridge Connection. Every bridge supports the token: the
+profile shows a single-use token, and a link built from the bridge's deep-link template when it has one; the person
+sends the token to the bot, and the bridge reports it as an Account link request with the sender's id and name. A
+bridge that can start direct messages and look people up by a handle also offers the code: the person enters their
+handle, labelled by the kind the bridge declares; Muster looks it up through the bridge and sends a code by direct
+message, which the person types into the profile. The link keeps the account's external id and display name, which
+Mentions need.
+
+**Edit windows.** Past `edit_max_age_seconds`, less a safety margin, Muster no longer edits a Root message. When its
+status changes after that, Muster publishes a new Root message Quietly, replies in the old Thread that the current
+message is elsewhere, with a link to it, and continues the Thread under the new message. Other changes — Alerts,
+counters — do not republish: they reach the Thread as the Loud/Quiet table says, and the old Root message shows the
+last status until the next change of status. The old Root message keeps working: a press on its buttons and a Text
+command in its Thread act on the Alert Group as before. An edit refused as `gone` with the reason
+`edit_window_closed` — a window shorter than the bridge declared — is handled the same way.
+
+**Placement in Muster.** Muster's delivery adapter for Bridges implements the delivery adapter interface, so posts,
+edits and Thread replies through a bridge are made only by the delivery worker and the interactive path; answers and
+direct messages are interactive calls; lint 3 (ADR-0016) names them with the other messenger calls. All requests go
+through the outbound package (ADR-0015) — the delivery class for deliveries and the Broken probe, the interactive class
+for checks started by a person, answers and messages during linking, the background class for polling — under the
+outbound address policy and the Connection's proxy, with the token sent only to the saved base URL. Polling a bridge
+joins the closed list of Leader tasks (ADR-0007): it is safe to run twice, because an event polled twice is handled once
+by its id.
+
+**Licensing.** The repository ships an example bridge — a small chat server in Go with its own web page that offers
+every feature of the protocol — and the protocol specification, `api/bridge.yaml`. **Both are licensed MIT**, as an
+exception to the AGPL-3.0-only of ADR-0001, so that anyone may start a bridge from them, or generate code from the
+specification, and keep it closed: a bridge for an internal messenger often cannot be published. `api/bridge.yaml`
+states its licence in `info.license`, and `NOTICE` names both MIT parts. The example lives in its own directory with its
+own `LICENSE` and its own Go module, is listed in the exclusion list of `NOTICE` so that the licence header check
+accepts its MIT headers, and is never imported by the Muster binary, the image or the chart. A bridge talks to Muster
+only over HTTP, so it is a separate program whatever its licence. Contributions to these files fall under the CLA like
+any other.
+
+**Settled with the maintainer** (journal D322): the specification is MIT like the example; one `answerEvent` call
+answers presses, Text commands and Account link requests; the Russian Text command words and `unsnooze` are those of
+`bridge.text_commands`; the Bridge limiters default to 10 requests per second per Connection and 30 per minute per
+Destination, or half of the rates the bridge declares; an edit refused because the window closed earlier than declared
+is `gone` with the `reason` `edit_window_closed`, not a class of its own; and a requested wait longer than
+`bridge.retry_after_max` counts as a temporary failure.
+
+**Delivered with the protocol**: the specification, a fake bridge among the fake servers of `muster dev`, the example
+bridge, a conformance check `muster bridge check <url>` that runs the protocol against a bridge without a Muster
+database, and a "Write a bridge" page on the documentation site.
+
+## Consequences
+
+- A team can reach any messenger with a bot API by writing one small service, in any language, without forking Muster
+  and without publishing it.
+- Muster's core stays free of messenger quirks: only `gone`, `forbidden` and the features in `info` reach it.
+- Bridge authors carry real work: idempotency keys, confirming presses in time, safe truncation, and deciding `gone`.
+  The conformance check and the example bridge exist to make that work checkable.
+- A bridge is one more service to run and monitor; when it is down, its Destinations become Broken like any messenger.
+- Where a messenger limits edits, a long-lived Alert Group may get several Root messages, one per change of status
+  after the window, each linked from the Thread before it.
+- Messengers without buttons are usable through text commands and the link to Muster, at the cost of typing.
+- Two more Secrets per Bridge Connection — the token and, for push, the push secret — that the Admin also configures in
+  the bridge.
+- The protocol is a public contract from its first release; breaking it means a new major path, so its first version
+  has to be right in the parts every bridge implements.
+- Polling adds one more Leader task, paused like Telegram polling while no replica leads.
+
+## Alternatives considered
+
+- **A native adapter per messenger, in the repository or in a fork.** Each needs a Muster release, a test server the
+  maintainers can reach and long-term care; an internal messenger's adapter could only live in a fork, which the AGPL
+  requires to be published.
+- **In-process plugins** (Go plugins, WebAssembly modules, or a child process speaking gRPC). Go plugins must be built
+  with the exact toolchain and dependencies of the binary; WebAssembly sandboxes make network access and messenger SDKs
+  awkward; a child process ties the bridge to Muster's lifecycle and replicas. All of them blur the licence boundary
+  that HTTP keeps clear, and none works across languages as simply as HTTP.
+- **Outgoing webhooks only.** Already available for one-way delivery, but presses, Thread messages and Account links
+  cannot come back, error classes are guessed from HTTP codes, and every installation writes messenger markup in Go
+  templates.
+- **A persistent connection (WebSocket or gRPC streaming) for events.** Needs reconnection, heartbeats and replica
+  handover logic on both sides; polling and signed pushes cover both network directions with plain HTTP.
+- **Only push, or only polling.** Push needs an address of Muster that the bridge can reach; polling adds a Leader loop
+  and some latency. Offering both, as Telegram does, lets each installation choose.
+- **Muster renders the messenger's markup**, with templates per bridge. Moves messenger knowledge back into Muster and
+  into every Route; CommonMark is the common ground every bridge can translate.
+- **Muster classifies errors by HTTP status.** Messengers answer a deleted message with `403`, `400` or `200`; only the
+  bridge can tell. A missing channel treated as `gone` would republish forever.
+- **When an edit window closes, stop editing and post changes only in the Thread**, or report it as a new error class.
+  The Root message would keep an outdated status for good; republishing on a change of status keeps the part people act
+  on current while bounding the number of new messages.
+- **Answers to presses as Thread replies sent by Muster.** Thread replies belong to delivery and its Desired state
+  (ADR-0005); one interactive answer call that the bridge places privately or in the Thread keeps that rule.
+- **Linking by matching email addresses.** Rejected in ADR-0013 for the same reasons; the handle lookup only finds the
+  account that receives the code.
+- **Text commands for every messenger.** Mattermost and Telegram have buttons; commands are kept where they are needed.
+- **The protocol and the example under the AGPL.** A company could then hesitate to derive a closed bridge from them;
+  MIT removes the question for the parts a bridge author copies.

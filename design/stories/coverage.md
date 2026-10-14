@@ -14,7 +14,7 @@ part; this page joins them.
 - **Note** names, for an acceptance statement that cannot be checked when its capability merges, the later story that
   verifies it — the one in which its dependency appears — and why ([L1 conventions](../prd/L1.md#2-conventions)).
 
-Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C-05](#c-05) · [C-06](#c-06) · [C-07](#c-07) · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) · [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) · [NFR](#non-functional-requirements)
+Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C-05](#c-05) · [C-06](#c-06) · [C-07](#c-07) · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) · [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) · [C-22](#c-22) · [NFR](#non-functional-requirements)
 
 ## Summary
 
@@ -41,6 +41,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-19 Self-observation | Operations | 15 | S-053, S-054, S-059 | yes | 15 of 15 |
 | C-20 Organization settings and security | Operations | 12 | S-055, S-071, S-056, S-072 | yes | 12 of 12 |
 | C-21 Documentation site and runbooks | Operations | 9 | S-057, S-058, S-060 | yes | 9 of 9 |
+| C-22 Bridge | Bridge | 48 | S-073, S-074, S-075, S-076, S-077, S-078, S-079 | yes | 48 of 48 |
 
 ## C-01
 
@@ -60,7 +61,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-01.FR-10 | S-003 | complete |  |
 | C-01.FR-11 | S-002 (part), S-003 (part) | complete |  |
 | C-01.FR-12 | S-001 (part), S-005 (part), S-006 | complete |  |
-| C-01.FR-13 | S-004 (part), S-006 (part), S-009 (part), S-013 (part), S-018 (part), S-020 (part), S-023 (part), S-037 (part), S-039 (part), S-041 (part), S-042 (part), S-066 (part), S-067 (part), S-044 (part), S-045 (part), S-047 (part), S-069 (part) | complete | later capabilities extend their fake servers and the demo configuration; re-verified with several Connections of one messenger in S-069 (D305) |
+| C-01.FR-13 | S-004 (part), S-006 (part), S-009 (part), S-013 (part), S-018 (part), S-020 (part), S-023 (part), S-037 (part), S-039 (part), S-041 (part), S-042 (part), S-066 (part), S-067 (part), S-044 (part), S-045 (part), S-047 (part), S-069 (part), S-073 (part) | complete | later capabilities extend their fake servers and the demo configuration; the fake bridge in S-073; re-verified with several Connections of one messenger in S-069 (D305) |
 | C-01.FR-14 | S-001, S-058 (part) | complete | the README demo animation is added after the frontend stories, with S-058 |
 | C-01.FR-15 | S-003 (part), S-004 (part) | complete |  |
 | C-01.AC-1 | S-001 (part), S-002 (part) | complete |  |
@@ -723,6 +724,61 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-21.AC-2 | S-060 | complete |  |
 | C-21.AC-3 | S-058 | complete |  |
 
+## C-22
+
+[Bridge](../prd/l1/C-22-bridge.md) · Bridge · stories: S-073, S-074, S-075, S-076, S-077, S-078, S-079
+
+| ID | Covered by | Status | Note |
+|---|---|---|---|
+| C-22.FR-1 | S-073 (part), S-077 (part) | complete |  |
+| C-22.FR-2 | S-073 (part), S-077 (part) | complete |  |
+| C-22.FR-3 | S-073 (part), S-074 (part), S-077 (part) | complete |  |
+| C-22.FR-4 | S-074 | complete |  |
+| C-22.FR-5 | S-074 | complete |  |
+| C-22.FR-6 | S-074 | complete |  |
+| C-22.FR-7 | S-074 | complete |  |
+| C-22.FR-8 | S-073 (part), S-074 (part) | complete |  |
+| C-22.FR-9 | S-074 (part), S-077 (part) | complete |  |
+| C-22.FR-10 | S-075 | complete |  |
+| C-22.FR-11 | S-075 | complete |  |
+| C-22.FR-12 | S-075 | complete |  |
+| C-22.FR-13 | S-075 (part), S-076 (part) | complete |  |
+| C-22.FR-14 | S-075 | complete |  |
+| C-22.FR-15 | S-076 (part), S-077 (part) | complete |  |
+| C-22.FR-16 | S-076 | complete |  |
+| C-22.FR-17 | S-074 (part), S-075 (part) | complete |  |
+| C-22.FR-18 | S-077 | complete |  |
+| C-22.FR-19 | S-074 | complete |  |
+| C-22.FR-20 | S-073 (part), S-079 (part) | complete |  |
+| C-22.FR-21 | S-078 | complete |  |
+| C-22.FR-22 | S-078 | complete | the deployment on the test environment is the maintainer's (S-078) |
+| C-22.FR-23 | S-074 (part), S-076 (part), S-079 (part) | complete |  |
+| C-22.FR-24 | S-073 (part), S-074 (part), S-075 (part) | complete |  |
+| C-22.AC-1 | S-073 | complete |  |
+| C-22.AC-2 | S-073 | complete |  |
+| C-22.AC-3 | S-073 (part), S-075 (part) | complete |  |
+| C-22.AC-4 | S-074 | complete |  |
+| C-22.AC-5 | S-074 | complete |  |
+| C-22.AC-6 | S-074 | complete |  |
+| C-22.AC-7 | S-074 | complete |  |
+| C-22.AC-8 | S-074 | complete |  |
+| C-22.AC-9 | S-074 | complete |  |
+| C-22.AC-10 | S-074 | complete |  |
+| C-22.AC-11 | S-074 | complete |  |
+| C-22.AC-12 | S-074 (part), S-075 (part) | complete |  |
+| C-22.AC-13 | S-075 | complete |  |
+| C-22.AC-14 | S-075 | complete |  |
+| C-22.AC-15 | S-075 | complete |  |
+| C-22.AC-16 | S-075 | complete |  |
+| C-22.AC-17 | S-075 | complete |  |
+| C-22.AC-18 | S-076 (part), S-077 (part) | complete |  |
+| C-22.AC-19 | S-076 | complete |  |
+| C-22.AC-20 | S-073 (part), S-076 (part) | complete |  |
+| C-22.AC-21 | S-077 | complete |  |
+| C-22.AC-22 | S-078 | complete |  |
+| C-22.AC-23 | S-078 | complete |  |
+| C-22.AC-24 | S-079 | complete |  |
+
 ## Non-functional requirements
 
 The [non-functional requirements](../prd/L1.md#3-non-functional-requirements) have no FR or AC IDs; each is owned by
@@ -735,13 +791,13 @@ the stories that implement and check its parts. A story that proves an NFR says 
 | NFR-3 Footprint | S-003, S-004 | the compose example with PostgreSQL's memory capped (S-003); the nightly measurement of the peak working sets (S-004) |
 | NFR-4 Availability | S-004, S-006, S-008, S-018, S-020, S-028, S-034, S-035 | the nightly two-replica end-to-end run with `muster dev --replica` (S-004); readiness on the database only (S-006); the Leader replaced within a minute and the recovery notice (S-008); `202` only after the Snapshot is stored (S-018); ingestion, timers and delivery on every replica (S-020, S-028, S-034); Broken Destinations that recover to the current state (S-035) |
 | NFR-5 Durability and backup | S-008, S-060 | `muster doctor` with the key canary check (S-008); the backup and restore page with the restore order (S-060) |
-| NFR-6 Security | S-001, S-002, S-003, S-007, S-009, S-010, S-012, S-013, S-062, S-016, S-018, S-036, S-041, S-044, S-055, S-071 | the secret-leak lint (S-001); dependency scanning (S-002); signed images and the SBOM (S-003); AES-256-GCM under the Keyring (S-007) and its rotation (S-071); the outbound address policy, no redirects, per-client proxies (S-009), and a policy change effective at once, idle connections included (S-055); secure cookies, CSRF, the Content Security Policy, argon2id and sign-in throttling (S-010); TOTP (S-012); write-only secret fields and OIDC refusing users without a mapped group (S-013); OIDC re-checks at the IdP (S-062); hashed tokens (S-016, S-018); escaping, neutralized Mentions and signed buttons (S-036); the Telegram token sent only to the saved Bot API address (S-041); outgoing webhook Secrets (S-044) |
+| NFR-6 Security | S-001, S-002, S-003, S-007, S-009, S-010, S-012, S-013, S-062, S-016, S-018, S-036, S-041, S-044, S-055, S-071, S-073, S-075 | the secret-leak lint (S-001); dependency scanning (S-002); signed images and the SBOM (S-003); AES-256-GCM under the Keyring (S-007) and its rotation (S-071); the outbound address policy, no redirects, per-client proxies (S-009), and a policy change effective at once, idle connections included (S-055); secure cookies, CSRF, the Content Security Policy, argon2id and sign-in throttling (S-010); TOTP (S-012); write-only secret fields and OIDC refusing users without a mapped group (S-013); OIDC re-checks at the IdP (S-062); hashed tokens (S-016, S-018); escaping, neutralized Mentions and signed buttons (S-036); the Telegram token sent only to the saved Bot API address (S-041); outgoing webhook Secrets (S-044); a bridge token sent only to the saved bridge address (S-073); signed pushed bridge events (S-075) |
 | NFR-7 Privacy | S-005, S-011 | metric labels without alert labels, users or Alert Group numbers (S-005); pseudonymized deletion (S-011); no telemetry and no email are properties of the whole design, kept by review |
 | NFR-8 Internationalization | S-014, S-036, S-057 | the UI in English and Russian with plural forms and a lint for missing keys (S-014); built-in message texts in both languages, chosen per Route (S-036); the documentation in English (S-057) |
 | NFR-9 Time | S-008, S-010, S-014, S-036, S-060 | the clock skew check (S-008); UTC in the API (S-010); the user's time zone in the UI (S-014); absolute times in the Organization's time zone in messages (S-036); NTP on the nodes in the high-availability page (S-060) |
 | NFR-10 Retention | S-008, S-029, S-055 | partitions dropped by retention (S-008); batched deletes of summary rows and details (S-029, with the other owners of unpartitioned tables); editing the periods (S-055) |
 | NFR-11 Upgrades | S-003, S-006, S-060 | semantic versions through release-please (S-003); expand/contract migrations and the refusal of a newer schema (S-006); the upgrade page (S-060) |
-| NFR-12 Compatibility | S-003, S-006, S-020, S-039, S-041 | binaries for linux and darwin on amd64 and arm64, the chart with Ingress and Gateway API routes (S-003); PostgreSQL 14 or newer and the session-capable pooler check (S-006); `notification_reason` with the fallback to identical Snapshots (S-020); Mattermost REST API v4 with a bot account (S-039); the Bot API at a configurable base URL (S-041) |
+| NFR-12 Compatibility | S-003, S-006, S-020, S-039, S-041, S-073 | binaries for linux and darwin on amd64 and arm64, the chart with Ingress and Gateway API routes (S-003); PostgreSQL 14 or newer and the session-capable pooler check (S-006); `notification_reason` with the fallback to identical Snapshots (S-020); Mattermost REST API v4 with a bot account (S-039); the Bot API at a configurable base URL (S-041); any other messenger through version 1 of the Bridge protocol (S-073) |
 | NFR-13 API | S-002, S-010 | spec-first generation (S-002); cursor pagination, RFC 9457 errors with pointers, optimistic locking, UTC and `public_id` in URLs (S-010) |
 | NFR-14 Quality | S-001, S-002, S-004, S-014 | the coverage gate (S-001); the nightly mutation report (S-002); end-to-end tests with fake servers (S-004) and a real browser (S-014); evidence for every acceptance statement in each pull request (section 7 of the [README](README.md#7-lifecycle)) |
 | NFR-15 Phone width | S-030 | the Alert Group list and page at 360 CSS pixels, checked end to end at that width |

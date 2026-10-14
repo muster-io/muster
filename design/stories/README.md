@@ -10,7 +10,7 @@ CLI commands — which files it touches, how its acceptance is checked and what 
 code: the implementation writes the code in the repository against compiler and test feedback, and the contract is what
 the review checks the code against.
 
-Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-21`. Every functional requirement
+Stories implement the [L1 capabilities](../prd/L1.md#13-capability-map) `C-01`…`C-22`. Every functional requirement
 (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of a capability is covered by its stories; the
 [coverage table](coverage.md) shows which story covers which ID. Terms follow [`CONTEXT.md`](../../CONTEXT.md); the
 reasons behind technical choices are in the [ADRs](../adr/README.md).
@@ -86,24 +86,26 @@ and ADR-0009 (the SPA in `web/`); the foundation stories create it.
 |---|---|
 | `cmd/muster/` | The single binary: the server and its CLI subcommands. |
 | `cmd/muster-archlint/` | The architecture lints, built only with the `lint` build tag. |
-| `internal/<domain>/` | One package per domain: `users`, `auth`, `totp`, `oidc`, `tokens`, `audit`, `organization`, `integrations`, `ingest`, `heartbeat`, `matchers`, `routing`, `groups`, `timers`, `delivery`, `destinations`, `connections`, `mattermost`, `telegram`, `webhooks`, `messages`, `templates`, `links`, `mentions`, `buttons`, `accountlinks`, `internalalerts`, `outgoingheartbeat`, `systemstatus`. |
+| `internal/<domain>/` | One package per domain: `users`, `auth`, `totp`, `oidc`, `tokens`, `audit`, `organization`, `integrations`, `ingest`, `heartbeat`, `matchers`, `routing`, `groups`, `timers`, `delivery`, `destinations`, `connections`, `mattermost`, `telegram`, `bridge`, `webhooks`, `messages`, `templates`, `links`, `mentions`, `buttons`, `accountlinks`, `internalalerts`, `outgoingheartbeat`, `systemstatus`. |
 | `internal/<domain>/query.sql` | The domain's hand-written SQL queries, read by `sqlc`. |
 | `internal/api/` | Hand-written API handlers, one file per OpenAPI tag, and the API middleware; each handler calls its domain package. |
 | `internal/{logging,metrics,outbound,proxyconf,db,keyring,publicid,leader,partitions,server,live,runtime,config,clock,cli,buildinfo,doctor,devmode}/` | Shared infrastructure: the domain logger and log event registry, the metric registry, the outbound HTTP package and the proxy settings, database access, the Keyring, `public_id`, the Leader and partition maintenance, the listeners, the live-update hub, process wiring, bootstrap settings, the clock, the CLI, build information, `muster doctor` and the development mode. |
 | `internal/archlint/` | The rules and fixtures of the architecture lints that `cmd/muster-archlint` runs. |
 | `internal/db/migrations/` | Migrations in golang-migrate format, embedded in the binary; the schema `sqlc` reads. |
-| `internal/fakes/<name>/` | Fake servers of external systems (Alertmanager, Mattermost, Telegram, OIDC, proxies) for tests and `muster dev`. |
+| `internal/fakes/<name>/` | Fake servers of external systems (Alertmanager, Mattermost, Telegram, a bridge, OIDC, proxies) for tests and `muster dev`. |
 | `internal/tools/` | Generators run by `make generate`; never part of the binary. |
-| `api/` | `openapi.yaml`, its generator configuration and the package that embeds the spec for `/api/v1/openapi.yaml`. |
+| `api/` | `openapi.yaml`, its generator configuration and the package that embeds the spec for `/api/v1/openapi.yaml`; `bridge.yaml`, the Bridge protocol (MIT, ADR-0017). |
+| `examples/bridge/` | The example bridge: its own Go module under MIT, never part of the binary (S-078). |
 | `web/` | The SPA: `src/routes/` (file-based routes), `src/components/`, `src/locales/`, `e2e/` (Playwright). |
 | `deploy/helm/muster/`, `deploy/compose/`, `deploy/dev/` | The Helm chart, the docker-compose example and the development database. |
 | `docs/` | The documentation site; `docs/reference/` holds generated reference pages. |
 | `test/e2e/`, `test/load/`, `test/docs/` | The end-to-end harness, the load test and the check of the documented quick start. |
 
 **Generated files are never listed** and are checked in: `internal/*/dbgen/` (sqlc), `internal/api/gen/` (the
-oapi-codegen strict server), `pkg/apiclient/` (the Go client), `web/src/api/gen/` (the orval client),
-`web/src/routeTree.gen.ts` (the route tree), the reference pages under `docs/reference/`, and lock files (`go.sum`,
-`web/pnpm-lock.yaml`). CI fails when any of them is not current.
+oapi-codegen strict server), `internal/bridge/gen/` (the models of the Bridge protocol, from S-073), `pkg/apiclient/`
+(the Go client), `web/src/api/gen/` (the orval client), `web/src/routeTree.gen.ts` (the route tree), the reference
+pages under `docs/reference/`, and lock files (`go.sum`, `web/pnpm-lock.yaml`). CI fails when any of them is not
+current.
 
 ## 3. Sizing and slicing
 
@@ -121,8 +123,8 @@ oapi-codegen strict server), `pkg/apiclient/` (the Go client), `web/src/api/gen/
   the frontend story. A statement that needs a later capability is covered in part by the earlier story and completed by
   the later one; the coverage table names both.
 - **Phase order.** Stories are implemented in the order of the rollout stages: foundation (C-01 – C-04), observation
-  (C-05 – C-10), shadow (C-11 – C-16), actions (C-17, C-18) and operations (C-19 – C-21). The architecture lints of
-  ADR-0016 exist from the first story that contains code.
+  (C-05 – C-10), shadow (C-11 – C-16), actions (C-17, C-18) and operations (C-19 – C-21), then the Bridge (C-22) and the
+  last documentation story, S-060. The architecture lints of ADR-0016 exist from the first story that contains code.
 
 ## 4. Shared contracts
 
@@ -235,8 +237,9 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Observation | C-05 – C-10 | S-018 – S-033, S-063 | 17 |
 | Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 – S-067 | 20 |
 | Actions | C-17, C-18 | S-049 – S-052, S-068 – S-070 | 7 |
-| Operations | C-19 – C-21 | S-053 – S-060, S-071, S-072 | 10 |
-| **L1** | 21 | | **72** |
+| Operations | C-19 – C-21 | S-053 – S-059, S-071, S-072 | 9 |
+| Bridge | C-22, and S-060 of C-21 | S-073 – S-079, S-060 | 8 |
+| **L1** | 22 | | **79** |
 
 ### Foundation
 
@@ -333,7 +336,19 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-057](S-057-documentation-site-build-and-generated-references.md) | C-21 | Documentation site, its build and the generated references | docs | S-053, S-051 |
 | [S-058](S-058-runbooks-telegram-in-restricted-networks-and-the-readme-demo.md) | C-21 | Runbooks, Telegram in restricted networks and the README demo | docs | S-056, S-057, S-054 |
 | [S-059](S-059-chart-alert-rules-with-rule-unit-tests-and-the-grafana-dashboard.md) | C-19 | Chart alert rules with rule unit tests and the Grafana dashboard | infra | S-053, S-058 |
-| [S-060](S-060-quick-start-install-concepts-operations-and-remaining-documentation.md) | C-21 | Remaining documentation sections: Quick start, Install, Alertmanager, Sign-in, Concepts and Operations | docs | S-055, S-071, S-059, S-054 |
+
+### Bridge
+
+| ID | Capability | Title | Kind | Depends on |
+|---|---|---|---|---|
+| [S-073](S-073-bridge-connections-destinations-protocol-client-and-fake-bridge.md) | C-22 | Bridge Connections and Destinations, the protocol client, the Destination check and the fake bridge (BE) | be | S-069, S-071, S-059 |
+| [S-074](S-074-bridge-adapter-envelopes-idempotent-publications-threads-and-edit-windows.md) | C-22 | Bridge adapter: envelopes in CommonMark, idempotent Publications, Thread replies, error classes and edit windows (BE) | be | S-073 |
+| [S-075](S-075-bridge-events-by-polling-and-push-presses-answers-and-text-commands.md) | C-22 | Bridge events by polling and push: presses, answers, Text commands and deleted messages (BE) | be | S-074 |
+| [S-076](S-076-bridge-account-links-by-token-and-code-and-mentions.md) | C-22 | Bridge Account links by a token sent to the bot or a code by direct message, and Mentions of linked people (BE) | be | S-075 |
+| [S-077](S-077-bridge-connection-and-destination-pages-and-profile-links.md) | C-22 | Bridge Connection and Destination pages, Account links through a Bridge in the profile, and labels (FE) | fe | S-076, S-070 |
+| [S-078](S-078-example-bridge-and-the-bridge-conformance-check.md) | C-22 | Example bridge under MIT and the conformance check `muster bridge check` (BE) | be | S-076 |
+| [S-079](S-079-write-a-bridge-and-the-bridge-protocol-reference.md) | C-22 | "Write a bridge" and the Bridge protocol reference on the documentation site | docs | S-078 |
+| [S-060](S-060-quick-start-install-concepts-operations-and-remaining-documentation.md) | C-21 | Remaining documentation sections: Quick start, Install, Alertmanager, Sign-in, Concepts and Operations | docs | S-055, S-071, S-059, S-054, S-077, S-079 |
 
 S-059 and S-060 were split from S-053 and S-058 when their contracts were written; S-053 and S-058 keep their IDs. The
 chart rules follow the runbook pages, so that the check of rendered rules against the pages can run as soon as the
@@ -375,7 +390,11 @@ and S-056, whose Keyring page needs it, and S-060 follow it. S-055 keeps its fil
 (D314): it cuts the main navigation to eight entries — "Access" takes Users, Service accounts and OIDC as a
 sub-navigation like that of Organization, the Audit log moves under Organization and Profile stays in the user menu
 only. It belongs to C-03, whose application shell it changes, but follows S-056 in the Operations phase, because it
-extends S-056's sub-navigation.
+extends S-056's sub-navigation. S-073 to S-079 were added with C-22 after S-059 (D317, D319, D321): a Bridge
+Connection reaches any messenger through a separate service that speaks the Bridge protocol of ADR-0017. They come
+after the Operations phase because they build on the Account links, Reminder buttons, labels and key rotation of the
+earlier phases and on the documentation site, and S-060 moves after them, so that its Quick start and Concepts name
+Bridges; S-060 keeps its file name and its capability, C-21.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

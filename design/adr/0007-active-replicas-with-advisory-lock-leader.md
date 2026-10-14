@@ -6,6 +6,8 @@
 - Amended: 2026-10-05 — pruning short-lived rows and the records of gone replicas are Leader tasks
 - Amended: 2026-10-13 — re-signing the buttons of open Root messages after a master key rotation
   (`rerender_after_rotation`) is a Leader task: the rotation CLI has no renderer (ADR-0011)
+- Amended: 2026-10-14 — polling the events of Bridge Connections in the poll mode (`bridge_polling`) is a Leader task
+  (ADR-0017); it is safe to run twice, because an event polled twice is handled once by its id
 
 ## Context
 
@@ -14,6 +16,8 @@ that claim rows with `SKIP LOCKED` (ADR-0006) — ingestion, delivery and timers
 Snooze ends, Grace periods). A few tasks must run exactly once across all replicas:
 
 - Telegram `getUpdates` long polling — Telegram answers `409 Conflict` when two clients poll the same bot token;
+- polling the events of Bridge Connections in the poll mode (ADR-0017), so that one cursor per Connection is kept in
+  one place;
 - periodic checks over all Integrations and Alerts: Heartbeat lost and Stale Alerts;
 - creating and dropping partitions, and pruning short-lived rows (ended sessions, expired requests and links) and the
   records of gone replicas;
@@ -41,10 +45,11 @@ claimed like any other row, with `SKIP LOCKED` and a lease, so a timer fires on 
 replica delays nothing beyond its lease.
 
 **One Leader** holds a **session advisory lock with a constant key** on a dedicated connection and runs only the tasks
-listed in the Context: Telegram polling, the Heartbeat lost and Stale checks, partition maintenance, database gauges,
-the "alive" mark, the outgoing heartbeat, the OIDC secret expiry check and the re-render after a key rotation (later
-also polling Alertmanager in the `pull` Connection mode). This list is closed: new singleton work is added to it by a
-reviewed change. Because only the Leader sends the outgoing heartbeat, it also stops when no replica leads.
+listed in the Context: Telegram polling, Bridge polling, the Heartbeat lost and Stale checks, partition maintenance,
+database gauges, the "alive" mark, the outgoing heartbeat, the OIDC secret expiry check and the re-render after a key
+rotation (later also polling Alertmanager in the `pull` Connection mode). This list is closed: new singleton work is
+added to it by a reviewed change. Because only the Leader sends the outgoing heartbeat, it also stops when no replica
+leads.
 
 **A bounded lease on leadership.** The Leader proves it still holds the lock by pinging over the lock's own session at a
 fixed interval. The lock session sets `idle_session_timeout` (which is why PostgreSQL 14 is the oldest supported

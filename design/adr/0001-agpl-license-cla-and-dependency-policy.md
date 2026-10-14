@@ -5,6 +5,9 @@
 - Amended: 2026-10-05 — the base layer of the container image (the distroless static image: Debian data packages such
   as `base-files`, `netbase`, `tzdata` and `ca-certificates`) is aggregated with Muster, not linked into it, and is outside
   the list below; its packages and licenses appear in the image SBOM
+- Amended: 2026-10-14 — the Bridge protocol specification (`api/bridge.yaml`) and the example bridge are licensed MIT,
+  so that bridges derived from them may stay closed; the example is its own Go module, never part of the shipped
+  artifacts, and is listed in `NOTICE` ([ADR-0017](0017-bridge-protocol-for-messengers-without-native-support.md))
 
 ## Context
 

@@ -155,9 +155,14 @@ A request from a person or automation to change an Alert Group, such as Acknowle
 _Avoid_: Operation
 
 **Transport**:
-The way a Command reaches Muster: the web UI, the API, Mattermost or Telegram, or Muster itself (`system`) for
-transitions it starts on its own.
+The way a Command reaches Muster: the web UI, the API, Mattermost, Telegram or a Bridge, or Muster itself (`system`)
+for transitions it starts on its own.
 _Avoid_: Channel
+
+**Text command**:
+A Command written as a reply in a Thread, such as `ack` or `snooze 4h`, for messengers whose bridge has no buttons.
+Only Bridge Destinations take them.
+_Avoid_: Slash command, Chat command
 
 ### Handling an Alert Group
 
@@ -240,8 +245,19 @@ _Avoid_: Twin, Duplicate
 ### Delivery
 
 **Connection**:
-The credentials Muster uses to talk to one messenger: a bot on a Mattermost server or a Telegram bot.
+The credentials Muster uses to talk to one messenger: a bot on a Mattermost server, a Telegram bot, or a Bridge.
 _Avoid_: Notification integration, Provider, Bot (on its own)
+
+**Bridge**:
+A Connection through which Muster reaches a messenger it has no native support for: Muster talks to a separate
+service, the bridge, over the Bridge protocol, and the bridge talks to the messenger. Anyone can write a bridge for
+their messenger.
+_Avoid_: Plugin, Adapter, Custom messenger, Integration
+
+**Bridge protocol**:
+The HTTP protocol between Muster and a bridge, specified in `api/bridge.yaml`: what a bridge offers, how Muster posts,
+edits and replies through it, and how it reports presses, Thread messages and Account link requests back.
+_Avoid_: Bridge API, Plugin API
 
 **Destination**:
 A place where Alert Groups are delivered: a messenger channel reached through a Connection, or an outgoing webhook.
@@ -341,8 +357,8 @@ The tie between a User and their account in a messenger.
 _Avoid_: Binding, Pairing, Connection
 
 **Identity space**:
-The scope in which one messenger account means one person for Account links: all of Telegram, or one Mattermost
-Connection.
+The scope in which one messenger account means one person for Account links: all of Telegram, one Mattermost
+Connection, or one Bridge.
 
 **Secret**:
 A setting Muster stores encrypted and never shows again once saved, such as a bot token or an outgoing webhook header.

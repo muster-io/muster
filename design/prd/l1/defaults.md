@@ -157,6 +157,17 @@ Other lifecycle values:
 | `telegram.press_edit_delay` | 500 ms: an edit of a Telegram Root message that comes due while an update of its Connection is being handled, such as a press not answered yet, is tried again this much later instead of waiting for it, so that the answer still goes first (C-14.FR-5); the wait is not an attempt, records no error and takes no limiter token | built in | C-14 | P-51 |
 | `telegram.parallel_updates` | 2 Telegram updates handled at the same time per replica, over all its Connections and both update modes; each holds a connection of the main pool for its update lock while its handler takes one more at a time, so at most 4 of the default 10 (`pool_max_conns` of `MUSTER_DATABASE_URL`), next to the half that `processing.parallel_groups` may take | built in | C-14 | P-52 |
 | `destination.webhook.limiter` | 5 requests/s | Destination | C-15 | decided |
+| `connection.bridge.limiter` | 10 requests/s, or half of `limits.send_per_second` when the bridge's `info` has it; the bridge's `rate_limited` answers stay the truth | Connection | C-22 | decided |
+| `destination.bridge.limiter` | 30 requests/min, sends and edits together, or half of `limits.send_per_second_per_channel` when the bridge's `info` has it | Destination | C-22 | decided |
+| `connection.bridge.event_delivery` | `poll`: the Leader long-polls the bridge, which needs no address of Muster; `push` when the bridge can reach `MUSTER_INGEST_URL` | Connection | C-22 | decided |
+| `bridge.info_max_age` | 10 min: a call that depends on the bridge's `info` reads it again first when Muster's copy is older | built in | C-22 | decided |
+| `bridge.poll_wait` | 25 s: the `wait` of each `pollEvents` call; a failed poll backs off from 1 s up to 1 min | built in | C-22 | decided |
+| `bridge.push_tolerance` | 5 min between a pushed event's `webhook-timestamp` and Muster's real clock, as Standard Webhooks recommends | built in | C-22 | decided |
+| `bridge.event_dedup_window` | 24 h: an event id of a Connection is handled once within it, as long as a bridge keeps events and idempotency keys | built in | C-22 | decided |
+| `bridge.event_max_age` | 1 h after the event's `occurred_at`, by the real clock: an older press or Text command is dropped, unanswered, and logged | built in | C-22 | decided |
+| `bridge.retry_after_max` | 15 min: a `rate_limited` answer asking for a longer wait, or a `429` without `Retry-After`, counts as Transient, so a long pause ends in Broken instead of an unseen stall | built in | C-22 | decided |
+| `bridge.edit_window_margin` | 60 s: a Root message is treated as past the bridge's edit window this long before `edit_max_age_seconds` | built in | C-22 | decided |
+| `bridge.text_commands` | `ack`, `unack`, `resolve`, `snooze <duration>`, `unsnooze`, `still on it`, and in Russian `взял`, `отпускаю`, `решено`, `отложить <duration>`, `вернуть`, `ещё работаю` (also with `е`); every word works whatever the Route's language | built in | C-22 | decided |
 
 ## Account links
 
@@ -165,6 +176,9 @@ Other lifecycle values:
 | `account_link.telegram_token_ttl` | single use, 10 min | built in | C-18 | decided |
 | `account_link.mattermost_code` | 8 characters without look-alikes, valid 10 min, at most 5 attempts | built in | C-18 | decided |
 | `account_link.mattermost_code_requests` | 5 per hour per requesting User; 3 per hour per target account | built in | C-18 | decided |
+| `account_link.bridge_token_ttl` | single use, 10 min, like `account_link.telegram_token_ttl` | built in | C-22 | decided |
+| `account_link.bridge_code` | 8 characters without look-alikes, valid 10 min, at most 5 attempts, like `account_link.mattermost_code` | built in | C-22 | decided |
+| `account_link.bridge_code_requests` | 5 per hour per requesting User; 3 per hour per target account, like `account_link.mattermost_code_requests` | built in | C-22 | decided |
 | `account_link.request_prune_after` | 24 h after a link request's `expires_at`, consumed and voided requests included, so that the hour `account_link.mattermost_code_requests` counts is kept and a late `/start` still answers that the link expired; then the Leader deletes the row (`short_lived_pruning`, hourly) | built in | C-18 | decided |
 
 ## Organization
