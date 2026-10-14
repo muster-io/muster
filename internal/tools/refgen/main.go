@@ -229,7 +229,8 @@ func internalAlertsMarkdown(defs []*internalalerts.Definition) string {
 		if list == "" {
 			list = "—"
 		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s | %s | `%s` | %s |\n", d.Name, d.Severity, list, d.Capability, d.Runbook(),
+		runbook := "[`" + d.Runbook() + "`](../" + strings.TrimSuffix(d.Runbook(), "/") + ".md)"
+		fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s | %s |\n", d.Name, d.Severity, list, d.Capability, runbook,
 			cell(d.Condition))
 	}
 	return b.String()

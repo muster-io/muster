@@ -26,6 +26,7 @@
     "vite.config.ts",
     "vitest.config.ts",
     "playwright.config.ts",
+    "playwright.demo.config.ts",
     "orval.config.ts",
     "i18next.config.ts"
   ]

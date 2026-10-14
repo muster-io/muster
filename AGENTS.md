@@ -182,9 +182,10 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 | `make dev-db`, `make dev` | the development PostgreSQL; PostgreSQL, build and `muster dev` | S-004 |
 | `make e2e` | the end-to-end suites, Go and then Playwright (`web/e2e`); `E2E_REPLICAS=2` runs the Go suite with two replicas | S-004, S-014 |
 | `make load-test` | the load test against `muster dev` | S-004 |
+| `make demo` | record the README demo (`web/e2e/demo.spec.ts`) on `muster dev` and convert it with ffmpeg into `docs/assets/demo.gif`; run by hand, never in CI | S-058 |
 | `make test-integration` | integration tests on PostgreSQL 14 and 17 | S-006 |
 | `make docs`, `make docs-serve` | generate, render the API reference and build the documentation site strictly into `site/` with the pinned toolchain in `bin/docs-venv/`; the same, served on `localhost:8000` | S-057 |
-| `make docs-check` | `generate-check`, then `docs`: fail on a stale generated page and on a broken link or anchor | S-057 |
+| `make docs-check` | `generate-check`, then `docs`: fail on a stale generated page, on runbook pages that do not match the Internal alerts and the chart rules, and on a broken link or anchor | S-057, S-058 |
 
 ### Development mode
 

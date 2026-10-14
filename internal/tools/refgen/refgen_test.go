@@ -41,8 +41,9 @@ func TestRunWritesPages(t *testing.T) {
 			"| `muster_build_info` | `version` | info: "},
 		internalAlertsPage: {"DO NOT EDIT",
 			"| `MusterSnapshotTruncated` | warning | `integration`, `integration_name` | C-06 | " +
-				"`operations/runbooks/MusterSnapshotTruncated/` | ",
-			"| `MusterOIDCSecretExpiring` | warning | — | C-19 | `operations/runbooks/MusterOIDCSecretExpiring/` | ",
+				"[`operations/runbooks/MusterSnapshotTruncated/`](../operations/runbooks/MusterSnapshotTruncated.md) | ",
+			"| `MusterOIDCSecretExpiring` | warning | — | C-19 | " +
+				"[`operations/runbooks/MusterOIDCSecretExpiring/`](../operations/runbooks/MusterOIDCSecretExpiring.md) | ",
 			"(`latest` for a development build)"},
 	}
 	for name, wants := range tests {

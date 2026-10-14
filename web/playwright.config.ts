@@ -3,12 +3,13 @@
 
 // The Playwright end-to-end specs against `muster dev` (make e2e), which e2e/global-setup.ts starts on a fresh
 // database. The specs share the server and its fixed ports, so they run one at a time. Output goes under bin/, which
-// git ignores.
+// git ignores. The README demo (e2e/demo.spec.ts) is left out: make demo records it with playwright.demo.config.ts.
 
 import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "e2e",
+  testIgnore: "demo.spec.ts",
   globalSetup: "./e2e/global-setup.ts",
   outputDir: "../bin/e2e-web",
   fullyParallel: false,

@@ -13,6 +13,8 @@ editable message in Mattermost, in Telegram or through an outgoing webhook. Peop
 Alert Group from the chat or the web UI, and Muster keeps its message current, sends a Loud update only when someone
 has to react and records everything in a Timeline and an Audit log.
 
+<p align="center"><img src="docs/assets/demo.gif" alt="An Alert Group arrives in the Muster web UI, is acknowledged from its page and resolves" width="960"></p>
+
 Muster is an open alternative to Grafana IRM for teams that run Prometheus-style monitoring and want their alerting
 path to keep working inside their own network. One binary and one PostgreSQL database are a complete installation.
 

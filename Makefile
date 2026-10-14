@@ -105,7 +105,7 @@ LOAD_TEST_FLAGS ?=
 
 .PHONY: help fmt lint lint-arch test test-race test-web test-integration generate generate-check build licenses \
 	vulncheck mutation helm-check compose-check dev-db dev e2e load-test ci clean web-browsers docs docs-serve \
-	docs-check docs-api
+	docs-check docs-api demo
 
 help: ## List the targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z0-9-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -325,6 +325,25 @@ e2e: dev-db build web-browsers ## Run the end-to-end suites (Go, then Playwright
 load-test: ## Run the load test against a running muster dev
 	$(GO) run ./test/load $(LOAD_TEST_FLAGS)
 
+# The README demo: web/e2e/demo.spec.ts alone on a muster dev of its own (the global setup of make e2e), recorded by
+# Playwright as a 1280 x 720 video under bin/demo, then converted by ffmpeg into docs/assets/demo.gif, at most 30 seconds
+# and 3 MB, with a palette of its own. It is run by hand when the UI changes and the GIF is checked in; never in CI.
+DEMO_DIR := $(BIN)/demo
+DEMO_GIF := docs/assets/demo.gif
+DEMO_FILTER := fps=8,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle
+
+demo: dev-db build web-browsers ## Record the README demo into docs/assets/demo.gif (needs ffmpeg); run by hand, never in CI
+	@command -v ffmpeg >/dev/null || { echo "make demo needs ffmpeg"; exit 1; }
+	rm -rf $(DEMO_DIR)
+	MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) $(PNPM) --dir web exec playwright test --config playwright.demo.config.ts
+	@video=$$(find $(DEMO_DIR) -name '*.webm' | head -n 1); \
+	test -n "$$video" || { echo "no video under $(DEMO_DIR)"; exit 1; }; \
+	mkdir -p $(dir $(DEMO_GIF)); \
+	ffmpeg -loglevel error -y -t 30 -i "$$video" -vf "$(DEMO_FILTER)" -loop 0 $(DEMO_GIF); \
+	size=$$(wc -c <$(DEMO_GIF)); \
+	test $$size -le 3145728 || { echo "$(DEMO_GIF) is $$size bytes, more than 3 MB"; exit 1; }; \
+	echo "$(DEMO_GIF): $$size bytes"
+
 # The API reference, rendered by the Redocly CLI that make lint runs; .redocly.yaml keeps its telemetry off, the
 # environment its update check quiet, and --disableGoogleFont the page from loading fonts from Google (NFR-7).
 docs-api: $(WEB_DEPS)
@@ -332,10 +351,13 @@ docs-api: $(WEB_DEPS)
 	REDOCLY_SUPPRESS_UPDATE_NOTICE=true $(PNPM) --dir web exec redocly build-docs ../api/openapi.yaml \
 		--config ../.redocly.yaml --disableGoogleFont --output ../$(API_REFERENCE)
 
-# Zensical checks the links to pages and their anchors, but not those to other files and not the navigation, so after
-# the build the rendered API reference is checked, then that every page the nav of mkdocs.yml names exists under docs/
-# and that every page under docs/, except those exclude_docs names, is in the nav.
+# Before the build, runbookcheck fails when the runbook pages under docs/operations/runbooks/ differ from the Internal
+# alerts and the chart rules of reference.md, or a page lacks one of its four sections; its command is not echoed, so
+# that its own lines come first. Zensical checks the links to pages and their anchors, but not those to other files
+# and not the navigation, so after the build the rendered API reference is checked, then that every page the nav of
+# mkdocs.yml names exists under docs/ and that every page under docs/, except those exclude_docs names, is in the nav.
 docs: generate docs-api $(DOCS_DEPS) ## Generate, render the API reference and build the site strictly into site/
+	@$(GO) run ./internal/tools/runbookcheck
 	$(ZENSICAL) build --strict --config-file mkdocs.yml
 	@test -s site/$(API_REFERENCE:docs/%=%) || \
 		{ echo "site/$(API_REFERENCE:docs/%=%) is missing: the API page links to it"; exit 1; }
@@ -355,7 +377,7 @@ docs-serve: generate docs-api $(DOCS_DEPS) ## Build the site and serve it on loc
 	$(ZENSICAL) serve --config-file mkdocs.yml
 
 # generate-check runs first and on its own, so that the generate step of docs cannot hide a stale page.
-docs-check: ## Fail on stale generated files, then build the site strictly (broken links and anchors fail)
+docs-check: ## Fail on stale generated files, check the runbook pages, then build the site strictly (broken links and anchors fail)
 	$(MAKE) --no-print-directory generate-check
 	$(MAKE) --no-print-directory docs
 
