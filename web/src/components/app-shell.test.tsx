@@ -104,13 +104,14 @@ describe("navigation", () => {
   async function renderNavigation(
     permissions: Permission[],
     shownEntries: readonly NavEntry[] = entries,
+    path = "/",
   ) {
     const rootRoute = createRootRoute({
       component: () => <Navigation entries={shownEntries} permissions={permissions} />,
     });
     const router = createRouter({
       routeTree: rootRoute,
-      history: createMemoryHistory({ initialEntries: ["/"] }),
+      history: createMemoryHistory({ initialEntries: [path] }),
     });
     return render(withProviders(new QueryClient(), <RouterProvider router={router} />));
   }
@@ -167,57 +168,75 @@ describe("navigation", () => {
       .not.toBeInTheDocument();
   });
 
-  test("Outgoing heartbeat, Lookup tables and Link rules follow Security under Organization, each with its Permission", async () => {
-    const index = NAVIGATION.findIndex((e) => e.to === "/admin/organization/security");
-    expect(NAVIGATION.slice(index + 1, index + 4)).toEqual([
-      {
-        to: "/admin/organization/outgoing-heartbeat",
-        label: "outgoingHeartbeat",
-        permission: "organization:write",
-      },
-      {
-        to: "/admin/organization/lookup-tables",
-        label: "lookupTables",
-        permission: "lookup-tables:read",
-      },
-      { to: "/admin/organization/link-rules", label: "linkRules", permission: "link-rules:read" },
-    ]);
-
-    const shown = await renderNavigation(
-      ["organization:write", "lookup-tables:read", "link-rules:read"],
-      NAVIGATION,
+  test("Organization follows OIDC in place of its pages, and Audit log comes last", () => {
+    const index = NAVIGATION.findIndex((e) => e.to === "/admin/organization");
+    expect(NAVIGATION[index - 1]?.to).toBe("/admin/oidc");
+    expect(NAVIGATION.at(-1)).toEqual({
+      to: "/admin/audit-log",
+      label: "auditLog",
+      permission: "audit-log:read",
+    });
+    expect(NAVIGATION).toHaveLength(12);
+    const moved = [
+      "/admin/organization/security",
+      "/admin/organization/outgoing-heartbeat",
+      "/admin/organization/lookup-tables",
+      "/admin/organization/link-rules",
+      "/admin/system-status",
+    ];
+    expect(NAVIGATION.filter((e) => moved.includes(e.to))).toEqual([]);
+    expect(new Set(NAVIGATION[index]?.permission)).toEqual(
+      new Set([
+        "organization:write",
+        "organization:read",
+        "lookup-tables:read",
+        "link-rules:read",
+        "system-status:read",
+      ]),
     );
-    await expect.element(shown.getByRole("link", { name: "Outgoing heartbeat" })).toBeVisible();
-    await expect.element(shown.getByRole("link", { name: "Lookup tables" })).toBeVisible();
-    await expect.element(shown.getByRole("link", { name: "Link rules" })).toBeVisible();
-    await shown.unmount();
-
-    const without = await renderNavigation(["link-rules:read"], NAVIGATION);
-    await expect
-      .element(without.getByRole("link", { name: "Outgoing heartbeat" }))
-      .not.toBeInTheDocument();
-    await expect
-      .element(without.getByRole("link", { name: "Lookup tables" }))
-      .not.toBeInTheDocument();
-    await expect.element(without.getByRole("link", { name: "Link rules" })).toBeVisible();
   });
 
-  test("System status comes last and needs system-status:read", async () => {
-    expect(NAVIGATION.at(-1)).toEqual({
-      to: "/admin/system-status",
-      label: "systemStatus",
-      permission: "system-status:read",
-    });
+  test("an entry with several Permissions shows when the session holds any of them", async () => {
+    const organization: NavEntry = {
+      to: "/admin/organization",
+      label: "organization",
+      permission: ["organization:write", "link-rules:read"],
+    };
+    expect(visibleEntries([organization], ["link-rules:read"])).toEqual([organization]);
+    expect(visibleEntries([organization], ["organization:write"])).toEqual([organization]);
+    expect(visibleEntries([organization], [])).toEqual([]);
 
-    const shown = await renderNavigation(["system-status:read"], NAVIGATION);
-    await expect.element(shown.getByRole("link", { name: "System status" })).toBeVisible();
+    const shown = await renderNavigation(["link-rules:read"], NAVIGATION);
+    await expect.element(shown.getByRole("link", { name: "Organization" })).toBeVisible();
     await shown.unmount();
 
-    const without = await renderNavigation(["audit-log:read"], NAVIGATION);
-    await expect.element(without.getByRole("link", { name: "Audit log" })).toBeVisible();
+    const without = await renderNavigation(["alert-groups:read"], NAVIGATION);
     await expect
-      .element(without.getByRole("link", { name: "System status" }))
+      .element(without.getByRole("link", { name: "Organization" }))
       .not.toBeInTheDocument();
+  });
+
+  test("Organization is active on every page of its sub-navigation, System status included", async () => {
+    const all: Permission[] = ["organization:write", "system-status:read", "audit-log:read"];
+    const status = await renderNavigation(all, NAVIGATION, "/admin/system-status");
+    await expect
+      .element(status.getByRole("link", { name: "Organization" }))
+      .toHaveAttribute("aria-current", "page");
+    await expect
+      .element(status.getByRole("link", { name: "Audit log" }))
+      .not.toHaveAttribute("aria-current");
+    await status.unmount();
+
+    const keyring = await renderNavigation(all, NAVIGATION, "/admin/organization/keyring");
+    await expect
+      .element(keyring.getByRole("link", { name: "Organization" }))
+      .toHaveAttribute("data-status", "active");
+    await keyring.unmount();
+
+    const audit = await renderNavigation(all, NAVIGATION, "/admin/audit-log");
+    await expect
+      .element(audit.getByRole("link", { name: "Organization" }))
+      .not.toHaveAttribute("aria-current");
   });
 
   test("Statistics follows Alert Groups and needs alert-groups:read", async () => {

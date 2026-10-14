@@ -308,9 +308,23 @@ export function useSession(): Session | null {
   return data?.session ?? null;
 }
 
+/** The segments of a JSON pointer (RFC 6901), decoded: "/allowed/2" is ["allowed", "2"]. */
+function pointerSegments(pointer: string): string[] {
+  if (pointer === "") {
+    return [];
+  }
+  return pointer
+    .replace(/^\//, "")
+    .split("/")
+    .map((s) => s.replaceAll("~1", "/").replaceAll("~0", "~"));
+}
+
 /**
- * Puts the field errors of a 400 or 422 Problem on the fields of a form; pointer "/new_password" names the field
- * new_password. Returns the codes that matched no field, for the form to show as a whole.
+ * Puts the field errors of a 400 or 422 Problem on the fields of a form. The whole pointer names the field, its
+ * segments joined with dots: "/retention/alert_group_summaries_days" is retention.alert_group_summaries_days and
+ * "/allowed/2" is allowed.2. A pointer below a listed field, such as "/permissions/2" when only permissions is listed,
+ * goes to the longest listed field it lies under. Returns the codes that matched no field, for the form to show as a
+ * whole.
  */
 export function applyFieldErrors<T extends FieldValues>(
   err: ApiError,
@@ -320,8 +334,15 @@ export function applyFieldErrors<T extends FieldValues>(
 ): string[] {
   const unmatched: string[] = [];
   for (const item of err.errors ?? []) {
-    const pointer = item.pointer.replace(/^\//, "").split("/")[0];
-    const name = fields.find((f) => f === pointer);
+    const path = pointerSegments(item.pointer).join(".");
+    let name = fields.find((f) => f === path);
+    if (name === undefined) {
+      for (const f of fields) {
+        if (path.startsWith(`${f}.`) && (name === undefined || f.length > name.length)) {
+          name = f;
+        }
+      }
+    }
     if (name !== undefined) {
       setError(name, { type: item.code, message: message(item.code) });
     } else {
@@ -390,6 +411,12 @@ export function fieldErrorText(t: TFunction, code: string): string {
       return t("fieldErrors.mismatch");
     case "unsupported":
       return t("fieldErrors.unsupported");
+    case "duplicate":
+      return t("fieldErrors.duplicate");
+    case "out_of_range":
+      return t("fieldErrors.outOfRange");
+    case "retention_order":
+      return t("fieldErrors.retentionOrder");
     default:
       return t("fieldErrors.invalid");
   }

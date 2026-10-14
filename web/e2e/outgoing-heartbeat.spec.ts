@@ -101,6 +101,13 @@ function nav(page: Page, name: string) {
   return page.getByRole("navigation", { name: "Main" }).getByRole("link", { name, exact: true });
 }
 
+/** An entry of the sub-navigation of Organization. */
+function sub(page: Page, name: string) {
+  return page
+    .getByRole("navigation", { name: "Organization" })
+    .getByRole("link", { name, exact: true });
+}
+
 function urlStatus(page: Page) {
   return page.getByTestId("secret-outgoing-heartbeat-url-status");
 }
@@ -121,7 +128,8 @@ test("sets the outgoing heartbeat URL from the suggestion and shows its result",
   await signInAdmin(page);
 
   // 4. The suggestion → Organization → Outgoing heartbeat → "Set a value" → the URL → "Save" → "Set, changed {time}".
-  await nav(page, "System status").click();
+  await nav(page, "Organization").click();
+  await sub(page, "System status").click();
   await page.getByRole("link", { name: SUGGESTION }).click();
   await expect(page).toHaveURL(/\/admin\/organization\/outgoing-heartbeat$/);
   await expect(page.getByRole("heading", { name: "Outgoing heartbeat", level: 1 })).toBeVisible();
@@ -152,7 +160,7 @@ test("sets the outgoing heartbeat URL from the suggestion and shows its result",
     },
   );
   await expect.poll(received).toContain("/hook/dev/ping");
-  await nav(page, "System status").click();
+  await sub(page, "System status").click();
   const sent = page.getByTestId("system-status-heartbeat");
   await expect
     .poll(async () => {
@@ -167,7 +175,7 @@ test("sets the outgoing heartbeat URL from the suggestion and shows its result",
   await shot(page, "system-status-heartbeat-ok");
 
   // A change made elsewhere while the form is being edited shows the conflict message until "Reload".
-  await nav(page, "Outgoing heartbeat").click();
+  await sub(page, "Outgoing heartbeat").click();
   await expect(urlStatus(page)).toHaveText(/^Set, changed /);
   await page.getByRole("button", { name: "Replace", exact: true }).click();
   await page.getByLabel("Heartbeat URL").fill(`${PING}?unsaved`);

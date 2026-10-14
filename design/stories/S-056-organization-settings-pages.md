@@ -28,6 +28,7 @@ files_touched:
   - web/src/components/network-list-editor.tsx
   - web/src/components/network-list-editor.test.tsx
   - web/src/components/keyring-status.tsx
+  - web/src/components/keyring-status.test.tsx
   - web/src/components/app-shell.tsx
   - web/src/components/app-shell.test.tsx
   - web/src/lib/api.ts
@@ -35,6 +36,7 @@ files_touched:
   - web/src/lib/live.ts
   - web/src/locales/en.json
   - web/src/locales/ru.json
+  - web/e2e/global-setup.ts
   - web/e2e/organization-settings.spec.ts
   - web/e2e/phone-width.spec.ts
   - web/e2e/link-rules.spec.ts
@@ -194,6 +196,13 @@ None.
 - Pages that need `organization:read` only (Outbound addresses, Keyring) are read-only for a role without
   `organization:write`; in L1 only Admins hold either Permission.
 - S-054 has landed; this story moves its two entries into the sub-navigation along with those of S-015 and S-038.
+- Added to `files_touched` while implementing: `web/e2e/global-setup.ts` starts the end-to-end server with
+  `MUSTER_SECRET_KEYS` set to the development key followed by a new key (the development key first, so it is active on
+  the fresh database) and passes it to the specs as `MUSTER_E2E_SECRET_KEYS`, for the `rotate-key` of step 5; and
+  `web/src/components/keyring-status.test.tsx`. On the shared end-to-end server an older key becomes removable only
+  once no open Alert Group of an earlier spec still depends on it, so `organization-settings.spec.ts` asserts after the
+  activation that the old key is "Still needed" or removable, and the component test covers every state, the
+  removable sentence included; the rotation leaves both keys held, so later specs are unaffected.
 - About 35 files, most of them small: if the moved specs and the new pages grow past 40, the sub-navigation with the
   moved pages can go first in a pull request of its own.
 

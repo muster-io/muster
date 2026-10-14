@@ -34,7 +34,7 @@ function row(page: Page, text: string) {
 test("creates a user with a setup link, disables, enables and deletes it", async ({ page }) => {
   const csp = watchCsp(page);
   await signInAdmin(page);
-  for (const entry of ["Users", "OIDC", "Security", "Audit log"]) {
+  for (const entry of ["Users", "OIDC", "Organization", "Audit log"]) {
     await expect(nav(page).getByRole("link", { name: entry })).toBeVisible();
   }
 
