@@ -15,8 +15,10 @@ In the examples, `MUSTER_INGEST_URL` is `https://ingest.muster.example.org` and 
    stores it encrypted and never shows it again.
 3. Leave the bot's privacy mode on, the default. Muster needs no other setting in BotFather.
 
-In Muster, create a **Connection** of type Telegram with the bot token, then **Check** it. The check runs in steps and
-shows the latency of each and whether it went through the proxy:
+In Muster, create a **Connection** of type Telegram with the bot token, then **Check** it. Its **Bot API base URL** is
+`https://api.telegram.org` unless Telegram is blocked in your network; for a proxy or another address, see
+[Telegram in restricted networks](telegram-restricted-networks.md). The check runs in steps and shows the latency of
+each and whether it went through the proxy:
 
 1. a dry probe, `GET <base>/bot0:x/getMe` without your token, which only a Bot API answers with `401` and JSON — it
    tells a wrong address, a wrong path prefix, a proxy that refuses or a web server that is not a Bot API apart before
@@ -82,7 +84,7 @@ modes**, set on the Connection:
   Connection, calls `deleteWebhook`. Use the webhook mode when Telegram can reach `MUSTER_INGEST_URL` over HTTPS.
 
 Where Telegram is blocked, a Connection can reach the Bot API through a proxy or through another Bot API address; see
-**Telegram in restricted networks**.
+[Telegram in restricted networks](telegram-restricted-networks.md).
 
 ## Join the discussion group and mute the channel
 

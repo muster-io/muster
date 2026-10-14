@@ -75,12 +75,30 @@ nav:
   - Messengers:
       - messengers/mattermost.md
       - messengers/telegram.md
+      - messengers/telegram-restricted-networks.md
       - messengers/account-links.md
   - Outgoing webhooks:
       - outgoing-webhooks/events.md
       - outgoing-webhooks/templates.md
   - Sign-in:
       - sign-in/oidc-keycloak.md
+  - Operations:
+      - Runbooks:
+          - operations/runbooks/index.md
+          - operations/runbooks/MusterDown.md
+          - operations/runbooks/MusterNoLeader.md
+          - operations/runbooks/MusterDeliveryFailing.md
+          - operations/runbooks/MusterDestinationBroken.md
+          - operations/runbooks/MusterHeartbeatLost.md
+          - operations/runbooks/MusterDeliverySlow.md
+          - operations/runbooks/MusterDeliveryQueueGrowing.md
+          - operations/runbooks/MusterIngestBacklog.md
+          - operations/runbooks/MusterIngestRejected.md
+          - operations/runbooks/MusterTemplateError.md
+          - operations/runbooks/MusterClockSkew.md
+          - operations/runbooks/MusterLoginFailures.md
+          - operations/runbooks/MusterSnapshotTruncated.md
+          - operations/runbooks/MusterOIDCSecretExpiring.md
   - Reference:
       - reference/index.md
       - reference/metrics.md

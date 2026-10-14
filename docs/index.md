@@ -24,6 +24,8 @@ The Alertmanager of each cluster sends its notifications to an Integration of Mu
 labels, group them into Alert Groups and decide the Destinations they are delivered to, and Muster keeps the message
 of each Alert Group there up to date until the Alert Group is resolved.
 
+![An Alert Group arrives in the Muster web UI, is acknowledged from its page and resolves](assets/demo.gif)
+
 ## Sections
 
 - [Alertmanager](integrations/alertmanager.md): connect the Alertmanager of a cluster, and watch the path from it with
@@ -34,5 +36,6 @@ of each Alert Group there up to date until the Alert Group is resolved.
   [events mode](outgoing-webhooks/events.md), or keep a message in any chat in the
   [template mode](outgoing-webhooks/templates.md).
 - [Sign-in](sign-in/oidc-keycloak.md): sign in with OpenID Connect, shown with Keycloak.
+- [Runbooks](operations/runbooks/index.md): what each alert about Muster means and how to fix it.
 - [Reference](reference/index.md): metrics, log events, Internal alerts, environment variables, chart values and the
   API.
