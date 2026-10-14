@@ -356,6 +356,9 @@ func TestCreateMattermost(t *testing.T) {
 	if len(w.audit) != 1 || w.audit[0].Action != ActionCreated || len(w.hints) != 1 || w.hints[0].Type != Hint {
 		t.Errorf("audit %+v hints %+v", w.audit, w.hints)
 	}
+	if got := counterSeries(d.PublicID); !slices.Equal(got, zeroCounterSeries(d.PublicID, TypeMattermost)) {
+		t.Errorf("counter series %q", got)
+	}
 }
 
 // TestCreateRefusals: a failing check is destination_check_failed at the field of each failing check and saves
@@ -658,6 +661,9 @@ func TestCreateWebhook(t *testing.T) {
 	if d.ID != 21 || !d.SigningSecret.Set || !d.Proxy.PasswordSet || *d.WebhookMode != "events" {
 		t.Errorf("destination %+v", d)
 	}
+	if got := counterSeries(d.PublicID); !slices.Equal(got, zeroCounterSeries(d.PublicID, TypeWebhook)) {
+		t.Errorf("counter series %q", got)
+	}
 	if len(w.audit) != 1 || w.audit[0].Action != ActionCreated || stringsContain(string(w.audit[0].Diff), "proxy-pass") ||
 		!stringsContain(string(w.audit[0].Diff), "/proxy/password") || stringsContain(string(w.audit[0].Diff),
 		string(d.SigningSecretOnce)) {
@@ -839,6 +845,9 @@ func TestCreateTelegram(t *testing.T) {
 	if len(w.audit) != 1 || w.audit[0].Action != ActionCreated || !bytes.Contains(w.audit[0].Diff, []byte("@muster_alerts")) ||
 		len(w.hints) != 1 {
 		t.Errorf("audit %+v hints %+v", w.audit, w.hints)
+	}
+	if got := counterSeries(d.PublicID); !slices.Equal(got, zeroCounterSeries(d.PublicID, TypeTelegram)) {
+		t.Errorf("counter series %q", got)
 	}
 }
 

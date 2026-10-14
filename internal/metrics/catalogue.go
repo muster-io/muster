@@ -355,12 +355,20 @@ var AlertGroupTimeToAck = newHistogram(Definition{
 	Capability: "C-10",
 })
 
-// DeliveryKinds are the kind values of muster_delivery_attempts_total: what an attempt sends.
-var DeliveryKinds = []string{"publication", "update", "thread_reply", "storm_summary", "final_edit", "webhook_event"}
+// MessageDeliveryKinds are the kind values of muster_delivery_attempts_total of Root messages, Storm summaries and
+// Thread replies, which Mattermost, Telegram and outgoing webhooks in the template mode send.
+var MessageDeliveryKinds = []string{"publication", "update", "thread_reply", "storm_summary", "final_edit"}
+
+// DeliveryKinds are the kind values of muster_delivery_attempts_total: what an attempt sends; webhook_event is an
+// event of an outgoing webhook in the events mode.
+var DeliveryKinds = append(slices.Clone(MessageDeliveryKinds), "webhook_event")
+
+// OutcomeDelivered is the outcome of muster_delivery_attempts_total of an attempt that delivered.
+const OutcomeDelivered = "delivered"
 
 // DeliveryOutcomes are the outcome values of muster_delivery_attempts_total: delivered, or the error class of the
 // answer.
-var DeliveryOutcomes = []string{"delivered", "markup_rejected", "retry_after", "transient", "fatal", "unknown",
+var DeliveryOutcomes = []string{OutcomeDelivered, "markup_rejected", "retry_after", "transient", "fatal", "unknown",
 	"template_error"}
 
 // DeliveryAttempts counts the calls the delivery worker made, by Destination, kind and outcome (C-11.FR-17).
@@ -430,8 +438,13 @@ var DestinationInfo = newGauge(Definition{
 	Capability: "C-11",
 })
 
-// TemplateKinds are the values of the label template: the templates of C-12.FR-4.
-var TemplateKinds = []string{"root_message", "line", "ack_timeout_notice", "link_rule", "webhook_request"}
+// RouteTemplateKinds are the templates a Route owns: the template values of its series of
+// muster_template_errors_total.
+var RouteTemplateKinds = []string{"root_message", "line", "ack_timeout_notice", "link_rule"}
+
+// TemplateKinds are the values of the label template: the templates of C-12.FR-4, the Route's and the request
+// template of an outgoing webhook.
+var TemplateKinds = append(slices.Clone(RouteTemplateKinds), "webhook_request")
 
 // TemplateErrors counts the template renders that failed at runtime, by the Route or the Destination that owns the
 // template, the other one empty (C-12.FR-6, ADR-0012).

@@ -70,6 +70,9 @@ func NewHandler(cfg HandlerConfig) http.Handler {
 	if cfg.BodyLimit <= 0 {
 		cfg.BodyLimit = BodyLimit
 	}
+	// The series of the tokens that match no Integration exists at zero from the start, so that increase() sees the
+	// first one; integrations creates the series of each Integration.
+	metrics.IngestRequests.With(integrations.Unknown, OutcomeUnauthorized)
 	h := &handler{HandlerConfig: cfg}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+RouteHeader, func(w http.ResponseWriter, r *http.Request) {

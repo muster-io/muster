@@ -121,6 +121,15 @@ func TestWebhookTemplate(t *testing.T) {
 		e := e.on(t)
 		d := e.templateWebhook("chat", "template", chatTemplate("ops", true), "", map[string]string{
 			"new_alert_group": "all"})
+		// Its series exist at zero before its first request, on every replica, so that increase() in
+		// MusterTemplateError and MusterDeliveryFailing sees the first one.
+		for _, rr := range h.Replicas {
+			eventually(t, "the series at zero", func() bool {
+				return rr.Metric(t, `muster_template_errors_total{route="",destination="`+d+
+					`",template="webhook_request"}`) == "0" && rr.Metric(t, `muster_delivery_attempts_total{destination="`+
+					d+`",kind="publication",outcome="delivered"}`) == "0"
+			})
+		}
 		e.route("chat", "chat", []string{d}, nil)
 		e.group("c1", "QueueStuck")
 		e.alert("c1", "a", `{"team":"chat","cluster":"c1","queue":"q1"}`, "")

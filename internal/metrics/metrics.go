@@ -137,6 +137,12 @@ func (c Counter) Float(values ...string) *vm.FloatCounter {
 	return s.GetOrCreateFloatCounter(name)
 }
 
+// Delete removes the series of c, such as the series of a deleted entity.
+func (c Counter) Delete(values ...string) {
+	name, s := series(c.def, values)
+	s.UnregisterMetric(name)
+}
+
 // Func makes the series of c read f at every scrape, for a count that a library keeps, such as the acquires of the
 // database pool; f must never decrease. A series keeps the first f it gets.
 func (c Counter) Func(f func() float64, values ...string) {

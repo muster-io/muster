@@ -1357,6 +1357,95 @@ func TestRefreshInfo(t *testing.T) {
 	<-done
 }
 
+// templateSeries are the muster_template_errors_total series of the Route id with their values, as /metrics shows
+// them.
+func templateSeries(t *testing.T, id string) []string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	metrics.Handler(nil).ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
+	var out []string
+	for line := range strings.Lines(rec.Body.String()) {
+		if strings.HasPrefix(line, `muster_template_errors_total{route="`+id+`"`) {
+			out = append(out, strings.TrimSpace(line))
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// zeroTemplateSeries are the series of muster_template_errors_total a Route has before any template error.
+func zeroTemplateSeries(id string) []string {
+	var out []string
+	for _, template := range []string{"ack_timeout_notice", "line", "link_rule", "root_message"} {
+		out = append(out, `muster_template_errors_total{route="`+id+`",destination="",template="`+template+`"} 0`)
+	}
+	return out
+}
+
+// TestTemplateErrorSeries: every Route that is not deleted has its series of muster_template_errors_total at zero
+// before its first template error — the Default route, stored when the replica starts, and a Route created later — so
+// that increase() sees the first error; a rename keeps the counts and a deletion, here or on another replica, removes
+// the series.
+func TestTemplateErrorSeries(t *testing.T) {
+	svc, store, _ := newService(t)
+	list, _ := svc.List(t.Context())
+	def := list.Routes[0].PublicID
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		svc.RunInfo(ctx, nil)
+		close(done)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for !slices.Equal(templateSeries(t, def), zeroTemplateSeries(def)) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the Default route at the start: %q", templateSeries(t, def))
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	a, err := svc.Create(t.Context(), by, input("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := templateSeries(t, a.PublicID); !slices.Equal(got, zeroTemplateSeries(a.PublicID)) {
+		t.Errorf("after the creation = %q", got)
+	}
+	metrics.TemplateErrors.With(a.PublicID, "", "line").Inc()
+	if _, err := svc.Update(t.Context(), by, a.PublicID, nil, input("a2")); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RefreshInfo(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := templateSeries(t, a.PublicID); len(got) != 4 || !slices.Contains(got,
+		`muster_template_errors_total{route="`+a.PublicID+`",destination="",template="line"} 1`) {
+		t.Errorf("after the rename = %q", got)
+	}
+	if err := svc.Delete(t.Context(), by, a.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := templateSeries(t, a.PublicID); len(got) != 0 {
+		t.Errorf("after the deletion = %q", got)
+	}
+
+	b, err := svc.Create(t.Context(), by, input("b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	store.find(b.PublicID).deleted = true // on another replica
+	store.mu.Unlock()
+	if err := svc.RefreshInfo(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := templateSeries(t, b.PublicID); len(got) != 0 {
+		t.Errorf("after a deletion elsewhere = %q", got)
+	}
+}
+
 // execRecorder is a connection that records the statements it runs; it answers nothing else.
 type execRecorder struct {
 	dbgen.DBTX

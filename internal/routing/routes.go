@@ -975,6 +975,7 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		return err
 	}
 	s.unexportInfo(before.PublicID)
+	unexportCounters(before.PublicID)
 	return nil
 }
 
@@ -1309,7 +1310,7 @@ func routeOf(r dbgen.GetRouteRow) Route {
 	}
 }
 
-// exportInfo sets the muster_route_info series of a Route.
+// exportInfo sets the muster_route_info series of a Route and creates its counter series.
 func (s *Service) exportInfo(publicID, name string) {
 	s.infoMu.Lock()
 	defer s.infoMu.Unlock()
@@ -1318,6 +1319,24 @@ func (s *Service) exportInfo(publicID, name string) {
 	}
 	s.info[publicID] = name
 	metrics.RouteInfo.With(publicID, name).Set(1)
+	exportCounters(publicID)
+}
+
+// exportCounters creates the series of muster_template_errors_total of a Route at zero, one per template it owns:
+// increase() never counts the first sample of a series, so MusterTemplateError would otherwise miss the first error
+// of each of its templates on each replica.
+func exportCounters(publicID string) {
+	for _, template := range metrics.RouteTemplateKinds {
+		metrics.TemplateErrors.With(publicID, "", template)
+	}
+}
+
+// unexportCounters removes the series of muster_template_errors_total of a deleted Route: it has no open Alert
+// Groups (C-09.FR-19), so its templates no longer render.
+func unexportCounters(publicID string) {
+	for _, template := range metrics.RouteTemplateKinds {
+		metrics.TemplateErrors.Delete(publicID, "", template)
+	}
 }
 
 // unexportInfo removes the muster_route_info series of a Route.
@@ -1331,7 +1350,8 @@ func (s *Service) unexportInfo(publicID string) {
 }
 
 // RefreshInfo makes muster_route_info list exactly the Routes that are not deleted, the Default route included, as
-// the database has them, whichever replica changed them (C-08.FR-12).
+// the database has them, whichever replica changed them (C-08.FR-12), and gives each its series of
+// muster_template_errors_total; a deleted Route loses them.
 func (s *Service) RefreshInfo(ctx context.Context) error {
 	// The read happens under the lock, so that a local change exported meanwhile is never undone by an older read.
 	s.infoMu.Lock()
@@ -1343,8 +1363,12 @@ func (s *Service) RefreshInfo(ctx context.Context) error {
 	want := make(map[string]string, len(rows))
 	for _, r := range rows {
 		want[r.PublicID] = r.Name
+		exportCounters(r.PublicID)
 	}
 	for id, name := range s.info {
+		if _, ok := want[id]; !ok {
+			unexportCounters(id)
+		}
 		if want[id] != name {
 			metrics.RouteInfo.Delete(id, name)
 			delete(s.info, id)

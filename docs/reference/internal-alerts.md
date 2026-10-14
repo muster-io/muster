@@ -23,7 +23,7 @@ Raised while: A Destination is Broken: the messenger answered with a Fatal error
 
 critical · labels: `integration`, `integration_name`, the Integration's Static labels · C-07 · runbook: [`operations/runbooks/MusterHeartbeatLost/`](../operations/runbooks/MusterHeartbeatLost.md)
 
-Raised while: An Integration is Heartbeat lost: no Heartbeat signal arrived within its Heartbeat timeout, so the path from its Alertmanager to Muster may be broken and Stale resolution is paused. It resolves with the next signal, when the Heartbeat is turned off or when the Integration is deleted.
+Raised while: An Integration is Heartbeat lost: no Heartbeat signal arrived within its Heartbeat timeout, so the path from its Alertmanager to Muster may be interrupted and Stale resolution is paused. It resolves with the next signal, when the Heartbeat is turned off or when the Integration is deleted.
 
 ### `MusterOIDCSecretExpiring`
 

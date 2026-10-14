@@ -21,6 +21,7 @@ import (
 
 	"github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
 )
@@ -151,11 +152,13 @@ type Service struct {
 
 	mu   sync.Mutex
 	info map[string]string
+	// infoChanged wakes RunInfo.
+	infoChanged chan struct{}
 }
 
 // New returns the Service of the Organization orgID.
 func New(orgID int64, store Store) *Service {
-	return &Service{orgID: orgID, store: store, info: map[string]string{}}
+	return &Service{orgID: orgID, store: store, info: map[string]string{}, infoChanged: make(chan struct{}, 1)}
 }
 
 // List reads a page of the Destinations that are not deleted, in id order, with their Routes.
@@ -257,7 +260,7 @@ func (s *Service) RouteRefs(ctx context.Context, routeIDs []int64) (map[int64][]
 }
 
 // RefreshInfo sets muster_destination_info to the Destinations that are not deleted: a series per Destination with
-// its current name; the series of a renamed or deleted one is removed.
+// its current name; the series of a renamed or deleted one is removed. Each Destination also gets its counter series.
 func (s *Service) RefreshInfo(ctx context.Context) error {
 	rows, err := s.store.ListDestinationInfo(ctx, s.orgID)
 	if err != nil {
@@ -268,6 +271,7 @@ func (s *Service) RefreshInfo(ctx context.Context) error {
 	want := make(map[string]string, len(rows))
 	for _, r := range rows {
 		want[r.PublicID] = r.Name
+		exportCounters(r.PublicID, r.Type)
 	}
 	for id, name := range s.info {
 		if want[id] != name {
@@ -282,14 +286,41 @@ func (s *Service) RefreshInfo(ctx context.Context) error {
 	return nil
 }
 
-// RunInfo keeps muster_destination_info current until ctx ends: it refreshes it at once and at every tick, which
-// also repairs a refresh that failed.
+// exportCounters creates at zero the series of a Destination of type typ that the chart rules read with increase(),
+// which never counts the first sample of a series: muster_delivery_attempts_total with the outcome delivered for
+// every kind it sends, for MusterDeliveryFailing, and for an outgoing webhook muster_template_errors_total of its
+// request template, for MusterTemplateError. An outgoing webhook can change its mode, so it gets the series of both
+// modes. The series stay when the Destination is deleted, until the replica restarts: its final edits are delivered,
+// and counted, after the deletion.
+func exportCounters(publicID, typ string) {
+	kinds := metrics.MessageDeliveryKinds
+	if typ == TypeWebhook {
+		kinds = metrics.DeliveryKinds
+		metrics.TemplateErrors.With("", publicID, messages.TemplateWebhookRequest)
+	}
+	for _, kind := range kinds {
+		metrics.DeliveryAttempts.With(publicID, kind, metrics.OutcomeDelivered)
+	}
+}
+
+// InfoChanged asks RunInfo to refresh muster_destination_info: a hint said a Destination changed, maybe on another
+// replica. It never blocks.
+func (s *Service) InfoChanged() {
+	select {
+	case s.infoChanged <- struct{}{}:
+	default:
+	}
+}
+
+// RunInfo keeps muster_destination_info current until ctx ends: it refreshes it at once, after InfoChanged and at
+// every tick, which also repairs a refresh that failed.
 func (s *Service) RunInfo(ctx context.Context, ticks <-chan time.Time) {
 	for {
 		_ = s.RefreshInfo(ctx) // a failed refresh is repeated at the next tick
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.infoChanged:
 		case <-ticks:
 		}
 	}

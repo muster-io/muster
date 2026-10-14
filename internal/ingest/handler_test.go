@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -173,6 +174,34 @@ func TestIngestBothTokenForms(t *testing.T) {
 	}
 	if strings.Contains(x.log.String(), validToken) {
 		t.Error("the token reached the log")
+	}
+}
+
+// TestUnknownSeriesFromTheStart: the handler creates the series of the tokens that match no Integration at zero, so
+// that increase() in MusterIngestRejected sees the first one.
+func TestUnknownSeriesFromTheStart(t *testing.T) {
+	metrics.IngestRequests.Delete(integrations.Unknown, OutcomeUnauthorized)
+	exported := func() []string {
+		rec := httptest.NewRecorder()
+		metrics.Handler(nil).ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
+		var out []string
+		for line := range strings.Lines(rec.Body.String()) {
+			if strings.HasPrefix(line, `muster_ingest_requests_total{integration="unknown"`) {
+				out = append(out, strings.TrimSpace(line))
+			}
+		}
+		return out
+	}
+	if got := exported(); len(got) != 0 {
+		t.Fatalf("before the start = %q", got)
+	}
+	x := newIngest(0)
+	if got := exported(); !slices.Equal(got, []string{requests("unknown", OutcomeUnauthorized) + " 0"}) {
+		t.Errorf("at the start = %q", got)
+	}
+	x.post(t, "/api/v1/ingest/mstr_int_nope", strings.NewReader("{}"))
+	if got := exported(); !slices.Equal(got, []string{requests("unknown", OutcomeUnauthorized) + " 1"}) {
+		t.Errorf("after one = %q", got)
 	}
 }
 
