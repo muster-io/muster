@@ -39,7 +39,7 @@ acceptance:
   - "[C-22.FR-3] With `bridge` in the `Destination` union the SPA's type check passes: `destinationPlace` shows a Bridge Destination's channel name, or its channel id, and `destinationTypeName` names it \"Bridge\" until S-077 adds the messenger's name."
 verify: "make ci test-integration"
 operator_attention: false
-issue: null
+issue: 238
 ---
 
 # S-080. Bridge Destinations, the channel check, `muster doctor` and the Mention settings of Bridges (BE)

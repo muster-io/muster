@@ -58,7 +58,7 @@ acceptance:
   - "[C-22.AC-3] A pushed event with a wrong signature, and a failing poll, leave the push secret and the token in no log line (`secretleak.go` probe `bridge_events`)."
 verify: "make ci test-integration e2e docs-check"
 operator_attention: false
-issue: null
+issue: 233
 ---
 
 # S-075. Bridge events by polling and push: presses, answers, Text commands and deleted messages (BE)

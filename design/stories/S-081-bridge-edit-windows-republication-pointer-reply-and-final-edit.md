@@ -44,7 +44,7 @@ acceptance:
   - "[C-22.FR-23] Messengers → Bridge explains edit windows: when Muster stops editing, republication on a change of status, the pointer reply and the old message that keeps working; `make docs-check` passes."
 verify: "make ci test-integration e2e docs-check"
 operator_attention: false
-issue: null
+issue: 239
 ---
 
 # S-081. Bridge edit windows: republication on a change of status, the pointer reply and the final edit as a Thread reply (BE)

@@ -21,7 +21,7 @@ acceptance:
   - "[C-22.FR-23] The home page lists Bridges among the messengers, and Messengers → Bridge links to Write a bridge and to the protocol reference."
 verify: "make ci docs-check"
 operator_attention: false
-issue: null
+issue: 237
 ---
 
 # S-079. "Write a bridge" and the Bridge protocol reference on the documentation site

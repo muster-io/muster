@@ -49,7 +49,7 @@ acceptance:
   - "[C-22.FR-23] The page Messengers → Account links explains linking through a Bridge by token and by code, the lookup kind the bridge declares, and that Bridge links are per Connection; `make docs-check` passes."
 verify: "make ci test-integration e2e docs-check"
 operator_attention: false
-issue: null
+issue: 234
 ---
 
 # S-076. Bridge Account links by a token sent to the bot or a code by direct message, and Mentions of linked people (BE)
