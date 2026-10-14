@@ -22,7 +22,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 |---|---|---|---|---|---|
 | C-01 Project skeleton and releases | Foundation | 20 | S-001, S-002, S-003, S-004 | yes | 20 of 20 |
 | C-02 Process startup and runtime | Foundation | 36 | S-005, S-006, S-007, S-008, S-009 | yes | 36 of 36 |
-| C-03 Sign-in and access | Foundation | 58 | S-010, S-011, S-012, S-013, S-062, S-014, S-015 | yes | 58 of 58 |
+| C-03 Sign-in and access | Foundation | 58 | S-010, S-011, S-012, S-013, S-062, S-014, S-015, S-072 | yes | 58 of 58 |
 | C-04 API tokens | Foundation | 17 | S-016, S-017 | yes | 17 of 17 |
 | C-05 Integrations | Observation | 18 | S-018, S-019 | yes | 18 of 18 |
 | C-06 Snapshot processing | Observation | 36 | S-020, S-021, S-022, S-065 | yes | 36 of 36 |
@@ -39,7 +39,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-17 Timers | Actions | 20 | S-049, S-068, S-050 | yes | 20 of 20 |
 | C-18 Account links | Actions | 18 | S-051, S-052, S-069, S-070 | yes | 18 of 18 |
 | C-19 Self-observation | Operations | 15 | S-053, S-054, S-059 | yes | 15 of 15 |
-| C-20 Organization settings and security | Operations | 12 | S-055, S-071, S-056 | yes | 12 of 12 |
+| C-20 Organization settings and security | Operations | 12 | S-055, S-071, S-056, S-072 | yes | 12 of 12 |
 | C-21 Documentation site and runbooks | Operations | 9 | S-057, S-058, S-060 | yes | 9 of 9 |
 
 ## C-01
@@ -114,7 +114,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-03
 
-[Sign-in and access](../prd/l1/C-03-sign-in-and-access.md) · Foundation · stories: S-010, S-011, S-012, S-013, S-062, S-014, S-015
+[Sign-in and access](../prd/l1/C-03-sign-in-and-access.md) · Foundation · stories: S-010, S-011, S-012, S-013, S-062, S-014, S-015, S-072
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -135,7 +135,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-03.FR-15 | S-011 (part), S-015 | complete |  |
 | C-03.FR-16 | S-010 | complete |  |
 | C-03.FR-17 | S-013 | complete |  |
-| C-03.FR-18 | S-012 (part), S-014, S-015 (part) | complete |  |
+| C-03.FR-18 | S-012 (part), S-014, S-015 (part), S-072 (part) | complete |  |
 | C-03.FR-19 | S-013 (part), S-015 | complete |  |
 | C-03.FR-20 | S-012, S-015 | complete |  |
 | C-03.FR-21 | S-013 (part), S-015 | complete |  |
@@ -690,11 +690,11 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-20
 
-[Organization settings and security](../prd/l1/C-20-organization-settings-and-security.md) · Operations · stories: S-055, S-071, S-056
+[Organization settings and security](../prd/l1/C-20-organization-settings-and-security.md) · Operations · stories: S-055, S-071, S-056, S-072
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
-| C-20.FR-1 | S-055 (part), S-056 (part) | complete |  |
+| C-20.FR-1 | S-055 (part), S-056 (part), S-072 (part) | complete |  |
 | C-20.FR-2 | S-055 | complete |  |
 | C-20.FR-3 | S-055 (part), S-056 (part) | complete |  |
 | C-20.FR-6 | S-071 (part), S-056 (part) | complete |  |

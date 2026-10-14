@@ -216,12 +216,14 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
 
 ## UI
 
-The application shell (navigation, banner area, language and time zone); sign-in page (local form and "Sign in with
-{provider}"), TOTP prompt and enrolment, password setup page; profile (details, time zone, language, password, sessions,
-TOTP, the sign-in method, "Link OIDC" with its warning); Users (list with Role, source, sign-in method, last sign-in,
-TOTP and status; create, disable, enable, delete, reset TOTP, convert to local); OIDC settings with the group mapping
-editor, the client secret expiry date and warning, the warning that the last active Admin keeps the Role, the proxy
-form and the connection check; Organization → Security with the TOTP policy; Audit log.
+The application shell (navigation, user menu, banner area, language and time zone); sign-in page (local form and "Sign
+in with {provider}"), TOTP prompt and enrolment, password setup page; profile, opened from the user menu (details, time
+zone, language, password, sessions, TOTP, the sign-in method, "Link OIDC" with its warning); Access → Users (list with
+Role, source, sign-in method, last sign-in, TOTP and status; create, disable, enable, delete, reset TOTP, convert to
+local); Access → OIDC settings with the group mapping editor, the client secret expiry date and warning, the warning
+that the last active Admin keeps the Role, the proxy form and the connection check; Organization → Security with the
+TOTP policy; Organization → Audit log. The main navigation has one "Access" entry whose sub-navigation holds Users,
+Service accounts (C-04) and OIDC settings.
 
 ## API surface
 

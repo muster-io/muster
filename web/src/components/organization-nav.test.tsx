@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The sub-navigation of Organization in a real browser: its entries in order, each with its Permission, the page an
-// address without a sub-entry leads to, and the landmark it is.
+// The sub-navigation of Organization in a real browser: its entries in order, the Audit log last, each with its
+// Permission, the page an address without a sub-entry leads to, and the landmark it is.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -34,6 +34,7 @@ const ADMIN: Permission[] = [
   "lookup-tables:read",
   "link-rules:read",
   "system-status:read",
+  "audit-log:read",
 ];
 const RESPONDER: Permission[] = ["alert-groups:read", "lookup-tables:read", "link-rules:read"];
 
@@ -55,7 +56,7 @@ async function renderNav(permissions: Permission[]) {
 }
 
 describe("organization navigation", () => {
-  test("lists the eleven entries in order, each with its Permission", () => {
+  test("lists the twelve entries in order, each with its Permission", () => {
     expect(ORGANIZATION_NAVIGATION.map((e) => [e.to, e.permission])).toEqual([
       ["/admin/organization/general", "organization:write"],
       ["/admin/organization/severity-levels", "organization:write"],
@@ -68,6 +69,7 @@ describe("organization navigation", () => {
       ["/admin/organization/lookup-tables", "lookup-tables:read"],
       ["/admin/organization/link-rules", "link-rules:read"],
       ["/admin/system-status", "system-status:read"],
+      ["/admin/audit-log", "audit-log:read"],
     ]);
   });
 
@@ -91,6 +93,7 @@ describe("organization navigation", () => {
       "Lookup tables",
       "Link rules",
       "System status",
+      "Audit log",
     ]);
     await expect
       .element(nav.getByRole("link", { name: "Keyring" }))
@@ -98,6 +101,9 @@ describe("organization navigation", () => {
     await expect
       .element(nav.getByRole("link", { name: "System status" }))
       .toHaveAttribute("href", "/admin/system-status");
+    await expect
+      .element(nav.getByRole("link", { name: "Audit log" }))
+      .toHaveAttribute("href", "/admin/audit-log");
   });
 
   test("a Responder sees only Lookup tables and Link rules", async () => {
@@ -111,10 +117,16 @@ describe("organization navigation", () => {
     expect(nav.getByRole("link").elements()).toHaveLength(2);
   });
 
+  test("a session that can open no entry gets no sub-navigation", async () => {
+    const screen = await renderNav(["alert-groups:read"]);
+    await expect.element(screen.getByRole("navigation")).not.toBeInTheDocument();
+  });
+
   test("the address of Organization leads to the first entry the session can open", () => {
     expect(firstOrganizationPage(ADMIN)).toBe("/admin/organization/general");
     expect(firstOrganizationPage(RESPONDER)).toBe("/admin/organization/lookup-tables");
     expect(firstOrganizationPage(["system-status:read"])).toBe("/admin/system-status");
+    expect(firstOrganizationPage(["audit-log:read"])).toBe("/admin/audit-log");
     expect(firstOrganizationPage(["alert-groups:read"])).toBeUndefined();
   });
 });

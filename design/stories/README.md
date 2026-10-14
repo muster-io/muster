@@ -235,8 +235,8 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Observation | C-05 – C-10 | S-018 – S-033, S-063 | 17 |
 | Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 – S-067 | 20 |
 | Actions | C-17, C-18 | S-049 – S-052, S-068 – S-070 | 7 |
-| Operations | C-19 – C-21 | S-053 – S-060, S-071 | 9 |
-| **L1** | 21 | | **71** |
+| Operations | C-19 – C-21 | S-053 – S-060, S-071, S-072 | 10 |
+| **L1** | 21 | | **72** |
 
 ### Foundation
 
@@ -329,6 +329,7 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-055](S-055-organization-settings-outbound-policy-editing-keyring-status-and-key-rotation.md) | C-20 | Organization settings, values seen and outbound policy editing (BE) | be | S-047, S-051, S-053 |
 | [S-071](S-071-keyring-status-key-rotation-and-re-render-after-rotation.md) | C-20 | Keyring status, key rotation and re-render after rotation (BE) | be | S-055, S-069 |
 | [S-056](S-056-organization-settings-pages.md) | C-20 | Organization settings pages (FE) | fe | S-015, S-055, S-071 |
+| [S-072](S-072-compact-top-navigation.md) | C-03 | Compact top navigation: Access entry, Profile in the user menu, Audit log under Organization (FE) | fe | S-056 |
 | [S-057](S-057-documentation-site-build-and-generated-references.md) | C-21 | Documentation site, its build and the generated references | docs | S-053, S-051 |
 | [S-058](S-058-runbooks-telegram-in-restricted-networks-and-the-readme-demo.md) | C-21 | Runbooks, Telegram in restricted networks and the README demo | docs | S-056, S-057, S-054 |
 | [S-059](S-059-chart-alert-rules-with-rule-unit-tests-and-the-grafana-dashboard.md) | C-19 | Chart alert rules with rule unit tests and the Grafana dashboard | infra | S-053, S-058 |
@@ -370,7 +371,11 @@ follows S-069. S-071 was split from S-055 by the plan review of the Operations p
 because with the files that review added S-055 touched about 40 files (D311). S-055 keeps the Organization settings,
 the values seen and the outbound policy; S-071 takes the Keyring status, `muster secrets rotate-key`, the Leader's
 re-render after a rotation and the repeated expiry of Reminder buttons. S-071 follows S-055 in the Operations phase,
-and S-056, whose Keyring page needs it, and S-060 follow it. S-055 keeps its file name.
+and S-056, whose Keyring page needs it, and S-060 follow it. S-055 keeps its file name. S-072 was added after S-056
+(D314): it cuts the main navigation to eight entries — "Access" takes Users, Service accounts and OIDC as a
+sub-navigation like that of Organization, the Audit log moves under Organization and Profile stays in the user menu
+only. It belongs to C-03, whose application shell it changes, but follows S-056 in the Operations phase, because it
+extends S-056's sub-navigation.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

@@ -4,7 +4,7 @@
 // The profile against `muster dev`: Verification steps 4, 7, 8 and 9 of the shell and sign-in story, with every
 // section of the profile, "Link OIDC" and the background re-check that ends the session.
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import {
   APP,
@@ -13,6 +13,7 @@ import {
   expectNoHorizontalScroll,
   freshCode,
   nextIdpUser,
+  openProfile,
   scalar,
   shot,
   shownSecret,
@@ -29,16 +30,12 @@ async function localUser(login: string, password: string): Promise<void> {
   await admin.dispose();
 }
 
-function nav(page: Page) {
-  return page.getByRole("navigation");
-}
-
 test("edits every section of the profile", async ({ page }) => {
   const csp = watchCsp(page);
   await localUser("frank", "frank-password-1");
   await page.goto("/sign-in");
   await signInLocally(page, "frank", "frank-password-1");
-  await nav(page).getByRole("link", { name: "Profile" }).click();
+  await openProfile(page);
   await expect(page).toHaveURL(`${APP}/profile`);
   await expect(page.getByText("You sign in with your login and password.")).toBeVisible();
 
@@ -49,14 +46,16 @@ test("edits every section of the profile", async ({ page }) => {
 
   // Language: the UI switches at once, and back.
   await page.getByLabel("Language").selectOption("ru");
-  await expect(nav(page).getByRole("link", { name: "Профиль" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Меню пользователя: Frank Example" }),
+  ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Профиль", level: 1 })).toBeVisible();
   await shot(page, "profile-ru");
   await page.setViewportSize({ width: 360, height: 740 });
   await expectNoHorizontalScroll(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.getByLabel("Язык").selectOption("en");
-  await expect(nav(page).getByRole("link", { name: "Profile" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "User menu: Frank Example" })).toBeVisible();
 
   // Time zone
   const saved = page.waitForResponse(
@@ -135,7 +134,7 @@ test("refuses a taken login, links OIDC after the warning and ends the session t
   await shot(page, "sign-in-login-taken");
 
   await signInLocally(page, "Alice", "alice-password-1");
-  await nav(page).getByRole("link", { name: "Profile" }).click();
+  await openProfile(page);
   await page.getByRole("button", { name: "Link OIDC" }).click();
   const dialog = page.getByRole("dialog");
   await expect(
@@ -155,7 +154,7 @@ test("refuses a taken login, links OIDC after the warning and ends the session t
   const bob = await browser.newPage();
   await bob.goto(`${APP}/sign-in`);
   await signInLocally(bob, "bob", "bob-password-123");
-  await nav(bob).getByRole("link", { name: "Profile" }).click();
+  await openProfile(bob);
   await bob.getByRole("button", { name: "Link OIDC" }).click();
   await bob.getByRole("dialog").getByRole("button", { name: "Continue" }).click();
   await expect(bob).toHaveURL(`${APP}/profile?error=identity_linked_elsewhere`);
@@ -180,8 +179,13 @@ test("refuses a taken login, links OIDC after the warning and ends the session t
     )
     .toBe(0);
   if (!page.url().includes("/sign-in")) {
-    await nav(page)
-      .getByRole("link", { name: "Profile" })
+    // Opening the Profile from the user menu is the next action; the page may leave for the sign-in page meanwhile.
+    await page
+      .getByTestId("user-menu-name")
+      .click({ timeout: 5_000 })
+      .catch(() => {});
+    await page
+      .getByRole("menuitem", { name: "Profile", exact: true })
       .click({ timeout: 5_000 })
       .catch(() => {});
   }

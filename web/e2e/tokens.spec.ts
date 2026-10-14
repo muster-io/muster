@@ -14,6 +14,7 @@ import {
   adminApi,
   expectNoHorizontalScroll,
   nextIdpUser,
+  openProfile,
   scalar,
   shot,
   signInAdmin,
@@ -86,10 +87,7 @@ test("creates, uses and revokes Personal access tokens, and the Audit log names 
   const csp = watchCsp(page);
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await signInAdmin(page);
-  await page
-    .getByRole("navigation", { name: "Main" })
-    .getByRole("link", { name: "Profile" })
-    .click();
+  await openProfile(page);
   await expect(page.getByRole("heading", { name: "Personal access tokens" })).toBeVisible();
   await expect(page.getByText("You have no Personal access tokens.")).toBeVisible();
 

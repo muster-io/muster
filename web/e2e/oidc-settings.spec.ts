@@ -26,6 +26,15 @@ function nav(page: Page) {
   return page.getByRole("navigation", { name: "Main" });
 }
 
+/** Opens an entry of the sub-navigation of Access: Access in the main navigation, then the entry. */
+async function openAccess(page: Page, entry: string) {
+  await nav(page).getByRole("link", { name: "Access", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Access" })
+    .getByRole("link", { name: entry, exact: true })
+    .click();
+}
+
 /** A day n days from today (UTC), as the date input takes it and as the warning shows it. */
 function daysAhead(n: number): { iso: string; shown: string } {
   const day = new Date(Date.now() + n * 24 * 60 * 60 * 1000);
@@ -50,7 +59,7 @@ test("edits the OIDC settings: secret expiry, an empty mapping, the proxy and th
 }) => {
   const csp = watchCsp(page);
   await signInAdmin(page);
-  await nav(page).getByRole("link", { name: "OIDC" }).click();
+  await openAccess(page, "OIDC");
   await expect(page).toHaveURL(`${APP}/admin/oidc`);
   await expect(page.getByLabel("Issuer URL")).toHaveValue("http://127.0.0.1:18090");
   await expect(page.getByLabel("Client ID")).toHaveValue("muster-dev");
@@ -206,13 +215,13 @@ test("warns while the last active Admin keeps the Role, and a Responder sees non
   await nextIdpUser("u-web-ada", "ada", ["oncall"]);
   await page.goto("/api/v1/sessions/oidc/start");
   await expect(page).toHaveURL(`${APP}/alert-groups`);
-  await nav(page).getByRole("link", { name: "OIDC" }).click();
+  await openAccess(page, "OIDC");
   const kept =
     "ada stays Admin: they are the last active Admin, and the identity provider maps them to Responder. Make another user Admin first.";
   await expect(page.getByText(kept)).toBeVisible();
   await shot(page, "oidc-last-admin-kept");
 
-  await nav(page).getByRole("link", { name: "Users" }).click();
+  await openAccess(page, "Users");
   await page
     .getByRole("table", { name: "Users" })
     .getByRole("link", { name: "admin", exact: true })
@@ -228,12 +237,14 @@ test("warns while the last active Admin keeps the Role, and a Responder sees non
   await expect(page).toHaveURL(`${APP}/alert-groups`);
 
   // Step 10: as a Responder, ada sees none of the admin pages; Organization stays for Lookup tables and Link rules.
-  for (const entry of ["Users", "OIDC", "Audit log"]) {
+  for (const entry of ["Access", "Users", "OIDC", "Audit log"]) {
     await expect(nav(page).getByRole("link", { name: entry })).toHaveCount(0);
   }
   await expect(nav(page).getByRole("link", { name: "Organization" })).toBeVisible();
   for (const address of [
+    "/admin/access",
     "/admin/users",
+    "/admin/service-accounts",
     "/admin/oidc",
     "/admin/organization/security",
     "/admin/audit-log",

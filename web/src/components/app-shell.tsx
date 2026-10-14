@@ -20,7 +20,9 @@ import {
 } from "../lib/api";
 import { connectLiveUpdates } from "../lib/live";
 import { NoticeBanners } from "./notice-banners";
+import { ACCESS_NAVIGATION } from "./access-nav";
 import { ORGANIZATION_NAVIGATION } from "./organization-nav";
+import type { SectionEntry } from "./section-nav";
 import { cn } from "./ui/utils";
 import { UserMenu } from "./user-menu";
 
@@ -79,12 +81,25 @@ export type NavLabel =
   | "routes"
   | "connections"
   | "destinations"
-  | "profile"
-  | "users"
-  | "serviceAccounts"
-  | "oidc"
-  | "organization"
-  | "auditLog";
+  | "access"
+  | "organization";
+
+/**
+ * The entry of a section with a sub-navigation: shown when the session may open at least one of its sub-entries, and
+ * active on its own address and on each of theirs.
+ */
+function sectionEntry<L extends string>(
+  to: string,
+  label: NavLabel,
+  entries: readonly SectionEntry<L>[],
+): NavEntry {
+  return {
+    to,
+    label,
+    permission: [...new Set(entries.map((e) => e.permission))],
+    activeOn: [to, ...entries.map((e) => e.to)],
+  };
+}
 
 /** The pages register their entries here, in the order of the navigation. */
 export const NAVIGATION: readonly NavEntry[] = [
@@ -94,18 +109,8 @@ export const NAVIGATION: readonly NavEntry[] = [
   { to: "/routes", label: "routes", permission: "routes:read" },
   { to: "/connections", label: "connections", permission: "connections:read" },
   { to: "/destinations", label: "destinations", permission: "destinations:read" },
-  { to: "/profile", label: "profile" },
-  { to: "/admin/users", label: "users", permission: "users:read" },
-  { to: "/admin/service-accounts", label: "serviceAccounts", permission: "service-accounts:read" },
-  { to: "/admin/oidc", label: "oidc", permission: "oidc:read" },
-  {
-    to: "/admin/organization",
-    label: "organization",
-    // Shown when the session may open at least one page of the sub-navigation, and active on each of them.
-    permission: [...new Set(ORGANIZATION_NAVIGATION.map((e) => e.permission))],
-    activeOn: ["/admin/organization", "/admin/system-status"],
-  },
-  { to: "/admin/audit-log", label: "auditLog", permission: "audit-log:read" },
+  sectionEntry("/admin/access", "access", ACCESS_NAVIGATION),
+  sectionEntry("/admin/organization", "organization", ORGANIZATION_NAVIGATION),
 ];
 
 /**
@@ -145,18 +150,10 @@ function navLabel(t: (key: string) => string, label: NavLabel): string {
       return t("nav.connections");
     case "destinations":
       return t("nav.destinations");
-    case "profile":
-      return t("nav.profile");
-    case "users":
-      return t("nav.users");
-    case "serviceAccounts":
-      return t("nav.serviceAccounts");
-    case "oidc":
-      return t("nav.oidc");
-    case "organization":
-      return t("nav.organization");
+    case "access":
+      return t("nav.access");
     default:
-      return t("nav.auditLog");
+      return t("nav.organization");
   }
 }
 
@@ -164,6 +161,17 @@ function navLabel(t: (key: string) => string, label: NavLabel): string {
 export function useCan(permission: Permission): boolean {
   const session = useSession();
   return session?.permissions.includes(permission) === true;
+}
+
+/** What a page shows to a session without the Permission to see it. */
+export function NoPermission() {
+  const { t } = useTranslation();
+  return (
+    <section className="flex flex-col gap-2 py-6">
+      <h1 className="text-xl font-semibold">{t("errors.noPermissionTitle")}</h1>
+      <p className="text-muted-foreground">{t("errors.noPermission")}</p>
+    </section>
+  );
 }
 
 /** Shows a page only to a session that holds its Permission (C-03.FR-18); the API refuses the rest anyway. */
@@ -174,14 +182,8 @@ export function RequirePermission({
   permission: Permission;
   children: ReactNode;
 }) {
-  const { t } = useTranslation();
   if (!useCan(permission)) {
-    return (
-      <section className="flex flex-col gap-2 py-6">
-        <h1 className="text-xl font-semibold">{t("errors.noPermissionTitle")}</h1>
-        <p className="text-muted-foreground">{t("errors.noPermission")}</p>
-      </section>
-    );
+    return <NoPermission />;
   }
   return children;
 }
@@ -293,7 +295,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {t("shell.skipToContent")}
       </a>
       <header className="border-b bg-background">
-        <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-3 sm:gap-4 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-3 sm:gap-4 sm:px-6">
           <Link
             to="/alert-groups"
             className="flex shrink-0 items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"

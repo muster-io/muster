@@ -383,6 +383,12 @@ export async function adminApi(): Promise<Api> {
   return Api.signIn(ADMIN_LOGIN, ADMIN_PASSWORD);
 }
 
+/** Opens the Profile from the user menu, the only way to it besides its address; name is its text in the language shown. */
+export async function openProfile(page: Page, name = "Profile"): Promise<void> {
+  await page.getByTestId("user-menu-name").click();
+  await page.getByRole("menuitem", { name, exact: true }).click();
+}
+
 /** Saves a screenshot for the pull request next to the other test output. */
 export async function shot(page: Page, name: string): Promise<void> {
   const dir = process.env.MUSTER_E2E_SCREENSHOTS;

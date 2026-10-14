@@ -1,4 +1,12 @@
 {
+  "access": {
+    "nav": {
+      "label": "Доступ",
+      "oidc": "OIDC",
+      "serviceAccounts": "Сервисные аккаунты",
+      "users": "Пользователи"
+    }
+  },
   "accountLinks": {
     "admin": {
       "empty": "Аккаунты мессенджеров не привязаны.",
@@ -1303,19 +1311,16 @@
     "title": "Упоминания"
   },
   "nav": {
+    "access": "Доступ",
     "alertGroups": "Группы алертов",
-    "auditLog": "Журнал аудита",
     "connections": "Подключения",
     "destinations": "Места доставки",
     "integrations": "Интеграции",
     "label": "Основная",
-    "oidc": "OIDC",
     "organization": "Организация",
     "profile": "Профиль",
     "routes": "Маршруты",
-    "serviceAccounts": "Сервисные аккаунты",
-    "statistics": "Статистика",
-    "users": "Пользователи"
+    "statistics": "Статистика"
   },
   "notes": {
     "add": "Добавить заметку",
@@ -1428,6 +1433,7 @@
     },
     "nav": {
       "alertHandling": "Обработка алертов",
+      "auditLog": "Журнал аудита",
       "general": "Общие",
       "keyring": "Связка ключей",
       "label": "Организация",

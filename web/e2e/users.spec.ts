@@ -34,12 +34,18 @@ function row(page: Page, text: string) {
 test("creates a user with a setup link, disables, enables and deletes it", async ({ page }) => {
   const csp = watchCsp(page);
   await signInAdmin(page);
-  for (const entry of ["Users", "OIDC", "Organization", "Audit log"]) {
-    await expect(nav(page).getByRole("link", { name: entry })).toBeVisible();
+  for (const entry of ["Access", "Organization"]) {
+    await expect(nav(page).getByRole("link", { name: entry, exact: true })).toBeVisible();
+  }
+  for (const entry of ["Users", "OIDC", "Audit log", "Profile"]) {
+    await expect(nav(page).getByRole("link", { name: entry, exact: true })).toHaveCount(0);
   }
 
-  await nav(page).getByRole("link", { name: "Users" }).click();
+  await nav(page).getByRole("link", { name: "Access", exact: true }).click();
   await expect(page).toHaveURL(`${APP}/admin/users`);
+  await expect(
+    page.getByRole("navigation", { name: "Access" }).getByRole("link", { name: "Users" }),
+  ).toHaveAttribute("data-status", "active");
   await page.getByRole("button", { name: "Create user" }).click();
   const create = page.getByRole("dialog");
   await create.getByLabel("Name").fill("Dana");
