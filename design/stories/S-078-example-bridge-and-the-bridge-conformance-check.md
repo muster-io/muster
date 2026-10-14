@@ -47,7 +47,7 @@ acceptance:
   - "[C-22.FR-22] The example bridge runs on the test environment as the maintainer deploys it, and a Muster there delivers to it, takes presses from its page and links an account by token (Notes)."
 verify: "make ci e2e"
 operator_attention: true
-issue: null
+issue: 236
 ---
 
 # S-078. Example bridge under MIT and the conformance check `muster bridge check` (BE)

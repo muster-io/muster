@@ -55,7 +55,7 @@ acceptance:
   - "[C-22.FR-23] The page Messengers → Bridge is in the site's navigation and covers the topics of C-22.FR-23 that this story implements: the Connection, event delivery modes, Destinations by channel id, the Connection check and Broken Destinations; `make docs-check` passes."
 verify: "make ci test-integration e2e docs-check"
 operator_attention: false
-issue: null
+issue: 232
 ---
 
 # S-074. Bridge delivery: envelopes in CommonMark, idempotent Publications, Thread replies, error classes, test messages and the Broken probe (BE)

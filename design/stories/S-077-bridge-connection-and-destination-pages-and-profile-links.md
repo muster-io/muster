@@ -53,7 +53,7 @@ acceptance:
   - "Every new text exists in English and Russian, the pages of the acceptance statements show no horizontal scrolling at 360 px wide in either language, and no Content Security Policy violation is reported (`bridge-connection.spec.ts`, `bridge-destination.spec.ts`)."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 235
 ---
 
 # S-077. Bridge Connection and Destination pages, Account links through a Bridge in the profile, and labels (FE)

@@ -57,7 +57,7 @@ acceptance:
   - "[C-01.FR-13] The fake bridge answers `getInfo` as `api/bridge.yaml` specifies and checks the bearer token; `muster dev` starts it on `127.0.0.1:18094` and creates the demo Connection \"Dev Bridge\" in poll mode, without Destinations; `listLinkableConnections` leaves Bridge Connections out until S-076, so `TestSeveralConnectionsRoute` passes unchanged."
 verify: "make ci test-integration docs-check"
 operator_attention: false
-issue: null
+issue: 231
 ---
 
 # S-073. Bridge Connections, the protocol client with its error classes, `info` and the fake bridge (BE)
