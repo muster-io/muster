@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The sub-navigation of Organization (C-20.FR-1): the settings pages of the Organization, each shown only with its
-// Permission. It wraps onto several lines on a narrow screen instead of scrolling, so every entry stays in view.
+// The sub-navigation of Organization (C-20.FR-1): the settings pages of the Organization and the Audit log, each shown
+// only with its Permission, on the shared sub-navigation.
 
-import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { Permission } from "../api/gen/model";
-import { useSession } from "../lib/api";
+import {
+  type SectionEntry,
+  SectionLayout,
+  SectionNav,
+  allowedEntries,
+  firstAllowedPage,
+} from "./section-nav";
 
 /** The labels of the sub-entries, under organization.nav. */
 export type OrganizationNavLabel =
@@ -23,13 +28,10 @@ export type OrganizationNavLabel =
   | "outgoingHeartbeat"
   | "lookupTables"
   | "linkRules"
-  | "systemStatus";
+  | "systemStatus"
+  | "auditLog";
 
-export interface OrganizationEntry {
-  to: string;
-  label: OrganizationNavLabel;
-  permission: Permission;
-}
+export type OrganizationEntry = SectionEntry<OrganizationNavLabel>;
 
 /** The sub-entries, in the order of the sub-navigation. */
 export const ORGANIZATION_NAVIGATION: readonly OrganizationEntry[] = [
@@ -60,16 +62,17 @@ export const ORGANIZATION_NAVIGATION: readonly OrganizationEntry[] = [
   },
   { to: "/admin/organization/link-rules", label: "linkRules", permission: "link-rules:read" },
   { to: "/admin/system-status", label: "systemStatus", permission: "system-status:read" },
+  { to: "/admin/audit-log", label: "auditLog", permission: "audit-log:read" },
 ];
 
 /** The sub-entries whose Permission the session holds. */
 export function organizationEntries(permissions: readonly Permission[]): OrganizationEntry[] {
-  return ORGANIZATION_NAVIGATION.filter((e) => permissions.includes(e.permission));
+  return allowedEntries(ORGANIZATION_NAVIGATION, permissions);
 }
 
 /** The first sub-entry the session can open, where /admin/organization leads; undefined when there is none. */
 export function firstOrganizationPage(permissions: readonly Permission[]): string | undefined {
-  return organizationEntries(permissions)[0]?.to;
+  return firstAllowedPage(ORGANIZATION_NAVIGATION, permissions);
 }
 
 /** The title of a sub-entry, which is also the heading of its page. */
@@ -98,38 +101,26 @@ export function organizationNavLabel(
       return t("organization.nav.lookupTables");
     case "linkRules":
       return t("organization.nav.linkRules");
-    default:
+    case "systemStatus":
       return t("organization.nav.systemStatus");
+    default:
+      return t("organization.nav.auditLog");
   }
 }
 
 export function OrganizationNav({ permissions }: { permissions: readonly Permission[] }) {
   const { t } = useTranslation();
   return (
-    <nav aria-label={t("organization.nav.label")} className="min-w-0">
-      <ul className="flex flex-wrap gap-1">
-        {organizationEntries(permissions).map((e) => (
-          <li key={e.to}>
-            <Link
-              to={e.to}
-              className="block rounded-md px-2.5 py-1.5 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring data-[status=active]:bg-accent data-[status=active]:text-foreground"
-            >
-              {organizationNavLabel(t, e.label)}
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </nav>
+    <SectionNav
+      name={t("organization.nav.label")}
+      entries={ORGANIZATION_NAVIGATION}
+      permissions={permissions}
+      entryLabel={(label) => organizationNavLabel(t, label)}
+    />
   );
 }
 
 /** The frame of every Organization page: the sub-navigation above the page. */
 export function OrganizationLayout({ children }: { children: ReactNode }) {
-  const session = useSession();
-  return (
-    <div className="flex min-w-0 flex-col gap-6">
-      <OrganizationNav permissions={session?.permissions ?? []} />
-      {children}
-    </div>
-  );
+  return <SectionLayout nav={OrganizationNav}>{children}</SectionLayout>;
 }

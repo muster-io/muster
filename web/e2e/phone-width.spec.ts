@@ -6,7 +6,7 @@
 // many long labels that keeps firing, and one that Alertmanager stops reporting until Muster resolves it as Gone. At
 // 360 × 740 the list shows compact rows and a "Filters" button, the page puts the header first, then the Alerts, then
 // the Timeline, a tap opens the full reason of the Gone Alert, and neither page scrolls sideways. As the Admin, the main
-// navigation scrolls inside itself and the sub-navigation of Organization wraps, so every entry of both is reachable.
+// navigation scrolls inside itself and the sub-navigations of Organization and Access wrap, so every entry is reachable.
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -171,13 +171,14 @@ test("the list and the page in Russian, 360 px wide", async ({ page }) => {
   expect(csp).toEqual([]);
 });
 
-test("both navigations reach every entry 360 px wide", async ({ page }) => {
+test("the navigations reach every entry 360 px wide", async ({ page }) => {
   const csp = watchCsp(page);
   await signInAdmin(page);
   await page.goto("/alert-groups");
 
   // 8. The main navigation scrolls inside itself, the page does not; "Organization" scrolls into view and opens.
   const main = page.getByRole("navigation", { name: "Main" });
+  await expect(main.getByRole("link")).toHaveCount(8);
   const mainWidths = await main.evaluate((el) => ({
     scroll: el.scrollWidth,
     client: el.clientWidth,
@@ -192,21 +193,52 @@ test("both navigations reach every entry 360 px wide", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "General", level: 1 })).toBeVisible();
   await expectNoHorizontalScroll(page);
 
-  // The sub-navigation wraps: its eleven entries are on the screen without scrolling.
+  // The sub-navigation wraps: its twelve entries are on the screen without scrolling.
   const sub = page.getByRole("navigation", { name: "Organization" });
+  const links = sub.getByRole("link");
+  await expect(links).toHaveCount(12);
+  await expect(links.last()).toHaveText("Audit log");
   const subWidths = await sub.evaluate((el) => ({
     scroll: el.scrollWidth,
     client: el.clientWidth,
   }));
   expect(subWidths.scroll).toBeLessThanOrEqual(subWidths.client);
-  const links = sub.getByRole("link");
-  await expect(links).toHaveCount(11);
   for (const link of await links.all()) {
     await expect(link).toBeInViewport();
   }
   await shot(page, "organization-navigation-360");
   await sub.getByRole("link", { name: "System status", exact: true }).tap();
   await expect(page).toHaveURL(/\/admin\/system-status$/);
+  await expect(page.getByRole("heading", { name: "System status", level: 1 })).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  await sub.getByRole("link", { name: "Audit log", exact: true }).tap();
+  await expect(page).toHaveURL(/\/admin\/audit-log$/);
+  await expect(page.getByRole("heading", { name: "Audit log", level: 1 })).toBeVisible();
+  await expectNoHorizontalScroll(page);
+
+  // "Access" scrolls into view and opens Users; its sub-navigation wraps with its three entries in view.
+  const access = main.getByRole("link", { name: "Access", exact: true });
+  await access.scrollIntoViewIfNeeded();
+  await expect(access).toBeInViewport();
+  await access.tap();
+  await expect(page).toHaveURL(/\/admin\/users$/);
+  await expect(page.getByRole("heading", { name: "Users", level: 1 })).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  const accessSub = page.getByRole("navigation", { name: "Access" });
+  const accessLinks = accessSub.getByRole("link");
+  await expect(accessLinks).toHaveText(["Users", "Service accounts", "OIDC"]);
+  const accessWidths = await accessSub.evaluate((el) => ({
+    scroll: el.scrollWidth,
+    client: el.clientWidth,
+  }));
+  expect(accessWidths.scroll).toBeLessThanOrEqual(accessWidths.client);
+  for (const link of await accessLinks.all()) {
+    await expect(link).toBeInViewport();
+  }
+  await shot(page, "access-navigation-360");
+  await accessSub.getByRole("link", { name: "OIDC", exact: true }).tap();
+  await expect(page).toHaveURL(/\/admin\/oidc$/);
+  await expect(page.getByRole("heading", { name: "OIDC", level: 1 })).toBeVisible();
   await expectNoHorizontalScroll(page);
   expect(csp).toEqual([]);
 });

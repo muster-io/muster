@@ -15,10 +15,13 @@ import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as StatisticsRouteImport } from './routes/statistics'
 import { Route as TotpEnrolmentRouteImport } from './routes/totp-enrolment'
+import { Route as AdminAccessRouteImport } from './routes/admin.access'
 import { Route as AdminAuditLogRouteImport } from './routes/admin.audit-log'
 import { Route as AdminOidcRouteImport } from './routes/admin.oidc'
 import { Route as AdminOrganizationRouteImport } from './routes/admin.organization'
+import { Route as AdminServiceAccountsRouteImport } from './routes/admin.service-accounts'
 import { Route as AdminSystemStatusRouteImport } from './routes/admin.system-status'
+import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as AlertGroupsIndexRouteImport } from './routes/alert-groups.index'
 import { Route as AlertGroupsAlertGroupIdRouteImport } from './routes/alert-groups.$alertGroupId'
 import { Route as ConnectionsIndexRouteImport } from './routes/connections.index'
@@ -86,6 +89,11 @@ const TotpEnrolmentRoute = TotpEnrolmentRouteImport.update({
   path: '/totp-enrolment',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminAccessRoute = AdminAccessRouteImport.update({
+  id: '/admin/access',
+  path: '/admin/access',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminAuditLogRoute = AdminAuditLogRouteImport.update({
   id: '/admin/audit-log',
   path: '/admin/audit-log',
@@ -101,9 +109,19 @@ const AdminOrganizationRoute = AdminOrganizationRouteImport.update({
   path: '/admin/organization',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminServiceAccountsRoute = AdminServiceAccountsRouteImport.update({
+  id: '/admin/service-accounts',
+  path: '/admin/service-accounts',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminSystemStatusRoute = AdminSystemStatusRouteImport.update({
   id: '/admin/system-status',
   path: '/admin/system-status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/admin/users',
+  path: '/admin/users',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AlertGroupsIndexRoute = AlertGroupsIndexRouteImport.update({
@@ -232,25 +250,25 @@ const AdminOrganizationSeverityLevelsRoute =
   } as any)
 const AdminServiceAccountsIndexRoute =
   AdminServiceAccountsIndexRouteImport.update({
-    id: '/admin/service-accounts/',
-    path: '/admin/service-accounts/',
-    getParentRoute: () => rootRouteImport,
+    id: '/',
+    path: '/',
+    getParentRoute: () => AdminServiceAccountsRoute,
   } as any)
 const AdminServiceAccountsServiceAccountIdRoute =
   AdminServiceAccountsServiceAccountIdRouteImport.update({
-    id: '/admin/service-accounts/$serviceAccountId',
-    path: '/admin/service-accounts/$serviceAccountId',
-    getParentRoute: () => rootRouteImport,
+    id: '/$serviceAccountId',
+    path: '/$serviceAccountId',
+    getParentRoute: () => AdminServiceAccountsRoute,
   } as any)
 const AdminUsersIndexRoute = AdminUsersIndexRouteImport.update({
-  id: '/admin/users/',
-  path: '/admin/users/',
-  getParentRoute: () => rootRouteImport,
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminUsersRoute,
 } as any)
 const AdminUsersUserIdRoute = AdminUsersUserIdRouteImport.update({
-  id: '/admin/users/$userId',
-  path: '/admin/users/$userId',
-  getParentRoute: () => rootRouteImport,
+  id: '/$userId',
+  path: '/$userId',
+  getParentRoute: () => AdminUsersRoute,
 } as any)
 const IntegrationsIntegrationIdIndexRoute =
   IntegrationsIntegrationIdIndexRouteImport.update({
@@ -314,10 +332,13 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRouteWithChildren
   '/statistics': typeof StatisticsRoute
   '/totp-enrolment': typeof TotpEnrolmentRoute
+  '/admin/access': typeof AdminAccessRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
   '/admin/organization': typeof AdminOrganizationRouteWithChildren
+  '/admin/service-accounts': typeof AdminServiceAccountsRouteWithChildren
   '/admin/system-status': typeof AdminSystemStatusRoute
+  '/admin/users': typeof AdminUsersRouteWithChildren
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
   '/connections/new': typeof ConnectionsNewRoute
@@ -362,6 +383,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRouteWithChildren
   '/statistics': typeof StatisticsRoute
   '/totp-enrolment': typeof TotpEnrolmentRoute
+  '/admin/access': typeof AdminAccessRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
   '/admin/system-status': typeof AdminSystemStatusRoute
@@ -410,10 +432,13 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRouteWithChildren
   '/statistics': typeof StatisticsRoute
   '/totp-enrolment': typeof TotpEnrolmentRoute
+  '/admin/access': typeof AdminAccessRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
   '/admin/organization': typeof AdminOrganizationRouteWithChildren
+  '/admin/service-accounts': typeof AdminServiceAccountsRouteWithChildren
   '/admin/system-status': typeof AdminSystemStatusRoute
+  '/admin/users': typeof AdminUsersRouteWithChildren
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
   '/connections/new': typeof ConnectionsNewRoute
@@ -460,10 +485,13 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/statistics'
     | '/totp-enrolment'
+    | '/admin/access'
     | '/admin/audit-log'
     | '/admin/oidc'
     | '/admin/organization'
+    | '/admin/service-accounts'
     | '/admin/system-status'
+    | '/admin/users'
     | '/alert-groups/$alertGroupId'
     | '/connections/$connectionId'
     | '/connections/new'
@@ -508,6 +536,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/statistics'
     | '/totp-enrolment'
+    | '/admin/access'
     | '/admin/audit-log'
     | '/admin/oidc'
     | '/admin/system-status'
@@ -555,10 +584,13 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/statistics'
     | '/totp-enrolment'
+    | '/admin/access'
     | '/admin/audit-log'
     | '/admin/oidc'
     | '/admin/organization'
+    | '/admin/service-accounts'
     | '/admin/system-status'
+    | '/admin/users'
     | '/alert-groups/$alertGroupId'
     | '/connections/$connectionId'
     | '/connections/new'
@@ -604,10 +636,13 @@ export interface RootRouteChildren {
   SignInRoute: typeof SignInRouteWithChildren
   StatisticsRoute: typeof StatisticsRoute
   TotpEnrolmentRoute: typeof TotpEnrolmentRoute
+  AdminAccessRoute: typeof AdminAccessRoute
   AdminAuditLogRoute: typeof AdminAuditLogRoute
   AdminOidcRoute: typeof AdminOidcRoute
   AdminOrganizationRoute: typeof AdminOrganizationRouteWithChildren
+  AdminServiceAccountsRoute: typeof AdminServiceAccountsRouteWithChildren
   AdminSystemStatusRoute: typeof AdminSystemStatusRoute
+  AdminUsersRoute: typeof AdminUsersRouteWithChildren
   AlertGroupsAlertGroupIdRoute: typeof AlertGroupsAlertGroupIdRoute
   ConnectionsConnectionIdRoute: typeof ConnectionsConnectionIdRoute
   ConnectionsNewRoute: typeof ConnectionsNewRoute
@@ -621,11 +656,7 @@ export interface RootRouteChildren {
   DestinationsIndexRoute: typeof DestinationsIndexRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
   RoutesIndexRoute: typeof RoutesIndexRoute
-  AdminServiceAccountsServiceAccountIdRoute: typeof AdminServiceAccountsServiceAccountIdRoute
-  AdminUsersUserIdRoute: typeof AdminUsersUserIdRoute
   IntegrationsIntegrationIdEditRoute: typeof IntegrationsIntegrationIdEditRoute
-  AdminServiceAccountsIndexRoute: typeof AdminServiceAccountsIndexRoute
-  AdminUsersIndexRoute: typeof AdminUsersIndexRoute
   IntegrationsIntegrationIdIndexRoute: typeof IntegrationsIntegrationIdIndexRoute
   IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute: typeof IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute
 }
@@ -674,6 +705,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TotpEnrolmentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/access': {
+      id: '/admin/access'
+      path: '/admin/access'
+      fullPath: '/admin/access'
+      preLoaderRoute: typeof AdminAccessRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/audit-log': {
       id: '/admin/audit-log'
       path: '/admin/audit-log'
@@ -695,11 +733,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminOrganizationRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/service-accounts': {
+      id: '/admin/service-accounts'
+      path: '/admin/service-accounts'
+      fullPath: '/admin/service-accounts'
+      preLoaderRoute: typeof AdminServiceAccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/system-status': {
       id: '/admin/system-status'
       path: '/admin/system-status'
       fullPath: '/admin/system-status'
       preLoaderRoute: typeof AdminSystemStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/users': {
+      id: '/admin/users'
+      path: '/admin/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/alert-groups/': {
@@ -865,31 +917,31 @@ declare module '@tanstack/react-router' {
     }
     '/admin/service-accounts/': {
       id: '/admin/service-accounts/'
-      path: '/admin/service-accounts'
+      path: '/'
       fullPath: '/admin/service-accounts/'
       preLoaderRoute: typeof AdminServiceAccountsIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminServiceAccountsRoute
     }
     '/admin/service-accounts/$serviceAccountId': {
       id: '/admin/service-accounts/$serviceAccountId'
-      path: '/admin/service-accounts/$serviceAccountId'
+      path: '/$serviceAccountId'
       fullPath: '/admin/service-accounts/$serviceAccountId'
       preLoaderRoute: typeof AdminServiceAccountsServiceAccountIdRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminServiceAccountsRoute
     }
     '/admin/users/': {
       id: '/admin/users/'
-      path: '/admin/users'
+      path: '/'
       fullPath: '/admin/users/'
       preLoaderRoute: typeof AdminUsersIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminUsersRoute
     }
     '/admin/users/$userId': {
       id: '/admin/users/$userId'
-      path: '/admin/users/$userId'
+      path: '/$userId'
       fullPath: '/admin/users/$userId'
       preLoaderRoute: typeof AdminUsersUserIdRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminUsersRoute
     }
     '/integrations/$integrationId/': {
       id: '/integrations/$integrationId/'
@@ -1011,6 +1063,34 @@ const AdminOrganizationRouteChildren: AdminOrganizationRouteChildren = {
 const AdminOrganizationRouteWithChildren =
   AdminOrganizationRoute._addFileChildren(AdminOrganizationRouteChildren)
 
+interface AdminServiceAccountsRouteChildren {
+  AdminServiceAccountsServiceAccountIdRoute: typeof AdminServiceAccountsServiceAccountIdRoute
+  AdminServiceAccountsIndexRoute: typeof AdminServiceAccountsIndexRoute
+}
+
+const AdminServiceAccountsRouteChildren: AdminServiceAccountsRouteChildren = {
+  AdminServiceAccountsServiceAccountIdRoute:
+    AdminServiceAccountsServiceAccountIdRoute,
+  AdminServiceAccountsIndexRoute: AdminServiceAccountsIndexRoute,
+}
+
+const AdminServiceAccountsRouteWithChildren =
+  AdminServiceAccountsRoute._addFileChildren(AdminServiceAccountsRouteChildren)
+
+interface AdminUsersRouteChildren {
+  AdminUsersUserIdRoute: typeof AdminUsersUserIdRoute
+  AdminUsersIndexRoute: typeof AdminUsersIndexRoute
+}
+
+const AdminUsersRouteChildren: AdminUsersRouteChildren = {
+  AdminUsersUserIdRoute: AdminUsersUserIdRoute,
+  AdminUsersIndexRoute: AdminUsersIndexRoute,
+}
+
+const AdminUsersRouteWithChildren = AdminUsersRoute._addFileChildren(
+  AdminUsersRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   PasswordSetupRoute: PasswordSetupRoute,
@@ -1018,10 +1098,13 @@ const rootRouteChildren: RootRouteChildren = {
   SignInRoute: SignInRouteWithChildren,
   StatisticsRoute: StatisticsRoute,
   TotpEnrolmentRoute: TotpEnrolmentRoute,
+  AdminAccessRoute: AdminAccessRoute,
   AdminAuditLogRoute: AdminAuditLogRoute,
   AdminOidcRoute: AdminOidcRoute,
   AdminOrganizationRoute: AdminOrganizationRouteWithChildren,
+  AdminServiceAccountsRoute: AdminServiceAccountsRouteWithChildren,
   AdminSystemStatusRoute: AdminSystemStatusRoute,
+  AdminUsersRoute: AdminUsersRouteWithChildren,
   AlertGroupsAlertGroupIdRoute: AlertGroupsAlertGroupIdRoute,
   ConnectionsConnectionIdRoute: ConnectionsConnectionIdRoute,
   ConnectionsNewRoute: ConnectionsNewRoute,
@@ -1035,12 +1118,7 @@ const rootRouteChildren: RootRouteChildren = {
   DestinationsIndexRoute: DestinationsIndexRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
   RoutesIndexRoute: RoutesIndexRoute,
-  AdminServiceAccountsServiceAccountIdRoute:
-    AdminServiceAccountsServiceAccountIdRoute,
-  AdminUsersUserIdRoute: AdminUsersUserIdRoute,
   IntegrationsIntegrationIdEditRoute: IntegrationsIntegrationIdEditRoute,
-  AdminServiceAccountsIndexRoute: AdminServiceAccountsIndexRoute,
-  AdminUsersIndexRoute: AdminUsersIndexRoute,
   IntegrationsIntegrationIdIndexRoute: IntegrationsIntegrationIdIndexRoute,
   IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute:
     IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute,

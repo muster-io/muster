@@ -25,6 +25,15 @@ function nav(page: Page) {
   return page.getByRole("navigation", { name: "Main" });
 }
 
+/** Opens an entry of a sub-navigation: its section in the main navigation, then the entry. */
+async function openSub(page: Page, section: string, entry: string) {
+  await nav(page).getByRole("link", { name: section, exact: true }).click();
+  await page
+    .getByRole("navigation", { name: section })
+    .getByRole("link", { name: entry, exact: true })
+    .click();
+}
+
 function rows(page: Page) {
   return page.getByRole("table", { name: "Audit log" }).getByRole("row");
 }
@@ -44,7 +53,7 @@ test("filters the Audit log and shows a Secret only as changed", async ({ page }
   await signInAdmin(page);
 
   // A new client secret, so that the newest oidc_settings.updated entry is the Admin's.
-  await nav(page).getByRole("link", { name: "OIDC" }).click();
+  await openSub(page, "Access", "OIDC");
   await page
     .getByTestId("secret-oidc-client-secret")
     .getByRole("button", { name: "Replace" })
@@ -56,8 +65,12 @@ test("filters the Audit log and shows a Secret only as changed", async ({ page }
   expect(await page.content()).not.toContain(NEW_SECRET);
   expect(await page.content()).not.toContain(DEMO_SECRET);
 
-  await nav(page).getByRole("link", { name: "Audit log" }).click();
+  await openSub(page, "Organization", "Audit log");
   await expect(page).toHaveURL(`${APP}/admin/audit-log`);
+  await expect(nav(page).getByRole("link", { name: "Organization", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
   // By default, the last 7 days.
   await expect(page.getByLabel("From", { exact: true })).toHaveValue(berlinDay(7));
   await expect(page.getByLabel("To", { exact: true })).toHaveValue("");

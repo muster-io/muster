@@ -89,14 +89,14 @@ function withProviders(queryClient: QueryClient, children: ReactNode) {
 
 describe("navigation", () => {
   const entries: NavEntry[] = [
-    { to: "/profile", label: "profile" },
+    { to: "/statistics", label: "statistics" },
     { to: "/alert-groups", label: "alertGroups", permission: "alert-groups:read" },
   ];
 
   test("visibleEntries keeps the entries without a Permission and those the session holds", () => {
-    expect(visibleEntries(entries, []).map((e) => e.to)).toEqual(["/profile"]);
+    expect(visibleEntries(entries, []).map((e) => e.to)).toEqual(["/statistics"]);
     expect(visibleEntries(entries, ["alert-groups:read"]).map((e) => e.to)).toEqual([
-      "/profile",
+      "/statistics",
       "/alert-groups",
     ]);
   });
@@ -118,7 +118,7 @@ describe("navigation", () => {
 
   test("shows an entry only to a session that holds its Permission", async () => {
     const without = await renderNavigation([]);
-    await expect.element(without.getByRole("link", { name: "Profile" })).toBeVisible();
+    await expect.element(without.getByRole("link", { name: "Statistics" })).toBeVisible();
     await expect
       .element(without.getByRole("link", { name: "Alert Groups" }))
       .not.toBeInTheDocument();
@@ -168,32 +168,111 @@ describe("navigation", () => {
       .not.toBeInTheDocument();
   });
 
-  test("Organization follows OIDC in place of its pages, and Audit log comes last", () => {
-    const index = NAVIGATION.findIndex((e) => e.to === "/admin/organization");
-    expect(NAVIGATION[index - 1]?.to).toBe("/admin/oidc");
-    expect(NAVIGATION.at(-1)).toEqual({
-      to: "/admin/audit-log",
-      label: "auditLog",
-      permission: "audit-log:read",
-    });
-    expect(NAVIGATION).toHaveLength(12);
+  test("eight entries, Access and Organization last, in place of the pages they group", () => {
+    expect(NAVIGATION.map((e) => e.to)).toEqual([
+      "/alert-groups",
+      "/statistics",
+      "/integrations",
+      "/routes",
+      "/connections",
+      "/destinations",
+      "/admin/access",
+      "/admin/organization",
+    ]);
+    expect(NAVIGATION).toHaveLength(8);
     const moved = [
+      "/profile",
+      "/admin/users",
+      "/admin/service-accounts",
+      "/admin/oidc",
+      "/admin/audit-log",
       "/admin/organization/security",
-      "/admin/organization/outgoing-heartbeat",
       "/admin/organization/lookup-tables",
-      "/admin/organization/link-rules",
       "/admin/system-status",
     ];
     expect(NAVIGATION.filter((e) => moved.includes(e.to))).toEqual([]);
-    expect(new Set(NAVIGATION[index]?.permission)).toEqual(
+    const access = NAVIGATION.find((e) => e.to === "/admin/access");
+    expect(new Set(access?.permission)).toEqual(
+      new Set(["users:read", "service-accounts:read", "oidc:read"]),
+    );
+    const organization = NAVIGATION.find((e) => e.to === "/admin/organization");
+    expect(new Set(organization?.permission)).toEqual(
       new Set([
         "organization:write",
         "organization:read",
         "lookup-tables:read",
         "link-rules:read",
         "system-status:read",
+        "audit-log:read",
       ]),
     );
+  });
+
+  test("an Admin sees eight entries, a Responder and a Viewer seven without Access", async () => {
+    const admin: Permission[] = [
+      "alert-groups:read",
+      "integrations:read",
+      "routes:read",
+      "connections:read",
+      "destinations:read",
+      "users:read",
+      "service-accounts:read",
+      "oidc:read",
+      "organization:read",
+      "organization:write",
+      "lookup-tables:read",
+      "link-rules:read",
+      "system-status:read",
+      "audit-log:read",
+    ];
+    const responder: Permission[] = [
+      "alert-groups:read",
+      "alert-groups:acknowledge",
+      "integrations:read",
+      "routes:read",
+      "connections:read",
+      "destinations:read",
+      "lookup-tables:read",
+      "link-rules:read",
+    ];
+    const viewer: Permission[] = [
+      "alert-groups:read",
+      "integrations:read",
+      "routes:read",
+      "connections:read",
+      "destinations:read",
+      "lookup-tables:read",
+      "link-rules:read",
+    ];
+    const seven = [
+      "Alert Groups",
+      "Statistics",
+      "Integrations",
+      "Routes",
+      "Connections",
+      "Destinations",
+      "Organization",
+    ];
+    for (const [permissions, expected] of [
+      [admin, [...seven.slice(0, 6), "Access", "Organization"]],
+      [responder, seven],
+      [viewer, seven],
+    ] as const) {
+      const shown = await renderNavigation(permissions, NAVIGATION);
+      const nav = shown.getByRole("navigation", { name: "Main" });
+      await expect.element(nav).toBeVisible();
+      expect(
+        nav
+          .getByRole("link")
+          .elements()
+          .map((e) => e.textContent),
+      ).toEqual(expected);
+      await shown.unmount();
+    }
+
+    const auditOnly = await renderNavigation(["audit-log:read"], NAVIGATION);
+    await expect.element(auditOnly.getByRole("link", { name: "Organization" })).toBeVisible();
+    await expect.element(auditOnly.getByRole("link", { name: "Access" })).not.toBeInTheDocument();
   });
 
   test("an entry with several Permissions shows when the session holds any of them", async () => {
@@ -216,14 +295,21 @@ describe("navigation", () => {
       .not.toBeInTheDocument();
   });
 
-  test("Organization is active on every page of its sub-navigation, System status included", async () => {
-    const all: Permission[] = ["organization:write", "system-status:read", "audit-log:read"];
+  test("Organization is active on every page of its sub-navigation, System status and Audit log included", async () => {
+    const all: Permission[] = [
+      "organization:write",
+      "system-status:read",
+      "audit-log:read",
+      "users:read",
+      "service-accounts:read",
+      "oidc:read",
+    ];
     const status = await renderNavigation(all, NAVIGATION, "/admin/system-status");
     await expect
       .element(status.getByRole("link", { name: "Organization" }))
       .toHaveAttribute("aria-current", "page");
     await expect
-      .element(status.getByRole("link", { name: "Audit log" }))
+      .element(status.getByRole("link", { name: "Access" }))
       .not.toHaveAttribute("aria-current");
     await status.unmount();
 
@@ -236,7 +322,41 @@ describe("navigation", () => {
     const audit = await renderNavigation(all, NAVIGATION, "/admin/audit-log");
     await expect
       .element(audit.getByRole("link", { name: "Organization" }))
+      .toHaveAttribute("aria-current", "page");
+    await audit.unmount();
+  });
+
+  test("Access is active on /admin/access and on every page of its sub-navigation", async () => {
+    const all: Permission[] = [
+      "users:read",
+      "service-accounts:read",
+      "oidc:read",
+      "organization:write",
+      "audit-log:read",
+    ];
+    for (const path of [
+      "/admin/access",
+      "/admin/users",
+      "/admin/users/abc",
+      "/admin/service-accounts",
+      "/admin/service-accounts/abc",
+      "/admin/oidc",
+    ]) {
+      const shown = await renderNavigation(all, NAVIGATION, path);
+      await expect
+        .element(shown.getByRole("link", { name: "Access" }))
+        .toHaveAttribute("aria-current", "page");
+      await expect
+        .element(shown.getByRole("link", { name: "Organization" }))
+        .not.toHaveAttribute("aria-current");
+      await shown.unmount();
+    }
+
+    const sibling = await renderNavigation(all, NAVIGATION, "/admin/users-archive");
+    await expect
+      .element(sibling.getByRole("link", { name: "Access" }))
       .not.toHaveAttribute("aria-current");
+    await sibling.unmount();
   });
 
   test("Statistics follows Alert Groups and needs alert-groups:read", async () => {

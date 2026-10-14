@@ -1,4 +1,12 @@
 {
+  "access": {
+    "nav": {
+      "label": "Access",
+      "oidc": "OIDC",
+      "serviceAccounts": "Service accounts",
+      "users": "Users"
+    }
+  },
   "accountLinks": {
     "admin": {
       "empty": "No messenger accounts linked.",
@@ -1257,19 +1265,16 @@
     "title": "Mentions"
   },
   "nav": {
+    "access": "Access",
     "alertGroups": "Alert Groups",
-    "auditLog": "Audit log",
     "connections": "Connections",
     "destinations": "Destinations",
     "integrations": "Integrations",
     "label": "Main",
-    "oidc": "OIDC",
     "organization": "Organization",
     "profile": "Profile",
     "routes": "Routes",
-    "serviceAccounts": "Service accounts",
-    "statistics": "Statistics",
-    "users": "Users"
+    "statistics": "Statistics"
   },
   "notes": {
     "add": "Add note",
@@ -1382,6 +1387,7 @@
     },
     "nav": {
       "alertHandling": "Alert handling",
+      "auditLog": "Audit log",
       "general": "General",
       "keyring": "Keyring",
       "label": "Organization",

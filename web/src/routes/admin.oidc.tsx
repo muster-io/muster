@@ -3,7 +3,8 @@
 
 // The OIDC settings (C-03.FR-5, FR-6, FR-8, FR-19, FR-21, FR-32): every setting, the group mapping editor, the write-only
 // client secret with its expiry date, the proxy, the warnings and "Check connection". The form keeps the version it
-// was read at and sends it as If-Match, so a save over a newer version is refused instead of overwriting it.
+// was read at and sends it as If-Match, so a save over a newer version is refused instead of overwriting it. It shows
+// the sub-navigation of Access.
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -28,6 +29,7 @@ import type {
   OidcWarning,
 } from "../api/gen/model";
 import { UpdateOidcSettingsBody } from "../api/gen/zod/oidc/oidc.zod";
+import { AccessLayout } from "../components/access-nav";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { fieldLabel } from "../components/audit-diff";
 import {
@@ -667,8 +669,10 @@ function OidcView() {
 
 function OidcPage() {
   return (
-    <RequirePermission permission="oidc:read">
-      <OidcView />
-    </RequirePermission>
+    <AccessLayout>
+      <RequirePermission permission="oidc:read">
+        <OidcView />
+      </RequirePermission>
+    </AccessLayout>
   );
 }

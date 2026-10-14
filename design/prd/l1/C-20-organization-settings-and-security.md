@@ -51,7 +51,8 @@ One "Organization" entry in the main navigation opens a sub-navigation of the Or
 zone), Severity levels (mapping, emoji and colours, values seen), Alert handling ("critical is Urgent", Instance
 labels), Security (the TOTP policy of C-03; the token grace period for OIDC users without an offline token), Outbound
 addresses (outbound address policy, allowed and denied entries), Retention, Keyring (Keyring status), and the pages of
-other capabilities kept with them: Outgoing heartbeat and System status (C-19), Lookup tables and Link rules (C-12).
+other capabilities kept with them: Outgoing heartbeat and System status (C-19), Lookup tables and Link rules (C-12),
+and the Audit log (C-03).
 
 ## API surface
 

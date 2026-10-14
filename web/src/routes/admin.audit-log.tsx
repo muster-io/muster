@@ -3,7 +3,8 @@
 
 // The Audit log (C-03.FR-15): entries newest first for a time range, by default the last 7 days, filtered by actor,
 // action and resource, with the filters in the URL. Each row shows the actor, with the token it acted through
-// (C-04.FR-6), the Transport and the diff, in which a Secret appears only as changed (C-03.FR-21).
+// (C-04.FR-6), the Transport and the diff, in which a Secret appears only as changed (C-03.FR-21). It keeps its own
+// address and shows the sub-navigation of Organization.
 
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
@@ -18,6 +19,7 @@ import type { AuditActor, AuditEntry, ListAuditLogParams, Transport } from "../a
 import { RequirePermission, useCan } from "../components/app-shell";
 import { AuditDiff } from "../components/audit-diff";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
+import { OrganizationLayout } from "../components/organization-nav";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -455,8 +457,10 @@ function AuditLogView() {
 
 function AuditLogPage() {
   return (
-    <RequirePermission permission="audit-log:read">
-      <AuditLogView />
-    </RequirePermission>
+    <OrganizationLayout>
+      <RequirePermission permission="audit-log:read">
+        <AuditLogView />
+      </RequirePermission>
+    </OrganizationLayout>
   );
 }

@@ -40,8 +40,16 @@ const SUB_ENTRIES = [
   "Lookup tables",
   "Link rules",
   "System status",
+  "Audit log",
 ];
-const MOVED = ["Security", "Outgoing heartbeat", "Lookup tables", "Link rules", "System status"];
+const MOVED = [
+  "Security",
+  "Outgoing heartbeat",
+  "Lookup tables",
+  "Link rules",
+  "System status",
+  "Audit log",
+];
 const STALE = "Someone else changed these settings. Reload to see them.";
 const RETENTION_ORDER = "Keep Alert Group summaries at least as long as alert details.";
 const P5_BANNER = "These values have no mapping and count as warning: P5.";
@@ -134,7 +142,7 @@ test("one Organization entry leads to General, which saves the time zone of mess
   const csp = watchCsp(page);
   await signInAdmin(page);
 
-  // 1. "Organization" and none of the moved entries → the eleven sub-entries → General → "Europe/Berlin" → "Saved.".
+  // 1. "Organization" and none of the moved entries → the twelve sub-entries → General → "Europe/Berlin" → "Saved.".
   await expect(nav(page, "Organization")).toBeVisible();
   for (const entry of MOVED) {
     await expect(nav(page, entry)).toHaveCount(0);
@@ -162,7 +170,9 @@ test("one Organization entry leads to General, which saves the time zone of mess
   );
   expect(org.time_zone).toBe("Europe/Berlin");
 
-  await nav(page, "Audit log").click();
+  await sub(page, "Audit log").click();
+  await expect(page).toHaveURL(/\/admin\/audit-log$/);
+  await expect(nav(page, "Organization")).toHaveAttribute("aria-current", "page");
   await page.getByLabel("Action", { exact: true }).fill("organization.updated");
   await page.getByLabel("Action", { exact: true }).press("Enter");
   await expect(page).toHaveURL(/[?&]action=organization\.updated/);

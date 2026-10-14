@@ -59,7 +59,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
 
 Profile → Personal access tokens (create with name, expiry and Permissions; list; revoke; the warning for tokens without
 expiry; for an OIDC account without an offline token, the date until which its tokens work without a new OIDC sign-in).
-Admin → Service accounts (create with Role; tokens; disable; delete).
+Access → Service accounts (create with Role; tokens; disable; delete).
 
 ## API surface
 

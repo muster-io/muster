@@ -30,7 +30,9 @@ test("creates a Service account with a token, changes its Role, disables, enable
   const csp = watchCsp(page);
   await signInAdmin(page);
   const nav = page.getByRole("navigation", { name: "Main" });
-  await nav.getByRole("link", { name: "Service accounts" }).click();
+  const access = page.getByRole("navigation", { name: "Access" });
+  await nav.getByRole("link", { name: "Access", exact: true }).click();
+  await access.getByRole("link", { name: "Service accounts" }).click();
   await expect(page).toHaveURL(`${APP}/admin/service-accounts`);
   await expect(page.getByText("No service accounts yet.")).toBeVisible();
 
@@ -45,9 +47,18 @@ test("creates a Service account with a token, changes its Role, disables, enable
   await expect(page.getByTestId("sa-role")).toHaveText("Admin");
   await expect(page.getByTestId("sa-status")).toHaveText("Active");
   await expect(page.getByTestId("sa-tokens")).toHaveText("0");
+  // The page of a Service account shows the sub-navigation of Access, with Access marked in the main navigation.
+  await expect(access.getByRole("link", { name: "Service accounts" })).toHaveAttribute(
+    "data-status",
+    "active",
+  );
+  await expect(nav.getByRole("link", { name: "Access", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
 
   // A name is taken once.
-  await page.getByRole("link", { name: "Service accounts" }).first().click();
+  await access.getByRole("link", { name: "Service accounts" }).click();
   await page.getByRole("button", { name: "Create service account" }).click();
   await page.getByRole("dialog").getByLabel("Name").fill("Terraform");
   await page.getByRole("dialog").getByRole("button", { name: "Create", exact: true }).click();
