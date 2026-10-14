@@ -1708,8 +1708,8 @@
 
 <h1 id="musteringestrejected">MusterIngestRejected<a class="headerlink" href="#musteringestrejected" title="Permanent link">&para;</a></h1>
 <h2 id="meaning">Meaning<a class="headerlink" href="#meaning" title="Permanent link">&para;</a></h2>
-<p>Muster refused ingestion requests: an oversized one, or more than 10 without a valid token, within 15 minutes. The
-chart rule is:</p>
+<p>Muster refused ingestion requests within 15 minutes: an oversized one, or more than 10 without a valid Integration
+token, counted per value of the label <code>integration</code>. The chart rule is:</p>
 <div class="highlight"><pre><span></span><code><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">integration</span><span class="p">,</span><span class="w"> </span><span class="nv">outcome</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="kr">increase</span><span class="o">(</span><span class="nv">muster_ingest_requests_total</span><span class="p">{</span><span class="nl">job</span><span class="o">=</span><span class="p">"</span><span class="s">muster</span><span class="p">",</span><span class="nl">outcome</span><span class="o">=</span><span class="p">"</span><span class="s">too_large</span><span class="p">"}[</span><span class="s">15m</span><span class="p">]</span><span class="o">))</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">integration</span><span class="p">,</span><span class="w"> </span><span class="nv">outcome</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="kr">increase</span><span class="o">(</span><span class="nv">muster_ingest_requests_total</span><span class="p">{</span><span class="nl">job</span><span class="o">=</span><span class="p">"</span><span class="s">muster</span><span class="p">",</span><span class="nl">outcome</span><span class="o">=</span><span class="p">"</span><span class="s">unauthorized</span><span class="p">"}[</span><span class="s">15m</span><span class="p">]</span><span class="o">))</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">10</span>
 </code></pre></div>
 <p>It fires at once (<code>for: 0m</code>), with severity <code>warning</code> and the labels <code>integration</code> — the id of the token's
@@ -1723,7 +1723,7 @@ Integration, or <code>unknown</code> when the token matched none — and <code>o
 <ul>
 <li>The refused requests are not stored or processed. When they come from an Alertmanager, its Alerts do not reach
   Muster, and with a Heartbeat on, the Integration soon becomes Heartbeat lost.</li>
-<li>Requests with valid tokens keep working.</li>
+<li>Requests with a valid Integration token and a body within <code>ingest.body_limit</code> keep working.</li>
 </ul>
 <h2 id="diagnosis">Diagnosis<a class="headerlink" href="#diagnosis" title="Permanent link">&para;</a></h2>
 <ol>
