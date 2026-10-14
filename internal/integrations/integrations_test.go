@@ -339,7 +339,7 @@ func (s *fakeStore) ListIntegrationInfo(context.Context, int64) ([]dbgen.ListInt
 	var out []dbgen.ListIntegrationInfoRow
 	for _, r := range s.rows {
 		if !r.deleted {
-			out = append(out, dbgen.ListIntegrationInfoRow{PublicID: r.PublicID, Name: r.Name})
+			out = append(out, dbgen.ListIntegrationInfoRow{PublicID: r.PublicID, Name: r.Name, Builtin: r.Builtin})
 		}
 	}
 	return out, nil
@@ -848,6 +848,100 @@ func TestRefreshInfo(t *testing.T) {
 	cancel()
 	<-done
 	svc.unexportInfo(a.PublicID)
+}
+
+// ingestSeries are the muster_ingest_requests_total series of the integration id with their values, as /metrics
+// shows them.
+func ingestSeries(t *testing.T, id string) []string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	metrics.Handler(nil).ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
+	var out []string
+	for line := range strings.Lines(rec.Body.String()) {
+		if strings.HasPrefix(line, `muster_ingest_requests_total{integration="`+id+`"`) {
+			out = append(out, strings.TrimSpace(line))
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// zeroIngestSeries are the series of muster_ingest_requests_total an Integration has before any request.
+func zeroIngestSeries(id string) []string {
+	return []string{
+		`muster_ingest_requests_total{integration="` + id + `",outcome="accepted"} 0`,
+		`muster_ingest_requests_total{integration="` + id + `",outcome="too_large"} 0`,
+		`muster_ingest_requests_total{integration="` + id + `",outcome="unauthorized"} 0`,
+	}
+}
+
+// TestIngestSeries: every Integration that is not deleted has its series of muster_ingest_requests_total at zero
+// before its first request — one already stored when the replica starts and one created later — so that increase()
+// sees the first rejected request; the built-in Integration, which takes no token, has none; a rename keeps the
+// counts and a deletion, here or on another replica, removes the series.
+func TestIngestSeries(t *testing.T) {
+	svc, store, _, _ := newService(t)
+	if err := EnsureBuiltin(t.Context(), store, orgID, t0); err != nil {
+		t.Fatal(err)
+	}
+	seeded, err := store.InsertIntegration(t.Context(), dbgen.InsertIntegrationParams{OrgID: orgID,
+		PublicID: "NTSEEDEDAAAAA1", Name: "seeded", ConnectionMode: ConnectionWebhookOnly, StaticLabels: []byte("{}"),
+		DuplicateWindowSeconds: 45, HeartbeatTimeoutSeconds: 300, Now: t0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ingestSeries(t, "NTSEEDEDAAAAA1"); len(got) != 0 {
+		t.Fatalf("before the start = %q", got)
+	}
+	// The start: RunInfo refreshes at once.
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		svc.RunInfo(ctx, nil)
+		close(done)
+	}()
+	waitFor(t, func() bool {
+		return slices.Equal(ingestSeries(t, "NTSEEDEDAAAAA1"), zeroIngestSeries("NTSEEDEDAAAAA1"))
+	})
+	cancel()
+	<-done
+	builtin := store.rows[0].PublicID
+	if !store.rows[0].Builtin || len(ingestSeries(t, builtin)) != 0 {
+		t.Errorf("built-in %s: %q", builtin, ingestSeries(t, builtin))
+	}
+
+	created, err := svc.Create(t.Context(), by, input("created"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ingestSeries(t, created.PublicID); !slices.Equal(got, zeroIngestSeries(created.PublicID)) {
+		t.Errorf("after the creation = %q", got)
+	}
+	metrics.IngestRequests.With(created.PublicID, "too_large").Inc()
+	if _, err := svc.Update(t.Context(), by, created.PublicID, nil, input("renamed")); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RefreshInfo(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := ingestSeries(t, created.PublicID); !slices.Contains(got,
+		`muster_ingest_requests_total{integration="`+created.PublicID+`",outcome="too_large"} 1`) || len(got) != 3 {
+		t.Errorf("after the rename = %q", got)
+	}
+
+	if err := svc.Delete(t.Context(), by, created.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := ingestSeries(t, created.PublicID); len(got) != 0 {
+		t.Errorf("after the deletion = %q", got)
+	}
+	store.byID(seeded).deleted = true // on another replica
+	if err := svc.RefreshInfo(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := ingestSeries(t, "NTSEEDEDAAAAA1"); len(got) != 0 {
+		t.Errorf("after a deletion elsewhere = %q", got)
+	}
 }
 
 func waitFor(t *testing.T, cond func() bool) {

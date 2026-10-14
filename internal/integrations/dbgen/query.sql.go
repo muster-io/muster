@@ -381,7 +381,7 @@ func (q *Queries) LastSnapshotTimes(ctx context.Context, arg LastSnapshotTimesPa
 }
 
 const listIntegrationInfo = `-- name: ListIntegrationInfo :many
-SELECT public_id, name
+SELECT public_id, name, builtin
 FROM integrations
 WHERE org_id = $1 AND deleted_at IS NULL
 ORDER BY id
@@ -390,9 +390,11 @@ ORDER BY id
 type ListIntegrationInfoRow struct {
 	PublicID string
 	Name     string
+	Builtin  bool
 }
 
-// ListIntegrationInfo lists the id and the name of every Integration that is not deleted, for muster_integration_info.
+// ListIntegrationInfo lists the id, the name and whether it is built in of every Integration that is not deleted, for
+// muster_integration_info and the series of muster_ingest_requests_total.
 func (q *Queries) ListIntegrationInfo(ctx context.Context, orgID int64) ([]ListIntegrationInfoRow, error) {
 	rows, err := q.db.Query(ctx, listIntegrationInfo, orgID)
 	if err != nil {
@@ -402,7 +404,7 @@ func (q *Queries) ListIntegrationInfo(ctx context.Context, orgID int64) ([]ListI
 	items := []ListIntegrationInfoRow{}
 	for rows.Next() {
 		var i ListIntegrationInfoRow
-		if err := rows.Scan(&i.PublicID, &i.Name); err != nil {
+		if err := rows.Scan(&i.PublicID, &i.Name, &i.Builtin); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

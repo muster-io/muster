@@ -2,8 +2,8 @@
 
 ## Meaning
 
-Muster refused ingestion requests: an oversized one, or more than 10 without a valid token, within 15 minutes. The
-chart rule is:
+Muster refused ingestion requests within 15 minutes: an oversized one, or more than 10 without a valid Integration
+token, counted per value of the label `integration`. The chart rule is:
 
 ```promql
 sum by (integration, outcome) (increase(muster_ingest_requests_total{job="muster",outcome="too_large"}[15m])) > 0 or sum by (integration, outcome) (increase(muster_ingest_requests_total{job="muster",outcome="unauthorized"}[15m])) > 10
@@ -20,7 +20,7 @@ Integration, or `unknown` when the token matched none — and `outcome`. It is a
 
 - The refused requests are not stored or processed. When they come from an Alertmanager, its Alerts do not reach
   Muster, and with a Heartbeat on, the Integration soon becomes Heartbeat lost.
-- Requests with valid tokens keep working.
+- Requests with a valid Integration token and a body within `ingest.body_limit` keep working.
 
 ## Diagnosis
 

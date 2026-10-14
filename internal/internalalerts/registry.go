@@ -106,12 +106,12 @@ var HeartbeatLost = register(&Definition{
 	NameLabel:    "integration_name",
 	StaticLabels: true,
 	Condition: "An Integration is Heartbeat lost: no Heartbeat signal arrived within its Heartbeat timeout, so the " +
-		"path from its Alertmanager to Muster may be broken and Stale resolution is paused. It resolves with the next " +
-		"signal, when the Heartbeat is turned off or when the Integration is deleted.",
+		"path from its Alertmanager to Muster may be interrupted and Stale resolution is paused. It resolves with the " +
+		"next signal, when the Heartbeat is turned off or when the Integration is deleted.",
 	Summary: "No Heartbeat from the Alertmanager of Integration {name}",
 	Description: "Muster has received no Heartbeat signal for Integration {name} within its Heartbeat timeout: " +
-		"Alertmanager, its network path to Muster or the Heartbeat route may be broken, and new alerts may not arrive. " +
-		"Nothing is resolved as Stale until the signal returns.",
+		"Alertmanager, its Heartbeat route or its network path to Muster may have stopped working, and new alerts may " +
+		"not arrive. Nothing is resolved as Stale until the signal returns.",
 	Capability: "C-07",
 })
 

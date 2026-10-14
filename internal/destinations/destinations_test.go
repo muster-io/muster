@@ -239,13 +239,92 @@ func TestInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := scrape()
-	if strings.Contains(out, `name="ops"}`) || strings.Contains(out, "DSAAAAAAAAAAA2") || !strings.Contains(out,
-		`name="ops-2"`) {
+	if strings.Contains(out, `name="ops"}`) || strings.Contains(out, `muster_destination_info{destination="DSAAAAAAAAAAA2"`) ||
+		!strings.Contains(out, `name="ops-2"`) {
 		t.Errorf("after rename %s", out)
 	}
 	f.fail["ListDestinationInfo"] = errBoom
 	if err := s.RefreshInfo(t.Context()); !errors.Is(err, errBoom) {
 		t.Errorf("failed = %v", err)
+	}
+}
+
+// counterSeries are the series of muster_delivery_attempts_total and muster_template_errors_total of the Destination
+// id with their values, as /metrics shows them.
+func counterSeries(id string) []string {
+	var out []string
+	for line := range strings.Lines(scrape()) {
+		if strings.HasPrefix(line, `muster_delivery_attempts_total{destination="`+id+`"`) ||
+			strings.HasPrefix(line, `muster_template_errors_total{route="",destination="`+id+`"`) {
+			out = append(out, strings.TrimSpace(line))
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// zeroCounterSeries are the counter series a Destination of type typ has before any attempt.
+func zeroCounterSeries(id, typ string) []string {
+	kinds := []string{"final_edit", "publication", "storm_summary", "thread_reply", "update"}
+	if typ == TypeWebhook {
+		kinds = append(kinds, "webhook_event")
+	}
+	var out []string
+	for _, kind := range kinds {
+		out = append(out, `muster_delivery_attempts_total{destination="`+id+`",kind="`+kind+`",outcome="delivered"} 0`)
+	}
+	if typ == TypeWebhook {
+		out = append(out, `muster_template_errors_total{route="",destination="`+id+`",template="webhook_request"} 0`)
+	}
+	return out
+}
+
+// TestCounterSeries: every Destination that is not deleted has at zero, before its first attempt, its series of
+// muster_delivery_attempts_total with the outcome delivered for each kind its type sends and, for an outgoing webhook,
+// of muster_template_errors_total for its request template, so that increase() sees the first one: those stored when
+// the replica starts and those another replica creates once their hint arrives. A deleted Destination keeps its
+// series, which count its final edits.
+func TestCounterSeries(t *testing.T) {
+	f := newStore()
+	f.info = []dbgen.ListDestinationInfoRow{{PublicID: "DSCNTAAAAAAAM1", Name: "mm", Type: TypeMattermost},
+		{PublicID: "DSCNTAAAAAAAT1", Name: "tg", Type: TypeTelegram}}
+	s := New(1, f)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		s.RunInfo(ctx, nil)
+		close(done)
+	}()
+	waitSeries(t, "DSCNTAAAAAAAM1", TypeMattermost)
+	waitSeries(t, "DSCNTAAAAAAAT1", TypeTelegram)
+	if got := counterSeries("DSCNTAAAAAAAW1"); len(got) != 0 {
+		t.Fatalf("a Destination not created yet: %q", got)
+	}
+	f.info = append(f.info, dbgen.ListDestinationInfoRow{PublicID: "DSCNTAAAAAAAW1", Name: "hook", Type: TypeWebhook})
+	s.InfoChanged()
+	s.InfoChanged() // never blocks
+	waitSeries(t, "DSCNTAAAAAAAW1", TypeWebhook)
+	cancel()
+	<-done
+
+	f.info = nil
+	if err := s.RefreshInfo(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := counterSeries("DSCNTAAAAAAAW1"); !slices.Equal(got, zeroCounterSeries("DSCNTAAAAAAAW1", TypeWebhook)) {
+		t.Errorf("after the deletion = %q", got)
+	}
+}
+
+// waitSeries waits until the Destination id of type typ has its counter series at zero.
+func waitSeries(t *testing.T, id, typ string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !slices.Equal(counterSeries(id), zeroCounterSeries(id, typ)) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: %q", id, counterSeries(id))
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

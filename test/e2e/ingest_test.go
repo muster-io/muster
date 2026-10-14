@@ -62,6 +62,14 @@ func TestIngestion(t *testing.T) {
 		"static_labels":{"cluster":"prod-eu"},"duplicate_window_seconds":45,"heartbeat":{"enabled":false}}`,
 		http.StatusCreated)
 	id := in["id"].(string)
+	// Its series exist at zero before its first request, on every replica, so that increase() in
+	// MusterIngestRejected sees the first rejected one.
+	for _, rr := range h.Replicas {
+		eventually(t, "the series at zero", func() bool {
+			return rr.Metric(t, `muster_ingest_requests_total{integration="`+id+`",outcome="too_large"}`) == "0" &&
+				rr.Metric(t, `muster_ingest_requests_total{integration="`+id+`",outcome="unauthorized"}`) == "0"
+		})
+	}
 	created := admin.json(http.MethodPost, "/api/v1/integrations/"+id+"/tokens", `{"name":"rotation-1"}`,
 		http.StatusCreated)
 	token, snippet := created["value"].(string), created["alertmanager_snippet"].(string)

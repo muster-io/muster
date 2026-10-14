@@ -159,6 +159,9 @@ func TestSeries(t *testing.T) {
 		Labels: []Label{info("version", "the version")}})
 
 	requests.With("int_7Kq2", "accepted").Add(2)
+	requests.With("int_gone", "too_large")
+	requests.Delete("int_gone", "too_large")
+	requests.Delete("int_never", "accepted")
 	latency.With().Update(0.7)
 	queue.With().Set(3)
 	pool.Func(func() float64 { return 7 })
