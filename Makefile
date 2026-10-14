@@ -399,10 +399,16 @@ $(DOCS_DEPS): docs/requirements.txt
 		-r docs/requirements.txt
 	@touch $@
 
-# $(call go-install,<package>@<version>,<binary>) installs a tool as $@ with the project's toolchain.
+# $(call go-install,<package>@<version>,<binary>) installs a tool as $@ with the project's toolchain. A failed install
+# runs again after 10 and then 20 seconds, so that a transient error of the module proxy or the checksum database
+# does not fail the build; checksums are still verified.
 define go-install
 @mkdir -p $(TOOLS)/.install-$(2)
-GOTOOLCHAIN=$(GO_TOOLCHAIN) GOBIN=$(abspath $(TOOLS))/.install-$(2) $(GO) install $(1)
+for attempt in 1 2 3; do \
+	GOTOOLCHAIN=$(GO_TOOLCHAIN) GOBIN=$(abspath $(TOOLS))/.install-$(2) $(GO) install $(1) && break; \
+	if [ $$attempt -eq 3 ]; then exit 1; fi; \
+	echo "go install $(1) failed, trying again in $$((attempt * 10)) seconds"; sleep $$((attempt * 10)); \
+done
 mv $(TOOLS)/.install-$(2)/$(2) $@
 rmdir $(TOOLS)/.install-$(2)
 endef
