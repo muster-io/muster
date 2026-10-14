@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# The documentation site (C-21), built by Zensical from docs/ with make docs; Material for MkDocs reads the same file
+# and is the fallback generator. strict turns every warning into an error, and the validation block makes broken links
+# and anchors warnings, so they fail the build. Zensical ignores validation.nav, which Material for MkDocs reads, so
+# make docs checks the nav after the build: every page it names exists, and every page is in it.
+site_name: Muster
+site_description: Alert grouping and on-call after Alertmanager
+site_url: https://muster-io.github.io/muster/
+repo_url: https://github.com/muster-io/muster
+repo_name: muster-io/muster
+copyright: Copyright The Muster Authors
+docs_dir: docs
+site_dir: site
+strict: true
+
+# brand/README.md is the notes on the Muster mark, not a page; the requirements files pin the toolchain.
+exclude_docs: |
+  brand/README.md
+  requirements.*
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+
+theme:
+  name: material
+  language: en
+  # The system fonts: the site loads nothing from Google Fonts (NFR-7).
+  font: false
+  logo: brand/muster-mark.svg
+  favicon: brand/muster-mark-tile.svg
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+
+# The version selector reads versions.json at the root of the published site, which docspublish writes.
+extra:
+  version:
+    provider: mike
+
+markdown_extensions:
+  - admonition
+  - tables
+  - attr_list
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Alertmanager:
+      - integrations/alertmanager.md
+      - integrations/heartbeat.md
+  - Messengers:
+      - messengers/mattermost.md
+      - messengers/telegram.md
+      - messengers/account-links.md
+  - Outgoing webhooks:
+      - outgoing-webhooks/events.md
+      - outgoing-webhooks/templates.md
+  - Sign-in:
+      - sign-in/oidc-keycloak.md
+  - Reference:
+      - reference/index.md
+      - reference/metrics.md
+      - reference/log-events.md
+      - reference/internal-alerts.md
+      - reference/environment.md
+      - reference/chart-values.md
+      - reference/api.md

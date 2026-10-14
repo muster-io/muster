@@ -4,73 +4,94 @@
   "additionalProperties": false,
   "properties": {
     "global": {
+      "description": "Helm's global values, shared with subcharts; Muster reads none of them.",
       "type": "object"
     },
     "image": {
+      "description": "The container image of Muster.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "repository": {
+          "description": "The image repository.",
           "type": "string"
         },
         "tag": {
+          "description": "The image tag; empty uses the appVersion of the chart.",
           "type": ["string", "null"]
         },
         "pullPolicy": {
+          "description": "The pull policy of the image.",
           "type": "string",
           "enum": ["Always", "Never", "IfNotPresent"]
         }
       }
     },
     "imagePullSecrets": {
+      "description": "The Secrets for pulling the image from a private registry, as in a pod spec.",
       "type": "array"
     },
     "nameOverride": {
+      "description": "Replaces the chart name in the names of the resources.",
       "type": "string"
     },
     "fullnameOverride": {
+      "description": "Replaces the whole name of the resources.",
       "type": "string"
     },
     "replicas": {
+      "description": "The number of Muster replicas; one of them is the Leader at a time.",
       "type": "integer",
       "minimum": 1
     },
     "existingSecret": {
+      "description": "The Secret that holds the master keys and, under the keys named below, the database password or URL and the password of the bootstrap Admin. Required: the chart never generates the master keys.",
       "type": "string"
     },
     "masterKeysKey": {
+      "description": "The key of existingSecret that holds the master keys, one per line (MUSTER_SECRET_KEYS_FILE).",
       "type": "string",
       "minLength": 1
     },
     "database": {
+      "description": "The database connection.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "host": {
+          "description": "The database host (MUSTER_DATABASE_HOST); ignored when urlKey is set.",
           "type": "string"
         },
         "port": {
+          "description": "The database port (MUSTER_DATABASE_PORT); ignored when urlKey is set.",
           "type": "integer"
         },
         "name": {
+          "description": "The database name (MUSTER_DATABASE_NAME); ignored when urlKey is set.",
           "type": "string"
         },
         "user": {
+          "description": "The database user (MUSTER_DATABASE_USER); ignored when urlKey is set.",
           "type": "string"
         },
         "sslmode": {
+          "description": "The sslmode of the database connections (MUSTER_DATABASE_SSLMODE); empty uses Muster's default, prefer.",
           "type": "string"
         },
         "passwordKey": {
+          "description": "The key of existingSecret that holds the database password (MUSTER_DATABASE_PASSWORD_FILE); ignored when urlKey is set.",
           "type": "string"
         },
         "urlKey": {
+          "description": "The key of existingSecret that holds the whole connection as a URL (MUSTER_DATABASE_URL), used instead of the fields above.",
           "type": "string"
         },
         "sessionHost": {
+          "description": "The host of the session connection, for a pooler in transaction mode (MUSTER_DATABASE_SESSION_HOST).",
           "type": "string"
         },
         "sessionPort": {
+          "description": "The port of the session connection (MUSTER_DATABASE_SESSION_PORT); null uses the port of the main connection.",
           "type": ["integer", "null"],
           "minimum": 1,
           "maximum": 65535
@@ -78,119 +99,153 @@
       }
     },
     "publicURL": {
+      "description": "The address of Muster for people and messengers (MUSTER_PUBLIC_URL).",
       "type": "string"
     },
     "ingestURL": {
+      "description": "The address Alertmanager sends its notifications to (MUSTER_INGEST_URL); empty uses publicURL.",
       "type": "string"
     },
     "bootstrapAdmin": {
+      "description": "The bootstrap Admin, created at start while the Organization has no Admin.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "email": {
+          "description": "The email, also the login, of the bootstrap Admin (MUSTER_BOOTSTRAP_ADMIN_EMAIL).",
           "type": "string"
         },
         "passwordKey": {
+          "description": "The key of existingSecret that holds the password of the bootstrap Admin (MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE).",
           "type": "string"
         }
       }
     },
     "extraEnv": {
+      "description": "Extra environment variables of the Muster containers, as in a container spec.",
       "type": "array"
     },
     "resources": {
+      "description": "The resource requests and limits of the Muster containers.",
       "type": "object"
     },
     "podSecurityContext": {
+      "description": "The security context of the pods.",
       "type": "object"
     },
     "securityContext": {
+      "description": "The security context of the Muster containers.",
       "type": "object"
     },
     "podAnnotations": {
+      "description": "Extra annotations of the pods.",
       "type": "object"
     },
     "podLabels": {
+      "description": "Extra labels of the pods.",
       "type": "object"
     },
     "nodeSelector": {
+      "description": "The node selector of the pods.",
       "type": "object"
     },
     "tolerations": {
+      "description": "The tolerations of the pods.",
       "type": "array"
     },
     "affinity": {
+      "description": "The affinity of the pods.",
       "type": "object"
     },
     "topologySpreadConstraints": {
+      "description": "The topology spread constraints of the pods.",
       "type": "array"
     },
     "priorityClassName": {
+      "description": "The priority class of the pods; empty sets none.",
       "type": "string"
     },
     "serviceAccount": {
+      "description": "The service account of the pods.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "create": {
+          "description": "Creates the service account.",
           "type": "boolean"
         },
         "name": {
+          "description": "The name of the service account; empty uses the full name of the release when the chart creates it, and default otherwise.",
           "type": "string"
         },
         "annotations": {
+          "description": "Extra annotations of the service account.",
           "type": "object"
         },
         "automountServiceAccountToken": {
+          "description": "Mounts the token of the service account into the pods; Muster does not call the Kubernetes API.",
           "type": "boolean"
         }
       }
     },
     "service": {
+      "description": "The Services of the three listeners.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "app": {
+          "description": "The Service of the app listener: the UI and the API.",
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "type": {
+              "description": "The type of the Service.",
               "type": "string"
             },
             "port": {
+              "description": "The port of the Service, also the container port and the listen port (MUSTER_LISTEN_APP).",
               "type": "integer"
             },
             "annotations": {
+              "description": "Extra annotations of the Service.",
               "type": "object"
             }
           }
         },
         "ingest": {
+          "description": "The Service of the ingest listener: ingestion, Heartbeats and messenger callbacks.",
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "type": {
+              "description": "The type of the Service.",
               "type": "string"
             },
             "port": {
+              "description": "The port of the Service, also the container port and the listen port (MUSTER_LISTEN_INGEST).",
               "type": "integer"
             },
             "annotations": {
+              "description": "Extra annotations of the Service.",
               "type": "object"
             }
           }
         },
         "internal": {
+          "description": "The Service of the internal listener: the health checks and /metrics.",
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "type": {
+              "description": "The type of the Service.",
               "type": "string"
             },
             "port": {
+              "description": "The port of the Service, also the container port and the listen port (MUSTER_LISTEN_INTERNAL).",
               "type": "integer"
             },
             "annotations": {
+              "description": "Extra annotations of the Service.",
               "type": "object"
             }
           }
@@ -198,85 +253,108 @@
       }
     },
     "ingress": {
+      "description": "The Ingresses of the app and ingest listeners; the internal listener is never exposed.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "description": "Creates the Ingresses.",
           "type": "boolean"
         },
         "className": {
+          "description": "The class of the Ingresses; empty uses the cluster's default.",
           "type": "string"
         },
         "annotations": {
+          "description": "Extra annotations of the Ingresses.",
           "type": "object"
         },
         "app": {
+          "description": "The hosts and tls of the Ingress of the app listener, as in an Ingress spec.",
           "type": "object"
         },
         "ingest": {
+          "description": "The hosts and tls of the Ingress of the ingest listener, as in an Ingress spec.",
           "type": "object"
         }
       }
     },
     "httpRoute": {
+      "description": "The Gateway API HTTPRoutes of the app and ingest listeners; the internal listener is never exposed.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "description": "Creates the HTTPRoutes.",
           "type": "boolean"
         },
         "parentRefs": {
+          "description": "The Gateways the HTTPRoutes attach to, as in an HTTPRoute spec.",
           "type": "array"
         },
         "annotations": {
+          "description": "Extra annotations of the HTTPRoutes.",
           "type": "object"
         },
         "labels": {
+          "description": "Extra labels of the HTTPRoutes.",
           "type": "object"
         },
         "app": {
+          "description": "The hostnames of the HTTPRoute of the app listener.",
           "type": "object"
         },
         "ingest": {
+          "description": "The hostnames of the HTTPRoute of the ingest listener.",
           "type": "object"
         }
       }
     },
     "serviceMonitor": {
+      "description": "A Prometheus Operator ServiceMonitor that scrapes /metrics on the internal listener.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "description": "Creates the ServiceMonitor.",
           "type": "boolean"
         },
         "interval": {
+          "description": "The scrape interval.",
           "type": "string"
         },
         "scrapeTimeout": {
+          "description": "The scrape timeout.",
           "type": "string"
         },
         "labels": {
+          "description": "Extra labels of the ServiceMonitor, such as the one the Prometheus selects.",
           "type": "object"
         }
       }
     },
     "networkPolicy": {
+      "description": "A NetworkPolicy of the pods.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "description": "Creates a NetworkPolicy that allows incoming traffic to the three listener ports only.",
           "type": "boolean"
         }
       }
     },
     "podDisruptionBudget": {
+      "description": "A PodDisruptionBudget of the pods.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "description": "Creates the PodDisruptionBudget.",
           "type": "boolean"
         },
         "maxUnavailable": {
+          "description": "The number or percentage of pods that may be unavailable at a time.",
           "oneOf": [
             {
               "type": "integer",

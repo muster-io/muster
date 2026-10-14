@@ -8,11 +8,13 @@ depends_on: [S-053, S-051]
 covers: [C-21.FR-1, C-21.FR-2, C-21.FR-4, C-21.FR-5, C-21.AC-1]
 files_touched:
   - mkdocs.yml
+  - docs/requirements.in
   - docs/requirements.txt
   - docs/index.md
   - internal/tools/refgen/main.go
   - internal/tools/refgen/refgen_test.go
   - internal/config/config.go
+  - internal/config/config_test.go
   - deploy/helm/muster/values.schema.json
   - internal/tools/docspublish/main.go
   - internal/tools/docspublish/docspublish_test.go
@@ -20,6 +22,7 @@ files_touched:
   - .gitignore
   - .github/workflows/ci.yml
   - .github/workflows/docs.yml
+  - AGENTS.md
 acceptance:
   - "[C-21.FR-1] `make docs` builds the site from `docs/` with Zensical — or with Material for MkDocs and the same `mkdocs.yml` if Zensical cannot build it — in strict mode, with the toolchain pinned by hash in `docs/requirements.txt`."
   - "[C-21.FR-1, C-21.AC-1] The publishing tool writes a build into the `gh-pages` branch under `<major.minor>/` for a release and `latest/` for `master`, keeps `versions.json` and the root redirect to the newest release — to `latest/` while no release is published — and refuses to change a minor older than the newest one."
@@ -61,22 +64,24 @@ issue: 57
   the packages in that environment next to the other tooling licences, without failing on them.
 - **Configuration** (`mkdocs.yml`): `site_url` `https://muster-io.github.io/muster/`, the repository link, `docs_dir`
   `docs`, `strict: true` with link and anchor validation turned into errors, the `pymdownx.superfences` fence for
-  `mermaid`, admonitions, tables, the search, the version selector reading `versions.json`, and the navigation:
-  Home; Alertmanager (`integrations/alertmanager.md`, `integrations/heartbeat.md`); Messengers
-  (`messengers/mattermost.md`, `messengers/telegram.md`, `messengers/account-links.md` of S-051); Outgoing webhooks
-  (`outgoing-webhooks/events.md`, `outgoing-webhooks/templates.md`); Sign-in (`sign-in/oidc-keycloak.md`); Reference.
-  Later stories add their pages to it. `exclude_docs` leaves out `brand/README.md`, the notes on the Muster mark, which
-  is not a page of the site; the SVG files of `docs/brand/` stay available to the theme as logo and favicon.
+  `mermaid`, admonitions, tables, the search, the version selector reading `versions.json`, and the navigation: Home;
+  Alertmanager (`integrations/alertmanager.md`, `integrations/heartbeat.md`); Messengers (`messengers/mattermost.md`,
+  `messengers/telegram.md`, `messengers/account-links.md` of S-051); Outgoing webhooks (`outgoing-webhooks/events.md`,
+  `outgoing-webhooks/templates.md`); Sign-in (`sign-in/oidc-keycloak.md`); Reference. Later stories add their pages to
+  it. `exclude_docs` leaves out `brand/README.md`, the notes on the Muster mark, which is not a page of the site, and
+  `requirements.*`, the pins of the toolchain; the SVG files of `docs/brand/` stay available to the theme as logo and
+  favicon.
 - **Home** (`docs/index.md`): what Muster is, a Mermaid diagram of the path Alertmanager → Muster → Destinations, and
   links to the sections.
 - **Generated references** (C-21.FR-2, FR-4; `internal/tools/refgen`, `make generate`): besides `metrics.md`,
   `log-events.md` and `internal-alerts.md`, it writes `docs/reference/environment.md` from the bootstrap settings
-  registry of `internal/config` (name, default, description, the `_FILE` form) and `docs/reference/chart-values.md`
-  from `deploy/helm/muster/values.schema.json` (path, type, default, description), which gains a description for every
-  value. `make generate-check` fails when any of them is not current. Everything in `docs/reference/` is generated:
-  `make generate` removes `docs/reference/*.md` before refgen runs (`Makefile`), so a hand-written page there would be
-  deleted. refgen therefore also writes `docs/reference/index.md`, the list of the reference pages, and
-  `docs/reference/api.md`, the API page below, from text kept in refgen.
+  registry of `internal/config` (name, default, the `_FILE` form, whether it is a secret, description) and
+  `docs/reference/chart-values.md` from `deploy/helm/muster/values.schema.json` (path, type, description), which gains a
+  description for every value, and the defaults of `deploy/helm/muster/values.yaml`. `make generate-check` fails when
+  any of them is not current. Everything in `docs/reference/` is generated: `make generate` removes
+  `docs/reference/*.md` before refgen runs (`Makefile`), so a hand-written page there would be deleted. refgen therefore
+  also writes `docs/reference/index.md`, the list of the reference pages, and `docs/reference/api.md`, the API page
+  below, from text kept in refgen.
 - **API reference** (`docs/reference/api.md`, written by refgen): a page that explains the conventions of
   `api/README.md` in short and links to `api/spec/index.html`. Before the site is built, `make docs` renders
   `api/openapi.yaml` with Redocly CLI — the `@redocly/cli` pinned in `web/package.json` that `make lint` already runs,
@@ -162,6 +167,19 @@ None.
 - Pages written by earlier stories move into the navigation unchanged; a page that breaks the strict build is fixed in
   this pull request.
 - `operator_attention`: enabling GitHub Pages in the repository settings.
+- Corrections made in the pull request: `docs/requirements.in` holds the single pin from which
+  `docs/requirements.txt` is compiled with hashes, and its comment and the header of `requirements.txt` record the
+  command; `internal/config/config_test.go` tests `config.Variables()`, the registry the environment page is generated
+  from; `AGENTS.md` lists `make docs`, `make docs-serve` and `make docs-check` among the Make targets. The chart values
+  take their defaults from `values.yaml`, not from the schema, which has no defaults, so that they are kept in one
+  place. `exclude_docs` also leaves out `docs/requirements.*`, which the site would otherwise publish.
+- Zensical checks links to pages and their anchors in strict mode, but not links to files that are not pages, such as
+  the rendered API reference, and it ignores `validation.nav`: a nav entry to a missing page and a page left out of the
+  nav both build. `make docs` therefore checks after the build that `site/reference/api/spec/index.html` exists, that
+  every page the nav of `mkdocs.yml` names exists under `docs/`, and that every page under `docs/`, except those
+  `exclude_docs` names, is in the nav.
+- No page of the site requests fonts from Google (NFR-7): `theme.font` is `false`, and the API reference is rendered
+  with `--disableGoogleFont`.
 
 ## Coverage
 
