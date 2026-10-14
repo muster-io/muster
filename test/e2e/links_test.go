@@ -150,9 +150,7 @@ func TestLinksAndLookupTables(t *testing.T) {
 	if after-before != 1 {
 		t.Errorf("muster_template_errors_total{template=\"link_rule\"} grew by %d on one read, want 1", after-before)
 	}
-	if _, _, ok := reader.LogLine("link_rule_failed"); !ok {
-		t.Error("no link_rule_failed")
-	}
+	reader.WaitLogLine(t, "link_rule_failed")
 
 	// C-12.FR-9: the built-in rule cannot be deleted; the table a rule reads cannot be deleted.
 	var rules struct {

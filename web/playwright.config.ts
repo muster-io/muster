@@ -17,6 +17,9 @@ export default defineConfig({
   forbidOnly: process.env.CI !== undefined,
   retries: 0,
   timeout: 90_000,
+  // The whole run ends within 15 minutes, before the 20 of the CI job, so that a run that hangs still reports which
+  // specs were running instead of being cut off without its log.
+  globalTimeout: 15 * 60_000,
   expect: { timeout: 10_000 },
   reporter: [["list"]],
   use: {

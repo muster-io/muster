@@ -49,7 +49,8 @@ The Makefile is the only entry point:
 | `make compose-check` | checks the compose example with `docker compose config` |
 | `make dev-db` | starts the development PostgreSQL on `127.0.0.1:55432` with Docker Compose |
 | `make dev` | starts the development PostgreSQL, builds the binary and runs `muster dev` |
-| `make e2e` | builds the binary and runs the end-to-end suite on `muster dev`; `E2E_REPLICAS=2` runs two replicas |
+| `make e2e` | builds the binary and runs the end-to-end suites on `muster dev`, Go and then Playwright; `E2E_REPLICAS=2` runs the Go suite with two replicas |
+| `make e2e-go`, `make e2e-web` | runs one of the two suites: the Go suite, or the Playwright specs of the SPA |
 | `make load-test` | runs the load test against a running `muster dev`; `LOAD_TEST_FLAGS` passes `-rate` and `-duration` |
 | `make ci` | runs the pull-request tier locally: `lint`, `lint-arch`, `generate-check`, `licenses`, `test-race`, `build` |
 | `make clean` | removes `bin/`: the binary, the coverage profile and the installed tools |
@@ -73,11 +74,12 @@ In CI, the `ci` workflow runs the jobs `lint`, `lint-arch`, `test`, `build`, `ge
 `licenses`, `vulncheck`, `helm-check` (`make helm-check rules-test`), `compose-check` (`make compose-check`, then the
 example's PostgreSQL settings) and `image-scan` (a snapshot release whose images are checked and scanned with Trivy) on
 every pull request, with `make test-race` in `test`, and on every push to `master`, with `make test`. A pull request
-also runs the `e2e` job (`make e2e`) and gets the non-blocking `oasdiff` report of breaking changes to the API spec, and
-the `codeql` workflow analyses the Go and TypeScript code. The `nightly` workflow runs `mutation` (`make mutation`, its
-report kept as an artifact), `vulncheck`, `e2e-two-replicas` (`make e2e E2E_REPLICAS=2`) and `load-test`: the load test
-against `muster dev`, then against the compose example started with the build under test, with the peak memory of its
-Muster and PostgreSQL containers in the job summary.
+also runs the end-to-end suites as the jobs `e2e-go` (`make e2e-go`) and `e2e-web` (`make e2e-web`) side by side,
+which the `e2e` job requires to pass, and gets the non-blocking `oasdiff` report of breaking changes to the API spec,
+and the `codeql` workflow analyses the Go and TypeScript code. The `nightly` workflow runs `mutation` (`make mutation`,
+its report kept as an artifact), `vulncheck`, `e2e-two-replicas` (`make e2e-go E2E_REPLICAS=2`), `e2e-web`
+(`make e2e-web`) and `load-test`: the load test against `muster dev`, then against the compose example started with
+the build under test, with the peak memory of its Muster and PostgreSQL containers in the job summary.
 Pushes to other branches run nothing: open a pull request, a draft one if the work is not ready, to get the checks.
 
 ## Releases

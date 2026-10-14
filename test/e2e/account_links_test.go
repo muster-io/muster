@@ -596,6 +596,8 @@ func TestAccountLinks(t *testing.T) {
 	}
 	e.mm.press(rp.ID, "unack", fakemattermost.BobUserID)
 	eventually(t, "the unacknowledgement", func() bool { s, _ := e.ownerOf(g); return s == "firing" })
+	// The Root messages offer Ack again once delivery has edited them, after the Command: the presses below need it.
+	e.settle()
 
 	// C-18.AC-6: a Viewer's press and a disabled User's press change nothing, in both messengers.
 	rid, code = e.codeFor(dana, "dana", fakemattermost.DanaUserID)

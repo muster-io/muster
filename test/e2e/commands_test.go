@@ -140,7 +140,7 @@ func TestCommands(t *testing.T) {
 		!strings.Contains(string(a.body), "alert-groups:acknowledge") {
 		t.Errorf("viewer = %d %s", a.status, a.body)
 	}
-	if line, _, ok := r.LogLine("command_refused"); !ok || line["code"] != "forbidden" || line["command"] != "acknowledge" ||
+	if line, _ := r.WaitLogLine(t, "command_refused"); line["code"] != "forbidden" || line["command"] != "acknowledge" ||
 		line["group"] != ga {
 		t.Errorf("command_refused = %v", line)
 	}

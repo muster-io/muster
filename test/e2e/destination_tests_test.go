@@ -288,6 +288,12 @@ func TestDestinationTests(t *testing.T) {
 		eventually(t, "MusterDestinationBroken resolved", func() bool {
 			return !slices.Contains(e.internalAlerts(), "MusterDestinationBroken")
 		})
+		// The end of the Broken state publishes the Alert Group of k1, which waited, in the background; the previews
+		// below count the posts.
+		eventually(t, "the waiting publication", func() bool {
+			return h.count(t, `SELECT count(*) FROM deliveries d JOIN destinations ds ON ds.id = d.destination_id
+				WHERE ds.public_id = '`+md+`' AND d.state = 'pending'`) == 0
+		})
 	})
 
 	t.Run("previews", func(t *testing.T) {

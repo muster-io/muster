@@ -323,9 +323,12 @@ func TestTelegram(t *testing.T) {
 	}
 	w := hooked("hooked", "777020:hook-token")
 	if a := e.api.do(http.MethodDelete, "/api/v1/connections/"+w, ""); a.status != http.StatusNoContent ||
-		deletes() != 1 || !strings.Contains(r.Output(), `"event":"telegram_webhook_deleted","connection":"`+w+`"`) {
+		deletes() != 1 {
 		t.Errorf("delete = %d, %d deleteWebhook", a.status, deletes())
 	}
+	// The line is written before the answer, but the output reaches the test through a pipe.
+	waitLog(t, r, "the outcome of deleteWebhook", regexp.MustCompile(`"event":"telegram_webhook_deleted","connection":"`+
+		w+`"`))
 	w = hooked("refused", "777021:hook-token")
 	e.fake(http.MethodPost, e.ftg+"/faults", `{"path":"/bot777021:hook-token/deleteWebhook","status":500,"times":1}`)
 	if a := e.api.do(http.MethodDelete, "/api/v1/connections/"+w, ""); a.status != http.StatusNoContent ||
@@ -607,12 +610,14 @@ func TestTelegramThreads(t *testing.T) {
 	advance(t, r, 61)
 	eventually(t, "the unattached reply", func() bool { return len(e.botReplies()) == replies+1 })
 	first := e.botReplies()[replies]
-	if first.ReplyParameters != nil || first.MessageThreadID != 0 || !e.threadNotAttached(g2) {
+	if first.ReplyParameters != nil || first.MessageThreadID != 0 {
 		t.Fatalf("first link %+v", first)
 	}
-	if got := deliveryEvents(e.timeline(g2, "&kind=delivery")); !slices.Contains(got, "thread_not_attached") {
-		t.Errorf("delivery events %v", got)
-	}
+	// The fake keeps the reply before its answer reaches Muster, which then records the Thread as not attached.
+	eventually(t, "the thread_not_attached event", func() bool {
+		return e.threadNotAttached(g2) &&
+			slices.Contains(deliveryEvents(e.timeline(g2, "&kind=delivery")), "thread_not_attached")
+	})
 	e.fake(http.MethodPost, e.ftg+"/comment", fmt.Sprintf(`{"post_id":%d,"from":{"id":7001},"text":"looking"}`, p2))
 	eventually(t, "the comment to attach the Thread", func() bool { return e.threadState(p2) == "attached" })
 	if e.threadNotAttached(g2) {
@@ -667,7 +672,12 @@ func TestTelegramThreads(t *testing.T) {
 			refused++
 		}
 	}
-	tl := e.timeline(g, "&kind=delivery")
+	// As above, Muster records the lost Thread after the fake kept the reply sent without the link.
+	var tl []timelineEntry
+	eventually(t, "the lost Thread to be recorded", func() bool {
+		tl = e.timeline(g, "&kind=delivery")
+		return e.threadNotAttached(g) && len(tl) > 0 && tl[0].DeliveryEvent == "thread_not_attached"
+	})
 	if lost.ReplyParameters != nil || refused != 1 || !e.threadNotAttached(g) || len(tl) == 0 ||
 		tl[0].DeliveryEvent != "thread_not_attached" || e.health(dest).State != "healthy" {
 		t.Fatalf("lost thread: reply %+v, refused %d, events %v, health %+v", lost, refused, deliveryEvents(tl),
@@ -727,6 +737,19 @@ func (e *tgd) keyboardOf(id int64, want ...string) {
 	})
 }
 
+// rootPost is the channel post of the Alert Group's Root message once Muster has recorded it. The fake keeps the post
+// before its answer to sendMessage reaches Muster, and a press on a post that Muster has not recorded yet is not bound
+// to the Alert Group: it is answered as not verified.
+func (e *tgd) rootPost(g string) int64 {
+	e.t.Helper()
+	q := `FROM deliveries d JOIN destinations ds ON ds.id = d.destination_id JOIN alert_groups g ON g.id = d.alert_group_id
+		WHERE ds.type = 'telegram' AND d.message_id IS NOT NULL AND g.public_id = '` + g + `'`
+	eventually(e.t, "the channel post of "+g+" to be recorded", func() bool {
+		return e.h.count(e.t, `SELECT count(*) `+q) > 0
+	})
+	return e.h.count(e.t, `SELECT d.message_id::bigint `+q+` ORDER BY d.id LIMIT 1`)
+}
+
 // lastIndex is the index of the last request to the method of the Bot API, -1 for none.
 func lastIndex(reqs []fakeserver.Request, method string) int {
 	for i := len(reqs) - 1; i >= 0; i-- {
@@ -780,8 +803,7 @@ func TestTelegramPresses(t *testing.T) {
 	e.alert("t1", "a", `{"team":"tg","cluster":"p1","domain":"a.example.org"}`, "")
 	e.notify("t1", "first notification")
 	g := e.groupOf("p1")
-	eventually(t, "the channel post", func() bool { return len(e.messages(faketelegram.ChannelID)) == 1 })
-	post := e.messages(faketelegram.ChannelID)[0].ID
+	post := e.rootPost(g)
 	e.keyboardOf(post, "Ack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h")
 
 	// C-14.AC-18, FR-4, C-10.FR-3: the answer first, then the edit with the keyboard of the new state.
@@ -847,8 +869,7 @@ func TestTelegramPresses(t *testing.T) {
 	e.alert("t2", "a", `{"team":"tg","cluster":"p2"}`, "")
 	e.notify("t2", "first notification")
 	g2 := e.groupOf("p2")
-	eventually(t, "the second post", func() bool { return len(e.messages(faketelegram.ChannelID)) == 2 })
-	post2 := e.messages(faketelegram.ChannelID)[1].ID
+	post2 := e.rootPost(g2)
 	data := ""
 	for _, m := range e.messages(faketelegram.ChannelID) {
 		if m.ID == post2 {
@@ -888,9 +909,9 @@ func TestTelegramPresses(t *testing.T) {
 	advance(t, r, 3700)
 	e.fake(http.MethodPost, e.ftg+"/press", fmt.Sprintf(`{"chat":%d,"message_id":%d,"from":{"id":5001},
 		"button":"Unsnooze"}`, faketelegram.ChannelID, post2))
+	// A dropped press is logged after nothing else happened: it is neither answered nor run.
 	waitLog(t, r, "the dropped press", regexp.MustCompile(`"event":"telegram_press_dropped","connection":"`+e.conn+
 		`","gap_seconds":3[67]\d\d`))
-	time.Sleep(time.Second)
 	if len(e.answers()) != answers || e.alertGroup(g2)["status"] != "snoozed" {
 		t.Errorf("the dropped press was answered or changed the Alert Group: %d answers, %v", len(e.answers()),
 			e.alertGroup(g2)["status"])
@@ -902,6 +923,10 @@ func TestTelegramPresses(t *testing.T) {
 	if strings.Contains(r.Output(), "dev-telegram-token") {
 		t.Error("the bot token reached the log")
 	}
+	// telegram_press is logged after the answer that press waited for, and the output is read through a pipe.
+	r.waitFor(t, "nine telegram_press lines", func() bool {
+		return strings.Count(r.Output(), `"event":"telegram_press",`) >= 9
+	})
 	if n := strings.Count(r.Output(), `"event":"telegram_press",`); n != 9 {
 		t.Errorf("%d telegram_press lines", n)
 	}
