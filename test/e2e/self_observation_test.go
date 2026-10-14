@@ -180,9 +180,7 @@ func TestOutgoingHeartbeat(t *testing.T) {
 	h.InProcess.Webhook.ResetFaults()
 	advance(t, a, 60)
 	eventually(t, "the recovered ping", func() bool { return heartbeatResult(api)["last_ok"] == true })
-	if _, _, ok := a.LogLine("outgoing_heartbeat_recovered"); !ok {
-		t.Error("outgoing_heartbeat_recovered was not logged")
-	}
+	a.WaitLogLine(t, "outgoing_heartbeat_recovered")
 
 	// C-19.AC-7: a handover keeps one send per interval.
 	a.Stop(t)

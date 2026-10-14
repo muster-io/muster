@@ -50,10 +50,7 @@ func TestLeaderFailover(t *testing.T) {
 	}
 	took := time.Since(cut)
 
-	line, lost, ok := a.LogLine("leadership_lost")
-	if !ok {
-		t.Fatalf("replica A did not log leadership_lost; output:\n%s", a.Output())
-	}
+	line, lost := a.WaitLogLine(t, "leadership_lost")
 	// The deadline counts from the last successful ping, which came before the cut; stopping the tasks and writing
 	// the line take a moment more.
 	const slack = 500 * time.Millisecond
@@ -63,9 +60,7 @@ func TestLeaderFailover(t *testing.T) {
 	if got := a.Metric(t, "muster_leader"); got != "0" {
 		t.Errorf("replica A exports muster_leader %q after it was fenced, want 0", got)
 	}
-	if _, _, ok := b.LogLine("leadership_acquired"); !ok {
-		t.Errorf("replica B did not log leadership_acquired; output:\n%s", b.Output())
-	}
+	b.WaitLogLine(t, "leadership_acquired")
 	t.Logf("cut at %s: A logged leadership_lost after %v, B exported muster_leader 1 after %v",
 		cut.UTC().Format(time.RFC3339Nano), lost.Sub(cut).Round(time.Millisecond), took.Round(time.Millisecond))
 }

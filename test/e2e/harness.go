@@ -476,6 +476,24 @@ func (r *Replica) Metric(t testing.TB, name string) string {
 	return ""
 }
 
+// WaitLogLine waits for the first log line of the event in the current run's output and returns it with the time it
+// carries. A line that the process wrote before it answered a request may still be on its way through the pipe to the
+// test process when the answer arrives, so a check of a line that must be there waits for it; LogLine alone is for a
+// line that must not be there.
+func (r *Replica) WaitLogLine(t testing.TB, event string) (map[string]any, time.Time) {
+	t.Helper()
+	var (
+		line map[string]any
+		at   time.Time
+	)
+	r.waitFor(t, "the log line "+event, func() bool {
+		var ok bool
+		line, at, ok = r.LogLine(event)
+		return ok
+	})
+	return line, at
+}
+
 // LogLine is the first log line of the event in the current run's output, and the time it carries.
 func (r *Replica) LogLine(event string) (map[string]any, time.Time, bool) {
 	for line := range strings.Lines(r.Output()) {

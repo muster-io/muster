@@ -93,7 +93,7 @@ func TestGroupKeyPreview(t *testing.T) {
 		p.Truncated || p.Period != 86400 {
 		t.Errorf("unsaved = %d %s", a.status, a.body)
 	}
-	if line, _, ok := r.LogLine("group_key_previewed"); !ok || line["route"] != "" || line["snapshots_read"] != 1.0 {
+	if line, _ := r.WaitLogLine(t, "group_key_previewed"); line["route"] != "" || line["snapshots_read"] != 1.0 {
 		t.Errorf("log line %v", line)
 	}
 

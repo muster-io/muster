@@ -103,7 +103,7 @@ API_REFERENCE := docs/reference/api/spec/index.html
 DOCKER ?= docker
 DEV_COMPOSE := deploy/dev/docker-compose.yml
 
-# make e2e runs one replica; E2E_REPLICAS=2 adds muster dev --replica beside muster dev.
+# The Go end-to-end suite runs one replica; E2E_REPLICAS=2 adds muster dev --replica beside muster dev.
 E2E_REPLICAS ?= 1
 # Flags of `playwright install chromium`, such as --with-deps on a CI runner that lacks the browser's libraries.
 PLAYWRIGHT_INSTALL_FLAGS ?=
@@ -111,7 +111,7 @@ PLAYWRIGHT_INSTALL_FLAGS ?=
 LOAD_TEST_FLAGS ?=
 
 .PHONY: help fmt lint lint-arch test test-race test-web test-integration generate generate-check build licenses \
-	vulncheck mutation helm-check rules-test compose-check dev-db dev e2e load-test ci clean web-browsers docs \
+	vulncheck mutation helm-check rules-test compose-check dev-db dev e2e e2e-go e2e-web load-test ci clean web-browsers docs \
 	docs-serve docs-check docs-api demo
 
 help: ## List the targets
@@ -373,14 +373,24 @@ dev: dev-db build ## Start the development PostgreSQL, build and run muster dev
 	./$(BIN)/muster dev
 
 # Each run gets a fresh database on the development PostgreSQL, which it drops at the end: the Go suite, then the
-# Playwright specs of the SPA (web/e2e) on a muster dev of their own. Both run even when the first fails.
+# Playwright specs of the SPA (web/e2e) on a muster dev of their own. make e2e runs both, the second even when the first
+# fails; e2e-go and e2e-web run one each. Both use the fixed ports of muster dev, so one machine runs one at a time; CI
+# runs them as two jobs side by side.
+E2E_GO = MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) E2E_REPLICAS=$(E2E_REPLICAS) $(GO) test -tags e2e -count=1 -timeout 10m ./test/e2e/...
+E2E_WEB = MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) $(PNPM) --dir web run e2e
+
 e2e: dev-db build web-browsers ## Run the end-to-end suites (Go, then Playwright); E2E_REPLICAS=2 for the Go suite
 	@failed=0; \
-	for step in "MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) E2E_REPLICAS=$(E2E_REPLICAS) $(GO) test -tags e2e -count=1 -timeout 10m ./test/e2e/..." \
-		"MUSTER_E2E_BINARY=$(abspath $(BIN)/muster) $(PNPM) --dir web run e2e"; do \
+	for step in "$(E2E_GO)" "$(E2E_WEB)"; do \
 		echo "$$step"; sh -c "$$step" || failed=1; \
 	done; \
 	exit $$failed
+
+e2e-go: dev-db build ## Run the Go end-to-end suite; E2E_REPLICAS=2 runs it with two replicas
+	$(E2E_GO)
+
+e2e-web: dev-db build web-browsers ## Run the Playwright specs of the SPA (web/e2e)
+	$(E2E_WEB)
 
 load-test: ## Run the load test against a running muster dev
 	$(GO) run ./test/load $(LOAD_TEST_FLAGS)

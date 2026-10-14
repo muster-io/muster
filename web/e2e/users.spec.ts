@@ -26,6 +26,14 @@ function nav(page: Page) {
   return page.getByRole("navigation", { name: "Main" });
 }
 
+/**
+ * The filters of the users list. The URL changes before the list replaces the page it came from, so a bare "Role" may
+ * still find the Role select of a user's page; the filters find only the list's.
+ */
+function filters(page: Page) {
+  return page.getByRole("search", { name: "User filters" });
+}
+
 /** The row of the users table that holds a text. */
 function row(page: Page, text: string) {
   return page.getByRole("table", { name: "Users" }).getByRole("row").filter({ hasText: text });
@@ -71,15 +79,15 @@ test("creates a user with a setup link, disables, enables and deletes it", async
   await shot(page, "users-list");
 
   // The filters live in the URL.
-  await page.getByLabel("Role").selectOption({ label: "Viewer" });
+  await filters(page).getByLabel("Role").selectOption({ label: "Viewer" });
   await expect(page).toHaveURL(/role=viewer/);
-  await page.getByLabel("Search").fill("dan");
+  await filters(page).getByLabel("Search").fill("dan");
   await expect(page).toHaveURL(/q=dan/);
   await expect(row(page, "dana")).toHaveCount(1);
   await expect(row(page, ADMIN_LOGIN)).toHaveCount(0);
   await page.reload();
-  await expect(page.getByLabel("Search")).toHaveValue("dan");
-  await expect(page.getByLabel("Role")).toHaveValue("viewer");
+  await expect(filters(page).getByLabel("Search")).toHaveValue("dan");
+  await expect(filters(page).getByLabel("Role")).toHaveValue("viewer");
   await page.setViewportSize({ width: 360, height: 740 });
   await expectNoHorizontalScroll(page);
   await shot(page, "users-list-360");
@@ -100,8 +108,9 @@ test("creates a user with a setup link, disables, enables and deletes it", async
   await shot(page, "user-delete-confirm");
   await confirm.getByRole("button", { name: "Delete" }).click();
   await expect(page).toHaveURL(`${APP}/admin/users`);
-  await page.getByLabel("Role").selectOption({ label: "Viewer" });
-  await page.getByLabel("Status").selectOption({ label: "Deleted" });
+  await filters(page).getByLabel("Role").selectOption({ label: "Viewer" });
+  await expect(page).toHaveURL(`${APP}/admin/users?role=viewer`);
+  await filters(page).getByLabel("Status").selectOption({ label: "Deleted" });
   await expect(page).toHaveURL(`${APP}/admin/users?role=viewer&status=deleted`);
   await expect(row(page, "deleted-user-")).toHaveCount(1);
   await expect(row(page, "deleted-user-").getByRole("cell").nth(6)).toHaveText("Deleted");
