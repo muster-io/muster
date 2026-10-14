@@ -3,8 +3,8 @@
 
 // "Link Mattermost" of the profile (C-18.FR-3): the Connection and the user's Mattermost username, then the code the
 // bot sent in a direct message, with the attempts left and "Request a new code". The code lives only in this dialog's
-// state: the requests' results keep none, and closing the dialog drops it. The API does not say how many attempts are
-// left after a wrong code, so the dialog counts down from the number the code request gave.
+// state: the requests' results keep none, and closing the dialog drops it. The attempts left come from the server: the
+// code request gives them, and so does each refused code (attempts_remaining).
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -33,6 +33,7 @@ import { Label } from "./ui/label";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
 
 const LINK_CODE_INVALID = "link_code_invalid";
+const LINK_CODE_REQUESTS_EXCEEDED = "link_code_requests_exceeded";
 
 function hasFieldCode(err: unknown, code: string): boolean {
   return isApiError(err) && (err.errors ?? []).some((e) => e.code === code);
@@ -40,7 +41,8 @@ function hasFieldCode(err: unknown, code: string): boolean {
 
 /**
  * The text of a refused code request or confirmation: a wrong or used-up code, an unknown username, an account linked
- * to another user, too many code requests (in minutes, from Retry-After) and a busy messenger have their own texts.
+ * to another user, too many code requests (link_code_requests_exceeded, in minutes from Retry-After) and a busy
+ * messenger have their own texts; any other limit, such as the token's, is the generic one.
  */
 export function linkProblemText(t: TFunction, err: unknown, username: string): string {
   if (isApiError(err)) {
@@ -55,7 +57,7 @@ export function linkProblemText(t: TFunction, err: unknown, username: string): s
     if (err.status === 409 && err.code === "account_linked_elsewhere") {
       return t("accountLinks.mattermost.errors.linkedElsewhere");
     }
-    if (err.status === 429) {
+    if (err.status === 429 && err.code === LINK_CODE_REQUESTS_EXCEEDED) {
       return t("accountLinks.mattermost.errors.tooManyCodes", {
         count: Math.max(1, Math.ceil((err.retry_after_seconds ?? 60) / 60)),
       });
@@ -123,7 +125,9 @@ export function LinkMattermostDialog({
         return;
       }
       if (hasFieldCode(err, LINK_CODE_INVALID)) {
-        setPending((p) => (p === null ? p : { ...p, attempts: Math.max(0, p.attempts - 1) }));
+        // A refusal without the number leaves no attempt: the dialog then offers only a new code.
+        const left = isApiError(err) ? (err.attempts_remaining ?? 0) : 0;
+        setPending((p) => (p === null ? p : { ...p, attempts: Math.max(0, left) }));
         setCode("");
       }
     },
@@ -148,12 +152,7 @@ export function LinkMattermostDialog({
   };
 
   const error = confirm.error ?? start.error;
-  const errorText =
-    error === null
-      ? null
-      : isApiError(error) && error === confirm.error && error.status === 429
-        ? problemText(t, error)
-        : linkProblemText(t, error, username);
+  const errorText = error === null ? null : linkProblemText(t, error, username);
   const busy = start.isPending || confirm.isPending;
   const canEnter = pending !== null && pending.attempts > 0;
 

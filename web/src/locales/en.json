@@ -863,7 +863,9 @@
       "webhook": "Sends the test event, the “Create” request, or both, as the mode of this outgoing webhook says, with the saved settings. No Alert Group changes."
     },
     "passed": "Test passed",
+    "pressBotUnknown": "Muster does not know the bot of this Connection yet, so it did not press the button. Run the Connection check, then test again.",
     "pressLimited": "The messenger is busy; the button was not pressed. Try again in a few seconds.",
+    "pressNotReached": "The button press did not reach Muster. Add the host of MUSTER_INGEST_URL to ServiceSettings.AllowedUntrustedInternalConnections on the Mattermost server.",
     "pressReached": "Button presses reach Muster.",
     "request": {
       "headers": "Headers",
@@ -1461,6 +1463,22 @@
     }
   },
   "outgoingHeartbeat": {
+    "failure": {
+      "blocked": "blocked by the outbound address policy",
+      "connect": "the connection failed",
+      "detail": "Details: {{detail}}",
+      "dns": "the host name does not resolve",
+      "fatal": "the URL refused the request",
+      "internal": "Muster could not prepare the request",
+      "proxyAuth": "the proxy refused its credentials",
+      "redirect": "a redirect, which Muster does not follow",
+      "retryAfter": "the URL asked to retry later",
+      "timeout": "no answer in time",
+      "tls": "the TLS handshake failed",
+      "transient": "a temporary error",
+      "unknown": "an unexpected answer",
+      "withStatus": "{{reason}} (answered {{status}})"
+    },
     "fixErrors": "Fix the marked fields and save again.",
     "hint": "Muster calls this URL every minute while a replica leads. Use a dead man's switch that alerts when the calls stop.",
     "lastResult": {

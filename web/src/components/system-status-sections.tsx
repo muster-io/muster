@@ -15,12 +15,16 @@ import { useTranslation } from "react-i18next";
 import { useGetSystemStatus } from "../api/gen/endpoints/system/system";
 import type {
   EntityRef,
+  NullableOutgoingHeartbeatErrorClass,
   OutgoingHeartbeatResult,
   SystemStatus,
   SystemStatusRecovery,
   TemplateKind,
 } from "../api/gen/model";
 import { useTimeFormat } from "../lib/time";
+import { unreachable } from "./destination-test-panel";
+
+type OutgoingHeartbeatErrorClass = NonNullable<NullableOutgoingHeartbeatErrorClass>;
 
 /** How often the System status is read again, besides its hints. */
 export const SYSTEM_STATUS_REFRESH_MS = 30_000;
@@ -28,6 +32,73 @@ export const SYSTEM_STATUS_REFRESH_MS = 30_000;
 /** The System status, read again on its hints and every 30 seconds; disabled, it is not read. */
 export function useSystemStatus(enabled = true) {
   return useGetSystemStatus({ query: { refetchInterval: SYSTEM_STATUS_REFRESH_MS, enabled } });
+}
+
+/** Why an outgoing heartbeat failed, by its class, without the status of the answer. */
+function heartbeatClassText(t: TFunction, errorClass: OutgoingHeartbeatErrorClass): string {
+  switch (errorClass) {
+    case "transient":
+      return t("outgoingHeartbeat.failure.transient");
+    case "retry_after":
+      return t("outgoingHeartbeat.failure.retryAfter");
+    case "fatal":
+      return t("outgoingHeartbeat.failure.fatal");
+    case "redirect":
+      return t("outgoingHeartbeat.failure.redirect");
+    case "unknown":
+      return t("outgoingHeartbeat.failure.unknown");
+    case "blocked":
+      return t("outgoingHeartbeat.failure.blocked");
+    case "dns":
+      return t("outgoingHeartbeat.failure.dns");
+    case "connect":
+      return t("outgoingHeartbeat.failure.connect");
+    case "tls":
+      return t("outgoingHeartbeat.failure.tls");
+    case "timeout":
+      return t("outgoingHeartbeat.failure.timeout");
+    case "proxy_auth":
+      return t("outgoingHeartbeat.failure.proxyAuth");
+    case "internal":
+      return t("outgoingHeartbeat.failure.internal");
+    default:
+      return unreachable(errorClass);
+  }
+}
+
+/**
+ * Why the last outgoing heartbeat failed, in the reader's language: its class, with the status of the answer when there
+ * was one; the server's English text without a class, null without either. The server's text stays the detail
+ * (heartbeatFailureDetail).
+ */
+export function heartbeatFailureText(t: TFunction, result: OutgoingHeartbeatResult): string | null {
+  const errorClass = result.last_error_class;
+  if (errorClass === null || errorClass === undefined) {
+    return result.last_error ? result.last_error : null;
+  }
+  const reason = heartbeatClassText(t, errorClass);
+  return typeof result.last_status === "number"
+    ? t("outgoingHeartbeat.failure.withStatus", { reason, status: result.last_status })
+    : reason;
+}
+
+/** The server's text of the last failed heartbeat as the detail of its translated reason; null without both. */
+export function HeartbeatFailureDetail({
+  result,
+  testId,
+}: {
+  result: OutgoingHeartbeatResult;
+  testId: string;
+}) {
+  const { t } = useTranslation();
+  if (result.last_ok !== false || !result.last_error || !result.last_error_class) {
+    return null;
+  }
+  return (
+    <span className="block text-xs text-muted-foreground wrap-anywhere" data-testid={testId}>
+      {t("outgoingHeartbeat.failure.detail", { detail: result.last_error })}
+    </span>
+  );
 }
 
 /** The last outgoing heartbeat as the System status shows it; null when no URL is set. */
@@ -46,8 +117,9 @@ export function heartbeatSentText(
   if (result.last_ok === true) {
     return t("systemStatus.heartbeat.ok", { time });
   }
-  return result.last_error
-    ? t("systemStatus.heartbeat.failed", { time, error: result.last_error })
+  const error = heartbeatFailureText(t, result);
+  return error !== null
+    ? t("systemStatus.heartbeat.failed", { time, error })
     : t("systemStatus.heartbeat.failedNoError", { time });
 }
 
@@ -292,6 +364,10 @@ export function SystemStatusSections({
               t("systemStatus.heartbeat.suggestion")
             ))}
         </p>
+        <HeartbeatFailureDetail
+          result={status.outgoing_heartbeat}
+          testId="system-status-heartbeat-detail"
+        />
       </Section>
     </div>
   );

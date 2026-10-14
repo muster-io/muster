@@ -152,8 +152,8 @@ registerHint("alert-group", (id) =>
 );
 // New Alert Groups may match: the counts; the list announces them as "N new" through a listener.
 registerHint("alert-groups", () => [getGetAlertGroupCountsQueryKey()]);
-// An Account link of the signed-in user came or went; only that user's streams get the hint (C-18). The "Link Telegram"
-// dialog closes through a listener.
+// An Account link of the signed-in user came, changed or went; only that user's streams get the hint (C-18), which
+// names the link. The "Link Telegram" dialog closes through a listener when the link is a Telegram one.
 registerHint("account-links", () => [getListMyAccountLinksQueryKey()]);
 
 /** What a page does with a hint itself; id is as in HintQueries. */
