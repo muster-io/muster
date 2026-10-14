@@ -16,7 +16,55 @@
         <loc>https://muster-io.github.io/muster/messengers/mattermost/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/messengers/telegram-restricted-networks/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/messengers/telegram/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterClockSkew/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterDeliveryFailing/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterDeliveryQueueGrowing/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterDeliverySlow/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterDestinationBroken/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterDown/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterHeartbeatLost/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterIngestBacklog/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterIngestRejected/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterLoginFailures/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterNoLeader/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterOIDCSecretExpiring/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterSnapshotTruncated/</loc>
+      </url>
+      <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterTemplateError/</loc>
       </url>
       <url>
         <loc>https://muster-io.github.io/muster/outgoing-webhooks/events/</loc>
