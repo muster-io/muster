@@ -314,7 +314,8 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: ./.github/actions/cache-go-tools
-      - run: make helm-check
+      # The chart's checks, then the unit tests of its alert rules with promtool.
+      - run: make helm-check rules-test
 
   # make compose-check, then PostgreSQL started from the example must report the example's settings and memory limit.
   compose-check:

@@ -367,6 +367,389 @@
           ]
         }
       }
+    },
+    "alerting": {
+      "description": "The chart's alert rules about Muster itself, for the Prometheus Operator and the VictoriaMetrics Operator; send the critical ones through an Alertmanager route that bypasses Muster.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runbookBaseURL": {
+          "description": "The documentation site the runbook_url of every rule points into: this URL, then the major.minor of the appVersion (latest for a development build), operations/runbooks/ and the name of the rule. Muster gets it too, as MUSTER_RUNBOOK_BASE_URL, for the runbook_url of its Internal alerts; set it here, not through extraEnv, so that the rules and the Internal alerts point into the same site.",
+          "type": "string",
+          "pattern": "^https?://\\S+$"
+        },
+        "jobSelector": {
+          "description": "The label matchers that select Muster's series, part of every series selector of every rule, such as job=\"muster\"; empty selects the job named after the chart, or after nameOverride when it is set, which is the job the ServiceMonitor scrapes into.",
+          "type": "string"
+        },
+        "prometheusRule": {
+          "description": "A Prometheus Operator PrometheusRule with the rules.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "Creates the PrometheusRule.",
+              "type": "boolean"
+            },
+            "labels": {
+              "description": "Extra labels of the PrometheusRule, such as the one the Prometheus selects rules by.",
+              "type": "object"
+            }
+          }
+        },
+        "vmRule": {
+          "description": "A VictoriaMetrics Operator VMRule with the same rules.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "Creates the VMRule.",
+              "type": "boolean"
+            },
+            "labels": {
+              "description": "Extra labels of the VMRule, such as the one the VMAlert selects rules by.",
+              "type": "object"
+            }
+          }
+        },
+        "rules": {
+          "description": "Each rule: whether it is rendered, how long its condition holds before it fires (for) and its thresholds and windows.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "MusterDown": {
+              "description": "A scrape target of Muster is down (critical).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long the target is down before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                }
+              }
+            },
+            "MusterNoLeader": {
+              "description": "No replica is the Leader (critical).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long no replica leads before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                }
+              }
+            },
+            "MusterDeliveryFailing": {
+              "description": "A Destination has queued deliveries and no successful delivery (critical).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long the condition holds before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                },
+                "window": {
+                  "description": "How far back a successful delivery counts.",
+                  "type": "string",
+                  "minLength": 2,
+                  "pattern": "^(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?$"
+                }
+              }
+            },
+            "MusterDestinationBroken": {
+              "description": "A Destination is Broken (critical).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long the Destination is Broken before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                }
+              }
+            },
+            "MusterHeartbeatLost": {
+              "description": "An Integration is Heartbeat lost (critical).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long the Integration is Heartbeat lost before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                }
+              }
+            },
+            "MusterDeliverySlow": {
+              "description": "The 95th percentile of delivery latency is above its objective (warning).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long delivery is slow before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                },
+                "seconds": {
+                  "description": "The latency objective in seconds.",
+                  "type": "number",
+                  "minimum": 0
+                },
+                "window": {
+                  "description": "The window of the latency percentile.",
+                  "type": "string",
+                  "minLength": 2,
+                  "pattern": "^(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?$"
+                }
+              }
+            },
+            "MusterDeliveryQueueGrowing": {
+              "description": "A delivery queue is large and keeps growing (warning).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long the queue keeps growing before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                },
+                "size": {
+                  "description": "The number of waiting deliveries above which a queue counts as large.",
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "window": {
+                  "description": "The window over which the queue's growth is measured.",
+                  "type": "string",
+                  "minLength": 2,
+                  "pattern": "^(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?$"
+                }
+              }
+            },
+            "MusterIngestBacklog": {
+              "description": "Processing falls behind ingestion (warning).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long processing falls behind before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                },
+                "backlog": {
+                  "description": "The number of waiting Stored Snapshots above which the rule fires.",
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "delaySeconds": {
+                  "description": "The 95th percentile of the processing delay, in seconds, above which the rule fires.",
+                  "type": "number",
+                  "minimum": 0
+                },
+                "window": {
+                  "description": "The window of the processing delay percentile.",
+                  "type": "string",
+                  "minLength": 2,
+                  "pattern": "^(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?$"
+                }
+              }
+            },
+            "MusterIngestRejected": {
+              "description": "Oversized or unauthorized ingestion requests arrived (warning).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long the condition holds before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                },
+                "unauthorized": {
+                  "description": "The number of unauthorized requests of an Integration within the window above which the rule fires; any oversized request fires it.",
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "window": {
+                  "description": "The window in which rejected requests count.",
+                  "type": "string",
+                  "minLength": 2,
+                  "pattern": "^(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?$"
+                }
+              }
+            },
+            "MusterTemplateError": {
+              "description": "Templates failed to render (warning).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long the condition holds before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                },
+                "window": {
+                  "description": "The window in which template errors count.",
+                  "type": "string",
+                  "minLength": 2,
+                  "pattern": "^(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?$"
+                }
+              }
+            },
+            "MusterClockSkew": {
+              "description": "A replica's clock is off (warning).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long the clock is off before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                },
+                "seconds": {
+                  "description": "The clock skew against the database, in seconds, above which the rule fires.",
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            },
+            "MusterLoginFailures": {
+              "description": "A burst of failed sign-ins (warning).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long the condition holds before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                },
+                "failures": {
+                  "description": "The number of failed sign-ins of one method within the window above which the rule fires.",
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "window": {
+                  "description": "The window in which failed sign-ins count.",
+                  "type": "string",
+                  "minLength": 2,
+                  "pattern": "^(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?$"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "dashboard": {
+      "description": "The \"Muster\" Grafana dashboard.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "configMap": {
+          "description": "A ConfigMap with the dashboard for the Grafana sidecar, under the key muster.json.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "Creates the ConfigMap.",
+              "type": "boolean"
+            },
+            "labels": {
+              "description": "Labels of the ConfigMap besides the chart's; the Grafana sidecar finds dashboards by grafana_dashboard: \"1\" by default.",
+              "type": "object"
+            },
+            "annotations": {
+              "description": "Annotations of the ConfigMap, such as the sidecar's folder annotation.",
+              "type": "object"
+            }
+          }
+        },
+        "grafanaDashboard": {
+          "description": "A Grafana Operator GrafanaDashboard that imports the dashboard from the ConfigMap; it needs dashboard.configMap.enabled.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "Creates the GrafanaDashboard; rendering fails without dashboard.configMap.enabled.",
+              "type": "boolean"
+            },
+            "instanceSelector": {
+              "description": "The label selector of the Grafana instances that import the dashboard, as in a GrafanaDashboard spec.",
+              "type": "object"
+            },
+            "folder": {
+              "description": "The Grafana folder of the dashboard; empty leaves it to the operator.",
+              "type": "string"
+            },
+            "allowCrossNamespaceImport": {
+              "description": "Lets Grafana instances in other namespaces import the dashboard.",
+              "type": "boolean"
+            }
+          }
+        }
+      }
     }
   }
 }

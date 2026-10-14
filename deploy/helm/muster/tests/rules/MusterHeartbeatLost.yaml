@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterHeartbeatLost fires when an Integration has been Heartbeat lost for 1 minute.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: an Integration Heartbeat lost for 1 minute fires
+    interval: 1m
+    input_series:
+      - series: 'muster_heartbeat_lost{job="muster",instance="10.0.0.1:8082",integration="int_1"}'
+        values: '0 1 1 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MusterHeartbeatLost
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: MusterHeartbeatLost
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              integration: int_1
+            exp_annotations:
+              summary: An Integration is Heartbeat lost
+              description: >-
+                No Heartbeat arrived in time for the Integration in the label integration: the path from Prometheus
+                through Alertmanager to Muster may be interrupted. First check the time of the last signal on the
+                Integration page, then whether Alertmanager can reach Muster's ingest listener.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterHeartbeatLost/
+  - name: a live Heartbeat, and another job's lost one, stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_heartbeat_lost{job="muster",instance="10.0.0.1:8082",integration="int_1"}'
+        values: '0x5'
+      - series: 'muster_heartbeat_lost{job="other",instance="10.0.0.9:8082",integration="int_1"}'
+        values: '1x5'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MusterHeartbeatLost
+        exp_alerts: []

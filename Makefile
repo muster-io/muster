@@ -45,11 +45,15 @@ SQLC_PKG := github.com/sqlc-dev/sqlc/cmd/sqlc
 # renovate: datasource=go depName=github.com/sqlc-dev/sqlc
 SQLC_VERSION := v1.31.1
 SQLC := $(TOOLS)/sqlc-$(SQLC_VERSION)
+PROMTOOL_PKG := github.com/prometheus/prometheus/cmd/promtool
+# renovate: datasource=go depName=github.com/prometheus/prometheus
+PROMTOOL_VERSION := v0.315.0
+PROMTOOL := $(TOOLS)/promtool-$(PROMTOOL_VERSION)
 # The tools above, as their install rules name them; make licenses reports their licences.
 INSTALLED_TOOLS := $(GOLANGCI_LINT_PKG)@$(GOLANGCI_LINT_VERSION) $(GO_TEST_COVERAGE_PKG)@$(GO_TEST_COVERAGE_VERSION) \
 	$(GO_LICENSES_PKG)@$(GO_LICENSES_VERSION) $(GOVULNCHECK_PKG)@$(GOVULNCHECK_VERSION) \
 	$(GREMLINS_PKG)@$(GREMLINS_VERSION) $(HELM_PKG)@$(HELM_VERSION) $(KUBECONFORM_PKG)@$(KUBECONFORM_VERSION) \
-	$(SQLC_PKG)@$(SQLC_VERSION)
+	$(SQLC_PKG)@$(SQLC_VERSION) $(PROMTOOL_PKG)@$(PROMTOOL_VERSION)
 
 VERSION ?= 0.0.0-dev
 COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
@@ -74,11 +78,14 @@ LICENSES_CHECKED_BY_HAND := github.com/oapi-codegen/nullable
 MUTATION_PKGS ?= internal/groups internal/routing internal/delivery internal/timers
 MUTATION_DIR := $(BIN)/mutation
 
-# make helm-check renders the chart for this Kubernetes version and validates it against its schemas; the Gateway API
-# and ServiceMonitor schemas come from a pinned commit of the CRDs catalog.
+# make helm-check renders the chart for this Kubernetes version and validates it against its schemas; the Gateway API,
+# ServiceMonitor, PrometheusRule, VMRule and GrafanaDashboard schemas come from a pinned commit of the CRDs catalog.
+# It also packages the chart with a release appVersion, as release.yml does with the tag, to check its runbook_urls.
 CHART := deploy/helm/muster
 HELM_CHECK_KUBE_VERSION := 1.33.0
 HELM_CHECK_SECRET_ERROR := the master keys are never generated: create a Secret and set existingSecret
+HELM_CHECK_DASHBOARD_ERROR := dashboard.grafanaDashboard.enabled needs dashboard.configMap.enabled
+HELM_CHECK_RELEASE_APP := v1.4.0-rc.1
 KUBECONFORM_FLAGS := -strict -summary -kubernetes-version $(HELM_CHECK_KUBE_VERSION) -schema-location default \
 	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/4c8dc296d32b06d15ccde9668ff136c951f4d539/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 
@@ -104,8 +111,8 @@ PLAYWRIGHT_INSTALL_FLAGS ?=
 LOAD_TEST_FLAGS ?=
 
 .PHONY: help fmt lint lint-arch test test-race test-web test-integration generate generate-check build licenses \
-	vulncheck mutation helm-check compose-check dev-db dev e2e load-test ci clean web-browsers docs docs-serve \
-	docs-check docs-api demo
+	vulncheck mutation helm-check rules-test compose-check dev-db dev e2e load-test ci clean web-browsers docs \
+	docs-serve docs-check docs-api demo
 
 help: ## List the targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z0-9-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -275,9 +282,11 @@ mutation: $(GREMLINS) ## Run mutation testing over the core packages, report onl
 	exit $$failed
 
 # Lints and renders the chart with the default values plus an existingSecret and with the all-options values, and
-# validates both renderings with kubeconform; rendering without existingSecret must fail with the master keys message.
-# Every step runs even when an earlier one fails.
-helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check the existingSecret error
+# validates both renderings with kubeconform. The default values render no rule and no dashboard; chartcheck checks the
+# rules and the dashboard of the all-options rendering, and of the chart packaged with a release appVersion, against
+# reference.md and the metric catalogue. Rendering without existingSecret must fail with the master keys message, and a
+# GrafanaDashboard without its ConfigMap with its own. Every step runs even when an earlier one fails.
+helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check its rules and dashboard; check the existingSecret error
 	@tmp=$$(mktemp -d) || exit 1; \
 	trap 'rm -rf "$$tmp"' EXIT; \
 	failed=0; \
@@ -291,6 +300,30 @@ helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check
 			echo "helm template failed with $$values"; failed=1; \
 		fi; \
 	done; \
+	echo "no rule and no dashboard with the default values"; \
+	if $(HELM) template muster $(CHART) --set existingSecret=muster >"$$tmp/default.yaml"; then \
+		if grep -qE '^kind: (PrometheusRule|VMRule|GrafanaDashboard)$$|muster\.json:' "$$tmp/default.yaml"; then \
+			echo "the default values render a rule resource or the dashboard"; failed=1; \
+		fi; \
+	else \
+		echo "helm template failed with the default values"; failed=1; \
+	fi; \
+	echo "chartcheck with the all-options values"; \
+	if $(HELM) template muster $(CHART) --kube-version $(HELM_CHECK_KUBE_VERSION) \
+		-f $(CHART)/ci/all-options-values.yaml >"$$tmp/all.yaml"; then \
+		$(GO) run ./internal/tools/chartcheck -manifest "$$tmp/all.yaml" || failed=1; \
+	else \
+		echo "helm template failed with the all-options values"; failed=1; \
+	fi; \
+	echo "chartcheck with the all-options values and the appVersion $(HELM_CHECK_RELEASE_APP)"; \
+	if $(HELM) package $(CHART) --version $(HELM_CHECK_RELEASE_APP:v%=%) --app-version $(HELM_CHECK_RELEASE_APP) \
+		--destination "$$tmp/release" >/dev/null && \
+		$(HELM) template muster "$$tmp/release/muster-$(HELM_CHECK_RELEASE_APP:v%=%).tgz" \
+		--kube-version $(HELM_CHECK_KUBE_VERSION) -f $(CHART)/ci/all-options-values.yaml >"$$tmp/release.yaml"; then \
+		$(GO) run ./internal/tools/chartcheck -manifest "$$tmp/release.yaml" || failed=1; \
+	else \
+		echo "packaging and rendering the chart with the appVersion $(HELM_CHECK_RELEASE_APP) failed"; failed=1; \
+	fi; \
 	echo "helm template without existingSecret"; \
 	if out=$$($(HELM) template muster $(CHART) --set publicURL=https://muster.example.org 2>&1); then \
 		echo "rendered without existingSecret"; failed=1; \
@@ -299,7 +332,34 @@ helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check
 	else \
 		echo "$$out"; echo "the error does not say: $(HELM_CHECK_SECRET_ERROR)"; failed=1; \
 	fi; \
+	echo "helm template with the GrafanaDashboard and without its ConfigMap"; \
+	if out=$$($(HELM) template muster $(CHART) --set existingSecret=muster \
+		--set dashboard.grafanaDashboard.enabled=true 2>&1); then \
+		echo "rendered the GrafanaDashboard without its ConfigMap"; failed=1; \
+	elif echo "$$out" | grep -qF '$(HELM_CHECK_DASHBOARD_ERROR)'; then \
+		echo "fails as it should: $(HELM_CHECK_DASHBOARD_ERROR)"; \
+	else \
+		echo "$$out"; echo "the error does not say: $(HELM_CHECK_DASHBOARD_ERROR)"; failed=1; \
+	fi; \
 	exit $$failed
+
+# Renders the chart with the PrometheusRule, extracts its rule group into a plain rule file with chartcheck, which also
+# checks that every rule has its unit test and every test a rule, checks the file with promtool, which prints only on
+# failure, and runs every unit test of $(RULE_TESTS) against it, one SUCCESS line per test file. promtool reads a test's
+# rule_files next to the test, so the tests run from copies beside the extracted rules; $(RULE_TESTS) never holds a
+# rules.yaml. RULES_TEST_FLAGS passes more values to helm template, such as a changed threshold.
+RULE_TESTS := $(CHART)/tests/rules
+RULES_TEST_FLAGS ?=
+rules-test: $(HELM) $(PROMTOOL) ## Render the chart's alert rules and run their unit tests with promtool
+	@tmp=$$(mktemp -d) || exit 1; \
+	trap 'rm -rf "$$tmp"' EXIT; \
+	$(HELM) template muster $(CHART) --set existingSecret=muster --set alerting.prometheusRule.enabled=true \
+		$(RULES_TEST_FLAGS) >"$$tmp/chart.yaml" || exit 1; \
+	$(GO) run ./internal/tools/chartcheck -manifest "$$tmp/chart.yaml" -extract-rules "$$tmp/rules.yaml" \
+		-tests $(RULE_TESTS) || exit 1; \
+	out=$$($(PROMTOOL) check rules "$$tmp/rules.yaml" 2>&1) || { echo "$$out"; exit 1; }; \
+	cp $(RULE_TESTS)/*.yaml "$$tmp/" || exit 1; \
+	$(PROMTOOL) test rules $(addprefix "$$tmp"/,$(notdir $(wildcard $(RULE_TESTS)/*.yaml)))
 
 # Without a .env next to the compose file its variables are unset, which compose reports as warnings.
 compose-check: ## Check the compose example with docker compose config, without and with .env.example
@@ -352,12 +412,16 @@ docs-api: $(WEB_DEPS)
 		--config ../.redocly.yaml --disableGoogleFont --output ../$(API_REFERENCE)
 
 # Before the build, runbookcheck fails when the runbook pages under docs/operations/runbooks/ differ from the Internal
-# alerts and the chart rules of reference.md, or a page lacks one of its four sections; its command is not echoed, so
-# that its own lines come first. Zensical checks the links to pages and their anchors, but not those to other files
-# and not the navigation, so after the build the rendered API reference is checked, then that every page the nav of
-# mkdocs.yml names exists under docs/ and that every page under docs/, except those exclude_docs names, is in the nav.
-docs: generate docs-api $(DOCS_DEPS) ## Generate, render the API reference and build the site strictly into site/
-	@$(GO) run ./internal/tools/runbookcheck
+# alerts, the chart rules of reference.md and the rules of the chart rendered with its all-options values, when a
+# rendered rule's runbook_url does not end in its page, or a page lacks one of its four sections; its commands are not
+# echoed, so that its own lines come first. Zensical checks the links to pages and their anchors, but not those to other
+# files and not the navigation, so after the build the rendered API reference is checked, then that every page the nav
+# of mkdocs.yml names exists under docs/ and that every page under docs/, except those exclude_docs names, is in the
+# nav.
+docs: generate docs-api $(DOCS_DEPS) $(HELM) ## Generate, render the API reference and build the site strictly into site/
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+		$(HELM) template muster $(CHART) -f $(CHART)/ci/all-options-values.yaml >"$$tmp/chart.yaml" && \
+		$(GO) run ./internal/tools/runbookcheck -manifest "$$tmp/chart.yaml"
 	$(ZENSICAL) build --strict --config-file mkdocs.yml
 	@test -s site/$(API_REFERENCE:docs/%=%) || \
 		{ echo "site/$(API_REFERENCE:docs/%=%) is missing: the API page links to it"; exit 1; }
@@ -438,3 +502,17 @@ $(KUBECONFORM):
 $(SQLC): export CGO_ENABLED := 0
 $(SQLC):
 	$(call go-install,$(SQLC_PKG)@$(SQLC_VERSION),sqlc)
+
+# go install refuses promtool@version: the prometheus module's go.mod has replace directives. It is built the same way
+# in a throwaway module, with the versions its go.mod requires and the checksums verified, retried like go-install.
+$(PROMTOOL): export CGO_ENABLED := 0
+$(PROMTOOL):
+	@mkdir -p $(TOOLS)
+	for attempt in 1 2 3; do \
+		tmp=$$(mktemp -d) || exit 1; \
+		( cd "$$tmp" && export GOTOOLCHAIN=$(GO_TOOLCHAIN) && $(GO) mod init muster-promtool && \
+			$(GO) get $(PROMTOOL_PKG)@$(PROMTOOL_VERSION) && $(GO) build -o $(abspath $@) $(PROMTOOL_PKG) ); \
+		status=$$?; rm -rf "$$tmp"; [ $$status -eq 0 ] && break; \
+		if [ $$attempt -eq 3 ]; then exit 1; fi; \
+		echo "building promtool failed, trying again in $$((attempt * 10)) seconds"; sleep $$((attempt * 10)); \
+	done

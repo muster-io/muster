@@ -21,8 +21,12 @@ files_touched:
   - internal/tools/chartcheck/main.go
   - internal/tools/chartcheck/chartcheck_test.go
   - internal/tools/runbookcheck/main.go
+  - internal/tools/runbookcheck/runbookcheck_test.go
+  - go.mod
   - Makefile
   - .github/workflows/ci.yml
+  - AGENTS.md
+  - CONTRIBUTING.md
 acceptance:
   - "[C-19.FR-3] With `alerting.prometheusRule.enabled` the chart renders a `PrometheusRule`, with `alerting.vmRule.enabled` a `VMRule`, both holding the twelve rules of reference.md with their severity, `description`, `runbook_url` and default expression; thresholds, windows, `for` and the job selector are chart values; without either flag no rule is rendered."
   - "[C-19.AC-8, C-19.AC-1] `make rules-test` runs `promtool test rules` over the rendered rules: each rule fires on its documented condition — `MusterNoLeader` after 2 minutes of `max(muster_leader) == 0` — and stays silent without it."
@@ -71,7 +75,9 @@ issue: 59
   `MusterLoginFailures.failures` and `.window`), with the defaults of reference.md.
 - **Rule unit tests** (C-19.AC-8; `tests/rules/**`, `make rules-test`): `helm template` with the rules enabled, the
   group extracted to a file, `promtool check rules` and `promtool test rules` with one test file per rule: the series
-  that make it fire, the time it starts firing (its window and `for`), and a series set that keeps it silent, including
+  that make it fire, the time it starts firing (its window and `for`) with the labels and annotations of the fired
+  alert, its `runbook_url` included — for a rule whose condition holds from its first samples or that fires at once,
+  the window is pinned by the time it stops firing — and a series set that keeps it silent, including
   `MusterNoLeader` after 2 minutes of `muster_leader` 0 on every target (C-19.AC-1) and `MusterIngestRejected` with one
   oversized request but not with ten unauthorized ones.
 - **`runbook_url`** (C-19.FR-9; `_helpers.tpl`): `{{ alerting.runbookBaseURL }}/{{ major.minor of appVersion, or
@@ -87,35 +93,49 @@ issue: 59
   resolutions by reason, Heartbeat lost), **Delivery** (attempts by Destination and outcome, queues, Broken Destinations,
   messenger API latency by client class), **Platform** (Leader, API requests and latency, sign-in failures, template
   errors and rendering time, clock skew, database pool, memory and goroutines). Rendered as a ConfigMap with the sidecar
-  label from `dashboard.configMap.labels` (default `grafana_dashboard: "1"`) when `dashboard.configMap.enabled`, and as a
+  label from `dashboard.configMap.labels` (default `grafana_dashboard: "1"`) and annotations from
+  `dashboard.configMap.annotations`, such as the sidecar's folder annotation, when `dashboard.configMap.enabled`, and as a
   `GrafanaDashboard` (`grafana.integreatly.org/v1beta1`) with `configMapRef` to that ConfigMap — `name` and `key`
   (`muster.json`), both required by the CRD — `instanceSelector`, which the CRD requires too
-  (`dashboard.grafanaDashboard.instanceSelector`, default `matchLabels: {dashboards: grafana}`), and `folder` from
-  values when `dashboard.grafanaDashboard.enabled`, which fails to render without the ConfigMap.
+  (`dashboard.grafanaDashboard.instanceSelector`, default `matchLabels: {dashboards: grafana}`), `folder` from
+  values and, with `dashboard.grafanaDashboard.allowCrossNamespaceImport`, `allowCrossNamespaceImport: true` for a
+  Grafana in another namespace, when `dashboard.grafanaDashboard.enabled`, which fails to render without the ConfigMap.
 - **Checks** (`internal/tools/chartcheck`, in `make helm-check`): the rendered rule names equal the chart rules table of
-  reference.md; each rule has a severity label, a `description` and a `runbook_url` of the form above; the dashboard has
-  the uid, the variables and the four rows, and every metric name in its queries and in the rule expressions is in the
-  metric registry (S-053). Before the lookup a name loses the `_bucket`, `_sum` and `_count` suffixes of a histogram,
-  and the series every Prometheus scrape or Go process exports without being in the catalogue — `up`, `process_*`
-  and `go_*` — are allowed. `make helm-check` validates the rendered CRD resources with kubeconform and their
-  published schemas through the CRDs catalog location already pinned in the Makefile (`KUBECONFORM_FLAGS`, which
-  ServiceMonitor uses); the story checks that the catalog has `PrometheusRule`, `VMRule` and `GrafanaDashboard` at that
-  commit, moves the pin forward if one is missing, and never skips missing schemas.
-- **Packaging**: `.helmignore` gains `tests/`, so that the rule unit tests are not part of the packaged chart.
+  reference.md; each rule has the severity, the `for` and, whitespace aside, the default expression of that table, a
+  `summary`, a `description` and a `runbook_url` of the form above, computed with the binary's own version function;
+  the `PrometheusRule` and the `VMRule` have the same spec; the dashboard has the uid, the variables and the four rows,
+  every panel queries the data source variable, the regex of each entity variable takes the id as the value and the
+  name as the text from its `query_result` series as Grafana prints them, labels in the sorted order Prometheus returns,
+  and every metric name in its queries and in the rule expressions is in the metric registry (S-053).
+  `make helm-check` runs it on the all-options rendering and on the same values in the chart packaged with a release
+  `appVersion` (`v1.4.0-rc.1`, whose runbooks are under `/1.4/`), and fails when the default values render a rule
+  resource or the dashboard, or when the `GrafanaDashboard` renders without its ConfigMap. Before the lookup a name
+  loses the `_bucket`, `_sum` and `_count` suffixes of a histogram, and the series every Prometheus scrape or Go process
+  exports without being in the catalogue — `up`, `process_*` and `go_*` — are allowed. `make helm-check` validates
+  the rendered CRD resources with kubeconform and their published schemas through the CRDs catalog location already
+  pinned in the Makefile (`KUBECONFORM_FLAGS`, which ServiceMonitor uses); the story checks that the catalog has
+  `PrometheusRule`, `VMRule` and `GrafanaDashboard` at that commit, moves the pin forward if one is missing, and never
+  skips missing schemas.
+- **Packaging**: `.helmignore` gains `/tests/`, anchored at the chart root, so that the rule unit tests are not part
+  of the packaged chart while a `templates/tests/` of `helm test` hooks still would be.
 - **Value descriptions**: every new value under `alerting.*` and `dashboard.*` has a `description` in
   `values.schema.json`, which the chart values reference of S-057 renders and checks.
 - **Runbook check** (C-21.FR-3, C-19.AC-4; `internal/tools/runbookcheck`): the rule names and the paths of the
-  `runbook_url`s rendered with the all-options values join the one-to-one check of S-058. It renders with the helm of
-  the Makefile's pinned tool target, so `make docs-check`, which runs on every pull request (S-057), fails a pull
-  request that adds a chart rule without its page.
+  `runbook_url`s rendered with the all-options values join the one-to-one check of S-058. `make docs` renders the chart
+  with the all-options values with the Makefile's pinned helm and passes the manifest to it (`-manifest`), so
+  `make docs-check`, which runs on every pull request (S-057), fails a pull request that adds a chart rule without its
+  page.
 - **Defaults**: `alerting.runbookBaseURL`, "Chart rule thresholds, windows and job selector".
 
 ## Steps
 
 1. Write the rule group with its values and the two resources. Check: `helm template` renders twelve rules in each and
    none without the flags; `chartcheck` passes.
-2. Write one unit test per rule. Check: `make rules-test` passes; changing a threshold value makes the matching test
-   fail.
+2. Write one unit test per rule. Check: `make rules-test` passes;
+   `make rules-test RULES_TEST_FLAGS='--set alerting.rules.MusterNoLeader.for=3m'` fails in the test of
+   `MusterNoLeader` only, `RULES_TEST_FLAGS='--set alerting.rules.MusterClockSkew.seconds=5'` in the test of
+   `MusterClockSkew` only, and a window changed by one minute, such as
+   `RULES_TEST_FLAGS='--set alerting.rules.MusterDeliveryFailing.window=11m'`, in the test of its rule only.
 3. Write the dashboard and its two deliveries. Check: `chartcheck` passes; kubeconform validates both.
 4. Pass the base URL to Muster and extend the runbook check. Check: Verification below.
 
@@ -127,7 +147,7 @@ yq 'select(.kind == "PrometheusRule" or .kind == "VMRule") | .kind' /tmp/def.yam
 helm template m deploy/helm/muster --set existingSecret=s -f deploy/helm/muster/ci/all-options-values.yaml > /tmp/all.yaml
 yq 'select(.kind == "PrometheusRule") | .spec.groups[].rules[].alert' /tmp/all.yaml | wc -l   # 12
 yq 'select(.kind == "VMRule") | .spec.groups[].rules[].alert' /tmp/all.yaml | wc -l          # 12
-yq 'select(.kind == "PrometheusRule") | .spec.groups[].rules[] | select(.alert == "MusterNoLeader") | [.expr, .for, .labels.severity, .annotations.runbook_url] | join(" | ")' /tmp/all.yaml
+yq 'select(.kind == "PrometheusRule") | .spec.groups[].rules[] | select(.alert == "MusterNoLeader") | [.expr, .for, .labels.severity, .annotations.runbook_url] | join(" | ")' /tmp/all.yaml | grep MusterNoLeader
 # max(muster_leader{job="muster"}) == 0 | 2m | critical | https://muster-io.github.io/muster/latest/operations/runbooks/MusterNoLeader/
 #   (appVersion 0.0.0-dev; a release chart has its major.minor)
 yq 'select(.kind == "PrometheusRule") | .spec.groups[].rules[] | select(.alert == "MusterDeliveryFailing") | .expr' /tmp/all.yaml | grep -o 'job="muster"' | wc -l   # 2
@@ -170,6 +190,22 @@ None.
 - The expressions use only metrics of the catalogue, so a renamed metric fails `chartcheck` before it reaches a
   cluster.
 - `operator_attention`: the optional check in a test cluster.
+- `files_touched` corrections: `internal/tools/runbookcheck/runbookcheck_test.go` tests the rendered rules that join
+  the runbook check; `go.mod` gains `github.com/VictoriaMetrics/metricsql`, the PromQL parser `chartcheck` reads the
+  metric names with, which only the tool imports, so it is not part of the binary; `AGENTS.md` and `CONTRIBUTING.md`
+  list the Make targets and the pinned tools, which gain `make rules-test` and promtool.
+- Contracts corrected: `runbookcheck` reads the chart that `make docs` renders with the pinned helm (`-manifest`)
+  instead of running helm itself; the dashboard values `dashboard.configMap.annotations` and
+  `dashboard.grafanaDashboard.allowCrossNamespaceImport` are named; the checks compare `expr`, `for` and severity
+  with reference.md and run on a release `appVersion` too, and they apply the entity variables' regexes to the
+  label-sorted `query_result` series, since a regex written in another label order lists no entity; the rule unit tests
+  assert the annotations of the fired alerts, and the window of a rule whose condition holds from its first samples
+  (`MusterDeliverySlow`, `MusterDeliveryQueueGrowing`, the delay of `MusterIngestBacklog`) or that fires at once
+  (`for: 0m`) is pinned by the time the alert ends instead of the time it starts; `.helmignore` anchors `/tests/`, as
+  an unanchored `tests/` would drop a `templates/tests/` at any depth. Step 2 named a changed threshold as its
+  negative check; it names the `for` of `MusterNoLeader`, the threshold of `MusterClockSkew` and a window, because the
+  `for` and the windows are what the tests pin by time, and both the `for` and the threshold were run as negatives.
+  The Verification line of `MusterNoLeader` filters with `grep`, as `yq` prints a line per document.
 
 ## Coverage
 

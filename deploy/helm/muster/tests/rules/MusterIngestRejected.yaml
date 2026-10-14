@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterIngestRejected fires at once on one oversized ingestion request, or on more than 10 unauthorized ones of an
+# Integration, within 15 minutes; increase needs a sample before the request. Ranges leave out their start, so a
+# request between 0m and 1m counts until 14m and no longer at 15m.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: one oversized request fires at once and counts for 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_ingest_requests_total{job="muster",instance="10.0.0.1:8082",integration="int_1",outcome="too_large"}'
+        values: '0 1x20'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: MusterIngestRejected
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: MusterIngestRejected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              integration: int_1
+              outcome: too_large
+            exp_annotations:
+              summary: Muster rejected ingestion requests
+              description: >-
+                In the last 15m the Integration in the label integration received an oversized request, or more than 10
+                requests without a valid Integration token; the label outcome says which. First read the log lines
+                ingest_rejected for the client address.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestRejected/
+      - eval_time: 14m
+        alertname: MusterIngestRejected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              integration: int_1
+              outcome: too_large
+            exp_annotations:
+              summary: Muster rejected ingestion requests
+              description: >-
+                In the last 15m the Integration in the label integration received an oversized request, or more than 10
+                requests without a valid Integration token; the label outcome says which. First read the log lines
+                ingest_rejected for the client address.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestRejected/
+      - eval_time: 15m
+        alertname: MusterIngestRejected
+        exp_alerts: []
+  - name: eleven unauthorized requests over two replicas fire at once
+    interval: 1m
+    input_series:
+      - series: 'muster_ingest_requests_total{job="muster",instance="10.0.0.1:8082",integration="unknown",outcome="unauthorized"}'
+        values: '0 6 6'
+      - series: 'muster_ingest_requests_total{job="muster",instance="10.0.0.2:8082",integration="unknown",outcome="unauthorized"}'
+        values: '0 5 5'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MusterIngestRejected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              integration: unknown
+              outcome: unauthorized
+            exp_annotations:
+              summary: Muster rejected ingestion requests
+              description: >-
+                In the last 15m the Integration in the label integration received an oversized request, or more than 10
+                requests without a valid Integration token; the label outcome says which. First read the log lines
+                ingest_rejected for the client address.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestRejected/
+  - name: ten unauthorized requests, accepted ones and another job's oversized one stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_ingest_requests_total{job="muster",instance="10.0.0.1:8082",integration="unknown",outcome="unauthorized"}'
+        values: '0 10 10 10'
+      - series: 'muster_ingest_requests_total{job="muster",instance="10.0.0.1:8082",integration="int_1",outcome="accepted"}'
+        values: '0+100x3'
+      - series: 'muster_ingest_requests_total{job="other",instance="10.0.0.9:8082",integration="int_1",outcome="too_large"}'
+        values: '0 1 1 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MusterIngestRejected
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: MusterIngestRejected
+        exp_alerts: []

@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterNoLeader fires after 2 minutes in which muster_leader is 0 on every target of the job muster (C-19.AC-1).
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: no target leads for 2 minutes, whatever another job reports
+    interval: 1m
+    input_series:
+      - series: 'muster_leader{job="muster",instance="10.0.0.1:8082"}'
+        values: '0x5'
+      - series: 'muster_leader{job="muster",instance="10.0.0.2:8082"}'
+        values: '0x5'
+      - series: 'muster_leader{job="other",instance="10.0.0.9:8082"}'
+        values: '1x5'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MusterNoLeader
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: MusterNoLeader
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: No Muster replica is the Leader
+              description: >-
+                No replica holds the Leader lock: Telegram polling, the Heartbeat and Stale checks, partition
+                maintenance and the outgoing heartbeat have stopped, while ingestion, delivery and timers keep working.
+                First check the replicas on the System status page and the database connection of each replica.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterNoLeader/
+  - name: one target leads, or a Leader returns within 2 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_leader{job="muster",instance="10.0.0.1:8082"}'
+        values: '1 1 0 0 1 1'
+      - series: 'muster_leader{job="muster",instance="10.0.0.2:8082"}'
+        values: '0x5'
+      - series: 'muster_leader{job="other",instance="10.0.0.9:8082"}'
+        values: '0x5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: MusterNoLeader
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: MusterNoLeader
+        exp_alerts: []

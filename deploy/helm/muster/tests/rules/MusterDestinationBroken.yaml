@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterDestinationBroken fires when a Destination has been Broken for 5 minutes.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: a Broken Destination fires after 5 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_destination_broken{job="muster",instance="10.0.0.1:8082",destination="dst_1"}'
+        values: '1x10'
+      - series: 'muster_destination_broken{job="muster",instance="10.0.0.1:8082",destination="dst_2"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MusterDestinationBroken
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: MusterDestinationBroken
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              destination: dst_1
+            exp_annotations:
+              summary: A Destination is Broken
+              description: >-
+                Muster stopped sending to the Destination in the label destination after a Fatal error or when its retry
+                budget ran out, and probes it until it answers. First read the reason on the Destination page.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDestinationBroken/
+  - name: healthy Destinations, and another job's Broken one, stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_destination_broken{job="muster",instance="10.0.0.1:8082",destination="dst_1"}'
+        values: '0x10'
+      - series: 'muster_destination_broken{job="other",instance="10.0.0.9:8082",destination="dst_1"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MusterDestinationBroken
+        exp_alerts: []

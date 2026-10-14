@@ -160,7 +160,8 @@ A false positive is fixed in the lint, never worked around in the code.
 
 The Makefile is the only entry point. Targets appear as the stories that define them land; the Makefile is
 authoritative, and `make help`, its default goal, lists them. Pinned tools — golangci-lint, go-test-coverage, go-licenses,
-govulncheck, gremlins, helm, kubeconform and sqlc — are built with the project's Go toolchain into `bin/tools/` on first use.
+govulncheck, gremlins, helm, kubeconform, promtool and sqlc — are built with the project's Go toolchain into `bin/tools/` on
+first use.
 Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageManager` in `web/package.json`) are pinned.
 
 | Target | Does | From |
@@ -178,14 +179,15 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 | `make licenses` | check dependency licences for shipped artifacts (binary, SPA bundle) and report tooling licences | S-002 |
 | `make vulncheck` | find vulnerable Go code that is called (govulncheck) and high and critical advisories in the SPA's production dependencies (pnpm audit) | S-002 |
 | `make mutation` | run mutation testing over the core packages; the nightly workflow uploads the report as an artifact | S-002 |
-| `make helm-check`, `make compose-check` | render and validate the chart; check the compose example | S-003 |
+| `make helm-check`, `make compose-check` | render and validate the chart and check its rules and dashboard against reference.md and the metric catalogue (`chartcheck`); check the compose example | S-003, S-059 |
+| `make rules-test` | render the chart's alert rules and run their unit tests (`deploy/helm/muster/tests/rules/`) with promtool | S-059 |
 | `make dev-db`, `make dev` | the development PostgreSQL; PostgreSQL, build and `muster dev` | S-004 |
 | `make e2e` | the end-to-end suites, Go and then Playwright (`web/e2e`); `E2E_REPLICAS=2` runs the Go suite with two replicas | S-004, S-014 |
 | `make load-test` | the load test against `muster dev` | S-004 |
 | `make demo` | record the README demo (`web/e2e/demo.spec.ts`) on `muster dev` and convert it with ffmpeg into `docs/assets/demo.gif`; run by hand, never in CI | S-058 |
 | `make test-integration` | integration tests on PostgreSQL 14 and 17 | S-006 |
 | `make docs`, `make docs-serve` | generate, render the API reference and build the documentation site strictly into `site/` with the pinned toolchain in `bin/docs-venv/`; the same, served on `localhost:8000` | S-057 |
-| `make docs-check` | `generate-check`, then `docs`: fail on a stale generated page, on runbook pages that do not match the Internal alerts and the chart rules, and on a broken link or anchor | S-057, S-058 |
+| `make docs-check` | `generate-check`, then `docs`: fail on a stale generated page, on runbook pages that do not match the Internal alerts, the chart rules and the rendered chart rules, and on a broken link or anchor | S-057, S-058, S-059 |
 
 ### Development mode
 

@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterDeliveryQueueGrowing fires when a delivery queue above 100 has kept growing over 15 minutes, for 15 minutes;
+# deriv needs two samples, so the condition holds from the first minute.
+# When the queue stops growing, the alert ends once its growth leaves the 15 minutes: the last growth between 19m and
+# 20m still counts at 33m, not at 34m.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: a queue above 100 that keeps growing fires after 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_delivery_queue{job="muster",instance="10.0.0.1:8082",destination="dst_1"}'
+        values: '101+10x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MusterDeliveryQueueGrowing
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: MusterDeliveryQueueGrowing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              destination: dst_1
+            exp_annotations:
+              summary: A delivery queue keeps growing
+              description: >-
+                The Destination in the label destination has more than 100 deliveries waiting, and the number keeps
+                growing. First check Delivery queues, Storms and Broken Destinations on the System status page.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryQueueGrowing/
+  - name: a queue that stops growing ends it once its growth leaves the 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_delivery_queue{job="muster",instance="10.0.0.1:8082",destination="dst_1"}'
+        values: '101+10x20 301x20'
+    alert_rule_test:
+      - eval_time: 33m
+        alertname: MusterDeliveryQueueGrowing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              destination: dst_1
+            exp_annotations:
+              summary: A delivery queue keeps growing
+              description: >-
+                The Destination in the label destination has more than 100 deliveries waiting, and the number keeps
+                growing. First check Delivery queues, Storms and Broken Destinations on the System status page.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryQueueGrowing/
+      - eval_time: 34m
+        alertname: MusterDeliveryQueueGrowing
+        exp_alerts: []
+  - name: a large flat queue, a small growing one and another job's growing one stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_delivery_queue{job="muster",instance="10.0.0.1:8082",destination="dst_1"}'
+        values: '500x30'
+      - series: 'muster_delivery_queue{job="muster",instance="10.0.0.1:8082",destination="dst_2"}'
+        values: '0+1x30'
+      - series: 'muster_delivery_queue{job="other",instance="10.0.0.9:8082",destination="dst_3"}'
+        values: '101+10x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MusterDeliveryQueueGrowing
+        exp_alerts: []

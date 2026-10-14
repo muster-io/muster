@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterIngestBacklog fires when more than 1000 Stored Snapshots wait, or the 95th percentile of the processing delay
+# over 5 minutes is above 60 seconds, for 5 minutes.
+# When processing is fast again, the alert ends once the last slow Snapshot leaves the 5 minutes: the last slow one
+# between 9m and 10m still counts at 13m, not at 14m.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: a backlog above 1000 fires after 5 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_ingest_backlog{job="muster",instance="10.0.0.1:8082"}'
+        values: '1001x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MusterIngestBacklog
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: MusterIngestBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Processing falls behind ingestion
+              description: >-
+                More than 1000 Stored Snapshots wait, or the 95th percentile of their processing delay over 5m is above
+                60 seconds. First find the slow Integrations by muster_ingest_processing_delay_seconds, then check the
+                load of the database.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestBacklog/
+  - name: a processing delay above 60 seconds fires after 5 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_ingest_backlog{job="muster",instance="10.0.0.1:8082"}'
+        values: '0x10'
+      - series: 'muster_ingest_processing_delay_seconds_bucket{job="muster",instance="10.0.0.1:8082",integration="int_1",le="60"}'
+        values: '0x10'
+      - series: 'muster_ingest_processing_delay_seconds_bucket{job="muster",instance="10.0.0.1:8082",integration="int_1",le="120"}'
+        values: '0+10x10'
+      - series: 'muster_ingest_processing_delay_seconds_bucket{job="muster",instance="10.0.0.1:8082",integration="int_1",le="+Inf"}'
+        values: '0+10x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MusterIngestBacklog
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: MusterIngestBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Processing falls behind ingestion
+              description: >-
+                More than 1000 Stored Snapshots wait, or the 95th percentile of their processing delay over 5m is above
+                60 seconds. First find the slow Integrations by muster_ingest_processing_delay_seconds, then check the
+                load of the database.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestBacklog/
+  - name: a processing delay that drops again ends it once the slow Snapshots leave the 5 minutes
+    interval: 1m
+    input_series:
+      - series: 'muster_ingest_backlog{job="muster",instance="10.0.0.1:8082"}'
+        values: '0x20'
+      - series: 'muster_ingest_processing_delay_seconds_bucket{job="muster",instance="10.0.0.1:8082",integration="int_1",le="60"}'
+        values: '1000x10 1010+10x9'
+      - series: 'muster_ingest_processing_delay_seconds_bucket{job="muster",instance="10.0.0.1:8082",integration="int_1",le="120"}'
+        values: '1000+10x19'
+      - series: 'muster_ingest_processing_delay_seconds_bucket{job="muster",instance="10.0.0.1:8082",integration="int_1",le="+Inf"}'
+        values: '1000+10x19'
+    alert_rule_test:
+      - eval_time: 13m
+        alertname: MusterIngestBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: Processing falls behind ingestion
+              description: >-
+                More than 1000 Stored Snapshots wait, or the 95th percentile of their processing delay over 5m is above
+                60 seconds. First find the slow Integrations by muster_ingest_processing_delay_seconds, then check the
+                load of the database.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestBacklog/
+      - eval_time: 14m
+        alertname: MusterIngestBacklog
+        exp_alerts: []
+  - name: a backlog of 1000, a fast processing and another job's backlog stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_ingest_backlog{job="muster",instance="10.0.0.1:8082"}'
+        values: '1000x10'
+      - series: 'muster_ingest_processing_delay_seconds_bucket{job="muster",instance="10.0.0.1:8082",integration="int_1",le="1"}'
+        values: '0+10x10'
+      - series: 'muster_ingest_processing_delay_seconds_bucket{job="muster",instance="10.0.0.1:8082",integration="int_1",le="+Inf"}'
+        values: '0+10x10'
+      - series: 'muster_ingest_backlog{job="other",instance="10.0.0.9:8082"}'
+        values: '5000x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MusterIngestBacklog
+        exp_alerts: []

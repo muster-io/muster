@@ -122,3 +122,28 @@ networkPolicy:
 podDisruptionBudget:
   enabled: true
   maxUnavailable: 1
+
+alerting:
+  prometheusRule:
+    enabled: true
+    labels:
+      prometheus: kube-prometheus
+  vmRule:
+    enabled: true
+    labels:
+      example.com/rules: muster
+
+dashboard:
+  configMap:
+    enabled: true
+    labels:
+      grafana_dashboard: "1"
+    annotations:
+      grafana_folder: Muster
+  grafanaDashboard:
+    enabled: true
+    instanceSelector:
+      matchLabels:
+        dashboards: grafana
+    folder: Muster
+    allowCrossNamespaceImport: true

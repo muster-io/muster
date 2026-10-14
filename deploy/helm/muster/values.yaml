@@ -114,3 +114,78 @@ networkPolicy:
 podDisruptionBudget:
   enabled: false
   maxUnavailable: 1
+
+alerting:
+  runbookBaseURL: https://muster-io.github.io/muster
+  jobSelector: ""
+  prometheusRule:
+    enabled: false
+    labels: {}
+  vmRule:
+    enabled: false
+    labels: {}
+  rules:
+    MusterDown:
+      enabled: true
+      for: 2m
+    MusterNoLeader:
+      enabled: true
+      for: 2m
+    MusterDeliveryFailing:
+      enabled: true
+      for: 5m
+      window: 10m
+    MusterDestinationBroken:
+      enabled: true
+      for: 5m
+    MusterHeartbeatLost:
+      enabled: true
+      for: 1m
+    MusterDeliverySlow:
+      enabled: true
+      for: 15m
+      seconds: 5
+      window: 15m
+    MusterDeliveryQueueGrowing:
+      enabled: true
+      for: 15m
+      size: 100
+      window: 15m
+    MusterIngestBacklog:
+      enabled: true
+      for: 5m
+      backlog: 1000
+      delaySeconds: 60
+      window: 5m
+    MusterIngestRejected:
+      enabled: true
+      for: 0m
+      unauthorized: 10
+      window: 15m
+    MusterTemplateError:
+      enabled: true
+      for: 0m
+      window: 15m
+    MusterClockSkew:
+      enabled: true
+      for: 5m
+      seconds: 2
+    MusterLoginFailures:
+      enabled: true
+      for: 0m
+      failures: 20
+      window: 10m
+
+dashboard:
+  configMap:
+    enabled: false
+    labels:
+      grafana_dashboard: "1"
+    annotations: {}
+  grafanaDashboard:
+    enabled: false
+    instanceSelector:
+      matchLabels:
+        dashboards: grafana
+    folder: ""
+    allowCrossNamespaceImport: false

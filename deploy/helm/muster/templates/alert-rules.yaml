@@ -1,0 +1,35 @@
+{{- /*
+SPDX-License-Identifier: AGPL-3.0-only
+Copyright The Muster Authors
+*/ -}}
+{{- if or .Values.alerting.prometheusRule.enabled .Values.alerting.vmRule.enabled }}
+{{- $spec := tpl (.Files.Get "files/rules.yaml") . }}
+{{- if .Values.alerting.prometheusRule.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "muster.fullname" . }}
+  labels:
+    {{- include "muster.labels" . | nindent 4 }}
+    {{- with .Values.alerting.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- $spec | nindent 2 }}
+{{- end }}
+{{- if .Values.alerting.vmRule.enabled }}
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: {{ include "muster.fullname" . }}
+  labels:
+    {{- include "muster.labels" . | nindent 4 }}
+    {{- with .Values.alerting.vmRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- $spec | nindent 2 }}
+{{- end }}
+{{- end }}

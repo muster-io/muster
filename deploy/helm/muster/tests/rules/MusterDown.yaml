@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterDown fires when a scrape target of the job muster has been down for 2 minutes.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: a target down for 2 minutes fires
+    interval: 1m
+    input_series:
+      - series: 'up{job="muster",instance="10.0.0.1:8082"}'
+        values: '1 0 0 0 0'
+      - series: 'up{job="muster",instance="10.0.0.2:8082"}'
+        values: '1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MusterDown
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: MusterDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: muster
+              instance: 10.0.0.1:8082
+            exp_annotations:
+              summary: A Muster replica cannot be scraped
+              description: >-
+                Prometheus cannot scrape the Muster replica in the label instance. First check that its pod runs and
+                that its internal listener answers GET /health/live.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDown/
+  - name: targets that are up, and another job down, stay silent
+    interval: 1m
+    input_series:
+      - series: 'up{job="muster",instance="10.0.0.1:8082"}'
+        values: '1x10'
+      - series: 'up{job="node",instance="10.0.0.9:9100"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MusterDown
+        exp_alerts: []

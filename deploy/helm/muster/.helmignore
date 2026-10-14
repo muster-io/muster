@@ -20,3 +20,5 @@
 *.iml
 .vscode/
 ci/
+# The unit tests of the alert rules, which make rules-test runs from the repository.
+/tests/

@@ -76,3 +76,32 @@ Return the appropriate image repository and tag
 {{- define "muster.image" -}}
 {{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) }}
 {{- end }}
+
+{{/*
+The label matchers that select Muster's series in every chart rule: alerting.jobSelector, or the job the ServiceMonitor
+scrapes into, named after the app.kubernetes.io/name label.
+*/}}
+{{- define "muster.jobSelector" -}}
+{{- .Values.alerting.jobSelector | default (printf "job=%q" (include "muster.name" .)) }}
+{{- end }}
+
+{{/*
+The version segment of the documentation site for the appVersion, as internalalerts.RunbookVersion computes it for
+the binary (C-19.FR-9): major.minor of a release number, latest for 0.0.0-dev and for anything that is not one.
+*/}}
+{{- define "muster.runbookVersion" -}}
+{{- $v := toString .Chart.AppVersion }}
+{{- $release := `^v?(\d+)\.(\d+)(\.\d+)?([-+].*)?$` }}
+{{- if or (not (regexMatch $release $v)) (regexMatch `^v?0\.0\.0-dev` $v) }}
+{{- "latest" }}
+{{- else }}
+{{- regexReplaceAll $release $v "${1}.${2}" }}
+{{- end }}
+{{- end }}
+
+{{/*
+The runbook pages of the documentation site for this appVersion; a rule's runbook_url is this, its name and a slash.
+*/}}
+{{- define "muster.runbookBase" -}}
+{{- printf "%s/%s/operations/runbooks" (trimSuffix "/" .Values.alerting.runbookBaseURL) (include "muster.runbookVersion" .) }}
+{{- end }}
