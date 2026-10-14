@@ -9,102 +9,343 @@ what it describes, such as a name or the version; every other label takes its va
 below. Histograms are Prometheus histograms with `le` buckets. A Leader-only metric is exported only by the
 replica that is the Leader. The capability is the one that exports the metric.
 
-| Metric | Type | Labels | Capability | Leader only | Description |
-|---|---|---|---|---|---|
-| `muster_alert_group_time_to_ack_seconds` | histogram | route | C-10 | no | Time from the start of an Alert Group to its first acknowledgement, observed once per Alert Group, by Route. Buckets (le): 60, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400. |
-| `muster_alert_group_time_to_resolve_seconds` | histogram | route | C-09 | no | Time from the start of an Alert Group to its resolution, observed at each resolution, by Route. Buckets (le): 60, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400. |
-| `muster_alert_groups` | gauge | route, status | C-09 | yes | Open Alert Groups by Route and status, counted by the Leader; an Alert Group moved to the Default route counts there. |
-| `muster_alert_groups_created_total` | counter | route | C-09 | no | Alert Groups that started, by Route. |
-| `muster_alert_groups_reopened_total` | counter | route | C-09 | no | Alert Groups that reopened within their Route's Reopen window, by Route. |
-| `muster_alert_groups_resolved_total` | counter | route, by | C-09 | no | Alert Groups that were resolved, by Route and by who resolved them. |
-| `muster_alerts_resolved_total` | counter | integration, reason | C-06 | no | Alerts that resolved, by Integration and reason. |
-| `muster_api_request_duration_seconds` | histogram | route_pattern, method | C-03 | no | Time from the arrival of an API request on the app listener to the end of its answer, by path template and method. Buckets (le): 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10. |
-| `muster_api_requests_total` | counter | route_pattern, method, code | C-03 | no | Requests to the API on the app listener, by the operation's path template, the method and the status code. |
-| `muster_build_info` | gauge | version, commit | C-02 | no | Always 1; the labels carry the version and commit of the running binary. |
-| `muster_client_request_duration_seconds` | histogram | client, outcome | C-02 | no | Duration of outbound HTTP requests, one per attempt, from the dial to the end of the body, by client class and outcome. Buckets (le): 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60. |
-| `muster_client_requests_total` | counter | client, outcome | C-02 | no | Outbound HTTP requests, one per attempt, by client class and classified outcome. |
-| `muster_clock_skew_seconds` | gauge | — | C-02 | no | This replica's clock minus the database clock, corrected by half the round trip; positive when the replica is ahead. |
-| `muster_commands_total` | counter | command, transport, outcome | C-10 | no | Commands run on Alert Groups, one per Alert Group, by command, Transport and outcome. |
-| `muster_db_pool_acquire_wait_seconds_total` | counter | — | C-02 | no | Seconds spent waiting for a connection of the main database pool of this replica, summed over every acquire. |
-| `muster_db_pool_acquires_total` | counter | — | C-02 | no | Connections taken from the main database pool of this replica. |
-| `muster_db_pool_connections` | gauge | state | C-02 | no | Connections of the main database pool of this replica, by state. |
-| `muster_db_pool_max_connections` | gauge | — | C-02 | no | The most connections the main database pool of this replica opens. |
-| `muster_delivery_attempts_total` | counter | destination, kind, outcome | C-11 | no | Calls of the delivery worker to a Destination, one per attempt, by Destination, what it sent and its outcome. |
-| `muster_delivery_latency_seconds` | histogram | destination | C-11 | no | Time from the receipt of the Snapshot behind a change of a Root message, or behind an event of an outgoing webhook, to the API call that delivered it, by Destination; changes made by Commands or timers are not observed. The service-level indicator of NFR-2. Buckets (le): 0.25, 0.5, 1, 2, 3, 5, 10, 30, 60, 300, 900. |
-| `muster_delivery_queue` | gauge | destination | C-11 | yes | Pending deliveries and Thread replies that are due, per Destination that is not deleted, counted by the Leader. |
-| `muster_destination_broken` | gauge | destination | C-11 | yes | 1 while the Destination is Broken, 0 while it is healthy, per Destination that is not deleted; set by the Leader. |
-| `muster_destination_info` | gauge | destination, name | C-11 | no | Always 1, one series per Destination that is not deleted; the labels carry its public_id and name. |
-| `muster_heartbeat_lost` | gauge | integration | C-07 | yes | 1 while the Integration is Heartbeat lost, 0 while its Heartbeat is on and not lost; set by the Leader's Heartbeat check. |
-| `muster_ingest_backlog` | gauge | — | C-06 | yes | Stored Snapshots waiting for processing in every Organization, counted by the Leader. |
-| `muster_ingest_failed_snapshots_total` | counter | integration | C-06 | no | Stored Snapshots that could not be processed and were marked failed — a body that is not an Alertmanager webhook, or an error of processing — by Integration. |
-| `muster_ingest_processing_delay_seconds` | histogram | integration | C-06 | no | Time from the receipt of a Stored Snapshot to the end of its processing, processed or failed, by Integration. Buckets (le): 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600. |
-| `muster_ingest_request_duration_seconds` | histogram | — | C-05 | no | Time from the arrival of an ingestion request to the end of its answer, the commit of the Stored Snapshot included. Buckets (le): 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10. |
-| `muster_ingest_requests_total` | counter | integration, outcome | C-05 | no | Requests to the ingestion endpoint, by the token's Integration and the outcome. |
-| `muster_ingest_resolved_dropped_total` | counter | integration | C-06 | no | Alerts sent as resolved whose fingerprint fires nowhere and that were dropped, by Integration; a re-sent resolve of an Alert already resolved is not counted. |
-| `muster_ingest_truncated_snapshots_total` | counter | integration | C-06 | no | Processed Snapshots that Alertmanager truncated (truncatedAlerts above 0), by Integration. |
-| `muster_integration_info` | gauge | integration, name | C-05 | no | Always 1, one series per Integration that is not deleted; the labels carry its public_id and name. |
-| `muster_leader` | gauge | — | C-02 | no | 1 while this replica is the Leader and runs the Leader tasks, 0 otherwise. |
-| `muster_login_failures_total` | counter | method | C-03 | no | Failed sign-ins that were evaluated, by method; attempts refused by the sign-in throttle are not counted. |
-| `muster_oidc_checks_total` | counter | outcome | C-03 | no | Background re-checks of OIDC users at the identity provider, by outcome. |
-| `muster_route_info` | gauge | route, name | C-08 | no | Always 1, one series per Route that is not deleted, the Default route included; the labels carry its public_id and name. |
-| `muster_short_lived_rows_pruned_total` | counter | table | C-02 | no | Short-lived rows that could no longer be used and that the Leader deleted, by table. |
-| `muster_storm_active` | gauge | route | C-11 | yes | 1 while the Route has an active Storm, 0 otherwise, per Route that is not deleted; set by the Leader. |
-| `muster_template_errors_total` | counter | route, destination, template | C-12 | no | Templates that failed while rendering, by the Route or the Destination that owns the template (the other label empty) and the kind of template; a message falls back to the Fallback template, a Link rule yields no link and is left out of the links, an outgoing webhook request is not sent. |
-| `muster_template_render_duration_seconds` | histogram | template | C-12 | no | Time to render a template in the sandbox, by the kind of template; a Root message is observed as a whole, its built-in default included. Buckets (le): 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5. |
+### `muster_alert_group_time_to_ack_seconds`
 
-## Label values
+histogram · labels: `route` · C-10 · exported by every replica
 
-| Metric | Label | Values |
-|---|---|---|
-| `muster_alert_group_time_to_ack_seconds` | `route` | entity: the public_id of the route |
-| `muster_alert_group_time_to_resolve_seconds` | `route` | entity: the public_id of the route |
-| `muster_alert_groups` | `route` | entity: the public_id of the route |
-| `muster_alert_groups` | `status` | `firing`, `acknowledged`, `snoozed` — the status of the open Alert Groups |
-| `muster_alert_groups_created_total` | `route` | entity: the public_id of the route |
-| `muster_alert_groups_reopened_total` | `route` | entity: the public_id of the route |
-| `muster_alert_groups_resolved_total` | `route` | entity: the public_id of the route |
-| `muster_alert_groups_resolved_total` | `by` | `user`, `system` — user is a person's resolve, system the resolve when the last Alert resolved |
-| `muster_alerts_resolved_total` | `integration` | entity: the public_id of the integration |
-| `muster_alerts_resolved_total` | `reason` | `resolved`, `gone`, `stale`, `integration_deleted` — resolved is a resolve from Alertmanager, for the Alert or its whole Alertmanager group; gone an Alert Alertmanager no longer lists; stale one not seen for stale_after with a live Heartbeat; integration_deleted one of a deleted Integration |
-| `muster_api_request_duration_seconds` | `route_pattern` | `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/live-updates`, `/connections`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has |
-| `muster_api_request_duration_seconds` | `method` | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `OTHER` — the HTTP method of the request |
-| `muster_api_requests_total` | `route_pattern` | `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/live-updates`, `/connections`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has |
-| `muster_api_requests_total` | `method` | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `OTHER` — the HTTP method of the request |
-| `muster_api_requests_total` | `code` | `200`, `201`, `202`, `204`, `302`, `304`, `400`, `401`, `403`, `404`, `405`, `409`, `410`, `412`, `413`, `415`, `422`, `428`, `429`, `500`, `501`, `502`, `503`, `504` — the HTTP status code of the answer |
-| `muster_build_info` | `version` | info: the release version of the binary, such as 1.4.0 |
-| `muster_build_info` | `commit` | info: the Git commit the binary was built from |
-| `muster_client_request_duration_seconds` | `client` | `delivery`, `interactive`, `background`, `heartbeat` — the client class of ADR-0015 |
-| `muster_client_request_duration_seconds` | `outcome` | `ok`, `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect` — the classified outcome of the request |
-| `muster_client_requests_total` | `client` | `delivery`, `interactive`, `background`, `heartbeat` — the client class of ADR-0015 |
-| `muster_client_requests_total` | `outcome` | `ok`, `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect` — the classified outcome of the request |
-| `muster_commands_total` | `command` | `acknowledge`, `unacknowledge`, `resolve`, `unresolve`, `snooze`, `unsnooze`, `add_note`, `still_on_it` — the Command |
-| `muster_commands_total` | `transport` | `ui`, `api`, `mattermost`, `telegram`, `system` — how the Command reached Muster |
-| `muster_commands_total` | `outcome` | `done`, `unchanged`, `refused`, `skipped`, `failed` — done changed the Alert Group, unchanged was an idempotent repeat, refused a refusal or a missing Permission, skipped an Alert Group a bulk Acknowledge left to its Owner, failed an Alert Group that was not found |
-| `muster_db_pool_connections` | `state` | `acquired`, `idle`, `constructing` — the state of the connection |
-| `muster_delivery_attempts_total` | `destination` | entity: the public_id of the destination |
-| `muster_delivery_attempts_total` | `kind` | `publication`, `update`, `thread_reply`, `storm_summary`, `final_edit`, `webhook_event` — publication is a new Root message, update an edit of one, thread_reply a reply in its Thread, storm_summary and final_edit those messages, webhook_event an event of an outgoing webhook |
-| `muster_delivery_attempts_total` | `outcome` | `delivered`, `markup_rejected`, `retry_after`, `transient`, `fatal`, `unknown`, `template_error` — delivered, or the error class of the answer |
-| `muster_delivery_latency_seconds` | `destination` | entity: the public_id of the destination |
-| `muster_delivery_queue` | `destination` | entity: the public_id of the destination |
-| `muster_destination_broken` | `destination` | entity: the public_id of the destination |
-| `muster_destination_info` | `destination` | entity: the public_id of the destination |
-| `muster_destination_info` | `name` | info: the name of the Destination |
-| `muster_heartbeat_lost` | `integration` | entity: the public_id of the integration |
-| `muster_ingest_failed_snapshots_total` | `integration` | entity: the public_id of the integration |
-| `muster_ingest_processing_delay_seconds` | `integration` | entity: the public_id of the integration |
-| `muster_ingest_requests_total` | `integration` | entity: the public_id of the token's Integration, a revoked token's included, or unknown when the token matches no Integration that is not deleted |
-| `muster_ingest_requests_total` | `outcome` | `accepted`, `unauthorized`, `too_large` — accepted is a body stored as a Stored Snapshot, unauthorized a missing or wrong token, too_large a body above ingest.body_limit |
-| `muster_ingest_resolved_dropped_total` | `integration` | entity: the public_id of the integration |
-| `muster_ingest_truncated_snapshots_total` | `integration` | entity: the public_id of the integration |
-| `muster_integration_info` | `integration` | entity: the public_id of the integration |
-| `muster_integration_info` | `name` | info: the name of the Integration |
-| `muster_login_failures_total` | `method` | `local`, `oidc`, `totp` — local is a wrong login or password, oidc a refused OIDC sign-in, totp a wrong TOTP or recovery code |
-| `muster_oidc_checks_total` | `outcome` | `ok`, `refused`, `unavailable`, `skipped` — ok is a refresh the identity provider granted, refused one it refused (the user's sessions ended), unavailable one that reached no decision, skipped a user without a live session or a usable Personal access token, not sent to the identity provider |
-| `muster_route_info` | `route` | entity: the public_id of the route |
-| `muster_route_info` | `name` | info: the name of the Route |
-| `muster_short_lived_rows_pruned_total` | `table` | `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests`, `telegram_post_copies`, `account_link_requests` — the short-lived table the rows were deleted from |
-| `muster_storm_active` | `route` | entity: the public_id of the route |
-| `muster_template_errors_total` | `route` | entity: the public_id of the route |
-| `muster_template_errors_total` | `destination` | entity: the public_id of the destination |
-| `muster_template_errors_total` | `template` | `root_message`, `line`, `ack_timeout_notice`, `link_rule`, `webhook_request` — the kind of template |
-| `muster_template_render_duration_seconds` | `template` | `root_message`, `line`, `ack_timeout_notice`, `link_rule`, `webhook_request` — the kind of template |
+Time from the start of an Alert Group to its first acknowledgement, observed once per Alert Group, by Route.
+
+Buckets (`le`): 60, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400.
+
+- `route` (entity): the public_id of the route
+
+### `muster_alert_group_time_to_resolve_seconds`
+
+histogram · labels: `route` · C-09 · exported by every replica
+
+Time from the start of an Alert Group to its resolution, observed at each resolution, by Route.
+
+Buckets (`le`): 60, 300, 600, 1800, 3600, 7200, 14400, 28800, 43200, 86400.
+
+- `route` (entity): the public_id of the route
+
+### `muster_alert_groups`
+
+gauge · labels: `route`, `status` · C-09 · exported by the Leader only
+
+Open Alert Groups by Route and status, counted by the Leader; an Alert Group moved to the Default route counts there.
+
+- `route` (entity): the public_id of the route
+- `status`: `firing`, `acknowledged`, `snoozed` — the status of the open Alert Groups
+
+### `muster_alert_groups_created_total`
+
+counter · labels: `route` · C-09 · exported by every replica
+
+Alert Groups that started, by Route.
+
+- `route` (entity): the public_id of the route
+
+### `muster_alert_groups_reopened_total`
+
+counter · labels: `route` · C-09 · exported by every replica
+
+Alert Groups that reopened within their Route's Reopen window, by Route.
+
+- `route` (entity): the public_id of the route
+
+### `muster_alert_groups_resolved_total`
+
+counter · labels: `route`, `by` · C-09 · exported by every replica
+
+Alert Groups that were resolved, by Route and by who resolved them.
+
+- `route` (entity): the public_id of the route
+- `by`: `user`, `system` — user is a person's resolve, system the resolve when the last Alert resolved
+
+### `muster_alerts_resolved_total`
+
+counter · labels: `integration`, `reason` · C-06 · exported by every replica
+
+Alerts that resolved, by Integration and reason.
+
+- `integration` (entity): the public_id of the integration
+- `reason`: `resolved`, `gone`, `stale`, `integration_deleted` — resolved is a resolve from Alertmanager, for the Alert or its whole Alertmanager group; gone an Alert Alertmanager no longer lists; stale one not seen for stale_after with a live Heartbeat; integration_deleted one of a deleted Integration
+
+### `muster_api_request_duration_seconds`
+
+histogram · labels: `route_pattern`, `method` · C-03 · exported by every replica
+
+Time from the arrival of an API request on the app listener to the end of its answer, by path template and method.
+
+Buckets (`le`): 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10.
+
+- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/live-updates`, `/connections`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
+- `method`: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `OTHER` — the HTTP method of the request
+
+### `muster_api_requests_total`
+
+counter · labels: `route_pattern`, `method`, `code` · C-03 · exported by every replica
+
+Requests to the API on the app listener, by the operation's path template, the method and the status code.
+
+- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/live-updates`, `/connections`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
+- `method`: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `OTHER` — the HTTP method of the request
+- `code`: `200`, `201`, `202`, `204`, `302`, `304`, `400`, `401`, `403`, `404`, `405`, `409`, `410`, `412`, `413`, `415`, `422`, `428`, `429`, `500`, `501`, `502`, `503`, `504` — the HTTP status code of the answer
+
+### `muster_build_info`
+
+gauge · labels: `version`, `commit` · C-02 · exported by every replica
+
+Always 1; the labels carry the version and commit of the running binary.
+
+- `version` (info): the release version of the binary, such as 1.4.0
+- `commit` (info): the Git commit the binary was built from
+
+### `muster_client_request_duration_seconds`
+
+histogram · labels: `client`, `outcome` · C-02 · exported by every replica
+
+Duration of outbound HTTP requests, one per attempt, from the dial to the end of the body, by client class and outcome.
+
+Buckets (`le`): 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60.
+
+- `client`: `delivery`, `interactive`, `background`, `heartbeat` — the client class of ADR-0015
+- `outcome`: `ok`, `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect` — the classified outcome of the request
+
+### `muster_client_requests_total`
+
+counter · labels: `client`, `outcome` · C-02 · exported by every replica
+
+Outbound HTTP requests, one per attempt, by client class and classified outcome.
+
+- `client`: `delivery`, `interactive`, `background`, `heartbeat` — the client class of ADR-0015
+- `outcome`: `ok`, `retry_after`, `transient`, `fatal`, `unknown`, `blocked`, `redirect` — the classified outcome of the request
+
+### `muster_clock_skew_seconds`
+
+gauge · no labels · C-02 · exported by every replica
+
+This replica's clock minus the database clock, corrected by half the round trip; positive when the replica is ahead.
+
+### `muster_commands_total`
+
+counter · labels: `command`, `transport`, `outcome` · C-10 · exported by every replica
+
+Commands run on Alert Groups, one per Alert Group, by command, Transport and outcome.
+
+- `command`: `acknowledge`, `unacknowledge`, `resolve`, `unresolve`, `snooze`, `unsnooze`, `add_note`, `still_on_it` — the Command
+- `transport`: `ui`, `api`, `mattermost`, `telegram`, `system` — how the Command reached Muster
+- `outcome`: `done`, `unchanged`, `refused`, `skipped`, `failed` — done changed the Alert Group, unchanged was an idempotent repeat, refused a refusal or a missing Permission, skipped an Alert Group a bulk Acknowledge left to its Owner, failed an Alert Group that was not found
+
+### `muster_db_pool_acquire_wait_seconds_total`
+
+counter · no labels · C-02 · exported by every replica
+
+Seconds spent waiting for a connection of the main database pool of this replica, summed over every acquire.
+
+### `muster_db_pool_acquires_total`
+
+counter · no labels · C-02 · exported by every replica
+
+Connections taken from the main database pool of this replica.
+
+### `muster_db_pool_connections`
+
+gauge · labels: `state` · C-02 · exported by every replica
+
+Connections of the main database pool of this replica, by state.
+
+- `state`: `acquired`, `idle`, `constructing` — the state of the connection
+
+### `muster_db_pool_max_connections`
+
+gauge · no labels · C-02 · exported by every replica
+
+The most connections the main database pool of this replica opens.
+
+### `muster_delivery_attempts_total`
+
+counter · labels: `destination`, `kind`, `outcome` · C-11 · exported by every replica
+
+Calls of the delivery worker to a Destination, one per attempt, by Destination, what it sent and its outcome.
+
+- `destination` (entity): the public_id of the destination
+- `kind`: `publication`, `update`, `thread_reply`, `storm_summary`, `final_edit`, `webhook_event` — publication is a new Root message, update an edit of one, thread_reply a reply in its Thread, storm_summary and final_edit those messages, webhook_event an event of an outgoing webhook
+- `outcome`: `delivered`, `markup_rejected`, `retry_after`, `transient`, `fatal`, `unknown`, `template_error` — delivered, or the error class of the answer
+
+### `muster_delivery_latency_seconds`
+
+histogram · labels: `destination` · C-11 · exported by every replica
+
+Time from the receipt of the Snapshot behind a change of a Root message, or behind an event of an outgoing webhook, to the API call that delivered it, by Destination; changes made by Commands or timers are not observed. The service-level indicator of NFR-2.
+
+Buckets (`le`): 0.25, 0.5, 1, 2, 3, 5, 10, 30, 60, 300, 900.
+
+- `destination` (entity): the public_id of the destination
+
+### `muster_delivery_queue`
+
+gauge · labels: `destination` · C-11 · exported by the Leader only
+
+Pending deliveries and Thread replies that are due, per Destination that is not deleted, counted by the Leader.
+
+- `destination` (entity): the public_id of the destination
+
+### `muster_destination_broken`
+
+gauge · labels: `destination` · C-11 · exported by the Leader only
+
+1 while the Destination is Broken, 0 while it is healthy, per Destination that is not deleted; set by the Leader.
+
+- `destination` (entity): the public_id of the destination
+
+### `muster_destination_info`
+
+gauge · labels: `destination`, `name` · C-11 · exported by every replica
+
+Always 1, one series per Destination that is not deleted; the labels carry its public_id and name.
+
+- `destination` (entity): the public_id of the destination
+- `name` (info): the name of the Destination
+
+### `muster_heartbeat_lost`
+
+gauge · labels: `integration` · C-07 · exported by the Leader only
+
+1 while the Integration is Heartbeat lost, 0 while its Heartbeat is on and not lost; set by the Leader's Heartbeat check.
+
+- `integration` (entity): the public_id of the integration
+
+### `muster_ingest_backlog`
+
+gauge · no labels · C-06 · exported by the Leader only
+
+Stored Snapshots waiting for processing in every Organization, counted by the Leader.
+
+### `muster_ingest_failed_snapshots_total`
+
+counter · labels: `integration` · C-06 · exported by every replica
+
+Stored Snapshots that could not be processed and were marked failed — a body that is not an Alertmanager webhook, or an error of processing — by Integration.
+
+- `integration` (entity): the public_id of the integration
+
+### `muster_ingest_processing_delay_seconds`
+
+histogram · labels: `integration` · C-06 · exported by every replica
+
+Time from the receipt of a Stored Snapshot to the end of its processing, processed or failed, by Integration.
+
+Buckets (`le`): 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600.
+
+- `integration` (entity): the public_id of the integration
+
+### `muster_ingest_request_duration_seconds`
+
+histogram · no labels · C-05 · exported by every replica
+
+Time from the arrival of an ingestion request to the end of its answer, the commit of the Stored Snapshot included.
+
+Buckets (`le`): 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10.
+
+### `muster_ingest_requests_total`
+
+counter · labels: `integration`, `outcome` · C-05 · exported by every replica
+
+Requests to the ingestion endpoint, by the token's Integration and the outcome.
+
+- `integration` (entity): the public_id of the token's Integration, a revoked token's included, or unknown when the token matches no Integration that is not deleted
+- `outcome`: `accepted`, `unauthorized`, `too_large` — accepted is a body stored as a Stored Snapshot, unauthorized a missing or wrong token, too_large a body above ingest.body_limit
+
+### `muster_ingest_resolved_dropped_total`
+
+counter · labels: `integration` · C-06 · exported by every replica
+
+Alerts sent as resolved whose fingerprint fires nowhere and that were dropped, by Integration; a re-sent resolve of an Alert already resolved is not counted.
+
+- `integration` (entity): the public_id of the integration
+
+### `muster_ingest_truncated_snapshots_total`
+
+counter · labels: `integration` · C-06 · exported by every replica
+
+Processed Snapshots that Alertmanager truncated (truncatedAlerts above 0), by Integration.
+
+- `integration` (entity): the public_id of the integration
+
+### `muster_integration_info`
+
+gauge · labels: `integration`, `name` · C-05 · exported by every replica
+
+Always 1, one series per Integration that is not deleted; the labels carry its public_id and name.
+
+- `integration` (entity): the public_id of the integration
+- `name` (info): the name of the Integration
+
+### `muster_leader`
+
+gauge · no labels · C-02 · exported by every replica
+
+1 while this replica is the Leader and runs the Leader tasks, 0 otherwise.
+
+### `muster_login_failures_total`
+
+counter · labels: `method` · C-03 · exported by every replica
+
+Failed sign-ins that were evaluated, by method; attempts refused by the sign-in throttle are not counted.
+
+- `method`: `local`, `oidc`, `totp` — local is a wrong login or password, oidc a refused OIDC sign-in, totp a wrong TOTP or recovery code
+
+### `muster_oidc_checks_total`
+
+counter · labels: `outcome` · C-03 · exported by every replica
+
+Background re-checks of OIDC users at the identity provider, by outcome.
+
+- `outcome`: `ok`, `refused`, `unavailable`, `skipped` — ok is a refresh the identity provider granted, refused one it refused (the user's sessions ended), unavailable one that reached no decision, skipped a user without a live session or a usable Personal access token, not sent to the identity provider
+
+### `muster_route_info`
+
+gauge · labels: `route`, `name` · C-08 · exported by every replica
+
+Always 1, one series per Route that is not deleted, the Default route included; the labels carry its public_id and name.
+
+- `route` (entity): the public_id of the route
+- `name` (info): the name of the Route
+
+### `muster_short_lived_rows_pruned_total`
+
+counter · labels: `table` · C-02 · exported by every replica
+
+Short-lived rows that could no longer be used and that the Leader deleted, by table.
+
+- `table`: `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests`, `telegram_post_copies`, `account_link_requests` — the short-lived table the rows were deleted from
+
+### `muster_storm_active`
+
+gauge · labels: `route` · C-11 · exported by the Leader only
+
+1 while the Route has an active Storm, 0 otherwise, per Route that is not deleted; set by the Leader.
+
+- `route` (entity): the public_id of the route
+
+### `muster_template_errors_total`
+
+counter · labels: `route`, `destination`, `template` · C-12 · exported by every replica
+
+Templates that failed while rendering, by the Route or the Destination that owns the template (the other label empty) and the kind of template; a message falls back to the Fallback template, a Link rule yields no link and is left out of the links, an outgoing webhook request is not sent.
+
+- `route` (entity): the public_id of the route
+- `destination` (entity): the public_id of the destination
+- `template`: `root_message`, `line`, `ack_timeout_notice`, `link_rule`, `webhook_request` — the kind of template
+
+### `muster_template_render_duration_seconds`
+
+histogram · labels: `template` · C-12 · exported by every replica
+
+Time to render a template in the sandbox, by the kind of template; a Root message is observed as a whole, its built-in default included.
+
+Buckets (`le`): 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5.
+
+- `template`: `root_message`, `line`, `ack_timeout_notice`, `link_rule`, `webhook_request` — the kind of template

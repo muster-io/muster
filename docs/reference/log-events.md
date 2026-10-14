@@ -8,103 +8,590 @@ someone must look within the hour, WARN that the line is needed for an investiga
 is impossible without it; `MUSTER_LOG_LEVEL` sets the lowest level written. The capability is the one that logs
 the event.
 
-| Event | Level | Fields | Capability | Description |
-|---|---|---|---|---|
-| `account_link_linked` | INFO | messenger, connection, user, error | C-18 | A messenger account was linked to a User, through /start with a deep-link token in Telegram or a code from the bot's direct message in Mattermost, and the account-links hint went to the User: messenger is telegram or mattermost, connection the public_id of the Connection, user the public_id of the User. error, when present, says why the bot's confirmation was not sent; the link stays. Never carries the token or the code. |
-| `account_link_rejected` | INFO | messenger, connection, reason, error | C-18 | A link of a messenger account was refused and recorded as account_link.link_rejected: messenger is telegram or mattermost, connection the public_id of the Connection, reason token_unknown, token_used, token_expired or wrong_connection for a /start, wrong_code, token_used or token_expired for a Mattermost code, or conflict for an account linked to another User. error, when present, says why the bot's answer was not sent. Never carries the token or the code. |
-| `account_link_unlinked` | INFO | messenger, connection, user, reason | C-18 | An Account link was removed and recorded as account_link.unlink: messenger is telegram or mattermost, connection the public_id of the Connection it was made through, user the public_id of its User, reason removed when the User or an Admin unlinked it, replaced when a new link of the User in the same identity space took its place, or user_deleted when its User was deleted. |
-| `active_key_not_held` | ERROR | active_key_id, key_ids, error | C-02 | The active master key is not in this replica's MUSTER_SECRET_KEYS, which happens when a key was activated while this replica's record had expired. The replica stops; add the key to its environment. |
-| `alert_continued` | INFO | group, fingerprint | C-09 | An Alert firing in an Alert Group got a new startsAt without being resolved in between (a Continuation, never a new firing): group is the #N of its Alert Group and fingerprint the Alert's. |
-| `alert_group_status_changed` | INFO | group, route, from, to, reason, transport | C-09 | An Alert Group changed status: group is its #N, route the public_id of its Route, from and to the statuses (from is empty for a new Alert Group), reason the reason of an automatic change and transport how the change reached Muster. |
-| `alert_groups_purged` | INFO | details, summaries | C-09 | The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended retention.alert_details ago (details, the rows deleted) and the summary rows of Alert Groups resolved retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted). |
-| `alerts_stale` | INFO | integration, count | C-06 | The Stale scan resolved Alerts of an Integration with a live Heartbeat as Stale, because Alertmanager had not listed them for stale_after of live time in any Alertmanager group: integration is the public_id of the Integration and count how many Alerts resolved. |
-| `api_request_failed` | ERROR | operation, error | C-03 | An API request failed with an unexpected error, usually because the database was unavailable, and answered 500 internal; operation is the operationId of the specification. |
-| `audit_entry` | INFO | entry, at, actor_kind, actor, actor_name, token_name, transport, action, resource_type, resource, resource_name, source_address, diff, details | C-03 | An Audit log entry, as written to audit_log: the actor (its kind, the public_id of the user or Service account, or the --actor name of a CLI command), the token used, the Transport, the action <resource>.<verb>, the resource, the before/after diff of what was configured (a Secret shows only that it changed) and details. |
-| `bootstrap_admin_ignored` | WARN | variables | C-03 | The bootstrap Admin variables are set, but the Organization already has an Admin, so they were ignored and no user was created; remove them from the environment. |
-| `bootstrap_admin_missing` | WARN | — | C-03 | The Organization has no Admin and the bootstrap variables are not set, so nobody can sign in to administer Muster: set MUSTER_BOOTSTRAP_ADMIN_EMAIL and MUSTER_BOOTSTRAP_ADMIN_PASSWORD (or _FILE) and restart, or run muster admin reset-password. |
-| `clock_skew` | WARN | skew_seconds, warning_seconds | C-02 | This replica's clock differs from the database clock by more than process.clock_skew_warning; skew_seconds is positive when the replica's clock is ahead. Synchronise the clocks with NTP. |
-| `command_executed` | INFO | command, group, actor, transport, outcome | C-10 | A Command ran on an Alert Group: command is its name, group the public_id of the Alert Group, actor the public_id of the User or Service account, transport how it reached Muster and outcome done, or unchanged for an idempotent repeat such as Acknowledge by the current Owner. |
-| `command_refused` | INFO | command, group, actor, transport, code | C-10 | A Command was refused and changed nothing: command is its name, group the public_id of the Alert Group (empty for a bulk command refused as a whole), actor the public_id of the User or Service account, transport how it reached Muster and code forbidden for a missing Permission or the code of the command-refused problem. |
-| `database_connection_security` | INFO or WARN | connection, sslmode, encrypted | C-02 | Whether a database connection (main or session) is encrypted, with the sslmode in effect; WARN when it is not encrypted, which prefer allows without an error. |
-| `database_settings_conflict` | WARN | used, ignored | C-02 | A database connection is set both as a URL and as fields: the URL is used and the fields are ignored. |
-| `delivery_attempt` | INFO | destination, group, kind, outcome, attempt, duration_ms, retry_after_ms | C-11 | The delivery worker called a Destination: destination is its public_id, group the #N of the Alert Group, empty for a Storm summary, kind what it sent (publication, update, thread_reply, storm_summary for any call of a Storm summary, or final_edit for the last edit of a Root message in a Destination it left), outcome delivered or the error class of the answer, attempt the number of this attempt, duration_ms how long the call took and retry_after_ms the wait a RetryAfter asked for, 0 otherwise. |
-| `delivery_not_delivered` | WARN | destination, group, kind, error_class | C-11 | A delivery ended as Not delivered after an answer the adapter could not classify, because no adapter serves the Destination type, or because the Connection of its deleted Destination was deleted: destination is the public_id of the Destination, group the public_id of the Alert Group, empty for a Storm summary, kind what was sent (publication, update, thread_reply, storm_summary or final_edit) and error_class unknown. The next change of the Alert Group starts a new delivery. |
-| `delivery_possible_duplicate` | WARN | destination, group | C-11 | A Publication started again after an earlier start whose outcome was never recorded, such as after a crash: destination is the public_id of the Destination and group the public_id of the Alert Group. The messenger may show the Root message twice. |
-| `delivery_work_failed` | WARN | work, error | C-11 | The delivery worker could not attempt a delivery or a Thread reply, or probe a Broken Destination (work is delivery, thread_reply or probe), or mark the first Publication of an Alert Group once its outcome committed (work is mark_published), because of error, such as a lost database connection. Any replica attempts it again once its lease runs out, or at the next probe; a first Publication is marked again by the next delivered call or event of the Alert Group. |
-| `destination_broken` | WARN | destination, cause, reason | C-11 | A Destination became Broken: destination is its public_id, cause fatal after a Fatal error or unavailable after the Transient budget ran out, and reason the masked error the messenger answered. Its deliveries wait, MusterDestinationBroken fires and a probe runs every delivery.broken_probe_interval. |
-| `destination_recovered` | INFO | destination, broken_for_s | C-11 | A Broken Destination is healthy again after a successful probe or Destination check: destination is its public_id and broken_for_s how long it was Broken, in seconds. Its deliveries resume with the current state. |
-| `destination_tested` | INFO | destination, steps | C-16 | A person tested a Destination: destination is its public_id and steps each step of the test with its error class, as name:class separated by commas, such as message:none,press:none; the class none is a step that succeeded, limited one that found no limiter token in time and sent nothing. The Audit log entry destination.tested records the same with the source. |
-| `dev_clock_load_failed` | WARN | error | C-01 | Development mode only: the development clock could not be read after a change on another replica; this process keeps its offset until the next change or the next LISTEN. |
-| `dev_clock_loaded` | INFO | offset_seconds | C-01 | Development mode only: this process runs on the development clock, offset_seconds ahead of the system time, as stored in the database for every replica; logged at start and after each advance. |
-| `downtime_recorded` | WARN | started_at, ended_at, duration_seconds | C-02 | Muster was unavailable: no Leader wrote the alive mark and no replica refreshed its record for the period between started_at and ended_at. The new Leader recorded it and opened the recovery window (recovery.banner_duration). |
-| `fallback_template_used` | WARN | route, group, template, error | C-12 | A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed. |
-| `group_key_previewed` | INFO | route, period_seconds, snapshots_read, truncated, duration_ms | C-08 | A Group key preview read the Stored Snapshots of a period: route is the public_id of the saved Route it previewed, empty for a Route that is not saved yet, period_seconds the period, snapshots_read how many distinct bodies it read, truncated whether routing.group_key_preview_max_alerts stopped it with Stored Snapshots of the period, or Alerts the Route takes, left unread, and duration_ms how long it took. |
-| `heartbeat_live` | INFO | integration, first | C-07 | The Heartbeat of an Integration became live: integration is its public_id, and first is true for the first signal after the Heartbeat was turned on and false for a signal that ended a loss, which resolves MusterHeartbeatLost. |
-| `heartbeat_lost` | WARN | integration, last_signal_at | C-07 | No Heartbeat signal arrived for an Integration within its Heartbeat timeout, so it is Heartbeat lost and MusterHeartbeatLost is raised: integration is its public_id and last_signal_at the time of its last signal. |
-| `ingest_failed` | ERROR | integration, route_pattern, error | C-05 | An ingestion or Heartbeat request answered 500 because the database could not look up the token, store the Stored Snapshot or record the Heartbeat signal, usually because it was unavailable; Alertmanager retries an ingestion request, and the next signal replaces a lost one. integration is the public_id of the token's Integration, or unknown when the lookup failed; route_pattern is the route it came by. |
-| `ingest_rejected` | INFO | integration, outcome, route_pattern, client_address | C-05 | An ingestion or Heartbeat request was refused: outcome unauthorized (401, a missing, wrong or revoked token, an API token, or one of a deleted Integration) or too_large (413, a body above ingest.body_limit). integration is the public_id of the token's Integration, or unknown; route_pattern is the route it came by — never the path, which may carry the token — and client_address the sender. Refused ingestion requests are also counted in muster_ingest_requests_total, which the chart rule MusterIngestRejected reports. |
-| `ingest_replayed` | INFO | actor, since, integration, count | C-06 | muster ingest replay set the Stored Snapshots received within the period back to pending, for processing again: actor is the --actor name, since the period as given, integration the public_id of the Integration it was limited to, empty for all, and count how many Stored Snapshots it set back. |
-| `internal_alert_raised` | INFO | alertname, fingerprint, entity | C-06 | An Internal alert fired as an Alert of the built-in Muster Integration: alertname names it, fingerprint is the Alert's, and entity the public_id of the Integration, Route or Destination it is about, empty when it is about none. |
-| `internal_alert_resolved` | INFO | alertname, fingerprint, entity | C-06 | An Internal alert resolved because its condition cleared or its entity was deleted: alertname names it, fingerprint is the Alert's, and entity the public_id of the Integration, Route or Destination it is about, empty when it is about none. |
-| `key_activated` | WARN | from, to, actor | C-20 | muster secrets rotate-key activated a master key: every Secret and the key canary are now encrypted with it, the replicas switch to it and the Leader re-signs the buttons of the open Root messages. The old key stays in MUSTER_SECRET_KEYS until the Keyring shows it as removable. |
-| `key_canary_failed` | ERROR | active_key_id, key_ids, error | C-02 | The master keys cannot decrypt the key canary: the active key is missing from MUSTER_SECRET_KEYS, or the keys belong to another database. The replica stops; set the keys this database was written with. |
-| `key_switched` | INFO | active | C-20 | This replica switched to the active master key without a restart, after muster secrets rotate-key activated it: it now encrypts and signs with that key. |
-| `keyring_loaded` | INFO | key_ids, active_key_id | C-02 | The master keys of MUSTER_SECRET_KEYS were loaded and decrypt the key canary; the ids are derived from the keys and never reveal them. |
-| `leader_task_failed` | WARN | task, error | C-02 | A run of a Leader task failed, usually because the database was unavailable; it runs again at its next interval. |
-| `leadership_acquired` | INFO | replica | C-02 | This replica took the Leader lock and runs the Leader tasks: partition maintenance, the alive mark, the pruning of replica records and the pruning of short-lived state. |
-| `leadership_lost` | WARN | replica, error | C-02 | The Leader could not confirm its lock within leader.fencing_timeout, or its lock session failed: it stopped every Leader task, closed the lock connection and competes for the lock again. |
-| `library_message` | WARN | message | C-02 | A third-party library wrote a line of its own, such as a failed read of the process metrics. |
-| `link_rule_failed` | WARN | link_rule, route, group, error | C-12 | The URL template of a Link rule failed while computing the links of an Alert Group, so the rule's link is left out and muster_template_errors_total{template="link_rule"} grows: link_rule is the public_id of the Link rule, route the public_id of the Alert Group's Route, group the public_id of the Alert Group and error what failed, with its line and column. Logged once per rule and Alert Group on each replica; the counter grows at every failure. |
-| `listener_failed` | ERROR | listener, error | C-02 | A listener stopped serving with an error; the process stops so that it is restarted. |
-| `listeners_started` | INFO | app, ingest, internal | C-02 | The listeners serve and the process is ready; app and ingest are the same address when one port serves both. |
-| `live_updates_listen_failed` | WARN | error | C-03 | A replica lost the session connection that listens for live-update hints, or could not open it, usually because the database was unavailable; it connects again with a growing delay, up to 30 seconds. Until then the browsers connected to it miss the hints of changes and see them at their next read. |
-| `live_updates_listen_restored` | INFO | — | C-03 | A replica listens for live-update hints again after live_updates_listen_failed; it sent every connected browser the hints of everything, so that they read it again. |
-| `mattermost_press` | INFO | connection, group, command, outcome, answer, error | C-13 | The callback of a Mattermost Connection received a button press and answered 200 with a JSON object, never with update: connection is the public_id of the Connection, empty when it does not exist; group the public_id of the Alert Group and command the Command, once the signed action id is verified; outcome done or unchanged for a Command that ran; refused, forbidden, not_linked, disabled or not_verified for a press that changed nothing and was answered, a not_verified one only on a post delivered to a Destination of the Connection in the channel of the press; expired for a press on a Reminder whose button was signed by a key that is no longer in the Keyring, answered that the button has expired; test for a press of a test message by a person, answered that nothing changed, and test_press for the bot's own press of it during a Destination test, answered with nothing; invalid_request for a body that is not a press, unknown_connection, or failed, answered once the press is bound to its post; answer how the person was answered: ephemeral_post for an ephemeral post in the channel, or in the Thread of the Root message for a press on a Reminder, ephemeral_text for the text in the callback's answer, shown in the Thread, when that post was not made, absent when nothing was answered; error why the press failed or why its ephemeral post was not sent, masked of secrets, never the 403 of a bot without the permission to make ephemeral posts. |
-| `migrations_applied` | INFO | from, to | C-02 | Migrations were applied under the migration lock, from one schema version to another. |
-| `migrations_current` | INFO | version | C-02 | No migration was applied: the schema already has the newest version this binary knows. |
-| `oidc_check_failed` | WARN | user, reason, error | C-03 | A background re-check of an OIDC user at the identity provider found it unavailable — unreachable, a timeout, 408, 429 or 5xx, or the 10-second budget of the refresh spent — or could not run. Nothing changes for the user: sessions and Personal access tokens keep working, and the next attempt comes one auth.oidc_recheck_interval later, so an incident at the identity provider never signs everybody out. user is the public_id of the user, empty when a round of the worker failed; reason names the step; the error is masked and carries no token or secret. |
-| `oidc_secret_expiring` | WARN | expires_on | C-19 | The OIDC client secret expires within oidc.secret_expiry_lead, so MusterOIDCSecretExpiring is raised: expires_on is the expiry date entered in the OIDC settings. Logged once per raise. |
-| `oidc_sign_in_failed` | WARN | reason, error | C-03 | An OIDC sign-in ended at the sign-in page, or the linking of an OIDC identity at the profile page, with idp_error: the identity provider reported an error, could not be reached through the back channel or its proxy, or answered with an ID token that did not verify. The reason names the step, prefixed with link for a link; the error is masked and carries no token or secret. |
-| `organization_created` | INFO | organization | C-02 | The first start created the Organization with the defaults of its settings and its outbound address policy. |
-| `organization_updated` | INFO | fields | C-20 | The Organization's settings changed; fields lists the JSON pointers of the changed fields, and the Audit log entry organization.updated has the values before and after (a Secret only as changed). |
-| `outbound_blocked` | WARN | client, rule, scheme, host | C-02 | The outbound address policy refused a request, which fails without retry; rule names the rule and the address or proxy it refused. Correct the configured address, or change the policy and its allowed networks. |
-| `outbound_policy_updated` | INFO | — | C-20 | The outbound address policy changed: every replica drops its cached policy and closes its idle outbound connections at once, so the next request is checked against the new policy. The Audit log entry outbound_policy.updated has the values before and after. |
-| `outbound_unverified_address` | INFO | client, scheme, host | C-02 | A request went through the client's proxy to a host name that Muster cannot resolve itself, so only the name was checked against the allowed and denied lists, not its addresses. |
-| `outgoing_heartbeat_failed` | WARN | error | C-19 | A send of the outgoing heartbeat to the dead man's switch failed and is not retried; the next interval sends again. error says what failed, without the URL. Logged at every failed send. |
-| `outgoing_heartbeat_recovered` | INFO | — | C-19 | A send of the outgoing heartbeat succeeded after a failed one. |
-| `partition_maintenance_failed` | WARN | error | C-02 | Partition maintenance failed, for example because a lock was not granted within 2 seconds; the Leader retries at the next hourly run. A partition that is still missing when its day or month begins makes writes to its table fail. |
-| `partitions_maintained` | INFO | created, dropped | C-02 | Partition maintenance created the partitions Muster will need (daily for Stored Snapshots and their bodies, monthly for Timeline entries, delivery events and the Audit log) or dropped partitions whose whole range is older than their retention period; the fields list the partitions by name. |
-| `process_started` | INFO | version, commit | C-02 | The server process started, with the version and commit of the binary. |
-| `process_stopped` | INFO | — | C-02 | The server process stopped after a graceful shutdown. |
-| `reminder_skipped` | INFO | group, reason | C-17 | A Reminder came due and was dropped with its timer: group is the public_id of the Alert Group and reason not_acknowledged when it is no longer acknowledged or policy_off when its Route's Reminders are off. |
-| `replica_record_failed` | WARN | replica, error | C-02 | A replica could not refresh its record of the keys it holds, usually because the database is unavailable; it retries at the next refresh and stops counting as live once the record is older than replica.live_expiry. At shutdown, the record could not be deleted; it stops counting as live after replica.live_expiry. |
-| `replicas_pruned` | INFO | replicas | C-02 | The Leader removed the records of replicas that had not refreshed them for replica.prune_after. |
-| `schema_dirty` | ERROR | database_version | C-02 | A migration failed halfway and the schema is marked dirty at its version: repair the schema from a backup or by hand, then clear the dirty flag in schema_migrations. |
-| `schema_too_new` | ERROR | database_version, known_version | C-02 | The database schema is newer than this binary knows, after an upgrade was rolled back: run a release that knows the schema version. |
-| `schema_too_old` | ERROR | database_version, known_version | C-02 | The database schema is older than this binary needs: run muster migrate or set MUSTER_MIGRATE_ON_START. |
-| `short_lived_pruned` | INFO | table, rows | C-02 | The hourly short-lived pruning of the Leader deleted, in batches, rows of a short-lived table that can no longer be used, such as sessions that ended or expired auth.session_prune_after ago, sign-in throttles without a failure for auth.signin_throttle_prune_after, password setup links that expired auth.password_setup_prune_after ago and Account link requests that expired account_link.request_prune_after ago; rows is how many it deleted from the table. |
-| `shutdown_grace_exceeded` | WARN | grace_seconds | C-02 | Requests were still running when the shutdown grace period ended; their connections were closed. |
-| `shutdown_requested` | WARN | grace_seconds | C-02 | The server received SIGTERM or an interrupt: readiness answers 503, work in progress finishes and the listeners drain within the grace period, in seconds. |
-| `snapshot_accepted` | INFO | integration, stored_snapshot, size_bytes, route_pattern | C-05 | An ingestion request was stored as a pending Stored Snapshot and answered 202: integration and stored_snapshot are public_ids, size_bytes the size of the body, route_pattern the route it came by — never the path, which may carry the token. |
-| `snapshot_failed` | WARN | integration, stored_snapshot, error | C-06 | A Stored Snapshot could not be processed and was marked failed with the error: its body is not JSON, lacks the fields of an Alertmanager webhook, or processing failed. It is not retried by itself, the Snapshots behind it are processed, and muster ingest replay processes it again after a fix. integration and stored_snapshot are public_ids. |
-| `snapshot_processed` | INFO | integration, stored_snapshot, group_key, alerts, fired, resolved, gone, continued, dropped, truncated, routes, alert_groups, duration_ms, lane | C-06 | A Stored Snapshot was processed: integration and stored_snapshot are public_ids, group_key the Alertmanager group it came for, alerts how many Alerts it listed, fired, resolved, gone and continued how many new firings, resolutions from Alertmanager or by the deletion of the Integration, Alerts resolved as Gone and Continuations it made, dropped the resolves of fingerprints that fire nowhere, truncated its truncatedAlerts, routes the public_ids of the Routes that took its newly firing Alerts, alert_groups the #N of the Alert Groups it created or changed, duration_ms how long processing took, and lane which of the Integration's processing.parallel_groups lanes processed it, from 0. |
-| `snapshot_processing_interrupted` | WARN | integration, error | C-06 | The processing worker stopped a round or an Integration because the database failed or the connection was lost; the Stored Snapshots stay pending and are processed at the next attempt, after a growing pause. integration is the public_id of the Integration, empty when the round failed. |
-| `startup_failed` | ERROR | error | C-02 | Startup stopped: the database cannot be reached or fails a check, a migration failed, or a listener cannot listen. The error says what to fix. |
-| `storm_ended` | INFO | route, alert_groups, urgent | C-11 | A Storm ended after its Route stayed at or below route.storm_threshold for delivery.storm_calm_period: route is the public_id of the Route, and alert_groups and urgent are the Storm's own counts at its end, as storm_started has them at its start: the new Alert Groups it counted and how many of them were Urgent. The Storm summary shows its final state and the Alert Groups still open are posted Quietly. |
-| `storm_started` | INFO | route, alert_groups, urgent | C-11 | The new Alert Groups of a Route exceeded route.storm_threshold within a minute and started a Storm: route is the public_id of the Route, and alert_groups and urgent are the Storm's own counts at its start, as storm_ended has them at its end: the new Alert Groups it counted, 1 (the one that started it), and how many of them were Urgent, 1 or 0. Each Destination of the Route gets a Storm summary and only Urgent Alert Groups are posted one by one until it calms down. Logged once the change that started it committed. |
-| `system_notices_check_failed` | WARN | error | C-03 | A replica could not read the state of the Organization-wide notices, usually because the database was unavailable, so the live-updates streams get no hint of a notice that started or ended; logged once until a check succeeds again. |
-| `telegram_poll_conflict` | INFO | connection, backoff_ms | C-14 | The long poll of a Telegram Connection was refused with 409 Conflict: another process polls the same bot, or a webhook is set for it. The poller waits backoff_ms, with jitter, and polls again; it is not a delivery outcome and makes nothing Broken. connection is the public_id of the Connection. Lines that keep coming mean that a second installation polls the bot, or that its webhook was set elsewhere: the connection check shows it. |
-| `telegram_poll_failed` | WARN | connection, error | C-14 | A long poll of a Telegram Connection failed after the retries of the background client class, or an update it brought could not be handed to the router: connection is the public_id of the Connection, error what failed, with the bot token and the path prefix of the base URL masked. The poller backs off and polls again from the stored offset. |
-| `telegram_press` | INFO | connection, group, command, outcome, error | C-14 | A callback_query of a Telegram Connection — a button press — was handled and answered with answerCallbackQuery before the Root message was edited: connection is the public_id of the Connection; group the public_id of the Alert Group and command the Command, once the button data is verified; outcome done or unchanged for a Command that ran; refused, forbidden, not_linked, disabled or not_verified for a press that changed nothing; expired for a press on a Reminder whose button was signed by a key that is no longer in the Keyring, answered that the button has expired; test for a press of a test message, answered that nothing changed; failed when a read or the Command failed. error, when present, says why the press failed or why its answer was not made — no limiter token within the interactive budget, or Telegram refusing an answer that came too late — masked of the bot token. The update is confirmed whatever the outcome, so that a press never runs twice. |
-| `telegram_press_dropped` | INFO | connection, gap_seconds | C-14 | A button press of a Telegram Connection arrived after the Connection had received no updates for longer than telegram.press_max_age — no successful long poll, or Muster not running — and was dropped without an answer: Telegram kept it during the gap, and acting on it now could undo what people did since. connection is the public_id of the Connection, gap_seconds the gap before the update that carried the press. Nothing changed; the person can press again. |
-| `telegram_update_dropped` | INFO | connection, kind | C-14 | An update of a Telegram Connection reached the update router, which has no handler for its kind and drops it: connection is the public_id of the Connection, kind one of callback_query, chat_message, private_message, my_chat_member or other. Private messages, such as /start, go to the handler of Account links. |
-| `telegram_update_failed` | WARN | connection, error | C-14 | The webhook endpoint of a Telegram Connection could not look up the Connection or hand the update to the router, usually because the database was unavailable, and answered 500; Telegram sends the update again. connection is the public_id from the path, error what failed. |
-| `telegram_webhook_delete_failed` | WARN | connection, error | C-14 | A Telegram Connection in the webhook update mode was deleted, and deleteWebhook, called with its bot and base URL as a best effort after the deletion, failed: connection is the public_id of the Connection, error what Telegram or the network answered, without the bot token. The deletion stands; Telegram keeps posting the bot's updates to Muster, which answers them 401, until the webhook is removed with the bot's token elsewhere. |
-| `telegram_webhook_deleted` | INFO | connection | C-14 | A Telegram Connection in the webhook update mode was deleted and deleteWebhook, called with its bot and base URL after the deletion, removed its webhook: connection is the public_id of the Connection. |
-| `telegram_webhook_set` | INFO | connection, host | C-14 | A Telegram Connection was saved in the webhook update mode and setWebhook set its webhook, with a new secret token, at MUSTER_INGEST_URL: connection is the public_id of the Connection, host the host of the webhook's URL. |
-| `template_recovered` | INFO | route, template | C-12 | A template of a Route that kept failing rendered again: route is the public_id of the Route and template the kind of template. The Route's template error is cleared and MusterTemplateError resolves. Logged once the change committed. |
-| `timer_failed` | WARN | kind, error | C-09 | A timer could not fire: kind is the timer kind and error what failed. The timer fires again on any replica once its lease runs out. |
-| `timer_fired` | INFO | kind, group, notice, missed | C-17 | A timer of an Alert Group fired: kind is ack_timeout or reminder, group the public_id of the Alert Group, notice the number of the notice or Reminder it sent, or of the last one a collapse stands for, and missed how many overdue ones collapsed into one notices_missed, 0 when none did. |
-| `webhook_event_not_delivered` | WARN | destination, group, lifecycle_event, status | C-15 | An event of an outgoing webhook in the events mode ended as Not delivered after an answer that is not retried and does not make the Destination Broken — 400, 413, 422, a redirect, which is never followed, or another unknown answer — or because its request template failed: destination is the public_id of the Destination, group the public_id of the Alert Group, lifecycle_event the lifecycle event and status the HTTP status of the answer, empty without one. The next event of the Alert Group follows. |
-| `webhook_template_failed` | WARN | destination, group, request, error | C-15 | A request template of an outgoing webhook failed, so that request was not sent and its delivery, Thread reply or event ended as Not delivered with no fallback body: destination is the public_id of the Destination, group the public_id of the Alert Group, empty for a Storm summary, request the request — create, update, open_thread, reply_in_thread or events — and error what failed, with its line and column and every Secret masked. The Destination shows a template error and MusterTemplateError fires until one of its requests renders again. Logged once the outcome is recorded. |
-| `webhook_value_missing` | WARN | destination, group, rule | C-15 | An extraction rule of the "create" or "open thread" request of an outgoing webhook found nothing in the response: destination is the public_id of the Destination, group the public_id of the Alert Group and rule the name of the rule. The request counts as delivered and the Timeline records template_value_missing; a later request that reads the value fails as a template error. Logged once the outcome is recorded. |
+### `account_link_linked`
+
+INFO · fields: `messenger`, `connection`, `user`, `error` · C-18
+
+A messenger account was linked to a User, through /start with a deep-link token in Telegram or a code from the bot's direct message in Mattermost, and the account-links hint went to the User: messenger is telegram or mattermost, connection the public_id of the Connection, user the public_id of the User. error, when present, says why the bot's confirmation was not sent; the link stays. Never carries the token or the code.
+
+### `account_link_rejected`
+
+INFO · fields: `messenger`, `connection`, `reason`, `error` · C-18
+
+A link of a messenger account was refused and recorded as account_link.link_rejected: messenger is telegram or mattermost, connection the public_id of the Connection, reason token_unknown, token_used, token_expired or wrong_connection for a /start, wrong_code, token_used or token_expired for a Mattermost code, or conflict for an account linked to another User. error, when present, says why the bot's answer was not sent. Never carries the token or the code.
+
+### `account_link_unlinked`
+
+INFO · fields: `messenger`, `connection`, `user`, `reason` · C-18
+
+An Account link was removed and recorded as account_link.unlink: messenger is telegram or mattermost, connection the public_id of the Connection it was made through, user the public_id of its User, reason removed when the User or an Admin unlinked it, replaced when a new link of the User in the same identity space took its place, or user_deleted when its User was deleted.
+
+### `active_key_not_held`
+
+ERROR · fields: `active_key_id`, `key_ids`, `error` · C-02
+
+The active master key is not in this replica's MUSTER_SECRET_KEYS, which happens when a key was activated while this replica's record had expired. The replica stops; add the key to its environment.
+
+### `alert_continued`
+
+INFO · fields: `group`, `fingerprint` · C-09
+
+An Alert firing in an Alert Group got a new startsAt without being resolved in between (a Continuation, never a new firing): group is the #N of its Alert Group and fingerprint the Alert's.
+
+### `alert_group_status_changed`
+
+INFO · fields: `group`, `route`, `from`, `to`, `reason`, `transport` · C-09
+
+An Alert Group changed status: group is its #N, route the public_id of its Route, from and to the statuses (from is empty for a new Alert Group), reason the reason of an automatic change and transport how the change reached Muster.
+
+### `alert_groups_purged`
+
+INFO · fields: `details`, `summaries` · C-09
+
+The Alert Group retention of the Leader deleted, in batches, the Alerts inside Alert Groups that ended retention.alert_details ago (details, the rows deleted) and the summary rows of Alert Groups resolved retention.alert_group_summaries ago, with their Notes (summaries, the Alert Groups deleted).
+
+### `alerts_stale`
+
+INFO · fields: `integration`, `count` · C-06
+
+The Stale scan resolved Alerts of an Integration with a live Heartbeat as Stale, because Alertmanager had not listed them for stale_after of live time in any Alertmanager group: integration is the public_id of the Integration and count how many Alerts resolved.
+
+### `api_request_failed`
+
+ERROR · fields: `operation`, `error` · C-03
+
+An API request failed with an unexpected error, usually because the database was unavailable, and answered 500 internal; operation is the operationId of the specification.
+
+### `audit_entry`
+
+INFO · fields: `entry`, `at`, `actor_kind`, `actor`, `actor_name`, `token_name`, `transport`, `action`, `resource_type`, `resource`, `resource_name`, `source_address`, `diff`, `details` · C-03
+
+An Audit log entry, as written to audit_log: the actor (its kind, the public_id of the user or Service account, or the --actor name of a CLI command), the token used, the Transport, the action <resource>.<verb>, the resource, the before/after diff of what was configured (a Secret shows only that it changed) and details.
+
+### `bootstrap_admin_ignored`
+
+WARN · fields: `variables` · C-03
+
+The bootstrap Admin variables are set, but the Organization already has an Admin, so they were ignored and no user was created; remove them from the environment.
+
+### `bootstrap_admin_missing`
+
+WARN · no fields · C-03
+
+The Organization has no Admin and the bootstrap variables are not set, so nobody can sign in to administer Muster: set MUSTER_BOOTSTRAP_ADMIN_EMAIL and MUSTER_BOOTSTRAP_ADMIN_PASSWORD (or _FILE) and restart, or run muster admin reset-password.
+
+### `clock_skew`
+
+WARN · fields: `skew_seconds`, `warning_seconds` · C-02
+
+This replica's clock differs from the database clock by more than process.clock_skew_warning; skew_seconds is positive when the replica's clock is ahead. Synchronise the clocks with NTP.
+
+### `command_executed`
+
+INFO · fields: `command`, `group`, `actor`, `transport`, `outcome` · C-10
+
+A Command ran on an Alert Group: command is its name, group the public_id of the Alert Group, actor the public_id of the User or Service account, transport how it reached Muster and outcome done, or unchanged for an idempotent repeat such as Acknowledge by the current Owner.
+
+### `command_refused`
+
+INFO · fields: `command`, `group`, `actor`, `transport`, `code` · C-10
+
+A Command was refused and changed nothing: command is its name, group the public_id of the Alert Group (empty for a bulk command refused as a whole), actor the public_id of the User or Service account, transport how it reached Muster and code forbidden for a missing Permission or the code of the command-refused problem.
+
+### `database_connection_security`
+
+INFO or WARN · fields: `connection`, `sslmode`, `encrypted` · C-02
+
+Whether a database connection (main or session) is encrypted, with the sslmode in effect; WARN when it is not encrypted, which prefer allows without an error.
+
+### `database_settings_conflict`
+
+WARN · fields: `used`, `ignored` · C-02
+
+A database connection is set both as a URL and as fields: the URL is used and the fields are ignored.
+
+### `delivery_attempt`
+
+INFO · fields: `destination`, `group`, `kind`, `outcome`, `attempt`, `duration_ms`, `retry_after_ms` · C-11
+
+The delivery worker called a Destination: destination is its public_id, group the #N of the Alert Group, empty for a Storm summary, kind what it sent (publication, update, thread_reply, storm_summary for any call of a Storm summary, or final_edit for the last edit of a Root message in a Destination it left), outcome delivered or the error class of the answer, attempt the number of this attempt, duration_ms how long the call took and retry_after_ms the wait a RetryAfter asked for, 0 otherwise.
+
+### `delivery_not_delivered`
+
+WARN · fields: `destination`, `group`, `kind`, `error_class` · C-11
+
+A delivery ended as Not delivered after an answer the adapter could not classify, because no adapter serves the Destination type, or because the Connection of its deleted Destination was deleted: destination is the public_id of the Destination, group the public_id of the Alert Group, empty for a Storm summary, kind what was sent (publication, update, thread_reply, storm_summary or final_edit) and error_class unknown. The next change of the Alert Group starts a new delivery.
+
+### `delivery_possible_duplicate`
+
+WARN · fields: `destination`, `group` · C-11
+
+A Publication started again after an earlier start whose outcome was never recorded, such as after a crash: destination is the public_id of the Destination and group the public_id of the Alert Group. The messenger may show the Root message twice.
+
+### `delivery_work_failed`
+
+WARN · fields: `work`, `error` · C-11
+
+The delivery worker could not attempt a delivery or a Thread reply, or probe a Broken Destination (work is delivery, thread_reply or probe), or mark the first Publication of an Alert Group once its outcome committed (work is mark_published), because of error, such as a lost database connection. Any replica attempts it again once its lease runs out, or at the next probe; a first Publication is marked again by the next delivered call or event of the Alert Group.
+
+### `destination_broken`
+
+WARN · fields: `destination`, `cause`, `reason` · C-11
+
+A Destination became Broken: destination is its public_id, cause fatal after a Fatal error or unavailable after the Transient budget ran out, and reason the masked error the messenger answered. Its deliveries wait, MusterDestinationBroken fires and a probe runs every delivery.broken_probe_interval.
+
+### `destination_recovered`
+
+INFO · fields: `destination`, `broken_for_s` · C-11
+
+A Broken Destination is healthy again after a successful probe or Destination check: destination is its public_id and broken_for_s how long it was Broken, in seconds. Its deliveries resume with the current state.
+
+### `destination_tested`
+
+INFO · fields: `destination`, `steps` · C-16
+
+A person tested a Destination: destination is its public_id and steps each step of the test with its error class, as name:class separated by commas, such as message:none,press:none; the class none is a step that succeeded, limited one that found no limiter token in time and sent nothing. The Audit log entry destination.tested records the same with the source.
+
+### `dev_clock_load_failed`
+
+WARN · fields: `error` · C-01
+
+Development mode only: the development clock could not be read after a change on another replica; this process keeps its offset until the next change or the next LISTEN.
+
+### `dev_clock_loaded`
+
+INFO · fields: `offset_seconds` · C-01
+
+Development mode only: this process runs on the development clock, offset_seconds ahead of the system time, as stored in the database for every replica; logged at start and after each advance.
+
+### `downtime_recorded`
+
+WARN · fields: `started_at`, `ended_at`, `duration_seconds` · C-02
+
+Muster was unavailable: no Leader wrote the alive mark and no replica refreshed its record for the period between started_at and ended_at. The new Leader recorded it and opened the recovery window (recovery.banner_duration).
+
+### `fallback_template_used`
+
+WARN · fields: `route`, `group`, `template`, `error` · C-12
+
+A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.
+
+### `group_key_previewed`
+
+INFO · fields: `route`, `period_seconds`, `snapshots_read`, `truncated`, `duration_ms` · C-08
+
+A Group key preview read the Stored Snapshots of a period: route is the public_id of the saved Route it previewed, empty for a Route that is not saved yet, period_seconds the period, snapshots_read how many distinct bodies it read, truncated whether routing.group_key_preview_max_alerts stopped it with Stored Snapshots of the period, or Alerts the Route takes, left unread, and duration_ms how long it took.
+
+### `heartbeat_live`
+
+INFO · fields: `integration`, `first` · C-07
+
+The Heartbeat of an Integration became live: integration is its public_id, and first is true for the first signal after the Heartbeat was turned on and false for a signal that ended a loss, which resolves MusterHeartbeatLost.
+
+### `heartbeat_lost`
+
+WARN · fields: `integration`, `last_signal_at` · C-07
+
+No Heartbeat signal arrived for an Integration within its Heartbeat timeout, so it is Heartbeat lost and MusterHeartbeatLost is raised: integration is its public_id and last_signal_at the time of its last signal.
+
+### `ingest_failed`
+
+ERROR · fields: `integration`, `route_pattern`, `error` · C-05
+
+An ingestion or Heartbeat request answered 500 because the database could not look up the token, store the Stored Snapshot or record the Heartbeat signal, usually because it was unavailable; Alertmanager retries an ingestion request, and the next signal replaces a lost one. integration is the public_id of the token's Integration, or unknown when the lookup failed; route_pattern is the route it came by.
+
+### `ingest_rejected`
+
+INFO · fields: `integration`, `outcome`, `route_pattern`, `client_address` · C-05
+
+An ingestion or Heartbeat request was refused: outcome unauthorized (401, a missing, wrong or revoked token, an API token, or one of a deleted Integration) or too_large (413, a body above ingest.body_limit). integration is the public_id of the token's Integration, or unknown; route_pattern is the route it came by — never the path, which may carry the token — and client_address the sender. Refused ingestion requests are also counted in muster_ingest_requests_total, which the chart rule MusterIngestRejected reports.
+
+### `ingest_replayed`
+
+INFO · fields: `actor`, `since`, `integration`, `count` · C-06
+
+muster ingest replay set the Stored Snapshots received within the period back to pending, for processing again: actor is the --actor name, since the period as given, integration the public_id of the Integration it was limited to, empty for all, and count how many Stored Snapshots it set back.
+
+### `internal_alert_raised`
+
+INFO · fields: `alertname`, `fingerprint`, `entity` · C-06
+
+An Internal alert fired as an Alert of the built-in Muster Integration: alertname names it, fingerprint is the Alert's, and entity the public_id of the Integration, Route or Destination it is about, empty when it is about none.
+
+### `internal_alert_resolved`
+
+INFO · fields: `alertname`, `fingerprint`, `entity` · C-06
+
+An Internal alert resolved because its condition cleared or its entity was deleted: alertname names it, fingerprint is the Alert's, and entity the public_id of the Integration, Route or Destination it is about, empty when it is about none.
+
+### `key_activated`
+
+WARN · fields: `from`, `to`, `actor` · C-20
+
+muster secrets rotate-key activated a master key: every Secret and the key canary are now encrypted with it, the replicas switch to it and the Leader re-signs the buttons of the open Root messages. The old key stays in MUSTER_SECRET_KEYS until the Keyring shows it as removable.
+
+### `key_canary_failed`
+
+ERROR · fields: `active_key_id`, `key_ids`, `error` · C-02
+
+The master keys cannot decrypt the key canary: the active key is missing from MUSTER_SECRET_KEYS, or the keys belong to another database. The replica stops; set the keys this database was written with.
+
+### `key_switched`
+
+INFO · fields: `active` · C-20
+
+This replica switched to the active master key without a restart, after muster secrets rotate-key activated it: it now encrypts and signs with that key.
+
+### `keyring_loaded`
+
+INFO · fields: `key_ids`, `active_key_id` · C-02
+
+The master keys of MUSTER_SECRET_KEYS were loaded and decrypt the key canary; the ids are derived from the keys and never reveal them.
+
+### `leader_task_failed`
+
+WARN · fields: `task`, `error` · C-02
+
+A run of a Leader task failed, usually because the database was unavailable; it runs again at its next interval.
+
+### `leadership_acquired`
+
+INFO · fields: `replica` · C-02
+
+This replica took the Leader lock and runs the Leader tasks: partition maintenance, the alive mark, the pruning of replica records and the pruning of short-lived state.
+
+### `leadership_lost`
+
+WARN · fields: `replica`, `error` · C-02
+
+The Leader could not confirm its lock within leader.fencing_timeout, or its lock session failed: it stopped every Leader task, closed the lock connection and competes for the lock again.
+
+### `library_message`
+
+WARN · fields: `message` · C-02
+
+A third-party library wrote a line of its own, such as a failed read of the process metrics.
+
+### `link_rule_failed`
+
+WARN · fields: `link_rule`, `route`, `group`, `error` · C-12
+
+The URL template of a Link rule failed while computing the links of an Alert Group, so the rule's link is left out and muster_template_errors_total{template="link_rule"} grows: link_rule is the public_id of the Link rule, route the public_id of the Alert Group's Route, group the public_id of the Alert Group and error what failed, with its line and column. Logged once per rule and Alert Group on each replica; the counter grows at every failure.
+
+### `listener_failed`
+
+ERROR · fields: `listener`, `error` · C-02
+
+A listener stopped serving with an error; the process stops so that it is restarted.
+
+### `listeners_started`
+
+INFO · fields: `app`, `ingest`, `internal` · C-02
+
+The listeners serve and the process is ready; app and ingest are the same address when one port serves both.
+
+### `live_updates_listen_failed`
+
+WARN · fields: `error` · C-03
+
+A replica lost the session connection that listens for live-update hints, or could not open it, usually because the database was unavailable; it connects again with a growing delay, up to 30 seconds. Until then the browsers connected to it miss the hints of changes and see them at their next read.
+
+### `live_updates_listen_restored`
+
+INFO · no fields · C-03
+
+A replica listens for live-update hints again after live_updates_listen_failed; it sent every connected browser the hints of everything, so that they read it again.
+
+### `mattermost_press`
+
+INFO · fields: `connection`, `group`, `command`, `outcome`, `answer`, `error` · C-13
+
+The callback of a Mattermost Connection received a button press and answered 200 with a JSON object, never with update: connection is the public_id of the Connection, empty when it does not exist; group the public_id of the Alert Group and command the Command, once the signed action id is verified; outcome done or unchanged for a Command that ran; refused, forbidden, not_linked, disabled or not_verified for a press that changed nothing and was answered, a not_verified one only on a post delivered to a Destination of the Connection in the channel of the press; expired for a press on a Reminder whose button was signed by a key that is no longer in the Keyring, answered that the button has expired; test for a press of a test message by a person, answered that nothing changed, and test_press for the bot's own press of it during a Destination test, answered with nothing; invalid_request for a body that is not a press, unknown_connection, or failed, answered once the press is bound to its post; answer how the person was answered: ephemeral_post for an ephemeral post in the channel, or in the Thread of the Root message for a press on a Reminder, ephemeral_text for the text in the callback's answer, shown in the Thread, when that post was not made, absent when nothing was answered; error why the press failed or why its ephemeral post was not sent, masked of secrets, never the 403 of a bot without the permission to make ephemeral posts.
+
+### `migrations_applied`
+
+INFO · fields: `from`, `to` · C-02
+
+Migrations were applied under the migration lock, from one schema version to another.
+
+### `migrations_current`
+
+INFO · fields: `version` · C-02
+
+No migration was applied: the schema already has the newest version this binary knows.
+
+### `oidc_check_failed`
+
+WARN · fields: `user`, `reason`, `error` · C-03
+
+A background re-check of an OIDC user at the identity provider found it unavailable — unreachable, a timeout, 408, 429 or 5xx, or the 10-second budget of the refresh spent — or could not run. Nothing changes for the user: sessions and Personal access tokens keep working, and the next attempt comes one auth.oidc_recheck_interval later, so an incident at the identity provider never signs everybody out. user is the public_id of the user, empty when a round of the worker failed; reason names the step; the error is masked and carries no token or secret.
+
+### `oidc_secret_expiring`
+
+WARN · fields: `expires_on` · C-19
+
+The OIDC client secret expires within oidc.secret_expiry_lead, so MusterOIDCSecretExpiring is raised: expires_on is the expiry date entered in the OIDC settings. Logged once per raise.
+
+### `oidc_sign_in_failed`
+
+WARN · fields: `reason`, `error` · C-03
+
+An OIDC sign-in ended at the sign-in page, or the linking of an OIDC identity at the profile page, with idp_error: the identity provider reported an error, could not be reached through the back channel or its proxy, or answered with an ID token that did not verify. The reason names the step, prefixed with link for a link; the error is masked and carries no token or secret.
+
+### `organization_created`
+
+INFO · fields: `organization` · C-02
+
+The first start created the Organization with the defaults of its settings and its outbound address policy.
+
+### `organization_updated`
+
+INFO · fields: `fields` · C-20
+
+The Organization's settings changed; fields lists the JSON pointers of the changed fields, and the Audit log entry organization.updated has the values before and after (a Secret only as changed).
+
+### `outbound_blocked`
+
+WARN · fields: `client`, `rule`, `scheme`, `host` · C-02
+
+The outbound address policy refused a request, which fails without retry; rule names the rule and the address or proxy it refused. Correct the configured address, or change the policy and its allowed networks.
+
+### `outbound_policy_updated`
+
+INFO · no fields · C-20
+
+The outbound address policy changed: every replica drops its cached policy and closes its idle outbound connections at once, so the next request is checked against the new policy. The Audit log entry outbound_policy.updated has the values before and after.
+
+### `outbound_unverified_address`
+
+INFO · fields: `client`, `scheme`, `host` · C-02
+
+A request went through the client's proxy to a host name that Muster cannot resolve itself, so only the name was checked against the allowed and denied lists, not its addresses.
+
+### `outgoing_heartbeat_failed`
+
+WARN · fields: `error` · C-19
+
+A send of the outgoing heartbeat to the dead man's switch failed and is not retried; the next interval sends again. error says what failed, without the URL. Logged at every failed send.
+
+### `outgoing_heartbeat_recovered`
+
+INFO · no fields · C-19
+
+A send of the outgoing heartbeat succeeded after a failed one.
+
+### `partition_maintenance_failed`
+
+WARN · fields: `error` · C-02
+
+Partition maintenance failed, for example because a lock was not granted within 2 seconds; the Leader retries at the next hourly run. A partition that is still missing when its day or month begins makes writes to its table fail.
+
+### `partitions_maintained`
+
+INFO · fields: `created`, `dropped` · C-02
+
+Partition maintenance created the partitions Muster will need (daily for Stored Snapshots and their bodies, monthly for Timeline entries, delivery events and the Audit log) or dropped partitions whose whole range is older than their retention period; the fields list the partitions by name.
+
+### `process_started`
+
+INFO · fields: `version`, `commit` · C-02
+
+The server process started, with the version and commit of the binary.
+
+### `process_stopped`
+
+INFO · no fields · C-02
+
+The server process stopped after a graceful shutdown.
+
+### `reminder_skipped`
+
+INFO · fields: `group`, `reason` · C-17
+
+A Reminder came due and was dropped with its timer: group is the public_id of the Alert Group and reason not_acknowledged when it is no longer acknowledged or policy_off when its Route's Reminders are off.
+
+### `replica_record_failed`
+
+WARN · fields: `replica`, `error` · C-02
+
+A replica could not refresh its record of the keys it holds, usually because the database is unavailable; it retries at the next refresh and stops counting as live once the record is older than replica.live_expiry. At shutdown, the record could not be deleted; it stops counting as live after replica.live_expiry.
+
+### `replicas_pruned`
+
+INFO · fields: `replicas` · C-02
+
+The Leader removed the records of replicas that had not refreshed them for replica.prune_after.
+
+### `schema_dirty`
+
+ERROR · fields: `database_version` · C-02
+
+A migration failed halfway and the schema is marked dirty at its version: repair the schema from a backup or by hand, then clear the dirty flag in schema_migrations.
+
+### `schema_too_new`
+
+ERROR · fields: `database_version`, `known_version` · C-02
+
+The database schema is newer than this binary knows, after an upgrade was rolled back: run a release that knows the schema version.
+
+### `schema_too_old`
+
+ERROR · fields: `database_version`, `known_version` · C-02
+
+The database schema is older than this binary needs: run muster migrate or set MUSTER_MIGRATE_ON_START.
+
+### `short_lived_pruned`
+
+INFO · fields: `table`, `rows` · C-02
+
+The hourly short-lived pruning of the Leader deleted, in batches, rows of a short-lived table that can no longer be used, such as sessions that ended or expired auth.session_prune_after ago, sign-in throttles without a failure for auth.signin_throttle_prune_after, password setup links that expired auth.password_setup_prune_after ago and Account link requests that expired account_link.request_prune_after ago; rows is how many it deleted from the table.
+
+### `shutdown_grace_exceeded`
+
+WARN · fields: `grace_seconds` · C-02
+
+Requests were still running when the shutdown grace period ended; their connections were closed.
+
+### `shutdown_requested`
+
+WARN · fields: `grace_seconds` · C-02
+
+The server received SIGTERM or an interrupt: readiness answers 503, work in progress finishes and the listeners drain within the grace period, in seconds.
+
+### `snapshot_accepted`
+
+INFO · fields: `integration`, `stored_snapshot`, `size_bytes`, `route_pattern` · C-05
+
+An ingestion request was stored as a pending Stored Snapshot and answered 202: integration and stored_snapshot are public_ids, size_bytes the size of the body, route_pattern the route it came by — never the path, which may carry the token.
+
+### `snapshot_failed`
+
+WARN · fields: `integration`, `stored_snapshot`, `error` · C-06
+
+A Stored Snapshot could not be processed and was marked failed with the error: its body is not JSON, lacks the fields of an Alertmanager webhook, or processing failed. It is not retried by itself, the Snapshots behind it are processed, and muster ingest replay processes it again after a fix. integration and stored_snapshot are public_ids.
+
+### `snapshot_processed`
+
+INFO · fields: `integration`, `stored_snapshot`, `group_key`, `alerts`, `fired`, `resolved`, `gone`, `continued`, `dropped`, `truncated`, `routes`, `alert_groups`, `duration_ms`, `lane` · C-06
+
+A Stored Snapshot was processed: integration and stored_snapshot are public_ids, group_key the Alertmanager group it came for, alerts how many Alerts it listed, fired, resolved, gone and continued how many new firings, resolutions from Alertmanager or by the deletion of the Integration, Alerts resolved as Gone and Continuations it made, dropped the resolves of fingerprints that fire nowhere, truncated its truncatedAlerts, routes the public_ids of the Routes that took its newly firing Alerts, alert_groups the #N of the Alert Groups it created or changed, duration_ms how long processing took, and lane which of the Integration's processing.parallel_groups lanes processed it, from 0.
+
+### `snapshot_processing_interrupted`
+
+WARN · fields: `integration`, `error` · C-06
+
+The processing worker stopped a round or an Integration because the database failed or the connection was lost; the Stored Snapshots stay pending and are processed at the next attempt, after a growing pause. integration is the public_id of the Integration, empty when the round failed.
+
+### `startup_failed`
+
+ERROR · fields: `error` · C-02
+
+Startup stopped: the database cannot be reached or fails a check, a migration failed, or a listener cannot listen. The error says what to fix.
+
+### `storm_ended`
+
+INFO · fields: `route`, `alert_groups`, `urgent` · C-11
+
+A Storm ended after its Route stayed at or below route.storm_threshold for delivery.storm_calm_period: route is the public_id of the Route, and alert_groups and urgent are the Storm's own counts at its end, as storm_started has them at its start: the new Alert Groups it counted and how many of them were Urgent. The Storm summary shows its final state and the Alert Groups still open are posted Quietly.
+
+### `storm_started`
+
+INFO · fields: `route`, `alert_groups`, `urgent` · C-11
+
+The new Alert Groups of a Route exceeded route.storm_threshold within a minute and started a Storm: route is the public_id of the Route, and alert_groups and urgent are the Storm's own counts at its start, as storm_ended has them at its end: the new Alert Groups it counted, 1 (the one that started it), and how many of them were Urgent, 1 or 0. Each Destination of the Route gets a Storm summary and only Urgent Alert Groups are posted one by one until it calms down. Logged once the change that started it committed.
+
+### `system_notices_check_failed`
+
+WARN · fields: `error` · C-03
+
+A replica could not read the state of the Organization-wide notices, usually because the database was unavailable, so the live-updates streams get no hint of a notice that started or ended; logged once until a check succeeds again.
+
+### `telegram_poll_conflict`
+
+INFO · fields: `connection`, `backoff_ms` · C-14
+
+The long poll of a Telegram Connection was refused with 409 Conflict: another process polls the same bot, or a webhook is set for it. The poller waits backoff_ms, with jitter, and polls again; it is not a delivery outcome and makes nothing Broken. connection is the public_id of the Connection. Lines that keep coming mean that a second installation polls the bot, or that its webhook was set elsewhere: the connection check shows it.
+
+### `telegram_poll_failed`
+
+WARN · fields: `connection`, `error` · C-14
+
+A long poll of a Telegram Connection failed after the retries of the background client class, or an update it brought could not be handed to the router: connection is the public_id of the Connection, error what failed, with the bot token and the path prefix of the base URL masked. The poller backs off and polls again from the stored offset.
+
+### `telegram_press`
+
+INFO · fields: `connection`, `group`, `command`, `outcome`, `error` · C-14
+
+A callback_query of a Telegram Connection — a button press — was handled and answered with answerCallbackQuery before the Root message was edited: connection is the public_id of the Connection; group the public_id of the Alert Group and command the Command, once the button data is verified; outcome done or unchanged for a Command that ran; refused, forbidden, not_linked, disabled or not_verified for a press that changed nothing; expired for a press on a Reminder whose button was signed by a key that is no longer in the Keyring, answered that the button has expired; test for a press of a test message, answered that nothing changed; failed when a read or the Command failed. error, when present, says why the press failed or why its answer was not made — no limiter token within the interactive budget, or Telegram refusing an answer that came too late — masked of the bot token. The update is confirmed whatever the outcome, so that a press never runs twice.
+
+### `telegram_press_dropped`
+
+INFO · fields: `connection`, `gap_seconds` · C-14
+
+A button press of a Telegram Connection arrived after the Connection had received no updates for longer than telegram.press_max_age — no successful long poll, or Muster not running — and was dropped without an answer: Telegram kept it during the gap, and acting on it now could undo what people did since. connection is the public_id of the Connection, gap_seconds the gap before the update that carried the press. Nothing changed; the person can press again.
+
+### `telegram_update_dropped`
+
+INFO · fields: `connection`, `kind` · C-14
+
+An update of a Telegram Connection reached the update router, which has no handler for its kind and drops it: connection is the public_id of the Connection, kind one of callback_query, chat_message, private_message, my_chat_member or other. Private messages, such as /start, go to the handler of Account links.
+
+### `telegram_update_failed`
+
+WARN · fields: `connection`, `error` · C-14
+
+The webhook endpoint of a Telegram Connection could not look up the Connection or hand the update to the router, usually because the database was unavailable, and answered 500; Telegram sends the update again. connection is the public_id from the path, error what failed.
+
+### `telegram_webhook_delete_failed`
+
+WARN · fields: `connection`, `error` · C-14
+
+A Telegram Connection in the webhook update mode was deleted, and deleteWebhook, called with its bot and base URL as a best effort after the deletion, failed: connection is the public_id of the Connection, error what Telegram or the network answered, without the bot token. The deletion stands; Telegram keeps posting the bot's updates to Muster, which answers them 401, until the webhook is removed with the bot's token elsewhere.
+
+### `telegram_webhook_deleted`
+
+INFO · fields: `connection` · C-14
+
+A Telegram Connection in the webhook update mode was deleted and deleteWebhook, called with its bot and base URL after the deletion, removed its webhook: connection is the public_id of the Connection.
+
+### `telegram_webhook_set`
+
+INFO · fields: `connection`, `host` · C-14
+
+A Telegram Connection was saved in the webhook update mode and setWebhook set its webhook, with a new secret token, at MUSTER_INGEST_URL: connection is the public_id of the Connection, host the host of the webhook's URL.
+
+### `template_recovered`
+
+INFO · fields: `route`, `template` · C-12
+
+A template of a Route that kept failing rendered again: route is the public_id of the Route and template the kind of template. The Route's template error is cleared and MusterTemplateError resolves. Logged once the change committed.
+
+### `timer_failed`
+
+WARN · fields: `kind`, `error` · C-09
+
+A timer could not fire: kind is the timer kind and error what failed. The timer fires again on any replica once its lease runs out.
+
+### `timer_fired`
+
+INFO · fields: `kind`, `group`, `notice`, `missed` · C-17
+
+A timer of an Alert Group fired: kind is ack_timeout or reminder, group the public_id of the Alert Group, notice the number of the notice or Reminder it sent, or of the last one a collapse stands for, and missed how many overdue ones collapsed into one notices_missed, 0 when none did.
+
+### `webhook_event_not_delivered`
+
+WARN · fields: `destination`, `group`, `lifecycle_event`, `status` · C-15
+
+An event of an outgoing webhook in the events mode ended as Not delivered after an answer that is not retried and does not make the Destination Broken — 400, 413, 422, a redirect, which is never followed, or another unknown answer — or because its request template failed: destination is the public_id of the Destination, group the public_id of the Alert Group, lifecycle_event the lifecycle event and status the HTTP status of the answer, empty without one. The next event of the Alert Group follows.
+
+### `webhook_template_failed`
+
+WARN · fields: `destination`, `group`, `request`, `error` · C-15
+
+A request template of an outgoing webhook failed, so that request was not sent and its delivery, Thread reply or event ended as Not delivered with no fallback body: destination is the public_id of the Destination, group the public_id of the Alert Group, empty for a Storm summary, request the request — create, update, open_thread, reply_in_thread or events — and error what failed, with its line and column and every Secret masked. The Destination shows a template error and MusterTemplateError fires until one of its requests renders again. Logged once the outcome is recorded.
+
+### `webhook_value_missing`
+
+WARN · fields: `destination`, `group`, `rule` · C-15
+
+An extraction rule of the "create" or "open thread" request of an outgoing webhook found nothing in the response: destination is the public_id of the Destination, group the public_id of the Alert Group and rule the name of the rule. The request counts as delivered and the Timeline records template_value_missing; a later request that reads the value fails as a template error. Logged once the outcome is recorded.

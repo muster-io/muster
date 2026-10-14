@@ -6,83 +6,470 @@ The values of the Helm chart `deploy/helm/muster`. The types and the description
 `values.schema.json`, which rejects a value it does not list, and the defaults from its `values.yaml`. Set
 `existingSecret`: the chart never generates the master keys, and rendering fails without it.
 
-| Value | Type | Default | Description |
-|---|---|---|---|
-| `global` | object | — | Helm's global values, shared with subcharts; Muster reads none of them. |
-| `image` | object | — | The container image of Muster. |
-| `image.repository` | string | `ghcr.io/muster-io/muster` | The image repository. |
-| `image.tag` | string or null | `""` | The image tag; empty uses the appVersion of the chart. |
-| `image.pullPolicy` | string (`Always`, `Never`, `IfNotPresent`) | `IfNotPresent` | The pull policy of the image. |
-| `imagePullSecrets` | array | `[]` | The Secrets for pulling the image from a private registry, as in a pod spec. |
-| `nameOverride` | string | `""` | Replaces the chart name in the names of the resources. |
-| `fullnameOverride` | string | `""` | Replaces the whole name of the resources. |
-| `replicas` | integer | `1` | The number of Muster replicas; one of them is the Leader at a time. |
-| `existingSecret` | string | `""` | The Secret that holds the master keys and, under the keys named below, the database password or URL and the password of the bootstrap Admin. Required: the chart never generates the master keys. |
-| `masterKeysKey` | string | `secret-keys` | The key of existingSecret that holds the master keys, one per line (MUSTER_SECRET_KEYS_FILE). |
-| `database` | object | — | The database connection. |
-| `database.host` | string | `""` | The database host (MUSTER_DATABASE_HOST); ignored when urlKey is set. |
-| `database.port` | integer | `5432` | The database port (MUSTER_DATABASE_PORT); ignored when urlKey is set. |
-| `database.name` | string | `muster` | The database name (MUSTER_DATABASE_NAME); ignored when urlKey is set. |
-| `database.user` | string | `muster` | The database user (MUSTER_DATABASE_USER); ignored when urlKey is set. |
-| `database.sslmode` | string | `""` | The sslmode of the database connections (MUSTER_DATABASE_SSLMODE); empty uses Muster's default, prefer. |
-| `database.passwordKey` | string | `database-password` | The key of existingSecret that holds the database password (MUSTER_DATABASE_PASSWORD_FILE); ignored when urlKey is set. |
-| `database.urlKey` | string | `""` | The key of existingSecret that holds the whole connection as a URL (MUSTER_DATABASE_URL), used instead of the fields above. |
-| `database.sessionHost` | string | `""` | The host of the session connection, for a pooler in transaction mode (MUSTER_DATABASE_SESSION_HOST). |
-| `database.sessionPort` | integer or null | `null` | The port of the session connection (MUSTER_DATABASE_SESSION_PORT); null uses the port of the main connection. |
-| `publicURL` | string | `""` | The address of Muster for people and messengers (MUSTER_PUBLIC_URL). |
-| `ingestURL` | string | `""` | The address Alertmanager sends its notifications to (MUSTER_INGEST_URL); empty uses publicURL. |
-| `bootstrapAdmin` | object | — | The bootstrap Admin, created at start while the Organization has no Admin. |
-| `bootstrapAdmin.email` | string | `""` | The email, also the login, of the bootstrap Admin (MUSTER_BOOTSTRAP_ADMIN_EMAIL). |
-| `bootstrapAdmin.passwordKey` | string | `""` | The key of existingSecret that holds the password of the bootstrap Admin (MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE). |
-| `extraEnv` | array | `[]` | Extra environment variables of the Muster containers, as in a container spec. |
-| `resources` | object | `{}` | The resource requests and limits of the Muster containers. |
-| `podSecurityContext` | object | `{"fsGroup":65532,"runAsGroup":65532,"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}}` | The security context of the pods. |
-| `securityContext` | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}` | The security context of the Muster containers. |
-| `podAnnotations` | object | `{}` | Extra annotations of the pods. |
-| `podLabels` | object | `{}` | Extra labels of the pods. |
-| `nodeSelector` | object | `{}` | The node selector of the pods. |
-| `tolerations` | array | `[]` | The tolerations of the pods. |
-| `affinity` | object | `{}` | The affinity of the pods. |
-| `topologySpreadConstraints` | array | `[]` | The topology spread constraints of the pods. |
-| `priorityClassName` | string | `""` | The priority class of the pods; empty sets none. |
-| `serviceAccount` | object | — | The service account of the pods. |
-| `serviceAccount.create` | boolean | `true` | Creates the service account. |
-| `serviceAccount.name` | string | `""` | The name of the service account; empty uses the full name of the release when the chart creates it, and default otherwise. |
-| `serviceAccount.annotations` | object | `{}` | Extra annotations of the service account. |
-| `serviceAccount.automountServiceAccountToken` | boolean | `false` | Mounts the token of the service account into the pods; Muster does not call the Kubernetes API. |
-| `service` | object | — | The Services of the three listeners. |
-| `service.app` | object | — | The Service of the app listener: the UI and the API. |
-| `service.app.type` | string | `ClusterIP` | The type of the Service. |
-| `service.app.port` | integer | `8080` | The port of the Service, also the container port and the listen port (MUSTER_LISTEN_APP). |
-| `service.app.annotations` | object | `{}` | Extra annotations of the Service. |
-| `service.ingest` | object | — | The Service of the ingest listener: ingestion, Heartbeats and messenger callbacks. |
-| `service.ingest.type` | string | `ClusterIP` | The type of the Service. |
-| `service.ingest.port` | integer | `8081` | The port of the Service, also the container port and the listen port (MUSTER_LISTEN_INGEST). |
-| `service.ingest.annotations` | object | `{}` | Extra annotations of the Service. |
-| `service.internal` | object | — | The Service of the internal listener: the health checks and /metrics. |
-| `service.internal.type` | string | `ClusterIP` | The type of the Service. |
-| `service.internal.port` | integer | `8082` | The port of the Service, also the container port and the listen port (MUSTER_LISTEN_INTERNAL). |
-| `service.internal.annotations` | object | `{}` | Extra annotations of the Service. |
-| `ingress` | object | — | The Ingresses of the app and ingest listeners; the internal listener is never exposed. |
-| `ingress.enabled` | boolean | `false` | Creates the Ingresses. |
-| `ingress.className` | string | `""` | The class of the Ingresses; empty uses the cluster's default. |
-| `ingress.annotations` | object | `{}` | Extra annotations of the Ingresses. |
-| `ingress.app` | object | `{"hosts":[],"tls":[]}` | The hosts and tls of the Ingress of the app listener, as in an Ingress spec. |
-| `ingress.ingest` | object | `{"hosts":[],"tls":[]}` | The hosts and tls of the Ingress of the ingest listener, as in an Ingress spec. |
-| `httpRoute` | object | — | The Gateway API HTTPRoutes of the app and ingest listeners; the internal listener is never exposed. |
-| `httpRoute.enabled` | boolean | `false` | Creates the HTTPRoutes. |
-| `httpRoute.parentRefs` | array | `[]` | The Gateways the HTTPRoutes attach to, as in an HTTPRoute spec. |
-| `httpRoute.annotations` | object | `{}` | Extra annotations of the HTTPRoutes. |
-| `httpRoute.labels` | object | `{}` | Extra labels of the HTTPRoutes. |
-| `httpRoute.app` | object | `{"hostnames":[]}` | The hostnames of the HTTPRoute of the app listener. |
-| `httpRoute.ingest` | object | `{"hostnames":[]}` | The hostnames of the HTTPRoute of the ingest listener. |
-| `serviceMonitor` | object | — | A Prometheus Operator ServiceMonitor that scrapes /metrics on the internal listener. |
-| `serviceMonitor.enabled` | boolean | `false` | Creates the ServiceMonitor. |
-| `serviceMonitor.interval` | string | `30s` | The scrape interval. |
-| `serviceMonitor.scrapeTimeout` | string | `10s` | The scrape timeout. |
-| `serviceMonitor.labels` | object | `{}` | Extra labels of the ServiceMonitor, such as the one the Prometheus selects. |
-| `networkPolicy` | object | — | A NetworkPolicy of the pods. |
-| `networkPolicy.enabled` | boolean | `false` | Creates a NetworkPolicy that allows incoming traffic to the three listener ports only. |
-| `podDisruptionBudget` | object | — | A PodDisruptionBudget of the pods. |
-| `podDisruptionBudget.enabled` | boolean | `false` | Creates the PodDisruptionBudget. |
-| `podDisruptionBudget.maxUnavailable` | integer or string | `1` | The number or percentage of pods that may be unavailable at a time. |
+### `global`
+
+object · no default
+
+Helm's global values, shared with subcharts; Muster reads none of them.
+
+### `image`
+
+object
+
+The container image of Muster.
+
+### `image.repository`
+
+string · default: `ghcr.io/muster-io/muster`
+
+The image repository.
+
+### `image.tag`
+
+string or null · default: `""`
+
+The image tag; empty uses the appVersion of the chart.
+
+### `image.pullPolicy`
+
+string (`Always`, `Never`, `IfNotPresent`) · default: `IfNotPresent`
+
+The pull policy of the image.
+
+### `imagePullSecrets`
+
+array · default: `[]`
+
+The Secrets for pulling the image from a private registry, as in a pod spec.
+
+### `nameOverride`
+
+string · default: `""`
+
+Replaces the chart name in the names of the resources.
+
+### `fullnameOverride`
+
+string · default: `""`
+
+Replaces the whole name of the resources.
+
+### `replicas`
+
+integer · default: `1`
+
+The number of Muster replicas; one of them is the Leader at a time.
+
+### `existingSecret`
+
+string · default: `""`
+
+The Secret that holds the master keys and, under the keys named below, the database password or URL and the password of the bootstrap Admin. Required: the chart never generates the master keys.
+
+### `masterKeysKey`
+
+string · default: `secret-keys`
+
+The key of existingSecret that holds the master keys, one per line (MUSTER_SECRET_KEYS_FILE).
+
+### `database`
+
+object
+
+The database connection.
+
+### `database.host`
+
+string · default: `""`
+
+The database host (MUSTER_DATABASE_HOST); ignored when urlKey is set.
+
+### `database.port`
+
+integer · default: `5432`
+
+The database port (MUSTER_DATABASE_PORT); ignored when urlKey is set.
+
+### `database.name`
+
+string · default: `muster`
+
+The database name (MUSTER_DATABASE_NAME); ignored when urlKey is set.
+
+### `database.user`
+
+string · default: `muster`
+
+The database user (MUSTER_DATABASE_USER); ignored when urlKey is set.
+
+### `database.sslmode`
+
+string · default: `""`
+
+The sslmode of the database connections (MUSTER_DATABASE_SSLMODE); empty uses Muster's default, prefer.
+
+### `database.passwordKey`
+
+string · default: `database-password`
+
+The key of existingSecret that holds the database password (MUSTER_DATABASE_PASSWORD_FILE); ignored when urlKey is set.
+
+### `database.urlKey`
+
+string · default: `""`
+
+The key of existingSecret that holds the whole connection as a URL (MUSTER_DATABASE_URL), used instead of the fields above.
+
+### `database.sessionHost`
+
+string · default: `""`
+
+The host of the session connection, for a pooler in transaction mode (MUSTER_DATABASE_SESSION_HOST).
+
+### `database.sessionPort`
+
+integer or null · default: `null`
+
+The port of the session connection (MUSTER_DATABASE_SESSION_PORT); null uses the port of the main connection.
+
+### `publicURL`
+
+string · default: `""`
+
+The address of Muster for people and messengers (MUSTER_PUBLIC_URL).
+
+### `ingestURL`
+
+string · default: `""`
+
+The address Alertmanager sends its notifications to (MUSTER_INGEST_URL); empty uses publicURL.
+
+### `bootstrapAdmin`
+
+object
+
+The bootstrap Admin, created at start while the Organization has no Admin.
+
+### `bootstrapAdmin.email`
+
+string · default: `""`
+
+The email, also the login, of the bootstrap Admin (MUSTER_BOOTSTRAP_ADMIN_EMAIL).
+
+### `bootstrapAdmin.passwordKey`
+
+string · default: `""`
+
+The key of existingSecret that holds the password of the bootstrap Admin (MUSTER_BOOTSTRAP_ADMIN_PASSWORD_FILE).
+
+### `extraEnv`
+
+array · default: `[]`
+
+Extra environment variables of the Muster containers, as in a container spec.
+
+### `resources`
+
+object · default: `{}`
+
+The resource requests and limits of the Muster containers.
+
+### `podSecurityContext`
+
+object · default: `{"fsGroup":65532,"runAsGroup":65532,"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}}`
+
+The security context of the pods.
+
+### `securityContext`
+
+object · default: `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}`
+
+The security context of the Muster containers.
+
+### `podAnnotations`
+
+object · default: `{}`
+
+Extra annotations of the pods.
+
+### `podLabels`
+
+object · default: `{}`
+
+Extra labels of the pods.
+
+### `nodeSelector`
+
+object · default: `{}`
+
+The node selector of the pods.
+
+### `tolerations`
+
+array · default: `[]`
+
+The tolerations of the pods.
+
+### `affinity`
+
+object · default: `{}`
+
+The affinity of the pods.
+
+### `topologySpreadConstraints`
+
+array · default: `[]`
+
+The topology spread constraints of the pods.
+
+### `priorityClassName`
+
+string · default: `""`
+
+The priority class of the pods; empty sets none.
+
+### `serviceAccount`
+
+object
+
+The service account of the pods.
+
+### `serviceAccount.create`
+
+boolean · default: `true`
+
+Creates the service account.
+
+### `serviceAccount.name`
+
+string · default: `""`
+
+The name of the service account; empty uses the full name of the release when the chart creates it, and default otherwise.
+
+### `serviceAccount.annotations`
+
+object · default: `{}`
+
+Extra annotations of the service account.
+
+### `serviceAccount.automountServiceAccountToken`
+
+boolean · default: `false`
+
+Mounts the token of the service account into the pods; Muster does not call the Kubernetes API.
+
+### `service`
+
+object
+
+The Services of the three listeners.
+
+### `service.app`
+
+object
+
+The Service of the app listener: the UI and the API.
+
+### `service.app.type`
+
+string · default: `ClusterIP`
+
+The type of the Service.
+
+### `service.app.port`
+
+integer · default: `8080`
+
+The port of the Service, also the container port and the listen port (MUSTER_LISTEN_APP).
+
+### `service.app.annotations`
+
+object · default: `{}`
+
+Extra annotations of the Service.
+
+### `service.ingest`
+
+object
+
+The Service of the ingest listener: ingestion, Heartbeats and messenger callbacks.
+
+### `service.ingest.type`
+
+string · default: `ClusterIP`
+
+The type of the Service.
+
+### `service.ingest.port`
+
+integer · default: `8081`
+
+The port of the Service, also the container port and the listen port (MUSTER_LISTEN_INGEST).
+
+### `service.ingest.annotations`
+
+object · default: `{}`
+
+Extra annotations of the Service.
+
+### `service.internal`
+
+object
+
+The Service of the internal listener: the health checks and /metrics.
+
+### `service.internal.type`
+
+string · default: `ClusterIP`
+
+The type of the Service.
+
+### `service.internal.port`
+
+integer · default: `8082`
+
+The port of the Service, also the container port and the listen port (MUSTER_LISTEN_INTERNAL).
+
+### `service.internal.annotations`
+
+object · default: `{}`
+
+Extra annotations of the Service.
+
+### `ingress`
+
+object
+
+The Ingresses of the app and ingest listeners; the internal listener is never exposed.
+
+### `ingress.enabled`
+
+boolean · default: `false`
+
+Creates the Ingresses.
+
+### `ingress.className`
+
+string · default: `""`
+
+The class of the Ingresses; empty uses the cluster's default.
+
+### `ingress.annotations`
+
+object · default: `{}`
+
+Extra annotations of the Ingresses.
+
+### `ingress.app`
+
+object · default: `{"hosts":[],"tls":[]}`
+
+The hosts and tls of the Ingress of the app listener, as in an Ingress spec.
+
+### `ingress.ingest`
+
+object · default: `{"hosts":[],"tls":[]}`
+
+The hosts and tls of the Ingress of the ingest listener, as in an Ingress spec.
+
+### `httpRoute`
+
+object
+
+The Gateway API HTTPRoutes of the app and ingest listeners; the internal listener is never exposed.
+
+### `httpRoute.enabled`
+
+boolean · default: `false`
+
+Creates the HTTPRoutes.
+
+### `httpRoute.parentRefs`
+
+array · default: `[]`
+
+The Gateways the HTTPRoutes attach to, as in an HTTPRoute spec.
+
+### `httpRoute.annotations`
+
+object · default: `{}`
+
+Extra annotations of the HTTPRoutes.
+
+### `httpRoute.labels`
+
+object · default: `{}`
+
+Extra labels of the HTTPRoutes.
+
+### `httpRoute.app`
+
+object · default: `{"hostnames":[]}`
+
+The hostnames of the HTTPRoute of the app listener.
+
+### `httpRoute.ingest`
+
+object · default: `{"hostnames":[]}`
+
+The hostnames of the HTTPRoute of the ingest listener.
+
+### `serviceMonitor`
+
+object
+
+A Prometheus Operator ServiceMonitor that scrapes /metrics on the internal listener.
+
+### `serviceMonitor.enabled`
+
+boolean · default: `false`
+
+Creates the ServiceMonitor.
+
+### `serviceMonitor.interval`
+
+string · default: `30s`
+
+The scrape interval.
+
+### `serviceMonitor.scrapeTimeout`
+
+string · default: `10s`
+
+The scrape timeout.
+
+### `serviceMonitor.labels`
+
+object · default: `{}`
+
+Extra labels of the ServiceMonitor, such as the one the Prometheus selects.
+
+### `networkPolicy`
+
+object
+
+A NetworkPolicy of the pods.
+
+### `networkPolicy.enabled`
+
+boolean · default: `false`
+
+Creates a NetworkPolicy that allows incoming traffic to the three listener ports only.
+
+### `podDisruptionBudget`
+
+object
+
+A PodDisruptionBudget of the pods.
+
+### `podDisruptionBudget.enabled`
+
+boolean · default: `false`
+
+Creates the PodDisruptionBudget.
+
+### `podDisruptionBudget.maxUnavailable`
+
+integer or string · default: `1`
+
+The number or percentage of pods that may be unavailable at a time.

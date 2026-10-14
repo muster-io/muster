@@ -67,9 +67,7 @@ const logEventsIntro = "# Log events\n\n" +
 	"(RFC 3339, UTC), `level`, `event` and the fields of its event; a secret is written as `[redacted]`. ERROR means\n" +
 	"someone must look within the hour, WARN that the line is needed for an investigation, INFO that an investigation\n" +
 	"is impossible without it; `MUSTER_LOG_LEVEL` sets the lowest level written. The capability is the one that logs\n" +
-	"the event.\n\n" +
-	"| Event | Level | Fields | Capability | Description |\n" +
-	"|---|---|---|---|---|\n"
+	"the event.\n"
 
 const metricsIntro = "# Metrics\n\n" +
 	"Muster serves these metrics in the Prometheus text format at `/metrics` on the internal listener and never pushes\n" +
@@ -77,9 +75,7 @@ const metricsIntro = "# Metrics\n\n" +
 	"appear only by their `public_id` (`integration`, `route`, `destination`); the labels of an `*_info` metric carry\n" +
 	"what it describes, such as a name or the version; every other label takes its values from the closed set listed\n" +
 	"below. Histograms are Prometheus histograms with `le` buckets. A Leader-only metric is exported only by the\n" +
-	"replica that is the Leader. The capability is the one that exports the metric.\n\n" +
-	"| Metric | Type | Labels | Capability | Leader only | Description |\n" +
-	"|---|---|---|---|---|---|\n"
+	"replica that is the Leader. The capability is the one that exports the metric.\n"
 
 const internalAlertsIntro = "# Internal alerts\n\n" +
 	"Muster reports problems it can still report through its own pipeline as Internal alerts: Alerts of the built-in\n" +
@@ -91,11 +87,19 @@ const internalAlertsIntro = "# Internal alerts\n\n" +
 	"the id label only, so renaming the entity updates the open Internal alert instead of raising a new one. Every\n" +
 	"Internal alert carries the annotations `summary`, `description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the\n" +
 	"`major.minor` of the binary (`latest` for a development build) and the runbook below, joined by `/`. The\n" +
-	"capability is the one that raises it.\n\n" +
-	"| Internal alert | Severity | Labels | Capability | Runbook | Raised while |\n" +
-	"|---|---|---|---|---|---|\n"
+	"capability is the one that raises it.\n"
 
-var cellEscaper = strings.NewReplacer("|", `\|`, "\n", " ")
+// entryHeading starts the heading of an entry of a page, whose anchor the heading's text gives.
+const entryHeading = "### "
+
+// Facts of an entry are joined by factSeparator on the line under its heading.
+const factSeparator = " · "
+
+// The facts of a metric say whether every replica exports it or only the Leader.
+const (
+	exportedByEveryReplica = "exported by every replica"
+	exportedByTheLeader    = "exported by the Leader only"
+)
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stderr))
@@ -150,15 +154,42 @@ func run(args []string, stderr io.Writer) int {
 	return 0
 }
 
+// entry writes one entry of a page: a heading with its name, the line of its facts that are not empty, and its
+// paragraphs that are not empty.
+func entry(b *strings.Builder, name string, facts []string, paragraphs ...string) {
+	fmt.Fprintf(b, "\n%s`%s`\n", entryHeading, name)
+	if facts = slices.DeleteFunc(facts, func(f string) bool { return f == "" }); len(facts) > 0 {
+		fmt.Fprintf(b, "\n%s\n", strings.Join(facts, factSeparator))
+	}
+	for _, p := range paragraphs {
+		if p != "" {
+			fmt.Fprintf(b, "\n%s\n", p)
+		}
+	}
+}
+
+// listFact is a fact that lists names in backticks after its label, or none when there are no names.
+func listFact(label, none string, names []string) string {
+	if len(names) == 0 {
+		return none
+	}
+	return label + ": " + codeList(names)
+}
+
+// codeList joins names in backticks with commas.
+func codeList(names []string) string {
+	quoted := make([]string, 0, len(names))
+	for _, n := range names {
+		quoted = append(quoted, "`"+n+"`")
+	}
+	return strings.Join(quoted, ", ")
+}
+
 func logEventsMarkdown(events []logging.EventInfo) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, header, "internal/logging/events.go")
 	b.WriteString(logEventsIntro)
 	for _, e := range events {
-		fields := strings.Join(e.Fields, ", ")
-		if fields == "" {
-			fields = "—"
-		}
 		levels := make([]string, 0, len(e.Levels))
 		for _, l := range e.Levels {
 			levels = append(levels, l.String())
@@ -166,8 +197,8 @@ func logEventsMarkdown(events []logging.EventInfo) string {
 		if len(levels) == 0 {
 			levels = append(levels, e.Level.String())
 		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s |\n", e.Name, strings.Join(levels, " or "), fields, e.Capability,
-			cell(e.Description))
+		entry(&b, e.Name, []string{strings.Join(levels, " or "), listFact("fields", "no fields", e.Fields), e.Capability},
+			text(e.Description))
 	}
 	return b.String()
 }
@@ -178,37 +209,25 @@ func metricsMarkdown(defs []metrics.Definition) string {
 	b.WriteString(metricsIntro)
 	for _, d := range defs {
 		names := make([]string, 0, len(d.Labels))
+		items := make([]string, 0, len(d.Labels))
 		for _, l := range d.Labels {
 			names = append(names, l.Name)
+			items = append(items, "- "+text(labelItem(l)))
 		}
-		labels := strings.Join(names, ", ")
-		if labels == "" {
-			labels = "—"
-		}
-		leader := "no"
+		exported := exportedByEveryReplica
 		if d.LeaderOnly {
-			leader = "yes"
+			exported = exportedByTheLeader
 		}
-		description := d.Help
+		buckets := ""
 		if len(d.Buckets) > 0 {
 			bounds := make([]string, 0, len(d.Buckets))
 			for _, v := range d.Buckets {
 				bounds = append(bounds, strconv.FormatFloat(v, 'g', -1, 64))
 			}
-			description += " Buckets (le): " + strings.Join(bounds, ", ") + "."
+			buckets = "Buckets (`le`): " + strings.Join(bounds, ", ") + "."
 		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s | %s |\n", d.Name, d.Kind, labels, d.Capability, leader, cell(description))
-	}
-	b.WriteString(`
-## Label values
-
-| Metric | Label | Values |
-|---|---|---|
-`)
-	for _, d := range defs {
-		for _, l := range d.Labels {
-			fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", d.Name, l.Name, cell(labelValues(l)))
-		}
+		entry(&b, d.Name, []string{string(d.Kind), listFact("labels", "no labels", names), d.Capability, exported},
+			text(d.Help), buckets, strings.Join(items, "\n"))
 	}
 	return b.String()
 }
@@ -218,42 +237,38 @@ func internalAlertsMarkdown(defs []*internalalerts.Definition) string {
 	fmt.Fprintf(&b, header, "internal/internalalerts/registry.go")
 	b.WriteString(internalAlertsIntro)
 	for _, d := range defs {
-		labels := make([]string, 0, len(d.Labels()))
-		for _, l := range d.Labels() {
-			labels = append(labels, "`"+l+"`")
-		}
+		labels := codeList(d.Labels())
 		if d.StaticLabels {
-			labels = append(labels, "the Integration's Static labels")
+			labels = strings.TrimPrefix(labels+", the Integration's Static labels", ", ")
 		}
-		list := strings.Join(labels, ", ")
-		if list == "" {
-			list = "—"
+		labelsFact := "no labels"
+		if labels != "" {
+			labelsFact = "labels: " + labels
 		}
-		runbook := "[`" + d.Runbook() + "`](../" + strings.TrimSuffix(d.Runbook(), "/") + ".md)"
-		fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s | %s |\n", d.Name, d.Severity, list, d.Capability, runbook,
-			cell(d.Condition))
+		runbook := "runbook: [`" + d.Runbook() + "`](../" + strings.TrimSuffix(d.Runbook(), "/") + ".md)"
+		entry(&b, d.Name, []string{d.Severity, labelsFact, d.Capability, runbook}, "Raised while: "+text(d.Condition))
 	}
 	return b.String()
 }
 
-func labelValues(l metrics.Label) string {
+// labelItem describes a label of a metric and its values: the closed set, or what an entity or an info label
+// carries.
+func labelItem(l metrics.Label) string {
+	name := "`" + l.Name + "`"
 	switch l.Kind {
 	case metrics.LabelClosed:
-		values := make([]string, 0, len(l.Values))
-		for _, v := range l.Values {
-			values = append(values, "`"+v+"`")
-		}
-		return strings.Join(values, ", ") + " — " + l.Description
+		return name + ": " + codeList(l.Values) + " — " + l.Description
 	case metrics.LabelEntity:
-		return "entity: " + l.Description
+		return name + " (entity): " + l.Description
 	case metrics.LabelInfo:
-		return "info: " + l.Description
+		return name + " (info): " + l.Description
 	}
-	return l.Description
+	return name + ": " + l.Description
 }
 
-func cell(s string) string {
-	return cellEscaper.Replace(s)
+// text keeps a description on one line, so that it stays one paragraph.
+func text(s string) string {
+	return strings.ReplaceAll(s, "\n", " ")
 }
 
 const environmentIntro = "# Environment variables\n\n" +
@@ -263,9 +278,7 @@ const environmentIntro = "# Environment variables\n\n" +
 	"setting. A variable that is not set takes its default; one that has a default and is set but empty is an error. A\n" +
 	"secret can instead come from the file that its file form names, without one trailing line break; setting both\n" +
 	"forms is an error. An invalid value stops the start with an error that names the variable and never repeats the\n" +
-	"value of a secret, a variable marked so in the Secret column.\n\n" +
-	"| Variable | Default | File form | Secret | Description |\n" +
-	"|---|---|---|---|---|\n"
+	"value of a secret, a variable marked so below.\n"
 
 // environmentMarkdown is the page of the bootstrap settings; every variable needs a description.
 func environmentMarkdown(vars []config.Variable) (string, error) {
@@ -277,12 +290,17 @@ func environmentMarkdown(vars []config.Variable) (string, error) {
 		if v.Description == "" {
 			errs = append(errs, fmt.Errorf("internal/config: %s has no description", v.Name))
 		}
-		secret := "—"
-		if v.Secret {
-			secret = "yes"
+		facts := []string{"no default"}
+		if v.Default != "" {
+			facts[0] = "default: `" + v.Default + "`"
 		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %s |\n", v.Name, code(v.Default), code(v.File), secret,
-			cell(v.Description))
+		if v.File != "" {
+			facts = append(facts, "file form: `"+v.File+"`")
+		}
+		if v.Secret {
+			facts = append(facts, "secret")
+		}
+		entry(&b, v.Name, facts, text(v.Description))
 	}
 	return b.String(), errors.Join(errs...)
 }
@@ -290,12 +308,10 @@ func environmentMarkdown(vars []config.Variable) (string, error) {
 const chartValuesIntro = "# Chart values\n\n" +
 	"The values of the Helm chart `deploy/helm/muster`. The types and the descriptions come from its\n" +
 	"`values.schema.json`, which rejects a value it does not list, and the defaults from its `values.yaml`. Set\n" +
-	"`existingSecret`: the chart never generates the master keys, and rendering fails without it.\n\n" +
-	"| Value | Type | Default | Description |\n" +
-	"|---|---|---|---|\n"
+	"`existingSecret`: the chart never generates the master keys, and rendering fails without it.\n"
 
-// chartValuesMarkdown is the page of the values of the chart in dir: a row per property of its values.schema.json, in
-// the order of the schema, with the default of its values.yaml. Every property needs a description.
+// chartValuesMarkdown is the page of the values of the chart in dir: an entry per property of its values.schema.json,
+// in the order of the schema, with the default of its values.yaml. Every property needs a description.
 func chartValuesMarkdown(dir string) (string, error) {
 	schemaData, err := os.ReadFile(filepath.Join(dir, "values.schema.json"))
 	if err != nil {
@@ -318,13 +334,14 @@ func chartValuesMarkdown(dir string) (string, error) {
 	b.WriteString(chartValuesIntro)
 	var errs []error
 	if len(schema.Content) == 1 {
-		chartRows(&b, field(schema.Content[0], "properties"), "", values, &errs)
+		chartEntries(&b, field(schema.Content[0], "properties"), "", values, &errs)
 	}
 	return b.String(), errors.Join(errs...)
 }
 
-// chartRows writes a row per property of props and of its nested objects, depth first.
-func chartRows(b *strings.Builder, props *yaml.Node, prefix string, values map[string]any, errs *[]error) {
+// chartEntries writes an entry per property of props and of its nested objects, depth first; an object with nested
+// properties has no default of its own, its properties have theirs.
+func chartEntries(b *strings.Builder, props *yaml.Node, prefix string, values map[string]any, errs *[]error) {
 	if props == nil || props.Kind != yaml.MappingNode {
 		return
 	}
@@ -339,13 +356,16 @@ func chartRows(b *strings.Builder, props *yaml.Node, prefix string, values map[s
 			*errs = append(*errs, fmt.Errorf("values.schema.json: %s has no description", path))
 		}
 		children := field(prop, "properties")
-		def := "—"
-		if v, ok := values[name]; ok && children == nil {
-			def = "`" + chartDefault(v) + "`"
+		def := ""
+		if children == nil {
+			def = "no default"
+			if v, ok := values[name]; ok {
+				def = "default: `" + chartDefault(v) + "`"
+			}
 		}
-		fmt.Fprintf(b, "| `%s` | %s | %s | %s |\n", path, cell(schemaType(prop)), cell(def), cell(description))
+		entry(b, path, []string{text(schemaType(prop)), def}, text(description))
 		nested, _ := values[name].(map[string]any)
-		chartRows(b, children, path+".", nested, errs)
+		chartEntries(b, children, path+".", nested, errs)
 	}
 }
 
@@ -416,14 +436,6 @@ func chartDefault(v any) string {
 		return fmt.Sprint(v)
 	}
 	return strings.TrimSpace(buf.String())
-}
-
-// code writes a value in backticks, or a dash when it is empty.
-func code(s string) string {
-	if s == "" {
-		return "—"
-	}
-	return "`" + s + "`"
 }
 
 // apiMarkdown is the API page: the conventions of api/README.md in short, and the link to the API reference that make
@@ -651,54 +663,96 @@ func registryMetrics(defs []metrics.Definition) []catalogueMetric {
 	return out
 }
 
-// readPage reads the generated metrics page back: its table of metrics and its table of label values.
+var labelItemRe = regexp.MustCompile("^- `([^`]+)`(?: \\((?:entity|info)\\))?: (.*)$")
+
+// readPage reads the generated metrics page back: per metric, its heading, the line of its facts (type, labels,
+// capability, who exports it) and the list of its labels with the closed sets of values.
 func readPage(page string) ([]catalogueMetric, error) {
-	rows, err := tableRows(strings.NewReader(page), "# Metrics")
-	if err != nil {
-		return nil, err
-	}
 	var out []catalogueMetric
-	index := map[string]int{}
-	for _, cells := range rows {
-		m := catalogueNameRe.FindStringSubmatch(cells[0])
-		if m == nil || len(cells) < 5 {
-			return nil, fmt.Errorf("%s: unreadable row %q", metricsPage, strings.Join(cells, " | "))
-		}
-		cm := catalogueMetric{Name: m[1], Type: cells[1], Leader: cells[4] == "yes"}
-		if cells[2] != "—" {
-			for name := range strings.SplitSeq(cells[2], ",") {
-				cm.Labels = append(cm.Labels, catalogueLabel{Name: strings.TrimSpace(name)})
+	needFacts := false
+	for line := range strings.Lines(page) {
+		line = strings.TrimSuffix(line, "\n")
+		switch {
+		case strings.HasPrefix(line, entryHeading):
+			if needFacts {
+				return nil, fmt.Errorf("%s: metric %q has no facts", metricsPage, out[len(out)-1].Name)
+			}
+			m := catalogueNameRe.FindStringSubmatch(strings.TrimPrefix(line, entryHeading))
+			if m == nil {
+				return nil, fmt.Errorf("%s: unreadable heading %q", metricsPage, line)
+			}
+			out = append(out, catalogueMetric{Name: m[1]})
+			needFacts = true
+		case len(out) == 0 || line == "":
+		case needFacts:
+			if err := readFacts(&out[len(out)-1], line); err != nil {
+				return nil, fmt.Errorf("%s: metric %q: %w", metricsPage, out[len(out)-1].Name, err)
+			}
+			needFacts = false
+		case strings.HasPrefix(line, "- "):
+			if err := readLabelItem(&out[len(out)-1], line); err != nil {
+				return nil, fmt.Errorf("%s: metric %q: %w", metricsPage, out[len(out)-1].Name, err)
 			}
 		}
-		index[cm.Name] = len(out)
-		out = append(out, cm)
 	}
-	values, err := tableRows(strings.NewReader(page), "## Label values")
-	if err != nil {
-		return nil, err
-	}
-	for _, cells := range values {
-		m, l := catalogueNameRe.FindStringSubmatch(cells[0]), backtickRe.FindStringSubmatch(cells[1])
-		if m == nil || l == nil || len(cells) < 3 {
-			return nil, fmt.Errorf("%s: unreadable label row %q", metricsPage, strings.Join(cells, " | "))
-		}
-		i, ok := index[m[1]]
-		if !ok {
-			return nil, fmt.Errorf("%s: label values of %q, which the page does not list", metricsPage, m[1])
-		}
-		for j := range out[i].Labels {
-			if out[i].Labels[j].Name != l[1] || !strings.HasPrefix(cells[2], "`") {
-				continue
-			}
-			out[i].Labels[j].Values = []string{}
-			for v := range strings.SplitSeq(splitTop(cells[2], "—")[0], ",") {
-				if tok := backtickRe.FindStringSubmatch(strings.TrimSpace(v)); tok != nil {
-					out[i].Labels[j].Values = append(out[i].Labels[j].Values, tok[1])
-				}
-			}
-		}
+	switch {
+	case needFacts:
+		return nil, fmt.Errorf("%s: metric %q has no facts", metricsPage, out[len(out)-1].Name)
+	case len(out) == 0:
+		return nil, fmt.Errorf("%s: no metrics", metricsPage)
 	}
 	return out, nil
+}
+
+// readFacts reads the line of the facts of a metric: its type, its labels, its capability and who exports it.
+func readFacts(m *catalogueMetric, line string) error {
+	facts := strings.Split(line, factSeparator)
+	if len(facts) != 4 {
+		return fmt.Errorf("unreadable facts %q", line)
+	}
+	m.Type = facts[0]
+	switch facts[3] {
+	case exportedByTheLeader:
+		m.Leader = true
+	case exportedByEveryReplica:
+	default:
+		return fmt.Errorf("unreadable exporter %q", facts[3])
+	}
+	if facts[1] == "no labels" {
+		return nil
+	}
+	names, ok := strings.CutPrefix(facts[1], "labels: ")
+	if !ok {
+		return fmt.Errorf("unreadable labels %q", facts[1])
+	}
+	for name := range strings.SplitSeq(names, ", ") {
+		l := backtickRe.FindStringSubmatch(name)
+		if l == nil || l[0] != name {
+			return fmt.Errorf("unreadable label %q", name)
+		}
+		m.Labels = append(m.Labels, catalogueLabel{Name: l[1]})
+	}
+	return nil
+}
+
+// readLabelItem reads an item of the list of the labels of a metric; the values of a closed set start with a
+// backtick and end at a dash. An item of a label that the facts do not name is ignored.
+func readLabelItem(m *catalogueMetric, line string) error {
+	item := labelItemRe.FindStringSubmatch(line)
+	if item == nil {
+		return fmt.Errorf("unreadable label item %q", line)
+	}
+	i := slices.IndexFunc(m.Labels, func(l catalogueLabel) bool { return l.Name == item[1] })
+	if i < 0 || !strings.HasPrefix(item[2], "`") {
+		return nil
+	}
+	m.Labels[i].Values = []string{}
+	for v := range strings.SplitSeq(splitTop(item[2], "—")[0], ",") {
+		if tok := backtickRe.FindStringSubmatch(strings.TrimSpace(v)); tok != nil {
+			m.Labels[i].Values = append(m.Labels[i].Values, tok[1])
+		}
+	}
+	return nil
 }
 
 // compareCatalogue names, by metric and field, every difference between the catalogue and the metrics of other:

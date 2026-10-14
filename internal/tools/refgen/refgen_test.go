@@ -28,28 +28,36 @@ func TestRunWritesPages(t *testing.T) {
 		t.Fatalf("run = %d: %s", code, stderr.String())
 	}
 	tests := map[string][]string{
-		environmentPage: {"DO NOT EDIT", "| `MUSTER_SECRET_KEYS` | — | `MUSTER_SECRET_KEYS_FILE` | yes | The master keys ",
-			"| `MUSTER_DATABASE_PORT` | `5432` | — | — | ", "`HTTP_PROXY`"},
-		chartValuesPage: {"DO NOT EDIT", "| `existingSecret` | string | `\"\"` | The Secret ",
-			"| `image.pullPolicy` | string (`Always`, `Never`, `IfNotPresent`) | `IfNotPresent` | ",
-			"| `database.sessionPort` | integer or null | `null` | ",
-			"| `podDisruptionBudget.maxUnavailable` | integer or string | `1` | ", "| `database` | object | — | "},
+		environmentPage: {"DO NOT EDIT",
+			"### `MUSTER_SECRET_KEYS`\n\nno default · file form: `MUSTER_SECRET_KEYS_FILE` · secret\n\nThe master keys ",
+			"### `MUSTER_DATABASE_PORT`\n\ndefault: `5432`\n\n", "`HTTP_PROXY`", "a variable marked so below.\n"},
+		chartValuesPage: {"DO NOT EDIT", "### `existingSecret`\n\nstring · default: `\"\"`\n\nThe Secret ",
+			"### `image.pullPolicy`\n\nstring (`Always`, `Never`, `IfNotPresent`) · default: `IfNotPresent`\n\n",
+			"### `database.sessionPort`\n\ninteger or null · default: `null`\n\n",
+			"### `podDisruptionBudget.maxUnavailable`\n\ninteger or string · default: `1`\n\n",
+			"### `database`\n\nobject\n\n"},
 		apiPage:       {"DO NOT EDIT", "[API reference](api/spec/index.html)", "`/api/v1/openapi.yaml`"},
 		indexPage:     {"DO NOT EDIT", "# Reference"},
-		logEventsPage: {"DO NOT EDIT", "| `process_started` | INFO | version, commit | C-02 | "},
-		metricsPage: {"DO NOT EDIT", "| `muster_build_info` | gauge | version, commit | C-02 | no | ",
-			"| `muster_build_info` | `version` | info: "},
+		logEventsPage: {"DO NOT EDIT", "### `process_started`\n\nINFO · fields: `version`, `commit` · C-02\n\n"},
+		metricsPage: {"DO NOT EDIT",
+			"### `muster_build_info`\n\ngauge · labels: `version`, `commit` · C-02 · exported by every replica\n\n",
+			"- `version` (info): ", "### `muster_leader`\n\ngauge · no labels · C-02 · exported by every replica\n\n"},
 		internalAlertsPage: {"DO NOT EDIT",
-			"| `MusterSnapshotTruncated` | warning | `integration`, `integration_name` | C-06 | " +
-				"[`operations/runbooks/MusterSnapshotTruncated/`](../operations/runbooks/MusterSnapshotTruncated.md) | ",
-			"| `MusterOIDCSecretExpiring` | warning | — | C-19 | " +
-				"[`operations/runbooks/MusterOIDCSecretExpiring/`](../operations/runbooks/MusterOIDCSecretExpiring.md) | ",
+			"### `MusterSnapshotTruncated`\n\nwarning · labels: `integration`, `integration_name` · C-06 · runbook: " +
+				"[`operations/runbooks/MusterSnapshotTruncated/`](../operations/runbooks/MusterSnapshotTruncated.md)\n\n" +
+				"Raised while: An Integration ",
+			"### `MusterOIDCSecretExpiring`\n\nwarning · no labels · C-19 · runbook: " +
+				"[`operations/runbooks/MusterOIDCSecretExpiring/`](../operations/runbooks/MusterOIDCSecretExpiring.md)\n\n",
+			"labels: `integration`, `integration_name`, the Integration's Static labels · C-07",
 			"(`latest` for a development build)"},
 	}
 	for name, wants := range tests {
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "|---|") {
+			t.Errorf("%s has a table", name)
 		}
 		for _, want := range wants {
 			if !strings.Contains(string(data), want) {
@@ -243,7 +251,7 @@ func TestCompareCatalogue(t *testing.T) {
 	}
 }
 
-// TestComparePage: an edited row of the generated page differs from the catalogue.
+// TestComparePage: an edited entry of the generated page differs from the catalogue.
 func TestComparePage(t *testing.T) {
 	defs, err := metrics.Catalogue()
 	if err != nil {
@@ -260,12 +268,11 @@ func TestComparePage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, edit := range map[string][3]string{
-		"labels": {"muster_alert_groups", "| `muster_alert_groups` | gauge | route, status |",
-			"| `muster_alert_groups` | gauge | route |"},
-		"values": {"muster_client_requests_total", "| `muster_client_requests_total` | `outcome` | `ok`, `retry_after`, ",
-			"| `muster_client_requests_total` | `outcome` | `retry_after`, "},
-		"leader": {"muster_alert_groups", "| `muster_alert_groups` | gauge | route, status | C-09 | yes |",
-			"| `muster_alert_groups` | gauge | route, status | C-09 | no |"},
+		"labels": {"muster_alert_groups", "gauge · labels: `route`, `status` · C-09 ·", "gauge · labels: `route` · C-09 ·"},
+		"values": {"muster_db_pool_connections", "- `state`: `acquired`, `idle`, ", "- `state`: `idle`, "},
+		"leader": {"muster_alert_groups", "`status` · C-09 · exported by the Leader only",
+			"`status` · C-09 · exported by every replica"},
+		"type": {"muster_leader", "### `muster_leader`\n\ngauge ·", "### `muster_leader`\n\ncounter ·"},
 	} {
 		edited := strings.Replace(page, edit[1], edit[2], 1)
 		if edited == page {
@@ -282,15 +289,27 @@ func TestComparePage(t *testing.T) {
 		}
 	}
 	for name, page := range map[string]string{
-		"no table":     "# Other\n",
-		"bad row":      "# Metrics\n\n| a | b |\n|---|---|\n| x | y |\n",
-		"no values":    "# Metrics\n\n| a | b | c | d | e | f |\n|---|---|---|---|---|---|\n| `muster_x` | gauge | — | C-02 | no | x |\n",
-		"bad value":    page + "| x | y | z |\n",
-		"unknown name": page + "| `muster_nothing` | `route` | entity: x |\n",
+		"no metrics":         "# Other\n",
+		"bad heading":        "# Metrics\n\n### `x`\n\ngauge · no labels · C-02 · exported by every replica\n",
+		"no facts":           "# Metrics\n\n### `muster_x`\n",
+		"no facts, then one": "# Metrics\n\n### `muster_x`\n\n### `muster_y`\n\ngauge · no labels · C-02 · exported by every replica\n",
+		"short facts":        "# Metrics\n\n### `muster_x`\n\ngauge · C-02\n",
+		"bad exporter":       "# Metrics\n\n### `muster_x`\n\ngauge · no labels · C-02 · exported somewhere\n",
+		"bad labels":         "# Metrics\n\n### `muster_x`\n\ngauge · route · C-02 · exported by every replica\n",
+		"bad label":          "# Metrics\n\n### `muster_x`\n\ngauge · labels: route · C-02 · exported by every replica\n",
+		"bad label item":     page + "- route\n",
 	} {
 		if _, err := readPage(page); err == nil {
 			t.Errorf("%s: no error", name)
 		}
+	}
+	got, err := readPage("# Metrics\n\n### `muster_x`\n\ngauge · labels: `route`, `outcome` · C-02 · " +
+		"exported by the Leader only\n\nHelp.\n\n- `route` (entity): x\n- `outcome`: `ok`, `fatal` — y, `z`\n" +
+		"- `other`: `a` — not a label of the facts\n")
+	want := []catalogueMetric{{Name: "muster_x", Type: "gauge", Leader: true,
+		Labels: []catalogueLabel{{Name: "route"}, {"outcome", []string{"ok", "fatal"}}}}}
+	if err != nil || fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("readPage = %v, %v; want %v", got, err, want)
 	}
 }
 
@@ -298,7 +317,7 @@ func TestLogEventsMarkdown(t *testing.T) {
 	got := logEventsMarkdown([]logging.EventInfo{
 		{Name: "quiet_event", Level: logging.LevelWarn, Capability: "C-07", Description: "A | pipe\nand a newline."},
 	})
-	if want := "| `quiet_event` | WARN | — | C-07 | A \\| pipe and a newline. |\n"; !strings.HasSuffix(got, want) {
+	if want := "\n### `quiet_event`\n\nWARN · no fields · C-07\n\nA | pipe and a newline.\n"; !strings.HasSuffix(got, want) {
 		t.Errorf("got\n%s\nwant it to end with\n%s", got, want)
 	}
 }
@@ -318,12 +337,12 @@ func TestMetricsMarkdown(t *testing.T) {
 		{Name: "muster_delivery_queue", Kind: metrics.KindGauge, Help: "Queue.", Capability: "C-11", LeaderOnly: true},
 	})
 	for _, want := range []string{
-		"| `muster_delivery_attempts_total` | counter | destination, outcome, odd | C-11 | no | Attempts. |\n",
-		"| `muster_delivery_latency_seconds` | histogram | — | C-11 | no | Latency. Buckets (le): 0.25, 1, 5. |\n",
-		"| `muster_delivery_queue` | gauge | — | C-11 | yes | Queue. |\n",
-		"| `muster_delivery_attempts_total` | `destination` | entity: the public_id of the destination |\n",
-		"| `muster_delivery_attempts_total` | `outcome` | `ok`, `fatal` — the result |\n",
-		"| `muster_delivery_attempts_total` | `odd` | free-form |\n",
+		"\n### `muster_delivery_attempts_total`\n\ncounter · labels: `destination`, `outcome`, `odd` · C-11 · " +
+			"exported by every replica\n\nAttempts.\n\n- `destination` (entity): the public_id of the destination\n" +
+			"- `outcome`: `ok`, `fatal` — the result\n- `odd`: free-form\n",
+		"\n### `muster_delivery_latency_seconds`\n\nhistogram · no labels · C-11 · exported by every replica\n\n" +
+			"Latency.\n\nBuckets (`le`): 0.25, 1, 5.\n",
+		"\n### `muster_delivery_queue`\n\ngauge · no labels · C-11 · exported by the Leader only\n\nQueue.\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the page lacks %q:\n%s", want, got)
@@ -380,7 +399,9 @@ func TestEnvironmentNeedsDescriptions(t *testing.T) {
 		strings.Contains(err.Error(), "MUSTER_X") {
 		t.Errorf("err = %v", err)
 	}
-	for _, want := range []string{"| `MUSTER_X` | — | — | — | X. |", "| `MUSTER_Z` | — | `MUSTER_Z_FILE` | yes | Z. |"} {
+	for _, want := range []string{"### `MUSTER_X`\n\nno default\n\nX.\n",
+		"### `MUSTER_Y`\n\ndefault: `1` · file form: `MUSTER_Y_FILE`\n",
+		"### `MUSTER_Z`\n\nno default · file form: `MUSTER_Z_FILE` · secret\n\nZ.\n"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the page lacks %q:\n%s", want, page)
 		}
@@ -414,13 +435,13 @@ func TestChartValuesMarkdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := []string{
-		"| `b` | object | — | B \\| pipe. |",
-		"| `b.s` | string or null (`x`, `y`) | `x` | S. |",
-		"| `b.missing` | integer | — | Missing. |",
-		"| `a` | object | `{\"k\":[\"<v>\"],\"z\":1}` | A. |",
-		"| `n` | integer or string | `null` | N. |",
-		"| `f` | boolean | `false` | F. |",
-		"| `e` | string | `\"\"` | E. |",
+		"### `b`\n\nobject\n\nB | pipe.\n",
+		"### `b.s`\n\nstring or null (`x`, `y`) · default: `x`\n\nS.\n",
+		"### `b.missing`\n\ninteger · no default\n\nMissing.\n",
+		"### `a`\n\nobject · default: `{\"k\":[\"<v>\"],\"z\":1}`\n\nA.\n",
+		"### `n`\n\ninteger or string · default: `null`\n\nN.\n",
+		"### `f`\n\nboolean · default: `false`\n\nF.\n",
+		"### `e`\n\nstring · default: `\"\"`\n\nE.\n",
 	}
 	last := -1
 	for _, row := range rows {
