@@ -145,6 +145,13 @@ function nav(page: Page, name: string) {
   return page.getByRole("navigation", { name: "Main" }).getByRole("link", { name, exact: true });
 }
 
+/** An entry of the sub-navigation of Organization. */
+function sub(page: Page, name: string) {
+  return page
+    .getByRole("navigation", { name: "Organization" })
+    .getByRole("link", { name, exact: true });
+}
+
 function region(page: Page, name: string) {
   return page.getByRole("region", { name });
 }
@@ -244,10 +251,12 @@ test("shows the Leader, a Broken Destination and a lost Heartbeat, only links, a
   const csp = watchCsp(page);
   await signInAdmin(page);
 
-  // 1. The navigation shows "System status" → the replicas with one Leader, "alerts" with a reason containing 403,
-  // "hb — Heartbeat lost since {time}" and the suggestion of an outgoing heartbeat.
-  await nav(page, "System status").click();
+  // 1. Organization → the sub-navigation shows "System status" → the replicas with one Leader, "alerts" with a
+  // reason containing 403, "hb — Heartbeat lost since {time}" and the suggestion of an outgoing heartbeat.
+  await nav(page, "Organization").click();
+  await sub(page, "System status").click();
   await expect(page).toHaveURL(/\/admin\/system-status$/);
+  await expect(nav(page, "Organization")).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "System status", level: 1 })).toBeVisible();
   await expect(region(page, "Replicas").getByTestId("replica-leader")).toHaveCount(1);
   await expect(region(page, "Replicas").getByTestId("replica-leader")).toHaveText("Leader");
@@ -305,10 +314,15 @@ test("a Responder sees neither the entries nor the pages", async ({ page }) => {
   }
   await signIn(page, "ss-rita", "ss-rita-password-1");
 
-  // 6. No "System status" or "Outgoing heartbeat" entry; both addresses refuse.
+  // 6. No "System status" or "Outgoing heartbeat" entry, in the main navigation or under Organization; both addresses
+  // refuse.
   await expect(nav(page, "Alert Groups")).toBeVisible();
   await expect(nav(page, "System status")).toHaveCount(0);
   await expect(nav(page, "Outgoing heartbeat")).toHaveCount(0);
+  await nav(page, "Organization").click();
+  await expect(sub(page, "Lookup tables")).toBeVisible();
+  await expect(sub(page, "System status")).toHaveCount(0);
+  await expect(sub(page, "Outgoing heartbeat")).toHaveCount(0);
   for (const path of ["/admin/system-status", "/admin/organization/outgoing-heartbeat"]) {
     await page.goto(path);
     await expect(page.getByText(NO_PERMISSION)).toBeVisible();

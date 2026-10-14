@@ -5,7 +5,7 @@
 // of the session, the user menu, the banner area and the live updates.
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -20,6 +20,7 @@ import {
 } from "../lib/api";
 import { connectLiveUpdates } from "../lib/live";
 import { NoticeBanners } from "./notice-banners";
+import { ORGANIZATION_NAVIGATION } from "./organization-nav";
 import { cn } from "./ui/utils";
 import { UserMenu } from "./user-menu";
 
@@ -58,14 +59,16 @@ export function AuthLayout({ children, wide = false }: { children: ReactNode; wi
   );
 }
 
-/** A navigation entry; it is shown only when the session holds its Permission. */
+/** A navigation entry; it is shown only when the session holds its Permission, or any of its Permissions. */
 export interface NavEntry {
   to: string;
   /** The key of the entry's label under nav. */
   label: NavLabel;
-  permission?: Permission;
+  permission?: Permission | readonly Permission[];
   /** Marks the entry active only on its exact address. */
   exact?: boolean;
+  /** Marks the entry active on every address under these paths as well, such as the pages of a sub-navigation. */
+  activeOn?: readonly string[];
 }
 
 /** The labels of the entries; each page's story adds its own. */
@@ -80,12 +83,8 @@ export type NavLabel =
   | "users"
   | "serviceAccounts"
   | "oidc"
-  | "security"
-  | "outgoingHeartbeat"
-  | "lookupTables"
-  | "linkRules"
-  | "auditLog"
-  | "systemStatus";
+  | "organization"
+  | "auditLog";
 
 /** The pages register their entries here, in the order of the navigation. */
 export const NAVIGATION: readonly NavEntry[] = [
@@ -99,28 +98,37 @@ export const NAVIGATION: readonly NavEntry[] = [
   { to: "/admin/users", label: "users", permission: "users:read" },
   { to: "/admin/service-accounts", label: "serviceAccounts", permission: "service-accounts:read" },
   { to: "/admin/oidc", label: "oidc", permission: "oidc:read" },
-  { to: "/admin/organization/security", label: "security", permission: "organization:write" },
   {
-    to: "/admin/organization/outgoing-heartbeat",
-    label: "outgoingHeartbeat",
-    permission: "organization:write",
+    to: "/admin/organization",
+    label: "organization",
+    // Shown when the session may open at least one page of the sub-navigation, and active on each of them.
+    permission: [...new Set(ORGANIZATION_NAVIGATION.map((e) => e.permission))],
+    activeOn: ["/admin/organization", "/admin/system-status"],
   },
-  {
-    to: "/admin/organization/lookup-tables",
-    label: "lookupTables",
-    permission: "lookup-tables:read",
-  },
-  { to: "/admin/organization/link-rules", label: "linkRules", permission: "link-rules:read" },
   { to: "/admin/audit-log", label: "auditLog", permission: "audit-log:read" },
-  { to: "/admin/system-status", label: "systemStatus", permission: "system-status:read" },
 ];
 
-/** The entries whose Permission the session holds; an entry without one is shown to everybody. */
+/**
+ * The entries whose Permission the session holds; an entry with several Permissions is shown when the session holds
+ * any of them, and an entry without one is shown to everybody.
+ */
 export function visibleEntries(
   entries: readonly NavEntry[],
   permissions: readonly Permission[],
 ): NavEntry[] {
-  return entries.filter((e) => e.permission === undefined || permissions.includes(e.permission));
+  return entries.filter((e) => {
+    if (e.permission === undefined) {
+      return true;
+    }
+    const any: readonly Permission[] =
+      typeof e.permission === "string" ? [e.permission] : e.permission;
+    return any.some((p) => permissions.includes(p));
+  });
+}
+
+/** Whether an address lies under one of the paths of an entry's activeOn. */
+function activeOn(entry: NavEntry, pathname: string): boolean {
+  return (entry.activeOn ?? []).some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
 function navLabel(t: (key: string) => string, label: NavLabel): string {
@@ -145,16 +153,8 @@ function navLabel(t: (key: string) => string, label: NavLabel): string {
       return t("nav.serviceAccounts");
     case "oidc":
       return t("nav.oidc");
-    case "security":
-      return t("nav.security");
-    case "outgoingHeartbeat":
-      return t("nav.outgoingHeartbeat");
-    case "lookupTables":
-      return t("nav.lookupTables");
-    case "linkRules":
-      return t("nav.linkRules");
-    case "systemStatus":
-      return t("nav.systemStatus");
+    case "organization":
+      return t("nav.organization");
     default:
       return t("nav.auditLog");
   }
@@ -194,6 +194,7 @@ export function Navigation({
   permissions: readonly Permission[];
 }) {
   const { t } = useTranslation();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
   return (
     <nav aria-label={t("nav.label")} className="min-w-0 overflow-x-auto">
       <ul className="flex items-center gap-1 py-1">
@@ -202,6 +203,9 @@ export function Navigation({
             <Link
               to={e.to}
               activeOptions={{ exact: e.exact === true }}
+              {...(activeOn(e, pathname)
+                ? { "data-status": "active", "aria-current": "page" as const }
+                : {})}
               className="rounded-md px-2.5 py-1.5 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring data-[status=active]:bg-accent data-[status=active]:text-foreground"
             >
               {navLabel(t, e.label)}

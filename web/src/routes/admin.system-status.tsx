@@ -3,11 +3,13 @@
 
 // The System status (C-19.FR-10, C-19.AC-6): a read-only page for Admins that lists what needs attention and links to
 // where it is fixed. It is read again on its live hints and every 30 seconds; a failed read keeps the last one shown.
+// It keeps its own address, to which other pages link, and shows the sub-navigation of Organization.
 
 import { createFileRoute } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 
 import { RequirePermission, useCan } from "../components/app-shell";
+import { OrganizationLayout } from "../components/organization-nav";
 import { SystemStatusSections, useSystemStatus } from "../components/system-status-sections";
 import { problemText } from "../lib/api";
 
@@ -39,8 +41,10 @@ function SystemStatusView() {
 
 function SystemStatusPage() {
   return (
-    <RequirePermission permission="system-status:read">
-      <SystemStatusView />
-    </RequirePermission>
+    <OrganizationLayout>
+      <RequirePermission permission="system-status:read">
+        <SystemStatusView />
+      </RequirePermission>
+    </OrganizationLayout>
   );
 }

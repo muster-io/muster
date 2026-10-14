@@ -17,6 +17,7 @@ import { Route as StatisticsRouteImport } from './routes/statistics'
 import { Route as TotpEnrolmentRouteImport } from './routes/totp-enrolment'
 import { Route as AdminAuditLogRouteImport } from './routes/admin.audit-log'
 import { Route as AdminOidcRouteImport } from './routes/admin.oidc'
+import { Route as AdminOrganizationRouteImport } from './routes/admin.organization'
 import { Route as AdminSystemStatusRouteImport } from './routes/admin.system-status'
 import { Route as AlertGroupsIndexRouteImport } from './routes/alert-groups.index'
 import { Route as AlertGroupsAlertGroupIdRouteImport } from './routes/alert-groups.$alertGroupId'
@@ -32,8 +33,15 @@ import { Route as RoutesIndexRouteImport } from './routes/routes.index'
 import { Route as RoutesRouteIdRouteImport } from './routes/routes.$routeId'
 import { Route as RoutesNewRouteImport } from './routes/routes.new'
 import { Route as SignInTotpRouteImport } from './routes/sign-in.totp'
+import { Route as AdminOrganizationIndexRouteImport } from './routes/admin.organization.index'
+import { Route as AdminOrganizationAlertHandlingRouteImport } from './routes/admin.organization.alert-handling'
+import { Route as AdminOrganizationGeneralRouteImport } from './routes/admin.organization.general'
+import { Route as AdminOrganizationKeyringRouteImport } from './routes/admin.organization.keyring'
+import { Route as AdminOrganizationOutboundRouteImport } from './routes/admin.organization.outbound'
 import { Route as AdminOrganizationOutgoingHeartbeatRouteImport } from './routes/admin.organization.outgoing-heartbeat'
+import { Route as AdminOrganizationRetentionRouteImport } from './routes/admin.organization.retention'
 import { Route as AdminOrganizationSecurityRouteImport } from './routes/admin.organization.security'
+import { Route as AdminOrganizationSeverityLevelsRouteImport } from './routes/admin.organization.severity-levels'
 import { Route as AdminServiceAccountsIndexRouteImport } from './routes/admin.service-accounts.index'
 import { Route as AdminServiceAccountsServiceAccountIdRouteImport } from './routes/admin.service-accounts.$serviceAccountId'
 import { Route as AdminUsersIndexRouteImport } from './routes/admin.users.index'
@@ -86,6 +94,11 @@ const AdminAuditLogRoute = AdminAuditLogRouteImport.update({
 const AdminOidcRoute = AdminOidcRouteImport.update({
   id: '/admin/oidc',
   path: '/admin/oidc',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminOrganizationRoute = AdminOrganizationRouteImport.update({
+  id: '/admin/organization',
+  path: '/admin/organization',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminSystemStatusRoute = AdminSystemStatusRouteImport.update({
@@ -164,17 +177,58 @@ const SignInTotpRoute = SignInTotpRouteImport.update({
   path: '/totp',
   getParentRoute: () => SignInRoute,
 } as any)
+const AdminOrganizationIndexRoute = AdminOrganizationIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminOrganizationRoute,
+} as any)
+const AdminOrganizationAlertHandlingRoute =
+  AdminOrganizationAlertHandlingRouteImport.update({
+    id: '/alert-handling',
+    path: '/alert-handling',
+    getParentRoute: () => AdminOrganizationRoute,
+  } as any)
+const AdminOrganizationGeneralRoute =
+  AdminOrganizationGeneralRouteImport.update({
+    id: '/general',
+    path: '/general',
+    getParentRoute: () => AdminOrganizationRoute,
+  } as any)
+const AdminOrganizationKeyringRoute =
+  AdminOrganizationKeyringRouteImport.update({
+    id: '/keyring',
+    path: '/keyring',
+    getParentRoute: () => AdminOrganizationRoute,
+  } as any)
+const AdminOrganizationOutboundRoute =
+  AdminOrganizationOutboundRouteImport.update({
+    id: '/outbound',
+    path: '/outbound',
+    getParentRoute: () => AdminOrganizationRoute,
+  } as any)
 const AdminOrganizationOutgoingHeartbeatRoute =
   AdminOrganizationOutgoingHeartbeatRouteImport.update({
-    id: '/admin/organization/outgoing-heartbeat',
-    path: '/admin/organization/outgoing-heartbeat',
-    getParentRoute: () => rootRouteImport,
+    id: '/outgoing-heartbeat',
+    path: '/outgoing-heartbeat',
+    getParentRoute: () => AdminOrganizationRoute,
+  } as any)
+const AdminOrganizationRetentionRoute =
+  AdminOrganizationRetentionRouteImport.update({
+    id: '/retention',
+    path: '/retention',
+    getParentRoute: () => AdminOrganizationRoute,
   } as any)
 const AdminOrganizationSecurityRoute =
   AdminOrganizationSecurityRouteImport.update({
-    id: '/admin/organization/security',
-    path: '/admin/organization/security',
-    getParentRoute: () => rootRouteImport,
+    id: '/security',
+    path: '/security',
+    getParentRoute: () => AdminOrganizationRoute,
+  } as any)
+const AdminOrganizationSeverityLevelsRoute =
+  AdminOrganizationSeverityLevelsRouteImport.update({
+    id: '/severity-levels',
+    path: '/severity-levels',
+    getParentRoute: () => AdminOrganizationRoute,
   } as any)
 const AdminServiceAccountsIndexRoute =
   AdminServiceAccountsIndexRouteImport.update({
@@ -212,39 +266,39 @@ const IntegrationsIntegrationIdEditRoute =
   } as any)
 const AdminOrganizationLinkRulesIndexRoute =
   AdminOrganizationLinkRulesIndexRouteImport.update({
-    id: '/admin/organization/link-rules/',
-    path: '/admin/organization/link-rules/',
-    getParentRoute: () => rootRouteImport,
+    id: '/link-rules/',
+    path: '/link-rules/',
+    getParentRoute: () => AdminOrganizationRoute,
   } as any)
 const AdminOrganizationLinkRulesLinkRuleIdRoute =
   AdminOrganizationLinkRulesLinkRuleIdRouteImport.update({
-    id: '/admin/organization/link-rules/$linkRuleId',
-    path: '/admin/organization/link-rules/$linkRuleId',
-    getParentRoute: () => rootRouteImport,
+    id: '/link-rules/$linkRuleId',
+    path: '/link-rules/$linkRuleId',
+    getParentRoute: () => AdminOrganizationRoute,
   } as any)
 const AdminOrganizationLinkRulesNewRoute =
   AdminOrganizationLinkRulesNewRouteImport.update({
-    id: '/admin/organization/link-rules/new',
-    path: '/admin/organization/link-rules/new',
-    getParentRoute: () => rootRouteImport,
+    id: '/link-rules/new',
+    path: '/link-rules/new',
+    getParentRoute: () => AdminOrganizationRoute,
   } as any)
 const AdminOrganizationLookupTablesIndexRoute =
   AdminOrganizationLookupTablesIndexRouteImport.update({
-    id: '/admin/organization/lookup-tables/',
-    path: '/admin/organization/lookup-tables/',
-    getParentRoute: () => rootRouteImport,
+    id: '/lookup-tables/',
+    path: '/lookup-tables/',
+    getParentRoute: () => AdminOrganizationRoute,
   } as any)
 const AdminOrganizationLookupTablesLookupTableIdRoute =
   AdminOrganizationLookupTablesLookupTableIdRouteImport.update({
-    id: '/admin/organization/lookup-tables/$lookupTableId',
-    path: '/admin/organization/lookup-tables/$lookupTableId',
-    getParentRoute: () => rootRouteImport,
+    id: '/lookup-tables/$lookupTableId',
+    path: '/lookup-tables/$lookupTableId',
+    getParentRoute: () => AdminOrganizationRoute,
   } as any)
 const AdminOrganizationLookupTablesNewRoute =
   AdminOrganizationLookupTablesNewRouteImport.update({
-    id: '/admin/organization/lookup-tables/new',
-    path: '/admin/organization/lookup-tables/new',
-    getParentRoute: () => rootRouteImport,
+    id: '/lookup-tables/new',
+    path: '/lookup-tables/new',
+    getParentRoute: () => AdminOrganizationRoute,
   } as any)
 const IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute =
   IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRouteImport.update({
@@ -262,6 +316,7 @@ export interface FileRoutesByFullPath {
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
+  '/admin/organization': typeof AdminOrganizationRouteWithChildren
   '/admin/system-status': typeof AdminSystemStatusRoute
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
@@ -277,11 +332,18 @@ export interface FileRoutesByFullPath {
   '/destinations/': typeof DestinationsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
+  '/admin/organization/alert-handling': typeof AdminOrganizationAlertHandlingRoute
+  '/admin/organization/general': typeof AdminOrganizationGeneralRoute
+  '/admin/organization/keyring': typeof AdminOrganizationKeyringRoute
+  '/admin/organization/outbound': typeof AdminOrganizationOutboundRoute
   '/admin/organization/outgoing-heartbeat': typeof AdminOrganizationOutgoingHeartbeatRoute
+  '/admin/organization/retention': typeof AdminOrganizationRetentionRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
+  '/admin/organization/severity-levels': typeof AdminOrganizationSeverityLevelsRoute
   '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/integrations/$integrationId/edit': typeof IntegrationsIntegrationIdEditRoute
+  '/admin/organization/': typeof AdminOrganizationIndexRoute
   '/admin/service-accounts/': typeof AdminServiceAccountsIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/integrations/$integrationId/': typeof IntegrationsIntegrationIdIndexRoute
@@ -317,11 +379,18 @@ export interface FileRoutesByTo {
   '/destinations': typeof DestinationsIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
   '/routes': typeof RoutesIndexRoute
+  '/admin/organization/alert-handling': typeof AdminOrganizationAlertHandlingRoute
+  '/admin/organization/general': typeof AdminOrganizationGeneralRoute
+  '/admin/organization/keyring': typeof AdminOrganizationKeyringRoute
+  '/admin/organization/outbound': typeof AdminOrganizationOutboundRoute
   '/admin/organization/outgoing-heartbeat': typeof AdminOrganizationOutgoingHeartbeatRoute
+  '/admin/organization/retention': typeof AdminOrganizationRetentionRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
+  '/admin/organization/severity-levels': typeof AdminOrganizationSeverityLevelsRoute
   '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/integrations/$integrationId/edit': typeof IntegrationsIntegrationIdEditRoute
+  '/admin/organization': typeof AdminOrganizationIndexRoute
   '/admin/service-accounts': typeof AdminServiceAccountsIndexRoute
   '/admin/users': typeof AdminUsersIndexRoute
   '/integrations/$integrationId': typeof IntegrationsIntegrationIdIndexRoute
@@ -343,6 +412,7 @@ export interface FileRoutesById {
   '/totp-enrolment': typeof TotpEnrolmentRoute
   '/admin/audit-log': typeof AdminAuditLogRoute
   '/admin/oidc': typeof AdminOidcRoute
+  '/admin/organization': typeof AdminOrganizationRouteWithChildren
   '/admin/system-status': typeof AdminSystemStatusRoute
   '/alert-groups/$alertGroupId': typeof AlertGroupsAlertGroupIdRoute
   '/connections/$connectionId': typeof ConnectionsConnectionIdRoute
@@ -358,11 +428,18 @@ export interface FileRoutesById {
   '/destinations/': typeof DestinationsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
+  '/admin/organization/alert-handling': typeof AdminOrganizationAlertHandlingRoute
+  '/admin/organization/general': typeof AdminOrganizationGeneralRoute
+  '/admin/organization/keyring': typeof AdminOrganizationKeyringRoute
+  '/admin/organization/outbound': typeof AdminOrganizationOutboundRoute
   '/admin/organization/outgoing-heartbeat': typeof AdminOrganizationOutgoingHeartbeatRoute
+  '/admin/organization/retention': typeof AdminOrganizationRetentionRoute
   '/admin/organization/security': typeof AdminOrganizationSecurityRoute
+  '/admin/organization/severity-levels': typeof AdminOrganizationSeverityLevelsRoute
   '/admin/service-accounts/$serviceAccountId': typeof AdminServiceAccountsServiceAccountIdRoute
   '/admin/users/$userId': typeof AdminUsersUserIdRoute
   '/integrations/$integrationId/edit': typeof IntegrationsIntegrationIdEditRoute
+  '/admin/organization/': typeof AdminOrganizationIndexRoute
   '/admin/service-accounts/': typeof AdminServiceAccountsIndexRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/integrations/$integrationId/': typeof IntegrationsIntegrationIdIndexRoute
@@ -385,6 +462,7 @@ export interface FileRouteTypes {
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
+    | '/admin/organization'
     | '/admin/system-status'
     | '/alert-groups/$alertGroupId'
     | '/connections/$connectionId'
@@ -400,11 +478,18 @@ export interface FileRouteTypes {
     | '/destinations/'
     | '/integrations/'
     | '/routes/'
+    | '/admin/organization/alert-handling'
+    | '/admin/organization/general'
+    | '/admin/organization/keyring'
+    | '/admin/organization/outbound'
     | '/admin/organization/outgoing-heartbeat'
+    | '/admin/organization/retention'
     | '/admin/organization/security'
+    | '/admin/organization/severity-levels'
     | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
     | '/integrations/$integrationId/edit'
+    | '/admin/organization/'
     | '/admin/service-accounts/'
     | '/admin/users/'
     | '/integrations/$integrationId/'
@@ -440,11 +525,18 @@ export interface FileRouteTypes {
     | '/destinations'
     | '/integrations'
     | '/routes'
+    | '/admin/organization/alert-handling'
+    | '/admin/organization/general'
+    | '/admin/organization/keyring'
+    | '/admin/organization/outbound'
     | '/admin/organization/outgoing-heartbeat'
+    | '/admin/organization/retention'
     | '/admin/organization/security'
+    | '/admin/organization/severity-levels'
     | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
     | '/integrations/$integrationId/edit'
+    | '/admin/organization'
     | '/admin/service-accounts'
     | '/admin/users'
     | '/integrations/$integrationId'
@@ -465,6 +557,7 @@ export interface FileRouteTypes {
     | '/totp-enrolment'
     | '/admin/audit-log'
     | '/admin/oidc'
+    | '/admin/organization'
     | '/admin/system-status'
     | '/alert-groups/$alertGroupId'
     | '/connections/$connectionId'
@@ -480,11 +573,18 @@ export interface FileRouteTypes {
     | '/destinations/'
     | '/integrations/'
     | '/routes/'
+    | '/admin/organization/alert-handling'
+    | '/admin/organization/general'
+    | '/admin/organization/keyring'
+    | '/admin/organization/outbound'
     | '/admin/organization/outgoing-heartbeat'
+    | '/admin/organization/retention'
     | '/admin/organization/security'
+    | '/admin/organization/severity-levels'
     | '/admin/service-accounts/$serviceAccountId'
     | '/admin/users/$userId'
     | '/integrations/$integrationId/edit'
+    | '/admin/organization/'
     | '/admin/service-accounts/'
     | '/admin/users/'
     | '/integrations/$integrationId/'
@@ -506,6 +606,7 @@ export interface RootRouteChildren {
   TotpEnrolmentRoute: typeof TotpEnrolmentRoute
   AdminAuditLogRoute: typeof AdminAuditLogRoute
   AdminOidcRoute: typeof AdminOidcRoute
+  AdminOrganizationRoute: typeof AdminOrganizationRouteWithChildren
   AdminSystemStatusRoute: typeof AdminSystemStatusRoute
   AlertGroupsAlertGroupIdRoute: typeof AlertGroupsAlertGroupIdRoute
   ConnectionsConnectionIdRoute: typeof ConnectionsConnectionIdRoute
@@ -520,21 +621,13 @@ export interface RootRouteChildren {
   DestinationsIndexRoute: typeof DestinationsIndexRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
   RoutesIndexRoute: typeof RoutesIndexRoute
-  AdminOrganizationOutgoingHeartbeatRoute: typeof AdminOrganizationOutgoingHeartbeatRoute
-  AdminOrganizationSecurityRoute: typeof AdminOrganizationSecurityRoute
   AdminServiceAccountsServiceAccountIdRoute: typeof AdminServiceAccountsServiceAccountIdRoute
   AdminUsersUserIdRoute: typeof AdminUsersUserIdRoute
   IntegrationsIntegrationIdEditRoute: typeof IntegrationsIntegrationIdEditRoute
   AdminServiceAccountsIndexRoute: typeof AdminServiceAccountsIndexRoute
   AdminUsersIndexRoute: typeof AdminUsersIndexRoute
   IntegrationsIntegrationIdIndexRoute: typeof IntegrationsIntegrationIdIndexRoute
-  AdminOrganizationLinkRulesLinkRuleIdRoute: typeof AdminOrganizationLinkRulesLinkRuleIdRoute
-  AdminOrganizationLinkRulesNewRoute: typeof AdminOrganizationLinkRulesNewRoute
-  AdminOrganizationLookupTablesLookupTableIdRoute: typeof AdminOrganizationLookupTablesLookupTableIdRoute
-  AdminOrganizationLookupTablesNewRoute: typeof AdminOrganizationLookupTablesNewRoute
   IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute: typeof IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute
-  AdminOrganizationLinkRulesIndexRoute: typeof AdminOrganizationLinkRulesIndexRoute
-  AdminOrganizationLookupTablesIndexRoute: typeof AdminOrganizationLookupTablesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -593,6 +686,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/oidc'
       fullPath: '/admin/oidc'
       preLoaderRoute: typeof AdminOidcRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/organization': {
+      id: '/admin/organization'
+      path: '/admin/organization'
+      fullPath: '/admin/organization'
+      preLoaderRoute: typeof AdminOrganizationRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/system-status': {
@@ -700,19 +800,68 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignInTotpRouteImport
       parentRoute: typeof SignInRoute
     }
+    '/admin/organization/': {
+      id: '/admin/organization/'
+      path: '/'
+      fullPath: '/admin/organization/'
+      preLoaderRoute: typeof AdminOrganizationIndexRouteImport
+      parentRoute: typeof AdminOrganizationRoute
+    }
+    '/admin/organization/alert-handling': {
+      id: '/admin/organization/alert-handling'
+      path: '/alert-handling'
+      fullPath: '/admin/organization/alert-handling'
+      preLoaderRoute: typeof AdminOrganizationAlertHandlingRouteImport
+      parentRoute: typeof AdminOrganizationRoute
+    }
+    '/admin/organization/general': {
+      id: '/admin/organization/general'
+      path: '/general'
+      fullPath: '/admin/organization/general'
+      preLoaderRoute: typeof AdminOrganizationGeneralRouteImport
+      parentRoute: typeof AdminOrganizationRoute
+    }
+    '/admin/organization/keyring': {
+      id: '/admin/organization/keyring'
+      path: '/keyring'
+      fullPath: '/admin/organization/keyring'
+      preLoaderRoute: typeof AdminOrganizationKeyringRouteImport
+      parentRoute: typeof AdminOrganizationRoute
+    }
+    '/admin/organization/outbound': {
+      id: '/admin/organization/outbound'
+      path: '/outbound'
+      fullPath: '/admin/organization/outbound'
+      preLoaderRoute: typeof AdminOrganizationOutboundRouteImport
+      parentRoute: typeof AdminOrganizationRoute
+    }
     '/admin/organization/outgoing-heartbeat': {
       id: '/admin/organization/outgoing-heartbeat'
-      path: '/admin/organization/outgoing-heartbeat'
+      path: '/outgoing-heartbeat'
       fullPath: '/admin/organization/outgoing-heartbeat'
       preLoaderRoute: typeof AdminOrganizationOutgoingHeartbeatRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminOrganizationRoute
+    }
+    '/admin/organization/retention': {
+      id: '/admin/organization/retention'
+      path: '/retention'
+      fullPath: '/admin/organization/retention'
+      preLoaderRoute: typeof AdminOrganizationRetentionRouteImport
+      parentRoute: typeof AdminOrganizationRoute
     }
     '/admin/organization/security': {
       id: '/admin/organization/security'
-      path: '/admin/organization/security'
+      path: '/security'
       fullPath: '/admin/organization/security'
       preLoaderRoute: typeof AdminOrganizationSecurityRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminOrganizationRoute
+    }
+    '/admin/organization/severity-levels': {
+      id: '/admin/organization/severity-levels'
+      path: '/severity-levels'
+      fullPath: '/admin/organization/severity-levels'
+      preLoaderRoute: typeof AdminOrganizationSeverityLevelsRouteImport
+      parentRoute: typeof AdminOrganizationRoute
     }
     '/admin/service-accounts/': {
       id: '/admin/service-accounts/'
@@ -758,45 +907,45 @@ declare module '@tanstack/react-router' {
     }
     '/admin/organization/link-rules/': {
       id: '/admin/organization/link-rules/'
-      path: '/admin/organization/link-rules'
+      path: '/link-rules'
       fullPath: '/admin/organization/link-rules/'
       preLoaderRoute: typeof AdminOrganizationLinkRulesIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminOrganizationRoute
     }
     '/admin/organization/link-rules/$linkRuleId': {
       id: '/admin/organization/link-rules/$linkRuleId'
-      path: '/admin/organization/link-rules/$linkRuleId'
+      path: '/link-rules/$linkRuleId'
       fullPath: '/admin/organization/link-rules/$linkRuleId'
       preLoaderRoute: typeof AdminOrganizationLinkRulesLinkRuleIdRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminOrganizationRoute
     }
     '/admin/organization/link-rules/new': {
       id: '/admin/organization/link-rules/new'
-      path: '/admin/organization/link-rules/new'
+      path: '/link-rules/new'
       fullPath: '/admin/organization/link-rules/new'
       preLoaderRoute: typeof AdminOrganizationLinkRulesNewRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminOrganizationRoute
     }
     '/admin/organization/lookup-tables/': {
       id: '/admin/organization/lookup-tables/'
-      path: '/admin/organization/lookup-tables'
+      path: '/lookup-tables'
       fullPath: '/admin/organization/lookup-tables/'
       preLoaderRoute: typeof AdminOrganizationLookupTablesIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminOrganizationRoute
     }
     '/admin/organization/lookup-tables/$lookupTableId': {
       id: '/admin/organization/lookup-tables/$lookupTableId'
-      path: '/admin/organization/lookup-tables/$lookupTableId'
+      path: '/lookup-tables/$lookupTableId'
       fullPath: '/admin/organization/lookup-tables/$lookupTableId'
       preLoaderRoute: typeof AdminOrganizationLookupTablesLookupTableIdRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminOrganizationRoute
     }
     '/admin/organization/lookup-tables/new': {
       id: '/admin/organization/lookup-tables/new'
-      path: '/admin/organization/lookup-tables/new'
+      path: '/lookup-tables/new'
       fullPath: '/admin/organization/lookup-tables/new'
       preLoaderRoute: typeof AdminOrganizationLookupTablesNewRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminOrganizationRoute
     }
     '/integrations/$integrationId/snapshots/$storedSnapshotId': {
       id: '/integrations/$integrationId/snapshots/$storedSnapshotId'
@@ -819,6 +968,49 @@ const SignInRouteChildren: SignInRouteChildren = {
 const SignInRouteWithChildren =
   SignInRoute._addFileChildren(SignInRouteChildren)
 
+interface AdminOrganizationRouteChildren {
+  AdminOrganizationAlertHandlingRoute: typeof AdminOrganizationAlertHandlingRoute
+  AdminOrganizationGeneralRoute: typeof AdminOrganizationGeneralRoute
+  AdminOrganizationKeyringRoute: typeof AdminOrganizationKeyringRoute
+  AdminOrganizationOutboundRoute: typeof AdminOrganizationOutboundRoute
+  AdminOrganizationOutgoingHeartbeatRoute: typeof AdminOrganizationOutgoingHeartbeatRoute
+  AdminOrganizationRetentionRoute: typeof AdminOrganizationRetentionRoute
+  AdminOrganizationSecurityRoute: typeof AdminOrganizationSecurityRoute
+  AdminOrganizationSeverityLevelsRoute: typeof AdminOrganizationSeverityLevelsRoute
+  AdminOrganizationIndexRoute: typeof AdminOrganizationIndexRoute
+  AdminOrganizationLinkRulesLinkRuleIdRoute: typeof AdminOrganizationLinkRulesLinkRuleIdRoute
+  AdminOrganizationLinkRulesNewRoute: typeof AdminOrganizationLinkRulesNewRoute
+  AdminOrganizationLookupTablesLookupTableIdRoute: typeof AdminOrganizationLookupTablesLookupTableIdRoute
+  AdminOrganizationLookupTablesNewRoute: typeof AdminOrganizationLookupTablesNewRoute
+  AdminOrganizationLinkRulesIndexRoute: typeof AdminOrganizationLinkRulesIndexRoute
+  AdminOrganizationLookupTablesIndexRoute: typeof AdminOrganizationLookupTablesIndexRoute
+}
+
+const AdminOrganizationRouteChildren: AdminOrganizationRouteChildren = {
+  AdminOrganizationAlertHandlingRoute: AdminOrganizationAlertHandlingRoute,
+  AdminOrganizationGeneralRoute: AdminOrganizationGeneralRoute,
+  AdminOrganizationKeyringRoute: AdminOrganizationKeyringRoute,
+  AdminOrganizationOutboundRoute: AdminOrganizationOutboundRoute,
+  AdminOrganizationOutgoingHeartbeatRoute:
+    AdminOrganizationOutgoingHeartbeatRoute,
+  AdminOrganizationRetentionRoute: AdminOrganizationRetentionRoute,
+  AdminOrganizationSecurityRoute: AdminOrganizationSecurityRoute,
+  AdminOrganizationSeverityLevelsRoute: AdminOrganizationSeverityLevelsRoute,
+  AdminOrganizationIndexRoute: AdminOrganizationIndexRoute,
+  AdminOrganizationLinkRulesLinkRuleIdRoute:
+    AdminOrganizationLinkRulesLinkRuleIdRoute,
+  AdminOrganizationLinkRulesNewRoute: AdminOrganizationLinkRulesNewRoute,
+  AdminOrganizationLookupTablesLookupTableIdRoute:
+    AdminOrganizationLookupTablesLookupTableIdRoute,
+  AdminOrganizationLookupTablesNewRoute: AdminOrganizationLookupTablesNewRoute,
+  AdminOrganizationLinkRulesIndexRoute: AdminOrganizationLinkRulesIndexRoute,
+  AdminOrganizationLookupTablesIndexRoute:
+    AdminOrganizationLookupTablesIndexRoute,
+}
+
+const AdminOrganizationRouteWithChildren =
+  AdminOrganizationRoute._addFileChildren(AdminOrganizationRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   PasswordSetupRoute: PasswordSetupRoute,
@@ -828,6 +1020,7 @@ const rootRouteChildren: RootRouteChildren = {
   TotpEnrolmentRoute: TotpEnrolmentRoute,
   AdminAuditLogRoute: AdminAuditLogRoute,
   AdminOidcRoute: AdminOidcRoute,
+  AdminOrganizationRoute: AdminOrganizationRouteWithChildren,
   AdminSystemStatusRoute: AdminSystemStatusRoute,
   AlertGroupsAlertGroupIdRoute: AlertGroupsAlertGroupIdRoute,
   ConnectionsConnectionIdRoute: ConnectionsConnectionIdRoute,
@@ -842,9 +1035,6 @@ const rootRouteChildren: RootRouteChildren = {
   DestinationsIndexRoute: DestinationsIndexRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
   RoutesIndexRoute: RoutesIndexRoute,
-  AdminOrganizationOutgoingHeartbeatRoute:
-    AdminOrganizationOutgoingHeartbeatRoute,
-  AdminOrganizationSecurityRoute: AdminOrganizationSecurityRoute,
   AdminServiceAccountsServiceAccountIdRoute:
     AdminServiceAccountsServiceAccountIdRoute,
   AdminUsersUserIdRoute: AdminUsersUserIdRoute,
@@ -852,17 +1042,8 @@ const rootRouteChildren: RootRouteChildren = {
   AdminServiceAccountsIndexRoute: AdminServiceAccountsIndexRoute,
   AdminUsersIndexRoute: AdminUsersIndexRoute,
   IntegrationsIntegrationIdIndexRoute: IntegrationsIntegrationIdIndexRoute,
-  AdminOrganizationLinkRulesLinkRuleIdRoute:
-    AdminOrganizationLinkRulesLinkRuleIdRoute,
-  AdminOrganizationLinkRulesNewRoute: AdminOrganizationLinkRulesNewRoute,
-  AdminOrganizationLookupTablesLookupTableIdRoute:
-    AdminOrganizationLookupTablesLookupTableIdRoute,
-  AdminOrganizationLookupTablesNewRoute: AdminOrganizationLookupTablesNewRoute,
   IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute:
     IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute,
-  AdminOrganizationLinkRulesIndexRoute: AdminOrganizationLinkRulesIndexRoute,
-  AdminOrganizationLookupTablesIndexRoute:
-    AdminOrganizationLookupTablesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

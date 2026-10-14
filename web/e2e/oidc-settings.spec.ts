@@ -143,7 +143,11 @@ test("Organization → Security saves the TOTP policy and refuses a save over a 
   const first = await securityPage(browser);
   const second = await securityPage(browser);
   try {
-    await nav(first).getByRole("link", { name: "Security" }).click();
+    await nav(first).getByRole("link", { name: "Organization" }).click();
+    await first
+      .getByRole("navigation", { name: "Organization" })
+      .getByRole("link", { name: "Security" })
+      .click();
     await expect(first).toHaveURL(`${APP}/admin/organization/security`);
     await expect(first.getByRole("radio", { name: "Nobody" })).toBeChecked();
     await first.getByRole("radio", { name: "Everyone" }).check();
@@ -223,10 +227,11 @@ test("warns while the last active Admin keeps the Role, and a Responder sees non
   await page.goto("/api/v1/sessions/oidc/start");
   await expect(page).toHaveURL(`${APP}/alert-groups`);
 
-  // Step 10: as a Responder, ada sees none of the admin pages.
-  for (const entry of ["Users", "OIDC", "Security", "Audit log"]) {
+  // Step 10: as a Responder, ada sees none of the admin pages; Organization stays for Lookup tables and Link rules.
+  for (const entry of ["Users", "OIDC", "Audit log"]) {
     await expect(nav(page).getByRole("link", { name: entry })).toHaveCount(0);
   }
+  await expect(nav(page).getByRole("link", { name: "Organization" })).toBeVisible();
   for (const address of [
     "/admin/users",
     "/admin/oidc",

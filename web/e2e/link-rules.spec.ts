@@ -75,6 +75,13 @@ function nav(page: Page, name: string) {
   return page.getByRole("navigation", { name: "Main" }).getByRole("link", { name, exact: true });
 }
 
+/** An entry of the sub-navigation of Organization. */
+function sub(page: Page, name: string) {
+  return page
+    .getByRole("navigation", { name: "Organization" })
+    .getByRole("link", { name, exact: true });
+}
+
 test.beforeAll(async () => {
   const admin = await adminApi();
   try {
@@ -110,26 +117,27 @@ test("edits a Lookup table, creates a Link rule with its preview and keeps the t
   const csp = watchCsp(page);
   await signInAdmin(page);
 
-  // 10. The navigation lists "Lookup tables" and "Link rules" after "Security" and "Outgoing heartbeat", under
-  // Organization.
-  await expect(nav(page, "Link rules")).toBeVisible();
-  const entries = page.getByRole("navigation", { name: "Main" }).getByRole("link");
-  const names = await entries.allTextContents();
-  const security = names.indexOf("Security");
-  expect(names.slice(security, security + 4)).toEqual([
-    "Security",
+  // 10. Organization lists "Lookup tables" and "Link rules" after "Outgoing heartbeat" in its sub-navigation.
+  await nav(page, "Organization").click();
+  await expect(sub(page, "Link rules")).toBeVisible();
+  const names = await page
+    .getByRole("navigation", { name: "Organization" })
+    .getByRole("link")
+    .allTextContents();
+  const heartbeat = names.indexOf("Outgoing heartbeat");
+  expect(names.slice(heartbeat, heartbeat + 3)).toEqual([
     "Outgoing heartbeat",
     "Lookup tables",
     "Link rules",
   ]);
-  await expect(nav(page, "Lookup tables")).toHaveAttribute(
+  await expect(sub(page, "Lookup tables")).toHaveAttribute(
     "href",
     "/admin/organization/lookup-tables",
   );
-  await expect(nav(page, "Link rules")).toHaveAttribute("href", "/admin/organization/link-rules");
+  await expect(sub(page, "Link rules")).toHaveAttribute("href", "/admin/organization/link-rules");
 
   // 4. Organization → Lookup tables → "grafana" → a row stage → "Save": the list shows 2 rows.
-  await nav(page, "Lookup tables").click();
+  await sub(page, "Lookup tables").click();
   await expect(page.getByRole("heading", { name: "Lookup tables", level: 1 })).toBeVisible();
   const grafanaRow = page
     .getByRole("row")
@@ -149,7 +157,7 @@ test("edits a Lookup table, creates a Link rule with its preview and keeps the t
   await expect(grafanaRow.getByTestId("lookup-table-rows")).toHaveText("2 rows");
 
   // 5. Link rules → "Create rule": the preview against the Stored Snapshot renders the link → "Save".
-  await nav(page, "Link rules").click();
+  await sub(page, "Link rules").click();
   await page.getByRole("link", { name: "Create rule" }).click();
   await page.getByRole("textbox", { name: "Name" }).fill("Dashboard");
   await page.getByRole("button", { name: "Add matcher" }).click();
@@ -206,7 +214,7 @@ test("edits a Lookup table, creates a Link rule with its preview and keeps the t
   await expect(page.getByRole("button", { name: "Delete" })).toHaveCount(0);
 
   // 6. Lookup tables → "grafana" → "Delete": a Link rule reads it.
-  await nav(page, "Lookup tables").click();
+  await sub(page, "Lookup tables").click();
   await grafanaRow.getByRole("link", { name: "grafana", exact: true }).click();
   await page.getByRole("button", { name: "Delete" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
@@ -221,7 +229,7 @@ test("edits a Lookup table, creates a Link rule with its preview and keeps the t
   await page.setViewportSize({ width: 360, height: 740 });
   await expect(page.getByLabel("Key of row 2")).toBeVisible();
   await expectNoHorizontalScroll(page);
-  await nav(page, "Link rules").click();
+  await sub(page, "Link rules").click();
   await page.getByRole("link", { name: "Dashboard", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "URL template" })).toHaveValue(URL_TEMPLATE);
   await expectNoHorizontalScroll(page);

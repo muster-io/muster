@@ -20,6 +20,7 @@ import { UpdateOrganizationBody } from "../api/gen/zod/organization/organization
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
 import { useTimeFormat } from "../lib/time";
 import { fieldLabel } from "./audit-diff";
+import { organizationInput } from "./organization-form";
 import {
   type ProxyField,
   ProxyForm,
@@ -43,14 +44,13 @@ function formValues(org: Organization): HeartbeatValues {
 }
 
 /** The Organization as an update: everything as read, the outgoing heartbeat as the form holds it. */
-function organizationInput(org: Organization, v: HeartbeatValues): OrganizationInput {
-  const { id: _id, etag: _etag, outgoing_heartbeat: _heartbeat, ...rest } = org;
+function heartbeatInput(org: Organization, v: HeartbeatValues): OrganizationInput {
   const heartbeat: OrganizationInput["outgoing_heartbeat"] = { proxy: proxyInput(v.proxy) };
   const url = secretPayload(v.url);
   if (url !== undefined) {
     heartbeat.url = url === null ? null : url.trim();
   }
-  return { ...rest, outgoing_heartbeat: heartbeat };
+  return organizationInput(org, { outgoing_heartbeat: heartbeat });
 }
 
 /** The pointers of the fields that show their errors themselves. */
@@ -167,7 +167,7 @@ export function OutgoingHeartbeatForm({ organization }: { organization: Organiza
       className="flex flex-col gap-6"
       onSubmit={form.handleSubmit((values) => {
         setSaved(false);
-        const input = organizationInput(base, values);
+        const input = heartbeatInput(base, values);
         const found = validate(input, values);
         setErrors(found);
         setFocusRequest((n) => n + 1);

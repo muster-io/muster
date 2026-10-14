@@ -34,7 +34,12 @@ import {
   getListIntegrationTokensQueryKey,
   getListIntegrationsQueryKey,
 } from "../api/gen/endpoints/integrations/integrations";
-import { getGetOrganizationQueryKey } from "../api/gen/endpoints/organization/organization";
+import {
+  getGetKeyringQueryKey,
+  getGetOrganizationQueryKey,
+  getGetOutboundPolicyQueryKey,
+  getListSeverityValuesQueryKey,
+} from "../api/gen/endpoints/organization/organization";
 import {
   getGetRouteQueryKey,
   getListRouteSuggestionsQueryKey,
@@ -70,9 +75,16 @@ export function registerHint(type: HintEventType, queries: HintQueries): () => v
 }
 
 registerHint("system-notices", () => [getListSystemNoticesQueryKey()]);
-// The Organization changed: its settings pages, and the System status, which shows whether an outgoing heartbeat URL
-// is set.
-registerHint("organization", () => [getGetOrganizationQueryKey(), getGetSystemStatusQueryKey()]);
+// The Organization changed: its settings pages, among them the outbound address policy, the values seen with the
+// levels the mapping gives them, and the Keyring, whose keys change on an activation and when the old key is no longer
+// needed; and the System status, which shows whether an outgoing heartbeat URL is set.
+registerHint("organization", () => [
+  getGetOrganizationQueryKey(),
+  getGetOutboundPolicyQueryKey(),
+  getListSeverityValuesQueryKey(),
+  getGetKeyringQueryKey(),
+  getGetSystemStatusQueryKey(),
+]);
 // The System status changed in a way the other hints do not name, such as the result of the outgoing heartbeat; the
 // server sends it only to the streams that may read the System status.
 registerHint("system-status", () => [getGetSystemStatusQueryKey()]);

@@ -3,7 +3,9 @@
 
 // Starts `muster dev` for the Playwright specs, as the Go end-to-end harness does: a fresh database on the development
 // PostgreSQL (or the server of MUSTER_E2E_DATABASE_URL), the binary of MUSTER_E2E_BINARY (default ../bin/muster) with
-// its fake servers, and a wait until it is ready. The returned teardown stops it and drops the database.
+// its fake servers, and a wait until it is ready. The returned teardown stops it and drops the database. The server
+// holds two master keys, the development key first, which becomes active on the fresh database, and a new one that the
+// Keyring spec activates; MUSTER_E2E_SECRET_KEYS passes both to the specs, for the CLI they run.
 
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -12,6 +14,8 @@ import { resolve } from "node:path";
 import { Client } from "pg";
 
 const DEFAULT_SERVER = "postgres://muster:muster@127.0.0.1:55432/muster?sslmode=disable";
+// The published master key of `muster dev` (internal/keyring.DevelopmentKey).
+const DEVELOPMENT_KEY = "bXVzdGVyLWRldi1vbmx5LWtleS1ub3QtYS1zZWNyZXQ=";
 const READY_URL = "http://localhost:8082/health/ready";
 // The last address line of `muster dev`, printed once its fake servers listen.
 const FAKES_READY = "muster dev: fake Telegram ";
@@ -49,10 +53,15 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const database = new URL(server);
   database.pathname = `/${name}`;
   process.env.MUSTER_E2E_WEB_DATABASE_URL = database.toString();
+  process.env.MUSTER_E2E_SECRET_KEYS = `${DEVELOPMENT_KEY},${randomBytes(32).toString("base64")}`;
 
   const binary = resolve(process.env.MUSTER_E2E_BINARY ?? "../bin/muster");
   const child = spawn(binary, ["dev"], {
-    env: { ...process.env, MUSTER_DATABASE_URL: database.toString() },
+    env: {
+      ...process.env,
+      MUSTER_DATABASE_URL: database.toString(),
+      MUSTER_SECRET_KEYS: process.env.MUSTER_E2E_SECRET_KEYS,
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";

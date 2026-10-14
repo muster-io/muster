@@ -927,10 +927,13 @@
     "wrongCredentials": "Wrong login, password or code."
   },
   "fieldErrors": {
+    "duplicate": "This value is listed twice.",
     "invalid": "This value is not valid.",
     "invalidFormat": "This value has the wrong format.",
     "mismatch": "The passwords do not match.",
+    "outOfRange": "This value is out of range.",
     "required": "Fill in this field.",
+    "retentionOrder": "Keep Alert Group summaries at least as long as alert details.",
     "tooLong": "This value is too long.",
     "tooShort": "This value is too short.",
     "unsupported": "This setting cannot be changed yet."
@@ -1260,16 +1263,12 @@
     "destinations": "Destinations",
     "integrations": "Integrations",
     "label": "Main",
-    "linkRules": "Link rules",
-    "lookupTables": "Lookup tables",
     "oidc": "OIDC",
-    "outgoingHeartbeat": "Outgoing heartbeat",
+    "organization": "Organization",
     "profile": "Profile",
     "routes": "Routes",
-    "security": "Security",
     "serviceAccounts": "Service accounts",
     "statistics": "Statistics",
-    "systemStatus": "System status",
     "users": "Users"
   },
   "notes": {
@@ -1344,6 +1343,115 @@
       "lastAdminKept": "{{user}} stays Admin: they are the last active Admin, and the identity provider maps them to {{role}}. Make another user Admin first.",
       "nobodyCanSignIn": "Nobody will be able to sign in through OIDC.",
       "secretExpiring": "The client secret expires on {{date}}. Issue a new one in the identity provider and enter it here."
+    }
+  },
+  "organization": {
+    "alertHandling": {
+      "addInstanceLabel": "Add label",
+      "criticalIsUrgent": "Critical is Urgent",
+      "criticalIsUrgentHint": "An Alert Group whose Severity level is critical is Urgent.",
+      "instanceLabels": "Instance labels",
+      "instanceLabelsHint": "A new Alert that differs from a firing one only in these labels is a Replacement: it stays in the same Alert Group and the Timeline names the label that changed."
+    },
+    "evaluationNote": "Changes apply to Alerts evaluated from now on; open Alert Groups keep their status.",
+    "general": {
+      "name": "Name",
+      "timeZone": "Time zone of messages",
+      "timeZoneHint": "Times in messages use this time zone. Each user sees the web UI in their own time zone.",
+      "timeZoneSearch": "Search time zones"
+    },
+    "keyring": {
+      "active": "Active",
+      "command": "muster secrets rotate-key --activate <id> --actor <your name>",
+      "explain": "To activate a key, add it to MUSTER_SECRET_KEYS on every replica, then run <command></command>.",
+      "heldBy": "Held by {{replicas}}",
+      "hint": "The master keys that protect stored Secrets. One of them is active.",
+      "id": "Key id",
+      "keys": "Keys",
+      "missingOn": "Missing on {{replicas}}",
+      "notActiveYet": "Not active yet",
+      "removable": "Key {{id}} is no longer used and can be removed from MUSTER_SECRET_KEYS.",
+      "replicas": "Replicas",
+      "state": "State",
+      "stillNeeded": "Still needed"
+    },
+    "list": {
+      "empty": "None.",
+      "entry": "{{list}}, entry {{row}}",
+      "remove": "Remove {{list}}, entry {{row}}"
+    },
+    "nav": {
+      "alertHandling": "Alert handling",
+      "general": "General",
+      "keyring": "Keyring",
+      "label": "Organization",
+      "linkRules": "Link rules",
+      "lookupTables": "Lookup tables",
+      "outbound": "Outbound addresses",
+      "outgoingHeartbeat": "Outgoing heartbeat",
+      "retention": "Retention",
+      "security": "Security",
+      "severityLevels": "Severity levels",
+      "systemStatus": "System status"
+    },
+    "outbound": {
+      "addAllowed": "Add allowed entry",
+      "addDenied": "Add denied entry",
+      "allowed": "Allowed",
+      "alwaysBlocked": "Always blocked",
+      "denied": "Denied",
+      "deniedWins": "A denied entry always wins.",
+      "entryHint": "A network such as 10.0.0.0/8, an address, a host name or a domain such as *.example.org.",
+      "hint": "Which network addresses Muster may call: Destinations, Connections, the identity provider, proxies and the outgoing heartbeat.",
+      "policy": "Outbound address policy",
+      "rule": {
+        "cloudMetadata": "Cloud metadata addresses",
+        "linkLocal": "Link-local addresses",
+        "multicast": "Multicast addresses",
+        "unspecified": "Unspecified addresses"
+      },
+      "standard": "Standard — private addresses allowed, loopback blocked",
+      "strict": "Strict — only public addresses and the allowed entries"
+    },
+    "retention": {
+      "alertDetails": "Alert details (days)",
+      "alertDetailsHint": "Alerts inside Alert Groups, Timeline entries and delivery events. Never Notes.",
+      "auditLog": "Audit log (days)",
+      "auditLogHint": "Who changed or did what.",
+      "storedSnapshots": "Stored Snapshots (days)",
+      "storedSnapshotsHint": "Snapshots kept as received, for debugging, previews and replay.",
+      "summaries": "Alert Group summaries (days)",
+      "summariesHint": "Alert Group summary rows with their Notes."
+    },
+    "severity": {
+      "addValue": "Add value",
+      "colourOf": "Colour of {{level}}",
+      "emojiOf": "Emoji of {{level}}",
+      "label": "Severity label",
+      "labelHint": "The label of an Alert that carries its severity.",
+      "levelOf": "Level of {{value}}",
+      "levelOfRow": "Level of value {{row}}",
+      "mappingDuplicate": "This value is already mapped.",
+      "mappingHint": "Values of the severity label and their Severity levels. Unmapped values count as warning.",
+      "mappingTitle": "Mapping",
+      "remove": "Remove {{value}}",
+      "removeRow": "Remove value {{row}}",
+      "seen": {
+        "alerts": "Alerts",
+        "banner": "These values have no mapping and count as warning: {{values}}.",
+        "empty": "No values were seen.",
+        "label": "Values seen",
+        "level": "Level",
+        "map": "Map",
+        "mapValue": "Map {{value}}",
+        "title_one": "Values seen in the last {{count}} day",
+        "title_other": "Values seen in the last {{count}} days",
+        "unmapped": "No mapping — counts as warning",
+        "value": "Value"
+      },
+      "stylesTitle": "Emoji and colours",
+      "valueOfRow": "Value {{row}}",
+      "valuePlaceholder": "P1"
     }
   },
   "outgoingHeartbeat": {
@@ -1691,6 +1799,11 @@
   "security": {
     "hint": "Sign-in rules for the whole Organization.",
     "title": "Security",
+    "tokenGrace": {
+      "hint": "For OIDC users whose identity provider granted no offline token: their Personal access tokens work while their last OIDC sign-in is no older than this. Service account tokens are not affected.",
+      "label": "Token grace for OIDC users without an offline token (days)",
+      "title": "Personal access tokens of OIDC users"
+    },
     "totp": {
       "everyone": "Everyone",
       "everyoneHint": "Every user, whether they sign in with a password or through OIDC.",
