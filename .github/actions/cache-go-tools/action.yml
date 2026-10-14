@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# Keeps bin/tools, the pinned tools the Makefile builds with go install, across runs, so that a job does not build
+# them, and download and verify their modules, on every run. Each job has its own entry, as each builds other tools.
+# The key changes with the Go toolchain and with any package or version line of the Makefile; a miss builds the tools
+# as before and saves them at the end of a successful job. Runs after actions/setup-go.
+name: cache the Go tools
+description: Restore bin/tools, and save it at the end of the job when it was not restored.
+runs:
+  using: composite
+  steps:
+    - name: compute the key of the Go tools
+      id: key
+      shell: bash
+      run: |
+        lines=$(grep -E '^[A-Z_]+_(PKG|VERSION) :=' Makefile | sha256sum | cut -c1-16)
+        echo "key=go-tools-$RUNNER_OS-$RUNNER_ARCH-$GITHUB_JOB-$(go env GOVERSION)-$lines" >>"$GITHUB_OUTPUT"
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: bin/tools
+        key: ${{ steps.key.outputs.key }}
