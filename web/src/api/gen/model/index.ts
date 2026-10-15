@@ -234,6 +234,8 @@ export * from './noteInput';
 export * from './noteList';
 export * from './notFoundResponse';
 export * from './nullableAlertGroupStatus';
+export * from './nullableConnectionCheckCode';
+export * from './nullableDestinationCheckCode';
 export * from './nullableLanguage';
 export * from './nullableOutgoingHeartbeatErrorClass';
 export * from './nullablePublicId';

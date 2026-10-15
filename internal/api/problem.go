@@ -172,12 +172,16 @@ func inUseProblem(err error) *Problem {
 }
 
 // checkFailedProblem is the 422 of a save that its Destination check refused: one item per failing check at the field
-// it concerns, with the check's message as its detail.
+// it concerns, with the check's message as its detail and its code as check_code.
 func checkFailedProblem(c *destinations.CheckFailedError) *Problem {
 	p := problem(http.StatusUnprocessableEntity, typeValidationFailed, "", detailSemanticValidation)
 	for _, it := range c.Items {
 		detail := it.Message
-		p.Errors = append(p.Errors, gen.ProblemError{Pointer: it.Pointer, Code: codeCheckFailed, Detail: &detail})
+		item := gen.ProblemError{Pointer: it.Pointer, Code: codeCheckFailed, Detail: &detail}
+		if it.Code != "" {
+			item.CheckCode.Set(gen.NullableDestinationCheckCode(it.Code))
+		}
+		p.Errors = append(p.Errors, item)
 	}
 	return p
 }

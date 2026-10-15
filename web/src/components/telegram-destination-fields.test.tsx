@@ -350,4 +350,26 @@ describe("DestinationCheck of a Telegram Destination", () => {
         `Bot rights in the discussion group: failed ${NOT_ADMIN}`,
       ]);
   });
+
+  test("translates a failing check into Russian by its code, the English message below as its detail", async () => {
+    await i18n.changeLanguage("ru");
+    mockReads({
+      ok: false,
+      health: { state: "healthy" },
+      checks: [
+        { name: "channel_exists", ok: true },
+        { name: "discussion_group", ok: true },
+        { name: "bot_rights_channel", ok: true },
+        { name: "bot_rights_group", ok: false, message: NOT_ADMIN, code: "bot_not_group_admin" },
+      ],
+    });
+    await render(providers(<DestinationCheck destination={DESTINATION} dirty={false} />));
+    await page.getByRole("button", { name: "Проверить", exact: true }).click();
+    await expect
+      .element(page.getByTestId("destination-check-item").nth(3))
+      .toHaveTextContent(
+        "Права бота в группе обсуждения: ошибка Бот не администратор группы обсуждения. Сделайте бота " +
+          `администратором там, с правом публиковать сообщения.Подробности: ${NOT_ADMIN}`,
+      );
+  });
 });

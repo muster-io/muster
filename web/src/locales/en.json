@@ -398,6 +398,35 @@
     },
     "yes": "yes"
   },
+  "checks": {
+    "codes": {
+      "blocked": "The outbound address policy blocks this address.",
+      "botMayNotEdit": "The bot may not edit messages in the channel.",
+      "botMayNotPost": "The bot may not post messages in the channel.",
+      "botNotChannelAdmin": "The bot is not an admin of the channel.",
+      "botNotGroupAdmin": "The bot is not an admin of the discussion group. Make the bot an admin there, allowed to post messages.",
+      "botNotInChannel": "The bot is not a member of this channel.",
+      "changedSinceSaved": "The channel or its discussion group changed since the Destination was saved. Save the Destination again.",
+      "channelArchived": "The channel is archived.",
+      "channelInOtherTeam": "The channel is not in this team.",
+      "channelNotFound": "The channel was not found, or the bot cannot see it.",
+      "commentsDisabled": "Comments are not enabled for this channel. Enable comments in the channel settings in Telegram; this creates its discussion group.",
+      "connectFailed": "The connection failed.",
+      "dnsFailed": "The host name does not resolve.",
+      "notAChannel": "This chat is not a channel.",
+      "notBotApi": "This is not a Bot API.",
+      "proxyRefused": "The proxy refused the connection.",
+      "requestFailed": "The request failed.",
+      "timeout": "No answer in time.",
+      "tlsFailed": "The TLS handshake failed.",
+      "tokenInvalid": "The bot token is not valid.",
+      "unexpectedStatus": "The server did not answer as a Bot API, with 401 and JSON.",
+      "webhookSet": "A webhook is set.",
+      "wrongPathPrefix": "Wrong path prefix: the server answered 404."
+    },
+    "detail": "Details: {{detail}}",
+    "reasonWithDetail": "{{reason}} Details: {{detail}}"
+  },
   "commands": {
     "bulk": {
       "actions": "Commands for the selected Alert Groups",

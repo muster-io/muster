@@ -170,7 +170,7 @@ func (s *Server) DeleteConnection(ctx context.Context, req gen.DeleteConnectionR
 // CheckConnection is checkConnection (C-13.FR-2, C-14.FR-11) on the interactive path: the steps with their latency and
 // path — the token of a Mattermost Connection; the dry probe, getMe and getWebhookInfo of a Telegram one, only the dry
 // probe with an unsaved base_url — the bot's name once the token works, a Telegram bot's webhook and pending updates,
-// and the warnings that do not fail the check.
+// and the warnings that do not fail the check. A step's message is English; its code is what clients translate.
 func (s *Server) CheckConnection(ctx context.Context, req gen.CheckConnectionRequestObject) (
 	gen.CheckConnectionResponseObject, error) {
 	var baseURL *string
@@ -201,6 +201,11 @@ func (s *Server) CheckConnection(ctx context.Context, req gen.CheckConnectionReq
 			step.Message.Set(st.Message)
 		} else {
 			step.Message.SetNull()
+		}
+		if st.Code != "" {
+			step.Code.Set(gen.NullableConnectionCheckCode(st.Code))
+		} else {
+			step.Code.SetNull()
 		}
 		out.Steps = append(out.Steps, step)
 	}

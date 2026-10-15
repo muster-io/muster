@@ -88,37 +88,39 @@ func TestDestinationCheckFailures(t *testing.T) {
 		setup   func(f *faketelegram.Fake)
 		steps   string
 		message string
+		code    string
 	}{
-		{"no comments", "@no_comments", nil, "channel_exists:ok discussion_group:fail", MessageNoComments},
-		{"unknown chat", "@nobody", nil, "channel_exists:fail", MessageChannelNotFound},
-		{"a group", "-1001000000002", nil, "channel_exists:fail", MessageNotChannel},
+		{"no comments", "@no_comments", nil, "channel_exists:ok discussion_group:fail", MessageNoComments,
+			CodeNoComments},
+		{"unknown chat", "@nobody", nil, "channel_exists:fail", MessageChannelNotFound, CodeChannelNotFound},
+		{"a group", "-1001000000002", nil, "channel_exists:fail", MessageNotChannel, CodeNotChannel},
 		{"bot left the channel", "@muster_alerts", func(f *faketelegram.Fake) {
 			_ = f.SetMember(faketelegram.ChannelID, faketelegram.BotID, faketelegram.Member{Status: faketelegram.StatusLeft})
-		}, "channel_exists:ok discussion_group:ok bot_rights_channel:fail", MessageChannelNotAdmin},
+		}, "channel_exists:ok discussion_group:ok bot_rights_channel:fail", MessageChannelNotAdmin, CodeChannelNotAdmin},
 		{"may not post", "@muster_alerts", func(f *faketelegram.Fake) {
 			_ = f.SetMember(faketelegram.ChannelID, faketelegram.BotID, faketelegram.Member{
 				Status: faketelegram.StatusAdministrator, CanEditMessages: true})
-		}, "channel_exists:ok discussion_group:ok bot_rights_channel:fail", MessageMayNotPost},
+		}, "channel_exists:ok discussion_group:ok bot_rights_channel:fail", MessageMayNotPost, CodeMayNotPost},
 		{"may not edit", "@muster_alerts", func(f *faketelegram.Fake) {
 			_ = f.SetMember(faketelegram.ChannelID, faketelegram.BotID, faketelegram.Member{
 				Status: faketelegram.StatusAdministrator, CanPostMessages: true})
-		}, "channel_exists:ok discussion_group:ok bot_rights_channel:fail", MessageMayNotEdit},
+		}, "channel_exists:ok discussion_group:ok bot_rights_channel:fail", MessageMayNotEdit, CodeMayNotEdit},
 		{"channel membership refused", "@muster_alerts", func(f *faketelegram.Fake) {
 			_ = f.SetFault(fakeserver.Fault{Path: "/bot" + testToken + "/getChatMember", Status: 403, Times: 1,
 				Body: `{"ok":false,"error_code":403,"description":"Forbidden: bot is not a member of the channel chat"}`})
-		}, "channel_exists:ok discussion_group:ok bot_rights_channel:fail", MessageChannelNotAdmin},
+		}, "channel_exists:ok discussion_group:ok bot_rights_channel:fail", MessageChannelNotAdmin, CodeChannelNotAdmin},
 		{"a member of the group", "@muster_alerts", func(f *faketelegram.Fake) {
 			_ = f.SetMember(faketelegram.GroupID, faketelegram.BotID, faketelegram.Member{Status: faketelegram.StatusMember})
 		}, "channel_exists:ok discussion_group:ok bot_rights_channel:ok bot_rights_group:fail",
 			"The bot is not an admin of the discussion group Muster alerts Chat. Make the bot an admin there, allowed " +
-				"to post messages."},
+				"to post messages.", CodeGroupNotAdmin},
 		{"outside the group", "@muster_alerts", func(f *faketelegram.Fake) {
 			_ = f.SetMember(faketelegram.GroupID, faketelegram.BotID, faketelegram.Member{Status: faketelegram.StatusLeft})
 		}, "channel_exists:ok discussion_group:ok bot_rights_channel:ok bot_rights_group:fail",
-			MessageGroupNotAdmin(faketelegram.GroupTitle)},
+			MessageGroupNotAdmin(faketelegram.GroupTitle), CodeGroupNotAdmin},
 		{"a revoked token", "@muster_alerts", func(f *faketelegram.Fake) {
 			_ = f.SetConfig(nil, nil, &[]string{testToken})
-		}, "channel_exists:fail", MessageTokenInvalid},
+		}, "channel_exists:fail", MessageTokenInvalid, CodeTokenInvalid},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -132,7 +134,7 @@ func TestDestinationCheckFailures(t *testing.T) {
 				t.Fatal(err)
 			}
 			last := res.Steps[len(res.Steps)-1]
-			if res.OK() || stepNames(res) != tc.steps || last.Message != tc.message ||
+			if res.OK() || stepNames(res) != tc.steps || last.Message != tc.message || last.Code != tc.code ||
 				res.Outcome.Kind != delivery.OutcomeFatal || string(res.Outcome.Error) != tc.message {
 				t.Fatalf("check = %s %+v", stepNames(res), res)
 			}
@@ -173,7 +175,8 @@ func TestDestinationCheckTransient(t *testing.T) {
 		want := []string{"channel_exists", "channel_exists", "bot_rights_channel"}[i]
 		if err != nil || res.OK() || res.Outcome.Kind != delivery.OutcomeTransient ||
 			res.Steps[len(res.Steps)-1].Name != want ||
-			res.Steps[len(res.Steps)-1].Message != "Telegram answered 502: Bad Gateway" {
+			res.Steps[len(res.Steps)-1].Message != "Telegram answered 502: Bad Gateway" ||
+			res.Steps[len(res.Steps)-1].Code != delivery.CodeRequestFailed {
 			t.Fatalf("%s: %+v %v", method, res, err)
 		}
 	}

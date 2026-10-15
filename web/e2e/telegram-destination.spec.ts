@@ -38,6 +38,9 @@ const NO_COMMENTS =
   "Comments are not enabled for this channel. Enable comments in the channel settings in Telegram; this creates its discussion group.";
 const NOT_ADMIN =
   "The bot is not an admin of the discussion group Muster alerts Chat. Make the bot an admin there, allowed to post messages.";
+/** The text of the code bot_not_group_admin; the server's message, which names the group, follows as its detail. */
+const NOT_ADMIN_CODE =
+  "The bot is not an admin of the discussion group. Make the bot an admin there, allowed to post messages.";
 const NOT_ATTACHED = "Thread not attached to the Root message";
 
 interface Named {
@@ -189,7 +192,7 @@ test("creates a Telegram Destination with the channel only, and checks it", asyn
   await channel.fill("@muster_alerts");
   await expect(channelError).toHaveCount(0);
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(channelError).toHaveText(NOT_ADMIN);
+  await expect(channelError).toHaveText(`${NOT_ADMIN_CODE} Details: ${NOT_ADMIN}`);
   await expect(page).toHaveURL(/\/destinations\/new$/);
   const admin = await adminApi();
   try {
@@ -234,7 +237,7 @@ test("creates a Telegram Destination with the channel only, and checks it", asyn
   await page.getByRole("button", { name: "Check", exact: true }).click();
   await expect(page.getByTestId("destination-check-summary")).toHaveText("Check failed");
   await expect(page.getByTestId("destination-check-item").nth(3)).toHaveText(
-    `Bot rights in the discussion group: failed ${NOT_ADMIN}`,
+    `Bot rights in the discussion group: failed ${NOT_ADMIN_CODE}Details: ${NOT_ADMIN}`,
   );
   await botInGroup(true);
   await page.getByRole("button", { name: "Check", exact: true }).click();

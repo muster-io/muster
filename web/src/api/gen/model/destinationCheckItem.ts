@@ -18,11 +18,16 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DestinationCheckItemName } from './destinationCheckItemName';
+import type { NullableDestinationCheckCode } from './nullableDestinationCheckCode';
 
 export interface DestinationCheckItem {
   /** One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). */
   name: DestinationCheckItemName;
   ok: boolean;
-  /** @nullable */
+  /**
+     * Why the check failed, in English; untrusted text where it comes from the messenger. Clients translate `code` and show this text as its detail.
+     * @nullable
+     */
   message?: string | null;
+  code?: NullableDestinationCheckCode | null;
 }

@@ -36,8 +36,19 @@ const (
 	messageWebhookUnknown = "A webhook is set."
 )
 
+// The codes of the messages above (ConnectionCheckStep.code, DestinationCheckItem.code), which clients translate: the
+// dry probe that reached no Bot API, a token getMe refused, and a webhook that is set. The DNS, TLS, timeout and proxy
+// failures of the dry probe, and any other failure, have the codes of delivery.FailureCode.
+const (
+	CodeNotBotAPI        = "not_bot_api"
+	CodeWrongPrefix      = "wrong_path_prefix"
+	CodeUnexpectedStatus = "unexpected_status"
+	CodeTokenInvalid     = "token_invalid"
+	CodeWebhookSet       = "webhook_set"
+)
+
 // Step is one step of a check: whether it passed or was skipped, its latency and path, and what answered when it
-// failed, or the host of a webhook that is set.
+// failed, or the host of a webhook that is set, in English, with its code, which clients translate.
 type Step struct {
 	Name    string
 	OK      bool
@@ -45,6 +56,7 @@ type Step struct {
 	Latency time.Duration
 	Via     string
 	Message string
+	Code    string
 }
 
 // Check is the result of a connection check: its three steps, the bot once getMe passed and the webhook once
@@ -132,7 +144,7 @@ func RunCheck(ctx context.Context, saved, probe *Client, run Runner, realClock c
 		return Check{}, err
 	}
 	dry := Step{Name: StepDryProbe, Latency: latency, Via: target.Via()}
-	dry.OK, dry.Message = probeVerdict(r, target.settings.BaseURL)
+	dry.OK, dry.Message, dry.Code = probeVerdict(r, target.settings.BaseURL)
 	out.Steps = append(out.Steps, dry)
 	if probe != nil || !dry.OK {
 		skipRest(StepGetMe, StepGetWebhookInfo)
@@ -147,9 +159,9 @@ func RunCheck(ctx context.Context, saved, probe *Client, run Runner, realClock c
 	}
 	me := Step{Name: StepGetMe, OK: r.OK(), Latency: latency, Via: saved.Via()}
 	if !me.OK {
-		me.Message = string(r.Outcome.Error)
+		me.Message, me.Code = string(r.Outcome.Error), r.FailureCode()
 		if r.Status == http.StatusUnauthorized || r.Code == http.StatusUnauthorized {
-			me.Message = MessageTokenInvalid
+			me.Message, me.Code = MessageTokenInvalid, CodeTokenInvalid
 		}
 		out.Steps = append(out.Steps, me)
 		skipRest(StepGetWebhookInfo)
@@ -166,11 +178,11 @@ func RunCheck(ctx context.Context, saved, probe *Client, run Runner, realClock c
 	hook := Step{Name: StepGetWebhookInfo, OK: r.OK(), Latency: latency, Via: saved.Via()}
 	switch {
 	case !hook.OK:
-		hook.Message = string(r.Outcome.Error)
+		hook.Message, hook.Code = string(r.Outcome.Error), r.FailureCode()
 	default:
 		out.Webhook = &info
 		if info.URL != "" {
-			hook.Message = messageWebhookUnknown
+			hook.Message, hook.Code = messageWebhookUnknown, CodeWebhookSet
 			if u, err := url.Parse(info.URL); err == nil && u.Host != "" {
 				hook.Message = fmt.Sprintf(messageWebhookSet, u.Host)
 			}
@@ -194,35 +206,36 @@ func timed(ctx context.Context, run Runner, realClock clock.Clock, f func(ctx co
 }
 
 // probeVerdict says whether the answer to the dry probe is a Bot API's — 401 with a JSON body — and otherwise names
-// what answered: the name, the TLS handshake, the time, the proxy, a 404 of a wrong path prefix, an answer that is not
-// JSON, or another status.
-func probeVerdict(r Result, base string) (bool, string) {
+// what answered, with its code: the name, the TLS handshake, the time, the proxy, a 404 of a wrong path prefix, an
+// answer that is not JSON, or another status.
+func probeVerdict(r Result, base string) (bool, string, string) {
 	if r.Status == 0 {
+		code := r.FailureCode()
 		switch r.Network {
 		case outbound.NetworkDNS:
 			host := base
 			if u, err := url.Parse(base); err == nil {
 				host = u.Hostname()
 			}
-			return false, fmt.Sprintf(messageDNS, host)
+			return false, fmt.Sprintf(messageDNS, host), code
 		case outbound.NetworkTLS:
-			return false, fmt.Sprintf(messageTLS, r.Detail)
+			return false, fmt.Sprintf(messageTLS, r.Detail), code
 		case outbound.NetworkTimeout:
-			return false, fmt.Sprintf(messageTimeout, int(CallTimeout/time.Second))
+			return false, fmt.Sprintf(messageTimeout, int(CallTimeout/time.Second)), code
 		case outbound.NetworkProxyAuth:
-			return false, MessageProxyRefused
+			return false, MessageProxyRefused, code
 		}
-		return false, string(r.Outcome.Error)
+		return false, string(r.Outcome.Error), code
 	}
 	switch {
 	case r.Status == http.StatusProxyAuthRequired:
-		return false, MessageProxyRefused
+		return false, MessageProxyRefused, delivery.CodeProxyRefused
 	case r.Status == http.StatusNotFound:
-		return false, MessageWrongPrefix
+		return false, MessageWrongPrefix, CodeWrongPrefix
 	case r.NotJSON:
-		return false, MessageNotBotAPI
+		return false, MessageNotBotAPI, CodeNotBotAPI
 	case r.Status == http.StatusUnauthorized:
-		return true, ""
+		return true, "", ""
 	}
-	return false, fmt.Sprintf(messageOtherStatus, r.Status)
+	return false, fmt.Sprintf(messageOtherStatus, r.Status), CodeUnexpectedStatus
 }

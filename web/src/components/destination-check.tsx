@@ -2,7 +2,8 @@
 // Copyright The Muster Authors
 
 // "Check" of a Destination (C-13.FR-10, C-13.AC-8; C-14.FR-14): the Destination check through the interactive path,
-// each check with "ok" or its message — for Telegram "Channel exists", "Discussion group", "Bot rights in the channel"
+// each check with "ok" or what failed, translated by its code with the server's English message below as its detail —
+// for Telegram "Channel exists", "Discussion group", "Bot rights in the channel"
 // and "Bot rights in the discussion group" — and "Check passed" or "Check failed". A passing check ends the Broken
 // state: the page takes the health of the result at once, and the destination hint confirms it. A busy messenger
 // answers 503 with Retry-After: "The messenger is busy; try again in N s."
@@ -23,7 +24,7 @@ import type {
   DestinationCheckItemName,
   DestinationCheckResult,
 } from "../api/gen/model";
-import { checkErrorText } from "./connection-check";
+import { CheckDetail, checkCodeText, checkErrorText } from "./connection-check";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { cn } from "./ui/utils";
@@ -47,6 +48,7 @@ export function checkItemName(t: TFunction, name: DestinationCheckItemName): str
 
 function Item({ item }: { item: DestinationCheckItem }) {
   const { t } = useTranslation();
+  const code = item.code ?? null;
   return (
     <li className="flex min-w-0 items-start gap-2 text-sm" data-testid="destination-check-item">
       {item.ok ? (
@@ -57,15 +59,22 @@ function Item({ item }: { item: DestinationCheckItem }) {
       ) : (
         <CircleXIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-destructive" />
       )}
-      <span className="min-w-0 wrap-anywhere">
-        <span className="font-medium">{checkItemName(t, item.name)}:</span>{" "}
-        {item.ok ? (
-          t("destinations.check.ok")
-        ) : (
-          <span className="text-destructive">
-            <span className="sr-only">{t("destinations.check.itemFailed")} </span>
-            {item.message ?? t("destinations.check.noDetails")}
-          </span>
+      <span className="flex min-w-0 flex-col gap-0.5 wrap-anywhere">
+        <span>
+          <span className="font-medium">{checkItemName(t, item.name)}:</span>{" "}
+          {item.ok ? (
+            t("destinations.check.ok")
+          ) : (
+            <span className="text-destructive" data-testid="destination-check-item-reason">
+              <span className="sr-only">{t("destinations.check.itemFailed")} </span>
+              {code === null
+                ? (item.message ?? t("destinations.check.noDetails"))
+                : checkCodeText(t, code)}
+            </span>
+          )}
+        </span>
+        {!item.ok && (
+          <CheckDetail code={code} message={item.message} testId="destination-check-item-detail" />
         )}
       </span>
     </li>

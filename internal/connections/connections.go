@@ -837,7 +837,7 @@ func (s *Service) cachedClient(r dbgen.GetConnectionRow) (*mattermost.Client, er
 }
 
 // Step is a step of a Connection check: whether it passed or was skipped, its latency and path, and when it failed
-// what answered.
+// what answered, in English, with its code, which clients translate (ConnectionCheckStep.code).
 type Step struct {
 	Name    string
 	OK      bool
@@ -845,6 +845,7 @@ type Step struct {
 	Latency time.Duration
 	Via     string
 	Message string
+	Code    string
 }
 
 // CheckResult is the result of a Connection check: its steps and the bot's username once the token works; for a
@@ -866,7 +867,8 @@ const WarningPressAnswersInThread = "press_answers_in_thread"
 // Check runs the Connection check of the Connection publicID on the interactive path, limited by the Connection. A
 // Telegram Connection is checked in steps by checkTelegram, against the unsaved baseURL when it is set. A Mattermost
 // one (C-13.FR-2), which takes no baseURL, is checked with GET /api/v4/users/me with the bot token. A token that works
-// records the bot's username and user id on the Connection; a 401 fails with "The bot token is not valid.". No limiter
+// records the bot's username and user id on the Connection; a 401 fails with "The bot token is not valid." and
+// mattermost.CodeTokenInvalid, any other failure with the code of mattermost.Result.FailureCode. No limiter
 // token within the budget is a *delivery.LimitedError. Once the token works, a read of the bot's roles tells whether
 // it may make ephemeral posts; when it may not, the check passes with WarningPressAnswersInThread (D284, F-064); a
 // failed read adds nothing.
@@ -901,9 +903,9 @@ func (s *Service) Check(ctx context.Context, publicID string, baseURL *string) (
 	}
 	step := Step{Name: StepToken, OK: r.OK(), Latency: latency, Via: c.Via()}
 	if !r.OK() {
-		step.Message = string(r.Outcome.Error)
+		step.Message, step.Code = string(r.Outcome.Error), r.FailureCode()
 		if r.Status == http.StatusUnauthorized {
-			step.Message = mattermost.MessageTokenInvalid
+			step.Message, step.Code = mattermost.MessageTokenInvalid, mattermost.CodeTokenInvalid
 		}
 		return CheckResult{Steps: []Step{step}}, nil
 	}

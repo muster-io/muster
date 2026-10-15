@@ -278,7 +278,7 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await page.getByRole("textbox", { name: "Базовый URL Bot API" }).fill(`${FTG}/other/`);
   await page.getByRole("button", { name: "Проверить подключение" }).click();
   await expect(steps(page)).toHaveText([
-    /^Пробный запрос без токена: ошибка \d+ мс · напрямуюWrong path prefix: the server answered 404\.$/,
+    /^Пробный запрос без токена: ошибка \d+ мс · напрямуюНеверный префикс пути: сервер ответил 404\.Подробности: Wrong path prefix: the server answered 404\.$/,
     "getMe: Пропущен: сначала сохраните адрес",
     "getWebhookInfo: Пропущен: сначала сохраните адрес",
   ]);

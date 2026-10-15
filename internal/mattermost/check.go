@@ -22,12 +22,22 @@ const (
 	MessageArchived     = "The channel is archived."
 )
 
-// Step is one step of a check: its name, whether it passed, and when it failed the message for the person and the
-// outcome for delivery.
+// The codes of the steps that failed (ConnectionCheckStep.code, DestinationCheckItem.code), one per message above; any
+// other failure has the code of delivery.FailureCode.
+const (
+	CodeTokenInvalid = "token_invalid"
+	CodeNotMember    = "bot_not_in_channel"
+	CodeOtherTeam    = "channel_in_other_team"
+	CodeArchived     = "channel_archived"
+)
+
+// Step is one step of a check: its name, whether it passed, and when it failed the message for the person, in English,
+// its code, which clients translate, and the outcome for delivery.
 type Step struct {
 	Name    string
 	OK      bool
 	Message string
+	Code    string
 	Outcome delivery.Outcome
 }
 
@@ -88,15 +98,15 @@ func call(ctx context.Context, run Runner, read func(ctx context.Context, class 
 // GET /api/v4/users/me for the token, then GET /api/v4/channels/{channel_id}/members/me for the bot's membership,
 // then, once both passed, the channel and its team for their names. A step that fails ends the check; the token fails
 // with MessageTokenInvalid on 401, the membership with MessageNotMember on 403 or 404, with MessageOtherTeam for a
-// channel of another team and MessageArchived for an archived one, and any other failure with the masked text of the
-// answer.
+// channel of another team and MessageArchived for an archived one, each with its code, and any other failure with the
+// masked text of the answer and the code of Result.FailureCode.
 func CheckDestination(ctx context.Context, c *Client, run Runner, teamID, channelID string) (Check, error) {
 	var out Check
-	fail := func(name, message string, r Result) Check {
+	fail := func(name, code, message string, r Result) Check {
 		if message == "" {
-			message = string(r.Outcome.Error)
+			message, code = string(r.Outcome.Error), r.FailureCode()
 		}
-		out.Steps = append(out.Steps, Step{Name: name, Message: message, Outcome: r.Outcome})
+		out.Steps = append(out.Steps, Step{Name: name, Message: message, Code: code, Outcome: r.Outcome})
 		out.Outcome = r.Outcome
 		return out
 	}
@@ -109,11 +119,10 @@ func CheckDestination(ctx context.Context, c *Client, run Runner, teamID, channe
 		return Check{}, err
 	}
 	if !r.OK() {
-		message := ""
 		if r.Status == http.StatusUnauthorized {
-			message = MessageTokenInvalid
+			return fail(StepToken, CodeTokenInvalid, MessageTokenInvalid, r), nil
 		}
-		return fail(StepToken, message, r), nil
+		return fail(StepToken, "", "", r), nil
 	}
 	out.Steps = append(out.Steps, Step{Name: StepToken, OK: true})
 	if r, err = call(ctx, run, func(ctx context.Context, class outbound.Class) Result {
@@ -122,11 +131,10 @@ func CheckDestination(ctx context.Context, c *Client, run Runner, teamID, channe
 		return Check{}, err
 	}
 	if !r.OK() {
-		message := ""
 		if r.Status == http.StatusForbidden || r.Status == http.StatusNotFound {
-			message = MessageNotMember
+			return fail(StepBotInChannel, CodeNotMember, MessageNotMember, r), nil
 		}
-		return fail(StepBotInChannel, message, r), nil
+		return fail(StepBotInChannel, "", "", r), nil
 	}
 	var ch Channel
 	if r, err = call(ctx, run, func(ctx context.Context, class outbound.Class) Result {
@@ -137,16 +145,16 @@ func CheckDestination(ctx context.Context, c *Client, run Runner, teamID, channe
 		return Check{}, err
 	}
 	if !r.OK() {
-		return fail(StepBotInChannel, "", r), nil
+		return fail(StepBotInChannel, "", "", r), nil
 	}
 	switch {
 	case ch.TeamID != teamID:
-		return fail(StepBotInChannel, MessageOtherTeam, Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal,
-			Error: MessageOtherTeam}}), nil
+		return fail(StepBotInChannel, CodeOtherTeam, MessageOtherTeam, Result{Outcome: delivery.Outcome{
+			Kind: delivery.OutcomeFatal, Error: MessageOtherTeam}}), nil
 	case ch.DeleteAt != 0:
 		// Mattermost refuses posts to an archived channel with 404, which is Fatal (C-13.FR-5).
-		return fail(StepBotInChannel, MessageArchived, Result{Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal,
-			Error: MessageArchived}}), nil
+		return fail(StepBotInChannel, CodeArchived, MessageArchived, Result{Outcome: delivery.Outcome{
+			Kind: delivery.OutcomeFatal, Error: MessageArchived}}), nil
 	}
 	var team Team
 	if r, err = call(ctx, run, func(ctx context.Context, class outbound.Class) Result {
@@ -157,7 +165,7 @@ func CheckDestination(ctx context.Context, c *Client, run Runner, teamID, channe
 		return Check{}, err
 	}
 	if !r.OK() {
-		return fail(StepBotInChannel, "", r), nil
+		return fail(StepBotInChannel, "", "", r), nil
 	}
 	out.Steps = append(out.Steps, Step{Name: StepBotInChannel, OK: true})
 	out.TeamName, out.ChannelName = team.Name, ch.Name

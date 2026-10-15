@@ -168,7 +168,11 @@ func TestCheckDestination(t *testing.T) {
 		t.Helper()
 		res, err := mattermost.CheckDestination(ctx, c, interactive, fakemattermost.TeamID, channel)
 		last := res.Steps[len(res.Steps)-1]
+		codes := map[string]string{mattermost.MessageNotMember: mattermost.CodeNotMember,
+			mattermost.MessageOtherTeam: mattermost.CodeOtherTeam, mattermost.MessageArchived: mattermost.CodeArchived,
+			mattermost.MessageTokenInvalid: mattermost.CodeTokenInvalid}
 		if err != nil || res.OK() || last.Name != step || last.OK || last.Message != message ||
+			last.Code != codes[message] ||
 			res.Outcome.Kind != kind || last.Outcome.Kind != kind || res.TeamName != "" {
 			t.Errorf("check of %s = %+v, %v", channel, res, err)
 		}
@@ -217,7 +221,7 @@ func TestCheckDestinationFailures(t *testing.T) {
 		last := res.Steps[len(res.Steps)-1]
 		if err != nil || res.OK() || last.Name != tc.step || res.Outcome.Kind != tc.kind ||
 			!strings.Contains(last.Message, "Mattermost answered 503: down for") ||
-			strings.Contains(last.Message, token) {
+			strings.Contains(last.Message, token) || last.Code != delivery.CodeRequestFailed {
 			t.Errorf("%s: %+v, %v", tc.path, res, err)
 		}
 	}
@@ -282,7 +286,7 @@ func TestResponseMapping(t *testing.T) {
 			fault(t, f, tc.fault)
 			_, r := c.Me(t.Context(), outbound.ClassInteractive)
 			if r.Outcome.Kind != tc.kind || r.Outcome.RetryAfter != tc.retry ||
-				!strings.Contains(string(r.Outcome.Error), tc.text) {
+				!strings.Contains(string(r.Outcome.Error), tc.text) || r.FailureCode() != delivery.CodeRequestFailed {
 				t.Errorf("%s: %+v", tc.name, r)
 			}
 			if tc.kind == delivery.OutcomeRetryAfter && r.Outcome.Scope != delivery.ScopeConnection {
@@ -294,7 +298,8 @@ func TestResponseMapping(t *testing.T) {
 		fault(t, f, fakeserver.Fault{Path: "/api/v4/users/me", Status: 200, DelayMs: 5000, Times: 1})
 		ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
 		defer cancel()
-		if _, r := c.Me(ctx, outbound.ClassInteractive); r.Outcome.Kind != delivery.OutcomeTransient || r.Status != 0 {
+		if _, r := c.Me(ctx, outbound.ClassInteractive); r.Outcome.Kind != delivery.OutcomeTransient || r.Status != 0 ||
+			r.FailureCode() != delivery.CodeTimeout {
 			t.Errorf("timeout: %+v", r)
 		}
 	})
@@ -307,7 +312,7 @@ func TestResponseMapping(t *testing.T) {
 		addr := ln.Addr().String()
 		_ = ln.Close()
 		if _, r := newClient(t, "http://"+addr, nil).Me(t.Context(), outbound.ClassInteractive); r.Outcome.Kind !=
-			delivery.OutcomeTransient {
+			delivery.OutcomeTransient || r.FailureCode() != delivery.CodeConnectFailed {
 			t.Errorf("refused: %+v", r)
 		}
 	})
@@ -319,7 +324,7 @@ func TestResponseMapping(t *testing.T) {
 		}
 		before := len(f.Requests())
 		if _, r := blocked.Me(t.Context(), outbound.ClassInteractive); r.Outcome.Kind != delivery.OutcomeFatal ||
-			len(f.Requests()) != before {
+			len(f.Requests()) != before || r.FailureCode() != delivery.CodeBlocked {
 			t.Errorf("blocked: %+v", r)
 		}
 		if !strings.Contains(log.String(), `"event":"outbound_blocked"`) || strings.Contains(log.String(), token) {

@@ -81,12 +81,13 @@ type FieldError struct {
 
 func (e *FieldError) Error() string { return e.Pointer + ": " + e.Detail }
 
-// CheckItem is one step of a Destination check with its result: when it failed, its message and, on a save, the field
-// it concerns.
+// CheckItem is one step of a Destination check with its result: when it failed, its message, in English, its code,
+// which clients translate (DestinationCheckItem.code), and, on a save, the field it concerns.
 type CheckItem struct {
 	Name    string
 	OK      bool
 	Message string
+	Code    string
 	Pointer string
 }
 
@@ -613,7 +614,8 @@ func (s *Service) check(ctx context.Context, in Input, destinationID *int64) (Ch
 		if st.Name == mattermost.StepToken {
 			pointer = pointerConnection
 		}
-		failed.Items = append(failed.Items, CheckItem{Name: st.Name, Message: st.Message, Pointer: pointer})
+		failed.Items = append(failed.Items, CheckItem{Name: st.Name, Message: st.Message, Code: st.Code,
+			Pointer: pointer})
 	}
 	return ChannelChecked{}, failed
 }
@@ -797,7 +799,7 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 		}
 		out = CheckResult{OK: res.Check.OK(), Health: d.Health}
 		for _, st := range res.Check.Steps {
-			out.Items = append(out.Items, CheckItem{Name: st.Name, OK: st.OK, Message: st.Message})
+			out.Items = append(out.Items, CheckItem{Name: st.Name, OK: st.OK, Message: st.Message, Code: st.Code})
 		}
 	case d.Type == TypeTelegram && d.Connection != nil:
 		res, err := s.writer.Telegram.CheckTelegramChannel(ctx, TelegramChannelCheck{Connection: *d.Connection,
@@ -807,7 +809,7 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 		}
 		out = CheckResult{OK: res.Check.OK(), Health: d.Health}
 		for _, st := range res.Check.Steps {
-			out.Items = append(out.Items, CheckItem{Name: st.Name, OK: st.OK, Message: st.Message})
+			out.Items = append(out.Items, CheckItem{Name: st.Name, OK: st.OK, Message: st.Message, Code: st.Code})
 		}
 		// A group other than the stored one fails the check until the Destination is saved again, since its Thread
 		// replies go to the stored group.
@@ -816,7 +818,8 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 			out.OK = false
 			for i := range out.Items {
 				if out.Items[i].Name == telegram.StepDiscussionGroup {
-					out.Items[i].OK, out.Items[i].Message = false, telegram.MessageMoved
+					out.Items[i].OK, out.Items[i].Message, out.Items[i].Code = false, telegram.MessageMoved,
+						telegram.CodeMoved
 				}
 			}
 		}
@@ -934,10 +937,11 @@ func (s *Service) checkTelegram(ctx context.Context, in Input, destinationID *in
 			continue
 		}
 		pointer := pointerChannel
-		if st.Message == telegram.MessageTokenInvalid {
+		if st.Code == telegram.CodeTokenInvalid {
 			pointer = pointerConnection
 		}
-		failed.Items = append(failed.Items, CheckItem{Name: st.Name, Message: st.Message, Pointer: pointer})
+		failed.Items = append(failed.Items, CheckItem{Name: st.Name, Message: st.Message, Code: st.Code,
+			Pointer: pointer})
 	}
 	return TelegramChannelChecked{}, failed
 }

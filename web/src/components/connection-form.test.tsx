@@ -398,6 +398,22 @@ const PASSED: ConnectionCheckResult = {
   bot_name: "muster-dev-bot",
 };
 
+const TOKEN_REFUSED: ConnectionCheckResult = {
+  ok: false,
+  steps: [
+    {
+      name: "token",
+      ok: false,
+      latency_ms: 8,
+      via: "direct",
+      message: "The bot token is not valid.",
+      code: "token_invalid",
+    },
+  ],
+  warnings: [],
+  bot_name: null,
+};
+
 async function runCheck(response: Response, button = "Check connection") {
   const fetch = vi.spyOn(window, "fetch").mockResolvedValue(response);
   await render(providers(<ConnectionCheck connectionId="CN0000000000AA" dirty={false} />, WRITE));
@@ -459,6 +475,50 @@ describe("ConnectionCheck", () => {
     await expect
       .element(page.getByTestId("connection-check-step"))
       .toHaveTextContent("Token: failed 8 ms · directThe bot token is not valid.");
+  });
+
+  test("shows a failing step by its code, without repeating the same English message", async () => {
+    await runCheck(json(200, TOKEN_REFUSED));
+    await expect
+      .element(page.getByTestId("connection-check-step-reason"))
+      .toHaveTextContent("The bot token is not valid.");
+    await expect.element(page.getByTestId("connection-check-step-detail")).not.toBeInTheDocument();
+  });
+
+  test("translates a failing step by its code, with the server's English message as the detail", async () => {
+    await i18n.changeLanguage("ru");
+    await runCheck(json(200, TOKEN_REFUSED), "Проверить подключение");
+    await expect
+      .element(page.getByTestId("connection-check-step-reason"))
+      .toHaveTextContent("Токен бота недействителен.");
+    await expect
+      .element(page.getByTestId("connection-check-step-detail"))
+      .toHaveTextContent("Подробности: The bot token is not valid.");
+  });
+
+  test("names a request that got no answer by its code, the server's text as the detail", async () => {
+    await runCheck(
+      json(200, {
+        ok: false,
+        steps: [
+          {
+            name: "token",
+            ok: false,
+            latency_ms: 3,
+            via: "direct",
+            message: "dns: lookup mm.invalid: no such host",
+            code: "dns_failed",
+          },
+        ],
+        warnings: [],
+        bot_name: null,
+      }),
+    );
+    await expect
+      .element(page.getByTestId("connection-check-step"))
+      .toHaveTextContent(
+        "Token: failed 3 ms · directThe host name does not resolve.Details: dns: lookup mm.invalid: no such host",
+      );
   });
 
   test("names the wait of a busy messenger", async () => {

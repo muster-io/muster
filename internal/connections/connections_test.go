@@ -957,7 +957,7 @@ func TestCheck(t *testing.T) {
 	res, err := e.svc.Check(ctx, c.PublicID, nil)
 	if err != nil || !res.OK || res.BotName != fakemattermost.BotUsername || len(res.Steps) != 1 ||
 		res.Steps[0].Name != connections.StepToken || !res.Steps[0].OK || res.Steps[0].Via != mattermost.ViaDirect ||
-		res.Steps[0].Latency != 7*time.Millisecond || res.Steps[0].Message != "" ||
+		res.Steps[0].Latency != 7*time.Millisecond || res.Steps[0].Message != "" || res.Steps[0].Code != "" ||
 		!slices.Equal(res.Warnings, []string{connections.WarningPressAnswersInThread}) {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
@@ -990,7 +990,8 @@ func TestCheck(t *testing.T) {
 	nBots := len(e.store.bots)
 	res, err = e.svc.Check(ctx, c.PublicID, nil)
 	if err != nil || res.OK || res.BotName != "" || res.Steps[0].OK ||
-		res.Steps[0].Message != mattermost.MessageTokenInvalid || len(e.store.bots) != nBots {
+		res.Steps[0].Message != mattermost.MessageTokenInvalid || res.Steps[0].Code != mattermost.CodeTokenInvalid ||
+		len(e.store.bots) != nBots {
 		t.Errorf("revoked = %+v, %v", res, err)
 	}
 	e.configure(t, `{"revoked_tokens":[]}`)
@@ -998,7 +999,8 @@ func TestCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err = e.svc.Check(ctx, c.PublicID, nil)
-	if err != nil || res.OK || !strings.Contains(res.Steps[0].Message, "answered 503") {
+	if err != nil || res.OK || !strings.Contains(res.Steps[0].Message, "answered 503") ||
+		res.Steps[0].Code != delivery.CodeRequestFailed {
 		t.Errorf("unavailable = %+v, %v", res, err)
 	}
 	e.path.limited = true

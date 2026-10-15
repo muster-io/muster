@@ -19,6 +19,7 @@
  */
 import type { ConnectionCheckStepName } from './connectionCheckStepName';
 import type { ConnectionPath } from './connectionPath';
+import type { NullableConnectionCheckCode } from './nullableConnectionCheckCode';
 
 export interface ConnectionCheckStep {
   name: ConnectionCheckStepName;
@@ -28,8 +29,9 @@ export interface ConnectionCheckStep {
   latency_ms?: number | null;
   via?: ConnectionPath;
   /**
-     * What answered when the step failed; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked.
+     * What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail.
      * @nullable
      */
   message?: string | null;
+  code?: NullableConnectionCheckCode | null;
 }

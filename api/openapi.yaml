@@ -7483,7 +7483,8 @@ components:
         - code: destination_check_failed
           description: Saving a Mattermost or Telegram Destination ran its Destination check, a check failed and nothing
             was saved. One item per failing check, at the field the check concerns — `/connection_id` for `token`,
-            `/channel_id` for the others (see `DestinationCheckItem`) — with the check's message as `detail`.
+            `/channel_id` for the others (see `DestinationCheckItem`) — with the check's message as `detail` and its
+            code as `check_code`.
         - code: link_code_invalid
           description: The Mattermost link code is wrong, or its request is void, used or expired; never says which. The
             pointer is `/code` (`confirmMattermostLink`), and `attempts_remaining` says how many codes the request still
@@ -7628,6 +7629,10 @@ components:
           type: integer
           minimum: 1
           description: Column of a template error.
+        check_code:
+          description: Set on `destination_check_failed`; the code of the failing check, as in `DestinationCheckItem`,
+            which clients translate, with `detail` as its English text.
+          $ref: '#/components/schemas/NullableDestinationCheckCode'
     SecretStatus:
       type: object
       description: What a read shows instead of a Secret. The value itself is never returned.
@@ -11360,8 +11365,39 @@ components:
           type:
           - string
           - 'null'
-          description: What answered when the step failed; untrusted text where it comes from the remote side. Secrets, the
-            Signing secret and tokens are masked.
+          description: What answered when the step failed, or what a step that passed found, in English; untrusted text
+            where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate
+            `code` and show this text as its detail.
+        code:
+          $ref: '#/components/schemas/NullableConnectionCheckCode'
+    NullableConnectionCheckCode:
+      type:
+      - string
+      - 'null'
+      description: 'What a step of the Connection check found, as a stable code that clients translate, with `message` as
+        its detail in English; null when the step passed with nothing to say or was skipped. A step that failed:
+        `token_invalid` — the messenger refused the bot token (`token`, `get_me`); for the dry probe, `not_bot_api` — the
+        address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of
+        the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for any step,
+        `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be
+        read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy
+        refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` —
+        any other failure, such as an error answer, which `message` names. A step that passed: `webhook_set`
+        (`get_webhook_info`) — a webhook is set, and `message` names its host.'
+      enum:
+      - token_invalid
+      - not_bot_api
+      - wrong_path_prefix
+      - unexpected_status
+      - dns_failed
+      - connect_failed
+      - tls_failed
+      - timeout
+      - proxy_refused
+      - blocked
+      - request_failed
+      - webhook_set
+      - null
     ConnectionCheckResult:
       type: object
       required:
@@ -12137,6 +12173,46 @@ components:
           type:
           - string
           - 'null'
+          description: Why the check failed, in English; untrusted text where it comes from the messenger. Clients
+            translate `code` and show this text as its detail.
+        code:
+          $ref: '#/components/schemas/NullableDestinationCheckCode'
+    NullableDestinationCheckCode:
+      type:
+      - string
+      - 'null'
+      description: 'Why a check of the Destination check failed, as a stable code that clients translate, with `message`
+        as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token
+        (`token`, Telegram `channel_exists`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team`
+        — the channel is not in the Destination''s team, `channel_archived`; Telegram `channel_exists`:
+        `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a
+        channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not
+        enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved,
+        and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`,
+        `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; any check:
+        `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in
+        `NullableConnectionCheckCode`.'
+      enum:
+      - token_invalid
+      - bot_not_in_channel
+      - channel_in_other_team
+      - channel_archived
+      - channel_not_found
+      - not_a_channel
+      - comments_disabled
+      - changed_since_saved
+      - bot_not_channel_admin
+      - bot_may_not_post
+      - bot_may_not_edit
+      - bot_not_group_admin
+      - dns_failed
+      - connect_failed
+      - tls_failed
+      - timeout
+      - proxy_refused
+      - blocked
+      - request_failed
+      - null
     DestinationCheckResult:
       type: object
       required:

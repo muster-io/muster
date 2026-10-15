@@ -520,18 +520,27 @@ func TestCreateDestinationAPI(t *testing.T) {
 		t.Errorf("input %+v", in)
 	}
 	fd.saveErr = &destinations.CheckFailedError{Items: []destinations.CheckItem{{Name: mattermost.StepBotInChannel,
-		Message: mattermost.MessageNotMember, Pointer: "/channel_id"}}}
+		Message: mattermost.MessageNotMember, Code: mattermost.CodeNotMember, Pointer: "/channel_id"}}}
 	a = x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", mattermostBody)
 	if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity ||
 		a.json(t)["type"] != problemBase+"validation-failed" || len(errs) != 1 || errs[0]["pointer"] != "/channel_id" ||
-		errs[0]["code"] != "destination_check_failed" || errs[0]["detail"] != mattermost.MessageNotMember {
+		errs[0]["code"] != "destination_check_failed" || errs[0]["detail"] != mattermost.MessageNotMember ||
+		errs[0]["check_code"] != "bot_not_in_channel" {
 		t.Errorf("no bot = %d %s", a.status, a.body)
 	}
 	fd.saveErr = &destinations.CheckFailedError{Items: []destinations.CheckItem{{Name: mattermost.StepToken,
-		Message: mattermost.MessageTokenInvalid, Pointer: "/connection_id"}}}
+		Message: mattermost.MessageTokenInvalid, Code: mattermost.CodeTokenInvalid, Pointer: "/connection_id"}}}
 	if errs := problemErrors(t, x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
-		mattermostBody)); len(errs) != 1 || errs[0]["pointer"] != "/connection_id" {
+		mattermostBody)); len(errs) != 1 || errs[0]["pointer"] != "/connection_id" || errs[0]["check_code"] != "token_invalid" {
 		t.Errorf("revoked token = %v", errs)
+	}
+	fd.saveErr = &destinations.CheckFailedError{Items: []destinations.CheckItem{{Name: mattermost.StepToken,
+		Message: "answered 500", Pointer: "/connection_id"}}}
+	if errs := problemErrors(t, x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
+		mattermostBody)); len(errs) != 1 || errs[0]["detail"] != "answered 500" {
+		t.Errorf("without a code = %v", errs)
+	} else if _, set := errs[0]["check_code"]; set {
+		t.Errorf("a check without a code has check_code: %v", errs)
 	}
 	fd.saveErr = &mentions.FieldError{Pointer: "/mentions/new_alerts/user_ids/0", Code: mentions.CodeUnknownID,
 		Detail: "No such user."}
@@ -602,13 +611,16 @@ func TestCheckDestinationAPI(t *testing.T) {
 		Token: &auth.Token{ID: 53, Name: "destinations-test"}}
 	path := "/api/v1/destinations/" + mattermostID + "/checks"
 	fd.check = destinations.CheckResult{Health: destinations.Health{State: "healthy"}, Items: []destinations.CheckItem{
-		{Name: mattermost.StepToken, OK: true}, {Name: mattermost.StepBotInChannel, Message: mattermost.MessageNotMember}}}
+		{Name: mattermost.StepToken, OK: true}, {Name: mattermost.StepBotInChannel, Message: mattermost.MessageNotMember,
+			Code: mattermost.CodeNotMember}}}
 	a := x.as(t, destinationsTester, http.MethodPost, path, "")
 	var res gen.DestinationCheckResult
 	decodeInto(t, a, &res)
 	if a.status != http.StatusOK || res.Ok || len(res.Checks) != 2 || res.Checks[0].Name != "token" ||
-		!res.Checks[0].Ok || !res.Checks[0].Message.IsNull() || res.Checks[1].Name != "bot_in_channel" ||
+		!res.Checks[0].Ok || !res.Checks[0].Message.IsNull() || !res.Checks[0].Code.IsNull() ||
+		res.Checks[1].Name != "bot_in_channel" ||
 		res.Checks[1].Message.MustGet() != "The bot is not a member of this channel." ||
+		res.Checks[1].Code.MustGet() != gen.NullableDestinationCheckCodeBotNotInChannel ||
 		res.Health.State != gen.Healthy {
 		t.Errorf("check = %d %s", a.status, a.body)
 	}
