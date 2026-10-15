@@ -7,7 +7,8 @@
 // Groups. Destinations receive a Storm summary." Health follows the Destinations list, which the destination hint
 // reads again; the Route's own references name a Destination the list does not show. Each Destination reads
 // "<name> · <messenger> · via <Connection> · <channel>" (D309), and two or more Destinations that post in one chat get a
-// warning that does not block saving (D305).
+// warning that does not block saving (D305). Until both the Destinations and the Connections are read, a row shows a
+// placeholder after the name instead of a shorter label that would change once they arrive.
 
 import { Link } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
@@ -21,12 +22,7 @@ import { fieldErrorText } from "../lib/api";
 import { useTimeFormat } from "../lib/time";
 import { useCan } from "./app-shell";
 import { BrokenBanner, HealthBadge, destinationTypeName, healthText } from "./destination-health";
-import {
-  duplicateChatGroups,
-  fullLabel,
-  labelParts,
-  useConnectionsById,
-} from "./destination-label";
+import { duplicateChatGroups, fullLabel, labelParts, useConnections } from "./destination-label";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
@@ -45,17 +41,34 @@ export function routeDestinationErrorText(t: TFunction, code: string): string {
 
 /**
  * Every Destination the Route editor can offer, with its health, and the Connections that label them; page size at
- * most 500 (api.page_size).
+ * most 500 (api.page_size). The labels are settled once both lists are read, failed, or not readable.
  */
 export function useDestinationChoices(): {
   items: Destination[];
   connections: ReadonlyMap<string, Connection>;
   loaded: boolean;
+  labelsSettled: boolean;
 } {
   const canRead = useCan("destinations:read");
   const list = useListDestinations({ limit: 500 }, { query: { enabled: canRead } });
-  const connections = useConnectionsById();
-  return { items: list.data?.items ?? [], connections, loaded: list.isSuccess };
+  const connections = useConnections();
+  return {
+    items: list.data?.items ?? [],
+    connections: connections.byId,
+    loaded: list.isSuccess,
+    labelsSettled: (!canRead || list.isSuccess || list.isError) && connections.settled,
+  };
+}
+
+/** The place of a label that is not known yet: as wide as a short label, the same on every render. */
+function LabelPlaceholder() {
+  return (
+    <span
+      aria-hidden="true"
+      className="ml-1 inline-block h-3.5 w-40 max-w-full animate-pulse rounded bg-muted align-middle"
+      data-testid="route-destination-label-pending"
+    />
+  );
 }
 
 /** A Destination as an option of a picker: its full label and, when Broken, its health. */
@@ -216,12 +229,26 @@ export function RouteDestinations({
               >
                 <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                   {ref === undefined ? (
-                    <span className="font-mono text-sm wrap-anywhere">{destinationId}</span>
+                    choices.labelsSettled ? (
+                      <span className="font-mono text-sm wrap-anywhere">{destinationId}</span>
+                    ) : (
+                      <span className="min-w-0" aria-busy="true">
+                        <LabelPlaceholder />
+                      </span>
+                    )
                   ) : (
                     <>
-                      <span className="min-w-0 wrap-anywhere" data-testid="route-destination-label">
+                      <span
+                        className="min-w-0 wrap-anywhere"
+                        data-testid="route-destination-label"
+                        aria-busy={choices.labelsSettled ? undefined : true}
+                      >
                         <DestinationName destination={ref} />
-                        <span className="text-sm text-muted-foreground">{` · ${restOf(ref)}`}</span>
+                        {choices.labelsSettled ? (
+                          <span className="text-sm text-muted-foreground">{` · ${restOf(ref)}`}</span>
+                        ) : (
+                          <LabelPlaceholder />
+                        )}
                       </span>
                       <HealthBadge health={ref.health} />
                     </>

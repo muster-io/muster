@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -14,6 +15,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
+	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/timers"
@@ -302,8 +304,24 @@ func (s *Service) FireAckTimeout(ctx context.Context, tx dbgen.DBTX, groupID int
 	return after.run, nil
 }
 
-// ReasonNoAnswer is the reason of an auto_unacknowledged entry (C-17.FR-5).
-const ReasonNoAnswer = "No answer to the last two Reminders"
+// ReasonNoAnswer is the reason of an auto_unacknowledged entry (C-17.FR-5); ReasonCodeNoAnswer is its code.
+const (
+	ReasonNoAnswer     = "No answer to the last two Reminders"
+	ReasonCodeNoAnswer = "reminders_unanswered"
+)
+
+// StatusReasonCode is the code of the reason of an automatic status change, as the API gives it beside the reason
+// (reason_code): the reason itself where it is one already — why an Alert resolved, why an Owner was released — and
+// ReasonCodeNoAnswer for ReasonNoAnswer; "" for any other reason.
+func StatusReasonCode(reason string) string {
+	switch {
+	case reason == ReasonNoAnswer:
+		return ReasonCodeNoAnswer
+	case reason == ReasonOwnerDisabled, reason == ReasonOwnerDeleted, slices.Contains(ingest.ResolveReasons, reason):
+		return reason
+	}
+	return ""
+}
 
 // The reasons of reminder_skipped.
 const (

@@ -7,7 +7,8 @@
 // its outcome ("Sent" or the text of its error class), the error, the duration, the request with every Secret, the
 // Signing secret and the tokens masked, the response status, the response body as plain text and the extracted
 // values. The "Button press" block of a Mattermost Destination says whether the bot's press of the test message reached
-// Muster. The health of the result is the page's at once: a test that succeeded in every step ends the Broken state,
+// Muster and, when it did not, what to do, translated by its error code with the server's English text as the detail.
+// The health of the result is the page's at once: a test that succeeded in every step ends the Broken state,
 // and when a step failed the Destination stays Broken, which the result explains, the button press included.
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -81,9 +82,9 @@ export function classText(t: TFunction, errorClass: DeliveryErrorClass): string 
 }
 
 /**
- * The outcome of a step: the button press says whether presses reach Muster, or its error, which names what to change
- * on the Mattermost server; any other step "Sent" or the text of its class, with the webhook steps' limit named as the
- * endpoint's.
+ * The outcome of a step: the button press says whether presses reach Muster, or, by its error code, what to change on
+ * the Mattermost server or that the Connection check must learn the bot first; any other step "Sent" or the text of its
+ * class, with the webhook steps' limit named as the endpoint's. The server's text of the error is its detail.
  */
 export function outcomeText(t: TFunction, step: TestStep): string {
   if (step.name === "press") {
@@ -94,7 +95,17 @@ export function outcomeText(t: TFunction, step: TestStep): string {
       // The message was posted; only its press waited for a limiter token in vain.
       return t("destinationTest.pressLimited");
     }
-    return step.error ? step.error : classText(t, step.error_class);
+    switch (step.error_code) {
+      case "press_not_reached":
+        return t("destinationTest.pressNotReached");
+      case "bot_unknown":
+        return t("destinationTest.pressBotUnknown");
+      case null:
+      case undefined:
+        return classText(t, step.error_class);
+      default:
+        return unreachable(step.error_code);
+    }
   }
   if (step.error_class === "limited" && (step.name === "event" || step.name === "create")) {
     // Only an outgoing webhook has these steps; its limiter guards an endpoint, not a messenger.
@@ -118,8 +129,8 @@ function StepBlock({ step }: { step: TestStep }) {
   const { t } = useTranslation();
   const headingId = useId();
   const ok = step.error_class === "none";
-  // The press shows its error as its outcome; the other steps show it below.
-  const error = step.name === "press" ? null : (step.error ?? null);
+  // The outcome is translated; the server's text of the error, in English, is shown below as its detail.
+  const error = step.error ?? null;
   const extracted = Object.entries(step.extracted ?? {});
   return (
     <article

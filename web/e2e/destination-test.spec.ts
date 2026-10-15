@@ -4,7 +4,8 @@
 // The Test panel of the Destination page against `muster dev` and its fake Mattermost server and fake receiver:
 // Verification steps 1 to 4, 6 and 7 of its story. "alerts" → "Test" → "Example" → "Send test message" shows
 // "Message: Sent" and "Button press: Button presses reach Muster.", and the press error that names
-// AllowedUntrustedInternalConnections once the fake no longer allows Muster's address. The template-mode webhook "chat"
+// AllowedUntrustedInternalConnections once the fake no longer allows Muster's address, translated by its code with the
+// server's text, which names the ingest address, as its detail. The template-mode webhook "chat"
 // shows "Create: Sent" with the extracted id and its Secret as [redacted]; the events-mode webhook "auto" shows
 // "Event: Sent" with the response status 200, and "limited" once a delivery spent its limiter. A Broken "alerts" stays
 // Broken when only its button press fails, which the panel explains, and shows "Healthy" without a reload after a
@@ -37,6 +38,8 @@ const TEAM_MM = "s048-mm";
 const TEAM_AUTO = "s048-auto";
 const PRESS_ERROR =
   "The button press did not reach Muster. Add the host of http://localhost:8081 to ServiceSettings.AllowedUntrustedInternalConnections on the Mattermost server.";
+const PRESS_NOT_REACHED =
+  "Button press: The button press did not reach Muster. Add the host of MUSTER_INGEST_URL to ServiceSettings.AllowedUntrustedInternalConnections on the Mattermost server.";
 const LIMITED =
   "The endpoint's rate limit is reached; nothing was sent. Try again in a few seconds.";
 const SECRET_VALUE = "chat-token-value";
@@ -275,7 +278,8 @@ test("tests a Mattermost Destination and its button press, and ends its Broken s
   await allow("");
   try {
     await sendTest(page);
-    await expect(stepTitles(page)).toHaveText(["Message: Sent", `Button press: ${PRESS_ERROR}`]);
+    await expect(stepTitles(page)).toHaveText(["Message: Sent", PRESS_NOT_REACHED]);
+    await expect(page.getByTestId("test-step-error")).toHaveText(PRESS_ERROR);
     await shot(page, "destination-test-press-not-reached");
   } finally {
     await allow(ALLOWED);
@@ -298,7 +302,7 @@ test("tests a Mattermost Destination and its button press, and ends its Broken s
   await allow("");
   try {
     await sendTest(page);
-    await expect(stepTitles(page)).toHaveText(["Message: Sent", `Button press: ${PRESS_ERROR}`]);
+    await expect(stepTitles(page)).toHaveText(["Message: Sent", PRESS_NOT_REACHED]);
     await expect(page.getByTestId("test-still-broken")).toHaveText(
       "The test message was posted, but the Destination stays Broken: a test ends the Broken state only when every step succeeds, the button press included.",
     );

@@ -5,7 +5,8 @@
 // "<name> · <messenger> · via <Connection> · <channel>" and keeps its Health, the "Add a Destination" options read the
 // same, and one warning per chat names the Destinations that post in it — a Telegram @channel and its numeric chat id,
 // one Mattermost server and channel through two Connections — but not one channel id on another server; the warning
-// never blocks a change, and reads in Russian with its plurals.
+// never blocks a change, and reads in Russian with its plurals. While the Connections are still being read, a row shows
+// a placeholder after the name and never the shorter label without its Connection.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -243,6 +244,55 @@ describe("the Destinations of the Route editor", () => {
     await expect
       .element(rows().nth(1).getByTestId("route-destination-label"))
       .toHaveTextContent("hook · Outgoing webhook · 127.0.0.1:18093");
+  });
+
+  test("show a placeholder until the Connections are read, never a label that changes", async () => {
+    let releaseConnections: ((value: void) => void) | undefined;
+    const connectionsRead = new Promise<void>((resolve) => {
+      releaseConnections = resolve;
+    });
+    vi.spyOn(window, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.startsWith("/api/v1/destinations")) {
+        return json({ items: ALL, next_cursor: null });
+      }
+      if (url.startsWith("/api/v1/connections")) {
+        await connectionsRead;
+        return json({ items: CONNECTIONS, next_cursor: null });
+      }
+      return new Response("{}", { status: 404 });
+    });
+    const seen = new Set<string>();
+    const observer = new MutationObserver(() => {
+      for (const label of document.querySelectorAll('[data-testid="route-destination-label"]')) {
+        seen.add(label.textContent ?? "");
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    try {
+      await renderEditor([TG_A.id]);
+      await expect
+        .element(rows().nth(0).getByRole("link", { name: "tg-a-alerts", exact: true }))
+        .toBeVisible();
+      await expect
+        .element(rows().nth(0).getByTestId("route-destination-label-pending"))
+        .toBeInTheDocument();
+      expect(rows().nth(0).getByTestId("route-destination-label").element().textContent).toBe(
+        "tg-a-alerts",
+      );
+
+      releaseConnections?.();
+      await expect
+        .element(rows().nth(0).getByTestId("route-destination-label"))
+        .toHaveTextContent("tg-a-alerts · Telegram · via Dev Telegram · Muster alerts");
+      expect(rows().nth(0).getByTestId("route-destination-label-pending").query()).toBeNull();
+    } finally {
+      observer.disconnect();
+    }
+    expect([...seen].filter((text) => text !== "")).toEqual([
+      "tg-a-alerts",
+      "tg-a-alerts · Telegram · via Dev Telegram · Muster alerts",
+    ]);
   });
 
   test("offer every other Destination by its full label, a Broken one with its health", async () => {

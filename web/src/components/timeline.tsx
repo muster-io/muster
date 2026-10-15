@@ -21,6 +21,7 @@ import {
 } from "../api/gen/endpoints/alert-groups/alert-groups";
 import {
   type GetAlertGroupTimelineParams,
+  type NullableStatusChangeReason,
   TimelineKind,
   type TimelineActor,
   type TimelineEntry,
@@ -31,6 +32,7 @@ import { problemText } from "../lib/api";
 import { useTimeFormat } from "../lib/time";
 import { reasonLabel } from "./integration-alerts";
 import { useDestinationLabels } from "./destination-label";
+import { unreachable } from "./destination-test-panel";
 import { templateName } from "./template-editor";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -99,29 +101,33 @@ export function actorText(t: TFunction, actor: TimelineActor): string {
 /** Notices of one ack timeout at most (C-17.FR-2). */
 const ACK_TIMEOUT_NOTICES = 3;
 
-/** The reason the server gives an auto-unacknowledge (groups.ReasonNoAnswer), translated by its exact text. */
-const REASON_NO_ANSWER = "No answer to the last two Reminders";
-
-/** What the reason of an automatic status change says: the reason of a resolved Alert, or why an Owner left. */
-function changeReason(t: TFunction, reason: string | null | undefined): string | null {
-  switch (reason) {
-    case null:
-    case undefined:
-    case "":
-      return null;
+/**
+ * What the reason of an automatic status change says, translated by its code: the reason of a resolved Alert, why an
+ * Owner left, or the unanswered Reminders of an auto-unacknowledge. A reason without a code shows as the server wrote
+ * it.
+ */
+function changeReason(
+  t: TFunction,
+  code: NullableStatusChangeReason | undefined,
+  reason: string | null | undefined,
+): string | null {
+  switch (code) {
     case "owner_disabled":
       return t("timeline.reasons.ownerDisabled");
     case "owner_deleted":
       return t("timeline.reasons.ownerDeleted");
-    case REASON_NO_ANSWER:
+    case "reminders_unanswered":
       return t("timeline.reasons.noAnswer");
     case "resolved":
     case "gone":
     case "stale":
     case "integration_deleted":
-      return reasonLabel(t, reason);
+      return reasonLabel(t, code);
+    case null:
+    case undefined:
+      return reason ? reason : null;
     default:
-      return reason;
+      return unreachable(code);
   }
 }
 
@@ -152,7 +158,7 @@ export function entryText(
 ): string {
   switch (entry.kind) {
     case "status": {
-      const reason = changeReason(t, entry.reason);
+      const reason = changeReason(t, entry.reason_code, entry.reason);
       switch (entry.event) {
         case "created":
           return t("timeline.events.created");

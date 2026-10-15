@@ -30,6 +30,7 @@ import {
   proxyValues,
 } from "./proxy-form";
 import { KEEP_SECRET, type SecretChange, SecretField, secretPayload } from "./secret-field";
+import { HeartbeatFailureDetail, heartbeatFailureText } from "./system-status-sections";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
@@ -269,10 +270,14 @@ export function OutgoingHeartbeatForm({ organization }: { organization: Organiza
   );
 }
 
-/** The result of the last outgoing heartbeat, as the System status reads it. */
+/**
+ * The result of the last outgoing heartbeat, as the System status reads it: a failure in the reader's language by its
+ * class, with the server's text below as its detail.
+ */
 export function OutgoingHeartbeatLastResult({ result }: { result: OutgoingHeartbeatResult }) {
   const { t } = useTranslation();
   const { dateTime } = useTimeFormat();
+  const error = heartbeatFailureText(t, result);
   let text: string;
   if (!result.configured) {
     text = t("outgoingHeartbeat.lastResult.notConfigured");
@@ -280,10 +285,10 @@ export function OutgoingHeartbeatLastResult({ result }: { result: OutgoingHeartb
     text = t("outgoingHeartbeat.lastResult.notSent");
   } else if (result.last_ok === true) {
     text = t("outgoingHeartbeat.lastResult.ok", { time: dateTime(result.last_attempt_at) });
-  } else if (result.last_error) {
+  } else if (error !== null) {
     text = t("outgoingHeartbeat.lastResult.failed", {
       time: dateTime(result.last_attempt_at),
-      error: result.last_error,
+      error,
     });
   } else {
     text = t("outgoingHeartbeat.lastResult.failedNoError", {
@@ -291,12 +296,11 @@ export function OutgoingHeartbeatLastResult({ result }: { result: OutgoingHeartb
     });
   }
   return (
-    <p
-      className="text-sm wrap-anywhere"
-      aria-live="polite"
-      data-testid="outgoing-heartbeat-last-result"
-    >
-      {text}
-    </p>
+    <div aria-live="polite">
+      <p className="text-sm wrap-anywhere" data-testid="outgoing-heartbeat-last-result">
+        {text}
+      </p>
+      <HeartbeatFailureDetail result={result} testId="outgoing-heartbeat-last-detail" />
+    </div>
   );
 }

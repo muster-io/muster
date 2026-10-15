@@ -1884,7 +1884,8 @@ export const TestDestinationResponse = zod.object({
   "extracted": zod.record(zod.string(), zod.string()).optional(),
   "duration_ms": zod.int(),
   "error_class": zod.enum(['none', 'retry_after', 'transient', 'fatal', 'unknown', 'template_error', 'blocked', 'limited']).describe('How a delivery attempt ended. `limited`: no limiter token was free within `delivery.interactive_budget`, so nothing was sent (a test only; the attempt did not reach the remote side).'),
-  "error": zod.string().nullish().describe('What failed. Secrets, the Signing secret and tokens are masked.')
+  "error": zod.string().nullish().describe('What failed, in English. Secrets, the Signing secret and tokens are masked. Clients show it as the detail of `error_code`, or of `error_class` without one.'),
+  "error_code": zod.union([zod.literal('press_not_reached'),zod.literal('bot_unknown'),zod.literal(null)]).nullish().describe('What failed in a step where `error_class` does not tell it, for the `press` step of a Mattermost Destination: `press_not_reached` — the bot pressed the button, but the press did not reach Muster\'s callback; `error` names the host of `MUSTER_INGEST_URL` to add to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server; `bot_unknown` — no Connection check has learned the bot yet, so it did not press; run the Connection check, then test again. Null otherwise.')
 })).describe('The `message` step for a messenger, followed by the `press` step for Mattermost; for an outgoing webhook the `event` step and the `create` step, in this order, as the Destination\'s mode requires.'),
   "health": zod.object({
   "state": zod.enum(['healthy', 'broken']),

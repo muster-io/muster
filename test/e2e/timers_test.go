@@ -168,6 +168,7 @@ type timerEntry struct {
 	Loudness      string         `json:"loudness"`
 	Mentions      []string       `json:"mentions"`
 	Reason        *string        `json:"reason"`
+	ReasonCode    *string        `json:"reason_code"`
 	PreviousOwner map[string]any `json:"previous_owner"`
 	ToStatus      string         `json:"to_status"`
 }
@@ -654,7 +655,8 @@ func TestTimers(t *testing.T) {
 		st := e.entries(g7, "&kind=status")
 		x := st[len(st)-1]
 		if x.Event != "auto_unacknowledged" || x.Reason == nil || *x.Reason != "No answer to the last two Reminders" ||
-			x.Loudness != "loud" || !slices.Equal(x.Mentions, []string{"owner"}) || x.PreviousOwner == nil {
+			x.ReasonCode == nil || *x.ReasonCode != "reminders_unanswered" || x.Loudness != "loud" ||
+			!slices.Equal(x.Mentions, []string{"owner"}) || x.PreviousOwner == nil {
 			t.Errorf("g7 %+v", x)
 		}
 		if got := noticesOf(e.entries(g7, "&kind=timers"), "reminder"); !slices.Equal(got, []int{1, 2}) {

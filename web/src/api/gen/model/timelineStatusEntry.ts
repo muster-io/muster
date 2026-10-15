@@ -19,6 +19,7 @@
  */
 import type { AlertGroupStatus } from './alertGroupStatus';
 import type { NullableAlertGroupStatus } from './nullableAlertGroupStatus';
+import type { NullableStatusChangeReason } from './nullableStatusChangeReason';
 import type { TimelineEntryBase } from './timelineEntryBase';
 import type { TimelineLifecycleFields } from './timelineLifecycleFields';
 import type { TimelineStatusEntryKind } from './timelineStatusEntryKind';
@@ -29,10 +30,11 @@ export type TimelineStatusEntry = TimelineEntryBase & TimelineLifecycleFields & 
   from_status?: NullableAlertGroupStatus | null;
   to_status?: AlertGroupStatus;
   /**
-     * Reason of an automatic status change.
+     * Reason of an automatic status change, as text; clients translate `reason_code` and show this text only when there is no code.
      * @nullable
      */
   reason?: string | null;
+  reason_code?: NullableStatusChangeReason | null;
   /** The Owner after the entry, if any. */
   owner?: UserRef;
   /** The Owner who lost the Alert Group (Takeover, urgency rise, auto-unacknowledge, an Owner disabled or deleted). */

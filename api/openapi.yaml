@@ -5284,7 +5284,7 @@ paths:
       - Account links
       summary: Start linking a Telegram account
       description: 'Returns a deep link `t.me/<bot>?start=<token>`; the token is single-use, valid for `account_link.telegram_token_ttl`.
-        Pressing Start in Telegram completes the link and arrives as an `account-links` hint. Only the signed-in web session
+        Pressing Start in Telegram completes the link and arrives as an `account-links` hint with the link''s `public_id`. Only the signed-in web session
         can start a link (not a token). No operation starts a link for another User, whatever the caller''s Role. A `connection_id`
         that names no Telegram Connection — missing, deleted or a Mattermost one — answers `422` `unknown_id` at `/connection_id`.
         When the bot''s username is not known from the last Connection check, it is read with `getMe` on the interactive
@@ -5329,7 +5329,7 @@ paths:
       - Account links
       summary: Start linking a Mattermost account
       description: 'The Connection''s bot sends a direct message with a code to the `@username`. Code requests are limited
-        per requesting User and per target account (`429` with `Retry-After`). Refused with `409` if the account is already
+        per requesting User and per target account (`429` `link_code_requests_exceeded` with `Retry-After`). Refused with `409` if the account is already
         linked to another user (`account_linked_elsewhere`), or without a code when Mattermost refuses a call. Runs on
         the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503`
         with `Retry-After`. No operation starts a link for another User, whatever the caller''s Role.
@@ -5377,7 +5377,8 @@ paths:
       - Account links
       summary: Confirm a Mattermost link with the code
       description: 'At most 5 attempts; after that the code is void. A wrong code, and a request that is void, used or expired,
-        answer `422` `link_code_invalid` at `/code`, never saying which; a request of another User is `404`. Runs on the interactive
+        answer `422` `link_code_invalid` at `/code`, never saying which, with `attempts_remaining`: the codes the request
+        still takes, 0 once it takes none; a request of another User is `404`. Runs on the interactive
         path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`. No
         operation starts a link for another User, whatever the caller''s Role.'
       x-permission: authenticated
@@ -7355,6 +7356,11 @@ components:
         retry_after_seconds:
           type: integer
           description: Set on `rate-limited`; equals the `Retry-After` header.
+        attempts_remaining:
+          type: integer
+          minimum: 0
+          description: Set on the `link_code_invalid` refusal of `confirmMattermostLink`; the attempts left for the code of
+            the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
       x-problem-types:
       - type: validation-failed
         status:
@@ -7480,7 +7486,8 @@ components:
             `/channel_id` for the others (see `DestinationCheckItem`) — with the check's message as `detail`.
         - code: link_code_invalid
           description: The Mattermost link code is wrong, or its request is void, used or expired; never says which. The
-            pointer is `/code` (`confirmMattermostLink`).
+            pointer is `/code` (`confirmMattermostLink`), and `attempts_remaining` says how many codes the request still
+            takes.
         - code: messenger_user_not_found
           description: The Mattermost server has no user with this username; the pointer is `/username`
             (`startMattermostLink`).
@@ -7582,6 +7589,13 @@ components:
           description: '"Still on it" with no Reminder waiting.'
         - code: owner_must_be_user
           description: 'Acknowledge or "Still on it" from a Service account: an Owner is always a User.'
+      - type: rate-limited
+        in: code
+        codes:
+        - code: link_code_requests_exceeded
+          description: Too many Mattermost link codes were requested within an hour, by the User or for the target account
+            (`account_link.mattermost_code_requests`, `startMattermostLink`); `retry_after_seconds` says when the next one
+            is allowed.
       - type: gone
         in: code
         codes:
@@ -7863,6 +7877,23 @@ components:
       - gone
       - stale
       - integration_deleted
+      - null
+    NullableStatusChangeReason:
+      type:
+      - string
+      - 'null'
+      description: 'The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group
+        resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`,
+        `owner_deleted`), or `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was
+        unacknowledged automatically. Null when the entry has no reason or its reason has no code.'
+      enum:
+      - resolved
+      - gone
+      - stale
+      - integration_deleted
+      - owner_disabled
+      - owner_deleted
+      - reminders_unanswered
       - null
     Language:
       type: string
@@ -10632,7 +10663,10 @@ components:
             type:
             - string
             - 'null'
-            description: Reason of an automatic status change.
+            description: Reason of an automatic status change, as text; clients translate `reason_code` and show this text
+              only when there is no code.
+          reason_code:
+            $ref: '#/components/schemas/NullableStatusChangeReason'
           owner:
             description: The Owner after the entry, if any.
             $ref: '#/components/schemas/UserRef'
@@ -11069,7 +11103,7 @@ components:
         | `integration`, `route`, `connection`, `destination` | the resource `public_id`, or null for the whole collection | A configuration resource changed. |
         | `organization` | null | Organization settings changed. |
         | `system-notices`, `system-status` | null | The Organization-wide notices, or the System status, changed. |
-        | `account-links` | null | An Account link of the signed-in user appeared or disappeared. |
+        | `account-links` | the Account link `public_id`, or null when several changed at once | An Account link of the signed-in user appeared, changed or disappeared. |
       properties:
         type:
           type: string
@@ -11999,7 +12033,23 @@ components:
           type:
           - string
           - 'null'
-          description: What failed. Secrets, the Signing secret and tokens are masked.
+          description: What failed, in English. Secrets, the Signing secret and tokens are masked. Clients show it as the
+            detail of `error_code`, or of `error_class` without one.
+        error_code:
+          $ref: '#/components/schemas/NullableTestStepErrorCode'
+    NullableTestStepErrorCode:
+      type:
+      - string
+      - 'null'
+      description: 'What failed in a step where `error_class` does not tell it, for the `press` step of a Mattermost
+        Destination: `press_not_reached` — the bot pressed the button, but the press did not reach Muster''s callback;
+        `error` names the host of `MUSTER_INGEST_URL` to add to `ServiceSettings.AllowedUntrustedInternalConnections` on
+        the Mattermost server; `bot_unknown` — no Connection check has learned the bot yet, so it did not press; run the
+        Connection check, then test again. Null otherwise.'
+      enum:
+      - press_not_reached
+      - bot_unknown
+      - null
     DestinationTestResult:
       type: object
       required:
@@ -12622,6 +12672,39 @@ components:
           type:
           - string
           - 'null'
+          description: What failed, in English and without the URL; clients translate `last_error_class` and show this text
+            as its detail.
+        last_error_class:
+          $ref: '#/components/schemas/NullableOutgoingHeartbeatErrorClass'
+        last_status:
+          type:
+          - integer
+          - 'null'
+          description: The status code the URL answered the last failed heartbeat with; null without an answer.
+    NullableOutgoingHeartbeatErrorClass:
+      type:
+      - string
+      - 'null'
+      description: 'Why the last outgoing heartbeat failed; null when it succeeded or was not sent. The URL answered
+        `last_status` and the answer was classified `transient` (a server error, the next interval is the retry),
+        `retry_after` (the URL asked to wait), `fatal` (a client error, such as a wrong URL), `redirect` (Muster follows
+        no redirects) or `unknown`; or there was no answer: `blocked` (the outbound address policy refused the address),
+        `dns`, `connect`, `tls`, `timeout`, `proxy_auth` (the proxy refused its credentials); or Muster could not prepare
+        the request (`internal`, such as a URL it cannot decrypt).'
+      enum:
+      - transient
+      - retry_after
+      - fatal
+      - redirect
+      - unknown
+      - blocked
+      - dns
+      - connect
+      - tls
+      - timeout
+      - proxy_auth
+      - internal
+      - null
     SystemStatus:
       type: object
       description: Read-only status for Admins.

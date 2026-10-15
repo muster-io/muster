@@ -3,8 +3,8 @@
 
 // The System status sections in a real browser: every section of a full status in its order, each entity a link to
 // its page and no other control, "None" for the empty sections, the Leader badge and the key ids, the recovery and the
-// Integration texts, the outgoing heartbeat results and its suggestion, the Russian plurals, and the reads again on the
-// four hints and every 30 seconds.
+// Integration texts, the outgoing heartbeat results — a failure translated by its class, with the server's text as its
+// detail — and its suggestion, the Russian plurals, and the reads again on the four hints and every 30 seconds.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -32,6 +32,7 @@ import { browserTimeZone, formatDateTime } from "../lib/time";
 import {
   SYSTEM_STATUS_REFRESH_MS,
   SystemStatusSections,
+  heartbeatFailureText,
   heartbeatSentText,
   useSystemStatus,
 } from "./system-status-sections";
@@ -267,7 +268,31 @@ describe("the System status sections", () => {
   test.each<[string, OutgoingHeartbeatResult, string]>([
     ["OK", { configured: true, last_attempt_at: T3, last_ok: true }, `Last sent ${fmt(T3)}: OK`],
     [
-      "failed with an error",
+      "failed with an answer",
+      {
+        configured: true,
+        last_attempt_at: T3,
+        last_ok: false,
+        last_error: "answered 503 (transient)",
+        last_error_class: "transient",
+        last_status: 503,
+      },
+      `Last sent ${fmt(T3)}: a temporary error (answered 503)`,
+    ],
+    [
+      "failed without an answer",
+      {
+        configured: true,
+        last_attempt_at: T3,
+        last_ok: false,
+        last_error: "dns: lookup hc.example.org: no such host",
+        last_error_class: "dns",
+        last_status: null,
+      },
+      `Last sent ${fmt(T3)}: the host name does not resolve`,
+    ],
+    [
+      "failed with an error without a class",
       { configured: true, last_attempt_at: T3, last_ok: false, last_error: "answered 503" },
       `Last sent ${fmt(T3)}: answered 503`,
     ],
@@ -285,6 +310,47 @@ describe("the System status sections", () => {
 
   test("heartbeatSentText is null without a URL", () => {
     expect(heartbeatSentText(i18n.getFixedT("en"), { configured: false }, fmt)).toBeNull();
+  });
+
+  test("show the server's text of a classified failure as its detail, in Russian too", async () => {
+    const failed: OutgoingHeartbeatResult = {
+      configured: true,
+      last_attempt_at: T3,
+      last_ok: false,
+      last_error: "answered 503 (transient)",
+      last_error_class: "transient",
+      last_status: 503,
+    };
+    const screen = await renderSections({ ...EMPTY, outgoing_heartbeat: failed });
+    await expect
+      .element(screen.getByTestId("system-status-heartbeat-detail"))
+      .toHaveTextContent("Details: answered 503 (transient)");
+    await screen.unmount();
+    const ok = await renderSections({ ...EMPTY, outgoing_heartbeat: { ...failed, last_ok: true } });
+    expect(ok.getByTestId("system-status-heartbeat-detail").query()).toBeNull();
+    await ok.unmount();
+
+    const ru = i18n.getFixedT("ru");
+    expect(heartbeatSentText(ru, failed, fmt)).toBe(
+      `Последняя отправка ${fmt(T3)}: временная ошибка (ответ 503)`,
+    );
+    for (const [errorClass, text] of [
+      ["retry_after", "адрес попросил повторить позже"],
+      ["fatal", "адрес отклонил запрос"],
+      ["redirect", "перенаправление, по которому Muster не переходит"],
+      ["unknown", "неожиданный ответ"],
+      ["blocked", "заблокировано политикой исходящих адресов"],
+      ["dns", "имя хоста не найдено"],
+      ["connect", "не удалось подключиться"],
+      ["tls", "ошибка TLS-соединения"],
+      ["timeout", "нет ответа за отведённое время"],
+      ["proxy_auth", "прокси отклонил учётные данные"],
+      ["internal", "Muster не смог подготовить запрос"],
+    ] as const) {
+      expect(
+        heartbeatFailureText(ru, { ...failed, last_error_class: errorClass, last_status: null }),
+      ).toBe(text);
+    }
   });
 });
 

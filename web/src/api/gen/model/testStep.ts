@@ -18,6 +18,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DeliveryErrorClass } from './deliveryErrorClass';
+import type { NullableTestStepErrorCode } from './nullableTestStepErrorCode';
 import type { RenderedRequest } from './renderedRequest';
 import type { TestStepExtracted } from './testStepExtracted';
 import type { TestStepName } from './testStepName';
@@ -37,8 +38,9 @@ export interface TestStep {
   duration_ms: number;
   error_class: DeliveryErrorClass;
   /**
-     * What failed. Secrets, the Signing secret and tokens are masked.
+     * What failed, in English. Secrets, the Signing secret and tokens are masked. Clients show it as the detail of `error_code`, or of `error_class` without one.
      * @nullable
      */
   error?: string | null;
+  error_code?: NullableTestStepErrorCode | null;
 }

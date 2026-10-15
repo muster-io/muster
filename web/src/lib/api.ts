@@ -21,6 +21,7 @@ export class ApiError extends Error implements Problem {
   readonly retry_after_seconds?: number;
   readonly related_alert_group?: AlertGroupRef;
   readonly link_rules?: EntityRef[];
+  readonly attempts_remaining?: number;
 
   constructor(status: number, problem: Partial<Problem>, retryAfter: number | undefined) {
     super(problem.title ?? `HTTP ${status}`);
@@ -33,6 +34,7 @@ export class ApiError extends Error implements Problem {
     this.retry_after_seconds = problem.retry_after_seconds ?? retryAfter;
     this.related_alert_group = problem.related_alert_group;
     this.link_rules = problem.link_rules;
+    this.attempts_remaining = problem.attempts_remaining;
   }
 }
 
@@ -171,6 +173,8 @@ function problemOf(body: unknown): Partial<Problem> {
     errors,
     retry_after_seconds:
       typeof body.retry_after_seconds === "number" ? body.retry_after_seconds : undefined,
+    attempts_remaining:
+      typeof body.attempts_remaining === "number" ? body.attempts_remaining : undefined,
     related_alert_group:
       isRecord(related) && typeof related.id === "string" && typeof related.number === "number"
         ? { id: related.id, number: related.number }

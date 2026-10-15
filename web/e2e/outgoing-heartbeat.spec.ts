@@ -4,7 +4,9 @@
 // Organization → Outgoing heartbeat against `muster dev` and its fake webhook receiver: Verification steps 4, 5 and 7 of
 // its story. The suggestion on the System status leads to the page, the URL is set through the write-only field and
 // shows "Set, changed {time}"; once the development clock makes the heartbeat due, the fake receives it, the page shows
-// "Last result: OK" and the System status "Last sent {time}: OK". A change made elsewhere shows the conflict message
+// "Last result: OK" and the System status "Last sent {time}: OK"; a 503 of the receiver reads "a temporary error
+// (answered 503)" with the server's text as its detail, until the next heartbeat. A change made elsewhere shows the
+// conflict message
 // until "Reload"; the page fits 360 px with the proxy form open; "Clear" brings the suggestion back. No Content Security
 // Policy violation.
 
@@ -173,6 +175,29 @@ test("sets the outgoing heartbeat URL from the suggestion and shows its result",
     .toBe(true);
   await expect(page.getByRole("link", { name: SUGGESTION })).toHaveCount(0);
   await shot(page, "system-status-heartbeat-ok");
+
+  // A failed heartbeat reads by its class, with the server's text as its detail; the next one recovers.
+  const faults = `${FWH}/_fake/faults`;
+  const set = await fetch(faults, {
+    method: "POST",
+    body: JSON.stringify({ path: "/hook/dev/ping", status: 503 }),
+  });
+  expect(set.ok, `POST /_fake/faults: ${set.status}`).toBe(true);
+  try {
+    await advance(60);
+    await expect(sent).toHaveText(/^Last sent .+: a temporary error \(answered 503\)$/, {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("system-status-heartbeat-detail")).toHaveText(
+      "Details: answered 503 (transient)",
+    );
+    await shot(page, "system-status-heartbeat-failed");
+  } finally {
+    await fetch(faults, { method: "DELETE" });
+  }
+  await advance(60);
+  await expect(sent).toHaveText(/: OK$/, { timeout: 30_000 });
+  await expect(page.getByTestId("system-status-heartbeat-detail")).toHaveCount(0);
 
   // A change made elsewhere while the form is being edited shows the conflict message until "Reload".
   await sub(page, "Outgoing heartbeat").click();

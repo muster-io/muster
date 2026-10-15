@@ -168,7 +168,7 @@ func TestMattermostTest(t *testing.T) {
 	e := newTester(t)
 	steps := e.run(t)
 	if len(steps) != 2 || steps[0].Name != "message" || !steps[0].OK() || steps[1].Name != "press" ||
-		!steps[1].OK() || steps[1].Error != "" {
+		!steps[1].OK() || steps[1].Error != "" || steps[1].ErrorCode != "" {
 		t.Fatalf("steps %+v", steps)
 	}
 	posts := e.fake.Posts()
@@ -210,12 +210,13 @@ func TestMattermostTest(t *testing.T) {
 }
 
 // TestMattermostPressNotReached is C-16.AC-7: when the server does not allow Muster's address, its answer "Action
-// integration error" fails the step press with the class unknown and names AllowedUntrustedInternalConnections.
+// integration error" fails the step press with the class unknown and the code press_not_reached, and names
+// AllowedUntrustedInternalConnections.
 func TestMattermostPressNotReached(t *testing.T) {
 	e := newTester(t)
 	e.fake.SetAllowedUntrustedInternalConnections("")
 	steps := e.run(t)
-	if len(steps) != 2 || !steps[0].OK() || steps[1].ErrorClass != "unknown" ||
+	if len(steps) != 2 || !steps[0].OK() || steps[1].ErrorClass != "unknown" || steps[1].ErrorCode != "press_not_reached" ||
 		steps[1].Error != "The button press did not reach Muster. Add the host of "+
 			strings.TrimSuffix(e.tester.Adapter.IngestURL, "/")+
 			" to ServiceSettings.AllowedUntrustedInternalConnections on the Mattermost server." ||
@@ -228,8 +229,8 @@ func TestMattermostPressNotReached(t *testing.T) {
 	e.fake.SetAllowedUntrustedInternalConnections("127.0.0.1")
 	e.tester.Budget = 300 * time.Millisecond
 	steps = e.run(t)
-	if len(steps) != 2 || steps[1].ErrorClass != "unknown" || !strings.HasPrefix(steps[1].Error,
-		"The button press did not reach Muster.") {
+	if len(steps) != 2 || steps[1].ErrorClass != "unknown" || steps[1].ErrorCode != "press_not_reached" ||
+		!strings.HasPrefix(steps[1].Error, "The button press did not reach Muster.") {
 		t.Errorf("no notification %+v", steps)
 	}
 }
@@ -255,7 +256,8 @@ func TestMattermostTestFailures(t *testing.T) {
 	tg.BotUserID = ""
 	e.targets.byID[destA.ID] = tg
 	if steps := e.run(t); len(steps) != 2 || !steps[0].OK() || steps[1].ErrorClass != "unknown" ||
-		!strings.HasPrefix(steps[1].Error, "Muster does not know the bot") || len(e.fake.Ephemeral()) != 0 {
+		steps[1].ErrorCode != "bot_unknown" || !strings.HasPrefix(steps[1].Error, "Muster does not know the bot") ||
+		len(e.fake.Ephemeral()) != 0 {
 		t.Errorf("bot unknown %+v", steps)
 	}
 	tg.BotUserID = fakemattermost.BotUserID

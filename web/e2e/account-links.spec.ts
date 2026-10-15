@@ -4,8 +4,8 @@
 // Messenger accounts in the profile and Account links on the user page against `muster dev`: the Verification steps of
 // their story. Alice links Telegram through the deep link (the fake Telegram server sends her /start) and Mattermost
 // with the code the bot sent (read from the fake Mattermost server), Bob links his Mattermost account so that Alice's
-// try is refused, Alice unlinks, the Admin removes her last link from her user page, and the section and both dialogs
-// fit 360 pixels. The logins are link-alice and link-bob, as the profile spec takes "Alice" and "bob".
+// try is refused, Alice unlinks, the Admin removes her last link from her user page — her open "Relink Telegram" dialog
+// stays open, as the hint names a link that went away —, and the section and both dialogs fit 360 pixels. The logins are link-alice and link-bob, as the profile spec takes "Alice" and "bob".
 
 import { type Browser, type Page, expect, test } from "@playwright/test";
 
@@ -245,7 +245,11 @@ test("links, unlinks and removes messenger accounts", async ({ browser, page }) 
   await expect(unlink).toBeHidden();
   await expect(rows(alice)).toHaveCount(1);
 
-  // 6. The Admin's user page lists the link with "Remove" and no way to link; removing it empties Alice's list live.
+  // 6. The Admin's user page lists the link with "Remove" and no way to link; removing it empties Alice's list live,
+  // and Alice's open "Relink Telegram" dialog stays open: the hint names a link that went away, not a new Telegram one.
+  await alice.getByRole("button", { name: "Relink Telegram" }).click();
+  const relink = alice.getByRole("dialog");
+  await expect(relink.getByRole("link", { name: "Open Telegram" })).toBeVisible();
   const adminCsp = watchCsp(page);
   await signInAdmin(page);
   await page.goto(`/admin/users/${aliceId}`);
@@ -264,6 +268,10 @@ test("links, unlinks and removes messenger accounts", async ({ browser, page }) 
   await expect(remove).toBeHidden();
   await expect(page.getByText("No messenger accounts linked.")).toBeVisible();
   await expect(alice.getByText("No messenger accounts linked yet.")).toBeVisible();
+  await expect(relink.getByRole("link", { name: "Open Telegram" })).toBeVisible();
+  await shot(alice, "account-links-telegram-dialog-stays");
+  await alice.keyboard.press("Escape");
+  await expect(alice.getByRole("dialog")).toBeHidden();
 
   // 7. At 360 pixels the section and both dialogs fit.
   await alice.setViewportSize({ width: 360, height: 740 });

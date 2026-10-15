@@ -266,9 +266,11 @@ func TestLiveLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 		code := codeRe.FindString(bot.sent[0])
-		for range 5 {
-			if _, err := svc.ConfirmMattermost(ctx, as("bob"), started.RequestPublicID, "22222222"); err == nil {
-				t.Fatal("a wrong code linked")
+		for i := range 5 {
+			_, err := svc.ConfirmMattermost(ctx, as("bob"), started.RequestPublicID, "22222222")
+			if fe, ok := errors.AsType[*accountlinks.FieldError](err); !ok || fe.AttemptsRemaining == nil ||
+				*fe.AttemptsRemaining != 4-i {
+				t.Fatalf("wrong code %d = %v", i+1, err)
 			}
 		}
 		if _, err := svc.ConfirmMattermost(ctx, as("bob"), started.RequestPublicID, code); err == nil ||
@@ -333,7 +335,8 @@ func TestLiveLinks(t *testing.T) {
 		wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		n, err := listen.Conn().WaitForNotification(wctx)
 		cancel()
-		if err != nil || !strings.Contains(n.Payload, `"type":"account-links","user":"SRAAAAAAAAAAC1"`) {
+		if err != nil || !strings.Contains(n.Payload, `"type":"account-links","id":"`+mine[0].PublicID+
+			`","user":"SRAAAAAAAAAAC1"`) {
 			t.Errorf("hint %v, %v", n, err)
 		}
 		tx, err := d.Pool.Begin(ctx)

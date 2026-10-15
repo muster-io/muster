@@ -24,6 +24,7 @@ type destTestStep struct {
 	Name           string            `json:"name"`
 	ErrorClass     string            `json:"error_class"`
 	Error          *string           `json:"error"`
+	ErrorCode      *string           `json:"error_code"`
 	ResponseStatus *int              `json:"response_status"`
 	Extracted      map[string]string `json:"extracted"`
 	Request        *struct {
@@ -126,7 +127,7 @@ func TestDestinationTests(t *testing.T) {
 		want := "The button press did not reach Muster. Add the host of " + ingest +
 			" to ServiceSettings.AllowedUntrustedInternalConnections on the Mattermost server."
 		if len(res.Steps) != 2 || res.Steps[1].ErrorClass != "unknown" || res.Steps[1].Error == nil ||
-			*res.Steps[1].Error != want {
+			*res.Steps[1].Error != want || res.Steps[1].ErrorCode == nil || *res.Steps[1].ErrorCode != "press_not_reached" {
 			t.Errorf("not allowed %+v, want %q", res.Steps, want)
 		}
 		e.fake(http.MethodPut, e.fmm+"/config", `{"allowed_untrusted_internal_connections":"`+

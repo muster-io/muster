@@ -137,9 +137,9 @@ func TestStartTelegram(t *testing.T) {
 }
 
 // TestLinkTelegram is C-18.FR-2, AC-1 and FR-9: `/start <token>` links the account that sent it, the bot replies with
-// the User's name and login, the link is recorded and the hint goes to the User; the same token again links nothing,
-// is answered that the link is invalid or expired and recorded as link_rejected with token_used, as are an unknown
-// token, an expired one and one of another Connection.
+// the User's name and login, the link is recorded and the hint that names it goes to the User; the same token again
+// links nothing, is answered that the link is invalid or expired and recorded as link_rejected with token_used, as
+// are an unknown token, an expired one and one of another Connection.
 func TestLinkTelegram(t *testing.T) {
 	e := newEnv(t)
 	tok := e.start(t, alice)
@@ -155,7 +155,8 @@ func TestLinkTelegram(t *testing.T) {
 		got.Details["connection"] != tgPID || got.Details["messenger"] != MessengerTelegram || len(got.Diff) != 4 {
 		t.Fatalf("entry %+v", got)
 	}
-	if len(e.store.hints) != 1 || e.store.hints[0].User != alicePID || e.store.hints[0].Type != "account-links" {
+	if len(e.store.hints) != 1 || e.store.hints[0].User != alicePID || e.store.hints[0].Type != "account-links" ||
+		e.store.hints[0].ID != e.store.links[0].publicID {
 		t.Errorf("hints %+v", e.store.hints)
 	}
 	if !strings.Contains(e.log.String(), `"event":"account_link_linked","messenger":"telegram","connection":"`+tgPID+
@@ -213,8 +214,8 @@ func TestLinkTelegram(t *testing.T) {
 
 // TestLinkSameAccount is C-18.FR-4 for an account linked again by its own User: the link is kept with its id, its
 // username and Connection become the new ones, the request is consumed, account_link.link is recorded once with what
-// changed and nothing is unlinked or replaced; the hint goes out and the bot replies as for a link. A Mattermost code
-// for the account already linked does the same.
+// changed and nothing is unlinked or replaced; the hint names the kept link and the bot replies as for a link. A
+// Mattermost code for the account already linked does the same.
 func TestLinkSameAccount(t *testing.T) {
 	e := newEnv(t)
 	used := t0.Add(-time.Hour)
@@ -230,8 +231,9 @@ func TestLinkSameAccount(t *testing.T) {
 	got := entries(e.store)
 	if r.last() != "Linked to Muster user Alice Smith (alice)" || len(e.store.links) != 1 ||
 		e.store.links[0].publicID != l.publicID || *e.store.links[0].username != "alice_t2" ||
-		e.store.links[0].connID != tg2ID || e.store.reqs[0].consumed == nil || len(e.store.hints) != 1 {
-		t.Fatalf("reply %q, links %+v", r.last(), e.store.links)
+		e.store.links[0].connID != tg2ID || e.store.reqs[0].consumed == nil || len(e.store.hints) != 1 ||
+		e.store.hints[0].ID != l.publicID {
+		t.Fatalf("reply %q, links %+v, hints %+v", r.last(), e.store.links, e.store.hints)
 	}
 	if len(got) != 1 || got[0].Action != ActionLink || got[0].Resource != l.publicID || len(got[0].Diff) != 2 ||
 		got[0].Details["replaced"] != nil || got[0].Details["username"] != "alice_t2" ||

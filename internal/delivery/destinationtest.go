@@ -28,6 +28,14 @@ const (
 	ClassLimited = "limited"
 )
 
+// The error codes of a step (TestStep.error_code), where its error class does not tell what failed: the bot's press of
+// a Mattermost test message that did not reach Muster's callback, and the press a bot that no check has learned yet
+// does not make.
+const (
+	CodePressNotReached = "press_not_reached"
+	CodeBotUnknown      = "bot_unknown"
+)
+
 // MaxResponseBody is how much of a response a test result shows: its first 4 KB.
 const MaxResponseBody = 4 << 10
 
@@ -50,7 +58,7 @@ type TestRequest struct {
 
 // TestStep is one step of a test (TestStep): its name, the request, the status and the start of the body of the
 // response (0 and nil without one), the values the extraction rules found, how long it took, its error class and,
-// when it failed, what failed. Every text is masked.
+// when it failed, what failed, with its error code where the class does not tell it. Every text is masked.
 type TestStep struct {
 	Name           string
 	Request        *TestRequest
@@ -60,6 +68,7 @@ type TestStep struct {
 	Duration       time.Duration
 	ErrorClass     string
 	Error          string
+	ErrorCode      string
 }
 
 // OK reports whether the step succeeded.

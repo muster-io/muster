@@ -3,17 +3,21 @@
 
 // "Link Telegram" of the profile (C-18.FR-2): for the chosen Telegram Connection (no choice when there is one) the
 // dialog asks for a deep link and shows it as "Open Telegram" and as a QR code, with the time it expires. When the bot
-// links the account, the account-links hint closes the dialog and the list shows the link; once the link expired, the
-// dialog offers a new one. The deep link lives only in this dialog's state: the request's result keeps none, and
+// links the account, the account-links hint names the link: the dialog closes once the list read again shows it as a
+// Telegram link, and stays open for any other link that comes, changes or goes meanwhile, such as a Mattermost one or
+// an unlink in another tab. Once the deep link expired, the dialog offers a new one. The deep link lives only in this dialog's state: the request's result keeps none, and
 // closing the dialog drops it. With a Telegram link already made, the button and the dialog read "Relink Telegram":
 // the link is valid for every Telegram bot, and a new one replaces it.
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { startTelegramLink } from "../api/gen/endpoints/account-links/account-links";
+import {
+  getListMyAccountLinksQueryOptions,
+  startTelegramLink,
+} from "../api/gen/endpoints/account-links/account-links";
 import type { LinkableConnection, TelegramLinkStart } from "../api/gen/model";
 import { isApiError, problemText } from "../lib/api";
 import { onHint } from "../lib/live";
@@ -49,6 +53,7 @@ export function LinkTelegramDialog({
   relink?: boolean;
 }) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const { time } = useTimeFormat();
   const title = relink ? t("accountLinks.telegram.relink") : t("accountLinks.telegram.start");
   const [open, setOpen] = useState(false);
@@ -85,18 +90,33 @@ export function LinkTelegramDialog({
     return () => clearTimeout(timer);
   }, [link]);
 
-  // The bot linked the account: the list reads it again through the hint's queries, and the dialog closes.
+  // The bot linked the account: the hint names the link, the list reads it again through the hint's queries, and the
+  // dialog closes when that link is a Telegram one — in the round it was asked in.
   useEffect(() => {
     if (link === null) {
       return undefined;
     }
-    return onHint("account-links", () => {
-      round.current += 1;
-      setLink(null);
-      setExpired(false);
-      setOpen(false);
+    return onHint("account-links", (id) => {
+      if (id === null) {
+        return;
+      }
+      const asked = round.current;
+      void queryClient
+        .fetchQuery(getListMyAccountLinksQueryOptions())
+        .then((list) => {
+          if (
+            round.current === asked &&
+            list.items.some((l) => l.id === id && l.messenger === "telegram")
+          ) {
+            round.current += 1;
+            setLink(null);
+            setExpired(false);
+            setOpen(false);
+          }
+        })
+        .catch(() => undefined);
     });
-  }, [link]);
+  }, [link, queryClient]);
 
   const reset = () => {
     round.current += 1;

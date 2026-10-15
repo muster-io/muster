@@ -2,7 +2,8 @@
 // Copyright The Muster Authors
 
 // The Test panel of a Destination in a real browser: one block per step with its name and outcome for every error
-// class, the button press block reached and not reached, the error, duration, request with its masked headers, response
+// class, the button press block reached and not reached — translated by its error code, the server's text below —, the
+// error, duration, request with its masked headers, response
 // status and body as plain text and the extracted values; why a failed test leaves a Broken Destination Broken, the
 // button press included; "Send test message" with the chosen source, disabled while it runs, the health of the result
 // taken by the page at once, and the refusal of an Alert Group that is no longer offered. The source selector offers
@@ -159,7 +160,7 @@ describe("TestResult", () => {
     await expect.element(page.getByTestId("test-still-broken")).not.toBeInTheDocument();
   });
 
-  test("shows that button presses reach Muster, or the press error that names the setting", async () => {
+  test("shows that button presses reach Muster, or the press error by its code with the server's text", async () => {
     const reached: DestinationTestResult = {
       steps: [step("message", "none"), step("press", "none")],
       health: { state: "healthy" },
@@ -173,15 +174,56 @@ describe("TestResult", () => {
       providers(
         <TestResult
           result={{
-            steps: [step("message", "none"), step("press", "unknown", { error: PRESS_ERROR })],
+            steps: [
+              step("message", "none"),
+              step("press", "unknown", { error: PRESS_ERROR, error_code: "press_not_reached" }),
+            ],
             health: { state: "healthy" },
           }}
         />,
       ).ui,
     );
-    expect(titles()).toEqual(["Message: Sent", `Button press: ${PRESS_ERROR}`]);
-    // The press shows its error once, as its outcome.
-    expect(document.querySelectorAll('[data-testid="test-step-error"]')).toHaveLength(0);
+    expect(titles()).toEqual([
+      "Message: Sent",
+      "Button press: The button press did not reach Muster. Add the host of MUSTER_INGEST_URL to ServiceSettings.AllowedUntrustedInternalConnections on the Mattermost server.",
+    ]);
+    // The server's text, with the address, is the detail.
+    await expect.element(page.getByTestId("test-step-error")).toHaveTextContent(PRESS_ERROR);
+
+    await screen.rerender(
+      providers(
+        <TestResult
+          result={{
+            steps: [
+              step("message", "none"),
+              step("press", "unknown", {
+                error: "Muster does not know the bot of this Connection yet.",
+                error_code: "bot_unknown",
+              }),
+            ],
+            health: { state: "healthy" },
+          }}
+        />,
+      ).ui,
+    );
+    expect(titles()).toEqual([
+      "Message: Sent",
+      "Button press: Muster does not know the bot of this Connection yet, so it did not press the button. Run the Connection check, then test again.",
+    ]);
+
+    // An error without a code reads as its class, the server's text below.
+    await screen.rerender(
+      providers(
+        <TestResult
+          result={{
+            steps: [step("message", "none"), step("press", "unknown", { error: "boom" })],
+            health: { state: "healthy" },
+          }}
+        />,
+      ).ui,
+    );
+    expect(titles()).toEqual(["Message: Sent", "Button press: Unexpected answer"]);
+    await expect.element(page.getByTestId("test-step-error")).toHaveTextContent("boom");
 
     // An empty error falls back to the text of its class.
     await screen.rerender(
@@ -214,7 +256,10 @@ describe("TestResult", () => {
 
   test("explains why a Broken Destination stays Broken, the button press included", async () => {
     const press: DestinationTestResult = {
-      steps: [step("message", "none"), step("press", "unknown", { error: PRESS_ERROR })],
+      steps: [
+        step("message", "none"),
+        step("press", "unknown", { error: PRESS_ERROR, error_code: "press_not_reached" }),
+      ],
       health: { state: "broken", since: "2026-10-09T09:30:00Z", reason: "Refused" },
     };
     const { ui } = providers(<TestResult result={press} />);
@@ -287,7 +332,13 @@ describe("TestResult", () => {
     const { ui } = providers(
       <TestResult
         result={{
-          steps: [step("message", "none"), step("press", "none"), step("event", "limited")],
+          steps: [
+            step("message", "none"),
+            step("press", "none"),
+            step("event", "limited"),
+            step("press", "unknown", { error: PRESS_ERROR, error_code: "press_not_reached" }),
+            step("press", "unknown", { error: "bot", error_code: "bot_unknown" }),
+          ],
           health: { state: "healthy" },
         }}
       />,
@@ -298,6 +349,8 @@ describe("TestResult", () => {
       "Сообщение: Отправлено",
       "Нажатие кнопки: Нажатия кнопок доходят до Muster.",
       "Событие: Лимит запросов к адресу исчерпан, ничего не отправлено. Повторите через несколько секунд.",
+      "Нажатие кнопки: Нажатие кнопки не дошло до Muster. Добавьте хост из MUSTER_INGEST_URL в ServiceSettings.AllowedUntrustedInternalConnections на сервере Mattermost.",
+      "Нажатие кнопки: Muster ещё не знает бота этого подключения, поэтому не нажал кнопку. Запустите проверку подключения и повторите тест.",
     ]);
   });
 });

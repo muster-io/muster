@@ -188,14 +188,21 @@ describe("entryText", () => {
       [status("urgency_raised"), "Became Urgent"],
       [status("reopened"), "Reopened"],
       [status("snooze_ended"), "Snooze ended while alerts still fire"],
-      [status("resolved", { reason: "resolved" }), "Resolved: Resolved by Alertmanager"],
-      [status("resolved", { reason: "gone" }), "Resolved: Gone"],
+      [
+        status("resolved", { reason: "resolved", reason_code: "resolved" }),
+        "Resolved: Resolved by Alertmanager",
+      ],
+      [status("resolved", { reason: "gone", reason_code: "gone" }), "Resolved: Gone"],
       [status("resolved"), "Resolved"],
       [status("acknowledged"), "Acknowledged"],
       [status("takeover", { previous_owner: BOB }), "Taken over from Bob"],
       [
-        status("unacknowledged", { reason: "owner_disabled" }),
+        status("unacknowledged", { reason: "owner_disabled", reason_code: "owner_disabled" }),
         "Unacknowledged: the owner was disabled",
+      ],
+      [
+        status("unacknowledged", { reason: "A reason without a code", reason_code: null }),
+        "Unacknowledged: A reason without a code",
       ],
       [status("unresolved"), "Unresolved"],
       [status("snoozed", { snooze_until: AT }), `Snoozed until ${dateTime(AT)}`],
@@ -203,7 +210,10 @@ describe("entryText", () => {
       [status("unsnoozed"), "Unsnoozed"],
       [status("auto_unacknowledged"), "Unacknowledged automatically"],
       [
-        status("auto_unacknowledged", { reason: "No answer to the last two Reminders" }),
+        status("auto_unacknowledged", {
+          reason: "No answer to the last two Reminders",
+          reason_code: "reminders_unanswered",
+        }),
         "Unacknowledged automatically: No answer to the last two Reminders",
       ],
       [alerts("alerts_added", { fingerprints: ["a"] }), "1 alert added"],
@@ -284,9 +294,18 @@ describe("entryText", () => {
       "Уведомление о тайм-ауте подтверждения 3 из 3",
     );
     expect(text(timers("reminder_answered"))).toBe("Ещё работаю");
+    // Translated by its code, whatever the text of the reason says.
     expect(
-      text(status("auto_unacknowledged", { reason: "No answer to the last two Reminders" })),
+      text(
+        status("auto_unacknowledged", {
+          reason: "Any English text",
+          reason_code: "reminders_unanswered",
+        }),
+      ),
     ).toBe("Подтверждение снято автоматически: нет ответа на два последних напоминания");
+    expect(
+      text(status("unacknowledged", { reason: "owner_deleted", reason_code: "owner_deleted" })),
+    ).toBe("Подтверждение снято: владелец удалён");
     expect(
       text(
         system("fallback_template_used", {
@@ -376,6 +395,7 @@ describe("Timeline", () => {
         loudness: "loud",
         mentions: ["owner"],
         reason: "No answer to the last two Reminders",
+        reason_code: "reminders_unanswered",
         previous_owner: BOB,
       }),
       delivery("publication"),

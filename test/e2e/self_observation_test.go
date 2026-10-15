@@ -114,7 +114,7 @@ func TestOutgoingHeartbeat(t *testing.T) {
 	okSeries := `muster_client_requests_total{client="heartbeat",outcome="ok"}`
 
 	if st := systemStatus(api); fmt.Sprint(st["outgoing_heartbeat"]) !=
-		"map[configured:false last_attempt_at:<nil> last_error:<nil> last_ok:<nil>]" {
+		"map[configured:false last_attempt_at:<nil> last_error:<nil> last_error_class:<nil> last_ok:<nil> last_status:<nil>]" {
 		t.Fatalf("before a URL: %v", st["outgoing_heartbeat"])
 	}
 	org := setHeartbeat(api, map[string]any{"url": pingURL, "proxy": map[string]any{"enabled": false}})
@@ -161,8 +161,9 @@ func TestOutgoingHeartbeat(t *testing.T) {
 	advance(t, a, 60)
 	eventually(t, "the failed ping", func() bool { return heartbeatResult(api)["last_ok"] == false })
 	res := heartbeatResult(api)
-	if e, _ := res["last_error"].(string); !strings.Contains(e, "503") || strings.Contains(e, "hook/dev") {
-		t.Errorf("last error %v", res["last_error"])
+	if e, _ := res["last_error"].(string); !strings.Contains(e, "503") || strings.Contains(e, "hook/dev") ||
+		res["last_error_class"] != "transient" || res["last_status"] != float64(503) {
+		t.Errorf("last error %v, class %v, status %v", res["last_error"], res["last_error_class"], res["last_status"])
 	}
 	if c := strings.Count(a.Output(), `"event":"outgoing_heartbeat_failed"`); c != 1 ||
 		strings.Contains(a.Output(), "/hook/dev/ping") {

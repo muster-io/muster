@@ -253,6 +253,10 @@ func testStepOf(st delivery.TestStep) gen.TestStep {
 	if st.Error != "" {
 		out.Error.Set(st.Error)
 	}
+	out.ErrorCode.SetNull()
+	if st.ErrorCode != "" {
+		out.ErrorCode.Set(gen.NullableTestStepErrorCode(st.ErrorCode))
+	}
 	out.ResponseStatus.SetNull()
 	if st.ResponseStatus != 0 {
 		out.ResponseStatus.Set(st.ResponseStatus)

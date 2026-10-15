@@ -1118,3 +1118,18 @@ func TestOwnerAnswers(t *testing.T) {
 		t.Errorf("a note by the owner: answered %v", g.OwnerAnsweredAt)
 	}
 }
+
+// TestStatusReasonCode: the reason of an automatic status change has a code for the API, the reasons of a resolved
+// Alert and of a released Owner being their own; any other reason has none.
+func TestStatusReasonCode(t *testing.T) {
+	for reason, want := range map[string]string{
+		ReasonNoAnswer: "reminders_unanswered", ReasonOwnerDisabled: "owner_disabled",
+		ReasonOwnerDeleted: "owner_deleted", ingest.ResolveResolved: "resolved", ingest.ResolveGone: "gone",
+		ingest.ResolveStale: "stale", ingest.ResolveIntegrationDeleted: "integration_deleted",
+		"Integration prod-eu deleted": "", "": "",
+	} {
+		if got := StatusReasonCode(reason); got != want {
+			t.Errorf("StatusReasonCode(%q) = %q, want %q", reason, got, want)
+		}
+	}
+}

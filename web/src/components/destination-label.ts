@@ -152,11 +152,21 @@ export function duplicateChatGroups(
   return [...byChat.values()].filter((names) => names.length > 1);
 }
 
-/** The Connections by public_id, from the same query as the Destination form; empty without connections:read. */
-export function useConnectionsById(): ReadonlyMap<string, Connection> {
+/**
+ * The Connections by public_id, from the same query as the Destination form, and whether they are settled: read or
+ * failed, or never read without connections:read, when the map stays empty. Until then a label that names a Connection
+ * would still change.
+ */
+export function useConnections(): { byId: ReadonlyMap<string, Connection>; settled: boolean } {
   const canRead = useCan("connections:read");
   const list = useListConnections({ limit: 500 }, { query: { enabled: canRead } });
-  return useMemo(() => new Map((list.data?.items ?? []).map((c) => [c.id, c])), [list.data]);
+  const byId = useMemo(() => new Map((list.data?.items ?? []).map((c) => [c.id, c])), [list.data]);
+  return { byId, settled: !canRead || list.isSuccess || list.isError };
+}
+
+/** The Connections by public_id, from the same query as the Destination form; empty without connections:read. */
+export function useConnectionsById(): ReadonlyMap<string, Connection> {
+  return useConnections().byId;
 }
 
 export interface DestinationLabel {

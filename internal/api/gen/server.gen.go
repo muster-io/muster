@@ -1226,6 +1226,57 @@ func (e NullableLanguage) Valid() bool {
 	}
 }
 
+// Defines values for NullableOutgoingHeartbeatErrorClass.
+const (
+	NullableOutgoingHeartbeatErrorClassBlocked     NullableOutgoingHeartbeatErrorClass = "blocked"
+	NullableOutgoingHeartbeatErrorClassConnect     NullableOutgoingHeartbeatErrorClass = "connect"
+	NullableOutgoingHeartbeatErrorClassDns         NullableOutgoingHeartbeatErrorClass = "dns"
+	NullableOutgoingHeartbeatErrorClassFatal       NullableOutgoingHeartbeatErrorClass = "fatal"
+	NullableOutgoingHeartbeatErrorClassInternal    NullableOutgoingHeartbeatErrorClass = "internal"
+	NullableOutgoingHeartbeatErrorClassLessThannil NullableOutgoingHeartbeatErrorClass = "<nil>"
+	NullableOutgoingHeartbeatErrorClassProxyAuth   NullableOutgoingHeartbeatErrorClass = "proxy_auth"
+	NullableOutgoingHeartbeatErrorClassRedirect    NullableOutgoingHeartbeatErrorClass = "redirect"
+	NullableOutgoingHeartbeatErrorClassRetryAfter  NullableOutgoingHeartbeatErrorClass = "retry_after"
+	NullableOutgoingHeartbeatErrorClassTimeout     NullableOutgoingHeartbeatErrorClass = "timeout"
+	NullableOutgoingHeartbeatErrorClassTls         NullableOutgoingHeartbeatErrorClass = "tls"
+	NullableOutgoingHeartbeatErrorClassTransient   NullableOutgoingHeartbeatErrorClass = "transient"
+	NullableOutgoingHeartbeatErrorClassUnknown     NullableOutgoingHeartbeatErrorClass = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the NullableOutgoingHeartbeatErrorClass enum.
+func (e NullableOutgoingHeartbeatErrorClass) Valid() bool {
+	switch e {
+	case NullableOutgoingHeartbeatErrorClassBlocked:
+		return true
+	case NullableOutgoingHeartbeatErrorClassConnect:
+		return true
+	case NullableOutgoingHeartbeatErrorClassDns:
+		return true
+	case NullableOutgoingHeartbeatErrorClassFatal:
+		return true
+	case NullableOutgoingHeartbeatErrorClassInternal:
+		return true
+	case NullableOutgoingHeartbeatErrorClassLessThannil:
+		return true
+	case NullableOutgoingHeartbeatErrorClassProxyAuth:
+		return true
+	case NullableOutgoingHeartbeatErrorClassRedirect:
+		return true
+	case NullableOutgoingHeartbeatErrorClassRetryAfter:
+		return true
+	case NullableOutgoingHeartbeatErrorClassTimeout:
+		return true
+	case NullableOutgoingHeartbeatErrorClassTls:
+		return true
+	case NullableOutgoingHeartbeatErrorClassTransient:
+		return true
+	case NullableOutgoingHeartbeatErrorClassUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NullableResolveReason.
 const (
 	NullableResolveReasonGone               NullableResolveReason = "gone"
@@ -1247,6 +1298,63 @@ func (e NullableResolveReason) Valid() bool {
 	case NullableResolveReasonResolved:
 		return true
 	case NullableResolveReasonStale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NullableStatusChangeReason.
+const (
+	NullableStatusChangeReasonGone                NullableStatusChangeReason = "gone"
+	NullableStatusChangeReasonIntegrationDeleted  NullableStatusChangeReason = "integration_deleted"
+	NullableStatusChangeReasonLessThannil         NullableStatusChangeReason = "<nil>"
+	NullableStatusChangeReasonOwnerDeleted        NullableStatusChangeReason = "owner_deleted"
+	NullableStatusChangeReasonOwnerDisabled       NullableStatusChangeReason = "owner_disabled"
+	NullableStatusChangeReasonRemindersUnanswered NullableStatusChangeReason = "reminders_unanswered"
+	NullableStatusChangeReasonResolved            NullableStatusChangeReason = "resolved"
+	NullableStatusChangeReasonStale               NullableStatusChangeReason = "stale"
+)
+
+// Valid indicates whether the value is a known member of the NullableStatusChangeReason enum.
+func (e NullableStatusChangeReason) Valid() bool {
+	switch e {
+	case NullableStatusChangeReasonGone:
+		return true
+	case NullableStatusChangeReasonIntegrationDeleted:
+		return true
+	case NullableStatusChangeReasonLessThannil:
+		return true
+	case NullableStatusChangeReasonOwnerDeleted:
+		return true
+	case NullableStatusChangeReasonOwnerDisabled:
+		return true
+	case NullableStatusChangeReasonRemindersUnanswered:
+		return true
+	case NullableStatusChangeReasonResolved:
+		return true
+	case NullableStatusChangeReasonStale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NullableTestStepErrorCode.
+const (
+	NullableTestStepErrorCodeBotUnknown      NullableTestStepErrorCode = "bot_unknown"
+	NullableTestStepErrorCodeLessThannil     NullableTestStepErrorCode = "<nil>"
+	NullableTestStepErrorCodePressNotReached NullableTestStepErrorCode = "press_not_reached"
+)
+
+// Valid indicates whether the value is a known member of the NullableTestStepErrorCode enum.
+func (e NullableTestStepErrorCode) Valid() bool {
+	switch e {
+	case NullableTestStepErrorCodeBotUnknown:
+		return true
+	case NullableTestStepErrorCodeLessThannil:
+		return true
+	case NullableTestStepErrorCodePressNotReached:
 		return true
 	default:
 		return false
@@ -3370,7 +3478,7 @@ type HeartbeatState string
 // | `integration`, `route`, `connection`, `destination` | the resource `public_id`, or null for the whole collection | A configuration resource changed. |
 // | `organization` | null | Organization settings changed. |
 // | `system-notices`, `system-status` | null | The Organization-wide notices, or the System status, changed. |
-// | `account-links` | null | An Account link of the signed-in user appeared or disappeared. |
+// | `account-links` | the Account link `public_id`, or null when several changed at once | An Account link of the signed-in user appeared, changed or disappeared. |
 type HintEvent struct {
 	// Id A `public_id` in the format of `PublicId`, or null.
 	Id   nullable.Nullable[NullablePublicId] `json:"id"`
@@ -4027,11 +4135,20 @@ type NullableAlertGroupStatus string
 // NullableLanguage UI or template language; null follows the default.
 type NullableLanguage string
 
+// NullableOutgoingHeartbeatErrorClass Why the last outgoing heartbeat failed; null when it succeeded or was not sent. The URL answered `last_status` and the answer was classified `transient` (a server error, the next interval is the retry), `retry_after` (the URL asked to wait), `fatal` (a client error, such as a wrong URL), `redirect` (Muster follows no redirects) or `unknown`; or there was no answer: `blocked` (the outbound address policy refused the address), `dns`, `connect`, `tls`, `timeout`, `proxy_auth` (the proxy refused its credentials); or Muster could not prepare the request (`internal`, such as a URL it cannot decrypt).
+type NullableOutgoingHeartbeatErrorClass string
+
 // NullablePublicId A `public_id` in the format of `PublicId`, or null.
 type NullablePublicId = string
 
 // NullableResolveReason Why an Alert resolved; null while it fires.
 type NullableResolveReason string
+
+// NullableStatusChangeReason The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), or `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically. Null when the entry has no reason or its reason has no code.
+type NullableStatusChangeReason string
+
+// NullableTestStepErrorCode What failed in a step where `error_class` does not tell it, for the `press` step of a Mattermost Destination: `press_not_reached` — the bot pressed the button, but the press did not reach Muster's callback; `error` names the host of `MUSTER_INGEST_URL` to add to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server; `bot_unknown` — no Connection check has learned the bot yet, so it did not press; run the Connection check, then test again. Null otherwise.
+type NullableTestStepErrorCode string
 
 // OidcCheckResult defines model for OidcCheckResult.
 type OidcCheckResult struct {
@@ -4299,8 +4416,16 @@ type OutgoingHeartbeatResult struct {
 	// Configured False when no URL is set; the page suggests setting one.
 	Configured    bool                         `json:"configured"`
 	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at,omitempty"`
-	LastError     nullable.Nullable[string]    `json:"last_error,omitempty"`
-	LastOk        nullable.Nullable[bool]      `json:"last_ok,omitempty"`
+
+	// LastError What failed, in English and without the URL; clients translate `last_error_class` and show this text as its detail.
+	LastError nullable.Nullable[string] `json:"last_error,omitempty"`
+
+	// LastErrorClass Why the last outgoing heartbeat failed; null when it succeeded or was not sent. The URL answered `last_status` and the answer was classified `transient` (a server error, the next interval is the retry), `retry_after` (the URL asked to wait), `fatal` (a client error, such as a wrong URL), `redirect` (Muster follows no redirects) or `unknown`; or there was no answer: `blocked` (the outbound address policy refused the address), `dns`, `connect`, `tls`, `timeout`, `proxy_auth` (the proxy refused its credentials); or Muster could not prepare the request (`internal`, such as a URL it cannot decrypt).
+	LastErrorClass nullable.Nullable[NullableOutgoingHeartbeatErrorClass] `json:"last_error_class,omitempty"`
+	LastOk         nullable.Nullable[bool]                                `json:"last_ok,omitempty"`
+
+	// LastStatus The status code the URL answered the last failed heartbeat with; null without an answer.
+	LastStatus nullable.Nullable[int] `json:"last_status,omitempty"`
 }
 
 // OutgoingWebhookEvent Body of an events-mode request. The id of the event travels in the `webhook-id` header and is kept across retries. Events of one Alert Group are sent in order, at least once and never collapsed; a greater `sequence` means a newer event of the same Alert Group, and nothing more. New event names and new fields are added within `version` 1; removing a field or changing its meaning needs a new `version`. Receivers must ignore unknown `event` values and unknown fields.
@@ -4411,6 +4536,9 @@ type PersonalAccessTokenList struct {
 
 // Problem RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
 type Problem struct {
+	// AttemptsRemaining Set on the `link_code_invalid` refusal of `confirmMattermostLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
+	AttemptsRemaining *int `json:"attempts_remaining,omitempty"`
+
 	// Code Stable machine code that refines `type`, listed per type in `x-problem-codes`. Clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`.
 	Code *string `json:"code,omitempty"`
 
@@ -5320,12 +5448,15 @@ type TestSourceKind string
 type TestStep struct {
 	DurationMs int `json:"duration_ms"`
 
-	// Error What failed. Secrets, the Signing secret and tokens are masked.
+	// Error What failed, in English. Secrets, the Signing secret and tokens are masked. Clients show it as the detail of `error_code`, or of `error_class` without one.
 	Error nullable.Nullable[string] `json:"error,omitempty"`
 
 	// ErrorClass How a delivery attempt ended. `limited`: no limiter token was free within `delivery.interactive_budget`, so nothing was sent (a test only; the attempt did not reach the remote side).
 	ErrorClass DeliveryErrorClass `json:"error_class"`
-	Extracted  *map[string]string `json:"extracted,omitempty"`
+
+	// ErrorCode What failed in a step where `error_class` does not tell it, for the `press` step of a Mattermost Destination: `press_not_reached` — the bot pressed the button, but the press did not reach Muster's callback; `error` names the host of `MUSTER_INGEST_URL` to add to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server; `bot_unknown` — no Connection check has learned the bot yet, so it did not press; run the Connection check, then test again. Null otherwise.
+	ErrorCode nullable.Nullable[NullableTestStepErrorCode] `json:"error_code,omitempty"`
+	Extracted *map[string]string                           `json:"extracted,omitempty"`
 
 	// Name `message` — the test message to a messenger; `press` — for a Mattermost Destination, the bot's own press of the test message's first button (`POST /api/v4/posts/{post_id}/actions/{action_id}`): `error_class` `none` when the press reached Muster's callback; otherwise `error` says to add the host of `MUSTER_INGEST_URL` to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server, and `limited` means no limiter token was free for it; `event` and `create` — the requests of an outgoing webhook.
 	Name TestStepName `json:"name"`
@@ -5493,10 +5624,13 @@ type TimelineStatusEntry struct {
 	// PreviousOwner The Owner who lost the Alert Group (Takeover, urgency rise, auto-unacknowledge, an Owner disabled or deleted).
 	PreviousOwner *UserRef `json:"previous_owner,omitempty"`
 
-	// Reason Reason of an automatic status change.
-	Reason      nullable.Nullable[string]    `json:"reason,omitempty"`
-	SnoozeUntil nullable.Nullable[time.Time] `json:"snooze_until,omitempty"`
-	ToStatus    *AlertGroupStatus            `json:"to_status,omitempty"`
+	// Reason Reason of an automatic status change, as text; clients translate `reason_code` and show this text only when there is no code.
+	Reason nullable.Nullable[string] `json:"reason,omitempty"`
+
+	// ReasonCode The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), or `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically. Null when the entry has no reason or its reason has no code.
+	ReasonCode  nullable.Nullable[NullableStatusChangeReason] `json:"reason_code,omitempty"`
+	SnoozeUntil nullable.Nullable[time.Time]                  `json:"snooze_until,omitempty"`
+	ToStatus    *AlertGroupStatus                             `json:"to_status,omitempty"`
 }
 
 // TimelineStatusEntryKind defines model for TimelineStatusEntry.Kind.

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Link Mattermost" in a real browser, against a stubbed API: the code step with the attempts counted down after a
-// wrong code, a used-up request that offers only a new code, and the text of every refusal of the code request and the
-// confirmation (link_code_invalid, messenger_user_not_found, account_linked_elsewhere, 429 in minutes from Retry-After
-// or the body, 503), in English and Russian.
+// "Link Mattermost" in a real browser, against a stubbed API: the code step with the attempts left that the server
+// gives after a wrong code, a used-up request that offers only a new code, and the text of every refusal of the code
+// request and the confirmation (link_code_invalid, messenger_user_not_found, account_linked_elsewhere, 429
+// link_code_requests_exceeded in minutes from Retry-After or the body, another 429, 503), in English and Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
@@ -56,6 +56,14 @@ function problem(status: number, extra: Record<string, unknown> = {}): Answer {
 
 function fieldProblem(pointer: string, code: string): Answer {
   return problem(422, { errors: [{ pointer, code, detail: code }] });
+}
+
+/** The refusal of a wrong code, with the attempts the server says are left. */
+function wrongCode(left: number): Answer {
+  return problem(422, {
+    errors: [{ pointer: "/code", code: "link_code_invalid", detail: "wrong" }],
+    attempts_remaining: left,
+  });
 }
 
 function startedAnswer(): Answer {
@@ -146,14 +154,15 @@ function posts(path: string) {
 }
 
 describe("LinkMattermostDialog", () => {
-  test("counts down the attempts after a wrong code and links with the right one", async () => {
+  test("shows the attempts the server leaves after a wrong code and links with the right one", async () => {
     answer = (path) => {
       if (path === START) {
         return startedAnswer();
       }
+      // The server's number, not a count kept in the browser: two attempts are left after the first wrong code.
       return posts(CONFIRM).at(-1)?.body.includes('"code":"ABCDEFGH"') === true
         ? { status: 201, body: { id: "AL0000000000AA" } }
-        : fieldProblem("/code", "link_code_invalid");
+        : wrongCode(2);
     };
     await open();
     await page.getByLabelText("Connection").selectOptions("mm-2");
@@ -168,7 +177,7 @@ describe("LinkMattermostDialog", () => {
     await expect
       .element(page.getByText("The code is wrong or no longer valid. Request a new code."))
       .toBeVisible();
-    await expect.element(page.getByText("4 attempts left")).toBeVisible();
+    await expect.element(page.getByText("2 attempts left")).toBeVisible();
     await expect.element(codeField()).toHaveValue("");
     expect(JSON.parse(posts(CONFIRM)[0]?.body ?? "")).toEqual({
       request_id: "LR000000000001",
@@ -184,8 +193,7 @@ describe("LinkMattermostDialog", () => {
   });
 
   test("a confirmation still pending when the dialog closes leaves the reopened dialog alone", async () => {
-    answer = (path) =>
-      path === START ? startedAnswer() : fieldProblem("/code", "link_code_invalid");
+    answer = (path) => (path === START ? startedAnswer() : wrongCode(4));
     hold = new Promise((resolve) => {
       release = resolve;
     });
@@ -225,8 +233,7 @@ describe("LinkMattermostDialog", () => {
   });
 
   test("after the last wrong code only a new code is offered, which restores the attempts", async () => {
-    answer = (path) =>
-      path === START ? startedAnswer() : fieldProblem("/code", "link_code_invalid");
+    answer = (path) => (path === START ? startedAnswer() : wrongCode(5 - posts(CONFIRM).length));
     await open();
     await sendCode();
     for (let i = 0; i < 5; i++) {
@@ -253,6 +260,17 @@ describe("LinkMattermostDialog", () => {
     ).toBeNull();
   });
 
+  test("a refused code without the attempts left offers only a new code", async () => {
+    answer = (path) =>
+      path === START ? startedAnswer() : fieldProblem("/code", "link_code_invalid");
+    await open();
+    await sendCode();
+    await enter("22222222");
+    await expect.element(page.getByText("0 attempts left")).toBeVisible();
+    expect(codeField().query()).toBeNull();
+    await expect.element(page.getByRole("button", { name: "Request a new code" })).toBeVisible();
+  });
+
   test("an account linked to another user is refused with its text", async () => {
     answer = () => problem(409, { code: "account_linked_elsewhere" });
     await open("@bob");
@@ -273,19 +291,28 @@ describe("LinkMattermostDialog", () => {
     await expect.element(page.getByText("No user @bob on this Mattermost server.")).toBeVisible();
   });
 
-  test("too many code requests name the wait in minutes", async () => {
-    answer = () => ({ ...problem(429), headers: { "Retry-After": "1800" } });
+  test("too many code requests name the wait in minutes; another limit is the generic one", async () => {
+    const exceeded = { code: "link_code_requests_exceeded" };
+    answer = () => ({ ...problem(429, exceeded), headers: { "Retry-After": "1800" } });
     await open();
     await sendCode();
     await expect
       .element(page.getByText("Too many codes were requested. Try again in 30 minutes."))
       .toBeVisible();
 
-    answer = () => problem(429, { retry_after_seconds: 30 });
+    answer = () => problem(429, { ...exceeded, retry_after_seconds: 30 });
     await sendCode();
     await expect
       .element(page.getByText("Too many codes were requested. Try again in 1 minute."))
       .toBeVisible();
+
+    // The rate limit of the session or token has no code: it is not about link codes.
+    answer = () => problem(429, { retry_after_seconds: 30 });
+    await sendCode();
+    await expect
+      .element(page.getByText(i18n.t("errors.tooManyAttempts", { count: 30 })))
+      .toBeVisible();
+    expect(page.getByText("Too many codes were requested", { exact: false }).query()).toBeNull();
   });
 
   test("a busy messenger asks to try again shortly", async () => {
@@ -303,13 +330,14 @@ describe("LinkMattermostDialog", () => {
     expect(t("accountLinks.mattermost.attemptsLeft", { count: 4 })).toBe("Осталось 4 попытки");
     expect(t("accountLinks.mattermost.attemptsLeft", { count: 1 })).toBe("Осталась 1 попытка");
     expect(t("accountLinks.mattermost.attemptsLeft", { count: 5 })).toBe("Осталось 5 попыток");
-    expect(linkProblemText(t, new ApiError(429, {}, 300), "x")).toBe(
+    const exceeded = { code: "link_code_requests_exceeded" };
+    expect(linkProblemText(t, new ApiError(429, exceeded, 300), "x")).toBe(
       "Запрошено слишком много кодов. Попробуйте снова через 5 минут.",
     );
-    expect(linkProblemText(t, new ApiError(429, {}, 120), "x")).toBe(
+    expect(linkProblemText(t, new ApiError(429, exceeded, 120), "x")).toBe(
       "Запрошено слишком много кодов. Попробуйте снова через 2 минуты.",
     );
-    expect(linkProblemText(t, new ApiError(429, {}, 60), "x")).toBe(
+    expect(linkProblemText(t, new ApiError(429, exceeded, 60), "x")).toBe(
       "Запрошено слишком много кодов. Попробуйте снова через 1 минуту.",
     );
     expect(
@@ -324,8 +352,7 @@ describe("LinkMattermostDialog", () => {
       ),
     ).toBe("На этом сервере Mattermost нет пользователя @bob.");
 
-    answer = (path) =>
-      path === START ? startedAnswer() : fieldProblem("/code", "link_code_invalid");
+    answer = (path) => (path === START ? startedAnswer() : wrongCode(4));
     await open();
     await page.getByRole("button", { name: "Отправить код" }).click();
     await expect.element(page.getByText("Осталось 5 попыток")).toBeVisible();

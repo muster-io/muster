@@ -17,6 +17,7 @@
  * During 0.x breaking changes are allowed; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
  * OpenAPI spec version: 0.1.0
  */
+import type { NullableOutgoingHeartbeatErrorClass } from './nullableOutgoingHeartbeatErrorClass';
 
 export interface OutgoingHeartbeatResult {
   /** False when no URL is set; the page suggests setting one. */
@@ -25,6 +26,15 @@ export interface OutgoingHeartbeatResult {
   last_attempt_at?: string | null;
   /** @nullable */
   last_ok?: boolean | null;
-  /** @nullable */
+  /**
+     * What failed, in English and without the URL; clients translate `last_error_class` and show this text as its detail.
+     * @nullable
+     */
   last_error?: string | null;
+  last_error_class?: NullableOutgoingHeartbeatErrorClass | null;
+  /**
+     * The status code the URL answered the last failed heartbeat with; null without an answer.
+     * @nullable
+     */
+  last_status?: number | null;
 }
