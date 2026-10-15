@@ -52,7 +52,7 @@ func TestCheckPasses(t *testing.T) {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
 	if res.Bot.Username != faketelegram.BotUsername || res.Webhook.URL != "" || res.Webhook.PendingUpdateCount != 1 ||
-		res.Steps[2].Message != "" {
+		res.Steps[2].Message != "" || res.Steps[0].Code != "" || res.Steps[1].Code != "" || res.Steps[2].Code != "" {
 		t.Fatalf("bot %+v webhook %+v", res.Bot, res.Webhook)
 	}
 	if _, failed := res.Failed(); failed {
@@ -71,14 +71,14 @@ func TestCheckWebhookSet(t *testing.T) {
 		jsonAnswer(200, `{"ok":true,"result":{"url":"https://hooks.example.org/x/y","pending_update_count":3}}`))
 	res, err := RunCheck(t.Context(), newClient(t, Settings{BaseURL: base, Token: testToken}), nil, direct, clock.Real{})
 	if err != nil || !res.OK() || res.Steps[2].Message != "A webhook is set at hooks.example.org." ||
-		res.Webhook.PendingUpdateCount != 3 {
+		res.Steps[2].Code != CodeWebhookSet || res.Webhook.PendingUpdateCount != 3 {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
 	_, base = serve(t, jsonAnswer(401, `{"ok":false,"error_code":401,"description":"Unauthorized"}`),
 		jsonAnswer(200, `{"ok":true,"result":{"id":1,"is_bot":true,"username":"b"}}`),
 		jsonAnswer(200, `{"ok":true,"result":{"url":"::bad","pending_update_count":0}}`))
 	res, _ = RunCheck(t.Context(), newClient(t, Settings{BaseURL: base, Token: testToken}), nil, direct, clock.Real{})
-	if res.Steps[2].Message != "A webhook is set." {
+	if res.Steps[2].Message != "A webhook is set." || res.Steps[2].Code != CodeWebhookSet {
 		t.Fatalf("webhook without a host = %+v", res.Steps[2])
 	}
 }
@@ -112,38 +112,39 @@ func TestCheckFailures(t *testing.T) {
 		client  func() *Client
 		ctx     func() (context.Context, context.CancelFunc)
 		message string
+		code    string
 	}{
 		{name: "html", setup: func() { _ = f.SetConfig(nil, &html, nil) },
 			client:  func() *Client { return newClient(t, Settings{BaseURL: f.URL(), Token: testToken}) },
-			message: MessageNotBotAPI},
+			message: MessageNotBotAPI, code: CodeNotBotAPI},
 		{name: "wrong prefix", client: func() *Client {
 			return newClient(t, Settings{BaseURL: f.URL() + "/other", Token: testToken})
-		}, message: MessageWrongPrefix},
+		}, message: MessageWrongPrefix, code: CodeWrongPrefix},
 		{name: "dns", client: func() *Client {
 			n := network(t, nil)
 			n.Resolver = failingResolver{}
 			c, _ := NewClient(n, Settings{BaseURL: "https://bot-api.invalid/x", Token: testToken})
 			return c
-		}, message: "DNS lookup failed: bot-api.invalid"},
+		}, message: "DNS lookup failed: bot-api.invalid", code: delivery.CodeDNSFailed},
 		{name: "tls", client: func() *Client { return newClient(t, Settings{BaseURL: tlsServer.URL, Token: testToken}) },
-			message: "TLS handshake failed: tls: failed to verify certificate"},
+			message: "TLS handshake failed: tls: failed to verify certificate", code: delivery.CodeTLSFailed},
 		{name: "timeout", client: func() *Client { return newClient(t, Settings{BaseURL: slow.URL, Token: testToken}) },
 			ctx: func() (context.Context, context.CancelFunc) {
 				return context.WithTimeout(t.Context(), 100*time.Millisecond)
-			}, message: "No answer within 10 s"},
+			}, message: "No answer within 10 s", code: delivery.CodeTimeout},
 		{name: "http proxy 407", client: func() *Client {
 			return newClient(t, Settings{BaseURL: f.URL(), Token: testToken, Proxy: &outbound.Proxy{
 				Type: outbound.ProxyHTTP, Address: httpProxy.Addr(), Username: "u", Password: "wrong"}})
-		}, message: MessageProxyRefused},
+		}, message: MessageProxyRefused, code: delivery.CodeProxyRefused},
 		{name: "socks5 refused credentials", client: func() *Client {
 			return newClient(t, Settings{BaseURL: f.URL(), Token: testToken, Proxy: &outbound.Proxy{
 				Type: outbound.ProxySOCKS5, Address: socks.Addr(), Username: "u", Password: "wrong"}})
-		}, message: MessageProxyRefused},
+		}, message: MessageProxyRefused, code: delivery.CodeProxyRefused},
 		{name: "refused", client: func() *Client {
 			return newClient(t, Settings{BaseURL: "http://127.0.0.1:1", Token: testToken})
-		}, message: "connection refused"},
+		}, message: "connection refused", code: delivery.CodeConnectFailed},
 		{name: "another status", client: func() *Client { return newClient(t, Settings{BaseURL: ok200, Token: testToken}) },
-			message: "The server answered 200 instead of 401 with JSON."},
+			message: "The server answered 200 instead of 401 with JSON.", code: CodeUnexpectedStatus},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -160,7 +161,7 @@ func TestCheckFailures(t *testing.T) {
 			f.ResetRequests()
 			res, err := RunCheck(ctx, tc.client(), nil, direct, clock.Real{})
 			if err != nil || res.OK() || names(res) != "dry_probe:fail get_me:skip get_webhook_info:skip" ||
-				!strings.Contains(res.Steps[0].Message, tc.message) {
+				!strings.Contains(res.Steps[0].Message, tc.message) || res.Steps[0].Code != tc.code {
 				t.Fatalf("check = %+v, %v", res, err)
 			}
 			for _, r := range f.Requests() {
@@ -204,7 +205,7 @@ func TestCheckTokenRefused(t *testing.T) {
 	res, err := RunCheck(t.Context(), newClient(t, Settings{BaseURL: f.URL(), Token: testToken}), nil, direct,
 		clock.Real{})
 	if err != nil || res.OK() || names(res) != "dry_probe:ok get_me:fail get_webhook_info:skip" ||
-		res.Steps[1].Message != MessageTokenInvalid {
+		res.Steps[1].Message != MessageTokenInvalid || res.Steps[1].Code != CodeTokenInvalid {
 		t.Fatalf("check = %+v, %v", res, err)
 	}
 	if st, failed := res.Failed(); !failed || st.Name != StepGetMe {
@@ -213,14 +214,16 @@ func TestCheckTokenRefused(t *testing.T) {
 	_, base := serve(t, jsonAnswer(401, `{"ok":false,"error_code":401,"description":"Unauthorized"}`),
 		jsonAnswer(500, `{"ok":false,"error_code":500,"description":"Internal Server Error"}`))
 	res, _ = RunCheck(t.Context(), newClient(t, Settings{BaseURL: base, Token: testToken}), nil, direct, clock.Real{})
-	if res.Steps[1].Message != "Telegram answered 500: Internal Server Error" {
+	if res.Steps[1].Message != "Telegram answered 500: Internal Server Error" ||
+		res.Steps[1].Code != delivery.CodeRequestFailed {
 		t.Fatalf("getMe 500 = %+v", res.Steps[1])
 	}
 	_, base = serve(t, jsonAnswer(401, `{"ok":false,"error_code":401,"description":"Unauthorized"}`),
 		jsonAnswer(200, `{"ok":true,"result":{"id":1,"username":"b"}}`),
 		jsonAnswer(403, `{"ok":false,"error_code":403,"description":"Forbidden"}`))
 	res, _ = RunCheck(t.Context(), newClient(t, Settings{BaseURL: base, Token: testToken}), nil, direct, clock.Real{})
-	if res.OK() || res.Steps[2].Message != "Telegram answered 403: Forbidden" || res.Webhook != nil {
+	if res.OK() || res.Steps[2].Message != "Telegram answered 403: Forbidden" ||
+		res.Steps[2].Code != delivery.CodeRequestFailed || res.Webhook != nil {
 		t.Fatalf("getWebhookInfo 403 = %+v", res)
 	}
 }

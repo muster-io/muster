@@ -394,15 +394,18 @@ func TestCheckConnectionAPI(t *testing.T) {
 	decodeInto(t, a, &res)
 	if a.status != http.StatusOK || !res.Ok || res.BotName.MustGet() != "muster-dev-bot" || len(res.Steps) != 1 ||
 		res.Steps[0].Name != "token" || res.Steps[0].LatencyMs.MustGet() != 7 || *res.Steps[0].Via != "direct" ||
-		!res.Steps[0].Message.IsNull() || len(res.Warnings) != 1 || res.Warnings[0] != gen.PressAnswersInThread {
+		!res.Steps[0].Message.IsNull() || !res.Steps[0].Code.IsNull() || len(res.Warnings) != 1 ||
+		res.Warnings[0] != gen.PressAnswersInThread {
 		t.Errorf("check = %d %s", a.status, a.body)
 	}
 	fc.check = connections.CheckResult{Steps: []connections.Step{{Name: connections.StepToken,
-		Latency: 3 * time.Millisecond, Via: mattermost.ViaProxy, Message: mattermost.MessageTokenInvalid}}}
+		Latency: 3 * time.Millisecond, Via: mattermost.ViaProxy, Message: mattermost.MessageTokenInvalid,
+		Code: mattermost.CodeTokenInvalid}}}
 	a = x.as(t, connectionsWriter, http.MethodPost, path, "")
 	decodeInto(t, a, &res)
 	if a.status != http.StatusOK || res.Ok || !res.BotName.IsNull() || *res.Steps[0].Via != "proxy" ||
-		res.Steps[0].Message.MustGet() != "The bot token is not valid." || !strings.Contains(string(a.body),
+		res.Steps[0].Message.MustGet() != "The bot token is not valid." ||
+		res.Steps[0].Code.MustGet() != gen.NullableConnectionCheckCodeTokenInvalid || !strings.Contains(string(a.body),
 		`"warnings":[]`) {
 		t.Errorf("revoked = %d %s", a.status, a.body)
 	}
@@ -450,24 +453,27 @@ func TestTelegramConnectionAPI(t *testing.T) {
 			{Name: "dry_probe", OK: true, Latency: 4 * time.Millisecond, Via: "proxy"},
 			{Name: "get_me", OK: true, Latency: 5 * time.Millisecond, Via: "proxy"},
 			{Name: "get_webhook_info", OK: true, Latency: 6 * time.Millisecond, Via: "proxy",
-				Message: "A webhook is set at in.example.org."}}}
+				Message: "A webhook is set at in.example.org.", Code: "webhook_set"}}}
 	path := "/api/v1/connections/CNAAAAAAAAAAT1/checks"
 	a = x.as(t, connectionsWriter, http.MethodPost, path, "{}")
 	var res gen.ConnectionCheckResult
 	decodeInto(t, a, &res)
 	if a.status != http.StatusOK || !res.WebhookSet.MustGet() || res.PendingUpdates.MustGet() != 4 ||
 		len(res.Steps) != 3 || *res.Steps[2].Skipped || res.Steps[2].Message.MustGet() != "A webhook is set at in.example.org." ||
-		fc.baseURLs[len(fc.baseURLs)-1] != nil {
+		res.Steps[2].Code.MustGet() != gen.NullableConnectionCheckCodeWebhookSet || fc.baseURLs[len(fc.baseURLs)-1] != nil {
 		t.Fatalf("check = %d %s", a.status, a.body)
 	}
 	fc.check = connections.CheckResult{Steps: []connections.Step{
-		{Name: "dry_probe", Latency: time.Millisecond, Via: "direct", Message: "This is not a Bot API."},
+		{Name: "dry_probe", Latency: time.Millisecond, Via: "direct", Message: "This is not a Bot API.",
+			Code: "not_bot_api"},
 		{Name: "get_me", Skipped: true, Via: "direct"}, {Name: "get_webhook_info", Skipped: true, Via: "direct"}}}
 	a = x.as(t, connectionsWriter, http.MethodPost, path, `{"base_url":"http://127.0.0.1:18081/other/"}`)
 	decodeInto(t, a, &res)
 	if got := fc.baseURLs[len(fc.baseURLs)-1]; a.status != http.StatusOK || got == nil ||
 		*got != "http://127.0.0.1:18081/other/" || !*res.Steps[1].Skipped || !res.Steps[1].LatencyMs.IsNull() ||
-		res.Steps[0].Message.MustGet() != "This is not a Bot API." || !res.WebhookSet.IsNull() ||
+		res.Steps[0].Message.MustGet() != "This is not a Bot API." ||
+		res.Steps[0].Code.MustGet() != gen.NullableConnectionCheckCodeNotBotApi || !res.Steps[1].Code.IsNull() ||
+		!res.WebhookSet.IsNull() ||
 		!res.PendingUpdates.IsNull() {
 		t.Fatalf("unsaved base URL = %d %s", a.status, a.body)
 	}

@@ -352,6 +352,40 @@ describe("the refusals of a save", () => {
     );
   });
 
+  test("translate a failing Destination check by its code, with the English message as the detail", async () => {
+    const found = serverErrors(
+      refusal(422, {
+        errors: [
+          {
+            pointer: "/channel_id",
+            code: "destination_check_failed",
+            detail:
+              "The bot is not an admin of the discussion group Ops Chat. Make the bot an admin there.",
+            check_code: "bot_not_group_admin",
+          },
+        ],
+      }),
+    );
+    expect(found["/channel_id"]?.checkCode).toBe("bot_not_group_admin");
+    expect(destinationErrorText(i18n.t, "/channel_id", found["/channel_id"]!)).toBe(
+      "The bot is not an admin of the discussion group. Make the bot an admin there, allowed to post messages. " +
+        "Details: The bot is not an admin of the discussion group Ops Chat. Make the bot an admin there.",
+    );
+    const notMember = {
+      code: "destination_check_failed",
+      detail: "The bot is not a member of this channel.",
+      checkCode: "bot_not_in_channel" as const,
+    };
+    // In English the message says what the code says, so no detail repeats it.
+    expect(destinationErrorText(i18n.t, "/channel_id", notMember)).toBe(
+      "The bot is not a member of this channel.",
+    );
+    await i18n.changeLanguage("ru");
+    expect(destinationErrorText(i18n.t, "/channel_id", notMember)).toBe(
+      "Бот не состоит в этом канале. Подробности: The bot is not a member of this channel.",
+    );
+  });
+
   test("puts an unknown Connection at the Connection and a refused Mention at its kind", async () => {
     mockReads();
     await renderForm(
@@ -559,6 +593,48 @@ describe("Check", () => {
     await expect
       .element(page.getByTestId("destination-check-item").nth(1))
       .toHaveTextContent("Bot in the channel: failed The bot is not a member of this channel.");
+  });
+
+  test("translates a failing check by its code into Russian, the English message below as its detail", async () => {
+    await i18n.changeLanguage("ru");
+    const fetch = vi.spyOn(window, "fetch").mockResolvedValue(
+      json(200, {
+        ok: false,
+        checks: [
+          { name: "token", ok: true, code: null },
+          {
+            name: "bot_in_channel",
+            ok: false,
+            message: "The bot is not a member of this channel.",
+            code: "bot_not_in_channel",
+          },
+        ],
+        health: { state: "broken", since: "2026-10-09T08:05:00Z", reason: "403" },
+      }),
+    );
+    await render(
+      providers(
+        <DestinationCheck
+          destination={{
+            ...DESTINATION,
+            health: { state: "broken", since: "2026-10-09T08:05:00Z" },
+          }}
+          dirty={false}
+        />,
+        WRITE,
+      ),
+    );
+    await page.getByRole("button", { name: "Проверить", exact: true }).click();
+    await expect
+      .element(page.getByTestId("destination-check-item-reason"))
+      .toHaveTextContent("ошибка Бот не состоит в этом канале.");
+    await expect
+      .element(page.getByTestId("destination-check-item-detail"))
+      .toHaveTextContent("Подробности: The bot is not a member of this channel.");
+    await expect
+      .element(page.getByTestId("destination-check-item").nth(0))
+      .toHaveTextContent("Токен: успешно");
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   test("names a busy messenger with its wait", async () => {

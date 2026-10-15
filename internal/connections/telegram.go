@@ -209,7 +209,7 @@ func checkResultOf(res telegram.Check) CheckResult {
 	out := CheckResult{OK: res.OK(), Steps: make([]Step, 0, len(res.Steps))}
 	for _, st := range res.Steps {
 		out.Steps = append(out.Steps, Step{Name: st.Name, OK: st.OK, Skipped: st.Skipped, Latency: st.Latency,
-			Via: st.Via, Message: st.Message})
+			Via: st.Via, Message: st.Message, Code: st.Code})
 	}
 	if res.Bot != nil {
 		out.BotName = res.Bot.Username

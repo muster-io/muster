@@ -255,7 +255,7 @@ func TestBlockedAndRedirectAreFatal(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, r := c.GetMe(t.Context(), outbound.ClassInteractive); r.Outcome.Kind != delivery.OutcomeFatal ||
-		strings.Contains(string(r.Outcome.Error), "s3cr3t") {
+		strings.Contains(string(r.Outcome.Error), "s3cr3t") || !r.Blocked || r.FailureCode() != delivery.CodeBlocked {
 		t.Fatalf("blocked = %+v", r)
 	}
 }

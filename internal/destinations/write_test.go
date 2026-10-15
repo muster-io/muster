@@ -212,10 +212,12 @@ func (c *fakeChecker) CheckChannel(_ context.Context, in ChannelCheck) (ChannelC
 	case "ch-nobot":
 		return ChannelChecked{ConnectionID: 5, Check: mattermost.Check{Outcome: fatal, Steps: []mattermost.Step{
 			{Name: mattermost.StepToken, OK: true},
-			{Name: mattermost.StepBotInChannel, Message: mattermost.MessageNotMember, Outcome: fatal}}}}, nil
+			{Name: mattermost.StepBotInChannel, Message: mattermost.MessageNotMember, Code: mattermost.CodeNotMember,
+				Outcome: fatal}}}}, nil
 	case "revoked":
 		return ChannelChecked{ConnectionID: 5, Check: mattermost.Check{Outcome: fatal, Steps: []mattermost.Step{
-			{Name: mattermost.StepToken, Message: mattermost.MessageTokenInvalid, Outcome: fatal}}}}, nil
+			{Name: mattermost.StepToken, Message: mattermost.MessageTokenInvalid, Code: mattermost.CodeTokenInvalid,
+				Outcome: fatal}}}}, nil
 	}
 	return ChannelChecked{ConnectionID: 5, Check: mattermost.Check{Outcome: ok, TeamName: "dev",
 		ChannelName: "alerts", Steps: []mattermost.Step{{Name: mattermost.StepToken, OK: true},
@@ -244,21 +246,22 @@ func (c *fakeTelegram) CheckTelegramChannel(_ context.Context, in TelegramChanne
 		return TelegramChannelChecked{ConnectionID: 6, Check: telegram.DestinationCheck{Steps: steps,
 			Outcome: last.Outcome}}, nil
 	}
-	fatal := func(name, message string) telegram.DestinationStep {
-		return telegram.DestinationStep{Name: name, Message: message,
+	fatal := func(name, code, message string) telegram.DestinationStep {
+		return telegram.DestinationStep{Name: name, Message: message, Code: code,
 			Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(message)}}
 	}
 	ok := func(name string) telegram.DestinationStep { return telegram.DestinationStep{Name: name, OK: true} }
 	switch in.ChannelID {
 	case "@no_comments":
 		return fail([]telegram.DestinationStep{ok(telegram.StepChannelExists),
-			fatal(telegram.StepDiscussionGroup, telegram.MessageNoComments)})
+			fatal(telegram.StepDiscussionGroup, telegram.CodeNoComments, telegram.MessageNoComments)})
 	case "@no_group_admin":
 		return fail([]telegram.DestinationStep{ok(telegram.StepChannelExists), ok(telegram.StepDiscussionGroup),
 			ok(telegram.StepBotRightsChannel),
-			fatal(telegram.StepBotRightsGroup, telegram.MessageGroupNotAdmin("Muster alerts Chat"))})
+			fatal(telegram.StepBotRightsGroup, telegram.CodeGroupNotAdmin, telegram.MessageGroupNotAdmin("Muster alerts Chat"))})
 	case "@revoked":
-		return fail([]telegram.DestinationStep{fatal(telegram.StepChannelExists, telegram.MessageTokenInvalid)})
+		return fail([]telegram.DestinationStep{fatal(telegram.StepChannelExists, telegram.CodeTokenInvalid,
+			telegram.MessageTokenInvalid)})
 	}
 	title := c.title
 	if title == "" {
@@ -371,11 +374,12 @@ func TestCreateRefusals(t *testing.T) {
 	var failed *CheckFailedError
 	if !errors.As(err, &failed) || len(failed.Items) != 1 || failed.Items[0].Pointer != "/channel_id" ||
 		failed.Items[0].Message != mattermost.MessageNotMember || failed.Items[0].Name != "bot_in_channel" ||
+		failed.Items[0].Code != "bot_not_in_channel" ||
 		!stringsContain(failed.Error(), "bot_in_channel") {
 		t.Errorf("no bot = %v", err)
 	}
 	if _, err = s.Create(ctx, saver, mattermostInput("revoked", "revoked")); !errors.As(err, &failed) ||
-		failed.Items[0].Pointer != "/connection_id" {
+		failed.Items[0].Pointer != "/connection_id" || failed.Items[0].Code != "token_invalid" {
 		t.Errorf("revoked = %v", err)
 	}
 	in := mattermostInput("bad", "ch-alerts")
@@ -537,7 +541,8 @@ func TestCheckDestination(t *testing.T) {
 	store.rows[0].MattermostChannelID = txt("ch-nobot")
 	res, err := s.Check(ctx, "DSAAAAAAAAAAA1")
 	if err != nil || res.OK || len(res.Items) != 2 || res.Items[1].Message != mattermost.MessageNotMember ||
-		res.Items[0].Name != "token" || !res.Items[0].OK || res.Health.State != "healthy" {
+		res.Items[1].Code != "bot_not_in_channel" || res.Items[0].Name != "token" || !res.Items[0].OK ||
+		res.Items[0].Code != "" || res.Health.State != "healthy" {
 		t.Errorf("failing = %+v, %v", res, err)
 	}
 	if c := checker.calls[0]; c.Destination == nil || *c.Destination != 1 || c.ChannelID != "ch-nobot" {
@@ -859,11 +864,13 @@ func TestCreateTelegramRefusals(t *testing.T) {
 	tg := s.writer.Telegram.(*fakeTelegram)
 	ctx := t.Context()
 	for channel, want := range map[string]CheckItem{
-		"@no_comments": {Name: "discussion_group", Message: telegram.MessageNoComments, Pointer: "/channel_id"},
-		"@no_group_admin": {Name: "bot_rights_group", Pointer: "/channel_id",
+		"@no_comments": {Name: "discussion_group", Message: telegram.MessageNoComments, Code: "comments_disabled",
+			Pointer: "/channel_id"},
+		"@no_group_admin": {Name: "bot_rights_group", Pointer: "/channel_id", Code: "bot_not_group_admin",
 			Message: "The bot is not an admin of the discussion group Muster alerts Chat. Make the bot an admin there, " +
 				"allowed to post messages."},
-		"@revoked": {Name: "channel_exists", Message: telegram.MessageTokenInvalid, Pointer: "/connection_id"},
+		"@revoked": {Name: "channel_exists", Message: telegram.MessageTokenInvalid, Code: "token_invalid",
+			Pointer: "/connection_id"},
 	} {
 		_, err := s.Create(ctx, saver, telegramInput("x", channel))
 		failed, ok := errors.AsType[*CheckFailedError](err)
@@ -1015,7 +1022,7 @@ func TestCheckTelegramDestination(t *testing.T) {
 	store.rows[1].TelegramChannelID = txt("@no_comments")
 	res, err := s.Check(ctx, "DSAAAAAAAAAAA2")
 	if err != nil || res.OK || len(res.Items) != 2 || res.Items[1].Message != telegram.MessageNoComments ||
-		res.Health.State != "broken" {
+		res.Items[1].Code != "comments_disabled" || res.Health.State != "broken" {
 		t.Errorf("failing = %+v, %v", res, err)
 	}
 	if c := tg.calls[0]; c.Destination == nil || *c.Destination != 2 || c.Connection != "CNAAAAAAAAAAA2" {
@@ -1024,7 +1031,8 @@ func TestCheckTelegramDestination(t *testing.T) {
 	store.rows[1].TelegramChannelID = txt("@muster_alerts")
 	// The stored discussion group (-100200) is not the one the check finds: the check fails until a save.
 	res, err = s.Check(ctx, "DSAAAAAAAAAAA2")
-	if err != nil || res.OK || res.Items[1].Message != telegram.MessageMoved || len(*healed) != 0 {
+	if err != nil || res.OK || res.Items[1].Message != telegram.MessageMoved || res.Items[1].Code != "changed_since_saved" ||
+		len(*healed) != 0 {
 		t.Errorf("moved = %+v, %v", res, err)
 	}
 	store.rows[1].TelegramDiscussionChatID.Int64 = -1001000000002

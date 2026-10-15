@@ -52,6 +52,7 @@ type checkStep struct {
 	Skipped bool   `json:"skipped"`
 	Via     string `json:"via"`
 	Message string `json:"message"`
+	Code    string `json:"code"`
 }
 
 type checkResult struct {
@@ -137,7 +138,8 @@ func TestTelegramConnection(t *testing.T) {
 	}
 	e.fake(http.MethodPut, "/config", `{"mode":"html"}`)
 	res, a = e.check(id, "")
-	if res.OK || res.Steps[0].Message != "This is not a Bot API." || steps(res) != "dry_probe:fail get_me:skip get_webhook_info:skip" {
+	if res.OK || res.Steps[0].Message != "This is not a Bot API." || res.Steps[0].Code != "not_bot_api" ||
+		steps(res) != "dry_probe:fail get_me:skip get_webhook_info:skip" {
 		t.Fatalf("html = %s", a.body)
 	}
 	e.fake(http.MethodPut, "/config", `{"mode":"bot_api"}`)

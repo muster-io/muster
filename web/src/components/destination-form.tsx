@@ -4,7 +4,7 @@
 // The form of a Destination (C-13.FR-9, FR-2; C-12.FR-8), shared by every type: the name, the type's fields in a slot
 // (Mattermost, Telegram or the outgoing webhook), the Mention section and the limiter. Saving a Mattermost or Telegram
 // Destination runs its Destination check, and a failing check is refused with destination_check_failed at the field it
-// concerns and the check's message, which the form shows there; a template of an outgoing webhook that fails is
+// concerns, with the check's code, which the form shows there translated, and its English message as the detail; a template of an outgoing webhook that fails is
 // refused at its field with its line and column. Without destinations:write the form only shows the Destination.
 
 import { useMutation } from "@tanstack/react-query";
@@ -21,7 +21,7 @@ import type {
   MentionSettings,
 } from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
-import { checkErrorText } from "./connection-check";
+import { type CheckCode, checkCodeText, checkDetail, checkErrorText } from "./connection-check";
 import {
   LimiterField,
   type LimiterValues,
@@ -46,12 +46,13 @@ const ID = "destination";
 const NAME_MAX = 200;
 
 /**
- * A refusal of a field: its code; for a failing Destination check, the check's message; for a template, the server's
- * detail and the 1-based line and column of the error.
+ * A refusal of a field: its code; for a failing Destination check, the check's code and message; for a template, the
+ * server's detail and the 1-based line and column of the error.
  */
 export interface FieldProblem {
   code: string;
   detail?: string;
+  checkCode?: CheckCode;
   line?: number;
   column?: number;
 }
@@ -204,6 +205,9 @@ export function serverErrors(err: unknown): DestinationErrors {
     if (item.detail !== undefined) {
       problem.detail = item.detail;
     }
+    if (item.check_code !== undefined && item.check_code !== null) {
+      problem.checkCode = item.check_code;
+    }
     if (item.line !== undefined) {
       problem.line = item.line;
     }
@@ -228,7 +232,13 @@ export function serverErrors(err: unknown): DestinationErrors {
 
 export function destinationErrorText(t: TFunction, pointer: string, problem: FieldProblem): string {
   if (problem.code === "destination_check_failed") {
-    return problem.detail ?? t("destinations.errors.checkFailed");
+    if (problem.checkCode === undefined) {
+      return problem.detail ?? t("destinations.errors.checkFailed");
+    }
+    // The check's text in the reader's language; the server's English message follows as its detail.
+    const reason = checkCodeText(t, problem.checkCode);
+    const detail = checkDetail(t, problem.checkCode, problem.detail);
+    return detail === null ? reason : t("checks.reasonWithDetail", { reason, detail });
   }
   if (problem.code === "name_taken") {
     return t("destinations.errors.nameTaken");

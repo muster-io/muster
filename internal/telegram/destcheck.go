@@ -36,15 +36,29 @@ const (
 		"allowed to post messages."
 )
 
+// The codes of the messages above (DestinationCheckItem.code), which clients translate; a token getMe refused has
+// CodeTokenInvalid, and any other failure the code of delivery.FailureCode.
+const (
+	CodeChannelNotFound = "channel_not_found"
+	CodeNotChannel      = "not_a_channel"
+	CodeNoComments      = "comments_disabled"
+	CodeChannelNotAdmin = "bot_not_channel_admin"
+	CodeMayNotPost      = "bot_may_not_post"
+	CodeMayNotEdit      = "bot_may_not_edit"
+	CodeGroupNotAdmin   = "bot_not_group_admin"
+	CodeMoved           = "changed_since_saved"
+)
+
 // MessageGroupNotAdmin is the message of a discussion group whose admins do not include the bot.
 func MessageGroupNotAdmin(group string) string { return fmt.Sprintf(messageGroupNotAdmin, group) }
 
-// DestinationStep is one step of a Destination check: whether it passed, and when it failed the message for the person
-// and the outcome for delivery.
+// DestinationStep is one step of a Destination check: whether it passed, and when it failed the message for the
+// person, in English, its code, which clients translate, and the outcome for delivery.
 type DestinationStep struct {
 	Name    string
 	OK      bool
 	Message string
+	Code    string
 	Outcome delivery.Outcome
 }
 
@@ -86,10 +100,11 @@ func read(ctx context.Context, run Runner, f func(ctx context.Context, class out
 // on the group for its title and getChatMember for the bot there — an admin, who may always post in a group; a bot
 // outside the group gets 403 (F-003). The bot's id comes from getMe once per client, which later checks skip. A step
 // that fails ends the check: a refusal that a person must fix is Fatal with the step's message, which the Broken probe
-// keeps as the reason; an answer that says nothing of the chat, such as a timeout, keeps its own outcome.
+// keeps as the reason; an answer that says nothing of the chat, such as a timeout, keeps its own outcome. Each failure
+// has its code: the code of its message, or the code of Result.FailureCode for the masked text of an answer.
 func CheckDestination(ctx context.Context, c *Client, run Runner, channel string) (DestinationCheck, error) {
 	var out DestinationCheck
-	fail := func(name, message string, r Result) DestinationCheck {
+	fail := func(name, code, message string, r Result) DestinationCheck {
 		o := r.Outcome
 		switch {
 		case message != "":
@@ -98,9 +113,9 @@ func CheckDestination(ctx context.Context, c *Client, run Runner, channel string
 			o = delivery.Outcome{Kind: delivery.OutcomeUnknown, Error: "the check failed"}
 		}
 		if message == "" {
-			message = string(o.Error)
+			message, code = string(o.Error), r.FailureCode()
 		}
-		out.Steps = append(out.Steps, DestinationStep{Name: name, Message: message, Outcome: o})
+		out.Steps = append(out.Steps, DestinationStep{Name: name, Message: message, Code: code, Outcome: o})
 		out.Outcome = o
 		return out
 	}
@@ -116,7 +131,8 @@ func CheckDestination(ctx context.Context, c *Client, run Runner, channel string
 			return DestinationCheck{}, err
 		}
 		if !r.OK() {
-			return fail(StepChannelExists, refusedToken(r), r), nil
+			code, message := refusedToken(r)
+			return fail(StepChannelExists, code, message, r), nil
 		}
 	}
 	var ch ChatInfo
@@ -130,18 +146,18 @@ func CheckDestination(ctx context.Context, c *Client, run Runner, channel string
 	}
 	switch {
 	case !r.OK():
-		message := refusedToken(r)
+		code, message := refusedToken(r)
 		if message == "" && isAnswered(r) {
-			message = MessageChannelNotFound
+			code, message = CodeChannelNotFound, MessageChannelNotFound
 		}
-		return fail(StepChannelExists, message, r), nil
+		return fail(StepChannelExists, code, message, r), nil
 	case ch.Type != "channel":
-		return fail(StepChannelExists, MessageNotChannel, r), nil
+		return fail(StepChannelExists, CodeNotChannel, MessageNotChannel, r), nil
 	}
 	out.ChannelID, out.ChannelTitle = ch.ID, ch.Title
 	pass(StepChannelExists)
 	if ch.LinkedChatID == 0 {
-		return fail(StepDiscussionGroup, MessageNoComments, r), nil
+		return fail(StepDiscussionGroup, CodeNoComments, MessageNoComments, r), nil
 	}
 	out.GroupID = ch.LinkedChatID
 	pass(StepDiscussionGroup)
@@ -156,16 +172,16 @@ func CheckDestination(ctx context.Context, c *Client, run Runner, channel string
 	}
 	switch {
 	case !r.OK() && isAnswered(r):
-		return fail(StepBotRightsChannel, MessageChannelNotAdmin, r), nil
+		return fail(StepBotRightsChannel, CodeChannelNotAdmin, MessageChannelNotAdmin, r), nil
 	case !r.OK():
-		return fail(StepBotRightsChannel, "", r), nil
+		return fail(StepBotRightsChannel, "", "", r), nil
 	case m.Status == StatusCreator:
 	case m.Status != StatusAdministrator:
-		return fail(StepBotRightsChannel, MessageChannelNotAdmin, r), nil
+		return fail(StepBotRightsChannel, CodeChannelNotAdmin, MessageChannelNotAdmin, r), nil
 	case !m.CanPostMessages:
-		return fail(StepBotRightsChannel, MessageMayNotPost, r), nil
+		return fail(StepBotRightsChannel, CodeMayNotPost, MessageMayNotPost, r), nil
 	case !m.CanEditMessages:
-		return fail(StepBotRightsChannel, MessageMayNotEdit, r), nil
+		return fail(StepBotRightsChannel, CodeMayNotEdit, MessageMayNotEdit, r), nil
 	}
 	pass(StepBotRightsChannel)
 	var group ChatInfo
@@ -191,23 +207,23 @@ func CheckDestination(ctx context.Context, c *Client, run Runner, channel string
 	}
 	switch {
 	case !r.OK() && isAnswered(r):
-		return fail(StepBotRightsGroup, MessageGroupNotAdmin(name), r), nil
+		return fail(StepBotRightsGroup, CodeGroupNotAdmin, MessageGroupNotAdmin(name), r), nil
 	case !r.OK():
-		return fail(StepBotRightsGroup, "", r), nil
+		return fail(StepBotRightsGroup, "", "", r), nil
 	case m.Status != StatusCreator && m.Status != StatusAdministrator:
-		return fail(StepBotRightsGroup, MessageGroupNotAdmin(name), r), nil
+		return fail(StepBotRightsGroup, CodeGroupNotAdmin, MessageGroupNotAdmin(name), r), nil
 	}
 	pass(StepBotRightsGroup)
 	out.Outcome = delivery.Outcome{Kind: delivery.OutcomeOK}
 	return out, nil
 }
 
-// refusedToken is MessageTokenInvalid for an answer 401, empty otherwise.
-func refusedToken(r Result) string {
+// refusedToken is CodeTokenInvalid and MessageTokenInvalid for an answer 401, empty otherwise.
+func refusedToken(r Result) (string, string) {
 	if r.Status == http.StatusUnauthorized || r.Code == http.StatusUnauthorized {
-		return MessageTokenInvalid
+		return CodeTokenInvalid, MessageTokenInvalid
 	}
-	return ""
+	return "", ""
 }
 
 // isAnswered reports whether the Bot API refused the request itself, with 400 or 403 — not a transport failure, a

@@ -740,6 +740,14 @@ func TestMattermost(t *testing.T) {
 		reads[len(reads)-1].Status != http.StatusOK {
 		t.Errorf("reads of the post %+v", reads)
 	}
+	// Without the bot the check fails bot_in_channel with the code the UI translates and the English message.
+	failing := e.api.json(http.MethodPost, "/api/v1/destinations/"+dest+"/checks", "", http.StatusOK)
+	if items := failing["checks"].([]any); failing["ok"] != false || len(items) != 2 ||
+		items[1].(map[string]any)["code"] != "bot_not_in_channel" ||
+		items[1].(map[string]any)["message"] != "The bot is not a member of this channel." ||
+		items[0].(map[string]any)["code"] != nil {
+		t.Errorf("check without the bot = %v", failing)
+	}
 	e.fake(http.MethodPut, members, "")
 	interactive := e.clientRequests("interactive", "ok")
 	check := e.api.json(http.MethodPost, "/api/v1/destinations/"+dest+"/checks", "", http.StatusOK)

@@ -1207,6 +1207,129 @@ func (e NullableAlertGroupStatus) Valid() bool {
 	}
 }
 
+// Defines values for NullableConnectionCheckCode.
+const (
+	NullableConnectionCheckCodeBlocked          NullableConnectionCheckCode = "blocked"
+	NullableConnectionCheckCodeConnectFailed    NullableConnectionCheckCode = "connect_failed"
+	NullableConnectionCheckCodeDnsFailed        NullableConnectionCheckCode = "dns_failed"
+	NullableConnectionCheckCodeLessThannil      NullableConnectionCheckCode = "<nil>"
+	NullableConnectionCheckCodeNotBotApi        NullableConnectionCheckCode = "not_bot_api"
+	NullableConnectionCheckCodeProxyRefused     NullableConnectionCheckCode = "proxy_refused"
+	NullableConnectionCheckCodeRequestFailed    NullableConnectionCheckCode = "request_failed"
+	NullableConnectionCheckCodeTimeout          NullableConnectionCheckCode = "timeout"
+	NullableConnectionCheckCodeTlsFailed        NullableConnectionCheckCode = "tls_failed"
+	NullableConnectionCheckCodeTokenInvalid     NullableConnectionCheckCode = "token_invalid"
+	NullableConnectionCheckCodeUnexpectedStatus NullableConnectionCheckCode = "unexpected_status"
+	NullableConnectionCheckCodeWebhookSet       NullableConnectionCheckCode = "webhook_set"
+	NullableConnectionCheckCodeWrongPathPrefix  NullableConnectionCheckCode = "wrong_path_prefix"
+)
+
+// Valid indicates whether the value is a known member of the NullableConnectionCheckCode enum.
+func (e NullableConnectionCheckCode) Valid() bool {
+	switch e {
+	case NullableConnectionCheckCodeBlocked:
+		return true
+	case NullableConnectionCheckCodeConnectFailed:
+		return true
+	case NullableConnectionCheckCodeDnsFailed:
+		return true
+	case NullableConnectionCheckCodeLessThannil:
+		return true
+	case NullableConnectionCheckCodeNotBotApi:
+		return true
+	case NullableConnectionCheckCodeProxyRefused:
+		return true
+	case NullableConnectionCheckCodeRequestFailed:
+		return true
+	case NullableConnectionCheckCodeTimeout:
+		return true
+	case NullableConnectionCheckCodeTlsFailed:
+		return true
+	case NullableConnectionCheckCodeTokenInvalid:
+		return true
+	case NullableConnectionCheckCodeUnexpectedStatus:
+		return true
+	case NullableConnectionCheckCodeWebhookSet:
+		return true
+	case NullableConnectionCheckCodeWrongPathPrefix:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NullableDestinationCheckCode.
+const (
+	NullableDestinationCheckCodeBlocked            NullableDestinationCheckCode = "blocked"
+	NullableDestinationCheckCodeBotMayNotEdit      NullableDestinationCheckCode = "bot_may_not_edit"
+	NullableDestinationCheckCodeBotMayNotPost      NullableDestinationCheckCode = "bot_may_not_post"
+	NullableDestinationCheckCodeBotNotChannelAdmin NullableDestinationCheckCode = "bot_not_channel_admin"
+	NullableDestinationCheckCodeBotNotGroupAdmin   NullableDestinationCheckCode = "bot_not_group_admin"
+	NullableDestinationCheckCodeBotNotInChannel    NullableDestinationCheckCode = "bot_not_in_channel"
+	NullableDestinationCheckCodeChangedSinceSaved  NullableDestinationCheckCode = "changed_since_saved"
+	NullableDestinationCheckCodeChannelArchived    NullableDestinationCheckCode = "channel_archived"
+	NullableDestinationCheckCodeChannelInOtherTeam NullableDestinationCheckCode = "channel_in_other_team"
+	NullableDestinationCheckCodeChannelNotFound    NullableDestinationCheckCode = "channel_not_found"
+	NullableDestinationCheckCodeCommentsDisabled   NullableDestinationCheckCode = "comments_disabled"
+	NullableDestinationCheckCodeConnectFailed      NullableDestinationCheckCode = "connect_failed"
+	NullableDestinationCheckCodeDnsFailed          NullableDestinationCheckCode = "dns_failed"
+	NullableDestinationCheckCodeLessThannil        NullableDestinationCheckCode = "<nil>"
+	NullableDestinationCheckCodeNotAChannel        NullableDestinationCheckCode = "not_a_channel"
+	NullableDestinationCheckCodeProxyRefused       NullableDestinationCheckCode = "proxy_refused"
+	NullableDestinationCheckCodeRequestFailed      NullableDestinationCheckCode = "request_failed"
+	NullableDestinationCheckCodeTimeout            NullableDestinationCheckCode = "timeout"
+	NullableDestinationCheckCodeTlsFailed          NullableDestinationCheckCode = "tls_failed"
+	NullableDestinationCheckCodeTokenInvalid       NullableDestinationCheckCode = "token_invalid"
+)
+
+// Valid indicates whether the value is a known member of the NullableDestinationCheckCode enum.
+func (e NullableDestinationCheckCode) Valid() bool {
+	switch e {
+	case NullableDestinationCheckCodeBlocked:
+		return true
+	case NullableDestinationCheckCodeBotMayNotEdit:
+		return true
+	case NullableDestinationCheckCodeBotMayNotPost:
+		return true
+	case NullableDestinationCheckCodeBotNotChannelAdmin:
+		return true
+	case NullableDestinationCheckCodeBotNotGroupAdmin:
+		return true
+	case NullableDestinationCheckCodeBotNotInChannel:
+		return true
+	case NullableDestinationCheckCodeChangedSinceSaved:
+		return true
+	case NullableDestinationCheckCodeChannelArchived:
+		return true
+	case NullableDestinationCheckCodeChannelInOtherTeam:
+		return true
+	case NullableDestinationCheckCodeChannelNotFound:
+		return true
+	case NullableDestinationCheckCodeCommentsDisabled:
+		return true
+	case NullableDestinationCheckCodeConnectFailed:
+		return true
+	case NullableDestinationCheckCodeDnsFailed:
+		return true
+	case NullableDestinationCheckCodeLessThannil:
+		return true
+	case NullableDestinationCheckCodeNotAChannel:
+		return true
+	case NullableDestinationCheckCodeProxyRefused:
+		return true
+	case NullableDestinationCheckCodeRequestFailed:
+		return true
+	case NullableDestinationCheckCodeTimeout:
+		return true
+	case NullableDestinationCheckCodeTlsFailed:
+		return true
+	case NullableDestinationCheckCodeTokenInvalid:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NullableLanguage.
 const (
 	NullableLanguageEn          NullableLanguage = "en"
@@ -3183,9 +3306,11 @@ type ConnectionCheckResultWarnings string
 
 // ConnectionCheckStep defines model for ConnectionCheckStep.
 type ConnectionCheckStep struct {
-	LatencyMs nullable.Nullable[int] `json:"latency_ms,omitempty"`
+	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names. A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+	Code      nullable.Nullable[NullableConnectionCheckCode] `json:"code,omitempty"`
+	LatencyMs nullable.Nullable[int]                         `json:"latency_ms,omitempty"`
 
-	// Message What answered when the step failed; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked.
+	// Message What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail.
 	Message nullable.Nullable[string] `json:"message,omitempty"`
 	Name    ConnectionCheckStepName   `json:"name"`
 	Ok      bool                      `json:"ok"`
@@ -3231,6 +3356,10 @@ type Destination struct {
 
 // DestinationCheckItem defines model for DestinationCheckItem.
 type DestinationCheckItem struct {
+	// Code Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
+	Code nullable.Nullable[NullableDestinationCheckCode] `json:"code,omitempty"`
+
+	// Message Why the check failed, in English; untrusted text where it comes from the messenger. Clients translate `code` and show this text as its detail.
 	Message nullable.Nullable[string] `json:"message,omitempty"`
 
 	// Name One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there).
@@ -4134,6 +4263,12 @@ type NoteList struct {
 // NullableAlertGroupStatus defines model for NullableAlertGroupStatus.
 type NullableAlertGroupStatus string
 
+// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names. A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+type NullableConnectionCheckCode string
+
+// NullableDestinationCheckCode Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
+type NullableDestinationCheckCode string
+
 // NullableLanguage UI or template language; null follows the default.
 type NullableLanguage string
 
@@ -4577,6 +4712,9 @@ type Problem struct {
 
 // ProblemError defines model for ProblemError.
 type ProblemError struct {
+	// CheckCode Set on `destination_check_failed`; the code of the failing check, as in `DestinationCheckItem`, which clients translate, with `detail` as its English text.
+	CheckCode nullable.Nullable[NullableDestinationCheckCode] `json:"check_code,omitempty"`
+
 	// Code Stable code such as `required`, `invalid_format`, `unknown_id`, `too_long`, `too_short`, `out_of_range`, `invalid_regex`, `template_syntax`, `unknown_function`, `duplicate`, `unsupported`.
 	Code string `json:"code"`
 

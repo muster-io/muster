@@ -17,6 +17,7 @@
  * During 0.x breaking changes are allowed; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
  * OpenAPI spec version: 0.1.0
  */
+import type { NullableDestinationCheckCode } from './nullableDestinationCheckCode';
 
 export interface ProblemError {
   /** RFC 6901 JSON Pointer to the offending field in the request body, or `` for the whole body. Query and path parameters use `/query/<name>` and `/path/<name>`. */
@@ -35,4 +36,6 @@ export interface ProblemError {
      * @minimum 1
      */
   column?: number;
+  /** Set on `destination_check_failed`; the code of the failing check, as in `DestinationCheckItem`, which clients translate, with `detail` as its English text. */
+  check_code?: NullableDestinationCheckCode | null;
 }

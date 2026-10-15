@@ -108,16 +108,22 @@ func (c *Client) Via() string { return c.via }
 
 // Result is how a call ended: its outcome for delivery, which classifies the answer as C-13.FR-5 says, the status of
 // the answer, 0 without one, the error id Mattermost answered with, such as api.context.permissions.app_error, and the
-// body of the answer as received, which only a Destination test shows, masked (C-16.FR-2).
+// body of the answer as received, which only a Destination test shows, masked (C-16.FR-2); when the call got no answer,
+// what failed (outbound.Network*), and whether the outbound address policy refused the address.
 type Result struct {
 	Outcome delivery.Outcome
 	Status  int
 	ErrorID string
 	Body    []byte
+	Network string
+	Blocked bool
 }
 
 // OK reports whether the call succeeded.
 func (r Result) OK() bool { return r.Outcome.Kind == delivery.OutcomeOK }
+
+// FailureCode is the check code of a call that failed for a reason its check does not name (delivery.FailureCode).
+func (r Result) FailureCode() string { return delivery.FailureCode(r.Blocked, r.Network) }
 
 // User is a Mattermost user as the API answers it; a DeleteAt other than 0 is a deactivated account.
 type User struct {
@@ -398,7 +404,11 @@ func resultOf(res outbound.Result, err error) Result {
 	if err == nil {
 		return Result{Status: res.Status, Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}
 	}
-	r := Result{Status: res.Status, Outcome: delivery.Outcome{Error: outbound.Untrusted(err.Error())}}
+	r := Result{Status: res.Status, Outcome: delivery.Outcome{Error: outbound.Untrusted(err.Error())},
+		Blocked: res.Outcome == outbound.OutcomeBlocked}
+	if oe, ok := errors.AsType[*outbound.Error](err); ok {
+		r.Network = oe.Network
+	}
 	// The provider's text is masked of the Connection's secrets; the error id and message are read from it.
 	var e appError
 	if res.Status != 0 && json.Unmarshal([]byte(res.ProviderError), &e) == nil && e.ID != "" {

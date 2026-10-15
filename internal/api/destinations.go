@@ -190,8 +190,8 @@ func (s *Server) UpdateDestination(ctx context.Context, req gen.UpdateDestinatio
 		nil
 }
 
-// CheckDestination is checkDestination (C-13.FR-10, C-14.FR-14) on the interactive path: each check with its result, and the
-// health after it; a passing check ends a Broken state.
+// CheckDestination is checkDestination (C-13.FR-10, C-14.FR-14) on the interactive path: each check with its result, its
+// English message and the code clients translate, and the health after it; a passing check ends a Broken state.
 func (s *Server) CheckDestination(ctx context.Context, req gen.CheckDestinationRequestObject) (
 	gen.CheckDestinationResponseObject, error) {
 	res, err := s.destinations.Check(ctx, req.DestinationId)
@@ -206,6 +206,11 @@ func (s *Server) CheckDestination(ctx context.Context, req gen.CheckDestinationR
 			item.Message.Set(it.Message)
 		} else {
 			item.Message.SetNull()
+		}
+		if it.Code != "" {
+			item.Code.Set(gen.NullableDestinationCheckCode(it.Code))
+		} else {
+			item.Code.SetNull()
 		}
 		out.Checks = append(out.Checks, item)
 	}

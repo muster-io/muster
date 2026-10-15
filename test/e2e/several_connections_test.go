@@ -998,11 +998,11 @@ func TestSeveralConnectionsTelegramSameChat(t *testing.T) {
 	failed := ""
 	for _, x := range check["checks"].([]any) {
 		if c := x.(map[string]any); c["ok"] == false {
-			failed = fmt.Sprint(c["name"], ": ", c["message"])
+			failed = fmt.Sprint(c["name"], " ", c["code"], ": ", c["message"])
 		}
 	}
-	if check["ok"] != false || !strings.HasPrefix(failed, "bot_rights_group: The bot is not an admin of the discussion "+
-		"group "+faketelegram.GroupTitle) {
+	if check["ok"] != false || !strings.HasPrefix(failed, "bot_rights_group bot_not_group_admin: The bot is not an "+
+		"admin of the discussion group "+faketelegram.GroupTitle) {
 		t.Errorf("check of tg-b-alerts with bot B a member = %v", check)
 	}
 	if c := e.api.json(http.MethodPost, "/api/v1/destinations/"+ta+"/checks", "", http.StatusOK); c["ok"] != true {
@@ -1019,7 +1019,8 @@ func TestSeveralConnectionsTelegramWithoutDiscussionGroup(t *testing.T) {
 	e := newSeveral(t, h, r)
 	tb := e.tgConn("tg-b", devmode.TelegramSecondBotToken)
 	a := e.tgCreate("tg-b-nocomments", tb, "@"+faketelegram.NoCommentsName, mentionSettings(nil))
-	if fieldError(t, a) != "destination_check_failed /channel_id" || problemDetail(t, a) != telegram.MessageNoComments {
+	if fieldError(t, a) != "destination_check_failed /channel_id" || problemDetail(t, a) != telegram.MessageNoComments ||
+		!strings.Contains(string(a.body), `"check_code":"comments_disabled"`) {
 		t.Errorf("createDestination on @no_comments through tg-b = %d %s", a.status, a.body)
 	}
 	if telegram.MessageNoComments != "Comments are not enabled for this channel. Enable comments in the channel "+

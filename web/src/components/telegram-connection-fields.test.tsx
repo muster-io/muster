@@ -484,7 +484,11 @@ describe("ConnectionCheck of a Telegram Connection", () => {
       steps: [
         PASSED.steps[0],
         PASSED.steps[1],
-        { ...PASSED.steps[2], message: "A webhook is set at hooks.example.org." },
+        {
+          ...PASSED.steps[2],
+          message: "A webhook is set at hooks.example.org.",
+          code: "webhook_set" as const,
+        },
       ],
       webhook_set: true,
       pending_updates: 1,
@@ -496,7 +500,7 @@ describe("ConnectionCheck of a Telegram Connection", () => {
     await expect
       .poll(() => stepTexts()[2])
       .toBe(
-        "getWebhookInfo: ok · 5 ms · direct · 1 pending updateA webhook is set at hooks.example.org.",
+        "getWebhookInfo: ok · 5 ms · direct · 1 pending updateA webhook is set.Details: A webhook is set at hooks.example.org.",
       );
   });
 
@@ -519,6 +523,7 @@ describe("ConnectionCheck of a Telegram Connection", () => {
             latency_ms: 2,
             via: "direct",
             message: "Wrong path prefix: the server answered 404.",
+            code: "wrong_path_prefix",
           },
           { name: "get_me", ok: false, skipped: true, via: "direct" },
           { name: "get_webhook_info", ok: false, skipped: true, via: "direct" },
@@ -581,6 +586,7 @@ describe("ConnectionCheck of a Telegram Connection", () => {
             latency_ms: 1,
             via: "direct",
             message: "dial tcp 127.0.0.1:1: connect: connection refused",
+            code: "connect_failed",
           },
           { name: "get_me", ok: false, skipped: true, via: "direct" },
           { name: "get_webhook_info", ok: false, skipped: true, via: "direct" },
@@ -594,7 +600,7 @@ describe("ConnectionCheck of a Telegram Connection", () => {
     await expect
       .poll(stepTexts)
       .toEqual([
-        "Dry probe without the token: failed 1 ms · directdial tcp 127.0.0.1:1: connect: connection refused",
+        "Dry probe without the token: failed 1 ms · directThe connection failed.Details: dial tcp 127.0.0.1:1: connect: connection refused",
         "getMe: Skipped: an earlier step failed",
         "getWebhookInfo: Skipped: an earlier step failed",
       ]);
@@ -652,6 +658,38 @@ describe("ConnectionCheck of a Telegram Connection", () => {
         "getMe: Пропущен: сначала сохраните адрес",
         "getWebhookInfo: Пропущен: сначала сохраните адрес",
       ]);
+  });
+
+  test("translates a failed dry probe into Russian, with the server's English message as the detail", async () => {
+    await i18n.changeLanguage("ru");
+    await runCheck(
+      json(200, {
+        ok: false,
+        steps: [
+          {
+            name: "dry_probe",
+            ok: false,
+            latency_ms: 2,
+            via: "direct",
+            message: "Wrong path prefix: the server answered 404.",
+            code: "wrong_path_prefix",
+          },
+          { name: "get_me", ok: false, skipped: true, via: "direct" },
+          { name: "get_webhook_info", ok: false, skipped: true, via: "direct" },
+        ],
+        warnings: [],
+      }),
+      {},
+      "Проверить подключение",
+    );
+    await expect
+      .poll(() => stepTexts()[0])
+      .toBe(
+        "Пробный запрос без токена: ошибка 2 мс · напрямуюНеверный префикс пути: сервер ответил 404.Подробности: Wrong path prefix: the server answered 404.",
+      );
+    expect(page.getByTestId("connection-check-step-detail").element().className).toContain(
+      "text-muted-foreground",
+    );
   });
 
   test("writes the pending updates with Russian plurals", async () => {

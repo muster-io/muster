@@ -308,7 +308,8 @@ func TestTelegramCheck(t *testing.T) {
 	other := e.tg.URL() + "/other/"
 	res, err = e.svc.Check(t.Context(), c.PublicID, &other)
 	if err != nil || res.OK || !res.Steps[1].Skipped || !res.Steps[2].Skipped ||
-		res.Steps[0].Message != telegram.MessageWrongPrefix || res.WebhookSet != nil {
+		res.Steps[0].Message != telegram.MessageWrongPrefix || res.Steps[0].Code != telegram.CodeWrongPrefix ||
+		res.WebhookSet != nil {
 		t.Fatalf("unsaved = %+v, %v", res, err)
 	}
 	if reqs := e.tg.Requests(); len(reqs) != 1 || reqs[0].Path != "/other/bot0:x/getMe" {

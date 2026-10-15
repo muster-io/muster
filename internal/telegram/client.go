@@ -146,7 +146,8 @@ func (c *Client) client(k clientKey) (*outbound.Client, error) {
 
 // Result is how a call ended: its outcome for delivery, classified as C-14.FR-7 says; the status of the answer, 0
 // without one; the error_code and description of an `ok: false` answer, the description untrusted and masked; whether
-// the answer was not JSON; and, when the call got no answer, what failed (outbound.Network*) and its masked detail.
+// the answer was not JSON; when the call got no answer, what failed (outbound.Network*) and its masked detail; and
+// whether the outbound address policy refused the address.
 type Result struct {
 	Outcome     delivery.Outcome
 	Status      int
@@ -155,12 +156,16 @@ type Result struct {
 	NotJSON     bool
 	Network     string
 	Detail      string
+	Blocked     bool
 	// Body is the answer as received, which only a Destination test shows, masked (C-16.FR-2).
 	Body []byte
 }
 
 // OK reports whether the call succeeded.
 func (r Result) OK() bool { return r.Outcome.Kind == delivery.OutcomeOK }
+
+// FailureCode is the check code of a call that failed for a reason its check does not name (delivery.FailureCode).
+func (r Result) FailureCode() string { return delivery.FailureCode(r.Blocked, r.Network) }
 
 // User is the bot as getMe answers it.
 type User struct {
@@ -497,6 +502,7 @@ func resultOf(res outbound.Result, err error) Result {
 		return r
 	}
 	r.Outcome.Error = outbound.Untrusted(err.Error())
+	r.Blocked = res.Outcome == outbound.OutcomeBlocked
 	if oe, ok := errors.AsType[*outbound.Error](err); ok {
 		r.Network, r.Detail = oe.Network, oe.Detail
 	}

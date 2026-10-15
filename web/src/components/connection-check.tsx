@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// "Check connection" of a Connection (C-13.FR-2, AC-16; C-14.FR-11): each step with "ok" or its message, its latency
-// and the path it took, directly or through the proxy; "Connected as {bot}" once the token works; and the warnings that
-// do not fail the check, each with its hint. Telegram works in steps — the dry probe without the token, getMe with the
-// bot, getWebhookInfo with the pending updates — and a set webhook in the long-polling mode gets its warning. While the
-// form holds an unsaved base URL, the check sends it as base_url: the server makes only the dry probe against it, never
-// with the token, and the other steps read "Skipped: save the address first". The check runs on the interactive path,
-// so a busy messenger answers 503 with Retry-After: "The messenger is busy; try again in N s."
+// "Check connection" of a Connection (C-13.FR-2, AC-16; C-14.FR-11): each step with "ok" or what failed, translated by
+// its code with the server's English message below as its detail, its latency and the path it took, directly or through
+// the proxy; "Connected as {bot}" once the token works; and the warnings that do not fail the check, each with its hint.
+// Telegram works in steps — the dry probe without the token, getMe with the bot, getWebhookInfo with the pending updates
+// — and a set webhook in the long-polling mode gets its warning. While the form holds an unsaved base URL, the check
+// sends it as base_url: the server makes only the dry probe against it, never with the token, and the other steps read
+// "Skipped: save the address first". The check runs on the interactive path, so a busy messenger answers 503 with
+// Retry-After: "The messenger is busy; try again in N s."
 
 import { useQueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -25,9 +26,12 @@ import type {
   ConnectionCheckResultWarningsItem,
   ConnectionCheckStep,
   ConnectionCheckStepName,
+  NullableConnectionCheckCode,
+  NullableDestinationCheckCode,
   TelegramUpdateMode,
 } from "../api/gen/model";
 import { isApiError, problemText } from "../lib/api";
+import { unreachable } from "./destination-test-panel";
 import { isBaseUrl } from "./telegram-connection-fields";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -44,6 +48,108 @@ function stepName(t: TFunction, name: ConnectionCheckStepName): string {
     default:
       return t("connections.check.steps.getWebhookInfo");
   }
+}
+
+/** The code of what a step of the Connection check or a check of the Destination check found. */
+export type CheckCode =
+  | NonNullable<NullableConnectionCheckCode>
+  | NonNullable<NullableDestinationCheckCode>;
+
+/** What a check found, by its code, in the reader's language; the server's English message is its detail. */
+export function checkCodeText(t: TFunction, code: CheckCode): string {
+  switch (code) {
+    case "token_invalid":
+      return t("checks.codes.tokenInvalid");
+    case "not_bot_api":
+      return t("checks.codes.notBotApi");
+    case "wrong_path_prefix":
+      return t("checks.codes.wrongPathPrefix");
+    case "unexpected_status":
+      return t("checks.codes.unexpectedStatus");
+    case "dns_failed":
+      return t("checks.codes.dnsFailed");
+    case "connect_failed":
+      return t("checks.codes.connectFailed");
+    case "tls_failed":
+      return t("checks.codes.tlsFailed");
+    case "timeout":
+      return t("checks.codes.timeout");
+    case "proxy_refused":
+      return t("checks.codes.proxyRefused");
+    case "blocked":
+      return t("checks.codes.blocked");
+    case "request_failed":
+      return t("checks.codes.requestFailed");
+    case "webhook_set":
+      return t("checks.codes.webhookSet");
+    case "bot_not_in_channel":
+      return t("checks.codes.botNotInChannel");
+    case "channel_in_other_team":
+      return t("checks.codes.channelInOtherTeam");
+    case "channel_archived":
+      return t("checks.codes.channelArchived");
+    case "channel_not_found":
+      return t("checks.codes.channelNotFound");
+    case "not_a_channel":
+      return t("checks.codes.notAChannel");
+    case "comments_disabled":
+      return t("checks.codes.commentsDisabled");
+    case "changed_since_saved":
+      return t("checks.codes.changedSinceSaved");
+    case "bot_not_channel_admin":
+      return t("checks.codes.botNotChannelAdmin");
+    case "bot_may_not_post":
+      return t("checks.codes.botMayNotPost");
+    case "bot_may_not_edit":
+      return t("checks.codes.botMayNotEdit");
+    case "bot_not_group_admin":
+      return t("checks.codes.botNotGroupAdmin");
+    default:
+      return unreachable(code);
+  }
+}
+
+/**
+ * The server's English message as the detail of the text of its code, when it says more than that text — in another
+ * language, or with a host, a status or a name; null without a code, which shows the message itself.
+ */
+export function checkDetail(
+  t: TFunction,
+  code: CheckCode | null | undefined,
+  message: string | null | undefined,
+): string | null {
+  if (
+    code === null ||
+    code === undefined ||
+    message === null ||
+    message === undefined ||
+    message === ""
+  ) {
+    return null;
+  }
+  return message === checkCodeText(t, code) ? null : message;
+}
+
+/** The detail of a check's code: the server's English message, small and muted below the translated text. */
+export function CheckDetail({
+  code,
+  message,
+  testId,
+}: {
+  code: CheckCode | null | undefined;
+  message: string | null | undefined;
+  testId: string;
+}) {
+  const { t } = useTranslation();
+  const detail = checkDetail(t, code, message);
+  if (detail === null) {
+    return null;
+  }
+  return (
+    <span className="text-xs wrap-anywhere text-muted-foreground" data-testid={testId}>
+      {t("checks.detail", { detail })}
+    </span>
+  );
 }
 
 /** The hint of a warning; the permission is Mattermost's identifier and shows as code. */
@@ -120,6 +226,9 @@ function Step({
     details.push(t("connections.check.pendingUpdates", { count: pendingUpdates }));
   }
   const failed = !step.ok && !skipped;
+  const code = step.code ?? null;
+  // A step that passed may say what it found, such as the host of a webhook that is set.
+  const found = step.ok && !skipped && step.message !== undefined && step.message !== null;
   return (
     <li className="flex min-w-0 items-start gap-2 text-sm" data-testid="connection-check-step">
       {failed ? (
@@ -143,13 +252,25 @@ function Step({
           {details.join(" · ")}
         </span>
         {failed && (
-          <span className="wrap-anywhere text-destructive">
-            {step.message ?? t("connections.check.unknownError")}
+          <span
+            className="wrap-anywhere text-destructive"
+            data-testid="connection-check-step-reason"
+          >
+            {code === null
+              ? (step.message ?? t("connections.check.unknownError"))
+              : checkCodeText(t, code)}
           </span>
         )}
-        {/* A step that passed may say what it found, such as the host of a webhook that is set. */}
-        {step.ok && !skipped && step.message !== undefined && step.message !== null && (
-          <span className="wrap-anywhere text-muted-foreground">{step.message}</span>
+        {found && (
+          <span
+            className="wrap-anywhere text-muted-foreground"
+            data-testid="connection-check-step-reason"
+          >
+            {code === null ? step.message : checkCodeText(t, code)}
+          </span>
+        )}
+        {(failed || found) && (
+          <CheckDetail code={code} message={step.message} testId="connection-check-step-detail" />
         )}
       </div>
     </li>
