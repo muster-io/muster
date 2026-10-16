@@ -4310,11 +4310,11 @@ paths:
       tags:
       - Destinations
       summary: Create Destination
-      description: '`type` selects Mattermost, Telegram or outgoing webhook. Saving a Mattermost or Telegram Destination runs
-        the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed`
-        and `destination_check_failed`. Creating an outgoing webhook Destination also generates
-        its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through
-        `destination_ids`.'
+      description: '`type` selects Mattermost, Telegram, outgoing webhook or Bridge. Saving a Mattermost, Telegram or
+        Bridge Destination runs the Destination check through the interactive path and refuses one that fails it with
+        `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also
+        generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach
+        Destinations through `destination_ids`.'
       x-permission: destinations:write
       x-listener: app
       security:
@@ -4391,8 +4391,8 @@ paths:
       summary: Update Destination
       description: Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps
         its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null`
-        on a proxy `password` clears it. Saving a Mattermost or Telegram Destination runs the Destination check as
-        `createDestination` does and refuses a failing one with `destination_check_failed`.
+        on a proxy `password` clears it. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check
+        as `createDestination` does and refuses a failing one with `destination_check_failed`.
       x-permission: destinations:write
       x-listener: app
       security:
@@ -4477,11 +4477,11 @@ paths:
       tags:
       - Destinations
       summary: Run the Destination check
-      description: 'Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost
-        token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and
-        `getChatMember` for the bot in both. A success ends the Broken state. Not available for outgoing webhooks (`422`
-        with `check_not_supported`). Runs on the interactive path: when no limiter token is free within
-        `delivery.interactive_budget`, the answer is `503` with `Retry-After`.'
+      description: 'Verifies that Muster can still reach and post to the Destination without sending a message:
+        Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from
+        `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`. A success ends the Broken
+        state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path:
+        when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.'
       x-permission: destinations:test
       x-listener: app
       security:
@@ -4520,6 +4520,7 @@ paths:
         mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked
         in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination
         ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`.
+        A Bridge Destination answers `501` (`not-implemented`) until this build implements its test.
       x-permission: destinations:test
       x-listener: app
       security:
@@ -4553,6 +4554,8 @@ paths:
           $ref: '#/components/responses/Unprocessable'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
   /destinations/{destination_id}/previews:
     post:
       operationId: previewDestination
@@ -4560,7 +4563,7 @@ paths:
       - Destinations
       summary: Preview a message or request
       description: Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending
-        anything.
+        anything. A Bridge Destination answers `501` (`not-implemented`) until this build implements its preview.
       x-permission: destinations:test
       x-listener: app
       security:
@@ -4594,6 +4597,8 @@ paths:
           $ref: '#/components/responses/Unprocessable'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
   /destinations/{destination_id}/secrets:
     get:
       operationId: listDestinationSecrets
@@ -7286,6 +7291,21 @@ components:
                 status: 500
                 detail: The Snapshot could not be stored.
                 instance: /api/v1/ingest
+    NotImplemented:
+      description: This build does not implement the operation yet, or not for the type of the resource
+        (`not-implemented`).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notImplemented:
+              value:
+                type: https://muster-io.github.io/muster/problems/not-implemented
+                title: Not implemented
+                status: 501
+                detail: This build cannot test or preview Destinations of this type yet.
+                instance: /api/v1/destinations/DS4M1T6RW9KXPA/tests
     Limited:
       description: No limiter token was free within `delivery.interactive_budget` (`interactive-budget-exhausted`); retry
         after `Retry-After`.
@@ -7484,10 +7504,10 @@ components:
           description: The Destination type has no Destination check (outgoing webhooks); the pointer is
             `/path/destination_id`.
         - code: destination_check_failed
-          description: Saving a Mattermost or Telegram Destination ran its Destination check, a check failed and nothing
-            was saved. One item per failing check, at the field the check concerns — `/connection_id` for `token`,
-            `/channel_id` for the others (see `DestinationCheckItem`) — with the check's message as `detail` and its
-            code as `check_code`.
+          description: Saving a Mattermost, Telegram or Bridge Destination ran its Destination check, a check failed and
+            nothing was saved. One item per failing check, at the field the check concerns — `/connection_id` for
+            `token` and for the code `token_invalid`, `/channel_id` for the others (see `DestinationCheckItem`) — with
+            the check's message as `detail` and its code as `check_code`.
         - code: link_code_invalid
           description: The Mattermost link code is wrong, or its request is void, used or expired; never says which. The
             pointer is `/code` (`confirmMattermostLink`), and `attempts_remaining` says how many codes the request still
@@ -11803,6 +11823,7 @@ components:
       - mattermost
       - telegram
       - webhook
+      - bridge
     DestinationHealth:
       type: object
       required:
@@ -11852,7 +11873,8 @@ components:
       properties:
         everyone:
           type: string
-          description: '`none`, or the chat-wide mention the messenger supports; Telegram has none of them.'
+          description: '`none`, or the chat-wide mention the messenger supports; Telegram and Bridges have none of
+            them.'
           enum:
           - none
           - channel
@@ -11865,7 +11887,7 @@ components:
             $ref: '#/components/schemas/PublicId'
         groups:
           type: array
-          description: Messenger groups.
+          description: Messenger groups; Telegram and Bridges have none.
           items:
             type: string
     MentionSettings:
@@ -12052,6 +12074,39 @@ components:
           $ref: '#/components/schemas/MentionSettings'
         limiter:
           $ref: '#/components/schemas/Limiter'
+    BridgeDestinationInput:
+      type: object
+      description: A Bridge Destination (C-22.FR-3) is a channel of the bridge's messenger, named by its id. Saving it
+        runs the bridge's `checkChannel`, which posts nothing, and keeps the channel's name the bridge answers.
+      required:
+      - type
+      - name
+      - connection_id
+      - channel_id
+      - mentions
+      - limiter
+      properties:
+        type:
+          type: string
+          enum:
+          - bridge
+        name:
+          type: string
+          minLength: 1
+        connection_id:
+          description: A Bridge Connection.
+          $ref: '#/components/schemas/PublicId'
+        channel_id:
+          type: string
+          description: The channel as its messenger names it, an opaque string of up to 512 characters; surrounding
+            white space is trimmed.
+        mentions:
+          description: Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.
+          $ref: '#/components/schemas/MentionSettings'
+        limiter:
+          description: '`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits
+            together, or half of the Connection''s `info.limits.send_per_second_per_channel` when its info has it.'
+          $ref: '#/components/schemas/Limiter'
     WebhookDestinationBase:
       type: object
       required:
@@ -12154,6 +12209,19 @@ components:
             - string
             - 'null'
             readOnly: true
+    BridgeDestination:
+      allOf:
+      - $ref: '#/components/schemas/BridgeDestinationInput'
+      - $ref: '#/components/schemas/DestinationReadFields'
+      - type: object
+        properties:
+          channel_name:
+            type:
+            - string
+            - 'null'
+            readOnly: true
+            description: The channel's name as the bridge's `checkChannel` answered it when the Destination was last
+              saved. Untrusted text from the bridge.
     WebhookDestination:
       allOf:
       - $ref: '#/components/schemas/WebhookDestinationBase'
@@ -12187,12 +12255,14 @@ components:
       - $ref: '#/components/schemas/MattermostDestination'
       - $ref: '#/components/schemas/TelegramDestination'
       - $ref: '#/components/schemas/WebhookDestination'
+      - $ref: '#/components/schemas/BridgeDestination'
       discriminator:
         propertyName: type
         mapping:
           mattermost: '#/components/schemas/MattermostDestination'
           telegram: '#/components/schemas/TelegramDestination'
           webhook: '#/components/schemas/WebhookDestination'
+          bridge: '#/components/schemas/BridgeDestination'
     DestinationInput:
       description: A Destination as written; `type` selects the variant and cannot change on update. Routes are attached through
         the Route's `destination_ids`.
@@ -12200,12 +12270,14 @@ components:
       - $ref: '#/components/schemas/MattermostDestinationInput'
       - $ref: '#/components/schemas/TelegramDestinationInput'
       - $ref: '#/components/schemas/WebhookDestinationInput'
+      - $ref: '#/components/schemas/BridgeDestinationInput'
       discriminator:
         propertyName: type
         mapping:
           mattermost: '#/components/schemas/MattermostDestinationInput'
           telegram: '#/components/schemas/TelegramDestinationInput'
           webhook: '#/components/schemas/WebhookDestinationInput'
+          bridge: '#/components/schemas/BridgeDestinationInput'
     DestinationList:
       type: object
       required:
@@ -12483,7 +12555,8 @@ components:
           description: 'One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no
             linked discussion group, that is, comments are not enabled for the channel (the message says to enable them);
             `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message
-            says to make the bot an admin there).'
+            says to make the bot an admin there). Bridge: `channel`, the bridge''s `checkChannel` — whether the bot can
+            post, edit and reply in the channel.'
           enum:
           - token
           - bot_in_channel
@@ -12491,6 +12564,7 @@ components:
           - discussion_group
           - bot_rights_channel
           - bot_rights_group
+          - channel
         ok:
           type: boolean
         message:
@@ -12507,15 +12581,17 @@ components:
       - 'null'
       description: 'Why a check of the Destination check failed, as a stable code that clients translate, with `message`
         as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token
-        (`token`, Telegram `channel_exists`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team`
-        — the channel is not in the Destination''s team, `channel_archived`; Telegram `channel_exists`:
-        `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a
-        channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not
-        enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved,
-        and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`,
-        `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; any check:
-        `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in
-        `NullableConnectionCheckCode`.'
+        (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`,
+        `channel_in_other_team` — the channel is not in the Destination''s team, `channel_archived`; Telegram
+        `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` —
+        the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group,
+        so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the
+        Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`,
+        `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the
+        group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or
+        the bot cannot use it, with the bridge''s `detail` as `message`, and `request_failed` for any other error class
+        of the bridge, whose `message` names the class; any check: `dns_failed`, `connect_failed`, `tls_failed`,
+        `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.'
       enum:
       - token_invalid
       - bot_not_in_channel
@@ -12529,6 +12605,7 @@ components:
       - bot_may_not_post
       - bot_may_not_edit
       - bot_not_group_admin
+      - channel_forbidden
       - dns_failed
       - connect_failed
       - tls_failed

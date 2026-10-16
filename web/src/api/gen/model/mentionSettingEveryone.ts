@@ -19,7 +19,7 @@
  */
 
 /**
- * `none`, or the chat-wide mention the messenger supports; Telegram has none of them.
+ * `none`, or the chat-wide mention the messenger supports; Telegram and Bridges have none of them.
  */
 export type MentionSettingEveryone = typeof MentionSettingEveryone[keyof typeof MentionSettingEveryone];
 

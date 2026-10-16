@@ -17,7 +17,9 @@
   [`0007_alert_groups_first_published_at_backfill`](../../internal/db/migrations/0007_alert_groups_first_published_at_backfill.up.sql)
   (`alert_groups.first_published_at` filled for Alert Groups published before S-049) and
   [`0008_bridge_connections`](../../internal/db/migrations/0008_bridge_connections.up.sql)
-  (Bridge Connections, S-073), in `internal/db/migrations/` — golang-migrate
+  (Bridge Connections, S-073) and
+  [`0009_bridge_destinations`](../../internal/db/migrations/0009_bridge_destinations.up.sql)
+  (Bridge Destinations, S-080), in `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
   ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md))
@@ -428,10 +430,11 @@ erDiagram
     }
     destinations {
         bigint id PK
-        text type "mattermost telegram webhook"
+        text type "mattermost telegram webhook bridge"
         bigint connection_id FK "type-checked"
         text telegram_channel_id "the only Telegram setting"
         bigint telegram_discussion_chat_id "found by the check"
+        text bridge_channel_id "as its messenger names it"
         text webhook_mode "events template both"
         bytea signing_secret_ciphertext "Secret"
         jsonb mentions
@@ -683,23 +686,26 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18; [ADR-0005](../adr/0005-del
   bot a check learned. `UNIQUE (id, type)` is the target of type-checked foreign keys. A
   Connection cannot be deleted while a Destination that is not deleted uses it; deleting it abandons the final edits
   still pending for its deleted Destinations, whose deliveries end as `not_delivered`.
-- **`destinations`** — one table for the three types, with type-specific nullable columns and a `CHECK` per type. The
+- **`destinations`** — one table for the four types, with type-specific nullable columns and a `CHECK` per type. The
   composite foreign key `(connection_id, type) REFERENCES connections (id, type)` guarantees that a Mattermost
-  Destination posts through a Mattermost Connection and a Telegram one through a Telegram Connection; an outgoing
-  webhook has no Connection. Outgoing webhooks keep their request templates as `jsonb` (`webhook_events_config`,
-  `webhook_template_config`, matching `WebhookEventsConfig` and `WebhookTemplateConfig`), their own proxy, and the
-  current and previous Signing secrets (the previous one with `previous_signing_secret_since`, shown as "still signs
-  since"); a `CHECK` requires a Signing secret on every outgoing webhook that is not deleted, because it is generated at
-  creation. A Telegram Destination stores only its channel as entered (`telegram_channel_id`); the numeric channel id,
-  the channel's linked discussion group (`getChat` → `linked_chat_id`, in `telegram_discussion_chat_id`) and their
-  titles are learned by the Destination check. **Health**: `health`, `broken_since`, `broken_cause` (`fatal` or
-  `unavailable`), `broken_reason` (masked) and `next_probe_at`; the `CHECK` keeps them consistent. `mentions` holds the
-  Mention settings per kind of Loud event. The template error state of an outgoing webhook request is kept here
-  (`MusterTemplateError`). **Deletion** is soft: `deleted_at` is set and the Destination leaves its Routes; its open
-  Root messages get their final edit (`deliveries.desired_retire`), and then its secrets — the Signing secrets, the
-  proxy password and its `destination_secrets` rows — are wiped. An outgoing webhook in events mode has no Root message:
-  its pending `webhook_events` end as `not_delivered`, no final event is sent and its secrets are wiped at once. The row
-  stays for the deliveries, events and Audit log entries that point at it.
+  Destination posts through a Mattermost Connection, a Telegram one through a Telegram Connection and a Bridge one
+  through a Bridge Connection; an outgoing webhook has no Connection. Outgoing webhooks keep their request templates as
+  `jsonb` (`webhook_events_config`, `webhook_template_config`, matching `WebhookEventsConfig` and
+  `WebhookTemplateConfig`), their own proxy, and the current and previous Signing secrets (the previous one with
+  `previous_signing_secret_since`, shown as "still signs since"); a `CHECK` requires a Signing secret on every outgoing
+  webhook that is not deleted, because it is generated at creation. A Telegram Destination stores only its channel as
+  entered (`telegram_channel_id`); the numeric channel id, the channel's linked discussion group (`getChat` →
+  `linked_chat_id`, in `telegram_discussion_chat_id`) and their titles are learned by the Destination check. A Bridge
+  Destination stores its channel id as its messenger names it (`bridge_channel_id`, an opaque string of up to 512
+  characters) and the channel's name its Destination check (`checkChannel`) answered (`bridge_channel_name`).
+  **Health**: `health`, `broken_since`, `broken_cause` (`fatal` or `unavailable`), `broken_reason` (masked) and
+  `next_probe_at`; the `CHECK` keeps them consistent. `mentions` holds the Mention settings per kind of Loud event. The
+  template error state of an outgoing webhook request is kept here (`MusterTemplateError`). **Deletion** is soft:
+  `deleted_at` is set and the Destination leaves its Routes; its open Root messages get their final edit
+  (`deliveries.desired_retire`), and then its secrets — the Signing secrets, the proxy password and its
+  `destination_secrets` rows — are wiped. An outgoing webhook in events mode has no Root message: its pending
+  `webhook_events` end as `not_delivered`, no final event is sent and its secrets are wiped at once. The row stays for
+  the deliveries, events and Audit log entries that point at it.
 - **`destination_secrets`** — the named Secrets of an outgoing webhook, referenced as `{{ .Secrets.<name> }}`; the name
   is checked to be a template identifier.
 - **`account_links`** — the identity space is a stored generated column: `'telegram'` for every Telegram link,

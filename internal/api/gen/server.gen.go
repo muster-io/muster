@@ -302,6 +302,36 @@ func (e BridgeConnectionInputType) Valid() bool {
 	}
 }
 
+// Defines values for BridgeDestinationType.
+const (
+	BridgeDestinationTypeBridge BridgeDestinationType = "bridge"
+)
+
+// Valid indicates whether the value is a known member of the BridgeDestinationType enum.
+func (e BridgeDestinationType) Valid() bool {
+	switch e {
+	case BridgeDestinationTypeBridge:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BridgeDestinationInputType.
+const (
+	BridgeDestinationInputTypeBridge BridgeDestinationInputType = "bridge"
+)
+
+// Valid indicates whether the value is a known member of the BridgeDestinationInputType enum.
+func (e BridgeDestinationInputType) Valid() bool {
+	switch e {
+	case BridgeDestinationInputTypeBridge:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BridgeEventDelivery.
 const (
 	BridgeEventDeliveryPoll BridgeEventDelivery = "poll"
@@ -691,6 +721,7 @@ const (
 	DestinationCheckItemNameBotInChannel     DestinationCheckItemName = "bot_in_channel"
 	DestinationCheckItemNameBotRightsChannel DestinationCheckItemName = "bot_rights_channel"
 	DestinationCheckItemNameBotRightsGroup   DestinationCheckItemName = "bot_rights_group"
+	DestinationCheckItemNameChannel          DestinationCheckItemName = "channel"
 	DestinationCheckItemNameChannelExists    DestinationCheckItemName = "channel_exists"
 	DestinationCheckItemNameDiscussionGroup  DestinationCheckItemName = "discussion_group"
 	DestinationCheckItemNameToken            DestinationCheckItemName = "token"
@@ -704,6 +735,8 @@ func (e DestinationCheckItemName) Valid() bool {
 	case DestinationCheckItemNameBotRightsChannel:
 		return true
 	case DestinationCheckItemNameBotRightsGroup:
+		return true
+	case DestinationCheckItemNameChannel:
 		return true
 	case DestinationCheckItemNameChannelExists:
 		return true
@@ -775,6 +808,7 @@ func (e DestinationPreviewItemName) Valid() bool {
 
 // Defines values for DestinationType.
 const (
+	DestinationTypeBridge     DestinationType = "bridge"
 	DestinationTypeMattermost DestinationType = "mattermost"
 	DestinationTypeTelegram   DestinationType = "telegram"
 	DestinationTypeWebhook    DestinationType = "webhook"
@@ -783,6 +817,8 @@ const (
 // Valid indicates whether the value is a known member of the DestinationType enum.
 func (e DestinationType) Valid() bool {
 	switch e {
+	case DestinationTypeBridge:
+		return true
 	case DestinationTypeMattermost:
 		return true
 	case DestinationTypeTelegram:
@@ -1467,6 +1503,7 @@ const (
 	NullableDestinationCheckCodeBotNotInChannel    NullableDestinationCheckCode = "bot_not_in_channel"
 	NullableDestinationCheckCodeChangedSinceSaved  NullableDestinationCheckCode = "changed_since_saved"
 	NullableDestinationCheckCodeChannelArchived    NullableDestinationCheckCode = "channel_archived"
+	NullableDestinationCheckCodeChannelForbidden   NullableDestinationCheckCode = "channel_forbidden"
 	NullableDestinationCheckCodeChannelInOtherTeam NullableDestinationCheckCode = "channel_in_other_team"
 	NullableDestinationCheckCodeChannelNotFound    NullableDestinationCheckCode = "channel_not_found"
 	NullableDestinationCheckCodeCommentsDisabled   NullableDestinationCheckCode = "comments_disabled"
@@ -1499,6 +1536,8 @@ func (e NullableDestinationCheckCode) Valid() bool {
 	case NullableDestinationCheckCodeChangedSinceSaved:
 		return true
 	case NullableDestinationCheckCodeChannelArchived:
+		return true
+	case NullableDestinationCheckCodeChannelForbidden:
 		return true
 	case NullableDestinationCheckCodeChannelInOtherTeam:
 		return true
@@ -3556,6 +3595,59 @@ type BridgeConnectionInput struct {
 // BridgeConnectionInputType defines model for BridgeConnectionInput.Type.
 type BridgeConnectionInputType string
 
+// BridgeDestination defines model for BridgeDestination.
+type BridgeDestination struct {
+	// ChannelId The channel as its messenger names it, an opaque string of up to 512 characters; surrounding white space is trimmed.
+	ChannelId string `json:"channel_id"`
+
+	// ChannelName The channel's name as the bridge's `checkChannel` answered it when the Destination was last saved. Untrusted text from the bridge.
+	ChannelName nullable.Nullable[string] `json:"channel_name,omitempty"`
+
+	// ConnectionId A Bridge Connection.
+	ConnectionId PublicId  `json:"connection_id"`
+	CreatedAt    time.Time `json:"created_at"`
+
+	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
+	Etag   *string           `json:"etag,omitempty"`
+	Health DestinationHealth `json:"health"`
+
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	Id PublicId `json:"id"`
+
+	// Limiter `destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection's `info.limits.send_per_second_per_channel` when its info has it.
+	Limiter Limiter `json:"limiter"`
+
+	// Mentions Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.
+	Mentions      MentionSettings       `json:"mentions"`
+	Name          string                `json:"name"`
+	Routes        []EntityRef           `json:"routes"`
+	TemplateError *TemplateErrorState   `json:"template_error,omitempty"`
+	Type          BridgeDestinationType `json:"type"`
+}
+
+// BridgeDestinationType defines model for BridgeDestination.Type.
+type BridgeDestinationType string
+
+// BridgeDestinationInput A Bridge Destination (C-22.FR-3) is a channel of the bridge's messenger, named by its id. Saving it runs the bridge's `checkChannel`, which posts nothing, and keeps the channel's name the bridge answers.
+type BridgeDestinationInput struct {
+	// ChannelId The channel as its messenger names it, an opaque string of up to 512 characters; surrounding white space is trimmed.
+	ChannelId string `json:"channel_id"`
+
+	// ConnectionId A Bridge Connection.
+	ConnectionId PublicId `json:"connection_id"`
+
+	// Limiter `destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection's `info.limits.send_per_second_per_channel` when its info has it.
+	Limiter Limiter `json:"limiter"`
+
+	// Mentions Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.
+	Mentions MentionSettings            `json:"mentions"`
+	Name     string                     `json:"name"`
+	Type     BridgeDestinationInputType `json:"type"`
+}
+
+// BridgeDestinationInputType defines model for BridgeDestinationInput.Type.
+type BridgeDestinationInputType string
+
 // BridgeEventDelivery How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection's `callback_url`, signed with the push secret.
 type BridgeEventDelivery string
 
@@ -3756,18 +3848,18 @@ type Destination struct {
 
 // DestinationCheckItem defines model for DestinationCheckItem.
 type DestinationCheckItem struct {
-	// Code Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
+	// Code Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
 	Code nullable.Nullable[NullableDestinationCheckCode] `json:"code,omitempty"`
 
 	// Message Why the check failed, in English; untrusted text where it comes from the messenger. Clients translate `code` and show this text as its detail.
 	Message nullable.Nullable[string] `json:"message,omitempty"`
 
-	// Name One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there).
+	// Name One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel.
 	Name DestinationCheckItemName `json:"name"`
 	Ok   bool                     `json:"ok"`
 }
 
-// DestinationCheckItemName One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there).
+// DestinationCheckItemName One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel.
 type DestinationCheckItemName string
 
 // DestinationCheckResult defines model for DestinationCheckResult.
@@ -4582,17 +4674,17 @@ type MentionName string
 
 // MentionSetting Whom to mention for one kind of Loud event. The default is nobody.
 type MentionSetting struct {
-	// Everyone `none`, or the chat-wide mention the messenger supports; Telegram has none of them.
+	// Everyone `none`, or the chat-wide mention the messenger supports; Telegram and Bridges have none of them.
 	Everyone MentionSettingEveryone `json:"everyone"`
 
-	// Groups Messenger groups.
+	// Groups Messenger groups; Telegram and Bridges have none.
 	Groups []string `json:"groups"`
 
 	// UserIds Muster users, rendered through their Account links.
 	UserIds []PublicId `json:"user_ids"`
 }
 
-// MentionSettingEveryone `none`, or the chat-wide mention the messenger supports; Telegram has none of them.
+// MentionSettingEveryone `none`, or the chat-wide mention the messenger supports; Telegram and Bridges have none of them.
 type MentionSettingEveryone string
 
 // MentionSettings Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.
@@ -4666,7 +4758,7 @@ type NullableAlertGroupStatus string
 // NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 type NullableConnectionCheckCode string
 
-// NullableDestinationCheckCode Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
+// NullableDestinationCheckCode Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`, Bridge `channel`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; Bridge `channel`: `channel_forbidden` — the bridge answered `forbidden`: the channel does not exist or the bot cannot use it, with the bridge's `detail` as `message`, and `request_failed` for any other error class of the bridge, whose `message` names the class; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
 type NullableDestinationCheckCode string
 
 // NullableLanguage UI or template language; null follows the default.
@@ -6695,6 +6787,9 @@ type Limited = Problem
 // NotFound RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
 type NotFound = Problem
 
+// NotImplemented RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
+type NotImplemented = Problem
+
 // PayloadTooLarge RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
 type PayloadTooLarge = Problem
 
@@ -8388,6 +8483,40 @@ func (t *Destination) MergeWebhookDestination(v WebhookDestination) error {
 	return err
 }
 
+// AsBridgeDestination returns the union data inside the Destination as a BridgeDestination
+func (t Destination) AsBridgeDestination() (BridgeDestination, error) {
+	var body BridgeDestination
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeDestination overwrites any union data inside the Destination as the provided BridgeDestination
+func (t *Destination) FromBridgeDestination(v BridgeDestination) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"bridge"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeDestination performs a merge with any union data inside the Destination, using the provided BridgeDestination
+func (t *Destination) MergeBridgeDestination(v BridgeDestination) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"bridge"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t Destination) Discriminator() (string, error) {
 	var discriminator struct {
 		Discriminator string `json:"type"`
@@ -8402,6 +8531,8 @@ func (t Destination) ValueByDiscriminator() (interface{}, error) {
 		return nil, err
 	}
 	switch discriminator {
+	case "bridge":
+		return t.AsBridgeDestination()
 	case "mattermost":
 		return t.AsMattermostDestination()
 	case "telegram":
@@ -8525,6 +8656,40 @@ func (t *DestinationInput) MergeWebhookDestinationInput(v WebhookDestinationInpu
 	return err
 }
 
+// AsBridgeDestinationInput returns the union data inside the DestinationInput as a BridgeDestinationInput
+func (t DestinationInput) AsBridgeDestinationInput() (BridgeDestinationInput, error) {
+	var body BridgeDestinationInput
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeDestinationInput overwrites any union data inside the DestinationInput as the provided BridgeDestinationInput
+func (t *DestinationInput) FromBridgeDestinationInput(v BridgeDestinationInput) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"bridge"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeDestinationInput performs a merge with any union data inside the DestinationInput, using the provided BridgeDestinationInput
+func (t *DestinationInput) MergeBridgeDestinationInput(v BridgeDestinationInput) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"bridge"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t DestinationInput) Discriminator() (string, error) {
 	var discriminator struct {
 		Discriminator string `json:"type"`
@@ -8539,6 +8704,8 @@ func (t DestinationInput) ValueByDiscriminator() (interface{}, error) {
 		return nil, err
 	}
 	switch discriminator {
+	case "bridge":
+		return t.AsBridgeDestinationInput()
 	case "mattermost":
 		return t.AsMattermostDestinationInput()
 	case "telegram":
@@ -14814,6 +14981,8 @@ type LimitedApplicationProblemPlusJSONResponse struct {
 
 type NotFoundApplicationProblemPlusJSONResponse Problem
 
+type NotImplementedApplicationProblemPlusJSONResponse Problem
+
 type PayloadTooLargeApplicationProblemPlusJSONResponse Problem
 
 type PreconditionFailedApplicationProblemPlusJSONResponse Problem
@@ -18729,6 +18898,22 @@ func (response PreviewDestination429ApplicationProblemPlusJSONResponse) VisitPre
 	return err
 }
 
+type PreviewDestination501ApplicationProblemPlusJSONResponse struct {
+	NotImplementedApplicationProblemPlusJSONResponse
+}
+
+func (response PreviewDestination501ApplicationProblemPlusJSONResponse) VisitPreviewDestinationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(501)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListDestinationSecretsRequestObject struct {
 	DestinationId DestinationId `json:"destination_id"`
 }
@@ -19554,6 +19739,22 @@ func (response TestDestination429ApplicationProblemPlusJSONResponse) VisitTestDe
 		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
 	}
 	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestDestination501ApplicationProblemPlusJSONResponse struct {
+	NotImplementedApplicationProblemPlusJSONResponse
+}
+
+func (response TestDestination501ApplicationProblemPlusJSONResponse) VisitTestDestinationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(501)
 	_, err := buf.WriteTo(w)
 	return err
 }

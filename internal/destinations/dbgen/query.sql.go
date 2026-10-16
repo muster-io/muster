@@ -31,7 +31,8 @@ func (q *Queries) DeleteDestinationRoutes(ctx context.Context, arg DeleteDestina
 const getDestination = `-- name: GetDestination :one
 SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d.mattermost_team_id,
        d.mattermost_channel_id, d.mattermost_team_name, d.mattermost_channel_name, d.telegram_channel_id,
-       d.telegram_channel_chat_id, d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title, d.webhook_mode,
+       d.telegram_channel_chat_id, d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title,
+       d.bridge_channel_id, d.bridge_channel_name, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
@@ -62,6 +63,8 @@ type GetDestinationRow struct {
 	TelegramDiscussionChatID     pgtype.Int8
 	TelegramChannelTitle         pgtype.Text
 	TelegramDiscussionGroupTitle pgtype.Text
+	BridgeChannelID              pgtype.Text
+	BridgeChannelName            pgtype.Text
 	WebhookMode                  pgtype.Text
 	WebhookEventsConfig          []byte
 	WebhookTemplateConfig        []byte
@@ -102,6 +105,8 @@ func (q *Queries) GetDestination(ctx context.Context, arg GetDestinationParams) 
 		&i.TelegramDiscussionChatID,
 		&i.TelegramChannelTitle,
 		&i.TelegramDiscussionGroupTitle,
+		&i.BridgeChannelID,
+		&i.BridgeChannelName,
 		&i.WebhookMode,
 		&i.WebhookEventsConfig,
 		&i.WebhookTemplateConfig,
@@ -123,6 +128,51 @@ func (q *Queries) GetDestination(ctx context.Context, arg GetDestinationParams) 
 		&i.Version,
 	)
 	return i, err
+}
+
+const insertBridgeDestination = `-- name: InsertBridgeDestination :one
+INSERT INTO destinations (
+    org_id, public_id, type, name, connection_id, bridge_channel_id, bridge_channel_name, mentions, limiter_limit,
+    limiter_per_seconds, health, created_at, updated_at
+)
+VALUES (
+    $1, $2, 'bridge', $3, $4, $5, $6, $7, $8,
+    $9, 'healthy', $10::timestamptz, $10::timestamptz
+)
+RETURNING id
+`
+
+type InsertBridgeDestinationParams struct {
+	OrgID             int64
+	PublicID          string
+	Name              string
+	ConnectionID      pgtype.Int8
+	ChannelID         pgtype.Text
+	ChannelName       pgtype.Text
+	Mentions          []byte
+	LimiterLimit      int64
+	LimiterPerSeconds int64
+	Now               time.Time
+}
+
+// InsertBridgeDestination creates a healthy Bridge Destination with its channel id and the channel's name its
+// Destination check read (C-22.FR-3).
+func (q *Queries) InsertBridgeDestination(ctx context.Context, arg InsertBridgeDestinationParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertBridgeDestination,
+		arg.OrgID,
+		arg.PublicID,
+		arg.Name,
+		arg.ConnectionID,
+		arg.ChannelID,
+		arg.ChannelName,
+		arg.Mentions,
+		arg.LimiterLimit,
+		arg.LimiterPerSeconds,
+		arg.Now,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const insertMattermostDestination = `-- name: InsertMattermostDestination :one
@@ -369,7 +419,8 @@ const listDestinations = `-- name: ListDestinations :many
 
 SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d.mattermost_team_id,
        d.mattermost_channel_id, d.mattermost_team_name, d.mattermost_channel_name, d.telegram_channel_id,
-       d.telegram_channel_chat_id, d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title, d.webhook_mode,
+       d.telegram_channel_chat_id, d.telegram_discussion_chat_id, d.telegram_channel_title, d.telegram_discussion_group_title,
+       d.bridge_channel_id, d.bridge_channel_name, d.webhook_mode,
        d.webhook_events_config, d.webhook_template_config, d.proxy, (d.proxy_password_ciphertext IS NOT NULL)::boolean AS proxy_password_set,
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
@@ -415,6 +466,8 @@ type ListDestinationsRow struct {
 	TelegramDiscussionChatID     pgtype.Int8
 	TelegramChannelTitle         pgtype.Text
 	TelegramDiscussionGroupTitle pgtype.Text
+	BridgeChannelID              pgtype.Text
+	BridgeChannelName            pgtype.Text
 	WebhookMode                  pgtype.Text
 	WebhookEventsConfig          []byte
 	WebhookTemplateConfig        []byte
@@ -472,6 +525,8 @@ func (q *Queries) ListDestinations(ctx context.Context, arg ListDestinationsPara
 			&i.TelegramDiscussionChatID,
 			&i.TelegramChannelTitle,
 			&i.TelegramDiscussionGroupTitle,
+			&i.BridgeChannelID,
+			&i.BridgeChannelName,
 			&i.WebhookMode,
 			&i.WebhookEventsConfig,
 			&i.WebhookTemplateConfig,
@@ -552,6 +607,27 @@ func (q *Queries) ListRouteDestinationRefs(ctx context.Context, arg ListRouteDes
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockBridgeConnection = `-- name: LockBridgeConnection :one
+SELECT id
+FROM connections
+WHERE org_id = $1 AND id = $2 AND type = 'bridge' AND deleted_at IS NULL
+FOR SHARE
+`
+
+type LockBridgeConnectionParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// LockBridgeConnection takes the Bridge Connection that is not deleted in share mode for the save of one of its
+// Destinations, as LockMattermostConnection does.
+func (q *Queries) LockBridgeConnection(ctx context.Context, arg LockBridgeConnectionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockBridgeConnection, arg.OrgID, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const lockDestination = `-- name: LockDestination :one
@@ -643,6 +719,45 @@ type MarkDestinationDeletedParams struct {
 // MarkDestinationDeleted soft-deletes a Destination: it leaves every list and reads as missing, the row stays.
 func (q *Queries) MarkDestinationDeleted(ctx context.Context, arg MarkDestinationDeletedParams) error {
 	_, err := q.db.Exec(ctx, markDestinationDeleted, arg.Now, arg.OrgID, arg.ID)
+	return err
+}
+
+const updateBridgeDestination = `-- name: UpdateBridgeDestination :exec
+UPDATE destinations
+SET name = $1, connection_id = $2, bridge_channel_id = $3,
+    bridge_channel_name = $4, mentions = $5, limiter_limit = $6,
+    limiter_per_seconds = $7, updated_at = $8::timestamptz, version = version + 1
+WHERE org_id = $9 AND id = $10 AND type = 'bridge'
+`
+
+type UpdateBridgeDestinationParams struct {
+	Name              string
+	ConnectionID      pgtype.Int8
+	ChannelID         pgtype.Text
+	ChannelName       pgtype.Text
+	Mentions          []byte
+	LimiterLimit      int64
+	LimiterPerSeconds int64
+	Now               time.Time
+	OrgID             int64
+	ID                int64
+}
+
+// UpdateBridgeDestination replaces the configured fields of a Bridge Destination and the channel's name its
+// Destination check read; its health is left alone.
+func (q *Queries) UpdateBridgeDestination(ctx context.Context, arg UpdateBridgeDestinationParams) error {
+	_, err := q.db.Exec(ctx, updateBridgeDestination,
+		arg.Name,
+		arg.ConnectionID,
+		arg.ChannelID,
+		arg.ChannelName,
+		arg.Mentions,
+		arg.LimiterLimit,
+		arg.LimiterPerSeconds,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
 	return err
 }
 

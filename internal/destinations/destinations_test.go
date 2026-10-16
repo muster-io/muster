@@ -113,6 +113,40 @@ func newStore() *fakeStore {
 			Type: "telegram", Health: "broken", BrokenSince: since, BrokenReason: txt("chat not found")}}}
 }
 
+// bridgeRow is the Bridge Destination DSAAAAAAAAAAA4 on ch-alerts, whose check read the name "alerts", Broken.
+func bridgeRow() dbgen.GetDestinationRow {
+	since := pgtype.Timestamptz{Time: t0.Add(-time.Hour), Valid: true}
+	return dbgen.GetDestinationRow{ID: 4, PublicID: "DSAAAAAAAAAAA4", Type: "bridge", Name: "alerts-br",
+		ConnectionPublicID: txt("CNAAAAAAAAAAA3"), BridgeChannelID: txt("ch-alerts"), BridgeChannelName: txt("alerts"),
+		Proxy: []byte(`{"enabled":false}`), Mentions: []byte(`{}`), LimiterLimit: 30, LimiterPerSeconds: 60,
+		Health: "broken", BrokenSince: since, BrokenReason: txt("The bot is not a member of this channel."),
+		CreatedAt: t0, Version: 1}
+}
+
+// TestBridgeReadModel is getDestination and listDestinations of a Bridge Destination (C-22.FR-3, AC-2): its
+// Connection, its channel id and the channel's name its check read, and none of the other types' fields; the list is
+// filtered by the type bridge.
+func TestBridgeReadModel(t *testing.T) {
+	f := newStore()
+	f.rows = append(f.rows, bridgeRow())
+	s := New(1, f)
+	d, err := s.Get(t.Context(), "DSAAAAAAAAAAA4")
+	if err != nil || d.Type != TypeBridge || *d.Connection != "CNAAAAAAAAAAA3" || *d.BridgeChannelID != "ch-alerts" ||
+		*d.BridgeChannelName != "alerts" || d.TelegramChannelID != nil || d.MattermostChannelID != nil ||
+		d.WebhookMode != nil || d.Health.State != "broken" || d.LimiterLimit != 30 || d.Routes == nil {
+		t.Fatalf("get = %+v, %v", d, err)
+	}
+	typ := TypeBridge
+	page, err := s.List(t.Context(), ListFilter{Type: &typ})
+	if err != nil || len(page.Destinations) != 1 || *page.Destinations[0].BridgeChannelName != "alerts" ||
+		f.lists[len(f.lists)-1].Type.String != "bridge" {
+		t.Fatalf("list = %+v, %v", page, err)
+	}
+	if d := destinationOf(f.rows[0]); d.BridgeChannelID != nil || d.BridgeChannelName != nil {
+		t.Errorf("a Mattermost Destination has Bridge fields: %+v", d)
+	}
+}
+
 // TestList is listDestinations (C-11.FR-18): every type with its health and Routes, its own fields and Secrets as
 // their status only, in pages after a cursor, filtered as asked.
 func TestList(t *testing.T) {

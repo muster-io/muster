@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/muster-io/muster/internal/audit"
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
+	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
@@ -60,6 +62,18 @@ func (f *fakeWriter) UpdateTelegramDestination(context.Context, dbgen.UpdateTele
 	return errBoom
 }
 
+func (f *fakeWriter) LockBridgeConnection(context.Context, dbgen.LockBridgeConnectionParams) (int64, error) {
+	return 0, pgx.ErrNoRows
+}
+
+func (f *fakeWriter) InsertBridgeDestination(context.Context, dbgen.InsertBridgeDestinationParams) (int64, error) {
+	return 0, errBoom
+}
+
+func (f *fakeWriter) UpdateBridgeDestination(context.Context, dbgen.UpdateBridgeDestinationParams) error {
+	return errBoom
+}
+
 func (f *fakeWriter) InsertWebhookDestination(context.Context, dbgen.InsertWebhookDestinationParams) (int64, error) {
 	return 0, errBoom
 }
@@ -77,6 +91,8 @@ type saveWriter struct {
 	updated  []dbgen.UpdateMattermostDestinationParams
 	tgIns    []dbgen.InsertTelegramDestinationParams
 	tgSets   []dbgen.UpdateTelegramDestinationParams
+	brIns    []dbgen.InsertBridgeDestinationParams
+	brSets   []dbgen.UpdateBridgeDestinationParams
 	hooks    []dbgen.InsertWebhookDestinationParams
 	hookSets []dbgen.UpdateWebhookDestinationParams
 	audit    []auditdb.InsertAuditEntryParams
@@ -157,6 +173,33 @@ func (w *saveWriter) UpdateTelegramDestination(_ context.Context, arg dbgen.Upda
 		return err
 	}
 	w.tgSets = append(w.tgSets, arg)
+	return nil
+}
+
+func (w *saveWriter) LockBridgeConnection(_ context.Context, arg dbgen.LockBridgeConnectionParams) (int64, error) {
+	if err := w.fail["LockBridgeConnection"]; err != nil {
+		return 0, err
+	}
+	if !w.conns[arg.ID] {
+		return 0, pgx.ErrNoRows
+	}
+	return arg.ID, nil
+}
+
+func (w *saveWriter) InsertBridgeDestination(_ context.Context, arg dbgen.InsertBridgeDestinationParams) (int64,
+	error) {
+	if err := w.fail["InsertBridgeDestination"]; err != nil {
+		return 0, err
+	}
+	w.brIns = append(w.brIns, arg)
+	return int64(40 + len(w.brIns)), nil
+}
+
+func (w *saveWriter) UpdateBridgeDestination(_ context.Context, arg dbgen.UpdateBridgeDestinationParams) error {
+	if err := w.fail["UpdateBridgeDestination"]; err != nil {
+		return err
+	}
+	w.brSets = append(w.brSets, arg)
 	return nil
 }
 
@@ -274,6 +317,41 @@ func (c *fakeTelegram) CheckTelegramChannel(_ context.Context, in TelegramChanne
 		Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}}, nil
 }
 
+// fakeBridge stands for the Connections: the Destination check of a Bridge channel through the Connection
+// CNAAAAAAAAAAA3, by its channel id: ch-nobot is forbidden with the fake bridge's detail, revoked has its token
+// refused, and any other channel passes with the name name, "alerts" when it is empty.
+type fakeBridge struct {
+	calls []BridgeChannelCheck
+	err   error
+	name  string
+}
+
+func (c *fakeBridge) CheckBridgeChannel(_ context.Context, in BridgeChannelCheck) (BridgeChannelChecked, error) {
+	c.calls = append(c.calls, in)
+	if c.err != nil {
+		return BridgeChannelChecked{}, c.err
+	}
+	if in.Connection != "CNAAAAAAAAAAA3" {
+		return BridgeChannelChecked{}, ErrUnknownConnection
+	}
+	fatal := func(code, message string) BridgeChannelChecked {
+		return BridgeChannelChecked{ConnectionID: 7, Check: bridge.ChannelCheck{Message: message, Code: code,
+			Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(message)}}}
+	}
+	switch in.ChannelID {
+	case "ch-nobot":
+		return fatal(bridge.CodeChannelForbidden, "The bot is not a member of this channel."), nil
+	case "revoked":
+		return fatal(bridge.CodeTokenInvalid, bridge.MessageTokenInvalid), nil
+	}
+	name := c.name
+	if name == "" {
+		name = "alerts"
+	}
+	return BridgeChannelChecked{ConnectionID: 7, Check: bridge.ChannelCheck{Name: name,
+		Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}}, nil
+}
+
 // fakeMentions refuses the User SR0000000000ZZ, as mentions.Validate does for a User that does not exist.
 type fakeMentions struct{}
 
@@ -292,7 +370,7 @@ func (fakeMentions) Validate(_ context.Context, _ string, set mentions.Settings)
 func newSaver(t *testing.T) (*Service, *fakeStore, *saveWriter, *fakeChecker, *[]int64) {
 	t.Helper()
 	store := newStore()
-	w := &saveWriter{conns: map[int64]bool{5: true, 6: true}, versions: map[string]int64{"DSAAAAAAAAAAA1": 2,
+	w := &saveWriter{conns: map[int64]bool{5: true, 6: true, 7: true}, versions: map[string]int64{"DSAAAAAAAAAAA1": 2,
 		"DSAAAAAAAAAAA3": 4}, fail: map[string]error{}}
 	checker := &fakeChecker{}
 	var healed []int64
@@ -300,7 +378,7 @@ func newSaver(t *testing.T) (*Service, *fakeStore, *saveWriter, *fakeChecker, *[
 	logger := logging.New(&bytes.Buffer{}, logging.LevelInfo)
 	s.SetWriter(WriterConfig{Writer: w, Audit: audit.NewWriter(logger, clock.NewManual(t0)),
 		Business: clock.NewManual(t0), Mentions: fakeMentions{}, Mattermost: checker, Telegram: &fakeTelegram{},
-		Keyring:   activeKeyring(t),
+		Bridge: &fakeBridge{}, Keyring: activeKeyring(t),
 		Templates: templates.New(clock.NewManual(t0), clock.Real{}),
 		Healthy: func(_ context.Context, id int64) error {
 			healed = append(healed, id)
@@ -1043,5 +1121,294 @@ func TestCheckTelegramDestination(t *testing.T) {
 	tg.err = errBoom
 	if _, err := s.Check(ctx, "DSAAAAAAAAAAA2"); !errors.Is(err, errBoom) {
 		t.Errorf("failed check = %v", err)
+	}
+}
+
+func bridgeInput(name, channel string) Input {
+	in := mattermostInput(name, "")
+	in.Type, in.Mattermost = TypeBridge, nil
+	n := in.Mentions[mentions.Kinds[1]]
+	n.Everyone = mentions.EveryoneNone
+	in.Mentions[mentions.Kinds[1]] = n
+	in.Bridge = &BridgeInput{Connection: "cnaaaaaaaaaaa3", ChannelID: channel}
+	return in
+}
+
+// withBridge adds the Bridge Destination DSAAAAAAAAAAA4 on ch-alerts, Broken, to the store, and returns its row.
+func withBridge(store *fakeStore, w *saveWriter) *dbgen.GetDestinationRow {
+	store.rows = append(store.rows, bridgeRow())
+	w.versions["DSAAAAAAAAAAA4"] = 1
+	return &store.rows[len(store.rows)-1]
+}
+
+// TestCreateBridge is createDestination of type bridge (C-22.FR-3, AC-2): the channel id, trimmed, and the Connection
+// are checked through checkChannel before anything is saved, not limited by a Destination; a passing check stores the
+// channel's name it read with the Mention settings and the limiter, and records destination.created with the hint.
+func TestCreateBridge(t *testing.T) {
+	s, _, w, _, _ := newSaver(t)
+	br := s.writer.Bridge.(*fakeBridge)
+	d, err := s.Create(t.Context(), saver, bridgeInput(" alerts ", " ch-alerts "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(br.calls) != 1 || br.calls[0].Destination != nil || br.calls[0].Connection != "CNAAAAAAAAAAA3" ||
+		br.calls[0].ChannelID != "ch-alerts" {
+		t.Errorf("checks %+v", br.calls)
+	}
+	if d.ID != 41 || d.Type != TypeBridge || d.Name != "alerts" || *d.Connection != "CNAAAAAAAAAAA3" ||
+		*d.BridgeChannelID != "ch-alerts" || *d.BridgeChannelName != "alerts" || d.Health.State != "healthy" ||
+		d.LimiterLimit != 5 || d.Version != 1 {
+		t.Errorf("created %+v", d)
+	}
+	if len(w.brIns) != 1 {
+		t.Fatalf("inserts %+v", w.brIns)
+	}
+	ins := w.brIns[0]
+	if ins.ConnectionID.Int64 != 7 || ins.ChannelID.String != "ch-alerts" || ins.ChannelName.String != "alerts" ||
+		ins.Name != "alerts" || ins.LimiterLimit != 5 || ins.LimiterPerSeconds != 1 || !ins.Now.Equal(t0) ||
+		!bytes.Contains(ins.Mentions, []byte(`"new_alerts":{"everyone":"none"`)) {
+		t.Errorf("inserted %+v", ins)
+	}
+	if len(w.audit) != 1 || w.audit[0].Action != ActionCreated ||
+		!bytes.Contains(w.audit[0].Diff, []byte(`"/channel_id"`)) ||
+		!bytes.Contains(w.audit[0].Diff, []byte("ch-alerts")) || len(w.hints) != 1 {
+		t.Errorf("audit %+v hints %+v", w.audit, w.hints)
+	}
+	if got := counterSeries(d.PublicID); !slices.Equal(got, zeroCounterSeries(d.PublicID, TypeBridge)) {
+		t.Errorf("counter series %q", got)
+	}
+	long := strings.Repeat("я", maxBridgeChannelLength)
+	if d, err := s.Create(t.Context(), saver, bridgeInput("long", long)); err != nil || *d.BridgeChannelID != long {
+		t.Errorf("a channel id of 512 characters = %v", err)
+	}
+}
+
+// TestCreateBridgeRefusals is C-22.AC-2: a channel the bridge answers forbidden for is refused at /channel_id with the
+// bridge's detail and the check code channel_forbidden, and nothing is saved; a refused token is at /connection_id; a
+// Connection of another type or deleted, an empty or too long channel id and Mention settings that are refused are
+// refused before anything is saved.
+func TestCreateBridgeRefusals(t *testing.T) {
+	s, _, w, _, _ := newSaver(t)
+	br := s.writer.Bridge.(*fakeBridge)
+	ctx := t.Context()
+	for channel, want := range map[string]CheckItem{
+		"ch-nobot": {Name: bridge.ItemChannel, Message: "The bot is not a member of this channel.",
+			Code: "channel_forbidden", Pointer: "/channel_id"},
+		"revoked": {Name: bridge.ItemChannel, Message: bridge.MessageTokenInvalid, Code: "token_invalid",
+			Pointer: "/connection_id"},
+	} {
+		_, err := s.Create(ctx, saver, bridgeInput("x", channel))
+		failed, ok := errors.AsType[*CheckFailedError](err)
+		if !ok || len(failed.Items) != 1 || failed.Items[0] != want || failed.Error() == "" {
+			t.Errorf("%s = %v", channel, err)
+		}
+	}
+	calls := len(br.calls)
+	for name, c := range map[string]struct {
+		mut     func(in *Input)
+		pointer string
+		code    string
+	}{
+		"empty channel":    {func(in *Input) { in.Bridge.ChannelID = " \t" }, "/channel_id", CodeRequired},
+		"long channel":     {func(in *Input) { in.Bridge.ChannelID = strings.Repeat("x", 513) }, "/channel_id", CodeTooLong},
+		"malformed id":     {func(in *Input) { in.Bridge.Connection = "not-an-id" }, "/connection_id", CodeUnknownID},
+		"no bridge fields": {func(in *Input) { in.Bridge = nil }, "/type", CodeInvalidFormat},
+		"empty name":       {func(in *Input) { in.Name = " " }, "/name", CodeRequired},
+		"no limiter":       {func(in *Input) { in.Limiter = Limiter{} }, "/limiter", CodeInvalidFormat},
+	} {
+		in := bridgeInput("x", "ch-alerts")
+		c.mut(&in)
+		_, err := s.Create(ctx, saver, in)
+		fe, ok := errors.AsType[*FieldError](err)
+		if !ok || fe.Pointer != c.pointer || fe.Code != c.code {
+			t.Errorf("%s = %v", name, err)
+		}
+	}
+	in := bridgeInput("x", "ch-alerts")
+	in.Mentions["new_alerts"] = mentions.Setting{Everyone: "none", UserIDs: []string{"SR0000000000ZZ"}, Groups: []string{}}
+	if _, err := s.Create(ctx, saver, in); !errors.As(err, new(*mentions.FieldError)) {
+		t.Errorf("unknown user = %v", err)
+	}
+	if len(br.calls) != calls {
+		t.Errorf("a refused field ran the check: %+v", br.calls[calls:])
+	}
+	in = bridgeInput("x", "ch-alerts")
+	in.Bridge.Connection = "CNAAAAAAAAAAA2"
+	_, err := s.Create(ctx, saver, in)
+	if fe, ok := errors.AsType[*FieldError](err); !ok || fe.Pointer != "/connection_id" || fe.Code != CodeUnknownID ||
+		fe.Detail != "No such Bridge Connection." {
+		t.Errorf("a telegram connection = %v", err)
+	}
+	if len(w.brIns) != 0 {
+		t.Fatalf("a refused save inserted %+v", w.brIns)
+	}
+	w.fail["InsertBridgeDestination"] = &pgconn.PgError{Code: uniqueViolation, ConstraintName: nameIndex}
+	if _, err := s.Create(ctx, saver, bridgeInput("ops", "ch-alerts")); !errors.Is(err, ErrNameTaken) {
+		t.Errorf("name taken = %v", err)
+	}
+	delete(w.fail, "InsertBridgeDestination")
+	delete(w.conns, 7)
+	assertField(t, "connection deleted since the check", func() error {
+		_, err := s.Create(ctx, saver, bridgeInput("late", "ch-alerts"))
+		return err
+	}, "/connection_id", CodeUnknownID)
+	w.fail["LockBridgeConnection"] = errBoom
+	if _, err := s.Create(ctx, saver, bridgeInput("late", "ch-alerts")); !errors.Is(err, errBoom) {
+		t.Errorf("lock failed = %v", err)
+	}
+	br.err = &delivery.LimitedError{RetryAfter: 2}
+	if _, err := s.Create(ctx, saver, bridgeInput("busy", "ch-alerts")); !errors.As(err,
+		new(*delivery.LimitedError)) {
+		t.Errorf("limited = %v", err)
+	}
+	if len(w.brIns) != 0 || len(w.audit) != 0 {
+		t.Fatalf("a failed save wrote %+v %+v", w.brIns, w.audit)
+	}
+}
+
+// TestUpdateBridge is updateDestination of type bridge (C-22.FR-3): the check runs limited by the Destination; a
+// change is recorded with its diff, a new channel name the check read is stored without an Audit log entry, an
+// unchanged save writes nothing, and a passing save of a Broken Destination ends its Broken state.
+func TestUpdateBridge(t *testing.T) {
+	s, store, w, _, healed := newSaver(t)
+	br := s.writer.Bridge.(*fakeBridge)
+	ctx := t.Context()
+	r := withBridge(store, w)
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("alerts", "ch-nobot")); !errors.As(err,
+		new(*CheckFailedError)) || len(w.brSets) != 0 || len(*healed) != 0 {
+		t.Errorf("refused = %v", err)
+	}
+	d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", new(int64(1)), bridgeInput("alerts", "ch-alerts-prod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := br.calls[len(br.calls)-1]; last.Destination == nil || *last.Destination != 4 ||
+		last.ChannelID != "ch-alerts-prod" {
+		t.Errorf("the check is not limited by the destination: %+v", last)
+	}
+	if d.Health.State != "healthy" || !slices.Equal(*healed, []int64{4}) || len(w.brSets) != 1 ||
+		w.brSets[0].ID != 4 || w.brSets[0].ConnectionID.Int64 != 7 || w.brSets[0].ChannelID.String != "ch-alerts-prod" ||
+		w.brSets[0].ChannelName.String != "alerts" || len(w.audit) != 1 || w.audit[0].Action != ActionUpdated ||
+		!bytes.Contains(w.audit[0].Diff, []byte("ch-alerts-prod")) {
+		t.Errorf("updated %+v, sets %+v, audit %+v", d, w.brSets, w.audit)
+	}
+	// Stored as saved: the same save writes nothing; a new channel name is stored with a hint only.
+	r.Name, r.BridgeChannelID, r.Version, r.Health = "alerts", txt("ch-alerts-prod"), 2, "healthy"
+	r.Mentions, _ = json.Marshal(bridgeInput("x", "").Mentions)
+	r.LimiterLimit, r.LimiterPerSeconds = 5, 1
+	w.versions["DSAAAAAAAAAAA4"] = 2
+	if d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("alerts", "ch-alerts-prod")); err != nil ||
+		len(w.brSets) != 1 || d.Version != 2 {
+		t.Errorf("an unchanged save wrote: %v %d", err, len(w.brSets))
+	}
+	br.name = "alerts-renamed"
+	hints := len(w.hints)
+	if d, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("alerts", "ch-alerts-prod")); err != nil ||
+		len(w.brSets) != 2 || w.brSets[1].ChannelName.String != "alerts-renamed" || len(w.audit) != 1 ||
+		len(w.hints) != hints+1 || *d.BridgeChannelName != "alerts-renamed" || d.Version != 3 {
+		t.Errorf("a new channel name = %+v %v", d, err)
+	}
+	w.versions["DSAAAAAAAAAAA4"] = 9
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("moved", "ch-alerts")); !errors.Is(err,
+		ErrVersionMismatch) {
+		t.Errorf("raced = %v", err)
+	}
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", new(int64(1)), bridgeInput("moved", "ch-alerts")); !errors.Is(
+		err, ErrVersionMismatch) {
+		t.Errorf("stale = %v", err)
+	}
+	delete(w.versions, "DSAAAAAAAAAAA4")
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("gone", "ch-alerts")); !errors.Is(err,
+		ErrNotFound) {
+		t.Errorf("gone = %v", err)
+	}
+	w.versions["DSAAAAAAAAAAA4"] = 2
+	w.fail["LockDestination"] = errBoom
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("x", "ch-alerts")); !errors.Is(err, errBoom) {
+		t.Errorf("lock = %v", err)
+	}
+	delete(w.fail, "LockDestination")
+	assertField(t, "type changed", func() error {
+		_, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, bridgeInput("x", "ch-alerts"))
+		return err
+	}, "/type", CodeInvalidFormat)
+	delete(w.conns, 7)
+	assertField(t, "connection gone", func() error {
+		_, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("y", "ch-alerts"))
+		return err
+	}, "/connection_id", CodeUnknownID)
+	w.conns[7] = true
+	w.fail["UpdateBridgeDestination"] = &pgconn.PgError{Code: uniqueViolation, ConstraintName: nameIndex}
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("ops", "ch-alerts")); !errors.Is(err,
+		ErrNameTaken) {
+		t.Errorf("name taken = %v", err)
+	}
+	delete(w.fail, "UpdateBridgeDestination")
+	r.ID, r.Health = 99, "broken"
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("z", "ch-alerts")); !errors.Is(err, errBoom) {
+		t.Errorf("a failed end of the broken state = %v", err)
+	}
+	r.ID = 4
+	br.err = errBoom
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("z", "ch-alerts")); !errors.Is(err, errBoom) {
+		t.Errorf("a failed check = %v", err)
+	}
+}
+
+// TestCheckBridgeDestination is checkDestination of a Bridge Destination (C-22.FR-3): its one item channel, limited by
+// the Destination, with the code of a failure; a passing check of a Broken Destination ends its Broken state, and a
+// check stores no channel name it reads.
+func TestCheckBridgeDestination(t *testing.T) {
+	s, store, w, _, healed := newSaver(t)
+	br := s.writer.Bridge.(*fakeBridge)
+	ctx := t.Context()
+	r := withBridge(store, w)
+	r.BridgeChannelID = txt("ch-nobot")
+	res, err := s.Check(ctx, "DSAAAAAAAAAAA4")
+	want := CheckItem{Name: "channel", Message: "The bot is not a member of this channel.", Code: "channel_forbidden"}
+	if err != nil || res.OK || len(res.Items) != 1 || res.Items[0] != want || res.Health.State != "broken" ||
+		len(*healed) != 0 {
+		t.Errorf("failing = %+v, %v", res, err)
+	}
+	if c := br.calls[0]; c.Destination == nil || *c.Destination != 4 || c.Connection != "CNAAAAAAAAAAA3" ||
+		c.ChannelID != "ch-nobot" {
+		t.Errorf("check %+v", c)
+	}
+	r.BridgeChannelID = txt("ch-alerts")
+	br.name = "renamed"
+	res, err = s.Check(ctx, "DSAAAAAAAAAAA4")
+	if err != nil || !res.OK || len(res.Items) != 1 || res.Items[0] != (CheckItem{Name: "channel", OK: true}) ||
+		res.Health.State != "healthy" || !slices.Equal(*healed, []int64{4}) {
+		t.Errorf("recovered = %+v, %v, %v", res, err, *healed)
+	}
+	if len(w.brSets) != 0 || len(w.hints) != 0 || r.BridgeChannelName.String != "alerts" {
+		t.Errorf("a check stored the name it read: %+v", w.brSets)
+	}
+	br.err = errBoom
+	if _, err := s.Check(ctx, "DSAAAAAAAAAAA4"); !errors.Is(err, errBoom) {
+		t.Errorf("failed check = %v", err)
+	}
+}
+
+// TestBridgeHasNoTester: a test or a preview of a Bridge Destination is ErrNoTester until this build has its Tester,
+// which the API answers with 501; nothing is recorded. A Tester without samples is a failure of Muster.
+func TestBridgeHasNoTester(t *testing.T) {
+	e := newTestEnv(t)
+	withBridge(e.store, e.w)
+	if _, err := e.s.Test(t.Context(), saver, "DSAAAAAAAAAAA4", Source{Kind: SourceExample}); !errors.Is(err,
+		ErrNoTester) {
+		t.Errorf("test = %v", err)
+	}
+	if _, err := e.s.Preview(t.Context(), "DSAAAAAAAAAAA4", Source{Kind: SourceExample}); !errors.Is(err,
+		ErrNoTester) {
+		t.Errorf("preview = %v", err)
+	}
+	if len(e.w.audit) != 0 || len(e.tester.ins) != 0 {
+		t.Errorf("recorded %+v, tested %+v", e.w.audit, e.tester.ins)
+	}
+	e.s.writer.Samples = nil
+	if _, err := e.s.Preview(t.Context(), "DSAAAAAAAAAAA1", Source{Kind: SourceExample}); err == nil ||
+		errors.Is(err, ErrNoTester) {
+		t.Errorf("no samples = %v", err)
 	}
 }

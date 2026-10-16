@@ -11,6 +11,8 @@ files_touched:
   - internal/db/migrations/0009_bridge_destinations.up.sql
   - internal/db/migrations/0009_bridge_destinations.down.sql
   - design/db/schema.md
+  - internal/db/db_test.go
+  - internal/db/migrate_test.go
   - internal/bridge/client.go
   - internal/bridge/check.go
   - internal/bridge/check_test.go
@@ -19,14 +21,21 @@ files_touched:
   - internal/destinations/write.go
   - internal/destinations/write_test.go
   - internal/destinations/query.sql
+  - internal/destinations/delete.go
+  - internal/destinations/test.go
   - internal/mentions/mentions.go
   - internal/mentions/mentions_test.go
+  - internal/connections/bridge.go
+  - internal/connections/bridge_test.go
+  - internal/connections/connections_test.go
   - internal/connections/doctor.go
   - internal/connections/doctor_test.go
   - internal/connections/query.sql
+  - internal/doctor/doctor_test.go
   - internal/api/destinations.go
   - internal/api/destinations_test.go
   - internal/runtime/runtime.go
+  - internal/fakes/fakebridge/fakebridge.go
   - internal/fakes/fakebridge/channels.go
   - internal/fakes/fakebridge/fakebridge_test.go
   - internal/archlint/secretleak.go
@@ -66,9 +75,10 @@ issue: 238
 - Mentions of linked people and their names in footers (S-076).
 - The Destination form and its labels (S-077).
 - Interim states until later stories: a Bridge Destination on a Route ends each delivery Not delivered, "no adapter for
-  the destination type bridge", until S-074; a Mention of a User is their display name as text, which mentions nobody,
-  until S-076; the SPA names the type "Bridge" without the messenger's name, and the Destination page shows no form and
-  no check for a Bridge, so the check item `channel` is named only from S-077.
+  the destination type bridge", until S-074, and `testDestination` and `previewDestination` of a Bridge Destination
+  answer `501` `not-implemented` until S-074 adds its Tester; a Mention of a User is their display name as text, which
+  mentions nobody, until S-076; the SPA names the type "Bridge" without the messenger's name, and the Destination page
+  shows no form and no check for a Bridge, so the check item `channel` is named only from S-077.
 
 ## Contracts
 
@@ -76,7 +86,8 @@ issue: 238
   filters gain `bridge`; new schemas `BridgeDestinationInput` (`connection_id`, `channel_id`, `mentions`, `limiter`) and
   `BridgeDestination` (with `channel_name`), joined to the discriminators; `DestinationCheckItem.name` gains `channel`,
   the one check item of a Bridge Destination; `NullableDestinationCheckCode` gains `channel_forbidden`, and its
-  description names the item `channel`, `token_invalid` included.
+  description names the item `channel`, `token_invalid` included; `testDestination` and `previewDestination` gain the
+  response `501` (`NotImplemented`), which a Bridge Destination answers until S-074.
 - **Operations implemented for the type**: `listDestinations`, `getDestination`, `createDestination`,
   `updateDestination`, `deleteDestination` (`destinations:read` / `:write`), `checkDestination` (`destinations:test`,
   interactive).
@@ -157,7 +168,7 @@ psql "$MUSTER_DATABASE_URL" -qc "UPDATE destinations SET health = 'broken', brok
   broken_reason = 'test', next_probe_at = now() + interval '1 hour' WHERE public_id = '$D'"
 curl -s "${H[@]}" -X POST $API/destinations/$D/checks | jq -c '{ok, i: [.checks[].name], h: .health.state}'
 # {"ok":true,"i":["channel"],"h":"healthy"}
-./bin/muster dev doctor | grep -i bridge                                          # OK lines for "Dev Bridge", "br" and "alerts"
+./bin/muster dev doctor | grep -E '^OK +(connection (Dev Bridge|br)|destination alerts):'   # 3 OK lines
 curl -s -X PUT $FB/config -d '{"channels":{"ch-alerts":null}}' > /dev/null
 ./bin/muster dev doctor | grep FAIL | grep -c alerts                              # 1
 curl -s "${H[@]}" -X POST $API/destinations/$D/checks | jq -c '.checks[0] | {ok, code}'
@@ -171,7 +182,7 @@ curl -s -X DELETE 127.0.0.1:18091/_fake/requests; curl -s -X DELETE $FB/requests
 curl -s "${H[@]}" -X POST $API/destinations/$D/checks > /dev/null
 # the requests of this check only: from S-075 on, the fake also records the polls of "Dev Bridge"
 echo $(( $(curl -s $FB/requests | jq '[.[] | select(.path | startswith("/v1/channels/"))] | length') - $(curl -s 127.0.0.1:18091/_fake/requests | jq length) ))   # 0
-curl -s -X POST $FB/faults -d '{"path":"/v1/channels/*/check","delay_ms":8000,"times":1}' > /dev/null   # longer than the check waits
+curl -s -X POST $FB/faults -d '{"path":"/v1/channels/*/check","delay_ms":12000,"times":1}' > /dev/null  # longer than the 10 s the check waits
 curl -s "${H[@]}" -X POST $API/destinations/$D/checks | grep -c 'muster-dev-bridge-token-b'   # 0
 grep -c 'muster-dev-bridge-token-b' dev.log                                       # 0
 curl -s "${H[@]}" -X PUT -H "If-Match: $(ETAG)" $API/connections/$C -d '{"type":"bridge","name":"br","base_url":"http://127.0.0.1:18094",

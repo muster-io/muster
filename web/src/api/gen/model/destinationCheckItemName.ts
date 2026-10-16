@@ -19,7 +19,7 @@
  */
 
 /**
- * One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there).
+ * One step of the check. Telegram: `channel_exists`; `discussion_group` fails when the channel has no linked discussion group, that is, comments are not enabled for the channel (the message says to enable them); `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message says to make the bot an admin there). Bridge: `channel`, the bridge's `checkChannel` — whether the bot can post, edit and reply in the channel.
  */
 export type DestinationCheckItemName = typeof DestinationCheckItemName[keyof typeof DestinationCheckItemName];
 
@@ -31,4 +31,5 @@ export const DestinationCheckItemName = {
   discussion_group: 'discussion_group',
   bot_rights_channel: 'bot_rights_channel',
   bot_rights_group: 'bot_rights_group',
+  channel: 'channel',
 } as const;

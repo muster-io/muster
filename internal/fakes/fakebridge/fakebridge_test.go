@@ -20,8 +20,12 @@ import (
 
 	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/bridge/gen"
+	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
+	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/outbound"
 )
 
 // allFeatures are the features of the default info, as bridge.Info names them.
@@ -66,7 +70,18 @@ type answer struct {
 // operations that later stories add to the fake are checked the same way.
 func (s *spec) getInfo(t *testing.T, token string) answer {
 	t.Helper()
-	method, path := http.MethodGet, "/v1/info"
+	return s.call(t, http.MethodGet, "/v1/info", token)
+}
+
+// checkChannel sends checkChannel for the channel id, which is one path segment, checked as getInfo is.
+func (s *spec) checkChannel(t *testing.T, token, id string) answer {
+	t.Helper()
+	return s.call(t, http.MethodPost, "/v1/channels/"+bridge.Segment(id)+"/check", token)
+}
+
+// call sends the request of an operation without a body, checked as getInfo is.
+func (s *spec) call(t *testing.T, method, path, token string) answer {
+	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, s.fake.URL()+path, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -231,6 +246,122 @@ func TestBrokenOnPurpose(t *testing.T) {
 	}
 	s.configure(t, `{"info_padding_bytes":0}`)
 	s.getInfo(t, fakebridge.Token).valid(t)
+}
+
+// TestChannels is checkChannel of the fake (C-22.FR-3): for both bots, the default channels ch-alerts and
+// ch-alerts-prod answer their names, and ch-nobot and unknown ids forbidden with "The bot is not a member of this
+// channel.", as api/bridge.yaml specifies and Muster's check reads them; a revoked token gets 401; nothing is posted.
+func TestChannels(t *testing.T) {
+	s := start(t)
+	for _, token := range []string{fakebridge.Token, fakebridge.SecondToken} {
+		for id, name := range map[string]string{fakebridge.ChannelAlerts: "alerts",
+			fakebridge.ChannelAlertsProd: "alerts-prod"} {
+			a := s.checkChannel(t, token, id)
+			var c gen.ChannelCheck
+			if err := json.Unmarshal(a.body, &c); err != nil || a.invalid != nil || a.status != http.StatusOK ||
+				c.ChannelId != id || c.Name != name {
+				t.Errorf("%s by %s = %d %s %v", id, token, a.status, a.body, a.invalid)
+			}
+		}
+		for _, id := range []string{fakebridge.ChannelNoBot, "ch-unknown", "a/b .."} {
+			a := s.checkChannel(t, token, id)
+			if a.invalid != nil {
+				t.Errorf("%s does not match api/bridge.yaml: %v", id, a.invalid)
+			}
+			a.problem(t, http.StatusForbidden, gen.ErrorClassForbidden)
+			var p gen.Problem
+			if err := json.Unmarshal(a.body, &p); err != nil || p.Detail == nil || *p.Detail != fakebridge.MessageNotMember {
+				t.Errorf("%s = %s", id, a.body)
+			}
+		}
+	}
+	reqs := s.fake.Requests()
+	if len(reqs) != 10 || slices.ContainsFunc(reqs, func(r fakeserver.Request) bool {
+		return r.Method != http.MethodPost || !strings.HasPrefix(r.Path, "/v1/channels/")
+	}) {
+		t.Errorf("requests %+v", reqs)
+	}
+
+	n := network(t)
+	c, err := bridge.NewClient(n, bridge.Settings{BaseURL: s.fake.URL(), Token: fakebridge.Token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := bridge.Direct(delivery.Call{Class: outbound.ClassInteractive})
+	res, err := bridge.CheckDestination(t.Context(), c, direct, fakebridge.ChannelNoBot)
+	if err != nil || res.Code != bridge.CodeChannelForbidden || res.Message != fakebridge.MessageNotMember {
+		t.Errorf("Muster's check of ch-nobot = %+v, %v", res, err)
+	}
+	if res, err := bridge.CheckDestination(t.Context(), c, direct, fakebridge.ChannelAlerts); err != nil || !res.OK() ||
+		res.Name != "alerts" {
+		t.Errorf("Muster's check of ch-alerts = %+v, %v", res, err)
+	}
+	s.configure(t, `{"revoked":["`+fakebridge.Token+`"]}`)
+	a := s.checkChannel(t, fakebridge.Token, fakebridge.ChannelAlerts)
+	if a.invalid != nil {
+		t.Errorf("401 does not match api/bridge.yaml: %v", a.invalid)
+	}
+	a.problem(t, http.StatusUnauthorized, gen.ErrorClassForbidden)
+	if res, err := bridge.CheckDestination(t.Context(), c, direct, fakebridge.ChannelAlerts); err != nil ||
+		res.Code != bridge.CodeTokenInvalid {
+		t.Errorf("Muster's check with a revoked token = %+v, %v", res, err)
+	}
+}
+
+// TestChannelsConfig: a PUT of channels adds or replaces each channel it names — a name adds or renames one, null
+// forbids it — and keeps the others; GET shows them; SetConfig without channels leaves none.
+func TestChannelsConfig(t *testing.T) {
+	s := start(t)
+	s.configure(t, `{"channels":{"ch-alerts":null,"ch-new":"new","ch-alerts-prod":"prod"}}`)
+	s.checkChannel(t, fakebridge.Token, fakebridge.ChannelAlerts).problem(t, http.StatusForbidden,
+		gen.ErrorClassForbidden)
+	for id, name := range map[string]string{"ch-new": "new", fakebridge.ChannelAlertsProd: "prod"} {
+		var c gen.ChannelCheck
+		if a := s.checkChannel(t, fakebridge.Token, id); json.Unmarshal(a.body, &c) != nil || c.Name != name {
+			t.Errorf("%s = %d %s", id, a.status, a.body)
+		}
+	}
+	s.configure(t, `{"channels":{"ch-alerts":"alerts"}}`)
+	if a := s.checkChannel(t, fakebridge.Token, fakebridge.ChannelAlerts); a.status != http.StatusOK {
+		t.Errorf("ch-alerts again = %d %s", a.status, a.body)
+	}
+	s.configure(t, `{"channels":null}`)
+	status, body := s.control(t, http.MethodGet, "/_fake/config", "")
+	var c fakebridge.Config
+	if err := json.Unmarshal([]byte(body), &c); err != nil || status != http.StatusOK || len(c.Channels) != 4 ||
+		*c.Channels["ch-new"] != "new" || c.Channels[fakebridge.ChannelNoBot] != nil {
+		t.Errorf("GET /_fake/config = %d %s", status, body)
+	}
+	for _, bad := range []string{`{"channels":{"x":1}}`, `{"channels":["x"]}`} {
+		if status, body := s.control(t, http.MethodPut, "/_fake/config", bad); status != http.StatusBadRequest {
+			t.Errorf("PUT %s = %d %s, want 400", bad, status, body)
+		}
+	}
+	cfg := fakebridge.DefaultConfig()
+	cfg.Channels = nil
+	if err := s.fake.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.fake.Config(); got.Channels == nil || len(got.Channels) != 0 {
+		t.Errorf("channels after SetConfig without them: %+v", got.Channels)
+	}
+	s.checkChannel(t, fakebridge.Token, fakebridge.ChannelAlerts).problem(t, http.StatusForbidden,
+		gen.ErrorClassForbidden)
+	s.configure(t, `{"channels":{"ch-alerts":"alerts"}}`)
+	if a := s.checkChannel(t, fakebridge.Token, fakebridge.ChannelAlerts); a.status != http.StatusOK {
+		t.Errorf("a channel added to none = %d %s", a.status, a.body)
+	}
+}
+
+// network is a bridge.Network that lets the client reach the fake on the loopback address.
+func network(t *testing.T) bridge.Network {
+	t.Helper()
+	p, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bridge.Network{Policy: outbound.StaticPolicy(p), Log: logging.New(io.Discard, logging.LevelInfo),
+		Real: clock.Real{}}
 }
 
 // TestConfig: a PUT replaces the fields it gives, each as a whole, keeps the others, and answers the configuration;

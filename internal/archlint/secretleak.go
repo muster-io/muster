@@ -1644,15 +1644,20 @@ const (
 	bridgeVersion
 	bridgeVersionPushSecret
 	bridgeInfo
+	bridgeInfoPush
+	bridgeForbidden
+	bridgeChannel
 )
 
 // probeBridge pushes the secrets through a Bridge Connection (C-22.AC-3): the token, the push secret of push event
-// delivery and the password of an HTTP proxy that refuses it, through the Connection's creation and its checks —
-// through the proxy; against a stand-in bridge whose problems, a 500 and a 401, echo the token, the push secret, which
-// the bridge knows too, and the Authorization header in their detail, title and type, whose info names the token, and
-// then the push secret, as its protocol version, and whose info offers only poll; and against a listener that cuts
-// every connection — through a creation refused for a malformed push secret, muster doctor, which skips the
-// Connection, its deletion, and a client with an unsupported proxy.
+// delivery and the password of an HTTP proxy that refuses it, through the Connection's creation, its checks and the
+// Destination check of a channel (checkChannel) — through the proxy; against a stand-in bridge whose problems, a 500,
+// a 401 and a forbidden 403, echo the token, the push secret, which the bridge knows too, and the Authorization header
+// in their detail, title and type, whose info names the token, and then the push secret, as its protocol version,
+// whose info offers only poll, and whose channel is named after the token and the push secret; and against a listener
+// that cuts every connection — through a creation refused for a malformed push secret, muster doctor, which checks
+// the Connection with getInfo and its Destination with checkChannel, its deletion, and a client with an unsupported
+// proxy.
 func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
@@ -1670,7 +1675,7 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 		return err
 	}
 	pushSecret := "whsec_" + base64.StdEncoding.EncodeToString([]byte(secrets[1]))
-	var answer atomic.Int32
+	var answer, channelAnswer atomic.Int32
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1679,7 +1684,20 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			echo := "invalid token " + secrets[0] + " " + r.Header.Get("Authorization") + " push secret " + pushSecret
-			switch answer.Load() {
+			a := answer.Load()
+			if strings.HasPrefix(r.URL.Path, "/v1/channels/") {
+				a = channelAnswer.Load()
+			}
+			switch a {
+			case bridgeChannel:
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"channel_id": "probe",
+					"name": secrets[0] + " " + pushSecret})
+			case bridgeInfoPush:
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"protocol_version":"1","bridge":{"name":"probe","version":"1"},`+
+					`"messenger":{"name":"probe"},"capabilities":{},"limits":{"max_body_length":4000,`+
+					`"edit_max_age_seconds":null},"user_lookup":"none","event_delivery":["poll","push"]}`)
 			case bridgeVersion:
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]any{"protocol_version": secrets[0]})
@@ -1692,14 +1710,17 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 					`"messenger":{"name":"probe"},"capabilities":{},"limits":{"max_body_length":4000,`+
 					`"edit_max_age_seconds":null},"user_lookup":"none","event_delivery":["poll"]}`)
 			default:
-				status := http.StatusInternalServerError
-				if answer.Load() == bridgeUnauthorized {
-					status = http.StatusUnauthorized
+				status, class := http.StatusInternalServerError, "transient"
+				switch a {
+				case bridgeUnauthorized:
+					status, class = http.StatusUnauthorized, "forbidden"
+				case bridgeForbidden:
+					status, class = http.StatusForbidden, "forbidden"
 				}
 				w.Header().Set("Content-Type", "application/problem+json")
 				w.WriteHeader(status)
 				_ = json.NewEncoder(w).Encode(map[string]any{"status": status, "detail": echo, "title": echo,
-					"type": "urn:" + secrets[0] + ":" + pushSecret})
+					"type": "urn:" + secrets[0] + ":" + pushSecret, "class": class})
 			}
 		})}
 	go func() { _ = srv.Serve(ln) }()
@@ -1746,17 +1767,39 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 			errs = append(errs, errors.New(st.Message))
 		}
 	}
+	checkChannel := func() {
+		res, err := svc.CheckBridgeChannel(ctx, destinations.BridgeChannelCheck{Connection: store.row.PublicID,
+			ChannelID: "probe"})
+		errs = append(errs, err, errors.New(res.Check.Message), errors.New(res.Check.Name),
+			errors.New(string(res.Check.Outcome.Error)))
+	}
+	doctorRun := func() {
+		found, err := svc.Doctor(ctx, store, 2*time.Second)
+		errs = append(errs, err)
+		for _, f := range found {
+			errs = append(errs, errors.New(f.Message))
+		}
+	}
 	c, err := svc.Create(ctx, by, in)
 	if err != nil {
 		return err
 	}
 	check()
+	checkChannel()
 	in.Proxy, in.PushSecret, in.BotToken = proxyconf.Input{Enabled: false}, keyring.Keep, keyring.Keep
 	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
 	errs = append(errs, err)
-	for _, a := range []int32{bridgeProblem, bridgeUnauthorized, bridgeVersion, bridgeVersionPushSecret, bridgeInfo} {
+	for _, a := range []int32{bridgeProblem, bridgeUnauthorized, bridgeVersion, bridgeVersionPushSecret, bridgeInfo,
+		bridgeForbidden, bridgeChannel} {
 		answer.Store(a)
+		channelAnswer.Store(a)
 		check()
+		checkChannel()
+	}
+	answer.Store(bridgeInfoPush)
+	for _, a := range []int32{bridgeProblem, bridgeUnauthorized, bridgeForbidden, bridgeChannel} {
+		channelAnswer.Store(a)
+		doctorRun()
 	}
 	malformed := in
 	malformed.Name, malformed.BotToken = "malformed", keyring.Replace(logging.Secret(secrets[0]))
@@ -1767,11 +1810,8 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
 	errs = append(errs, err)
 	check()
-	found, err := svc.Doctor(ctx, store, 2*time.Second)
-	errs = append(errs, err)
-	for _, f := range found {
-		errs = append(errs, errors.New(f.Message))
-	}
+	checkChannel()
+	doctorRun()
 	errs = append(errs, svc.Delete(ctx, by, c.PublicID, nil))
 	_, err = bridge.NewClient(bridge.Network(network), bridge.Settings{BaseURL: "http://" + ln.Addr().String(),
 		Token: logging.Secret(secrets[0]), Proxy: &outbound.Proxy{Type: "ftp", Address: "proxy:1", Username: "muster",
@@ -1868,6 +1908,13 @@ func (s *probeConnections) ListTelegramDestinations(context.Context, int64) ([]c
 	error) {
 	return []cdb.ListTelegramDestinationsRow{{ID: 1, PublicID: "DSAAAAAAAAAAA1", Name: "probe",
 		ConnectionID: pgtype.Int8{Int64: 1, Valid: true}, TelegramChannelID: pgtype.Text{String: "@probe",
+			Valid: true}}}, nil
+}
+
+// ListBridgeDestinations lists the Destination 2 of the Connection on the channel probe for muster doctor.
+func (s *probeConnections) ListBridgeDestinations(context.Context, int64) ([]cdb.ListBridgeDestinationsRow, error) {
+	return []cdb.ListBridgeDestinationsRow{{ID: 2, PublicID: "DSAAAAAAAAAAA2", Name: "probe-bridge",
+		ConnectionID: pgtype.Int8{Int64: 1, Valid: true}, BridgeChannelID: pgtype.Text{String: "probe",
 			Valid: true}}}, nil
 }
 
