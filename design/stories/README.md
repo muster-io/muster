@@ -57,7 +57,7 @@ issue: null
 | `depends_on` | Stories that must be merged first. The graph is acyclic. A dependency usually has a smaller ID; a part split off later takes the next free ID (section 6) but keeps its place in the phase order, so stories with smaller IDs may depend on it — S-061, split from S-039, comes before S-040. The story map lists stories in an order that respects every dependency. A frontend story depends on the backend story of its capability. |
 | `covers` | The FR and AC IDs the story covers, fully or in part; the body's coverage table says which. Required by the [L1 conventions](../prd/L1.md#2-conventions). |
 | `files_touched` | Every hand-written file the story creates or changes, tests included. Generated files are never listed ([section 2](#2-repository-layout)). A path ending in `/**` stands for a directory of small fixtures and counts as one entry. |
-| `acceptance` | Testable statements. Each starts with the FR or AC IDs it proves, in brackets, and is checked by a test or by the live checks of the body. |
+| `acceptance` | Testable statements. Each starts with the FR or AC IDs it proves, in brackets, and is checked by a test or by the live checks of the body. A story whose `covers` is empty, because no requirement speaks about what it changes, says why in its Notes, and its statements name no IDs. |
 | `verify` | The automated check of the story; it always starts with `make`. |
 | `operator_attention` | `true` when the operator has to act or decide during the story: accounts and settings outside the repository, or a product value the story confirms. The Notes say why. |
 | `issue` | The GitHub issue that tracks the story. `null` until the script that creates issues fills it; never edited by hand. |
