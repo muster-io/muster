@@ -4,7 +4,7 @@ title: "Bridge delivery: envelopes in CommonMark, idempotent Publications, Threa
 capability: C-22
 kind: be
 layer: L1
-depends_on: [S-080]
+depends_on: [S-080, S-082]
 covers: [C-22.FR-3, C-22.FR-4, C-22.FR-5, C-22.FR-6, C-22.FR-7, C-22.FR-8, C-22.FR-17, C-22.FR-19, C-22.FR-23, C-22.AC-4, C-22.AC-5, C-22.AC-6, C-22.AC-7, C-22.AC-10, C-22.AC-11, C-22.AC-12]
 files_touched:
   - api/openapi.yaml
@@ -252,7 +252,8 @@ None.
   `info`.
 - `published_at` from the first attempt matters only for bridges with an edit window: a replay found after a crash
   must not move the window later than the real post.
-- The style hints of the buttons (D329) come from `buttons.StyleOf` of S-082, which Mattermost and Telegram already use.
+- The style hints of the buttons (D329) come from `buttons.StyleOf` of S-082, which Mattermost and Telegram already use;
+  hence S-082 in `depends_on`.
 
 ## Coverage
 

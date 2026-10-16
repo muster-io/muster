@@ -79,9 +79,12 @@ messages · Bot API 10.3_ · Used in C-14.FR-15.
 or “primary” (blue). If omitted, then an app-specific style is used"), added in Bot API 9.4 on 2026-02-09. `style` does
 not set the type of a button, so it goes with `callback_data`. `sendMessage` to the channel with one button of each
 style and one without answered `ok` and returned `style` in the message's `reply_markup`, and the clients showed the
-styled buttons filled with their colour; `editMessageReplyMarkup` changed a button's style on the sent message. —
-_2026-10-15 · one channel post with four buttons on the test stand, its keyboard edited and restored, viewed in the
-client; the Bot API reference and changelog · Bot API 10.3_ · Used in S-082.
+styled buttons filled with their colour; `editMessageReplyMarkup` changed a button's style on the sent message, and
+`editMessageText` with `reply_markup` sets the styles of its new keyboard too: after Acknowledge, Muster's edit of the
+Root message showed "Unack" plain and "Resolve" green. — _2026-10-15 · one channel post with four buttons on the test
+stand, its keyboard edited and restored, viewed in the client; the Bot API reference and changelog; 2026-10-16 · an
+Alert Group acknowledged on the development stand, its Root message edited by Muster, viewed in the client · Bot API
+10.3_ · Used in S-082.
 
 **F-067. An unknown button style fails the request.** A `style` outside the three documented values, such as
 `neutral` or a number, fails the request with
@@ -170,10 +173,13 @@ created post. It checks the value but, in 11.2.2, only logs "Invalid post props.
 in an error" and keeps the post. The clients do not fill the button: the label takes the colour, and the background the
 same colour at 8 % opacity; on the web `good` and `success` are the same green (`#339970`), `primary` is the theme's
 button colour, `danger` its error colour and `default` its text colour, and a button without `style` stays plain; the
-mobile app shows a button without `style` as `default`. — _2026-10-15 · one post with seven buttons on the test stand,
-viewed in the client; the interactive messages and message attachments documentation; `PostAction.IsValid` and
-`Post.ValidateProps` in `server/public/model` and `action_button.tsx` of the v11.2.2 source, and
-`app/utils/message_attachment.ts` of the mobile app · Mattermost 11.2.2_ · Used in S-082.
+mobile app shows a button without `style` as `default`. An edit of the post sets the styles of its new buttons: after
+Acknowledge, Muster's edit of the Root message (`PUT /api/v4/posts/{post_id}/patch`) showed "Unack" plain and "Resolve"
+tinted green. — _2026-10-15 · one post with seven buttons on the test stand, viewed in the client; the interactive
+messages and message attachments documentation; `PostAction.IsValid` and `Post.ValidateProps` in `server/public/model`
+and `action_button.tsx` of the v11.2.2 source, and `app/utils/message_attachment.ts` of the mobile app; 2026-10-16 · an
+Alert Group acknowledged on the development stand, its Root message edited by Muster, viewed in the client · Mattermost
+11.2.2_ · Used in S-082.
 
 ### Button presses and answers
 

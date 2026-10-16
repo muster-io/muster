@@ -31,10 +31,13 @@ files_touched:
   - internal/archlint/secretleak.go
   - web/src/components/destination-label.ts
   - web/src/components/destination-health.tsx
+  - web/src/components/connection-check.tsx
+  - web/src/locales/en.json
+  - web/src/locales/ru.json
 acceptance:
-  - "[C-22.FR-3, C-22.AC-2] `createDestination` of type `bridge` takes a Bridge Connection, the channel id, Mention settings and its limiter (`destination.bridge.limiter`) and runs `checkChannel`; a channel the fake answers `forbidden` for is refused with 422 `destination_check_failed` at `/channel_id` with the bridge's `detail`, and the fake records no `postMessage`; a passing check stores `channel_name`, which `getDestination` and `listDestinations` return with `connection_id` and `channel_id`; a Connection of another type is refused with 422 at `/connection_id`."
+  - "[C-22.FR-3, C-22.AC-2] `createDestination` of type `bridge` takes a Bridge Connection, the channel id, Mention settings and its limiter (`destination.bridge.limiter`) and runs `checkChannel`; a channel the fake answers `forbidden` for is refused with 422 `destination_check_failed` at `/channel_id` with the bridge's `detail` and the `check_code` `channel_forbidden`, and the fake records no `postMessage`; a passing check stores `channel_name`, which `getDestination` and `listDestinations` return with `connection_id` and `channel_id`; a Connection of another type is refused with 422 at `/connection_id`."
   - "[C-22.FR-3, C-22.AC-20] `mentions.Validate` takes nobody and chosen users for a Bridge Destination and refuses everyone in the chat and messenger groups with 422 `unsupported` at their pointer (`mentions_test.go`, a case per kind)."
-  - "[C-22.FR-3] `checkDestination` runs `checkChannel` through the interactive path and returns one item `channel`; a success on a Broken Destination ends the Broken state; `muster doctor` checks every Bridge Connection with `getInfo` and every Bridge Destination with `checkChannel`, printing an OK line for each and a FAIL line naming a failing one."
+  - "[C-22.FR-3] `checkDestination` runs `checkChannel` through the interactive path and returns one item `channel`, whose code is `token_invalid` when the bridge refuses the token with `401`, `channel_forbidden` for any other `forbidden`, the code of `delivery.FailureCode` for a request without an answer or one the outbound address policy refuses, and `request_failed`, with the class named, for any other class (`check_test.go`, a case per class); a success on a Broken Destination ends the Broken state; `muster doctor` checks every Bridge Connection with `getInfo` and every Bridge Destination with `checkChannel`, printing an OK line for each and a FAIL line naming a failing one."
   - "[C-22.AC-3] With an HTTP proxy on the Connection, every request of the Destination check reaches the fake bridge only through the fake proxy; with the fake closing the connection, the token appears in no log line and no error returned by the API (`secretleak.go` probe `bridge_connections`, the Destination check added)."
   - "[C-22.FR-3] With `bridge` in the `Destination` union the SPA's type check passes: `destinationPlace` shows a Bridge Destination's channel name, or its channel id, and `destinationTypeName` names it \"Bridge\" until S-077 adds the messenger's name."
 verify: "make ci test-integration"
@@ -69,7 +72,8 @@ issue: 238
 - **Spec** (`api/openapi.yaml`, changed here first, then generated): `Destination`, `DestinationInput` and the type
   filters gain `bridge`; new schemas `BridgeDestinationInput` (`connection_id`, `channel_id`, `mentions`, `limiter`) and
   `BridgeDestination` (with `channel_name`), joined to the discriminators; `DestinationCheckItem.name` gains `channel`,
-  the one check item of a Bridge Destination.
+  the one check item of a Bridge Destination; `NullableDestinationCheckCode` gains `channel_forbidden`, and its
+  description names the item `channel`, `token_invalid` included.
 - **Operations implemented for the type**: `listDestinations`, `getDestination`, `createDestination`,
   `updateDestination`, `deleteDestination` (`destinations:read` / `:write`), `checkDestination` (`destinations:test`,
   interactive).
@@ -81,9 +85,9 @@ issue: 238
   `channel_name` — in `getDestination`, `listDestinations` and the labels' data of S-070.
 - **Write path** (C-22.FR-3; `internal/destinations/write.go`): the shared write path validates Mention settings through
   `mentions.Validate`, and the type runs `checkChannel` on save: `forbidden` → `422 destination_check_failed` at
-  `/channel_id` with the `detail`; another class → the same problem with the class named; `200` →
-  `bridge_channel_name` stored. The Connection must be a Bridge Connection that is not deleted. The default limiter is
-  `destination.bridge.limiter`.
+  `/channel_id` with the `detail` and the `check_code` of the check item; another class → the same problem with the
+  class named; `200` → `bridge_channel_name` stored. The Connection must be a Bridge Connection that is not deleted.
+  The default limiter is `destination.bridge.limiter`.
 - **Mention settings** (`internal/mentions/mentions.go`): `everyoneOffered` and the group rule treat `bridge` as
   `telegram` — nobody or chosen users only — with a refusal text that names Bridges; `IdentitySpace("bridge", …)`
   returns no space until S-076, so a Mention of a User resolves to their display name as text.
@@ -91,6 +95,12 @@ issue: 238
   item `channel`, from save and `checkDestination` through the interactive path, and from `muster doctor`
   (`internal/connections/doctor.go`), which also runs `getInfo` for every Bridge Connection; a success on a Broken
   Destination calls `MarkHealthy`. S-074 uses the same function as the Bridge delivery's `Check` for the Broken probe.
+  A failing item carries its code (`DestinationCheckItem.code`) next to its English text, as the other types' checks
+  do: `token_invalid` when the bridge refuses the token with `401`; `channel_forbidden` for any other `forbidden`, with
+  the bridge's `detail` as the text; the code of `delivery.FailureCode` for a request without an answer or one the
+  outbound address policy refuses; `request_failed` for any other class, which the text names. `checkCodeText`
+  (`connection-check.tsx`) gains `channel_forbidden`, translated in `en.json` and `ru.json`: "The bridge refused the
+  channel: it does not exist, or the bot cannot use it."; the bridge's `detail` stays the detail.
 - **SPA type check** (`destination-label.ts`, `destination-health.tsx`): `destinationPlace` and `destinationTypeName`
   get an explicit `bridge` branch instead of falling through to the outgoing webhook's; no new text, which S-077 adds.
 - **Fake bridge** (`channels.go`): `checkChannel` for `ch-alerts` ("alerts") and `ch-alerts-prod` ("alerts-prod") and
@@ -104,7 +114,7 @@ issue: 238
 1. Add the migration, the Destination type with its read model and the Mention rules. Check: `write_test.go`,
    `destinations_test.go`, `mentions_test.go`.
 2. Add the channel check and `muster doctor`. Check: `check_test.go`, `doctor_test.go`.
-3. Narrow the SPA by type. Check: `make lint`.
+3. Narrow the SPA by type and translate the new check code. Check: `make lint`.
 4. Extend the fake and the secret probe. Check: `fakebridge_test.go`, then Verification.
 
 ## Verification
@@ -122,8 +132,8 @@ M='{"new_alert_group":{"everyone":"none","user_ids":[],"groups":[]},"new_alerts"
 MKD() { curl -s "${H[@]}" $API/destinations -d "{\"type\":\"bridge\",\"name\":\"$1\",\"connection_id\":\"$C\",\"channel_id\":\"$2\",
   \"mentions\":${3:-$M},\"limiter\":{\"limit\":30,\"per_seconds\":60}}"; }
 curl -s -X DELETE $FB/requests
-MKD nobot ch-nobot | jq -c '{status, code: .errors[0].code, p: .errors[0].pointer, d: .errors[0].detail}'
-# {"status":422,"code":"destination_check_failed","p":"/channel_id","d":"The bot is not a member of this channel."}
+MKD nobot ch-nobot | jq -c '{status, code: .errors[0].code, p: .errors[0].pointer, d: .errors[0].detail, cc: .errors[0].check_code}'
+# {"status":422,"code":"destination_check_failed","p":"/channel_id","d":"The bot is not a member of this channel.","cc":"channel_forbidden"}
 curl -s $FB/requests | jq '[.[] | select(.path == "/v1/messages")] | length'      # 0
 MKD all ch-alerts "$(jq -c '.new_alert_group.everyone = "channel"' <<<"$M")" | jq -c '[.status, .errors[0].code]'
 # [422,"unsupported"]
@@ -139,6 +149,8 @@ curl -s "${H[@]}" -X POST $API/destinations/$D/checks | jq -c '{ok, i: [.checks[
 ./bin/muster dev doctor | grep -i bridge                                          # OK lines for "Dev Bridge", "br" and "alerts"
 curl -s -X PUT $FB/config -d '{"channels":{"ch-alerts":null}}' > /dev/null
 ./bin/muster dev doctor | grep FAIL | grep -c alerts                              # 1
+curl -s "${H[@]}" -X POST $API/destinations/$D/checks | jq -c '.checks[0] | {ok, code}'
+# {"ok":false,"code":"channel_forbidden"}
 curl -s -X PUT $FB/config -d '{"channels":{"ch-alerts":"alerts"}}' > /dev/null
 
 # C-22.AC-3: the Destination check through the fake HTTP proxy, and no secret in an error
@@ -163,6 +175,10 @@ None.
 - Suggested commit: `feat(bridge): add bridge destinations and their channel check`.
 - S-080 was split from S-073 by the plan review of the Bridge phase (D323), because S-073 touched about 50 files. It
   follows S-073 and comes before S-074, whose Broken probe and posts need a Bridge Destination.
+- The check codes were added to every Destination check after this story was written; the item `channel` takes the
+  existing codes where the meaning is the same and adds `channel_forbidden`, because a bridge's `forbidden` covers both
+  a missing channel and a bot that cannot use it. `connection-check.tsx` and the locales are in `files_touched` because
+  `checkCodeText` switches exhaustively over the code enums: a new code fails the type check until it is translated.
 - A Bridge Destination's check has one item, `channel`, because the bridge answers one question — can the bot post,
   edit and reply there — and names the reason when it cannot.
 
