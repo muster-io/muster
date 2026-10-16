@@ -1039,3 +1039,37 @@ func TestDone(t *testing.T) {
 		}
 	}
 }
+
+// TestButtonStyleNotStored: a button's style hint is buttons.StyleOf of its Command, and the JSON of a rendered Root
+// message — the Desired state's payload and the input of its hash — has no style, so the styles change no Desired
+// state.
+func TestButtonStyleNotStored(t *testing.T) {
+	out := newRenderer(t).Root(source("firing", 3), MarkupPlain)
+	m := out.Message
+	if out.Failure != nil || len(m.Buttons) != 5 {
+		t.Fatalf("root %+v", out)
+	}
+	want := []buttons.Style{buttons.StylePrimary, buttons.StyleSuccess, buttons.StyleNeutral, buttons.StyleNeutral,
+		buttons.StyleNeutral}
+	for i, b := range m.Buttons {
+		if b.Style() != want[i] || b.Style() != buttons.StyleOf(b.Command) {
+			t.Errorf("button %d %s = %s, want %s", i, b.Command, b.Style(), want[i])
+		}
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored struct {
+		Buttons []map[string]any `json:"buttons"`
+	}
+	if err := json.Unmarshal(raw, &stored); err != nil || len(stored.Buttons) != 5 ||
+		strings.Contains(string(raw), `"style"`) {
+		t.Errorf("stored %s: %v", raw, err)
+	}
+	for i, b := range stored.Buttons {
+		if _, ok := b["style"]; ok || b["command"] != m.Buttons[i].Command {
+			t.Errorf("stored button %d = %v", i, b)
+		}
+	}
+}

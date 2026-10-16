@@ -275,6 +275,7 @@ type mmAction struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Type        string `json:"type"`
+	Style       string `json:"style"`
 	Integration struct {
 		URL     string            `json:"url"`
 		Context map[string]string `json:"context"`

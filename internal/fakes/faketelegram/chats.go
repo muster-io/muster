@@ -73,6 +73,7 @@ const (
 	DescriptionTooLong         = "Bad Request: message is too long"
 	DescriptionNeedAdmin       = "Bad Request: need administrator rights in the channel chat"
 	DescriptionButtonData      = "Bad Request: BUTTON_DATA_INVALID"
+	DescriptionButtonStyle     = "Bad Request: can't parse InlineKeyboardButton: Invalid button style specified"
 	DescriptionCantBeEdited    = "Bad Request: message can't be edited"
 	descriptionNotMember       = "Forbidden: bot is not a member of the %s chat"
 	descriptionKicked          = "Forbidden: bot was kicked from the %s chat"
@@ -512,8 +513,12 @@ type content struct {
 	markup    json.RawMessage
 }
 
+// buttonStyles are the styles an inline button takes: the three of F-066 and the undocumented default (F-067).
+var buttonStyles = []string{"primary", "danger", "success", "default"}
+
 // contentOf reads and checks the content of a call: a text that is not empty, HTML that parses, at most MaxTextLength
-// after entities, and buttons whose callback_data has at most 64 bytes. The failure is the description to answer.
+// after entities, and buttons whose style, when they have one, is one of buttonStyles (F-067) and whose callback_data
+// has at most 64 bytes. The failure is the description to answer.
 func contentOf(p params) (content, string) {
 	c := content{text: p.string("text"), parseMode: p.string("parse_mode")}
 	if raw, ok := p["reply_markup"]; ok && raw != nil {
@@ -540,8 +545,9 @@ func contentOf(p params) (content, string) {
 	if c.markup != nil {
 		var kb struct {
 			InlineKeyboard [][]struct {
-				Text         string `json:"text"`
-				CallbackData string `json:"callback_data"`
+				Text         string          `json:"text"`
+				CallbackData string          `json:"callback_data"`
+				Style        json.RawMessage `json:"style"`
 			} `json:"inline_keyboard"`
 		}
 		if err := json.Unmarshal(c.markup, &kb); err != nil {
@@ -549,6 +555,10 @@ func contentOf(p params) (content, string) {
 		}
 		for _, row := range kb.InlineKeyboard {
 			for _, b := range row {
+				var style string
+				if b.Style != nil && (json.Unmarshal(b.Style, &style) != nil || !slices.Contains(buttonStyles, style)) {
+					return content{}, DescriptionButtonStyle
+				}
 				if len(b.CallbackData) == 0 || len(b.CallbackData) > 64 {
 					return content{}, DescriptionButtonData
 				}

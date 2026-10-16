@@ -587,6 +587,61 @@ func TestMessageContent(t *testing.T) {
 	}
 }
 
+// F-066 and F-067: a send or an edit whose inline button has a style is refused unless the style is primary, danger,
+// success or default, the whole call failing; the style it accepts is kept in the message's reply_markup and listed by
+// the control endpoint.
+func TestButtonStyles(t *testing.T) {
+	f, base := start(t)
+	markup := func(style string) string {
+		return `"reply_markup":{"inline_keyboard":[[{"text":"a","callback_data":"a"},` +
+			`{"text":"b","callback_data":"b","style":` + style + `}]]}`
+	}
+	accepted := []string{`"primary"`, `"danger"`, `"success"`, `"default"`}
+	for i, style := range accepted {
+		if s, a := bot(t, base, "sendMessage", `{"chat_id":-1001000000001,"text":"x",`+markup(style)+`}`); s !=
+			http.StatusOK {
+			t.Fatalf("send with the style %s = %d %+v", style, s, a)
+		}
+		if s, a := bot(t, base, "editMessageText", fmt.Sprintf(`{"chat_id":-1001000000001,"message_id":1,`+
+			`"text":"e%d",%s}`, i, markup(style))); s != http.StatusOK {
+			t.Fatalf("edit with the style %s = %d %+v", style, s, a)
+		}
+	}
+	msgs := f.Messages(faketelegram.ChannelID)
+	if len(msgs) != len(accepted) || len(msgs[0].Edits) != len(accepted) {
+		t.Fatalf("messages = %+v", msgs)
+	}
+	// Message i was sent with style i; the first one was then edited to each style in turn, ending with default.
+	for i, style := range accepted {
+		if !strings.Contains(string(msgs[0].Edits[i].ReplyMarkup), `"style":`+style) ||
+			i > 0 && !strings.Contains(string(msgs[i].ReplyMarkup), `"style":`+style) {
+			t.Errorf("the style %s is not kept: %s, edit %s", style, msgs[i].ReplyMarkup, msgs[0].Edits[i].ReplyMarkup)
+		}
+	}
+	if !strings.Contains(string(msgs[0].ReplyMarkup), `"style":"default"`) {
+		t.Errorf("the edited keyboard = %s", msgs[0].ReplyMarkup)
+	}
+	if _, body, _ := call(t, http.MethodGet, base+"/_fake/messages?chat=@muster_alerts", ""); !strings.Contains(body,
+		`"style":"danger"`) {
+		t.Errorf("listed messages = %s", body)
+	}
+	for _, style := range []string{`"neutral"`, `""`, `"Primary"`, `42`, `null`} {
+		for _, c := range []struct{ method, body string }{
+			{"sendMessage", `{"chat_id":-1001000000002,"text":"x",` + markup(style) + `}`},
+			{"editMessageText", `{"chat_id":-1001000000001,"message_id":1,"text":"y",` + markup(style) + `}`},
+		} {
+			if s, a := bot(t, base, c.method, c.body); s != http.StatusBadRequest || a.ErrorCode != http.StatusBadRequest ||
+				a.Description != faketelegram.DescriptionButtonStyle {
+				t.Errorf("%s with the style %s = %d %+v", c.method, style, s, a)
+			}
+		}
+	}
+	if msgs := f.Messages(faketelegram.ChannelID); len(msgs) != len(accepted) || len(msgs[0].Edits) != len(accepted) ||
+		msgs[0].Text != "e3" {
+		t.Errorf("a refused call changed the messages: %+v", msgs)
+	}
+}
+
 // The control endpoints list messages by chat and refuse what they cannot apply.
 func TestChatControl(t *testing.T) {
 	_, base := start(t)

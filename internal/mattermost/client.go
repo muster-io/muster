@@ -295,10 +295,12 @@ type attachment struct {
 }
 
 // action is a button of an attachment: Mattermost calls integration.url with integration.context when it is pressed.
+// A style tints it (F-068); without one it stays plain.
 type action struct {
 	ID          string      `json:"id"`
 	Name        string      `json:"name"`
 	Type        string      `json:"type"`
+	Style       string      `json:"style,omitempty"`
 	Integration integration `json:"integration"`
 }
 

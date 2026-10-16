@@ -218,7 +218,15 @@ func mentionText(ts []mentions.Target, tokens []templates.Token, markup messages
 	return strings.Join(out, " ")
 }
 
-// actions are the buttons as attachment actions, each calling the callback with its signed action id.
+// actionStyles are the styles of attachment actions by style hint (F-068); a neutral button has no style and stays
+// plain.
+var actionStyles = map[buttons.Style]string{
+	buttons.StylePrimary: "primary",
+	buttons.StyleSuccess: "success",
+}
+
+// actions are the buttons as attachment actions, each with the style of its hint and calling the callback with its
+// signed action id.
 func actions(bs []messages.Button, callback string) []action {
 	out := make([]action, 0, len(bs))
 	for _, b := range bs {
@@ -226,8 +234,8 @@ func actions(bs []messages.Button, callback string) []action {
 		if b.Command == buttons.CommandSnooze {
 			id += strconv.Itoa(b.Argument)
 		}
-		out = append(out, action{ID: id, Name: b.Label, Type: "button", Integration: integration{URL: callback,
-			Context: actionContext{Action: b.ActionID, KeyID: b.KeyID}}})
+		out = append(out, action{ID: id, Name: b.Label, Type: "button", Style: actionStyles[b.Style()],
+			Integration: integration{URL: callback, Context: actionContext{Action: b.ActionID, KeyID: b.KeyID}}})
 	}
 	return out
 }

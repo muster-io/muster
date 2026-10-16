@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/templates"
 )
 
@@ -145,6 +146,12 @@ type Button struct {
 	Label    string `json:"label"`
 	ActionID string `json:"action_id,omitempty"`
 	KeyID    string `json:"key_id,omitempty"`
+}
+
+// Style is the style hint of the button, decided by its Command. It is not a field: the JSON of a Message is the
+// Desired state's payload and the input of its hash, which the style must not change.
+func (b Button) Style() buttons.Style {
+	return buttons.StyleOf(b.Command)
 }
 
 // Text is the message laid out as plain text: the stored text of a Desired state.

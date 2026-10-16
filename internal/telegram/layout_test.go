@@ -4,6 +4,7 @@
 package telegram
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -93,6 +94,60 @@ func TestKeyboard(t *testing.T) {
 	if len(k.InlineKeyboard) != 1 || len(k.InlineKeyboard[0]) != 2 || k.InlineKeyboard[0][0].Text != "Still on it" ||
 		k.InlineKeyboard[0][0].CallbackData != "s" || k.InlineKeyboard[0][1].Text != "Unack" {
 		t.Errorf("reminder = %+v", k)
+	}
+}
+
+// styledKeyboard is a keyboard as its JSON sends it, row by row: each button's text with its style, "-" for a button
+// without a style field.
+func styledKeyboard(t *testing.T, raw []byte) string {
+	t.Helper()
+	var kb struct {
+		InlineKeyboard [][]map[string]any `json:"inline_keyboard"`
+	}
+	if err := json.Unmarshal(raw, &kb); err != nil {
+		t.Fatalf("keyboard %s: %v", raw, err)
+	}
+	var rows []string
+	for _, row := range kb.InlineKeyboard {
+		var bs []string
+		for _, b := range row {
+			style, ok := b["style"]
+			if !ok {
+				style = "-"
+			}
+			bs = append(bs, fmt.Sprintf("%v:%v", b["text"], style))
+		}
+		rows = append(rows, "["+strings.Join(bs, ", ")+"]")
+	}
+	return strings.Join(rows, " ")
+}
+
+// TestKeyboardStyles is D329 with F-066 and F-067: in the JSON of the keyboard Ack and "Still on it" have the style
+// primary and Resolve success, while Unack, Unsnooze and every Snooze button have no style field, on a firing, an
+// acknowledged and a snoozed Root message and on a Reminder; a button of any other Command has no style either.
+func TestKeyboardStyles(t *testing.T) {
+	reminder := []messages.Button{{Command: buttons.CommandStillOnIt, Label: "Still on it", ActionID: "s"},
+		{Command: buttons.CommandUnacknowledge, Label: "Unack", ActionID: "u"}}
+	for _, c := range []struct {
+		name string
+		bs   []messages.Button
+		want string
+	}{
+		{"firing", root(messages.ColourFiring).Buttons,
+			"[Ack:primary, Resolve:success] [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-]"},
+		{"acknowledged", root(messages.ColourAcknowledged).Buttons,
+			"[Unack:-, Resolve:success] [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-]"},
+		{"snoozed", root(messages.ColourSnoozed).Buttons, "[Ack:primary, Unsnooze:-, Resolve:success]"},
+		{"reminder", reminder, "[Still on it:primary, Unack:-]"},
+		{"unknown", []messages.Button{{Command: "unresolve", Label: "x", ActionID: "x"}}, "[x:-]"},
+	} {
+		raw, err := json.Marshal(keyboard(c.bs))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := styledKeyboard(t, raw); got != c.want {
+			t.Errorf("%s: keyboard %s, want %s", c.name, got, c.want)
+		}
 	}
 }
 
