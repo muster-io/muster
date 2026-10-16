@@ -731,7 +731,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-22.FR-1 | S-073 (part), S-077 (part) | complete |  |
-| C-22.FR-2 | S-073 (part), S-077 (part) | complete |  |
+| C-22.FR-2 | S-073 (part), S-074 (part), S-077 (part) | complete |  |
 | C-22.FR-3 | S-080 (part), S-074 (part), S-077 (part) | complete |  |
 | C-22.FR-4 | S-074 | complete |  |
 | C-22.FR-5 | S-074 | complete |  |

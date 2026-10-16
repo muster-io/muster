@@ -5,7 +5,7 @@ capability: C-22
 kind: be
 layer: L1
 depends_on: [S-080, S-082]
-covers: [C-22.FR-3, C-22.FR-4, C-22.FR-5, C-22.FR-6, C-22.FR-7, C-22.FR-8, C-22.FR-17, C-22.FR-19, C-22.FR-23, C-22.AC-3, C-22.AC-4, C-22.AC-5, C-22.AC-6, C-22.AC-7, C-22.AC-10, C-22.AC-11, C-22.AC-12]
+covers: [C-22.FR-2, C-22.FR-3, C-22.FR-4, C-22.FR-5, C-22.FR-6, C-22.FR-7, C-22.FR-8, C-22.FR-17, C-22.FR-19, C-22.FR-23, C-22.AC-3, C-22.AC-4, C-22.AC-5, C-22.AC-6, C-22.AC-7, C-22.AC-10, C-22.AC-11, C-22.AC-12]
 files_touched:
   - api/openapi.yaml
   - internal/bridge/client.go
@@ -43,6 +43,7 @@ files_touched:
   - internal/delivery/lockorder_integration_test.go
   - design/db/schema.md
   - design/prd/l1/C-22-bridge.md
+  - design/stories/coverage.md
   - internal/runtime/runtime.go
   - internal/logging/events.go
   - internal/archlint/secretleak.go
@@ -325,6 +326,7 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
+| C-22.FR-2 | partial | a `407` of the Connection's proxy is `proxy_refused` (D338) |
 | C-22.FR-3 | partial | the Broken probe through `checkChannel`; `proxy_refused` for a `407` of the proxy (D338) |
 | C-22.FR-4 | full | |
 | C-22.FR-5 | full | presses on the buttons are S-075 |
