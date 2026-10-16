@@ -6,6 +6,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -40,11 +41,29 @@ func newBRD(t *testing.T, h *Harness, r *Replica) *brd {
 		t.Fatal("no demo Bridge Connection")
 	}
 	t.Cleanup(func() {
-		call(t, http.MethodPut, e.fb+"/config",
+		restore(t, http.MethodPut, e.fb+"/config",
 			`{"replays":true,"limits":{"max_body_length":4000,"edit_max_age_seconds":null}}`)
-		call(t, http.MethodDelete, e.fb+"/faults", "")
+		restore(t, http.MethodDelete, e.fb+"/faults", "")
 	})
 	return e
+}
+
+// restore sends a request of a cleanup, after the test's context ended, while the fake still runs.
+func restore(t *testing.T, method, url, body string) {
+	req, err := http.NewRequestWithContext(context.Background(), method, url, strings.NewReader(body))
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Errorf("%s %s: %v", method, url, err)
+		return
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		t.Errorf("%s %s = %d", method, url, resp.StatusCode)
+	}
 }
 
 // destination creates a Bridge Destination on channel, which mentions nobody.
