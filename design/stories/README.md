@@ -344,7 +344,7 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 |---|---|---|---|---|
 | [S-073](S-073-bridge-connections-destinations-protocol-client-and-fake-bridge.md) | C-22 | Bridge Connections, the protocol client with its error classes, `info` and the fake bridge (BE) | be | S-069, S-071, S-059 |
 | [S-080](S-080-bridge-destinations-channel-check-doctor-and-mention-settings.md) | C-22 | Bridge Destinations, the channel check, `muster doctor` and the Mention settings of Bridges (BE) | be | S-073 |
-| [S-074](S-074-bridge-adapter-envelopes-idempotent-publications-threads-and-edit-windows.md) | C-22 | Bridge delivery: envelopes in CommonMark, idempotent Publications, Thread replies, error classes, test messages and the Broken probe (BE) | be | S-080 |
+| [S-074](S-074-bridge-adapter-envelopes-idempotent-publications-threads-and-edit-windows.md) | C-22 | Bridge delivery: envelopes in CommonMark, idempotent Publications, Thread replies, error classes, test messages and the Broken probe (BE) | be | S-080, S-082 |
 | [S-081](S-081-bridge-edit-windows-republication-pointer-reply-and-final-edit.md) | C-22 | Bridge edit windows: republication on a change of status, the pointer reply and the final edit as a Thread reply (BE) | be | S-074 |
 | [S-075](S-075-bridge-events-by-polling-and-push-presses-answers-and-text-commands.md) | C-22 | Bridge events by polling and push: presses, answers, Text commands and deleted messages (BE) | be | S-081 |
 | [S-076](S-076-bridge-account-links-by-token-and-code-and-mentions.md) | C-22 | Bridge Account links by a token sent to the bot or a code by direct message, and Mentions of linked people (BE) | be | S-075 |
@@ -406,7 +406,8 @@ and the Broken probe — and S-081 takes the edit windows. S-080 follows S-073 a
 on S-080 and S-075 on S-081; S-073 and S-074 keep their file names. Style hints on the buttons of Mattermost and
 Telegram (D320), which the Bridge protocol brought in, became S-082 once their facts were checked on the test
 environment (F-066 to F-068, D329). It belongs to C-12, whose buttons it styles, but follows S-059 at the end of the
-Operations phase, before the Bridge phase; S-074 takes its mapping as the style hints of Bridge buttons.
+Operations phase, before the Bridge phase; S-074 takes its mapping as the style hints of Bridge buttons, so it depends
+on S-082.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group
