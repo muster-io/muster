@@ -43,13 +43,17 @@ files_touched:
   - web/src/routes/connections.index.tsx
   - web/src/routes/connections.$connectionId.tsx
   - web/src/components/connection-form.tsx
+  - web/src/components/connection-check.tsx
+  - web/src/locales/en.json
+  - web/src/locales/ru.json
 acceptance:
   - "[C-22.FR-1] A Bridge Connection is created with a name, the base URL, a write-only `bot_token`, the event delivery mode (`connection.bridge.event_delivery`), a write-only `push_secret` required in push mode, a proxy and its limiter (`connection.bridge.limiter`); reads return `bot_token_status`, `push_secret_status`, the read-only `callback_url` `MUSTER_INGEST_URL/api/v1/callbacks/bridge/<public_id>`, and `info` with `info_read_at`, null before the first check."
   - "[C-22.FR-1] A base URL with a query, a fragment or user information is refused with 422 at `/base_url`; a trailing `/` is dropped; `updateConnection` with a new `base_url` and no `bot_token` is refused with 422 `required` at `/bot_token`, so the stored token is never sent to another address."
   - "[C-22.FR-1] `muster secrets rotate-key` re-encrypts the push secret like every Secret: `encrypted_values` lists `connections.bridge_push_secret`, the registry of `internal/keyring/rotate.go` has the field, and `TestIntegrationRotation` in `rotate_integration_test.go` rotates a Bridge Connection's token and push secret; the token keeps the field `connections.bot_token`."
   - "[C-22.FR-1] With `bridge` in the `Connection` union the SPA's type check passes: the Connections list, the Connection page and `addressChanged` of the Connection form narrow by type, and a Bridge Connection is listed by its name until S-077 adds its labels."
-  - "[C-22.FR-2, C-22.AC-1] `checkConnection` calls `getInfo` through the interactive path and returns the steps `info` and `event_delivery` with their latency and path, and the bridge's name, messenger, `protocol_version` `1` and features, which it stores on the Connection; with the fake answering `protocol_version` `2` the `info` step fails with \"The bridge speaks protocol version 2; this Muster speaks 1.\", and with a wrong token with \"The bridge refused the token.\""
-  - "[C-22.FR-2] A Connection in push mode whose bridge offers only `poll` fails the `event_delivery` step with \"The bridge does not offer push event delivery.\"; an `info` larger than 64 KiB fails the `info` step as an answer that does not match the protocol and is not stored; a call that depends on `info` reads it again when Muster's copy is older than `bridge.info_max_age` (`info_test.go`, with a manual clock)."
+  - "[C-22.FR-2, C-22.AC-1] `checkConnection` calls `getInfo` through the interactive path and returns the steps `info` and `event_delivery` with their latency and path, and the bridge's name, messenger, `protocol_version` `1` and features, which it stores on the Connection; with the fake answering `protocol_version` `2` the `info` step fails with the code `protocol_version_unknown` and \"The bridge speaks protocol version 2; this Muster speaks 1.\", and with a wrong token with `token_invalid` and \"The bridge refused the token.\""
+  - "[C-22.FR-2] A Connection in push mode whose bridge offers only `poll` fails the `event_delivery` step with `event_delivery_not_offered` and \"The bridge does not offer push event delivery.\"; an `info` larger than 64 KiB fails the `info` step with `protocol_mismatch` as an answer that does not match the protocol and is not stored; a call that depends on `info` reads it again when Muster's copy is older than `bridge.info_max_age` (`info_test.go`, with a manual clock)."
+  - "[C-22.FR-2] A step that fails without a Bridge code of its own carries the code of `delivery.FailureCode` — a network code such as `timeout` for a request without an answer, `blocked` for an address the outbound address policy refuses, `request_failed` for any other error answer (`bridge_test.go`); `checkCodeText` translates `protocol_version_unknown`, `protocol_mismatch` and `event_delivery_not_offered` in English and Russian, so the type check and the translation check of `make lint` pass."
   - "[C-22.FR-8] The client classifies every answer by the problem's `class`, and without one by the protocol's own mapping — `401` and `403` forbidden, `408` transient, `429` and `503` with `Retry-After` rate limited, other `5xx`, timeouts and network errors transient, `404`, `410`, redirects and everything else invalid, never gone — and keeps the problem's `detail` as masked, untrusted text (`classify_test.go`, a case per status)."
   - "[C-22.AC-3] With an HTTP proxy on the Connection, every request of the Connection check reaches the fake bridge only through the fake proxy; with the fake closing the connection, the token and the push secret appear in no log line and no error returned by the API (`secretleak.go` probe `bridge_connections`)."
   - "[C-22.FR-20] The models of `api/bridge.yaml` are generated into `internal/bridge/gen/bridge.gen.go` by `make generate` (models only, no client or server), and `make generate-check` fails when they are stale; `api/bridge_test.go` fails when a schema of `openapi.yaml` marked `x-bridge-schema` differs from that schema of `api/bridge.yaml`; the `oasdiff` job of CI fails a pull request that breaks `api/bridge.yaml` against its base branch."
@@ -93,7 +97,8 @@ issue: 231
   `proxy`), `BridgeEventDelivery` (`poll`, `push`) and `BridgeInfo`, the `Info` of `api/bridge.yaml` copied with
   `x-bridge-schema: Info`, joined to the `Connection` and `ConnectionInput` discriminators; the secret fields follow the
   `<field>` / `<field>_status` pattern of `bot_token` and `signing_secret`; `ConnectionCheckStep.name` gains `info` and
-  `event_delivery`; `ConnectionCheckResult` returns `info` for a Bridge.
+  `event_delivery`; `ConnectionCheckResult` returns `info` for a Bridge; `NullableConnectionCheckCode` gains the codes
+  of the Bridge steps below, and its description names them, `token_invalid` also for `info`.
 - **Operations implemented for the type**: `listConnections`, `createConnection`, `getConnection`,
   `updateConnection`, `deleteConnection` (`connections:read` / `:write`), `checkConnection` (`connections:write`,
   interactive). `listConnectionChannels` answers `409` for a Bridge Connection: the protocol has no channel list, the
@@ -130,11 +135,19 @@ issue: 231
 - **Connection check** (C-22.FR-2): through `delivery.Interactive` on the Connection's limiter (`ReadOp`), steps `info`
   (latency, `via`) and `event_delivery`; failures with the texts of
   [reference.md](../prd/l1/reference.md#banners-warnings-and-notices); a passing `info` step stores `bridge_info` and
-  `bridge_info_read_at`, also when `event_delivery` fails.
+  `bridge_info_read_at`, also when `event_delivery` fails. Each failure carries its code (`ConnectionCheckStep.code`)
+  next to its English text, as the other types' checks do: `info` → `token_invalid` (the bridge refused the token),
+  `protocol_version_unknown`, `protocol_mismatch` (an answer that does not match the protocol, or an `info` larger than
+  64 KiB); `event_delivery` → `event_delivery_not_offered`; any step → the code of `delivery.FailureCode` for a request
+  without an answer or one the outbound address policy refuses, and `request_failed` for any other error answer, with
+  the bridge's masked `detail` as the text. A passing step has no code.
 - **SPA type check** (`connections.index.tsx`, `connections.$connectionId.tsx`, `connection-form.tsx`): the spec's new
   union member breaks the narrowing of `connectionTypeName`, `connectionAccount`, `botName` and `addressChanged`; each
   gets an explicit `bridge` branch — the name "Bridge", no account, no bot name, the base URL as the address — and no
-  new text or page, which S-077 adds.
+  new page, which S-077 adds. `checkCodeText` (`connection-check.tsx`) switches over every check code, so it gains the
+  three new codes, translated in `en.json` and `ru.json`: "The bridge speaks a protocol version this Muster does not.",
+  "The bridge's answer does not match the protocol." and "The bridge does not offer this event delivery mode."; the
+  English message, which names the version, the mismatch or the mode, stays the detail.
 - **Fake bridge** (`internal/fakes/fakebridge`, `127.0.0.1:18094`): two bots, as the protocol's "one token, one bot"
   says, with the published tokens `muster-dev-bridge-token`, used by the demo Connection, and
   `muster-dev-bridge-token-b`, for which `muster dev` creates no Connection and which the checks of the Bridge stories
@@ -169,7 +182,7 @@ issue: 231
    `go test ./api/...`.
 2. Add the migration, key rotation of the push secret, the Connection type and its check. Check: `bridge_test.go`,
    `connections_test.go`, `go test -tags integration ./internal/keyring/...`.
-3. Narrow the SPA by type. Check: `make lint`.
+3. Narrow the SPA by type and translate the new check codes. Check: `make lint`.
 4. Write the fake bridge, the demo Connection, the linkable filter and the secret probe. Check: `fakebridge_test.go`,
    then Verification.
 5. Add the blocking `oasdiff` step. Check: a scratch branch that removes a required field of `api/bridge.yaml` fails
@@ -191,13 +204,14 @@ curl -s "${H[@]}" -X POST $API/connections/$C/checks | jq -c '{ok, s: [.steps[] 
 # {"ok":true,"s":[{"name":"info","ok":true,"via":"direct"},{"name":"event_delivery","ok":true,"via":"direct"}],"v":"1","m":"Fake chat"}
 grep -c 'bridge_info_read' dev.log                                                 # 1 or more
 curl -s -X PUT $FB/config -d '{"protocol_version":"2"}' > /dev/null
-curl -s "${H[@]}" -X POST $API/connections/$C/checks | jq -r '.steps[0].message'
-# The bridge speaks protocol version 2; this Muster speaks 1.
+curl -s "${H[@]}" -X POST $API/connections/$C/checks | jq -r '.steps[0] | "\(.code): \(.message)"'
+# protocol_version_unknown: The bridge speaks protocol version 2; this Muster speaks 1.
 curl -s -X PUT $FB/config -d '{"protocol_version":"1","revoked":["muster-dev-bridge-token-b"]}' > /dev/null
-curl -s "${H[@]}" -X POST $API/connections/$C/checks | jq -r '.steps[0].message'   # The bridge refused the token.
+curl -s "${H[@]}" -X POST $API/connections/$C/checks | jq -r '.steps[0] | "\(.code): \(.message)"'
+# token_invalid: The bridge refused the token.
 curl -s -X PUT $FB/config -d '{"revoked":[],"info_padding_bytes":70000}' > /dev/null
-curl -s "${H[@]}" -X POST $API/connections/$C/checks | jq -r '.steps[0].message'
-# The bridge's answer does not match the protocol: info is larger than 64 KiB
+curl -s "${H[@]}" -X POST $API/connections/$C/checks | jq -r '.steps[0] | "\(.code): \(.message)"'
+# protocol_mismatch: The bridge's answer does not match the protocol: info is larger than 64 KiB
 curl -s -X PUT $FB/config -d '{"info_padding_bytes":0,"event_delivery":["poll"]}' > /dev/null
 
 # C-22.FR-1: push needs a secret and a bridge that offers push
@@ -207,7 +221,8 @@ curl -s "${H[@]}" -X PUT -H "If-Match: $(ETAG)" $API/connections/$C -d '{"type":
 # [422,"/push_secret"]
 curl -s "${H[@]}" -X PUT -H "If-Match: $(ETAG)" $API/connections/$C -d '{"type":"bridge","name":"br","base_url":"http://127.0.0.1:18094",
   "event_delivery":"push","push_secret":"whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw","proxy":{"enabled":false},"limiter":{"limit":10,"per_seconds":1}}' > /dev/null
-curl -s "${H[@]}" -X POST $API/connections/$C/checks | jq -r '.steps[1].message'   # The bridge does not offer push event delivery.
+curl -s "${H[@]}" -X POST $API/connections/$C/checks | jq -r '.steps[1] | "\(.code): \(.message)"'
+# event_delivery_not_offered: The bridge does not offer push event delivery.
 curl -s -X PUT $FB/config -d '{"event_delivery":["poll","push"]}' > /dev/null
 curl -s "${H[@]}" -X PUT -H "If-Match: $(ETAG)" $API/connections/$C -d '{"type":"bridge","name":"br","base_url":"http://127.0.0.1:9",
   "event_delivery":"poll","proxy":{"enabled":false},"limiter":{"limit":10,"per_seconds":1}}' | jq -c '[.status, .errors[0].pointer]'
@@ -241,6 +256,10 @@ None.
 ## Notes
 
 - Suggested commit: `feat(bridge): add bridge connections and the bridge protocol client`.
+- The check codes were added to every Connection and Destination check after this story was written; the Bridge
+  steps take the existing codes where the meaning is the same and add three of their own. `connection-check.tsx` and
+  the locales are in `files_touched` because `checkCodeText` switches exhaustively over the code enums: a new code
+  fails the type check until it is translated.
 - S-073 was split by the plan review of the Bridge phase (D323), because it touched about 50 files: S-073 keeps the
   Connection, the client, `info`, the classification and the fake bridge; S-080 takes Destinations, the Destination
   check, `muster doctor` and the Mention settings. The file name is kept.

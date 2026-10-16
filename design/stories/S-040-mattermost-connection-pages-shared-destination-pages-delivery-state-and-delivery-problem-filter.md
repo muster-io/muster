@@ -70,7 +70,8 @@ issue: 40
   Connection is used by N Destinations. Delete them first." in its plural forms ("… by 1 Destination. Delete it
   first.").
 - **Connection check** (`connection-check.tsx`): each step with "ok" or its message, `latency_ms` and `via`; for
-  Mattermost "Connected as {bot_name}"; `503` shows "The messenger is busy; try again in N s."
+  Mattermost "Connected as {bot_name}", and the hint of the warning `press_answers_in_thread` (C-13.AC-16) beside the
+  result; `503` shows "The messenger is busy; try again in N s."
 - **Audit log** (`audit-diff.tsx` and its test): the resource type `connection` names its fields — name, server URL,
   proxy, limiter — and the bot token as "secret changed".
 - **Live updates** (`live.ts`): the `connection` hint refreshes the list and the page.
@@ -116,3 +117,4 @@ None.
 | C-13.FR-1 | partial | the Connection pages; with S-039 complete |
 | C-13.FR-2 | partial | the Connection check on the page; the Destination form's check is S-064; with S-039 complete |
 | C-13.FR-13 | partial | the address and the hint; the test press is S-047 and S-048 |
+| C-13.AC-16 | partial | the hint on the Connection page; the warning in the API and `muster doctor` is S-061 |

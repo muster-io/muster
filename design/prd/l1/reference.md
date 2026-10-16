@@ -62,7 +62,9 @@ where its bridge declares `quiet_messages`, and otherwise as an ordinary message
 Other messages: a Reminder carries "Still on it" and "Unack"; a Storm summary and ack timeout notices carry only links;
 a test message carries the buttons of its status, answered with "This is a test message; nothing was changed". The UI
 and the API offer every command allowed by the status, including Unresolve, which messengers never offer. Snooze
-durations appear as separate buttons or a menu, as the messenger allows. In Mattermost every link, "Open in Muster"
+durations appear as separate buttons or a menu, as the messenger allows. Mattermost and Telegram show Ack and "Still
+on it" as primary buttons and Resolve as a success button, and the other buttons plain, without a style
+([F-066](../../facts.md#telegram), [F-068](../../facts.md#mattermost)). In Mattermost every link, "Open in Muster"
 included, is a link in the post, never a button (C-13.FR-3). A Bridge shows these buttons only when its bridge declares
 `buttons`, with the style hints Ack and "Still on it" `primary`, Resolve `success` and the rest `neutral`; without
 buttons, a Root message that is not resolved names the Text commands of its status in a line "Reply in the Thread: …"
