@@ -1654,10 +1654,12 @@ const (
 // Destination check of a channel (checkChannel) — through the proxy; against a stand-in bridge whose problems, a 500,
 // a 401 and a forbidden 403, echo the token, the push secret, which the bridge knows too, and the Authorization header
 // in their detail, title and type, whose info names the token, and then the push secret, as its protocol version,
-// whose info offers only poll, and whose channel is named after the token and the push secret; and against a listener
+// whose info offers only poll, and whose channel is named after the token and the push secret; through the Bridge
+// delivery — postMessage, editMessage, replyInThread, the Broken probe and a test message with its preview — whose
+// messages the stand-in refuses with each of those problems, and through the proxy again; and against a listener
 // that cuts every connection — through a creation refused for a malformed push secret, muster doctor, which checks
-// the Connection with getInfo and its Destination with checkChannel, its deletion, and a client with an unsupported
-// proxy.
+// the Connection with getInfo and its Destination with checkChannel, the Bridge delivery, its deletion, and a client
+// with an unsupported proxy.
 func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 	logger := logging.New(log, logging.LevelInfo)
 	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
@@ -1675,7 +1677,7 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 		return err
 	}
 	pushSecret := "whsec_" + base64.StdEncoding.EncodeToString([]byte(secrets[1]))
-	var answer, channelAnswer atomic.Int32
+	var answer, channelAnswer, messageAnswer atomic.Int32
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1685,8 +1687,11 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 		func(w http.ResponseWriter, r *http.Request) {
 			echo := "invalid token " + secrets[0] + " " + r.Header.Get("Authorization") + " push secret " + pushSecret
 			a := answer.Load()
-			if strings.HasPrefix(r.URL.Path, "/v1/channels/") {
+			switch {
+			case strings.HasPrefix(r.URL.Path, "/v1/channels/"):
 				a = channelAnswer.Load()
+			case strings.HasPrefix(r.URL.Path, "/v1/messages"):
+				a = messageAnswer.Load()
 			}
 			switch a {
 			case bridgeChannel:
@@ -1801,6 +1806,19 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 		channelAnswer.Store(a)
 		doctorRun()
 	}
+	check()
+	for _, a := range []int32{bridgeProblem, bridgeUnauthorized, bridgeForbidden} {
+		messageAnswer.Store(a)
+		channelAnswer.Store(a)
+		errs = append(errs, probeBridgeAdapter(ctx, svc, clocks))
+	}
+	proxied := in
+	proxied.Proxy = proxyconf.Input{Enabled: true, Type: new("http"), Address: new(proxy.Addr()), UsernameSet: true,
+		Username: new("muster"), Password: keyring.Replace(logging.Secret(secrets[2]))}
+	_, err = svc.Update(ctx, by, c.PublicID, nil, proxied)
+	errs = append(errs, err, probeBridgeAdapter(ctx, svc, clocks))
+	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
+	errs = append(errs, err)
 	malformed := in
 	malformed.Name, malformed.BotToken = "malformed", keyring.Replace(logging.Secret(secrets[0]))
 	malformed.PushSecret = keyring.Replace(logging.Secret("whsec_" + secrets[1]))
@@ -1812,11 +1830,35 @@ func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
 	check()
 	checkChannel()
 	doctorRun()
+	errs = append(errs, probeBridgeAdapter(ctx, svc, clocks))
 	errs = append(errs, svc.Delete(ctx, by, c.PublicID, nil))
 	_, err = bridge.NewClient(bridge.Network(network), bridge.Settings{BaseURL: "http://" + ln.Addr().String(),
 		Token: logging.Secret(secrets[0]), Proxy: &outbound.Proxy{Type: "ftp", Address: "proxy:1", Username: "muster",
 			Password: logging.Secret(secrets[2])}})
 	return errors.Join(append(errs, err)...)
+}
+
+// probeBridgeAdapter posts, edits and replies through the Bridge delivery to the Destination 2 of the Connection on the
+// interactive path, as lint 3 allows, checks it there and in the delivery class as the Broken probe does, and runs its
+// test message and its preview; it returns the text of every outcome and step.
+func probeBridgeAdapter(ctx context.Context, svc *connections.Service, clocks clock.Clocks) error {
+	a := &bridge.Adapter{Targets: svc}
+	conn := int64(1)
+	dest := delivery.Destination{ID: 2, PublicID: "DSAAAAAAAAAAA2", Type: delivery.TypeBridge, Connection: &conn}
+	m := delivery.Message{Kind: messages.KindRoot, Language: "en", Colour: "firing", Heading: &messages.Heading{
+		Number: 1, Title: "probe", URL: "http://localhost:8080/alert-groups/AGAAAAAAAAAAA1"}}
+	path := deliverytest.Unlimited(1, clocks)
+	var errs []error
+	for _, op := range []delivery.Op{delivery.PublishOp(a, m), delivery.UpdateOp(a, "m1", m),
+		delivery.ReplyOp(a, delivery.Root{MessageID: "m1", ThreadAnchorID: "t-m1"}, m), delivery.CheckOp(a)} {
+		o, err := path.Do(ctx, delivery.Subject{Destination: &dest}, op)
+		errs = append(errs, err, errors.New(string(o.Error)))
+	}
+	o := a.Check(ctx, delivery.Call{Class: outbound.ClassDelivery, Destination: dest})
+	errs = append(errs, errors.New(string(o.Error)))
+	errs = append(errs, probeTester(ctx, &bridge.Tester{Adapter: a, Path: path, Renderer: probeRenderer(clocks),
+		Real: clocks.Real}, dest))
+	return errors.Join(errs...)
 }
 
 // probeConnections is the one Connection of probeMattermost in memory.
