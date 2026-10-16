@@ -130,20 +130,30 @@ func (a *Adapter) Check(ctx context.Context, c delivery.Call) delivery.Outcome {
 }
 
 // prepare is the Target of the call's Destination and the info of its Connection, or the outcome of a call that cannot
-// be made. An info that cannot be read, without an earlier copy, ends the call as its read classifies it; that read
-// posted nothing, so its outcome is never Unanswered.
+// be made.
 func (a *Adapter) prepare(ctx context.Context, c delivery.Call) (Target, Info, *delivery.Outcome) {
 	t, fail := a.target(ctx, c)
 	if fail != nil {
 		return Target{}, Info{}, fail
 	}
+	i, _, fail := a.info(ctx, t, c)
+	if fail != nil {
+		return Target{}, Info{}, fail
+	}
+	return t, i, nil
+}
+
+// info is the info of the Connection of t and how its read ended, or also the outcome of a call that cannot be made:
+// an info that cannot be read, without an earlier copy, ends the call as its read classifies it; that read posted
+// nothing, so its outcome is never Unanswered.
+func (a *Adapter) info(ctx context.Context, t Target, c delivery.Call) (Info, Result, *delivery.Outcome) {
 	i, r := a.Targets.BridgeInfo(ctx, t.Conn, c.Class)
 	if !r.OK() && i.ProtocolVersion == "" {
 		o := r.Outcome()
 		o.Unanswered = false
-		return Target{}, Info{}, &o
+		return Info{}, r, &o
 	}
-	return t, i, nil
+	return i, r, nil
 }
 
 // target is the Target of the call's Destination, or the outcome of a call that cannot be made: Fatal without a
