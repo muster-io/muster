@@ -513,7 +513,8 @@ type content struct {
 	markup    json.RawMessage
 }
 
-// buttonStyles are the styles an inline button takes: the three of F-066 and the undocumented default (F-067).
+// buttonStyles are the styles an inline button takes: the three of F-066 and the undocumented default (F-067). The
+// fake also refuses an empty or null style, which was not checked against Telegram and which Muster never sends.
 var buttonStyles = []string{"primary", "danger", "success", "default"}
 
 // contentOf reads and checks the content of a call: a text that is not empty, HTML that parses, at most MaxTextLength

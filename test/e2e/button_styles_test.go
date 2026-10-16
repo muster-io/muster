@@ -6,7 +6,6 @@
 package e2e
 
 import (
-	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,12 +16,21 @@ import (
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 )
 
-// mmStyles are the actions of the attachment of a post, each its id and its style, "-" for none.
+// mmStyles are the actions of the attachment of a post, each its id and its style: "-" for an action without a style
+// field, the JSON text for a style that is not a string or is empty.
 func mmStyles(t *testing.T, p mmPost) string {
 	t.Helper()
 	var out []string
 	for _, a := range p.attachment(t).Actions {
-		out = append(out, a.ID+":"+cmp.Or(a.Style, "-"))
+		style := "-"
+		if a.Style != nil {
+			var s string
+			if json.Unmarshal(a.Style, &s) != nil || s == "" {
+				s = string(a.Style)
+			}
+			style = s
+		}
+		out = append(out, a.ID+":"+style)
 	}
 	return strings.Join(out, " ")
 }

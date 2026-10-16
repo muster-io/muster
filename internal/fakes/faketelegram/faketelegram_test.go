@@ -587,9 +587,9 @@ func TestMessageContent(t *testing.T) {
 	}
 }
 
-// F-066 and F-067: a send or an edit whose inline button has a style is refused unless the style is primary, danger,
-// success or default, the whole call failing; the style it accepts is kept in the message's reply_markup and listed by
-// the control endpoint.
+// F-066 and F-067: a send or an edit whose inline button has the style primary, danger, success or default succeeds,
+// and the style is kept in the message's reply_markup and listed by the control endpoint; an unknown string or a
+// number fails the whole call. Only the values verified against Telegram are checked here.
 func TestButtonStyles(t *testing.T) {
 	f, base := start(t)
 	markup := func(style string) string {
@@ -625,7 +625,7 @@ func TestButtonStyles(t *testing.T) {
 		`"style":"danger"`) {
 		t.Errorf("listed messages = %s", body)
 	}
-	for _, style := range []string{`"neutral"`, `""`, `"Primary"`, `42`, `null`} {
+	for _, style := range []string{`"neutral"`, `42`} {
 		for _, c := range []struct{ method, body string }{
 			{"sendMessage", `{"chat_id":-1001000000002,"text":"x",` + markup(style) + `}`},
 			{"editMessageText", `{"chat_id":-1001000000001,"message_id":1,"text":"y",` + markup(style) + `}`},
