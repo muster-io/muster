@@ -36,7 +36,7 @@ acceptance:
   - "The fake Telegram server refuses a `sendMessage` or `editMessageText` whose inline button has a `style` other than `primary`, `danger`, `success` or `default`, a non-string included, with `400` `Bad Request: can't parse InlineKeyboardButton: Invalid button style specified` (F-067), and keeps the `style` it accepts in the message's `reply_markup` (`faketelegram_test.go`)."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 244
 ---
 
 # S-082. Button style hints in Mattermost and Telegram (BE)
