@@ -1,0 +1,14 @@
+{#-
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright The Muster Authors
+
+  A page with a Mermaid diagram loads Mermaid from the site, which make docs copies to assets/vendor/; the theme then
+  uses it instead of loading it from unpkg.com (NFR-7).
+-#}
+{% extends "base.html" %}
+{% block scripts %}
+  {% if page and page.content and 'class="mermaid"' in page.content %}
+    <script src="{{ 'assets/vendor/mermaid/mermaid.min.js' | url }}"></script>
+  {% endif %}
+  {{ super() }}
+{% endblock %}

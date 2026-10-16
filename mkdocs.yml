@@ -15,10 +15,12 @@ docs_dir: docs
 site_dir: site
 strict: true
 
-# brand/README.md is the notes on the Muster mark, not a page; the requirements files pin the toolchain.
+# brand/README.md is the notes on the Muster mark, not a page; the requirements files pin the toolchain; overrides/
+# holds the theme's template overrides.
 exclude_docs: |
   brand/README.md
   requirements.*
+  overrides/
 
 validation:
   nav:
@@ -36,6 +38,8 @@ theme:
   language: en
   # The system fonts: the site loads nothing from Google Fonts (NFR-7).
   font: false
+  # Loads Mermaid from the site on the pages with a diagram; make docs copies Redoc and Mermaid to assets/vendor/.
+  custom_dir: docs/overrides
   logo: brand/muster-mark.svg
   favicon: brand/muster-mark-tile.svg
   features:

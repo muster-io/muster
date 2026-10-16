@@ -82,3 +82,13 @@ JSONPath
 The extraction rules of outgoing webhooks in template mode (internal/webhooks, C-15.FR-3) evaluate RFC 9535 JSONPath
 with theory/jsonpath (https://github.com/theory/jsonpath), licensed under the MIT License, Copyright 2024-2026
 David E. Wheeler, as a library dependency of the shipped binary; no jsonpath code is copied.
+
+
+Documentation site
+==================
+
+The documentation site serves two third-party scripts from its own address instead of a CDN: Mermaid
+(https://github.com/mermaid-js/mermaid), licensed under the MIT License, Copyright (c) 2014 - 2022 Knut Sveidqvist,
+for the diagrams, and Redoc (https://github.com/Redocly/redoc), licensed under the MIT License, Copyright (c)
+2015-present, Rebilly, Inc., for the API reference. make docs fetches them at the versions the Makefile pins and checks
+their SHA-256; they are not part of the repository, and the site publishes each with its licence under assets/vendor/.
