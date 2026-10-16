@@ -408,6 +408,7 @@
       "botNotInChannel": "The bot is not a member of this channel.",
       "changedSinceSaved": "The channel or its discussion group changed since the Destination was saved. Save the Destination again.",
       "channelArchived": "The channel is archived.",
+      "channelForbidden": "The bridge refused the channel: it does not exist, or the bot cannot use it.",
       "channelInOtherTeam": "The channel is not in this team.",
       "channelNotFound": "The channel was not found, or the bot cannot see it.",
       "commentsDisabled": "Comments are not enabled for this channel. Enable comments in the channel settings in Telegram; this creates its discussion group.",
@@ -805,6 +806,7 @@
     },
     "title": "Destinations",
     "types": {
+      "bridge": "Bridge",
       "webhook": "Outgoing webhook"
     },
     "webhook": {
