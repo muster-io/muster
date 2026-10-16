@@ -794,11 +794,16 @@ func TestCheckBridgeChannel(t *testing.T) {
 		*s.Connection != c.ID {
 		t.Errorf("subject %+v", s)
 	}
+	f.ResetRequests()
 	res, err = e.svc.CheckBridgeChannel(ctx, destinations.BridgeChannelCheck{Connection: c.PublicID,
 		Destination: new(int64(9)), ChannelID: fakebridge.ChannelNoBot})
 	if err != nil || res.Check.OK() || res.Check.Code != bridge.CodeChannelForbidden ||
 		res.Check.Message != fakebridge.MessageNotMember || res.Check.Outcome.Kind != delivery.OutcomeFatal {
 		t.Errorf("ch-nobot = %+v, %v", res, err)
+	}
+	if reqs := f.Requests(); len(reqs) != 1 || reqs[0].Method != http.MethodPost ||
+		!strings.HasSuffix(reqs[0].Path, "/channels/"+fakebridge.ChannelNoBot+"/check") {
+		t.Errorf("ch-nobot reached the bridge with %+v, not one channel check", reqs)
 	}
 	if s := e.path.subjects[len(e.path.subjects)-1]; s.Destination == nil || s.Destination.ID != 9 ||
 		s.Destination.Type != connections.TypeBridge || *s.Destination.Connection != c.ID {

@@ -10,8 +10,9 @@
 //
 // The control endpoints under /_fake/ come from the fake-server harness (requests, faults) and add GET and PUT
 // /_fake/config: the protocol version, the capabilities, the limits, the user lookup, the event delivery modes, the
-// revoked tokens, a padding that makes info larger and the channels, which both bots share. The fake answers what it is configured to, also when that
-// breaks the protocol, so that the checks of Muster can be tried against a broken bridge.
+// revoked tokens, a padding that makes info larger and the channels, which both bots share. The fake answers what it
+// is configured to, also when that breaks the protocol, so that the checks of Muster can be tried against a broken
+// bridge.
 package fakebridge
 
 import (

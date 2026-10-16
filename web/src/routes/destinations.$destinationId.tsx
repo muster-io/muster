@@ -5,7 +5,8 @@
 // the Broken banner, its Routes, and its form — Mattermost, Telegram, which shows the channel and the discussion group
 // it found, or the outgoing webhook, followed by its Secrets and its Signing secret — read-only without
 // destinations:write; "Check" with destinations:test for the types that have a Destination check, and "Delete" with
-// destinations:write. A Bridge Destination shows its name, health and Routes, without a form or a check yet.
+// destinations:write. A Bridge Destination shows its name, health and Routes, without a form, a check, a test or a
+// preview yet.
 // The form keeps the version it was read at and sends it as If-Match: when the Destination changes elsewhere an
 // untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
 // with the offer to reload. A new version with the same settings — a Secret or the Signing secret changed — becomes the
@@ -357,7 +358,7 @@ function DestinationView({ destinationId }: { destinationId: string }) {
               <SigningSecret destination={destination} />
             </>
           )}
-          {canTest && (
+          {canTest && destination.type !== "bridge" && (
             <TestAndPreview key={destination.id} destination={destination} dirty={dirty} />
           )}
         </>

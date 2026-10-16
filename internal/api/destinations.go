@@ -352,13 +352,13 @@ func destinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
 			"The type is not mattermost, telegram, webhook or bridge.")
 	}
 	switch kind {
-	case delivery.TypeWebhook:
+	case destinations.TypeWebhook:
 		return webhookInputOf(body)
-	case delivery.TypeTelegram:
+	case destinations.TypeTelegram:
 		return telegramDestinationInputOf(body)
 	case destinations.TypeBridge:
 		return bridgeDestinationInputOf(body)
-	case delivery.TypeMattermost:
+	case destinations.TypeMattermost:
 	default:
 		return destinations.Input{Type: kind}, nil
 	}
@@ -388,7 +388,7 @@ func telegramDestinationInputOf(body gen.DestinationInput) (destinations.Input, 
 	if err != nil {
 		return destinations.Input{}, err
 	}
-	return destinations.Input{Type: delivery.TypeTelegram, Name: t.Name, Mentions: set,
+	return destinations.Input{Type: destinations.TypeTelegram, Name: t.Name, Mentions: set,
 		Limiter:  destinations.Limiter{Limit: int64(t.Limiter.Limit), PerSeconds: int64(t.Limiter.PerSeconds)},
 		Telegram: &destinations.TelegramInput{Connection: t.ConnectionId, ChannelID: t.ChannelId}}, nil
 }
@@ -440,7 +440,7 @@ func webhookInputOf(body gen.DestinationInput) (destinations.Input, error) {
 			in.Template.ReplyInThread = &r
 		}
 	}
-	return destinations.Input{Type: delivery.TypeWebhook, Name: w.Name, Mentions: set,
+	return destinations.Input{Type: destinations.TypeWebhook, Name: w.Name, Mentions: set,
 		Limiter: destinations.Limiter{Limit: int64(w.Limiter.Limit), PerSeconds: int64(w.Limiter.PerSeconds)},
 		Webhook: in}, nil
 }
@@ -537,14 +537,14 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 	var out gen.Destination
 	var err error
 	switch d.Type {
-	case delivery.TypeMattermost:
+	case destinations.TypeMattermost:
 		err = out.FromMattermostDestination(gen.MattermostDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.MattermostDestinationTypeMattermost, ConnectionId: deref(d.Connection),
 			TeamId: deref(d.MattermostTeamID), ChannelId: deref(d.MattermostChannelID),
 			TeamName: nullableString(d.MattermostTeamName), ChannelName: nullableString(d.MattermostChannelName),
 			Mentions: mentions, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag})
-	case delivery.TypeTelegram:
+	case destinations.TypeTelegram:
 		err = out.FromTelegramDestination(gen.TelegramDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.TelegramDestinationTypeTelegram, ConnectionId: deref(d.Connection),
 			ChannelId: deref(d.TelegramChannelID), ChannelTitle: nullableString(d.TelegramChannelTitle),
@@ -559,7 +559,7 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 			ChannelId: deref(d.BridgeChannelID), ChannelName: nullableString(d.BridgeChannelName),
 			Mentions: mentions, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag})
-	case delivery.TypeWebhook:
+	case destinations.TypeWebhook:
 		var w gen.WebhookDestination
 		if w, err = webhookOf(d); err == nil {
 			w.Id, w.Name, w.Type = d.PublicID, d.Name, gen.WebhookDestinationTypeWebhook
