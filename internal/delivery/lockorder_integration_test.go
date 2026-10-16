@@ -121,13 +121,20 @@ func TestReplayedPublicationAgainstDispatcherLockOrder(t *testing.T) {
 
 // againstDispatcher acknowledges the Alert Group publicID through the dispatcher and holds that transaction after it
 // locked the Alert Group, before Enqueue; meanwhile a round of the worker runs until it ends or waits for a lock; then
-// the acknowledgement goes on. Both must succeed, and nothing may fail with a deadlock.
+// the acknowledgement goes on. Both must succeed, and nothing may fail with a deadlock. Only the acknowledgement is
+// held: a later change through the dispatcher, such as the worker's mark of the first Publication, goes straight on.
 func (l *live) againstDispatcher(t *testing.T, publicID string) {
 	t.Helper()
 	ctx := t.Context()
 	locked, proceed := make(chan struct{}), make(chan struct{})
 	var held int32
+	var gate sync.Once
 	l.groups.SetRerender(func(ctx context.Context, tx groups.DBTX, r groups.Rendering) error {
+		first := false
+		gate.Do(func() { first = true })
+		if !first {
+			return l.svc.Enqueue(ctx, tx, r)
+		}
 		err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&held)
 		close(locked)
 		<-proceed
