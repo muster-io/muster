@@ -180,6 +180,18 @@ FROM destinations
 WHERE org_id = @org_id AND type = 'telegram' AND deleted_at IS NULL
 ORDER BY id;
 
+-- GetBridgeDestinationTarget reads where a Bridge Destination posts — its channel id as the messenger names it — with
+-- the Connection it posts through, that Connection's secrets as stored and its version, which its client is cached for.
+-- A deleted Destination is read too, since its final edit still runs; its Connection must not be deleted.
+-- name: GetBridgeDestinationTarget :one
+SELECT d.bridge_channel_id, c.id, c.public_id, c.type, c.name, c.bridge_base_url, c.bot_token_ciphertext,
+       c.bot_token_key_id, c.bot_token_updated_at, c.bridge_push_secret_ciphertext, c.bridge_push_secret_key_id,
+       c.bridge_push_secret_updated_at, c.proxy, c.proxy_password_ciphertext, c.proxy_password_key_id,
+       c.proxy_password_updated_at, c.version
+FROM destinations d
+JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+WHERE d.org_id = @org_id AND d.id = @destination_id AND d.type = 'bridge' AND c.deleted_at IS NULL;
+
 -- ListBridgeDestinations lists the Bridge Destinations that are not deleted, in id order, with their Connection and
 -- channel, for muster doctor.
 -- name: ListBridgeDestinations :many

@@ -30,6 +30,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
+	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/proxyconf"
 )
@@ -884,5 +885,138 @@ func TestCheckBridgeChannelThroughProxy(t *testing.T) {
 		if strings.Contains(res.Check.Message+string(res.Check.Outcome.Error), s) {
 			t.Errorf("a secret reached the check: %+v", res.Check)
 		}
+	}
+}
+
+// TestBridgeTarget is the bridge.Targets of the Service for the Bridge delivery (C-22.FR-4): the Target of a Bridge
+// Destination — its channel and its Connection with the protocol client — posts and checks through that Connection;
+// the client is kept while the Connection is unchanged and built again after it changes, so that a new token posts as
+// the new bot; a Destination that is unknown, of a deleted Connection or of one that is not a Bridge has none; a read
+// that fails, or a token that cannot be opened, is an error.
+func TestBridgeTarget(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	ctx := t.Context()
+	c := e.createFakeBridge(t, f, "br", fakebridge.Token, connections.EventDeliveryPoll)
+	e.store.brTargets[21] = memBRTarget{connection: c.ID, channel: fakebridge.ChannelAlerts}
+	tg, err := e.svc.BridgeTarget(ctx, 21)
+	if err != nil || tg.ChannelID != fakebridge.ChannelAlerts || tg.Conn.ID != c.ID || tg.Conn.PublicID != c.PublicID ||
+		tg.Conn.Version != c.Version || tg.Conn.Client == nil {
+		t.Fatalf("target = %+v, %v", tg, err)
+	}
+	if again, err := e.svc.BridgeTarget(ctx, 21); err != nil || again.Conn.Client != tg.Conn.Client {
+		t.Fatalf("the client of an unchanged Connection was built again: %v", err)
+	}
+	a := &bridge.Adapter{Targets: e.svc}
+	call := delivery.Call{Class: outbound.ClassDelivery, Key: "pub-DS000000000021-1-1",
+		Destination: delivery.Destination{ID: 21, PublicID: "DS000000000021", Type: delivery.TypeBridge}}
+	m := messages.Message{Language: "en", Colour: messages.ColourFiring, Heading: &messages.Heading{Number: 1,
+		Title: "DiskFull", URL: "http://localhost:8080/alert-groups/AG00000000000A"}, Buttons: []messages.Button{}}
+	if o := a.Publish(ctx, call, m); o.Kind != delivery.OutcomeOK || o.MessageID != "m1" {
+		t.Fatalf("publish = %+v", o)
+	}
+	if o := a.Check(ctx, call); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("check = %+v", o)
+	}
+
+	in := bridgeInput("br", f.URL(), connections.EventDeliveryPoll)
+	in.BotToken = keyring.Replace(fakebridge.SecondToken)
+	if err := e.update(t, c.PublicID, in); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := e.svc.BridgeTarget(ctx, 21)
+	if err != nil || moved.Conn.Version != c.Version+1 || moved.Conn.Client == tg.Conn.Client {
+		t.Fatalf("the target after a new token = %+v, %v", moved, err)
+	}
+	call.Key = "pub-DS000000000021-2-1"
+	if o := a.Publish(ctx, call, m); o.Kind != delivery.OutcomeOK || o.MessageID != "m2" {
+		t.Fatalf("publish after a new token = %+v", o)
+	}
+	if ms := f.Messages(); len(ms) != 2 || ms[0].Bot != 1 || ms[1].Bot != 2 ||
+		ms[1].ChannelID != fakebridge.ChannelAlerts {
+		t.Errorf("messages %+v", ms)
+	}
+
+	mm := e.create(t, "mm")
+	gone := e.createFakeBridge(t, f, "gone", fakebridge.Token, connections.EventDeliveryPoll)
+	e.store.brTargets[22] = memBRTarget{connection: mm.ID, channel: fakebridge.ChannelAlerts}
+	e.store.brTargets[23] = memBRTarget{connection: gone.ID, channel: fakebridge.ChannelAlerts}
+	if _, err := e.svc.BridgeTarget(ctx, 23); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Delete(ctx, by, gone.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{22, 23, 99} {
+		if _, err := e.svc.BridgeTarget(ctx, id); !errors.Is(err, bridge.ErrNoTarget) {
+			t.Errorf("target %d = %v", id, err)
+		}
+	}
+	e.store.fail["GetBridgeDestinationTarget"] = errors.New("down")
+	if _, err := e.svc.BridgeTarget(ctx, 21); err == nil || errors.Is(err, bridge.ErrNoTarget) {
+		t.Errorf("unreadable = %v", err)
+	}
+	delete(e.store.fail, "GetBridgeDestinationTarget")
+	e.store.rows[c.ID].row.BotTokenCiphertext = []byte("garbage")
+	e.store.rows[c.ID].row.Version++
+	if _, err := e.svc.BridgeTarget(ctx, 21); err == nil || !strings.Contains(err.Error(), "open the token") {
+		t.Errorf("a token that cannot be opened = %v", err)
+	}
+}
+
+// TestBridgeInfoForDelivery is C-22.FR-7's limit as delivery reads it: BridgeInfo reads the info of a Target's
+// Connection through the InfoCache that the Connection check fills, so a checked Connection reads nothing, a read
+// within bridge.info_max_age on the business clock reads nothing, and one past it reads getInfo again and stores it; a
+// read that then fails keeps the stale copy with the failed Result.
+func TestBridgeInfoForDelivery(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	ctx := t.Context()
+	c := e.createFakeBridge(t, f, "br", fakebridge.Token, connections.EventDeliveryPoll)
+	e.store.brTargets[21] = memBRTarget{connection: c.ID, channel: fakebridge.ChannelAlerts}
+	infoReads := func() int {
+		n := 0
+		for _, r := range f.Requests() {
+			if r.Path == "/v1/info" {
+				n++
+			}
+		}
+		return n
+	}
+	if _, err := e.svc.Check(ctx, c.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	tg, err := e.svc.BridgeTarget(ctx, 21)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i, r := e.svc.BridgeInfo(ctx, tg.Conn, outbound.ClassDelivery); !r.OK() || i.Limits.MaxBodyLength != 4000 ||
+		infoReads() != 1 {
+		t.Fatalf("info after the check = %+v, %+v, %d reads", i.Limits, r, infoReads())
+	}
+	cfg := f.Config()
+	cfg.Limits.MaxBodyLength = 1000
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	e.business.Advance(bridge.DefaultInfoMaxAge - time.Second)
+	if i, _ := e.svc.BridgeInfo(ctx, tg.Conn, outbound.ClassDelivery); i.Limits.MaxBodyLength != 4000 ||
+		infoReads() != 1 {
+		t.Errorf("info within its maximum age = %+v, %d reads", i.Limits, infoReads())
+	}
+	e.business.Advance(2 * time.Second)
+	infos := len(e.store.infos)
+	if i, r := e.svc.BridgeInfo(ctx, tg.Conn, outbound.ClassDelivery); !r.OK() || i.Limits.MaxBodyLength != 1000 ||
+		infoReads() != 2 || len(e.store.infos) != infos+1 {
+		t.Errorf("info past its maximum age = %+v, %+v, %d reads", i.Limits, r, infoReads())
+	}
+	cfg.Revoked = []string{fakebridge.Token}
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	e.business.Advance(bridge.DefaultInfoMaxAge)
+	if i, r := e.svc.BridgeInfo(ctx, tg.Conn, outbound.ClassDelivery); r.OK() || r.Code != bridge.CodeTokenInvalid ||
+		i.Limits.MaxBodyLength != 1000 || infoReads() != 3 {
+		t.Errorf("a failed read = %+v, %+v, %d reads", i.Limits, r, infoReads())
 	}
 }

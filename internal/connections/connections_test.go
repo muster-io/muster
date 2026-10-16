@@ -72,7 +72,8 @@ type memStore struct {
 	tx        int
 	committed int
 	// targets are the Mattermost Destinations by id, as GetDestinationTarget reads them, tgTargets the Telegram ones,
-	// as GetTelegramDestinationTarget reads them, and brTargets the Bridge ones, as muster doctor lists them.
+	// as GetTelegramDestinationTarget reads them, and brTargets the Bridge ones, as GetBridgeDestinationTarget reads
+	// them and muster doctor lists them.
 	targets   map[int64]memTarget
 	tgTargets map[int64]memTGTarget
 	brTargets map[int64]memBRTarget
@@ -419,6 +420,26 @@ func (s *memStore) GetTelegramDestinationTarget(_ context.Context, a dbgen.GetTe
 		ProxyPasswordUpdatedAt: c.ProxyPasswordUpdatedAt, Version: c.Version}, nil
 }
 
+func (s *memStore) GetBridgeDestinationTarget(_ context.Context, a dbgen.GetBridgeDestinationTargetParams) (
+	dbgen.GetBridgeDestinationTargetRow, error) {
+	if err := s.fail["GetBridgeDestinationTarget"]; err != nil {
+		return dbgen.GetBridgeDestinationTargetRow{}, err
+	}
+	d, ok := s.brTargets[a.DestinationID]
+	r := s.rows[d.connection]
+	if !ok || r == nil || r.deleted || a.OrgID != 1 {
+		return dbgen.GetBridgeDestinationTargetRow{}, pgx.ErrNoRows
+	}
+	c := r.row
+	return dbgen.GetBridgeDestinationTargetRow{BridgeChannelID: pgtype.Text{String: d.channel, Valid: true}, ID: c.ID,
+		PublicID: c.PublicID, Type: c.Type, Name: c.Name, BridgeBaseUrl: c.BridgeBaseUrl,
+		BotTokenCiphertext: c.BotTokenCiphertext, BotTokenKeyID: c.BotTokenKeyID, BotTokenUpdatedAt: c.BotTokenUpdatedAt,
+		BridgePushSecretCiphertext: c.BridgePushSecretCiphertext, BridgePushSecretKeyID: c.BridgePushSecretKeyID,
+		BridgePushSecretUpdatedAt: c.BridgePushSecretUpdatedAt, Proxy: c.Proxy,
+		ProxyPasswordCiphertext: c.ProxyPasswordCiphertext, ProxyPasswordKeyID: c.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: c.ProxyPasswordUpdatedAt, Version: c.Version}, nil
+}
+
 func (s *memStore) InsertAuditEntry(_ context.Context, a auditdb.InsertAuditEntryParams) error {
 	if err := s.fail["InsertAuditEntry"]; err != nil {
 		return err
@@ -522,6 +543,7 @@ func (p *recordingPath) Do(ctx context.Context, s delivery.Subject, op delivery.
 
 type env struct {
 	svc      *connections.Service
+	business *clock.Manual
 	store    *memStore
 	fake     *fakemattermost.Fake
 	path     *recordingPath
@@ -546,8 +568,9 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clocks := clock.Clocks{Business: clock.NewManual(t0), Real: &ticking{at: t0, step: 7 * time.Millisecond}}
-	e := &env{store: newMemStore(), fake: f, log: &log, keys: openKeyring(t, logger),
+	business := clock.NewManual(t0)
+	clocks := clock.Clocks{Business: business, Real: &ticking{at: t0, step: 7 * time.Millisecond}}
+	e := &env{business: business, store: newMemStore(), fake: f, log: &log, keys: openKeyring(t, logger),
 		path: &recordingPath{next: deliverytest.Unlimited(1, clocks)}}
 	e.svc = connections.New(connections.Config{OrgID: 1, Store: e.store, Keyring: e.keys,
 		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks,

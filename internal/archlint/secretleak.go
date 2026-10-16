@@ -1911,6 +1911,22 @@ func (s *probeConnections) ListTelegramDestinations(context.Context, int64) ([]c
 			Valid: true}}}, nil
 }
 
+// GetBridgeDestinationTarget is the Destination 2 of the Connection, on the channel probe.
+func (s *probeConnections) GetBridgeDestinationTarget(context.Context, cdb.GetBridgeDestinationTargetParams) (
+	cdb.GetBridgeDestinationTargetRow, error) {
+	if s.row == nil {
+		return cdb.GetBridgeDestinationTargetRow{}, pgx.ErrNoRows
+	}
+	r := s.row
+	return cdb.GetBridgeDestinationTargetRow{BridgeChannelID: pgtype.Text{String: "probe", Valid: true}, ID: r.ID,
+		PublicID: r.PublicID, Type: r.Type, Name: r.Name, BridgeBaseUrl: r.BridgeBaseUrl,
+		BotTokenCiphertext: r.BotTokenCiphertext, BotTokenKeyID: r.BotTokenKeyID, BotTokenUpdatedAt: r.BotTokenUpdatedAt,
+		BridgePushSecretCiphertext: r.BridgePushSecretCiphertext, BridgePushSecretKeyID: r.BridgePushSecretKeyID,
+		BridgePushSecretUpdatedAt: r.BridgePushSecretUpdatedAt, Proxy: r.Proxy,
+		ProxyPasswordCiphertext: r.ProxyPasswordCiphertext, ProxyPasswordKeyID: r.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt, Version: r.Version}, nil
+}
+
 // ListBridgeDestinations lists the Destination 2 of the Connection on the channel probe for muster doctor.
 func (s *probeConnections) ListBridgeDestinations(context.Context, int64) ([]cdb.ListBridgeDestinationsRow, error) {
 	return []cdb.ListBridgeDestinationsRow{{ID: 2, PublicID: "DSAAAAAAAAAAA2", Name: "probe-bridge",
