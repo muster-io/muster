@@ -5,17 +5,26 @@
 // two bots, one per published token, each with its own state, as the protocol's "one token, one bot" asks: Token,
 // which the demo Connection of `muster dev` uses, and SecondToken. getInfo answers the configured info — the
 // messenger "Fake chat", every feature on and both event delivery modes by default — checkChannel answers the
-// configured channels (channels.go), and every request with any other token, none or a revoked one gets 401.
-// Operations that no story has added yet answer 501.
+// configured channels (channels.go), postMessage, editMessage and replyInThread keep the messages of each bot with
+// their edits and Thread replies (messages.go), and every request with any other token, none or a revoked one gets
+// 401. Operations that no story has added yet answer 501.
+//
+// Each bot keeps the Idempotency-Key of every post and Thread reply that succeeded and answers a repeated key with
+// its first result and replayed: true, unless replays are turned off, as for a bridge that lost its keys. The faults
+// of the harness script the rest: a problem with a class is a fault's body with the content type
+// application/problem+json, and a fault with a delay_ms and no status posts and then holds the answer, so that a
+// client that stops waiting retries into a replay.
 //
 // The control endpoints under /_fake/ come from the fake-server harness (requests, faults) and add GET and PUT
 // /_fake/config: the protocol version, the capabilities, the limits, the user lookup, the event delivery modes, the
-// revoked tokens, a padding that makes info larger and the channels, which both bots share. The fake answers what it
-// is configured to, also when that breaks the protocol, so that the checks of Muster can be tried against a broken
-// bridge.
+// revoked tokens, a padding that makes info larger, the channels, which both bots share, and replays; GET
+// /_fake/messages, the messages of both bots with their edits and replies, and DELETE /_fake/messages/{id}, which
+// deletes a message as a person would. The fake answers what it is configured to, also when that breaks the
+// protocol, so that the checks of Muster can be tried against a broken bridge.
 package fakebridge
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -66,14 +75,16 @@ const defaultConfig = `{
   "event_delivery": ["poll", "push"],
   "revoked": [],
   "info_padding_bytes": 0,
-  "channels": {"ch-alerts": "alerts", "ch-alerts-prod": "alerts-prod", "ch-nobot": null}
+  "channels": {"ch-alerts": "alerts", "ch-alerts-prod": "alerts-prod", "ch-nobot": null},
+  "replays": true
 }`
 
 // Config is the configuration of the fake, as GET and PUT /_fake/config show it. ProtocolVersion, Capabilities,
 // Limits, UserLookup and EventDelivery are served in info as they are; Revoked tokens get 401; InfoPaddingBytes adds a
 // member "padding" of that many bytes to info, which the protocol allows and Muster ignores, to make it larger.
 // Channels are the channels checkChannel knows, by id: the name of one the bot can use, or null for one it cannot;
-// any other id is one it cannot use either.
+// any other id is one it cannot use either; postMessage posts only to a channel the bot can use. With Replays, a
+// repeated Idempotency-Key answers the first result; without, every request posts again.
 type Config struct {
 	ProtocolVersion  string                  `json:"protocol_version"`
 	Capabilities     gen.Capabilities        `json:"capabilities"`
@@ -83,6 +94,7 @@ type Config struct {
 	Revoked          []string                `json:"revoked"`
 	InfoPaddingBytes int                     `json:"info_padding_bytes"`
 	Channels         map[string]*string      `json:"channels"`
+	Replays          bool                    `json:"replays"`
 }
 
 // configPatch is a PUT of /_fake/config: each field given replaces the whole value, the others are kept, except
@@ -96,11 +108,12 @@ type configPatch struct {
 	Revoked          *[]string                `json:"revoked"`
 	InfoPaddingBytes *int                     `json:"info_padding_bytes"`
 	Channels         map[string]*string       `json:"channels"`
+	Replays          *bool                    `json:"replays"`
 }
 
 // DefaultConfig is the configuration of a new fake: protocol version 1, every feature on, a body of up to 4000 code
-// points, edits that never expire, user lookup by login, both event delivery modes, and the channels ChannelAlerts and
-// ChannelAlertsProd that the bot can use and ChannelNoBot that it cannot.
+// points, edits that never expire, user lookup by login, both event delivery modes, the channels ChannelAlerts and
+// ChannelAlertsProd that the bot can use and ChannelNoBot that it cannot, and replays on.
 func DefaultConfig() Config {
 	var c Config
 	if err := json.Unmarshal([]byte(defaultConfig), &c); err != nil {
@@ -109,10 +122,12 @@ func DefaultConfig() Config {
 	return c
 }
 
-// bot is the state of one bot, named by its token; the messages and the events of the later stories are kept here,
-// apart from the other bot's.
+// bot is the state of one bot, named by its token, apart from the other bot's: its number, 1 for Token and 2 for
+// SecondToken, which /_fake/messages shows in place of the token, and the answers of its Idempotency-Keys.
 type bot struct {
 	token string
+	n     int
+	keys  map[string]stored
 }
 
 // Fake is the fake bridge.
@@ -124,14 +139,22 @@ type Fake struct {
 	mu     sync.Mutex
 	config Config
 	bots   map[string]*bot
+	// messages are the messages of both bots in the order they were posted; posted and replies count the ids given.
+	messages []*Message
+	posted   int
+	replies  int
 }
 
 // New returns the fake with DefaultConfig.
 func New() *Fake {
-	f := &Fake{api: http.NewServeMux(), config: DefaultConfig(),
-		bots: map[string]*bot{Token: {token: Token}, SecondToken: {token: SecondToken}}}
+	f := &Fake{api: http.NewServeMux(), config: DefaultConfig(), bots: map[string]*bot{
+		Token:       {token: Token, n: 1, keys: map[string]stored{}},
+		SecondToken: {token: SecondToken, n: 2, keys: map[string]stored{}}}}
 	f.api.HandleFunc("GET /v1/info", f.getInfo)
 	f.api.HandleFunc("POST /v1/channels/{channel_id}/check", f.checkChannel)
+	f.api.HandleFunc("POST /v1/messages", f.postMessage)
+	f.api.HandleFunc("PATCH /v1/messages/{message_id}", f.editMessage)
+	f.api.HandleFunc("POST /v1/messages/{message_id}/thread-replies", f.replyInThread)
 	f.api.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusNotImplemented, gen.ErrorClassInvalid,
 			r.Method+" "+r.URL.Path+" is not implemented by the fake bridge")
@@ -141,6 +164,10 @@ func New() *Fake {
 		fakeserver.WriteJSON(w, http.StatusOK, f.Config())
 	})
 	f.HandleControl("PUT /_fake/config", f.putConfig)
+	f.HandleControl("GET /_fake/messages", func(w http.ResponseWriter, _ *http.Request) {
+		fakeserver.WriteJSON(w, http.StatusOK, f.Messages())
+	})
+	f.HandleControl("DELETE /_fake/messages/{id}", f.deleteMessage)
 	return f
 }
 
@@ -234,6 +261,9 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 	if p.InfoPaddingBytes != nil {
 		c.InfoPaddingBytes = *p.InfoPaddingBytes
 	}
+	if p.Replays != nil {
+		c.Replays = *p.Replays
+	}
 	if len(p.Channels) > 0 {
 		channels := maps.Clone(c.Channels)
 		if channels == nil {
@@ -247,13 +277,18 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 	fakeserver.WriteJSON(w, http.StatusOK, f.Config())
 }
 
-// serve answers the requests of the protocol: 401 unless the bearer token is one of a bot and not revoked.
+// botKey is the key of the request's bot in its context.
+type botKey struct{}
+
+// serve answers the requests of the protocol: 401 unless the bearer token is one of a bot and not revoked; the
+// handlers find the bot in the request's context.
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
-	if _, ok := f.botOf(r); !ok {
+	b, ok := f.botOf(r)
+	if !ok {
 		writeProblem(w, http.StatusUnauthorized, gen.ErrorClassForbidden, "Unauthorized")
 		return
 	}
-	f.api.ServeHTTP(w, r)
+	f.api.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), botKey{}, b)))
 }
 
 // botOf is the bot of the request's bearer token; false for no token, another one or a revoked one.
