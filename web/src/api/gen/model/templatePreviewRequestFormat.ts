@@ -19,7 +19,7 @@
  */
 
 /**
- * The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram. Ignored for `link_rule` and `webhook_request`, which have no markup.
+ * The markup the output is laid out in and alert data are escaped for — `markdown` as in Mattermost (the default), `html` as in Telegram, `commonmark` as in a bridge's envelope body. Ignored for `link_rule` and `webhook_request`, which have no markup.
  * @nullable
  */
 export type TemplatePreviewRequestFormat = typeof TemplatePreviewRequestFormat[keyof typeof TemplatePreviewRequestFormat] | null;
@@ -28,4 +28,5 @@ export type TemplatePreviewRequestFormat = typeof TemplatePreviewRequestFormat[k
 export const TemplatePreviewRequestFormat = {
   markdown: 'markdown',
   html: 'html',
+  commonmark: 'commonmark',
 } as const;

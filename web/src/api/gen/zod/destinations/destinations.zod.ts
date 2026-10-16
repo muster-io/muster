@@ -2250,7 +2250,7 @@ export const CheckDestinationResponse = zod.object({
 })
 
 /**
- * One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination answers `501` (`not-implemented`) until this build implements its test.
+ * One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination posts one test message of the kind `test` with `postMessage`.
  * @summary Send a test message
  */
 export const testDestinationPathDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -2298,7 +2298,7 @@ export const TestDestinationResponse = zod.object({
 })
 
 /**
- * Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. A Bridge Destination answers `501` (`not-implemented`) until this build implements its preview.
+ * Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. For a Bridge Destination the item `message` is the envelope as Muster would post it, as JSON (format `json`).
  * @summary Preview a message or request
  */
 export const previewDestinationPathDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -2322,7 +2322,7 @@ export const PreviewDestinationResponse = zod.object({
   "items": zod.array(zod.object({
   "name": zod.enum(['message', 'event', 'create', 'update', 'open_thread', 'reply_in_thread']),
   "format": zod.union([zod.literal('markdown'),zod.literal('html'),zod.literal('json'),zod.literal('plain'),zod.literal(null)]).nullish(),
-  "text": zod.string().nullish().describe('The rendered Root message text.'),
+  "text": zod.string().nullish().describe('The rendered Root message text; for a Bridge, the envelope as JSON.'),
   "request": zod.object({
   "method": zod.string(),
   "url": zod.string(),

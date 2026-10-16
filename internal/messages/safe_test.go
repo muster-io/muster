@@ -75,3 +75,55 @@ func TestSafeOutput(t *testing.T) {
 		t.Errorf("safeHtml = %q, %v", out, err)
 	}
 }
+
+// TestEscapeCommonMark is C-22.FR-4 and C-22.AC-5: alert data reach a bridge as literal CommonMark text — every
+// punctuation that can start markup inside a line is escaped, and so is the marker of a heading, a list item or a
+// setext underline at the start of a line, after up to three spaces; `@` is neutralized by Value before, so a hostile
+// label value is no Mention, no emphasis, no HTML and no link.
+func TestEscapeCommonMark(t *testing.T) {
+	hostile := "@all *x* <b>y</b> [z](http://evil)"
+	if got := EscapeCommonMark(Value(hostile)); got != "@\u200ball \\*x\\* \\<b\\>y\\</b\\> \\[z\\](http://evil)" {
+		t.Errorf("hostile value = %q", got)
+	}
+	for in, want := range map[string]string{
+		"a_b `c` ~~d~~ &amp; \\":          "a\\_b \\`c\\` \\~\\~d\\~\\~ \\&amp; \\\\",
+		"![i](http://x/i.png) <http://x>": "!\\[i\\](http://x/i.png) \\<http://x\\>",
+		"# heading":                       "\\# heading",
+		"   ## three spaces":              "   \\## three spaces",
+		"    # four spaces is code":       "    # four spaces is code",
+		"- item":                          "\\- item",
+		"+ item":                          "\\+ item",
+		"* item":                          "\\* item",
+		"> quote":                         "\\> quote",
+		"===":                             "\\===",
+		"a\n---\nb":                       "a\n\\---\nb",
+		"1. one":                          "1\\. one",
+		"12) twelve":                      "12\\) twelve",
+		"123456789. nine digits":          "123456789\\. nine digits",
+		"1234567890. ten digits":          "1234567890. ten digits",
+		"1x. not a number":                "1x. not a number",
+		"v1. mid-line # - + = 2.":         "v1. mid-line # - + = 2.",
+		"x\r# carriage return":            "x\r\\# carriage return",
+		"x\r\n- crlf":                     "x\r\n\\- crlf",
+		"\n\n= blank lines":               "\n\n\\= blank lines",
+		"   ":                             "   ",
+		"":                                "",
+	} {
+		if got := EscapeCommonMark(in); got != want {
+			t.Errorf("EscapeCommonMark(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if Escaper(MarkupCommonMark)("*a*") != "\\*a\\*" {
+		t.Error("the escaper of commonmark")
+	}
+	d := templates.Data{CommonLabels: templates.KV{"note": hostile},
+		Alerts: templates.Alerts{{Labels: templates.KV{"pod": "1. p_1"}}}}
+	cm := SafeData(d, MarkupCommonMark)
+	if cm.CommonLabels["note"] != "@\u200ball \\*x\\* \\<b\\>y\\</b\\> \\[z\\](http://evil)" ||
+		cm.Alerts[0].Labels["pod"] != "1\\. p\\_1" {
+		t.Errorf("commonmark data %+v", cm)
+	}
+	if line := SafeLine(d.Alerts[0], d.AlertGroup, MarkupCommonMark); line.Labels["pod"] != "1\\. p\\_1" {
+		t.Errorf("commonmark line data %+v", line)
+	}
+}

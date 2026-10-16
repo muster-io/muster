@@ -80,6 +80,7 @@ const (
 	TypeMattermost = "mattermost"
 	TypeTelegram   = "telegram"
 	TypeWebhook    = "webhook"
+	TypeBridge     = "bridge"
 )
 
 // Destination is a Destination as delivery calls it: Connection is the internal id of its Connection, nil for an
