@@ -5,7 +5,7 @@ capability: C-22
 kind: be
 layer: L1
 depends_on: [S-080, S-082]
-covers: [C-22.FR-3, C-22.FR-4, C-22.FR-5, C-22.FR-6, C-22.FR-7, C-22.FR-8, C-22.FR-17, C-22.FR-19, C-22.FR-23, C-22.AC-4, C-22.AC-5, C-22.AC-6, C-22.AC-7, C-22.AC-10, C-22.AC-11, C-22.AC-12]
+covers: [C-22.FR-3, C-22.FR-4, C-22.FR-5, C-22.FR-6, C-22.FR-7, C-22.FR-8, C-22.FR-17, C-22.FR-19, C-22.FR-23, C-22.AC-3, C-22.AC-4, C-22.AC-5, C-22.AC-6, C-22.AC-7, C-22.AC-10, C-22.AC-11, C-22.AC-12]
 files_touched:
   - api/openapi.yaml
   - internal/bridge/client.go
@@ -24,6 +24,8 @@ files_touched:
   - internal/messages/texts/ru.json
   - internal/mattermost/layout.go
   - internal/delivery/delivery.go
+  - internal/delivery/render.go
+  - internal/delivery/render_test.go
   - internal/delivery/worker.go
   - internal/delivery/worker_test.go
   - internal/delivery/publication.go
@@ -34,7 +36,9 @@ files_touched:
   - internal/delivery/threads_test.go
   - internal/delivery/query.sql
   - internal/delivery/lockorder_integration_test.go
+  - design/db/schema.md
   - internal/runtime/runtime.go
+  - internal/archlint/secretleak.go
   - internal/fakes/fakebridge/messages.go
   - internal/fakes/fakebridge/fakebridge_test.go
   - docs/messengers/bridge.md
@@ -44,14 +48,15 @@ acceptance:
   - "[C-22.FR-4, C-22.FR-5, C-22.AC-4] A new Alert Group posts one `postMessage` of the kind `root` with the status `firing`, `#d32f2f`, 🔴, the title `#N <title>`, the link \"Open in Muster\" to the Alert Group page, a CommonMark body with items 3 to 11 of C-12.FR-1, `notify` true, and the buttons Ack (`primary`), Resolve (`success`) and the Route's Snooze durations (`neutral`) with signed data of at most 64 bytes; Acknowledge through the API makes one `editMessage` with the acknowledged buttons and no Mentions."
   - "[C-22.FR-6, C-22.AC-4] A new Alert creates a `replyInThread` under the Root message with the `thread_ref` its `postMessage` returned, or null without one; the `thread_ref` each reply returns is stored and sent with the next reply; each reply carries its own `Idempotency-Key`, `reply-<Destination public_id>-<thread reply id>`."
   - "[C-22.FR-4, C-22.AC-5] A label value `@all *x* <b>y</b> [z](http://evil)` reaches the fake bridge as literal text: escaped for CommonMark, `@` neutralized, no link and no HTML (`safe_test.go`, Verification)."
-  - "[C-22.FR-4] `previewTemplate` with the `format` `commonmark` renders a Root message template and a line template in CommonMark with alert data escaped."
-  - "[C-22.FR-6, C-22.AC-6] A Publication's key is `pub-<Destination public_id>-<delivery id>-<publications + 1>`, the same for every retry of that Publication. When the fake bridge posts a Publication and drops the connection before answering, the retry carries the same key, the fake holds one message, the answer is `replayed`, no possible duplicate is recorded, `published_at` is the time of the first attempt, and an `editMessage` follows with the current state — acknowledged when Acknowledge came before the retry; with replays turned off in the fake, the retry posts a second message and a possible duplicate is recorded as a delivery event."
+  - "[C-22.FR-4] `previewTemplate` with the `format` `commonmark` renders a Root message template and a line template in CommonMark with alert data escaped, and answers the `format` `commonmark`; delivery renders the Root messages and Thread replies of Bridge Destinations in CommonMark (`render_test.go`)."
+  - "[C-22.FR-6, C-22.AC-6] A Publication's key is `pub-<Destination public_id>-<delivery id>-<publications + 1>`, the same for every retry of that Publication. When the fake bridge posts a Publication and drops the connection before answering, the retry carries the same key, the fake holds one message, the answer is `replayed`, no possible duplicate is recorded, `published_at` and the Alert Group's first Publication are the time of the first attempt, and an `editMessage` follows with the current state — acknowledged when Acknowledge came before the retry; with replays turned off in the fake, the retry posts a second message and a possible duplicate is recorded as a delivery event."
   - "[C-22.FR-6] For Bridge Destinations the possible duplicate is decided by the outcome, not before the call: a retry after a started Publication records none when its answer is `replayed`, and records one when it is not; Mattermost and Telegram keep recording it before the retry (`publication_test.go`)."
   - "[C-22.FR-8, C-22.AC-7] `rate_limited` with `Retry-After: 7` delays the next call to that Destination by 7 to 8 seconds without counting an attempt, and with `scope` `bot` every Destination of the Connection; a `Retry-After` longer than `bridge.retry_after_max`, and a `429` without one, count as Transient; `transient` follows the Transient budget; `forbidden` makes the Destination Broken at once with the bridge's `detail` as the reason; `invalid` ends the delivery as Not delivered and leaves the Destination healthy; `gone` on an edit and on a Thread reply each start the deleted Root message flow once."
   - "[C-22.FR-7, C-22.AC-10] With `max_body_length` 1,000, an Alert Group with 40 Alerts posts a body of at most 1,000 code points that keeps its link line, notices and footer; `truncated` from the bridge is accepted as delivered; the limit is read from the Destination's Connection, so two Connections with different limits shorten differently (`delivery_test.go`)."
   - "[C-22.FR-5, C-22.AC-11] Without `buttons` and `thread_messages` in `info`, a Root message has no buttons and no commands line; with `thread_messages` `all` and no `buttons`, a firing Root message ends with \"Reply in the Thread: ack · resolve · snooze 1h\", an acknowledged one with \"unack · resolve · snooze 1h\", a resolved one with none; with `mentions_only` the line starts \"Reply in the Thread, mentioning the bot:\"."
   - "[C-22.FR-17, C-22.AC-12] `testDestination` posts one `postMessage` of the kind `test` with \"🧪 Test message\" through the interactive path and changes no Timeline; `previewDestination` returns the envelope as the item `message` with the format `json`, without posting."
   - "[C-22.FR-3, C-22.FR-19] With a Bridge Destination Broken and nothing waiting, the probe after `delivery.broken_probe_interval` runs `checkChannel` in the delivery client class and ends the Broken state once the fake answers `200`."
+  - "[C-22.AC-3] A failed `postMessage`, `editMessage`, `replyInThread` and test message leave the token in no log line and no error returned by the API (`secretleak.go` probe `bridge_connections`, the delivery paths added)."
   - "[C-22.FR-23] The page Messengers → Bridge is in the site's navigation and covers the topics of C-22.FR-23 that this story implements: the Connection, event delivery modes, Destinations by channel id, the Connection check and Broken Destinations; `make docs-check` passes."
 verify: "make ci test-integration e2e docs-check"
 operator_attention: false
@@ -92,8 +97,10 @@ issue: 232
   `null` — as `thread_ref`. The envelope takes the status, colour and emoji of item 1 of C-12.FR-1, the heading as
   `title` and `link`, the buttons and the CommonMark body of items 3 to 11. `Outcome` gains `ThreadRef` (from
   `postMessage` or `replyInThread`, stored in `deliveries.thread_anchor_id` when present) and `Replayed`; `MessageURL`
-  is the answer's `url` when `messages.SafeURL` accepts it, and empty otherwise. The client of S-073 gains
-  `postMessage`, `editMessage` and `replyInThread`.
+  is the answer's `url` when `messages.SafeURL` accepts it, and empty otherwise; `schema.md` describes
+  `thread_anchor_id` as Telegram's automatic copy or a Bridge's last `thread_ref`. The client of S-073 gains
+  `postMessage`, `editMessage` and `replyInThread`. As for Mattermost and Telegram, lint 3 checks the calls of these
+  adapter methods, not of the protocol client beneath them (ADR-0016).
 - **Length** (C-22.FR-7): `delivery.Adapter` keeps its signature. The Bridge delivery fits each body itself, before the
   call, to `limits.max_body_length` of the Destination's Connection — read through the `InfoCache` of S-073, again past
   `bridge.info_max_age` — with the shortening of C-12.FR-11; its `LengthLimit()`, which delivery never calls, answers
@@ -108,18 +115,21 @@ issue: 232
   retry's answer is not `Replayed`. A `Replayed` Publication records the message id, `thread_ref` and `url` and sets
   `published_at` from the first attempt's `publication_started_at`, which `StartPublication` keeps across the retries of
   one Publication for an `Idempotent` adapter, so the edit window of S-081 counts from when the message was really
-  posted; it leaves `actual_hash` unset, so the delivery stays pending and the worker's next call is an edit to the
-  latest Desired state. The Mattermost and Telegram paths do not change.
+  posted, and passes the same time to `markPublished`, so the Alert Group's first Publication (C-17.FR-1), from which
+  its ack timeout counts, is the real post too; it leaves `actual_hash` unset, so the delivery stays pending and the
+  worker's next call is an edit to the latest Desired state. The Mattermost and Telegram paths do not change.
 - **Lock order** (D307; `lockorder_integration_test.go`): a `Replayed` outcome and the edit that follows it lock the
   delivery row only, as every outcome does, never its Alert Group before it; the test gains a replayed Publication
   against an acknowledgement that holds the Alert Group and then waits for the delivery in `Enqueue`.
-- **Markup** (`internal/messages`): `MarkupCommonMark`; `EscapeCommonMark` escapes every CommonMark punctuation that
-  can start markup and line-leading block markers, after `Neutralize`; the default layout writes items 3 to 11 with
-  block quotes for the label sections, a bullet list for the Alerts and strikethrough for resolved ones; built-in texts
-  in English and Russian for the commands line and "🧪 Test message"; `previewTemplate` accepts the `format`
-  `commonmark` (spec: the `format` enum of `TemplatePreviewRequest` gains it). The colours of the statuses move from
-  `internal/mattermost/layout.go` to `internal/messages` (`messages.StatusColour`, beside `statusEmoji`), which
-  Mattermost and the Bridge envelope read.
+- **Markup** (`internal/messages`, `internal/delivery/render.go`): `MarkupCommonMark`; `EscapeCommonMark` escapes every
+  CommonMark punctuation that can start markup and line-leading block markers, after `Neutralize`; the default layout
+  writes items 3 to 11 with block quotes for the label sections, a bullet list for the Alerts and strikethrough for
+  resolved ones; built-in texts in English and Russian for the commands line and "🧪 Test message"; delivery's
+  `markupOf` maps the type `bridge` to `MarkupCommonMark`, which otherwise falls to plain text, so the Root messages and
+  Thread replies of Bridges are rendered in CommonMark; `previewTemplate` accepts the `format` `commonmark` and answers
+  it (spec: the `format` enums of `TemplatePreviewRequest` and `TemplatePreviewResult` gain it). The colours of the
+  statuses move from `internal/mattermost/layout.go` to `internal/messages` (`messages.StatusColour`, beside
+  `statusEmoji`), which Mattermost and the Bridge envelope read.
 - **Buttons and commands line** (C-22.FR-5): delivery renders the buttons of the status as for every messenger; the
   Bridge delivery keeps them only when `info` has `buttons`, drops Snooze durations from the longest beyond
   `buttons.max_per_message`, and sets the style hints. Without `buttons` and with `thread_messages`, it appends the
@@ -142,19 +152,23 @@ issue: 232
   answer is lost is a fault with `delay_ms` longer than the client waits, which posts and then holds the answer.
 - **Page** (`docs/messengers/bridge.md`, `mkdocs.yml`): Messengers → Bridge for Admins — the Connection with its token
   and event delivery mode, Destinations by channel id, what the Connection check shows, test messages and Broken
-  Destinations; S-081 adds edit windows, S-076 links Account links, S-079 links Write a bridge.
+  Destinations, with a link to Messengers → Account links, whose Bridge section S-076 adds; S-081 adds edit windows,
+  S-079 links Write a bridge.
+- **Secrets** (lint 5): probe `bridge_connections` also pushes the token through a failed `postMessage`,
+  `editMessage`, `replyInThread` and test message, with the fake closing the connection and answering a problem.
 - **Defaults**: `bridge.retry_after_max`, `bridge.info_max_age`, `delivery.transient_backoff`,
   `delivery.transient_budget`, `delivery.broken_probe_interval`, `delivery.interactive_budget`.
 
 ## Steps
 
-1. Add `commonmark`: escaping, the default layout, texts, the moved colours and previews. Check: `safe_test.go`,
-   `render_test.go`.
+1. Add `commonmark`: escaping, the default layout, texts, the moved colours, previews and delivery's markup of the
+   type. Check: `safe_test.go`, both `render_test.go`.
 2. Write the envelope and the Bridge delivery with the fake's messages. Check: `envelope_test.go`,
    `delivery_test.go`.
 3. Wire idempotency keys, replays, possible duplicates and `thread_ref`. Check: `publication_test.go`,
    `outcomes_test.go`, `threads_test.go`, `go test -tags integration -run LockOrder ./internal/delivery/`.
-4. Add the test message, the probe, the page and the end-to-end test. Check: Verification.
+4. Add the test message, the probe, the secret probe's delivery paths, the page and the end-to-end test. Check:
+   `make lint-arch`, then Verification.
 
 ## Verification
 
@@ -233,6 +247,10 @@ MSG '[.[] | select(.envelope.title == "#4 Queue")][0].envelope | {b: (.buttons |
 curl -s "${H[@]}" $API/destinations/$D/tests -d '{"source":"example"}' | jq -c '[.steps[] | {name, error_class}]'   # [{"name":"message","error_class":"none"}]
 MSG '.[-1].envelope | {kind, t: (.body | test("🧪 Test message"))}'          # {"kind":"test","t":true}
 curl -s "${H[@]}" $API/destinations/$D/previews -d '{"source":"example"}' | jq -c '.items[0] | {name, format}'   # {"name":"message","format":"json"}
+
+# C-22.FR-4: a template preview in CommonMark; C-22.AC-3: no token in the log after the faults above
+curl -s "${H[@]}" $API/template-previews -d '{"kind":"root_message","template":"","format":"commonmark"}' | jq -r .format   # commonmark
+grep -c 'muster-dev-bridge-token-b' dev.log                                       # 0
 ```
 
 `test/e2e/bridge_test.go` covers the rest of C-22.AC-6 (replays off), AC-7 (`transient`, `invalid`, `gone` on an edit
@@ -268,6 +286,7 @@ None.
 | C-22.FR-17 | partial | test messages and previews; the press on a test message is S-075 |
 | C-22.FR-19 | full | |
 | C-22.FR-23 | partial | Messengers → Bridge; edit windows are S-081, Account links S-076, "Write a bridge" S-079 |
+| C-22.AC-3 | partial | the token on the delivery paths; the Connection check is S-073, the Destination check S-080, the event paths S-075 |
 | C-22.AC-4 | full | |
 | C-22.AC-5 | full | |
 | C-22.AC-6 | full | |

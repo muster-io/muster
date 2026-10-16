@@ -4,9 +4,10 @@
 - Date: 2026-10-02
 - Amended: 2026-10-03 — delivery events live in a table of their own, outside the Alert Group tables; the move to the
   Default route is a system transition
-- Amended: 2026-10-14 — lint 3 allows, by name, the conformance check of `muster bridge check`
-  (`internal/bridge/conformance.go`), which runs the Bridge protocol against a bridge outside any installation
-  ([ADR-0017](0017-bridge-protocol-for-messengers-without-native-support.md))
+- Amended: 2026-10-14, corrected 2026-10-16 — the conformance check of `muster bridge check` sends outside delivery,
+  calling the Bridge protocol client directly against a bridge outside any installation
+  ([ADR-0017](0017-bridge-protocol-for-messengers-without-native-support.md)); lint 3 checks calls of the delivery
+  adapter's methods, not the messenger clients beneath them, so it needs no entry for the command
 
 ## Context
 
@@ -56,8 +57,9 @@ behind the `lint` build tag) that fails the build when:
 2. a query that writes Alert Group tables is called from outside the `groups` package; delivery records its delivery
    events in a table of its own, outside the Alert Group tables, and the Timeline view merges them (ADR-0005), so this
    lint has no exception for delivery;
-3. a messenger send or edit is called from outside the delivery worker and the named interactive path (ADR-0005), the
-   conformance check of `muster bridge check` excepted (ADR-0017);
+3. a messenger send or edit through the delivery adapter interface is called from outside the delivery worker and the
+   named interactive path (ADR-0005); the messenger clients beneath the adapters are not checked, so the conformance
+   check of `muster bridge check`, which calls the Bridge protocol client directly (ADR-0017), needs no exception;
 4. an HTTP client or transport is created outside the outbound HTTP package (ADR-0015);
 5. a known secret value reaches a log line — a test pushes known secrets through the code and inspects the output;
 6. `context.Background()` is used outside `main`, the wiring code and tests;

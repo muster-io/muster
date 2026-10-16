@@ -27,8 +27,7 @@ files_touched:
   - internal/cli/bridge.go
   - internal/cli/bridge_test.go
   - internal/cli/cli.go
-  - internal/archlint/archlint.go
-  - internal/archlint/archlint_test.go
+  - internal/archlint/secretleak.go
   - internal/tools/licensecheck/main.go
   - NOTICE
   - Makefile
@@ -40,7 +39,7 @@ files_touched:
 acceptance:
   - "[C-22.FR-22] `examples/bridge/` is its own Go module with only the standard library, an MIT `LICENSE` and MIT SPDX headers, listed in the exclusion list of `NOTICE`, whose heading now names third-party and MIT-licensed files alike; the Muster binary does not import it, and `make licenses` lists none of its files."
   - "[C-22.FR-22] The example serves a chat web page — channels, Threads, buttons with their styles, direct messages, a user picker — and the Bridge protocol with every feature, each switchable by `BRIDGE_FEATURES`, both event delivery modes, an idempotency store per token, `edit_max_age_seconds` and `max_body_length` from flags, and users found by login; `go test ./...` in its module covers each operation, and its conformance to `api/bridge.yaml` is checked from the main module by `muster bridge check` in `test/e2e/bridge_example_test.go`."
-  - "[C-22.FR-21] `muster bridge check` calls the protocol client directly from `internal/bridge/conformance.go`, the one file outside delivery that lint 3 allows to send (ADR-0017), and `make lint-arch` passes with that file named in the lint's allowed files (`archlint_test.go`)."
+  - "[C-22.FR-21] `muster bridge check` calls the protocol client directly from `internal/bridge/conformance.go`, outside delivery, which ADR-0017 permits; lint 3 checks calls of the `delivery.Adapter` methods, not of the protocol client, so it needs no entry and `make lint-arch` passes with the lint unchanged; the token read from `--token-file` appears in no output line, log line or returned error, the FAIL reasons taken from the bridge's answers included (`secretleak.go` probe `bridge_check`)."
   - "[C-22.FR-21, C-22.AC-22] `muster bridge check <url> --token-file f --channel alerts --forbidden-channel nobot` against the example prints one PASS line per step — info, channel check, post, repeated key replayed, edit, two Thread replies with `thread_ref`, the forbidden channel, polling, push to its own listener, user lookup, direct message, answer — and exits 0; with `BRIDGE_FEATURES=thread_messages` the buttons, direct-message and lookup steps print SKIP; against the fake bridge with replays off it prints FAIL for the repeated key and exits 1."
   - "[C-22.AC-23] On `muster dev` with a Bridge Connection to the example, a new Alert Group appears on the example's page; pressing Ack there as a linked user acknowledges it in Muster; with buttons switched off, `ack` written in its Thread acknowledges it (`test/e2e/bridge_example_test.go`)."
   - "[C-22.FR-22] `make ci` vets, lints (with the module's own `.golangci.yml`) and tests the example module without building an image; `make vulncheck` and CodeQL cover it too; each commit on `master` publishes `ghcr.io/muster-io/muster-example-bridge:sha-<7 hex digits>` and `edge`, unsigned like the Muster development image."
@@ -97,9 +96,13 @@ issue: 236
   prints both for the bridge's configuration, then waits for a signed event, unless `--no-interactive`; it never
   changes the bridge itself.
 - **The CLI exception** (ADR-0017, ADR-0016): the conformance check posts, edits and replies through the protocol
-  client, outside delivery and the interactive path; lint 3's allowed files (`internal/archlint/archlint.go`) gain
-  `internal/bridge/conformance.go`, and `archlint_test.go` shows that the same calls in any other file still fail.
-  AGENTS.md already states the exception.
+  client directly, outside delivery and the interactive path, which ADR-0017 permits because it runs outside any
+  installation. Lint 3 checks calls of the `delivery.Adapter` methods (`Publish`, `Update`, `Reply`), not the
+  messenger clients beneath them — the Mattermost and Telegram clients are not linted either — so the check needs no
+  lint entry and `internal/archlint` does not change. AGENTS.md already states the exception.
+- **Secrets** (lint 5): probe `bridge_check` runs the conformance check with a known token from a token file against
+  a server that answers problems whose `detail` echoes the request, and fails when the token reaches the printed
+  lines, a log line or a returned error.
 - **CI** (`Makefile`, `ci.yml`, `edge.yml`, `codeql.yml`): `make example-bridge` runs `go vet`, golangci-lint with the
   module's own `examples/bridge/.golangci.yml` (the root configuration names the main module's packages) and `go test`
   in the module, and builds no image, so it needs no Docker; `make ci` runs it; `make vulncheck` also runs govulncheck
@@ -114,7 +117,8 @@ issue: 236
 
 1. Write the protocol side of the example with its tests. Check: `go test ./...` in `examples/bridge`.
 2. Add the chat and its page. Check: the page by hand, then `bridge_example_test.go`.
-3. Write the conformance check. Check: `conformance_test.go` against the fake bridge with faults.
+3. Write the conformance check and its secret probe. Check: `conformance_test.go` against the fake bridge with
+   faults, `make lint-arch`.
 4. Wire CI, `NOTICE` and the layout tables. Check: `make ci`, `make licenses`.
 5. Hand over to the maintainer for the test environment (Notes).
 

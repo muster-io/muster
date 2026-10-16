@@ -23,6 +23,7 @@ files_touched:
   - internal/mentions/mentions_test.go
   - internal/connections/doctor.go
   - internal/connections/doctor_test.go
+  - internal/connections/query.sql
   - internal/api/destinations.go
   - internal/api/destinations_test.go
   - internal/runtime/runtime.go
@@ -31,6 +32,7 @@ files_touched:
   - internal/archlint/secretleak.go
   - web/src/components/destination-label.ts
   - web/src/components/destination-health.tsx
+  - web/src/routes/destinations.$destinationId.tsx
   - web/src/components/connection-check.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
@@ -39,7 +41,7 @@ acceptance:
   - "[C-22.FR-3, C-22.AC-20] `mentions.Validate` takes nobody and chosen users for a Bridge Destination and refuses everyone in the chat and messenger groups with 422 `unsupported` at their pointer (`mentions_test.go`, a case per kind)."
   - "[C-22.FR-3] `checkDestination` runs `checkChannel` through the interactive path and returns one item `channel`, whose code is `token_invalid` when the bridge refuses the token with `401`, `channel_forbidden` for any other `forbidden`, the code of `delivery.FailureCode` for a request without an answer or one the outbound address policy refuses, and `request_failed`, with the class named, for any other class (`check_test.go`, a case per class); a success on a Broken Destination ends the Broken state; `muster doctor` checks every Bridge Connection with `getInfo` and every Bridge Destination with `checkChannel`, printing an OK line for each and a FAIL line naming a failing one."
   - "[C-22.AC-3] With an HTTP proxy on the Connection, every request of the Destination check reaches the fake bridge only through the fake proxy; with the fake closing the connection, the token appears in no log line and no error returned by the API (`secretleak.go` probe `bridge_connections`, the Destination check added)."
-  - "[C-22.FR-3] With `bridge` in the `Destination` union the SPA's type check passes: `destinationPlace` shows a Bridge Destination's channel name, or its channel id, and `destinationTypeName` names it \"Bridge\" until S-077 adds the messenger's name."
+  - "[C-22.FR-3] With `bridge` in the `Destination` union the SPA's type check passes: `destinationPlace` shows a Bridge Destination's channel name, or its channel id, `destinationTypeName` names it \"Bridge\" («Мост») from a locale key until S-077 adds the messenger's name, and the Destination page shows a Bridge Destination's name, Broken banner and Routes but no form, its other branch narrowed to the outgoing webhook, until S-077 adds the form."
 verify: "make ci test-integration"
 operator_attention: false
 issue: 238
@@ -63,9 +65,10 @@ issue: 238
 - The Broken probe through the same check, and everything that posts (S-074).
 - Mentions of linked people and their names in footers (S-076).
 - The Destination form and its labels (S-077).
-- Interim states until later stories: a Bridge Destination on a Route gets no messages until S-074; a Mention of a User
-  is their display name as text, which mentions nobody, until S-076; the SPA names the type "Bridge" without the
-  messenger's name until S-077.
+- Interim states until later stories: a Bridge Destination on a Route ends each delivery Not delivered, "no adapter for
+  the destination type bridge", until S-074; a Mention of a User is their display name as text, which mentions nobody,
+  until S-076; the SPA names the type "Bridge" without the messenger's name, and the Destination page shows no form and
+  no check for a Bridge, so the check item `channel` is named only from S-077.
 
 ## Contracts
 
@@ -93,16 +96,23 @@ issue: 238
   returns no space until S-076, so a Mention of a User resolves to their display name as text.
 - **Destination check** (`internal/bridge/check.go`, `client.go`): the client of S-073 gains `checkChannel`; one check
   item `channel`, from save and `checkDestination` through the interactive path, and from `muster doctor`
-  (`internal/connections/doctor.go`), which also runs `getInfo` for every Bridge Connection; a success on a Broken
-  Destination calls `MarkHealthy`. S-074 uses the same function as the Bridge delivery's `Check` for the Broken probe.
+  (`internal/connections/doctor.go`), which replaces S-073's skip of Bridge Connections with `getInfo` for each and
+  reads the Bridge Destinations through `ListBridgeDestinations` (`internal/connections/query.sql`), beside
+  `ListMattermostDestinations` and `ListTelegramDestinations` in `DoctorQueries`; a success on a Broken Destination
+  calls `MarkHealthy`. S-074 uses the same function as the Bridge delivery's `Check` for the Broken probe.
   A failing item carries its code (`DestinationCheckItem.code`) next to its English text, as the other types' checks
   do: `token_invalid` when the bridge refuses the token with `401`; `channel_forbidden` for any other `forbidden`, with
   the bridge's `detail` as the text; the code of `delivery.FailureCode` for a request without an answer or one the
   outbound address policy refuses; `request_failed` for any other class, which the text names. `checkCodeText`
   (`connection-check.tsx`) gains `channel_forbidden`, translated in `en.json` and `ru.json`: "The bridge refused the
   channel: it does not exist, or the bot cannot use it."; the bridge's `detail` stays the detail.
-- **SPA type check** (`destination-label.ts`, `destination-health.tsx`): `destinationPlace` and `destinationTypeName`
-  get an explicit `bridge` branch instead of falling through to the outgoing webhook's; no new text, which S-077 adds.
+- **SPA type check** (`destination-label.ts`, `destination-health.tsx`, `destinations.$destinationId.tsx`):
+  `destinationPlace` and `destinationTypeName` get an explicit `bridge` branch instead of falling through to the
+  outgoing webhook's — the channel name or id, and the type's name "Bridge" («Мост») from the locale key
+  `destinations.types.bridge`. The Destination page passes the outgoing webhook's branch to `EditForm` and
+  `SigningSecret`, which take Mattermost, Telegram and outgoing webhook Destinations only; it gains an explicit `bridge`
+  branch with no form — the page keeps the name, the Broken banner and the Routes — and its last branch is narrowed
+  to `webhook`. `isEditable` and `hasCheck` do not take `bridge` until S-077 adds the form.
 - **Fake bridge** (`channels.go`): `checkChannel` for `ch-alerts` ("alerts") and `ch-alerts-prod` ("alerts-prod") and
   `forbidden` "The bot is not a member of this channel." for `ch-nobot` and unknown ids; `/_fake/config` `channels`
   adds or forbids channels.
@@ -113,8 +123,9 @@ issue: 238
 
 1. Add the migration, the Destination type with its read model and the Mention rules. Check: `write_test.go`,
    `destinations_test.go`, `mentions_test.go`.
-2. Add the channel check and `muster doctor`. Check: `check_test.go`, `doctor_test.go`.
-3. Narrow the SPA by type and translate the new check code. Check: `make lint`.
+2. Add the channel check and `muster doctor` with `ListBridgeDestinations`. Check: `check_test.go`, `doctor_test.go`.
+3. Narrow the SPA by type, the Destination page included, and translate the type's name and the new check code.
+   Check: `make lint`.
 4. Extend the fake and the secret probe. Check: `fakebridge_test.go`, then Verification.
 
 ## Verification
@@ -158,8 +169,9 @@ curl -s "${H[@]}" -X PUT -H "If-Match: $(ETAG)" $API/connections/$C -d '{"type":
   "event_delivery":"poll","proxy":{"enabled":true,"type":"http","address":"127.0.0.1:18091"},"limiter":{"limit":10,"per_seconds":1}}' > /dev/null
 curl -s -X DELETE 127.0.0.1:18091/_fake/requests; curl -s -X DELETE $FB/requests
 curl -s "${H[@]}" -X POST $API/destinations/$D/checks > /dev/null
-echo $(( $(curl -s $FB/requests | jq length) - $(curl -s 127.0.0.1:18091/_fake/requests | jq length) ))   # 0
-curl -s -X POST $FB/faults -d '{"path":"/v1/channels/*","delay_ms":8000,"times":1}' > /dev/null   # longer than the check waits
+# the requests of this check only: from S-075 on, the fake also records the polls of "Dev Bridge"
+echo $(( $(curl -s $FB/requests | jq '[.[] | select(.path | startswith("/v1/channels/"))] | length') - $(curl -s 127.0.0.1:18091/_fake/requests | jq length) ))   # 0
+curl -s -X POST $FB/faults -d '{"path":"/v1/channels/*/check","delay_ms":8000,"times":1}' > /dev/null   # longer than the check waits
 curl -s "${H[@]}" -X POST $API/destinations/$D/checks | grep -c 'muster-dev-bridge-token-b'   # 0
 grep -c 'muster-dev-bridge-token-b' dev.log                                       # 0
 curl -s "${H[@]}" -X PUT -H "If-Match: $(ETAG)" $API/connections/$C -d '{"type":"bridge","name":"br","base_url":"http://127.0.0.1:18094",
@@ -188,5 +200,5 @@ None.
 |---|---|---|
 | C-22.FR-3 | partial | on save, through the API and in `muster doctor`; the probe is S-074, the page S-077 |
 | C-22.AC-2 | full | |
-| C-22.AC-3 | partial | the Destination check; the Connection check is S-073, the event paths S-075 |
+| C-22.AC-3 | partial | the Destination check; the Connection check is S-073, the delivery paths S-074, the event paths S-075 |
 | C-22.AC-20 | partial | Mention settings that name everyone in the chat are refused; Mentions of linked people are S-076 |

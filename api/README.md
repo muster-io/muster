@@ -124,8 +124,9 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
   the Go and TypeScript clients.
 - **oasdiff** compares the spec with the base branch on every pull request. The report goes to the job summary and, on a
   pull request from this repository, into a comment; it does not block before 1.0 (ADR-0008). `bridge.yaml` is compared
-  too, and a breaking change of it fails the pull request from the first Bridge story on, because bridges are written
-  against it before Muster's first release (ADR-0017).
+  too, and a breaking change of it fails the pull request once its reference is published on the documentation site,
+  because bridges are written against it from then on, before Muster's first release; until then the Bridge stories
+  that implement it may still correct it (ADR-0017).
 
 Configuration that worked in the spike, for both oapi-codegen files:
 
