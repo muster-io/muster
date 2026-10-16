@@ -22,6 +22,7 @@ import (
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
+	cdb "github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 	"github.com/muster-io/muster/internal/keyring"
@@ -503,14 +504,17 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 		t.Fatal(err)
 	}
 	text := func(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
-	d.answers["ListConnections"] = &rows{values: [][]any{{int64(1), "CNAAAAAAAAAAA1", "mattermost", "Dev Mattermost",
-		text(f.URL()), pgtype.Text{}, pgtype.Text{}, pgtype.Int8{}, []byte(nil), pgtype.Text{}, pgtype.Timestamptz{},
-		ciphertext, text(keyID), time.Now(), pgtype.Text{}, pgtype.Text{}, []byte(`{"enabled":false}`),
-		[]byte(nil), pgtype.Text{}, pgtype.Timestamptz{}, int64(5), int64(1), time.Now(), int64(1), int64(2)},
-		{int64(2), "CNAAAAAAAAAAT1", "telegram", "Dev Telegram", pgtype.Text{}, text(tg.URL()), text("long_polling"),
-			pgtype.Int8{}, []byte(nil), pgtype.Text{}, pgtype.Timestamptz{}, tgCiphertext, text(tgKeyID), time.Now(),
-			pgtype.Text{}, pgtype.Text{}, []byte(`{"enabled":false}`), []byte(nil), pgtype.Text{},
-			pgtype.Timestamptz{}, int64(15), int64(1), time.Now(), int64(1), int64(0)}}}
+	d.answers["ListConnections"] = &rows{values: [][]any{
+		connectionRow(cdb.ListConnectionsRow{ID: 1, PublicID: "CNAAAAAAAAAAA1", Type: "mattermost",
+			Name: "Dev Mattermost", MattermostServerUrl: text(f.URL()), BotTokenCiphertext: ciphertext,
+			BotTokenKeyID: text(keyID), BotTokenUpdatedAt: time.Now(), Proxy: []byte(`{"enabled":false}`),
+			LimiterLimit: 5, LimiterPerSeconds: 1, CreatedAt: time.Now(), Version: 1, DestinationCount: 2}),
+		connectionRow(cdb.ListConnectionsRow{ID: 2, PublicID: "CNAAAAAAAAAAT1", Type: "telegram",
+			Name: "Dev Telegram", TelegramBotApiBaseUrl: text(tg.URL()), TelegramUpdateMode: text("long_polling"),
+			BotTokenCiphertext: tgCiphertext, BotTokenKeyID: text(tgKeyID), BotTokenUpdatedAt: time.Now(),
+			Proxy: []byte(`{"enabled":false}`), LimiterLimit: 15, LimiterPerSeconds: 1, CreatedAt: time.Now(),
+			Version: 1}),
+	}}
 	d.answers["ListMattermostDestinations"] = &rows{values: [][]any{
 		{int64(7), "DSAAAAAAAAAAA1", "alerts", pgtype.Int8{Int64: 1, Valid: true}, text(fakemattermost.TeamID),
 			text(fakemattermost.ChannelAlerts)},
@@ -523,6 +527,16 @@ func messengerDB(t *testing.T, key string) *fakeDB {
 	}}
 	d.answers["GetOutboundPolicy"] = &rows{values: [][]any{{"standard", []string{"127.0.0.0/8"}, []string(nil)}}}
 	return d
+}
+
+// connectionRow is a ListConnections row as the values Scan assigns, in the order of the generated row's fields.
+func connectionRow(r cdb.ListConnectionsRow) []any {
+	v := reflect.ValueOf(r)
+	values := make([]any, v.NumField())
+	for i := range values {
+		values[i] = v.Field(i).Interface()
+	}
+	return values
 }
 
 const (

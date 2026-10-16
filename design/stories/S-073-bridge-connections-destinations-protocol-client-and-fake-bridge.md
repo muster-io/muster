@@ -36,6 +36,7 @@ files_touched:
   - internal/connections/bridge_test.go
   - internal/connections/query.sql
   - internal/connections/doctor.go
+  - internal/doctor/doctor_test.go
   - internal/accountlinks/query.sql
   - internal/api/connections.go
   - internal/api/connections_test.go
