@@ -340,6 +340,45 @@ func (q *Queries) ListRotateBotToken(ctx context.Context, arg ListRotateBotToken
 	return items, nil
 }
 
+const listRotateBridgePushSecret = `-- name: ListRotateBridgePushSecret :many
+SELECT id, bridge_push_secret_ciphertext AS ciphertext, bridge_push_secret_key_id::text AS key_id
+FROM connections
+WHERE org_id = $1 AND bridge_push_secret_ciphertext IS NOT NULL
+  AND bridge_push_secret_key_id <> $2::text
+FOR NO KEY UPDATE
+`
+
+type ListRotateBridgePushSecretParams struct {
+	OrgID int64
+	KeyID string
+}
+
+type ListRotateBridgePushSecretRow struct {
+	ID         int64
+	Ciphertext []byte
+	KeyID      string
+}
+
+func (q *Queries) ListRotateBridgePushSecret(ctx context.Context, arg ListRotateBridgePushSecretParams) ([]ListRotateBridgePushSecretRow, error) {
+	rows, err := q.db.Query(ctx, listRotateBridgePushSecret, arg.OrgID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRotateBridgePushSecretRow{}
+	for rows.Next() {
+		var i ListRotateBridgePushSecretRow
+		if err := rows.Scan(&i.ID, &i.Ciphertext, &i.KeyID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRotateConnectionProxyPassword = `-- name: ListRotateConnectionProxyPassword :many
 SELECT id, proxy_password_ciphertext AS ciphertext, proxy_password_key_id::text AS key_id
 FROM connections
@@ -976,6 +1015,34 @@ type ReencryptBotTokenParams struct {
 
 func (q *Queries) ReencryptBotToken(ctx context.Context, arg ReencryptBotTokenParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reencryptBotToken,
+		arg.Ciphertext,
+		arg.KeyID,
+		arg.OrgID,
+		arg.ID,
+		arg.PreviousKeyID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reencryptBridgePushSecret = `-- name: ReencryptBridgePushSecret :execrows
+UPDATE connections
+SET bridge_push_secret_ciphertext = $1, bridge_push_secret_key_id = $2::text
+WHERE org_id = $3 AND id = $4 AND bridge_push_secret_key_id = $5::text
+`
+
+type ReencryptBridgePushSecretParams struct {
+	Ciphertext    []byte
+	KeyID         string
+	OrgID         int64
+	ID            int64
+	PreviousKeyID string
+}
+
+func (q *Queries) ReencryptBridgePushSecret(ctx context.Context, arg ReencryptBridgePushSecretParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reencryptBridgePushSecret,
 		arg.Ciphertext,
 		arg.KeyID,
 		arg.OrgID,

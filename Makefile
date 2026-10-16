@@ -65,7 +65,7 @@ COVER_PROFILE := $(BIN)/cover.out
 WEB_DEPS := web/node_modules/.modules.yaml
 
 # The output of make generate, checked in; sqlc writes one dbgen directory per package with a query.sql.
-GENERATED := internal/api/gen pkg/apiclient web/src/api/gen web/src/routeTree.gen.ts docs/reference \
+GENERATED := internal/api/gen internal/bridge/gen pkg/apiclient web/src/api/gen web/src/routeTree.gen.ts docs/reference \
 	$(patsubst %/query.sql,%/dbgen,$(wildcard internal/*/query.sql))
 
 # The licences shipped artifacts may depend on (ADR-0001).
@@ -192,10 +192,11 @@ test-integration: ## Run the integration tests on PostgreSQL 14 and 17 (needs Do
 # The Go outputs and the reference pages are removed first, as orval cleans its own, so that a file the generators no
 # longer write goes away.
 generate: $(WEB_DEPS) $(SQLC) ## Run every code generator
-	rm -f internal/api/gen/*.gen.go pkg/apiclient/*.gen.go internal/*/dbgen/*.go
+	rm -f internal/api/gen/*.gen.go internal/bridge/gen/*.gen.go pkg/apiclient/*.gen.go internal/*/dbgen/*.go
 	$(SQLC) generate -f sqlc.yaml
 	$(GO) tool oapi-codegen -config api/codegen-server.yaml api/openapi.yaml
 	$(GO) tool oapi-codegen -config api/codegen-client.yaml api/openapi.yaml
+	$(GO) tool oapi-codegen -config api/codegen-bridge.yaml api/bridge.yaml
 	$(PNPM) --dir web run generate
 	rm -f docs/reference/*.md
 	$(GO) run ./internal/tools/refgen -out docs/reference

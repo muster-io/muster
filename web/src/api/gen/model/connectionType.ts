@@ -24,4 +24,5 @@ export type ConnectionType = typeof ConnectionType[keyof typeof ConnectionType];
 export const ConnectionType = {
   mattermost: 'mattermost',
   telegram: 'telegram',
+  bridge: 'bridge',
 } as const;

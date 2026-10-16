@@ -104,6 +104,12 @@ export function checkCodeText(t: TFunction, code: CheckCode): string {
       return t("checks.codes.botMayNotEdit");
     case "bot_not_group_admin":
       return t("checks.codes.botNotGroupAdmin");
+    case "protocol_version_unknown":
+      return t("checks.codes.protocolVersionUnknown");
+    case "protocol_mismatch":
+      return t("checks.codes.protocolMismatch");
+    case "event_delivery_not_offered":
+      return t("checks.codes.eventDeliveryNotOffered");
     default:
       return unreachable(code);
   }

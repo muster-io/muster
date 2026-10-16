@@ -54,7 +54,7 @@ implement them.
 | Time and units | RFC 3339 UTC; durations are integer seconds in `*_seconds`. Exceptions: retention periods are whole days in `*_days`, measured latencies are milliseconds in `*_ms`. |
 | Enums | snake_case values. Kebab-case stays in URL segments, problem types and the `type` of live-update hints. |
 | Secrets | Write-only in `*Input` schemas (`writeOnly: true`); reads show `<field>_status` with `set` and `updated_at`. Free text that may echo a remote answer (`error`, `reason`, `message`, `response_body`) is masked. |
-| Nullability | Only `type: [T, "null"]`. A required nullable field (such as a hint's `id`) is always present, `null` meaning "none". |
+| Nullability | Only `type: [T, "null"]`; a nullable object is `oneOf: [{$ref: …}, {type: "null"}]`, generated as `nullable.Nullable[T]`. A required nullable field (such as a hint's `id`) is always present, `null` meaning "none". |
 | Actors | An Owner is always a User (`UserRef`). A Service account cannot become an Owner; the resolver of an Alert Group and the author of a Note are an `ActorRef` (a User or a Service account). |
 
 ### `public_id` format

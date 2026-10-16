@@ -385,8 +385,8 @@ func TestEncryptedFields(t *testing.T) {
 	fields := keyring.EncryptedFields()
 	sorted := slices.Clone(fields)
 	slices.Sort(sorted)
-	if len(fields) != 15 || len(slices.Compact(sorted)) != 15 || fields[0] != "organizations.outgoing_heartbeat_url" ||
-		fields[14] != "destination_secrets.value" {
+	if len(fields) != 16 || len(slices.Compact(sorted)) != 16 || fields[0] != "organizations.outgoing_heartbeat_url" ||
+		fields[15] != "destination_secrets.value" {
 		t.Errorf("fields %v", fields)
 	}
 	for _, tc := range []struct {

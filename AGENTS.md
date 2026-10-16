@@ -101,7 +101,7 @@ the `issue:` field by hand.
 | `internal/api/` | hand-written API handlers, one file per OpenAPI tag, and the middleware |
 | `internal/{logging,metrics,outbound,keyring,db,clock,runtime,cli,devmode,…}/` | shared infrastructure |
 | `internal/db/migrations/` | the migrations, also the schema `sqlc` reads |
-| `internal/fakes/<name>/` | fake Alertmanager, Mattermost, Telegram, OIDC and proxy servers |
+| `internal/fakes/<name>/` | fake Alertmanager, Mattermost, Telegram, bridge, OIDC and proxy servers |
 | `api/`, `web/`, `deploy/`, `docs/`, `test/` | the spec; the SPA; chart, compose and dev database; the docs site; e2e, load and docs checks |
 
 The full table, with every domain package and the list of generated paths, is
@@ -175,7 +175,7 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 | `make lint-arch` | the architecture lints | S-001 |
 | `make test`, `make test-race` | unit tests with the coverage gate of `.testcoverage.yml`, and `make test-web`; the same with the race detector | S-001, S-014 |
 | `make test-web` | the SPA's component tests, Vitest in browser mode on Chromium | S-014 |
-| `make generate`, `make generate-check` | run the code generators (the sqlc queries, the OpenAPI server and clients, the route tree); fail on stale generated files, naming them | S-001, S-002, S-007 |
+| `make generate`, `make generate-check` | run the code generators (the sqlc queries, the OpenAPI server and clients, the Bridge protocol models in `internal/bridge/gen/`, the route tree); fail on stale generated files, naming them | S-001, S-002, S-007, S-073 |
 | `make build` | the SPA, then `bin/muster` with version and commit | S-001, S-002 |
 | `make ci` | the pull-request tier, locally: `lint`, `lint-arch`, `generate-check`, `licenses`, `test-race`, `build`, and what later stories add | S-001, S-002 |
 | `make clean` | remove `bin/`: the binary, the coverage profile and the installed tools | S-001 |
@@ -197,10 +197,13 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 
 - `make dev` starts PostgreSQL on `127.0.0.1:55432` with Docker Compose, builds the binary and runs `muster dev`: app
   on `:8080`, ingest on `:8081`, internal on `:8082` (health, `/metrics`, `/_dev/`) from S-006, which adds the runtime.
-  The fake Alertmanager, Mattermost and Telegram servers listen on `127.0.0.1:19093`, `:18065` and `:18081`, and a
-  second fake Mattermost server on `:18066`; each records requests at `/_fake/requests` and takes scripted faults at
-  `/_fake/faults`. Both Mattermost servers and the Telegram server also serve a second bot, with the published tokens
-  `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, for which `muster dev` creates no Connection.
+  The fake Alertmanager, Mattermost and Telegram servers and the fake bridge listen on `127.0.0.1:19093`, `:18065`,
+  `:18081` and `:18094`, and a second fake Mattermost server on `:18066`; each records requests at `/_fake/requests`
+  and takes scripted faults at `/_fake/faults`. Both Mattermost servers and the Telegram server also serve a second
+  bot, with the published tokens `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, for which
+  `muster dev` creates no Connection. The fake bridge serves two bots: `muster-dev-bridge-token`, which the demo
+  Connection "Dev Bridge" uses in poll mode, and `muster-dev-bridge-token-b`, for which `muster dev` creates no
+  Connection; `/_fake/config` changes what its `info` says.
 - Development defaults: the bootstrap Admin `admin@example.org` with the password `muster-dev-password`, and a fixed,
   published master key that the server refuses outside development mode. A `MUSTER_*` variable that is set, even
   empty, replaces its default; the database default also yields to any field of the main connection, and the key and
@@ -217,9 +220,9 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 - `make fmt` and `golangci-lint` are clean; every `//nolint` states its reason.
 - Coverage of at least 95 % in `internal/groups`, `routing`, `delivery` and `timers`, and 80 % elsewhere; pull requests
   run the race detector.
-- Generated code (`internal/*/dbgen/`, `internal/api/gen/`, `pkg/apiclient/`, `web/src/api/gen/`,
-  `web/src/routeTree.gen.ts`, `docs/reference/`, lock files) is checked in and current: change the input, run
-  `make generate`, commit the output.
+- Generated code (`internal/*/dbgen/`, `internal/api/gen/`, `internal/bridge/gen/`, `pkg/apiclient/`,
+  `web/src/api/gen/`, `web/src/routeTree.gen.ts`, `docs/reference/`, lock files) is checked in and current: change the
+  input, run `make generate`, commit the output.
 - Shipped artifacts (binary, image, SPA bundle, chart) depend only on MIT, MIT-0, BSD-2-Clause, BSD-3-Clause,
   Apache-2.0, ISC, 0BSD, Unlicense, CC0-1.0 or unmodified MPL-2.0 code; anything else needs an ADR first. Build tooling
   may use any OSI-approved licence. A pull request that adds a dependency states its licence, latest release date and

@@ -552,7 +552,7 @@ func (q *Queries) ListAccountLinksOfUser(ctx context.Context, arg ListAccountLin
 const listLinkableConnections = `-- name: ListLinkableConnections :many
 SELECT public_id, name, type
 FROM connections
-WHERE org_id = $1 AND deleted_at IS NULL
+WHERE org_id = $1 AND deleted_at IS NULL AND type <> 'bridge'
 ORDER BY type, lower(name), id
 `
 
@@ -563,6 +563,8 @@ type ListLinkableConnectionsRow struct {
 }
 
 // ListLinkableConnections lists the Connections that are not deleted, by messenger and name (C-18.FR-10).
+// Bridge Connections are not linkable until their Account links exist (S-076): LinkableConnection.messenger has no
+// bridge.
 func (q *Queries) ListLinkableConnections(ctx context.Context, orgID int64) ([]ListLinkableConnectionsRow, error) {
 	rows, err := q.db.Query(ctx, listLinkableConnections, orgID)
 	if err != nil {

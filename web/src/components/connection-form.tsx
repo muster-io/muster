@@ -154,9 +154,15 @@ export function addressChanged(v: ConnectionValues, stored: Connection | undefin
   if (stored === undefined) {
     return false;
   }
-  return stored.type === "telegram"
-    ? normalizeBaseUrl(v.bot_api_base_url) !== stored.bot_api_base_url
-    : v.server_url.trim() !== stored.server_url;
+  switch (stored.type) {
+    case "telegram":
+      return normalizeBaseUrl(v.bot_api_base_url) !== stored.bot_api_base_url;
+    case "bridge":
+      // The form does not render for a Bridge yet; its address is the base URL.
+      return v.server_url.trim() !== stored.base_url;
+    default:
+      return v.server_url.trim() !== stored.server_url;
+  }
 }
 
 /** Field errors by JSON pointer, such as "/server_url" or "/proxy/address", with their codes. */

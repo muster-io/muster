@@ -19,7 +19,7 @@
  */
 
 /**
- * What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names. A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+ * What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
  * @nullable
  */
 export type NullableConnectionCheckCode = typeof NullableConnectionCheckCode[keyof typeof NullableConnectionCheckCode] | null;
@@ -38,4 +38,7 @@ export const NullableConnectionCheckCode = {
   blocked: 'blocked',
   request_failed: 'request_failed',
   webhook_set: 'webhook_set',
+  protocol_version_unknown: 'protocol_version_unknown',
+  protocol_mismatch: 'protocol_mismatch',
+  event_delivery_not_offered: 'event_delivery_not_offered',
 } as const;

@@ -413,8 +413,11 @@
       "commentsDisabled": "Comments are not enabled for this channel. Enable comments in the channel settings in Telegram; this creates its discussion group.",
       "connectFailed": "The connection failed.",
       "dnsFailed": "The host name does not resolve.",
+      "eventDeliveryNotOffered": "The bridge does not offer this event delivery mode.",
       "notAChannel": "This chat is not a channel.",
       "notBotApi": "This is not a Bot API.",
+      "protocolMismatch": "The bridge's answer does not match the protocol.",
+      "protocolVersionUnknown": "The bridge speaks a protocol version this Muster does not.",
       "proxyRefused": "The proxy refused the connection.",
       "requestFailed": "The request failed.",
       "timeout": "No answer in time.",
@@ -625,7 +628,10 @@
       },
       "webhookHint": "Telegram posts each update to Muster's Ingestion URL (MUSTER_INGEST_URL), which it must reach over HTTPS. Saving in this mode sets the webhook; leaving the mode or deleting the Connection removes it."
     },
-    "title": "Connections"
+    "title": "Connections",
+    "types": {
+      "bridge": "Bridge"
+    }
   },
   "deliveries": {
     "newTab": "(opens in a new tab)",

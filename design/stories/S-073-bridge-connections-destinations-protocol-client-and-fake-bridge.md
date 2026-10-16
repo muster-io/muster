@@ -10,6 +10,7 @@ files_touched:
   - api/openapi.yaml
   - api/codegen-bridge.yaml
   - api/bridge_test.go
+  - api/README.md
   - Makefile
   - AGENTS.md
   - CONTRIBUTING.md
@@ -17,8 +18,11 @@ files_touched:
   - internal/db/migrations/0008_bridge_connections.up.sql
   - internal/db/migrations/0008_bridge_connections.down.sql
   - design/db/schema.md
+  - internal/db/db_test.go
+  - internal/db/migrate_test.go
   - internal/keyring/rotate.go
   - internal/keyring/query.sql
+  - internal/keyring/rotate_test.go
   - internal/keyring/rotate_integration_test.go
   - internal/bridge/client.go
   - internal/bridge/client_test.go
@@ -27,10 +31,12 @@ files_touched:
   - internal/bridge/classify.go
   - internal/bridge/classify_test.go
   - internal/connections/connections.go
+  - internal/connections/connections_test.go
   - internal/connections/bridge.go
   - internal/connections/bridge_test.go
   - internal/connections/query.sql
   - internal/connections/doctor.go
+  - internal/doctor/doctor_test.go
   - internal/accountlinks/query.sql
   - internal/api/connections.go
   - internal/api/connections_test.go
@@ -39,6 +45,7 @@ files_touched:
   - internal/devmode/devmode.go
   - internal/devmode/devmode_test.go
   - internal/cli/dev.go
+  - internal/cli/dev_test.go
   - internal/runtime/runtime.go
   - test/e2e/harness.go
   - internal/archlint/secretleak.go
@@ -250,7 +257,7 @@ curl -s -X DELETE 127.0.0.1:18091/_fake/requests; curl -s -X DELETE $FB/requests
 curl -s "${H[@]}" -X POST $API/connections/$C/checks | jq -r '.steps[0].via'   # proxy
 # the requests of this Connection's check only: from S-075 on, the fake also records the polls of "Dev Bridge"
 echo $(( $(curl -s $FB/requests | jq '[.[] | select(.path == "/v1/info")] | length') - $(curl -s 127.0.0.1:18091/_fake/requests | jq length) ))   # 0
-curl -s -X POST $FB/faults -d '{"path":"/v1/info","delay_ms":8000,"times":1}' > /dev/null   # longer than the check waits
+curl -s -X POST $FB/faults -d '{"path":"/v1/info","delay_ms":12000,"times":1}' > /dev/null   # longer than the check waits
 curl -s "${H[@]}" -X POST $API/connections/$C/checks | grep -c 'muster-dev-bridge-token-b'   # 0
 grep -c 'muster-dev-bridge-token-b\|whsec_MfKQ' dev.log                            # 0
 

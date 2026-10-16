@@ -5,8 +5,11 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/oapi-codegen/nullable"
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/connections"
@@ -15,8 +18,8 @@ import (
 	"github.com/muster-io/muster/internal/mattermost"
 )
 
-// Connections is what the API needs of internal/connections: Mattermost and Telegram Connections, their checks and the
-// channels of a Mattermost one.
+// Connections is what the API needs of internal/connections: Mattermost, Telegram and Bridge Connections, their checks
+// and the channels of a Mattermost one.
 type Connections interface {
 	List(ctx context.Context, f connections.ListFilter) (connections.Page, error)
 	Get(ctx context.Context, publicID string) (connections.Connection, error)
@@ -27,6 +30,7 @@ type Connections interface {
 	Check(ctx context.Context, publicID string, baseURL *string) (connections.CheckResult, error)
 	Channels(ctx context.Context, publicID, teamID, q string) ([]connections.Channel, error)
 	CallbackURL(publicID string) string
+	BridgeCallbackURL(publicID string) string
 }
 
 // connectionsCursor is the cursor of the Connection list.
@@ -73,8 +77,8 @@ func (s *Server) ListConnections(ctx context.Context, req gen.ListConnectionsReq
 	return out, nil
 }
 
-// CreateConnection is createConnection (C-13.FR-1, C-14.FR-1): a Mattermost or Telegram Connection; the bot token is
-// write-only.
+// CreateConnection is createConnection (C-13.FR-1, C-14.FR-1, C-22.FR-1): a Mattermost, Telegram or Bridge
+// Connection; the bot token and the push secret are write-only.
 func (s *Server) CreateConnection(ctx context.Context, req gen.CreateConnectionRequestObject) (
 	gen.CreateConnectionResponseObject, error) {
 	r, err := connectionRequester(ctx)
@@ -116,7 +120,7 @@ func (s *Server) GetConnection(ctx context.Context, req gen.GetConnectionRequest
 	return gen.GetConnection200JSONResponse{Body: body, Headers: gen.GetConnection200ResponseHeaders{ETag: &tag}}, nil
 }
 
-// UpdateConnection is updateConnection, with If-Match; an omitted bot token keeps the stored one.
+// UpdateConnection is updateConnection, with If-Match; an omitted bot token or push secret keeps the stored one.
 func (s *Server) UpdateConnection(ctx context.Context, req gen.UpdateConnectionRequestObject) (
 	gen.UpdateConnectionResponseObject, error) {
 	r, err := connectionRequester(ctx)
@@ -167,10 +171,11 @@ func (s *Server) DeleteConnection(ctx context.Context, req gen.DeleteConnectionR
 	return gen.DeleteConnection204Response{}, nil
 }
 
-// CheckConnection is checkConnection (C-13.FR-2, C-14.FR-11) on the interactive path: the steps with their latency and
-// path — the token of a Mattermost Connection; the dry probe, getMe and getWebhookInfo of a Telegram one, only the dry
-// probe with an unsaved base_url — the bot's name once the token works, a Telegram bot's webhook and pending updates,
-// and the warnings that do not fail the check. A step's message is English; its code is what clients translate.
+// CheckConnection is checkConnection (C-13.FR-2, C-14.FR-11, C-22.FR-2) on the interactive path: the steps with their
+// latency and path — the token of a Mattermost Connection; the dry probe, getMe and getWebhookInfo of a Telegram one,
+// only the dry probe with an unsaved base_url; info and event_delivery of a Bridge — the bot's name once the token
+// works, a Telegram bot's webhook and pending updates, the info a Bridge's check read, null when it failed, and the
+// warnings that do not fail the check. A step's message is English; its code is what clients translate.
 func (s *Server) CheckConnection(ctx context.Context, req gen.CheckConnectionRequestObject) (
 	gen.CheckConnectionResponseObject, error) {
 	var baseURL *string
@@ -224,6 +229,9 @@ func (s *Server) CheckConnection(ctx context.Context, req gen.CheckConnectionReq
 	} else {
 		out.PendingUpdates.SetNull()
 	}
+	if res.Bridge {
+		out.Info = bridgeInfoOf(res.Info)
+	}
 	return out, nil
 }
 
@@ -264,16 +272,18 @@ func channelTypeOf(t string) gen.MattermostChannelType {
 	return gen.MattermostChannelTypeOpen
 }
 
-// connectionInputOf is the Input of a Connection's body, Mattermost or Telegram.
+// connectionInputOf is the Input of a Connection's body, Mattermost, Telegram or Bridge.
 func connectionInputOf(body gen.ConnectionInput) (connections.Input, error) {
 	kind, err := body.Discriminator()
 	if err != nil {
 		return connections.Input{}, fieldProblem(http.StatusBadRequest, "/type", fieldInvalidFormat,
-			"The type is not mattermost or telegram.")
+			"The type is not mattermost, telegram or bridge.")
 	}
 	switch kind {
 	case connections.TypeTelegram:
 		return telegramInputOf(body)
+	case connections.TypeBridge:
+		return bridgeInputOf(body)
 	case connections.TypeMattermost:
 	default:
 		return connections.Input{Type: kind}, nil
@@ -307,11 +317,33 @@ func telegramInputOf(body gen.ConnectionInput) (connections.Input, error) {
 	return in, nil
 }
 
+// bridgeInputOf is the Input of a Bridge Connection's body.
+func bridgeInputOf(body gen.ConnectionInput) (connections.Input, error) {
+	b, err := body.AsBridgeConnectionInput()
+	if err != nil {
+		return connections.Input{}, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
+			"The body is not a Bridge Connection.")
+	}
+	in := connections.Input{Type: connections.TypeBridge, Name: b.Name, BridgeBaseURL: b.BaseUrl,
+		EventDelivery: string(b.EventDelivery), Proxy: proxyInput(b.Proxy),
+		Limiter: connections.Limiter{Limit: int64(b.Limiter.Limit), PerSeconds: int64(b.Limiter.PerSeconds)}}
+	if b.BotToken != nil {
+		in.BotToken = keyring.Replace(logging.Secret(*b.BotToken))
+	}
+	if b.PushSecret != nil {
+		in.PushSecret = keyring.Replace(logging.Secret(*b.PushSecret))
+	}
+	return in, nil
+}
+
 // connectionOf is the API form of a Connection: its secrets as their status, and the callback address of a Mattermost
-// one or the warnings of a Telegram one.
+// one, the warnings of a Telegram one or the callback address and the last info of a Bridge.
 func (s *Server) connectionOf(c connections.Connection) (gen.Connection, error) {
-	if c.Type == connections.TypeTelegram {
+	switch c.Type {
+	case connections.TypeTelegram:
 		return telegramConnectionOf(c)
+	case connections.TypeBridge:
+		return s.bridgeConnectionOf(c)
 	}
 	tag := etag(c.Version)
 	callback := s.connections.CallbackURL(c.PublicID)
@@ -353,4 +385,42 @@ func telegramConnectionOf(c connections.Connection) (gen.Connection, error) {
 		return gen.Connection{}, err
 	}
 	return out, nil
+}
+
+// bridgeConnectionOf is the API form of a Bridge Connection: its info and when it was read are null before its first
+// check and after its base URL or token changed.
+func (s *Server) bridgeConnectionOf(c connections.Connection) (gen.Connection, error) {
+	tag := etag(c.Version)
+	callback := s.connections.BridgeCallbackURL(c.PublicID)
+	b := gen.BridgeConnection{Id: c.PublicID, Type: gen.BridgeConnectionTypeBridge, Name: c.Name,
+		BaseUrl: c.BridgeBaseURL, EventDelivery: gen.BridgeEventDelivery(c.EventDelivery),
+		BotTokenStatus: keyStatusOf(c.BotToken), PushSecretStatus: keyStatusOf(c.PushSecret), CallbackUrl: &callback,
+		Proxy:            proxyOf(c.Proxy, c.ProxyPassword),
+		Limiter:          gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)},
+		DestinationCount: int(c.DestinationCount), CreatedAt: c.CreatedAt, Etag: &tag}
+	info := bridgeInfoOf(c.BridgeInfo)
+	b.Info = info
+	if c.BridgeInfoReadAt != nil && !info.IsNull() {
+		b.InfoReadAt.Set(*c.BridgeInfoReadAt)
+	} else {
+		b.InfoReadAt.SetNull()
+	}
+	var out gen.Connection
+	if err := out.FromBridgeConnection(b); err != nil {
+		return gen.Connection{}, err
+	}
+	return out, nil
+}
+
+// bridgeInfoOf is a bridge's info as Muster stored it, in the API form: the fields of BridgeInfo; null without one,
+// and for a copy that does not decode, which the next read replaces, as connections.StoredInfo treats it.
+func bridgeInfoOf(raw json.RawMessage) nullable.Nullable[gen.BridgeInfo] {
+	var out nullable.Nullable[gen.BridgeInfo]
+	var i gen.BridgeInfo
+	if len(raw) == 0 || json.Unmarshal(raw, &i) != nil {
+		out.SetNull()
+		return out
+	}
+	out.Set(i)
+	return out
 }

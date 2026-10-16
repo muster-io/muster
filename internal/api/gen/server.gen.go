@@ -197,6 +197,189 @@ func (e AuditActorKind) Valid() bool {
 	}
 }
 
+// Defines values for BridgeButtonStyle.
+const (
+	Danger  BridgeButtonStyle = "danger"
+	Neutral BridgeButtonStyle = "neutral"
+	Primary BridgeButtonStyle = "primary"
+	Success BridgeButtonStyle = "success"
+)
+
+// Valid indicates whether the value is a known member of the BridgeButtonStyle enum.
+func (e BridgeButtonStyle) Valid() bool {
+	switch e {
+	case Danger:
+		return true
+	case Neutral:
+		return true
+	case Primary:
+		return true
+	case Success:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BridgeCapabilitiesPrivateAnswers.
+const (
+	Ephemeral BridgeCapabilitiesPrivateAnswers = "ephemeral"
+	Popup     BridgeCapabilitiesPrivateAnswers = "popup"
+)
+
+// Valid indicates whether the value is a known member of the BridgeCapabilitiesPrivateAnswers enum.
+func (e BridgeCapabilitiesPrivateAnswers) Valid() bool {
+	switch e {
+	case Ephemeral:
+		return true
+	case Popup:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BridgeCapabilitiesThreadMessages.
+const (
+	BridgeCapabilitiesThreadMessagesAll          BridgeCapabilitiesThreadMessages = "all"
+	BridgeCapabilitiesThreadMessagesMentionsOnly BridgeCapabilitiesThreadMessages = "mentions_only"
+)
+
+// Valid indicates whether the value is a known member of the BridgeCapabilitiesThreadMessages enum.
+func (e BridgeCapabilitiesThreadMessages) Valid() bool {
+	switch e {
+	case BridgeCapabilitiesThreadMessagesAll:
+		return true
+	case BridgeCapabilitiesThreadMessagesMentionsOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BridgeConnectionType.
+const (
+	BridgeConnectionTypeBridge BridgeConnectionType = "bridge"
+)
+
+// Valid indicates whether the value is a known member of the BridgeConnectionType enum.
+func (e BridgeConnectionType) Valid() bool {
+	switch e {
+	case BridgeConnectionTypeBridge:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BridgeConnectionBaseType.
+const (
+	BridgeConnectionBaseTypeBridge BridgeConnectionBaseType = "bridge"
+)
+
+// Valid indicates whether the value is a known member of the BridgeConnectionBaseType enum.
+func (e BridgeConnectionBaseType) Valid() bool {
+	switch e {
+	case BridgeConnectionBaseTypeBridge:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BridgeConnectionInputType.
+const (
+	BridgeConnectionInputTypeBridge BridgeConnectionInputType = "bridge"
+)
+
+// Valid indicates whether the value is a known member of the BridgeConnectionInputType enum.
+func (e BridgeConnectionInputType) Valid() bool {
+	switch e {
+	case BridgeConnectionInputTypeBridge:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BridgeEventDelivery.
+const (
+	BridgeEventDeliveryPoll BridgeEventDelivery = "poll"
+	BridgeEventDeliveryPush BridgeEventDelivery = "push"
+)
+
+// Valid indicates whether the value is a known member of the BridgeEventDelivery enum.
+func (e BridgeEventDelivery) Valid() bool {
+	switch e {
+	case BridgeEventDeliveryPoll:
+		return true
+	case BridgeEventDeliveryPush:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BridgeInfoEventDelivery.
+const (
+	BridgeInfoEventDeliveryPoll BridgeInfoEventDelivery = "poll"
+	BridgeInfoEventDeliveryPush BridgeInfoEventDelivery = "push"
+)
+
+// Valid indicates whether the value is a known member of the BridgeInfoEventDelivery enum.
+func (e BridgeInfoEventDelivery) Valid() bool {
+	switch e {
+	case BridgeInfoEventDeliveryPoll:
+		return true
+	case BridgeInfoEventDeliveryPush:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BridgeInfoProtocolVersion.
+const (
+	BridgeInfoProtocolVersionN1 BridgeInfoProtocolVersion = "1"
+)
+
+// Valid indicates whether the value is a known member of the BridgeInfoProtocolVersion enum.
+func (e BridgeInfoProtocolVersion) Valid() bool {
+	switch e {
+	case BridgeInfoProtocolVersionN1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BridgeInfoUserLookup.
+const (
+	BridgeInfoUserLookupEmail    BridgeInfoUserLookup = "email"
+	BridgeInfoUserLookupLogin    BridgeInfoUserLookup = "login"
+	BridgeInfoUserLookupNone     BridgeInfoUserLookup = "none"
+	BridgeInfoUserLookupUserId   BridgeInfoUserLookup = "user_id"
+	BridgeInfoUserLookupUsername BridgeInfoUserLookup = "username"
+)
+
+// Valid indicates whether the value is a known member of the BridgeInfoUserLookup enum.
+func (e BridgeInfoUserLookup) Valid() bool {
+	switch e {
+	case BridgeInfoUserLookupEmail:
+		return true
+	case BridgeInfoUserLookupLogin:
+		return true
+	case BridgeInfoUserLookupNone:
+		return true
+	case BridgeInfoUserLookupUserId:
+		return true
+	case BridgeInfoUserLookupUsername:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BulkCommandRequestCommand.
 const (
 	BulkCommandRequestCommandAcknowledge BulkCommandRequestCommand = "acknowledge"
@@ -320,8 +503,10 @@ func (e ConnectionCheckResultWarnings) Valid() bool {
 // Defines values for ConnectionCheckStepName.
 const (
 	ConnectionCheckStepNameDryProbe       ConnectionCheckStepName = "dry_probe"
+	ConnectionCheckStepNameEventDelivery  ConnectionCheckStepName = "event_delivery"
 	ConnectionCheckStepNameGetMe          ConnectionCheckStepName = "get_me"
 	ConnectionCheckStepNameGetWebhookInfo ConnectionCheckStepName = "get_webhook_info"
+	ConnectionCheckStepNameInfo           ConnectionCheckStepName = "info"
 	ConnectionCheckStepNameToken          ConnectionCheckStepName = "token"
 )
 
@@ -330,9 +515,13 @@ func (e ConnectionCheckStepName) Valid() bool {
 	switch e {
 	case ConnectionCheckStepNameDryProbe:
 		return true
+	case ConnectionCheckStepNameEventDelivery:
+		return true
 	case ConnectionCheckStepNameGetMe:
 		return true
 	case ConnectionCheckStepNameGetWebhookInfo:
+		return true
+	case ConnectionCheckStepNameInfo:
 		return true
 	case ConnectionCheckStepNameToken:
 		return true
@@ -361,6 +550,7 @@ func (e ConnectionPath) Valid() bool {
 
 // Defines values for ConnectionType.
 const (
+	ConnectionTypeBridge     ConnectionType = "bridge"
 	ConnectionTypeMattermost ConnectionType = "mattermost"
 	ConnectionTypeTelegram   ConnectionType = "telegram"
 )
@@ -368,6 +558,8 @@ const (
 // Valid indicates whether the value is a known member of the ConnectionType enum.
 func (e ConnectionType) Valid() bool {
 	switch e {
+	case ConnectionTypeBridge:
+		return true
 	case ConnectionTypeMattermost:
 		return true
 	case ConnectionTypeTelegram:
@@ -1207,19 +1399,22 @@ func (e NullableAlertGroupStatus) Valid() bool {
 
 // Defines values for NullableConnectionCheckCode.
 const (
-	NullableConnectionCheckCodeBlocked          NullableConnectionCheckCode = "blocked"
-	NullableConnectionCheckCodeConnectFailed    NullableConnectionCheckCode = "connect_failed"
-	NullableConnectionCheckCodeDnsFailed        NullableConnectionCheckCode = "dns_failed"
-	NullableConnectionCheckCodeLessThannil      NullableConnectionCheckCode = "<nil>"
-	NullableConnectionCheckCodeNotBotApi        NullableConnectionCheckCode = "not_bot_api"
-	NullableConnectionCheckCodeProxyRefused     NullableConnectionCheckCode = "proxy_refused"
-	NullableConnectionCheckCodeRequestFailed    NullableConnectionCheckCode = "request_failed"
-	NullableConnectionCheckCodeTimeout          NullableConnectionCheckCode = "timeout"
-	NullableConnectionCheckCodeTlsFailed        NullableConnectionCheckCode = "tls_failed"
-	NullableConnectionCheckCodeTokenInvalid     NullableConnectionCheckCode = "token_invalid"
-	NullableConnectionCheckCodeUnexpectedStatus NullableConnectionCheckCode = "unexpected_status"
-	NullableConnectionCheckCodeWebhookSet       NullableConnectionCheckCode = "webhook_set"
-	NullableConnectionCheckCodeWrongPathPrefix  NullableConnectionCheckCode = "wrong_path_prefix"
+	NullableConnectionCheckCodeBlocked                 NullableConnectionCheckCode = "blocked"
+	NullableConnectionCheckCodeConnectFailed           NullableConnectionCheckCode = "connect_failed"
+	NullableConnectionCheckCodeDnsFailed               NullableConnectionCheckCode = "dns_failed"
+	NullableConnectionCheckCodeEventDeliveryNotOffered NullableConnectionCheckCode = "event_delivery_not_offered"
+	NullableConnectionCheckCodeLessThannil             NullableConnectionCheckCode = "<nil>"
+	NullableConnectionCheckCodeNotBotApi               NullableConnectionCheckCode = "not_bot_api"
+	NullableConnectionCheckCodeProtocolMismatch        NullableConnectionCheckCode = "protocol_mismatch"
+	NullableConnectionCheckCodeProtocolVersionUnknown  NullableConnectionCheckCode = "protocol_version_unknown"
+	NullableConnectionCheckCodeProxyRefused            NullableConnectionCheckCode = "proxy_refused"
+	NullableConnectionCheckCodeRequestFailed           NullableConnectionCheckCode = "request_failed"
+	NullableConnectionCheckCodeTimeout                 NullableConnectionCheckCode = "timeout"
+	NullableConnectionCheckCodeTlsFailed               NullableConnectionCheckCode = "tls_failed"
+	NullableConnectionCheckCodeTokenInvalid            NullableConnectionCheckCode = "token_invalid"
+	NullableConnectionCheckCodeUnexpectedStatus        NullableConnectionCheckCode = "unexpected_status"
+	NullableConnectionCheckCodeWebhookSet              NullableConnectionCheckCode = "webhook_set"
+	NullableConnectionCheckCodeWrongPathPrefix         NullableConnectionCheckCode = "wrong_path_prefix"
 )
 
 // Valid indicates whether the value is a known member of the NullableConnectionCheckCode enum.
@@ -1231,9 +1426,15 @@ func (e NullableConnectionCheckCode) Valid() bool {
 		return true
 	case NullableConnectionCheckCodeDnsFailed:
 		return true
+	case NullableConnectionCheckCodeEventDeliveryNotOffered:
+		return true
 	case NullableConnectionCheckCodeLessThannil:
 		return true
 	case NullableConnectionCheckCodeNotBotApi:
+		return true
+	case NullableConnectionCheckCodeProtocolMismatch:
+		return true
+	case NullableConnectionCheckCodeProtocolVersionUnknown:
 		return true
 	case NullableConnectionCheckCodeProxyRefused:
 		return true
@@ -1873,19 +2074,19 @@ func (e SessionState) Valid() bool {
 
 // Defines values for SeverityLevel.
 const (
-	Critical SeverityLevel = "critical"
-	Info     SeverityLevel = "info"
-	Warning  SeverityLevel = "warning"
+	SeverityLevelCritical SeverityLevel = "critical"
+	SeverityLevelInfo     SeverityLevel = "info"
+	SeverityLevelWarning  SeverityLevel = "warning"
 )
 
 // Valid indicates whether the value is a known member of the SeverityLevel enum.
 func (e SeverityLevel) Valid() bool {
 	switch e {
-	case Critical:
+	case SeverityLevelCritical:
 		return true
-	case Info:
+	case SeverityLevelInfo:
 		return true
-	case Warning:
+	case SeverityLevelWarning:
 		return true
 	default:
 		return false
@@ -3214,6 +3415,204 @@ type AuditEntryList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// BridgeButtonStyle A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.
+type BridgeButtonStyle string
+
+// BridgeCapabilities The optional features of the bridge. A missing member means the feature is not offered.
+type BridgeCapabilities struct {
+	// Buttons The bridge shows buttons and reports presses on them.
+	Buttons *struct {
+		DataMaxBytes int `json:"data_max_bytes"`
+
+		// MaxPerMessage Muster sends at most this many; Snooze durations are dropped first.
+		MaxPerMessage int `json:"max_per_message"`
+		MaxPerRow     int `json:"max_per_row"`
+
+		// Styles The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.
+		Styles []BridgeButtonStyle `json:"styles"`
+	} `json:"buttons,omitempty"`
+
+	// Delete The bot can delete its own messages (unused by Muster L1).
+	Delete *struct {
+		MaxAgeSeconds nullable.Nullable[int] `json:"max_age_seconds"`
+	} `json:"delete,omitempty"`
+
+	// DeletionEvents The bridge reports `message_deleted` when a message of the bot is deleted in the messenger.
+	DeletionEvents *bool `json:"deletion_events,omitempty"`
+
+	// DirectMessages The bot can send direct messages, which Account links by code need.
+	DirectMessages *struct {
+		// BotCanStart Whether the bot can write to a person who never wrote to it.
+		BotCanStart bool `json:"bot_can_start"`
+	} `json:"direct_messages,omitempty"`
+
+	// NativeMentions Mention markers become the messenger's own mentions, which notify the person.
+	NativeMentions *bool `json:"native_mentions,omitempty"`
+
+	// PrivateAnswers How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.
+	PrivateAnswers *[]BridgeCapabilitiesPrivateAnswers `json:"private_answers,omitempty"`
+
+	// QuietMessages The messenger can post a new message without notifying anyone (`notify` false).
+	QuietMessages *bool `json:"quiet_messages,omitempty"`
+
+	// StatusColor The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.
+	StatusColor *bool `json:"status_color,omitempty"`
+
+	// ThreadMessages The bridge reports people's messages in Threads of the bot's messages — every one, or only those that mention the bot. Text commands need it.
+	ThreadMessages *BridgeCapabilitiesThreadMessages `json:"thread_messages,omitempty"`
+}
+
+// BridgeCapabilitiesPrivateAnswers defines model for BridgeCapabilities.PrivateAnswers.
+type BridgeCapabilitiesPrivateAnswers string
+
+// BridgeCapabilitiesThreadMessages The bridge reports people's messages in Threads of the bot's messages — every one, or only those that mention the bot. Text commands need it.
+type BridgeCapabilitiesThreadMessages string
+
+// BridgeConnection defines model for BridgeConnection.
+type BridgeConnection struct {
+	// BaseUrl Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.
+	BaseUrl string `json:"base_url"`
+
+	// BotTokenStatus What a read shows instead of a Secret. The value itself is never returned.
+	BotTokenStatus SecretStatus `json:"bot_token_status"`
+
+	// CallbackUrl `bridgeEvent` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/bridge/<id>`), where a bridge in push mode posts events signed with the push secret.
+	CallbackUrl *string   `json:"callback_url,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+
+	// DestinationCount A Connection used by Destinations cannot be deleted.
+	DestinationCount int `json:"destination_count"`
+
+	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
+	Etag *string `json:"etag,omitempty"`
+
+	// EventDelivery How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection's `callback_url`, signed with the push secret.
+	EventDelivery BridgeEventDelivery `json:"event_delivery"`
+
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	Id PublicId `json:"id"`
+
+	// Info The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.
+	Info nullable.Nullable[BridgeInfo] `json:"info,omitempty"`
+
+	// InfoReadAt When Muster read `info`; null while `info` is null.
+	InfoReadAt nullable.Nullable[time.Time] `json:"info_read_at,omitempty"`
+
+	// Limiter A rate limit of `limit` calls per `per_seconds`.
+	Limiter Limiter `json:"limiter"`
+	Name    string  `json:"name"`
+
+	// Proxy Per-client proxy as read. The password is a Secret.
+	Proxy ProxyConfig `json:"proxy"`
+
+	// PushSecretStatus What a read shows instead of a Secret. The value itself is never returned.
+	PushSecretStatus SecretStatus         `json:"push_secret_status"`
+	Type             BridgeConnectionType `json:"type"`
+}
+
+// BridgeConnectionType defines model for BridgeConnection.Type.
+type BridgeConnectionType string
+
+// BridgeConnectionBase defines model for BridgeConnectionBase.
+type BridgeConnectionBase struct {
+	// BaseUrl Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.
+	BaseUrl string `json:"base_url"`
+
+	// EventDelivery How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection's `callback_url`, signed with the push secret.
+	EventDelivery BridgeEventDelivery `json:"event_delivery"`
+
+	// Limiter A rate limit of `limit` calls per `per_seconds`.
+	Limiter Limiter                  `json:"limiter"`
+	Name    string                   `json:"name"`
+	Type    BridgeConnectionBaseType `json:"type"`
+}
+
+// BridgeConnectionBaseType defines model for BridgeConnectionBase.Type.
+type BridgeConnectionBaseType string
+
+// BridgeConnectionInput defines model for BridgeConnectionInput.
+type BridgeConnectionInput struct {
+	// BaseUrl Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.
+	BaseUrl string `json:"base_url"`
+
+	// BotToken Write-only Secret. Omit on update to keep the stored one; a new `base_url` needs it again.
+	BotToken *string `json:"bot_token,omitempty"`
+
+	// EventDelivery How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection's `callback_url`, signed with the push secret.
+	EventDelivery BridgeEventDelivery `json:"event_delivery"`
+
+	// Limiter A rate limit of `limit` calls per `per_seconds`.
+	Limiter Limiter `json:"limiter"`
+	Name    string  `json:"name"`
+
+	// Proxy Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.
+	Proxy ProxyConfigInput `json:"proxy"`
+
+	// PushSecret Write-only Secret in the Standard Webhooks form, `whsec_` and base64; required with `event_delivery` `push`. Omit on update to keep the stored one; a save in `poll` clears it.
+	PushSecret *string                   `json:"push_secret,omitempty"`
+	Type       BridgeConnectionInputType `json:"type"`
+}
+
+// BridgeConnectionInputType defines model for BridgeConnectionInput.Type.
+type BridgeConnectionInputType string
+
+// BridgeEventDelivery How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection's `callback_url`, signed with the push secret.
+type BridgeEventDelivery string
+
+// BridgeInfo The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).
+type BridgeInfo struct {
+	Bridge struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	} `json:"bridge"`
+
+	// Capabilities The optional features of the bridge. A missing member means the feature is not offered.
+	Capabilities BridgeCapabilities `json:"capabilities"`
+
+	// EventDelivery The event delivery modes the bridge offers; each Connection chooses one.
+	EventDelivery []BridgeInfoEventDelivery `json:"event_delivery"`
+
+	// Limits The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.
+	Limits BridgeLimits `json:"limits"`
+
+	// LinkUrlTemplate An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.
+	LinkUrlTemplate nullable.Nullable[string] `json:"link_url_template,omitempty"`
+	Messenger       struct {
+		// Name The messenger's name as people know it; Muster shows it on the Connection and the Destinations.
+		Name string `json:"name"`
+	} `json:"messenger"`
+
+	// ProtocolVersion The major version of this protocol the bridge speaks.
+	ProtocolVersion BridgeInfoProtocolVersion `json:"protocol_version"`
+
+	// UserLookup What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.
+	UserLookup BridgeInfoUserLookup `json:"user_lookup"`
+}
+
+// BridgeInfoEventDelivery defines model for BridgeInfo.EventDelivery.
+type BridgeInfoEventDelivery string
+
+// BridgeInfoProtocolVersion The major version of this protocol the bridge speaks.
+type BridgeInfoProtocolVersion string
+
+// BridgeInfoUserLookup What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.
+type BridgeInfoUserLookup string
+
+// BridgeLimits The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.
+type BridgeLimits struct {
+	// EditMaxAgeSeconds How long after posting the bot can still edit a message; `null` when edits never expire. Muster stops editing a minute earlier.
+	EditMaxAgeSeconds nullable.Nullable[int] `json:"edit_max_age_seconds"`
+
+	// MaxBodyLength The longest `body`, in Unicode code points of the CommonMark Muster sends, that the bridge always accepts for a post and for an edit alike, after its own rendering.
+	MaxBodyLength int `json:"max_body_length"`
+
+	// SendPerSecond A hint for the Connection limiter, over all channels of the bot.
+	SendPerSecond *float32 `json:"send_per_second,omitempty"`
+
+	// SendPerSecondPerChannel A hint for the Destination limiter; `rate_limited` stays the truth.
+	SendPerSecondPerChannel *float32 `json:"send_per_second_per_channel,omitempty"`
+}
+
 // BrokenDestination defines model for BrokenDestination.
 type BrokenDestination struct {
 	Destination EntityRef `json:"destination"`
@@ -3287,10 +3686,13 @@ type ConnectionCheckRequest struct {
 // ConnectionCheckResult defines model for ConnectionCheckResult.
 type ConnectionCheckResult struct {
 	// BotName The bot's name or username.
-	BotName        nullable.Nullable[string] `json:"bot_name,omitempty"`
-	Ok             bool                      `json:"ok"`
-	PendingUpdates nullable.Nullable[int]    `json:"pending_updates,omitempty"`
-	Steps          []ConnectionCheckStep     `json:"steps"`
+	BotName nullable.Nullable[string] `json:"bot_name,omitempty"`
+
+	// Info Bridge only. The `info` that the step `info` read and stored on the Connection, with the members of `BridgeInfo`, null when that step failed; omitted for the other types.
+	Info           nullable.Nullable[BridgeInfo] `json:"info,omitempty"`
+	Ok             bool                          `json:"ok"`
+	PendingUpdates nullable.Nullable[int]        `json:"pending_updates,omitempty"`
+	Steps          []ConnectionCheckStep         `json:"steps"`
 
 	// Warnings Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot's roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.
 	Warnings []ConnectionCheckResultWarnings `json:"warnings"`
@@ -3304,7 +3706,7 @@ type ConnectionCheckResultWarnings string
 
 // ConnectionCheckStep defines model for ConnectionCheckStep.
 type ConnectionCheckStep struct {
-	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names. A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+	// Code What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 	Code      nullable.Nullable[NullableConnectionCheckCode] `json:"code,omitempty"`
 	LatencyMs nullable.Nullable[int]                         `json:"latency_ms,omitempty"`
 
@@ -4261,7 +4663,7 @@ type NoteList struct {
 // NullableAlertGroupStatus defines model for NullableAlertGroupStatus.
 type NullableAlertGroupStatus string
 
-// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names. A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
+// NullableConnectionCheckCode What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection's event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem's masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.
 type NullableConnectionCheckCode string
 
 // NullableDestinationCheckCode Why a check of the Destination check failed, as a stable code that clients translate, with `message` as its detail in English; null for a check that passed. `token_invalid` — the messenger refused the bot token (`token`, Telegram `channel_exists`); Mattermost `bot_in_channel`: `bot_not_in_channel`, `channel_in_other_team` — the channel is not in the Destination's team, `channel_archived`; Telegram `channel_exists`: `channel_not_found` — the channel was not found or the bot cannot see it, `not_a_channel` — the chat is not a channel; `discussion_group`: `comments_disabled` — the channel has no linked discussion group, so comments are not enabled, `changed_since_saved` — the channel or its discussion group changed since the Destination was saved, and a save takes the new one; `bot_rights_channel`: `bot_not_channel_admin`, `bot_may_not_post`, `bot_may_not_edit`; `bot_rights_group`: `bot_not_group_admin`, whose `message` names the group; any check: `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` and `request_failed`, as in `NullableConnectionCheckCode`.
@@ -7678,6 +8080,40 @@ func (t *Connection) MergeTelegramConnection(v TelegramConnection) error {
 	return err
 }
 
+// AsBridgeConnection returns the union data inside the Connection as a BridgeConnection
+func (t Connection) AsBridgeConnection() (BridgeConnection, error) {
+	var body BridgeConnection
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeConnection overwrites any union data inside the Connection as the provided BridgeConnection
+func (t *Connection) FromBridgeConnection(v BridgeConnection) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"bridge"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeConnection performs a merge with any union data inside the Connection, using the provided BridgeConnection
+func (t *Connection) MergeBridgeConnection(v BridgeConnection) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"bridge"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t Connection) Discriminator() (string, error) {
 	var discriminator struct {
 		Discriminator string `json:"type"`
@@ -7692,6 +8128,8 @@ func (t Connection) ValueByDiscriminator() (interface{}, error) {
 		return nil, err
 	}
 	switch discriminator {
+	case "bridge":
+		return t.AsBridgeConnection()
 	case "mattermost":
 		return t.AsMattermostConnection()
 	case "telegram":
@@ -7779,6 +8217,40 @@ func (t *ConnectionInput) MergeTelegramConnectionInput(v TelegramConnectionInput
 	return err
 }
 
+// AsBridgeConnectionInput returns the union data inside the ConnectionInput as a BridgeConnectionInput
+func (t ConnectionInput) AsBridgeConnectionInput() (BridgeConnectionInput, error) {
+	var body BridgeConnectionInput
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeConnectionInput overwrites any union data inside the ConnectionInput as the provided BridgeConnectionInput
+func (t *ConnectionInput) FromBridgeConnectionInput(v BridgeConnectionInput) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"bridge"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeConnectionInput performs a merge with any union data inside the ConnectionInput, using the provided BridgeConnectionInput
+func (t *ConnectionInput) MergeBridgeConnectionInput(v BridgeConnectionInput) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"bridge"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t ConnectionInput) Discriminator() (string, error) {
 	var discriminator struct {
 		Discriminator string `json:"type"`
@@ -7793,6 +8265,8 @@ func (t ConnectionInput) ValueByDiscriminator() (interface{}, error) {
 		return nil, err
 	}
 	switch discriminator {
+	case "bridge":
+		return t.AsBridgeConnectionInput()
 	case "mattermost":
 		return t.AsMattermostConnectionInput()
 	case "telegram":

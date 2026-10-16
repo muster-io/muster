@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// A Connection (C-13.FR-1, FR-2, FR-13; C-14.FR-1, FR-11): its form, read-only without connections:write; for
-// Mattermost the callback address with its hint; "Check connection" and "Delete" with connections:write. A
-// Telegram Connection's check takes the base URL in the form: an unsaved one gets only the dry probe, without the
-// token. The form keeps the version it was
-// read at and sends it as If-Match: when the Connection changes elsewhere an untouched form takes the new version and
-// says so, and a form with changes keeps them, and its save is refused (412) with the offer to reload.
+// A Connection (C-13.FR-1, FR-2, FR-13; C-14.FR-1, FR-11; C-22.FR-1): its form, read-only without connections:write;
+// for Mattermost the callback address with its hint; "Check connection" and "Delete" with connections:write. A Bridge
+// Connection shows its name and "Delete" only: it has no form yet, so the Mattermost form never saves it. A Telegram
+// Connection's check takes the base URL in the form: an unsaved one gets only the dry probe, without the token. The
+// form keeps the version it was read at and sends it as If-Match: when the Connection changes elsewhere an untouched
+// form takes the new version and says so, and a form with changes keeps them, and its save is refused (412) with the
+// offer to reload.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
@@ -36,8 +37,11 @@ export const Route = createFileRoute("/connections/$connectionId")({
   component: ConnectionPage,
 });
 
-/** The bot's name as its messenger writes it: Telegram with an @. */
+/** The bot's name as its messenger writes it: Telegram with an @; none for a Bridge. */
 function botName(c: Connection): string | undefined {
+  if (c.type === "bridge") {
+    return undefined;
+  }
   if (c.bot_username === undefined || c.bot_username === null || c.bot_username === "") {
     return undefined;
   }
@@ -171,7 +175,7 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
             <h1 className="min-w-0 text-2xl font-semibold tracking-tight wrap-anywhere">
               {connection?.name ?? t("connections.edit.title")}
             </h1>
-            {connection !== undefined && (
+            {connection !== undefined && connection.type !== "bridge" && (
               <p
                 className="text-sm wrap-anywhere text-muted-foreground"
                 data-testid="connection-bot"
@@ -193,7 +197,7 @@ function ConnectionView({ connectionId }: { connectionId: string }) {
           {query.isError ? problemText(t, query.error) : t("common.loading")}
         </p>
       ) : (
-        <EditForm current={connection} />
+        connection.type !== "bridge" && <EditForm current={connection} />
       )}
     </div>
   );

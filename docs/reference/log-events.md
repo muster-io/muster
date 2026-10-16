@@ -80,6 +80,12 @@ WARN · no fields · C-03
 
 The Organization has no Admin and the bootstrap variables are not set, so nobody can sign in to administer Muster: set MUSTER_BOOTSTRAP_ADMIN_EMAIL and MUSTER_BOOTSTRAP_ADMIN_PASSWORD (or _FILE) and restart, or run muster admin reset-password.
 
+### `bridge_info_read`
+
+INFO · fields: `connection`, `protocol_version`, `features` · C-22
+
+Muster read the info of a Bridge Connection, on a Connection check or because its copy was older than bridge.info_max_age: connection is the public_id of the Connection, protocol_version the version the bridge speaks, features the names of the optional features it declares.
+
 ### `clock_skew`
 
 WARN · fields: `skew_seconds`, `warning_seconds` · C-02

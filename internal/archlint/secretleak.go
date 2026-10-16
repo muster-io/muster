@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -36,6 +37,7 @@ import (
 	adb "github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/auth"
 	authdb "github.com/muster-io/muster/internal/auth/dbgen"
+	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/cli"
 	"github.com/muster-io/muster/internal/clock"
@@ -108,6 +110,7 @@ var registry = []Probe{
 	{Name: "heartbeat", Run: probeHeartbeat},
 	{Name: "mattermost_connections", Run: probeMattermost},
 	{Name: "telegram_connections", Run: probeTelegram},
+	{Name: "bridge_connections", Run: probeBridge},
 	{Name: "outgoing_webhooks", Run: probeWebhooks},
 	{Name: "account_links", Run: probeAccountLinks},
 	{Name: "outgoing_heartbeat", Run: probeOutgoingHeartbeat},
@@ -1634,6 +1637,148 @@ func (probeCommands) AnswerReminder(ctx context.Context, c groups.Caller, id str
 	return probeCommands{}.Acknowledge(ctx, c, id)
 }
 
+// The answers of the stand-in bridge of probeBridge.
+const (
+	bridgeProblem int32 = iota
+	bridgeUnauthorized
+	bridgeVersion
+	bridgeVersionPushSecret
+	bridgeInfo
+)
+
+// probeBridge pushes the secrets through a Bridge Connection (C-22.AC-3): the token, the push secret of push event
+// delivery and the password of an HTTP proxy that refuses it, through the Connection's creation and its checks —
+// through the proxy; against a stand-in bridge whose problems, a 500 and a 401, echo the token, the push secret, which
+// the bridge knows too, and the Authorization header in their detail, title and type, whose info names the token, and
+// then the push secret, as its protocol version, and whose info offers only poll; and against a listener that cuts
+// every connection — through a creation refused for a malformed push secret, muster doctor, which skips the
+// Connection, its deletion, and a client with an unsupported proxy.
+func probeBridge(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	clocks := clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}}
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	pushSecret := "whsec_" + base64.StdEncoding.EncodeToString([]byte(secrets[1]))
+	var answer atomic.Int32
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			echo := "invalid token " + secrets[0] + " " + r.Header.Get("Authorization") + " push secret " + pushSecret
+			switch answer.Load() {
+			case bridgeVersion:
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"protocol_version": secrets[0]})
+			case bridgeVersionPushSecret:
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"protocol_version": pushSecret})
+			case bridgeInfo:
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"protocol_version":"1","bridge":{"name":"probe","version":"1"},`+
+					`"messenger":{"name":"probe"},"capabilities":{},"limits":{"max_body_length":4000,`+
+					`"edit_max_age_seconds":null},"user_lookup":"none","event_delivery":["poll"]}`)
+			default:
+				status := http.StatusInternalServerError
+				if answer.Load() == bridgeUnauthorized {
+					status = http.StatusUnauthorized
+				}
+				w.Header().Set("Content-Type", "application/problem+json")
+				w.WriteHeader(status)
+				_ = json.NewEncoder(w).Encode(map[string]any{"status": status, "detail": echo, "title": echo,
+					"type": "urn:" + secrets[0] + ":" + pushSecret})
+			}
+		})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	cut, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	cutter := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) {
+			if c, _, err := http.NewResponseController(w).Hijack(); err == nil {
+				_ = c.Close()
+			}
+		})}
+	go func() { _ = cutter.Serve(cut) }()
+	defer func() { _ = cutter.Close() }()
+	proxy, err := fakeproxy.Start(ctx, fakeproxy.HTTP, "127.0.0.1:0", fakeproxy.Options{Username: "muster",
+		Password: "other"})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = proxy.Close() }()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	network := mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}}
+	store := &probeConnections{}
+	svc := connections.New(connections.Config{OrgID: 1, Store: store, Keyring: k,
+		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks, Network: network,
+		Interactive: deliverytest.Unlimited(1, clocks), IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081"},
+		Log: logger})
+	by := connections.Requester{Actor: audit.System, Transport: audit.TransportUI}
+	in := connections.Input{Type: connections.TypeBridge, Name: "probe", BridgeBaseURL: "http://" + ln.Addr().String(),
+		EventDelivery: connections.EventDeliveryPush, BotToken: keyring.Replace(logging.Secret(secrets[0])),
+		PushSecret: keyring.Replace(logging.Secret(pushSecret)), Limiter: connections.Limiter{Limit: 10, PerSeconds: 1},
+		Proxy: proxyconf.Input{Enabled: true, Type: new("http"), Address: new(proxy.Addr()), UsernameSet: true,
+			Username: new("muster"), Password: keyring.Replace(logging.Secret(secrets[2]))}}
+	var errs []error
+	check := func() {
+		res, err := svc.Check(ctx, store.row.PublicID, nil)
+		errs = append(errs, err, errors.New(string(res.Info)))
+		for _, st := range res.Steps {
+			errs = append(errs, errors.New(st.Message))
+		}
+	}
+	c, err := svc.Create(ctx, by, in)
+	if err != nil {
+		return err
+	}
+	check()
+	in.Proxy, in.PushSecret, in.BotToken = proxyconf.Input{Enabled: false}, keyring.Keep, keyring.Keep
+	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
+	errs = append(errs, err)
+	for _, a := range []int32{bridgeProblem, bridgeUnauthorized, bridgeVersion, bridgeVersionPushSecret, bridgeInfo} {
+		answer.Store(a)
+		check()
+	}
+	malformed := in
+	malformed.Name, malformed.BotToken = "malformed", keyring.Replace(logging.Secret(secrets[0]))
+	malformed.PushSecret = keyring.Replace(logging.Secret("whsec_" + secrets[1]))
+	_, err = svc.Create(ctx, by, malformed)
+	errs = append(errs, err)
+	in.BridgeBaseURL, in.BotToken = "http://"+cut.Addr().String(), keyring.Replace(logging.Secret(secrets[0]))
+	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
+	errs = append(errs, err)
+	check()
+	found, err := svc.Doctor(ctx, store, 2*time.Second)
+	errs = append(errs, err)
+	for _, f := range found {
+		errs = append(errs, errors.New(f.Message))
+	}
+	errs = append(errs, svc.Delete(ctx, by, c.PublicID, nil))
+	_, err = bridge.NewClient(bridge.Network(network), bridge.Settings{BaseURL: "http://" + ln.Addr().String(),
+		Token: logging.Secret(secrets[0]), Proxy: &outbound.Proxy{Type: "ftp", Address: "proxy:1", Username: "muster",
+			Password: logging.Secret(secrets[2])}})
+	return errors.Join(append(errs, err)...)
+}
+
 // probeConnections is the one Connection of probeMattermost in memory.
 type probeConnections struct {
 	connections.Queries
@@ -1648,10 +1793,13 @@ func (s *probeConnections) InsertConnection(_ context.Context, a cdb.InsertConne
 	s.row = &cdb.GetConnectionRow{ID: 1, PublicID: a.PublicID, Type: a.Type, Name: a.Name,
 		MattermostServerUrl: a.ServerUrl, TelegramBotApiBaseUrl: a.BotApiBaseUrl, TelegramUpdateMode: a.UpdateMode,
 		TelegramWebhookSecretCiphertext: a.WebhookSecretCiphertext, TelegramWebhookSecretKeyID: a.WebhookSecretKeyID,
-		BotTokenCiphertext: a.BotTokenCiphertext, BotTokenKeyID: a.BotTokenKeyID,
-		BotTokenUpdatedAt: a.BotTokenUpdatedAt, Proxy: a.Proxy, ProxyPasswordCiphertext: a.ProxyPasswordCiphertext,
-		ProxyPasswordKeyID: a.ProxyPasswordKeyID, ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt,
-		LimiterLimit: a.LimiterLimit, LimiterPerSeconds: a.LimiterPerSeconds, CreatedAt: a.Now, Version: 1}
+		BridgeBaseUrl: a.BridgeBaseUrl, BridgeEventDelivery: a.EventDelivery,
+		BridgePushSecretCiphertext: a.PushSecretCiphertext, BridgePushSecretKeyID: a.PushSecretKeyID,
+		BridgePushSecretUpdatedAt: a.PushSecretUpdatedAt, BotTokenCiphertext: a.BotTokenCiphertext,
+		BotTokenKeyID: a.BotTokenKeyID, BotTokenUpdatedAt: a.BotTokenUpdatedAt, Proxy: a.Proxy,
+		ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, LimiterLimit: a.LimiterLimit,
+		LimiterPerSeconds: a.LimiterPerSeconds, CreatedAt: a.Now, Version: 1}
 	return 1, nil
 }
 
@@ -1675,6 +1823,9 @@ func (s *probeConnections) UpdateConnection(_ context.Context, a cdb.UpdateConne
 	s.row.TelegramBotApiBaseUrl, s.row.TelegramUpdateMode = a.BotApiBaseUrl, a.UpdateMode
 	s.row.TelegramWebhookSecretCiphertext, s.row.TelegramWebhookSecretKeyID = a.WebhookSecretCiphertext,
 		a.WebhookSecretKeyID
+	s.row.BridgeBaseUrl, s.row.BridgeEventDelivery = a.BridgeBaseUrl, a.EventDelivery
+	s.row.BridgePushSecretCiphertext, s.row.BridgePushSecretKeyID, s.row.BridgePushSecretUpdatedAt =
+		a.PushSecretCiphertext, a.PushSecretKeyID, a.PushSecretUpdatedAt
 	s.row.BotTokenCiphertext, s.row.BotTokenKeyID = a.BotTokenCiphertext, a.BotTokenKeyID
 	s.row.ProxyPasswordCiphertext, s.row.ProxyPasswordKeyID = a.ProxyPasswordCiphertext, a.ProxyPasswordKeyID
 	s.row.Version++
@@ -1750,6 +1901,12 @@ func (s *probeConnections) ListMattermostDestinations(context.Context, int64) ([
 
 func (s *probeConnections) SetBotIdentity(context.Context, cdb.SetBotIdentityParams) error {
 	return nil
+}
+
+// SetBridgeInfo records the info that a check of the Bridge Connection read.
+func (s *probeConnections) SetBridgeInfo(_ context.Context, a cdb.SetBridgeInfoParams) (int64, error) {
+	s.row.BridgeInfo, s.row.BridgeInfoReadAt = a.Info, pgtype.Timestamptz{Time: a.ReadAt, Valid: true}
+	return 1, nil
 }
 
 func (s *probeConnections) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
