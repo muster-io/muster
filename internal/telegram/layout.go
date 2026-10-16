@@ -259,17 +259,25 @@ func mentionText(ts []mentions.Target, w writer) string {
 	return strings.Join(out, " ")
 }
 
+// buttonStyles are the styles of inline buttons by style hint (F-066). Any other style fails the whole send or edit
+// (F-067), so a neutral button, and any hint without a style here, is sent without one.
+var buttonStyles = map[buttons.Style]string{
+	buttons.StylePrimary: "primary",
+	buttons.StyleSuccess: "success",
+}
+
 // keyboard is the inline keyboard of the buttons (C-14.FR-15): Ack, Unack, Unsnooze and Resolve — or a Reminder's
 // Still on it and Unack — on one row, one Snooze button per Snooze duration on the next, each sending its compact
-// action id, at most buttons.MaxLen bytes. A button without a usable action id is left out. The keyboard is never
-// nil, so that an edit always carries it and an edit to a state without buttons removes them on purpose (F-011).
+// action id, at most buttons.MaxLen bytes, with the style of its hint. A button without a usable action id is left
+// out. The keyboard is never nil, so that an edit always carries it and an edit to a state without buttons removes
+// them on purpose (F-011).
 func keyboard(bs []messages.Button) *inlineKeyboard {
 	var first, snooze []inlineButton
 	for _, b := range bs {
 		if b.ActionID == "" || len(b.ActionID) > buttons.MaxLen || !utf8.ValidString(b.Label) {
 			continue
 		}
-		ib := inlineButton{Text: b.Label, CallbackData: b.ActionID}
+		ib := inlineButton{Text: b.Label, CallbackData: b.ActionID, Style: buttonStyles[b.Style()]}
 		if b.Command == buttons.CommandSnooze {
 			snooze = append(snooze, ib)
 		} else {

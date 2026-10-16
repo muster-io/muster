@@ -242,3 +242,24 @@ func TestForStatus(t *testing.T) {
 		t.Errorf("the third Snooze has argument %d", bs[4].Argument)
 	}
 }
+
+// TestStyleOf is D329: Acknowledge and "Still on it" primary, Resolve success, every other button neutral.
+func TestStyleOf(t *testing.T) {
+	for command, want := range map[string]buttons.Style{
+		buttons.CommandAcknowledge:   buttons.StylePrimary,
+		buttons.CommandStillOnIt:     buttons.StylePrimary,
+		buttons.CommandResolve:       buttons.StyleSuccess,
+		buttons.CommandUnacknowledge: buttons.StyleNeutral,
+		buttons.CommandSnooze:        buttons.StyleNeutral,
+		buttons.CommandUnsnooze:      buttons.StyleNeutral,
+		"unresolve":                  buttons.StyleNeutral,
+		"":                           buttons.StyleNeutral,
+	} {
+		if got := buttons.StyleOf(command); got != want {
+			t.Errorf("StyleOf(%q) = %q, want %q", command, got, want)
+		}
+	}
+	if buttons.StylePrimary != "primary" || buttons.StyleSuccess != "success" || buttons.StyleNeutral != "neutral" {
+		t.Error("the style hints are not named as the Bridge protocol's ButtonStyle")
+	}
+}

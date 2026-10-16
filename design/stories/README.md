@@ -57,7 +57,7 @@ issue: null
 | `depends_on` | Stories that must be merged first. The graph is acyclic. A dependency usually has a smaller ID; a part split off later takes the next free ID (section 6) but keeps its place in the phase order, so stories with smaller IDs may depend on it — S-061, split from S-039, comes before S-040. The story map lists stories in an order that respects every dependency. A frontend story depends on the backend story of its capability. |
 | `covers` | The FR and AC IDs the story covers, fully or in part; the body's coverage table says which. Required by the [L1 conventions](../prd/L1.md#2-conventions). |
 | `files_touched` | Every hand-written file the story creates or changes, tests included. Generated files are never listed ([section 2](#2-repository-layout)). A path ending in `/**` stands for a directory of small fixtures and counts as one entry. |
-| `acceptance` | Testable statements. Each starts with the FR or AC IDs it proves, in brackets, and is checked by a test or by the live checks of the body. |
+| `acceptance` | Testable statements. Each starts with the FR or AC IDs it proves, in brackets, and is checked by a test or by the live checks of the body. A story whose `covers` is empty, because no requirement speaks about what it changes, says why in its Notes, and its statements name no IDs. |
 | `verify` | The automated check of the story; it always starts with `make`. |
 | `operator_attention` | `true` when the operator has to act or decide during the story: accounts and settings outside the repository, or a product value the story confirms. The Notes say why. |
 | `issue` | The GitHub issue that tracks the story. `null` until the script that creates issues fills it; never edited by hand. |
@@ -237,9 +237,9 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | Observation | C-05 – C-10 | S-018 – S-033, S-063 | 17 |
 | Shadow | C-11 – C-16 | S-034 – S-048, S-061, S-064 – S-067 | 20 |
 | Actions | C-17, C-18 | S-049 – S-052, S-068 – S-070 | 7 |
-| Operations | C-19 – C-21 | S-053 – S-059, S-071, S-072 | 9 |
+| Operations | C-19 – C-21 | S-053 – S-059, S-071, S-072, S-082 | 10 |
 | Bridge | C-22, and S-060 of C-21 | S-073 – S-081, S-060 | 10 |
-| **L1** | 22 | | **81** |
+| **L1** | 22 | | **82** |
 
 ### Foundation
 
@@ -336,6 +336,7 @@ later split takes the next free IDs (section 6). Kinds: `be` backend, `fe` front
 | [S-057](S-057-documentation-site-build-and-generated-references.md) | C-21 | Documentation site, its build and the generated references | docs | S-053, S-051 |
 | [S-058](S-058-runbooks-telegram-in-restricted-networks-and-the-readme-demo.md) | C-21 | Runbooks, Telegram in restricted networks and the README demo | docs | S-056, S-057, S-054 |
 | [S-059](S-059-chart-alert-rules-with-rule-unit-tests-and-the-grafana-dashboard.md) | C-19 | Chart alert rules with rule unit tests and the Grafana dashboard | infra | S-053, S-058 |
+| [S-082](S-082-button-style-hints-in-mattermost-and-telegram.md) | C-12 | Button style hints in Mattermost and Telegram (BE) | be | S-061, S-042, S-068 |
 
 ### Bridge
 
@@ -403,8 +404,9 @@ fake bridge, and S-080 takes Destinations, the Destination check, `muster doctor
 S-074 keeps Bridge delivery — envelopes, idempotent Publications, edits, Thread replies, error classes, test messages
 and the Broken probe — and S-081 takes the edit windows. S-080 follows S-073 and S-081 follows S-074, so S-074 depends
 on S-080 and S-075 on S-081; S-073 and S-074 keep their file names. Style hints on the buttons of Mattermost and
-Telegram (D320), which the Bridge protocol brought in, are not a story of this map yet: they wait for their facts from
-the test environment and get a story of their own after the Bridge phase.
+Telegram (D320), which the Bridge protocol brought in, became S-082 once their facts were checked on the test
+environment (F-066 to F-068, D329). It belongs to C-12, whose buttons it styles, but follows S-059 at the end of the
+Operations phase, before the Bridge phase; S-074 takes its mapping as the style hints of Bridge buttons.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

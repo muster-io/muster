@@ -35,6 +35,29 @@ const (
 var commandCodes = map[string]byte{CommandAcknowledge: 'a', CommandUnacknowledge: 'u', CommandResolve: 'r',
 	CommandSnooze: 's', CommandUnsnooze: 'n', CommandStillOnIt: 'k'}
 
+// Style is the style hint of a button, named as the ButtonStyle of the Bridge protocol; each adapter maps it to the
+// closest style of its messenger, neutral being a plain button.
+type Style string
+
+// The style hints Muster uses (D329); the Bridge protocol's danger is not one of them.
+const (
+	StyleNeutral Style = "neutral"
+	StylePrimary Style = "primary"
+	StyleSuccess Style = "success"
+)
+
+// StyleOf is the style hint of a button of the command: Acknowledge and "Still on it" primary, Resolve success, and
+// every other button, Unacknowledge, Snooze and Unsnooze included, neutral.
+func StyleOf(command string) Style {
+	switch command {
+	case CommandAcknowledge, CommandStillOnIt:
+		return StylePrimary
+	case CommandResolve:
+		return StyleSuccess
+	}
+	return StyleNeutral
+}
+
 // Subject is what a button is about: the Root message of an Alert Group, a Thread reply of one, or the test message
 // of a Destination.
 type Subject string

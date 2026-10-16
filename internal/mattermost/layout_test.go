@@ -4,6 +4,7 @@
 package mattermost
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -305,7 +306,7 @@ func TestReplyPost(t *testing.T) {
 		t.Errorf("reminder attachment = %+v", att)
 	}
 	for i, want := range []action{
-		{ID: "stillonit", Name: "Still on it", Type: "button",
+		{ID: "stillonit", Name: "Still on it", Type: "button", Style: "primary",
 			Integration: integration{URL: l.callback, Context: actionContext{Action: "x", KeyID: "k"}}},
 		{ID: "unack", Name: "Unack", Type: "button",
 			Integration: integration{URL: l.callback, Context: actionContext{Action: "y", KeyID: "k"}}},
@@ -316,6 +317,65 @@ func TestReplyPost(t *testing.T) {
 	}
 	if p := replyPost(m, l, ""); p.Message != "" || len(p.Props.Attachments) != 1 {
 		t.Errorf("quiet reminder = %+v", p)
+	}
+}
+
+// sentStyles are the actions of the one attachment of p as its JSON sends them: each id with its style, "-" for an
+// action without a style field.
+func sentStyles(t *testing.T, p post) string {
+	t.Helper()
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent struct {
+		Props struct {
+			Attachments []struct {
+				Actions []map[string]any `json:"actions"`
+			} `json:"attachments"`
+		} `json:"props"`
+	}
+	if err := json.Unmarshal(raw, &sent); err != nil || len(sent.Props.Attachments) != 1 {
+		t.Fatalf("post %s: %v", raw, err)
+	}
+	var out []string
+	for _, a := range sent.Props.Attachments[0].Actions {
+		style, ok := a["style"]
+		if !ok {
+			style = "-"
+		}
+		out = append(out, fmt.Sprintf("%v:%v", a["id"], style))
+	}
+	return strings.Join(out, " ")
+}
+
+// TestActionStyles is D329 with F-068: "ack" and "stillonit" are sent with the style primary and "resolve" with
+// success, while "unack", "unsnooze" and every "snooze<N>" have no style field, on a firing, an acknowledged and a
+// snoozed Root message and on a Reminder; a button of any other Command has no style either.
+func TestActionStyles(t *testing.T) {
+	reminder := messages.Message{Kind: messages.KindReply, Language: "en", Colour: messages.ColourAcknowledged,
+		Lines: []string{"Reminder: bob, are you still on it?"},
+		Buttons: []messages.Button{{Command: buttons.CommandStillOnIt, Label: "Still on it", ActionID: "x", KeyID: "k"},
+			{Command: buttons.CommandUnacknowledge, Label: "Unack", ActionID: "y", KeyID: "k"}}}
+	for _, c := range []struct {
+		name string
+		p    post
+		want string
+	}{
+		{"firing", rootPost(rootMessage(messages.ColourFiring), testLook(), ""),
+			"ack:primary resolve:success snooze0:- snooze1:- snooze2:-"},
+		{"acknowledged", rootPost(rootMessage(messages.ColourAcknowledged), testLook(), ""),
+			"unack:- resolve:success snooze0:- snooze1:- snooze2:-"},
+		{"snoozed", rootPost(rootMessage(messages.ColourSnoozed), testLook(), ""),
+			"ack:primary unsnooze:- resolve:success"},
+		{"reminder", replyPost(reminder, testLook(), "@bob"), "stillonit:primary unack:-"},
+	} {
+		if got := sentStyles(t, c.p); got != c.want {
+			t.Errorf("%s: actions %s, want %s", c.name, got, c.want)
+		}
+	}
+	if a := actions([]messages.Button{{Command: "unresolve", Label: "x"}}, callback); a[0].Style != "" {
+		t.Errorf("an unknown command has the style %q", a[0].Style)
 	}
 }
 

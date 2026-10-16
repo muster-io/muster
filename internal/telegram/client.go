@@ -338,10 +338,12 @@ type inlineKeyboard struct {
 	InlineKeyboard [][]inlineButton `json:"inline_keyboard"`
 }
 
-// inlineButton is a button whose press sends its callback_data, at most 64 bytes.
+// inlineButton is a button whose press sends its callback_data, at most 64 bytes; a style fills it with its colour
+// (F-066), and without one it has the app's own style.
 type inlineButton struct {
 	Text         string `json:"text"`
 	CallbackData string `json:"callback_data"`
+	Style        string `json:"style,omitempty"`
 }
 
 // sentMessage is the message a send or an edit answers with.

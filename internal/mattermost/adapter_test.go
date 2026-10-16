@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -198,6 +199,57 @@ func TestPublishUpdateReply(t *testing.T) {
 		if req.Path == "/api/v4/posts" && req.Headers["Content-Type"][0] != "application/json" {
 			t.Errorf("%s %s: Content-Type %v", req.Method, req.Path, req.Headers["Content-Type"])
 		}
+	}
+}
+
+// TestStylesReachTheServer is D329 with F-068 against the fake server: the posted Root message, its edits to
+// acknowledged and snoozed, and a Reminder keep the style of each action as sent — primary on "ack" and "stillonit",
+// success on "resolve", and no style field on "unack", "unsnooze" and every "snooze<N>".
+func TestStylesReachTheServer(t *testing.T) {
+	e := newAdapter(t)
+	ctx := t.Context()
+	styles := func(id string) string {
+		t.Helper()
+		var out []string
+		actions, _ := attachmentOf(t, postByID(t, e.fake, id))["actions"].([]any)
+		for _, x := range actions {
+			a, _ := x.(map[string]any)
+			style, ok := a["style"]
+			if !ok {
+				style = "-"
+			}
+			out = append(out, fmt.Sprintf("%v:%v", a["id"], style))
+		}
+		return strings.Join(out, " ")
+	}
+	out := e.adapter.Publish(ctx, call(1), root(messages.ColourFiring))
+	if out.Kind != delivery.OutcomeOK {
+		t.Fatalf("publish = %+v", out)
+	}
+	if got := styles(out.MessageID); got != "ack:primary resolve:success snooze0:- snooze1:- snooze2:-" {
+		t.Errorf("firing: %s", got)
+	}
+	for _, c := range []struct{ status, want string }{
+		{messages.ColourAcknowledged, "unack:- resolve:success snooze0:- snooze1:- snooze2:-"},
+		{messages.ColourSnoozed, "ack:primary unsnooze:- resolve:success"},
+	} {
+		if up := e.adapter.Update(ctx, call(1), out.MessageID, root(c.status)); up.Kind != delivery.OutcomeOK {
+			t.Fatalf("update to %s = %+v", c.status, up)
+		}
+		if got := styles(out.MessageID); got != c.want {
+			t.Errorf("%s: %s", c.status, got)
+		}
+	}
+	reminder := reply("Reminder: bob, are you still on it?")
+	reminder.Buttons = []messages.Button{
+		{Command: buttons.CommandStillOnIt, Label: "Still on it", ActionID: "action", KeyID: "k-00112233"},
+		{Command: buttons.CommandUnacknowledge, Label: "Unack", ActionID: "action", KeyID: "k-00112233"}}
+	r := e.adapter.Reply(ctx, call(1), delivery.Root{MessageID: out.MessageID}, reminder)
+	if r.Kind != delivery.OutcomeOK {
+		t.Fatalf("reminder = %+v", r)
+	}
+	if got := styles(r.MessageID); got != "stillonit:primary unack:-" {
+		t.Errorf("reminder: %s", got)
 	}
 }
 

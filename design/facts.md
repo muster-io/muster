@@ -1,7 +1,7 @@
 # Verified facts
 
 - Status: Living document
-- Date: 2026-10-09
+- Date: 2026-10-16
 
 External behaviour that Muster's design relies on and that was checked against the real system rather than taken from
 its documentation: how Telegram, Mattermost and Alertmanager actually behave. Each fact has a stable id `F-NNN`, never
@@ -74,6 +74,23 @@ invalid`. — _2026-10-03 · answers delayed on purpose · Bot API 10.3_ · Used
 no inline keyboard. — _2026-10-03 · observed when editing a Rich Message (F-019); not checked separately for plain
 messages · Bot API 10.3_ · Used in C-14.FR-15.
 
+**F-066. Inline buttons take a colour.** An `InlineKeyboardButton` may carry `style`: `danger` (red), `success`
+(green) or `primary` (blue); without it the app's own style is used ("Must be one of “danger” (red), “success” (green)
+or “primary” (blue). If omitted, then an app-specific style is used"), added in Bot API 9.4 on 2026-02-09. `style` does
+not set the type of a button, so it goes with `callback_data`. `sendMessage` to the channel with one button of each
+style and one without answered `ok` and returned `style` in the message's `reply_markup`, and the clients showed the
+styled buttons filled with their colour; `editMessageReplyMarkup` changed a button's style on the sent message. —
+_2026-10-15 · one channel post with four buttons on the test stand, its keyboard edited and restored, viewed in the
+client; the Bot API reference and changelog · Bot API 10.3_ · Used in S-082.
+
+**F-067. An unknown button style fails the request.** A `style` outside the three documented values, such as
+`neutral` or a number, fails the request with
+`400 Bad Request: can't parse InlineKeyboardButton: Invalid button style specified`; the error comes from reading the
+keyboard, so the whole send or edit fails, not only the button. The undocumented `default` is accepted and means no
+style (an edit that only added it answered `message is not modified`). A plain button is therefore sent without
+`style`. — _2026-10-15 · edits of the keyboard of the post of F-066 on the test stand · Bot API 10.3_ · Used in
+S-082.
+
 ### Notifications
 
 **F-012. `disable_notification` means without sound.** A message sent with `disable_notification` still produces a
@@ -143,6 +160,20 @@ Unless an entry says otherwise, the facts were checked on 2026-10-04 against a t
 (Enterprise Edition without a license, default configuration unless an entry says otherwise). A test bot with the system
 admin role used the REST API v4 in a test channel; a small HTTP receiver on a private address logged button presses as
 raw JSON and answered them. Presses and notifications were made and observed in the client of a test user.
+
+### Buttons
+
+**F-068. Attachment buttons take a style, which tints them.** A button in `props.attachments[].actions[]` of a post
+made through `POST /api/v4/posts` may carry `style`: `default`, `primary`, `success`, `good`, `warning` or `danger`,
+or a hex colour or a theme variable, which the documentation discourages. The server returned every value in the
+created post. It checks the value but, in 11.2.2, only logs "Invalid post props. In a future version this will result
+in an error" and keeps the post. The clients do not fill the button: the label takes the colour, and the background the
+same colour at 8 % opacity; on the web `good` and `success` are the same green (`#339970`), `primary` is the theme's
+button colour, `danger` its error colour and `default` its text colour, and a button without `style` stays plain; the
+mobile app shows a button without `style` as `default`. — _2026-10-15 · one post with seven buttons on the test stand,
+viewed in the client; the interactive messages and message attachments documentation; `PostAction.IsValid` and
+`Post.ValidateProps` in `server/public/model` and `action_button.tsx` of the v11.2.2 source, and
+`app/utils/message_attachment.ts` of the mobile app · Mattermost 11.2.2_ · Used in S-082.
 
 ### Button presses and answers
 
@@ -432,6 +463,8 @@ snippet with and without the catch-all; Alertmanager routing documentation_ · U
   without the system admin role gets the same answers about a deleted root post as in F-058 — its plain read answered
   `404` on 2026-10-08 (F-061); `403` to an edit and `400` to a reply are still to be seen — and whether it may read the
   post with `?include_deleted=true`, which probably needs that role (not verified; Muster does not use that read).
+- **Mattermost 12.** Mattermost 12.0.0 draws message attachments as Mattermost Blocks; whether Root messages, their
+  colour and the button styles of F-068 look the same is to be checked once the test stand is upgraded from 11.2.2.
 - **Alertmanager.** A restart of an HA instance without a persistent volume, and `--dispatch.start-delay` on an HA pair
   (tested on the single instance only); `externalURL` of instances without `--web.external-url`; a resolve during a mute
   with vmalert as the source; how often tick races of an HA pair cause duplicates over hours of operation — none in

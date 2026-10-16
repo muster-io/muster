@@ -268,6 +268,50 @@ func TestUpdateKeepsTheKeyboard(t *testing.T) {
 	}
 }
 
+// TestStylesReachTheServer is D329 with F-066 against the fake server, which refuses an unknown style (F-067): the
+// posted Root message, its edits to acknowledged and snoozed, and a Reminder in the discussion group keep the style of
+// each button as sent — primary on Ack and "Still on it", success on Resolve, and no style field on Unack, Unsnooze and
+// every Snooze button.
+func TestStylesReachTheServer(t *testing.T) {
+	e := newAdapter(t)
+	o := e.adapter.Publish(t.Context(), call(1), root(messages.ColourFiring))
+	if o.Kind != delivery.OutcomeOK {
+		t.Fatalf("publish = %+v", o)
+	}
+	if got := styledKeyboard(t, only(t, e.fake).ReplyMarkup); got !=
+		"[Ack:primary, Resolve:success] [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-]" {
+		t.Errorf("firing: %s", got)
+	}
+	for _, c := range []struct{ status, want string }{
+		{messages.ColourAcknowledged, "[Unack:-, Resolve:success] [Snooze 1 h:-, Snooze 4 h:-, Snooze 24 h:-]"},
+		{messages.ColourSnoozed, "[Ack:primary, Unsnooze:-, Resolve:success]"},
+	} {
+		if u := e.adapter.Update(t.Context(), call(1), o.MessageID, root(c.status)); u.Kind != delivery.OutcomeOK {
+			t.Fatalf("update to %s = %+v", c.status, u)
+		}
+		if got := styledKeyboard(t, only(t, e.fake).ReplyMarkup); got != c.want {
+			t.Errorf("%s: %s", c.status, got)
+		}
+	}
+	cp := e.fake.Messages(faketelegram.GroupID)
+	if len(cp) != 1 {
+		t.Fatalf("copy %+v", cp)
+	}
+	reminder := messages.Message{Kind: messages.KindReply, Language: "en", Colour: messages.ColourAcknowledged,
+		Lines: []string{"Reminder: bob, are you still on it?"},
+		Buttons: []messages.Button{{Command: buttons.CommandStillOnIt, Label: "Still on it", ActionID: "s"},
+			{Command: buttons.CommandUnacknowledge, Label: "Unack", ActionID: "u"}}}
+	r := e.adapter.Reply(t.Context(), call(1), delivery.Root{MessageID: o.MessageID,
+		ThreadAnchorID: fmt.Sprint(cp[0].ID)}, reminder)
+	msgs := e.fake.Messages(faketelegram.GroupID)
+	if r.Kind != delivery.OutcomeOK || len(msgs) != 2 {
+		t.Fatalf("reminder = %+v, group %+v", r, msgs)
+	}
+	if got := styledKeyboard(t, msgs[1].ReplyMarkup); got != "[Still on it:primary, Unack:-]" {
+		t.Errorf("reminder: %s", got)
+	}
+}
+
 // TestLongMessagesFit is C-14.AC-8 and C-12.FR-11: 25 Alerts fit in 4,096 characters with their title, status, footer,
 // buttons and the link to Muster; a message far too long is shortened and still accepted.
 func TestLongMessagesFit(t *testing.T) {
