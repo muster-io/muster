@@ -20,6 +20,10 @@ import (
 // The Audit log action of a Destination test (C-16.FR-5).
 const ActionTested = "destination.tested"
 
+// ErrNoTester is a test or a preview of a Destination whose type has no Tester in this build, such as a Bridge
+// Destination until its delivery exists: the API answers 501.
+var ErrNoTester = errors.New("this build has no test of destinations of this type")
+
 // The kinds of the source of a test or a preview (TestSource).
 const (
 	SourceAlertGroup = "alert_group"
@@ -102,15 +106,18 @@ func passed(steps []delivery.TestStep) bool {
 	return len(steps) > 0 && !slices.ContainsFunc(steps, func(st delivery.TestStep) bool { return !st.OK() })
 }
 
-// tester reads the Destination publicID and the Tester of its type.
+// tester reads the Destination publicID and the Tester of its type; a type without one is ErrNoTester.
 func (s *Service) tester(ctx context.Context, publicID string) (Destination, Tester, error) {
 	d, err := s.Get(ctx, publicID)
 	if err != nil {
 		return Destination{}, nil, err
 	}
 	t := s.writer.Testers[d.Type]
-	if t == nil || s.writer.Samples == nil {
-		return Destination{}, nil, fmt.Errorf("no test of destinations of the type %s", d.Type)
+	if t == nil {
+		return Destination{}, nil, fmt.Errorf("%w: %s", ErrNoTester, d.Type)
+	}
+	if s.writer.Samples == nil {
+		return Destination{}, nil, fmt.Errorf("no samples for the test of destination %s", d.PublicID)
 	}
 	return d, t, nil
 }

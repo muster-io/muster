@@ -55,6 +55,7 @@ import type {
   LimitedResponse,
   ListDestinationsParams,
   NotFoundResponse,
+  NotImplementedResponse,
   PreconditionFailedResponse,
   PreconditionRequiredResponse,
   SigningSecretGenerated,
@@ -203,7 +204,7 @@ export const getCreateDestinationUrl = () => {
 }
 
 /**
- * `type` selects Mattermost, Telegram or outgoing webhook. Saving a Mattermost or Telegram Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
+ * `type` selects Mattermost, Telegram, outgoing webhook or Bridge. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
  * @summary Create Destination
  */
 export const createDestination = async (destinationInput: DestinationInput, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationCreated> => {
@@ -391,7 +392,7 @@ export const getUpdateDestinationUrl = (destinationId: string,) => {
 }
 
 /**
- * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost or Telegram Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+ * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram or Bridge Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
  * @summary Update Destination
  */
 export const updateDestination = async (destinationId: string,
@@ -554,7 +555,7 @@ export const useDeleteDestination = <TError = UnauthorizedResponse | ForbiddenRe
 }
 
 /**
- * Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both. A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Verifies that Muster can still reach and post to the Destination without sending a message: Mattermost token and channel membership; Telegram `getChat` for the channel, its discussion group from `linked_chat_id`, and `getChatMember` for the bot in both; Bridge `checkChannel`. A success ends the Broken state. Not available for outgoing webhooks (`422` with `check_not_supported`). Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary Run the Destination check
  */
 export const checkDestination = async (destinationId: string, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationCheckResult> => {
@@ -628,7 +629,7 @@ export const useCheckDestination = <TError = UnauthorizedResponse | ForbiddenRes
 }
 
 /**
- * One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`.
+ * One "create" request marked "Test message", built from a recent Alert Group of one of the Destination's Routes or from a built-in example, through the interactive path. An outgoing webhook sends the `test` event in events mode and the "create" request in template mode, both when it uses both. Secrets and the Signing secret are masked in the result. Test messages are never reconciled and change no Alert Group. A successful test of a Broken Destination ends the Broken state. Audited. A step that could not get a limiter token in time ends with `error_class` `limited`. A Bridge Destination answers `501` (`not-implemented`) until this build implements its test.
  * @summary Send a test message
  */
 export const testDestination = async (destinationId: string,
@@ -663,7 +664,7 @@ return apiFetch<DestinationTestResult>(getTestDestinationUrl(destinationId),
 
 export const getTestDestinationMutationKey = () => ['testDestination'] as const;
 
-export const getTestDestinationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
+export const getTestDestinationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse | NotImplementedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testDestination>>, TError,TestDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof testDestination>>, TError,TestDestinationMutationVariables, TContext> => {
 
@@ -692,13 +693,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type TestDestinationMutationResult = NonNullable<Awaited<ReturnType<typeof testDestination>>>
     export type TestDestinationMutationBody = DestinationTestRequest
-    export type TestDestinationMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse
+    export type TestDestinationMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse | NotImplementedResponse
     export type TestDestinationMutationVariables = {destinationId: string;data: DestinationTestRequest}
 
     /**
  * @summary Send a test message
  */
-export const useTestDestination = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
+export const useTestDestination = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse | NotImplementedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testDestination>>, TError,TestDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof testDestination>>,
@@ -717,7 +718,7 @@ export const useTestDestination = <TError = BadRequestResponse | UnauthorizedRes
 }
 
 /**
- * Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything.
+ * Renders the Root message or the webhook requests for a chosen Alert Group or the example without sending anything. A Bridge Destination answers `501` (`not-implemented`) until this build implements its preview.
  * @summary Preview a message or request
  */
 export const previewDestination = async (destinationId: string,
@@ -752,7 +753,7 @@ return apiFetch<DestinationPreview>(getPreviewDestinationUrl(destinationId),
 
 export const getPreviewDestinationMutationKey = () => ['previewDestination'] as const;
 
-export const getPreviewDestinationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
+export const getPreviewDestinationMutationOptions = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse | NotImplementedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewDestination>>, TError,PreviewDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof previewDestination>>, TError,PreviewDestinationMutationVariables, TContext> => {
 
@@ -781,13 +782,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PreviewDestinationMutationResult = NonNullable<Awaited<ReturnType<typeof previewDestination>>>
     export type PreviewDestinationMutationBody = DestinationPreviewRequest
-    export type PreviewDestinationMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse
+    export type PreviewDestinationMutationError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse | NotImplementedResponse
     export type PreviewDestinationMutationVariables = {destinationId: string;data: DestinationPreviewRequest}
 
     /**
  * @summary Preview a message or request
  */
-export const usePreviewDestination = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse,
+export const usePreviewDestination = <TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | UnprocessableResponse | TooManyRequestsResponse | NotImplementedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewDestination>>, TError,PreviewDestinationMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof previewDestination>>,

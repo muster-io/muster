@@ -83,6 +83,15 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 		f.list = append(f.list, d)
 		return d, nil
 	}
+	if in.Bridge != nil {
+		d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA6", Type: in.Type,
+			Name: in.Name, Connection: &in.Bridge.Connection, BridgeChannelID: &in.Bridge.ChannelID,
+			BridgeChannelName: ptr("alerts"), Mentions: set, LimiterLimit: in.Limiter.Limit,
+			LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
+			Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
+		f.list = append(f.list, d)
+		return d, nil
+	}
 	if in.Telegram != nil {
 		d := destinations.Destination{ID: int64(len(f.list) + 10), PublicID: "DSAAAAAAAAAAA7", Type: in.Type,
 			Name: in.Name, Connection: &in.Telegram.Connection, TelegramChannelID: &in.Telegram.ChannelID,
@@ -124,6 +133,8 @@ func (f *fakeDestinations) Update(_ context.Context, r destinations.Requester, i
 		d.MattermostChannelID = &in.Mattermost.ChannelID
 	case in.Telegram != nil:
 		d.TelegramChannelID = &in.Telegram.ChannelID
+	case in.Bridge != nil:
+		d.BridgeChannelID = &in.Bridge.ChannelID
 	}
 	d.Version++
 	return *d, nil
@@ -993,6 +1004,103 @@ func TestTelegramDestinationAPI(t *testing.T) {
 	if a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
 		strings.Replace(body, `"channel_id":"@muster_alerts",`, "", 1)); a.status != http.StatusBadRequest {
 		t.Errorf("without a channel = %d %s", a.status, a.body)
+	}
+}
+
+// TestBridgeDestinationAPI is createDestination, updateDestination, getDestination, listDestinations and
+// checkDestination of type bridge (C-22.FR-3, AC-2): the body names the Connection and the channel id; the Destination
+// reads with them and the channel's name its check read; a refused check is 422 destination_check_failed at
+// /channel_id with the bridge's detail and the check code channel_forbidden; the check's one item is channel; a test
+// and a preview answer 501.
+func TestBridgeDestinationAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	ft := x.srv.tokens.(*fakeTokens)
+	ft.idents[destinationsTester] = &auth.Identity{Session: ft.idents[fullToken].Session,
+		Permissions: []auth.Permission{"destinations:read", "destinations:test"}, Transport: audit.TransportAPI,
+		Token: &auth.Token{ID: 53, Name: "destinations-test"}}
+	body := `{"type":"bridge","name":"br","connection_id":"CNAAAAAAAAAAA3","channel_id":"ch-alerts",` +
+		`"mentions":` + noMentions + `,"limiter":{"limit":30,"per_seconds":60}}`
+	a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", body)
+	if a.status != http.StatusCreated {
+		t.Fatalf("create = %d %s", a.status, a.body)
+	}
+	in := fd.saved[len(fd.saved)-1]
+	if in.Type != "bridge" || in.Bridge == nil || in.Bridge.Connection != "CNAAAAAAAAAAA3" ||
+		in.Bridge.ChannelID != "ch-alerts" || in.Mattermost != nil || in.Telegram != nil || in.Limiter.Limit != 30 ||
+		in.Limiter.PerSeconds != 60 || in.Mentions["rise_to_urgent"].Everyone != "here" {
+		t.Errorf("input %+v", in)
+	}
+	created := a.json(t)["destination"].(map[string]any)
+	if created["type"] != "bridge" || created["connection_id"] != "CNAAAAAAAAAAA3" ||
+		created["channel_id"] != "ch-alerts" || created["channel_name"] != "alerts" || created["id"] != "DSAAAAAAAAAAA6" {
+		t.Errorf("created %s", a.body)
+	}
+	a = x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/DSAAAAAAAAAAA6", "")
+	var got gen.BridgeDestination
+	decodeInto(t, a, &got)
+	if a.status != http.StatusOK || got.Type != gen.BridgeDestinationTypeBridge || got.ConnectionId != "CNAAAAAAAAAAA3" ||
+		got.ChannelId != "ch-alerts" || got.ChannelName.MustGet() != "alerts" || got.Limiter.Limit != 30 ||
+		a.header.Get("ETag") != `"1"` {
+		t.Errorf("get = %d %s", a.status, a.body)
+	}
+	a = x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations?type=bridge", "")
+	items, _ := a.json(t)["items"].([]any)
+	if a.status != http.StatusOK || len(items) != 1 || items[0].(map[string]any)["channel_name"] != "alerts" ||
+		*fd.filters[len(fd.filters)-1].Type != "bridge" {
+		t.Errorf("list = %d %s", a.status, a.body)
+	}
+	fd.list[len(fd.list)-1].BridgeChannelName = nil
+	a = x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/DSAAAAAAAAAAA6", "")
+	if m := a.json(t); a.status != http.StatusOK || m["channel_name"] != nil {
+		t.Errorf("without a name = %d %s", a.status, a.body)
+	}
+	update := strings.Replace(body, `"channel_id":"ch-alerts"`, `"channel_id":"ch-alerts-prod"`, 1)
+	a = x.as(t, destinationsWriter, http.MethodPut, "/api/v1/destinations/DSAAAAAAAAAAA6", update, "If-Match", `"1"`)
+	if a.status != http.StatusOK || a.json(t)["channel_id"] != "ch-alerts-prod" ||
+		fd.saved[len(fd.saved)-1].Bridge.ChannelID != "ch-alerts-prod" || *fd.saveVers[len(fd.saveVers)-1] != 1 {
+		t.Errorf("update = %d %s", a.status, a.body)
+	}
+	fd.saveErr = &destinations.CheckFailedError{Items: []destinations.CheckItem{{Name: "channel",
+		Pointer: "/channel_id", Message: "The bot is not a member of this channel.", Code: "channel_forbidden"}}}
+	a = x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", body)
+	if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity ||
+		errs[0]["code"] != "destination_check_failed" || errs[0]["pointer"] != "/channel_id" ||
+		errs[0]["detail"] != "The bot is not a member of this channel." || errs[0]["check_code"] != "channel_forbidden" {
+		t.Errorf("refused = %d %s", a.status, a.body)
+	}
+	fd.saveErr = &destinations.FieldError{Pointer: "/connection_id", Code: destinations.CodeUnknownID,
+		Detail: "No such Bridge Connection."}
+	a = x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", body)
+	if errs := problemErrors(t, a); a.status != http.StatusUnprocessableEntity || errs[0]["code"] != "unknown_id" ||
+		errs[0]["pointer"] != "/connection_id" {
+		t.Errorf("another type's connection = %d %s", a.status, a.body)
+	}
+	fd.saveErr = nil
+	if a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
+		strings.Replace(body, `"channel_id":"ch-alerts",`, "", 1)); a.status != http.StatusBadRequest {
+		t.Errorf("without a channel = %d %s", a.status, a.body)
+	}
+	if _, err := bridgeDestinationInputOf(gen.DestinationInput{}); err == nil {
+		t.Error("a body that is not a Bridge Destination")
+	}
+	fd.check = destinations.CheckResult{Health: destinations.Health{State: "healthy"}, Items: []destinations.CheckItem{
+		{Name: "channel", Message: "The bot is not a member of this channel.", Code: "channel_forbidden"}}}
+	a = x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DSAAAAAAAAAAA6/checks", "")
+	var res gen.DestinationCheckResult
+	decodeInto(t, a, &res)
+	if a.status != http.StatusOK || res.Ok || len(res.Checks) != 1 || res.Checks[0].Name != gen.DestinationCheckItemNameChannel ||
+		res.Checks[0].Code.MustGet() != gen.NullableDestinationCheckCodeChannelForbidden ||
+		res.Checks[0].Message.MustGet() != "The bot is not a member of this channel." {
+		t.Errorf("check = %d %s", a.status, a.body)
+	}
+	fd.testErr = errors.Join(destinations.ErrNoTester, errors.New("bridge"))
+	for _, op := range []string{"tests", "previews"} {
+		a := x.as(t, destinationsTester, http.MethodPost, "/api/v1/destinations/DSAAAAAAAAAAA6/"+op,
+			`{"source":{"kind":"example"}}`)
+		if a.status != http.StatusNotImplemented || !strings.HasSuffix(a.json(t)["type"].(string), "/not-implemented") ||
+			a.json(t)["detail"] != "This build cannot test or preview Destinations of this type yet." {
+			t.Errorf("%s = %d %s", op, a.status, a.body)
+		}
 	}
 }
 

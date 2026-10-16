@@ -48,6 +48,10 @@ type Webhooks interface {
 	RetirePreviousSigningSecret(ctx context.Context, r webhooks.Requester, publicID string) error
 }
 
+// errNoTester is the 501 of a test or a preview of a Destination whose type this build cannot test yet.
+var errNoTester = problem(http.StatusNotImplemented, typeNotImplemented, "",
+	"This build cannot test or preview Destinations of this type yet.")
+
 // codeNotWebhook is the conflict of a Secret or Signing secret operation on a Destination that is not an outgoing
 // webhook.
 const codeNotWebhook = "not_webhook_destination"
@@ -122,8 +126,8 @@ func destinationRequester(ctx context.Context) (destinations.Requester, error) {
 	return destinations.Requester{Actor: id.Actor(), Transport: id.Transport, Address: clientAddress(ctx)}, nil
 }
 
-// CreateDestination is createDestination (C-13.FR-2, FR-3, C-14.FR-2): a Mattermost or Telegram Destination, saved
-// once its Destination check passed on the interactive path, or an outgoing webhook.
+// CreateDestination is createDestination (C-13.FR-2, FR-3, C-14.FR-2, C-22.FR-3): a Mattermost, Telegram or Bridge
+// Destination, saved once its Destination check passed on the interactive path, or an outgoing webhook.
 func (s *Server) CreateDestination(ctx context.Context, req gen.CreateDestinationRequestObject) (
 	gen.CreateDestinationResponseObject, error) {
 	r, err := destinationRequester(ctx)
@@ -155,7 +159,7 @@ func (s *Server) CreateDestination(ctx context.Context, req gen.CreateDestinatio
 		Headers: gen.CreateDestination201ResponseHeaders{ETag: &tag, Location: &location}}, nil
 }
 
-// UpdateDestination is updateDestination, with If-Match: saving a Mattermost or Telegram Destination runs its
+// UpdateDestination is updateDestination, with If-Match: saving a Mattermost, Telegram or Bridge Destination runs its
 // Destination check as createDestination does.
 func (s *Server) UpdateDestination(ctx context.Context, req gen.UpdateDestinationRequestObject) (
 	gen.UpdateDestinationResponseObject, error) {
@@ -190,8 +194,9 @@ func (s *Server) UpdateDestination(ctx context.Context, req gen.UpdateDestinatio
 		nil
 }
 
-// CheckDestination is checkDestination (C-13.FR-10, C-14.FR-14) on the interactive path: each check with its result, its
-// English message and the code clients translate, and the health after it; a passing check ends a Broken state.
+// CheckDestination is checkDestination (C-13.FR-10, C-14.FR-14, C-22.FR-3) on the interactive path: each check with
+// its result, its English message and the code clients translate, and the health after it; a passing check ends a
+// Broken state.
 func (s *Server) CheckDestination(ctx context.Context, req gen.CheckDestinationRequestObject) (
 	gen.CheckDestinationResponseObject, error) {
 	res, err := s.destinations.Check(ctx, req.DestinationId)
@@ -228,7 +233,7 @@ func sourceOf(src gen.TestSource) destinations.Source {
 
 // TestDestination is testDestination (C-16.FR-1 to FR-3, FR-5, FR-7) on the interactive path: each step with its
 // masked request and response, and the health after the test. A step without a limiter token in time is limited and
-// the operation still answers 200.
+// the operation still answers 200. A type without a test in this build, a Bridge Destination, answers 501.
 func (s *Server) TestDestination(ctx context.Context, req gen.TestDestinationRequestObject) (
 	gen.TestDestinationResponseObject, error) {
 	r, err := destinationRequester(ctx)
@@ -239,6 +244,9 @@ func (s *Server) TestDestination(ctx context.Context, req gen.TestDestinationReq
 		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
 	}
 	res, err := s.destinations.Test(ctx, r, req.DestinationId, sourceOf(req.Body.Source))
+	if errors.Is(err, destinations.ErrNoTester) {
+		return nil, errNoTester
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -294,13 +302,17 @@ func renderedRequestOf(r *delivery.TestRequest) *gen.RenderedRequest {
 }
 
 // PreviewDestination is previewDestination (C-16.FR-4): what the Destination would receive for the source, rendered
-// without sending anything, with every Secret masked.
+// without sending anything, with every Secret masked. A type without a preview in this build, a Bridge Destination,
+// answers 501.
 func (s *Server) PreviewDestination(ctx context.Context, req gen.PreviewDestinationRequestObject) (
 	gen.PreviewDestinationResponseObject, error) {
 	if req.Body == nil {
 		return nil, fieldProblem(http.StatusBadRequest, "", fieldRequired, "The request body is missing.")
 	}
 	items, err := s.destinations.Preview(ctx, req.DestinationId, sourceOf(req.Body.Source))
+	if errors.Is(err, destinations.ErrNoTester) {
+		return nil, errNoTester
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -337,14 +349,16 @@ func destinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
 	kind, err := body.Discriminator()
 	if err != nil {
 		return destinations.Input{}, fieldProblem(http.StatusBadRequest, "/type", fieldInvalidFormat,
-			"The type is not mattermost, telegram or webhook.")
+			"The type is not mattermost, telegram, webhook or bridge.")
 	}
 	switch kind {
-	case delivery.TypeWebhook:
+	case destinations.TypeWebhook:
 		return webhookInputOf(body)
-	case delivery.TypeTelegram:
+	case destinations.TypeTelegram:
 		return telegramDestinationInputOf(body)
-	case delivery.TypeMattermost:
+	case destinations.TypeBridge:
+		return bridgeDestinationInputOf(body)
+	case destinations.TypeMattermost:
 	default:
 		return destinations.Input{Type: kind}, nil
 	}
@@ -374,9 +388,26 @@ func telegramDestinationInputOf(body gen.DestinationInput) (destinations.Input, 
 	if err != nil {
 		return destinations.Input{}, err
 	}
-	return destinations.Input{Type: delivery.TypeTelegram, Name: t.Name, Mentions: set,
+	return destinations.Input{Type: destinations.TypeTelegram, Name: t.Name, Mentions: set,
 		Limiter:  destinations.Limiter{Limit: int64(t.Limiter.Limit), PerSeconds: int64(t.Limiter.PerSeconds)},
 		Telegram: &destinations.TelegramInput{Connection: t.ConnectionId, ChannelID: t.ChannelId}}, nil
+}
+
+// bridgeDestinationInputOf is the Input of a Bridge Destination's body: its Connection and its channel id
+// (C-22.FR-3).
+func bridgeDestinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
+	b, err := body.AsBridgeDestinationInput()
+	if err != nil {
+		return destinations.Input{}, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
+			"The body is not a Bridge Destination.")
+	}
+	set, err := mentionSettingsOf(b.Mentions)
+	if err != nil {
+		return destinations.Input{}, err
+	}
+	return destinations.Input{Type: destinations.TypeBridge, Name: b.Name, Mentions: set,
+		Limiter: destinations.Limiter{Limit: int64(b.Limiter.Limit), PerSeconds: int64(b.Limiter.PerSeconds)},
+		Bridge:  &destinations.BridgeInput{Connection: b.ConnectionId, ChannelID: b.ChannelId}}, nil
 }
 
 // webhookInputOf is the Input of an outgoing webhook's body: its mode, the request of the events mode, the requests of
@@ -409,7 +440,7 @@ func webhookInputOf(body gen.DestinationInput) (destinations.Input, error) {
 			in.Template.ReplyInThread = &r
 		}
 	}
-	return destinations.Input{Type: delivery.TypeWebhook, Name: w.Name, Mentions: set,
+	return destinations.Input{Type: destinations.TypeWebhook, Name: w.Name, Mentions: set,
 		Limiter: destinations.Limiter{Limit: int64(w.Limiter.Limit), PerSeconds: int64(w.Limiter.PerSeconds)},
 		Webhook: in}, nil
 }
@@ -506,14 +537,14 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 	var out gen.Destination
 	var err error
 	switch d.Type {
-	case delivery.TypeMattermost:
+	case destinations.TypeMattermost:
 		err = out.FromMattermostDestination(gen.MattermostDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.MattermostDestinationTypeMattermost, ConnectionId: deref(d.Connection),
 			TeamId: deref(d.MattermostTeamID), ChannelId: deref(d.MattermostChannelID),
 			TeamName: nullableString(d.MattermostTeamName), ChannelName: nullableString(d.MattermostChannelName),
 			Mentions: mentions, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag})
-	case delivery.TypeTelegram:
+	case destinations.TypeTelegram:
 		err = out.FromTelegramDestination(gen.TelegramDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.TelegramDestinationTypeTelegram, ConnectionId: deref(d.Connection),
 			ChannelId: deref(d.TelegramChannelID), ChannelTitle: nullableString(d.TelegramChannelTitle),
@@ -522,7 +553,13 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 			DiscussionGroupTitle: nullableString(d.TelegramDiscussionGroupTitle),
 			Mentions:             mentions, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag})
-	case delivery.TypeWebhook:
+	case destinations.TypeBridge:
+		err = out.FromBridgeDestination(gen.BridgeDestination{Id: d.PublicID, Name: d.Name,
+			Type: gen.BridgeDestinationTypeBridge, ConnectionId: deref(d.Connection),
+			ChannelId: deref(d.BridgeChannelID), ChannelName: nullableString(d.BridgeChannelName),
+			Mentions: mentions, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
+			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag})
+	case destinations.TypeWebhook:
 		var w gen.WebhookDestination
 		if w, err = webhookOf(d); err == nil {
 			w.Id, w.Name, w.Type = d.PublicID, d.Name, gen.WebhookDestinationTypeWebhook

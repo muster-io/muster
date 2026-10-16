@@ -15,8 +15,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/bridge"
+	"github.com/muster-io/muster/internal/bridge/gen"
 	"github.com/muster-io/muster/internal/connections"
 	"github.com/muster-io/muster/internal/connections/dbgen"
+	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/mattermost"
@@ -53,6 +56,21 @@ func (s *memStore) ListTelegramDestinations(_ context.Context, org int64) ([]dbg
 		out = append(out, dbgen.ListTelegramDestinationsRow{ID: id, PublicID: fmt.Sprintf("DS%012d", id),
 			Name: fmt.Sprintf("tg-dest-%d", id), ConnectionID: pgtype.Int8{Int64: d.connection, Valid: true},
 			TelegramChannelID: pgtype.Text{String: d.channel, Valid: true}})
+	}
+	return out, nil
+}
+
+// ListBridgeDestinations names each Destination of brTargets br-dest-<id>.
+func (s *memStore) ListBridgeDestinations(_ context.Context, org int64) ([]dbgen.ListBridgeDestinationsRow, error) {
+	if err := s.fail["ListBridgeDestinations"]; err != nil || org != 1 {
+		return nil, err
+	}
+	var out []dbgen.ListBridgeDestinationsRow
+	for _, id := range slices.Sorted(maps.Keys(s.brTargets)) {
+		d := s.brTargets[id]
+		out = append(out, dbgen.ListBridgeDestinationsRow{ID: id, PublicID: fmt.Sprintf("DS%012d", id),
+			Name: fmt.Sprintf("br-dest-%d", id), ConnectionID: pgtype.Int8{Int64: d.connection, Valid: true},
+			BridgeChannelID: pgtype.Text{String: d.channel, Valid: true}})
 	}
 	return out, nil
 }
@@ -152,7 +170,8 @@ func TestDoctor(t *testing.T) {
 		t.Error("the bot token reached the log")
 	}
 
-	for _, name := range []string{"ListConnections", "ListMattermostDestinations", "ListTelegramDestinations"} {
+	for _, name := range []string{"ListConnections", "ListMattermostDestinations", "ListTelegramDestinations",
+		"ListBridgeDestinations"} {
 		e.store.fail[name] = errors.New("down")
 		if _, err := e.svc.Doctor(t.Context(), e.store, time.Second); err == nil || !strings.Contains(err.Error(), "down") {
 			t.Errorf("%s failing = %v", name, err)
@@ -163,6 +182,81 @@ func TestDoctor(t *testing.T) {
 	noKeys := connections.New(connections.Config{OrgID: 1})
 	if got := findings(t, noKeys, e.store); !strings.HasPrefix(got,
 		"connection mm: the bot token cannot be opened: the master keys could not be loaded\n") {
+		t.Errorf("without a keyring:\n%s", got)
+	}
+}
+
+// TestDoctorBridge is C-02.FR-14 and C-22.FR-3 for Bridges: muster doctor checks each Bridge Connection with getInfo
+// and whether the info offers its event delivery mode, and each Bridge Destination with checkChannel, in the background
+// class; a failing one names the step or the item channel with its message, and a Destination whose Connection failed
+// or is deleted says so. It stores nothing: no info, no Audit log entry, no transaction, nothing on the interactive
+// path.
+func TestDoctorBridge(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	cfg := f.Config()
+	cfg.EventDelivery = []gen.InfoEventDelivery{gen.Poll}
+	cfg.Revoked = []string{fakebridge.SecondToken}
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	br := e.createFakeBridge(t, f, "br", fakebridge.Token, connections.EventDeliveryPoll)
+	revoked := e.createFakeBridge(t, f, "revoked", fakebridge.SecondToken, connections.EventDeliveryPoll)
+	push := e.createFakeBridge(t, f, "push", fakebridge.Token, connections.EventDeliveryPush)
+	gone := e.createFakeBridge(t, f, "gone", fakebridge.Token, connections.EventDeliveryPoll)
+	e.store.rows[gone.ID].deleted = true
+	e.store.brTargets[21] = memBRTarget{connection: br.ID, channel: fakebridge.ChannelAlerts}
+	e.store.brTargets[22] = memBRTarget{connection: br.ID, channel: fakebridge.ChannelNoBot}
+	e.store.brTargets[23] = memBRTarget{connection: revoked.ID, channel: fakebridge.ChannelAlerts}
+	e.store.brTargets[24] = memBRTarget{connection: push.ID, channel: fakebridge.ChannelAlerts}
+	e.store.brTargets[25] = memBRTarget{connection: gone.ID, channel: fakebridge.ChannelAlerts}
+	background := metrics.ClientRequests.With(string(outbound.ClassBackground), string(outbound.OutcomeOK))
+	before, audits, txs, infos := background.Get(), len(e.store.audit), e.store.tx, len(e.store.infos)
+	f.ResetRequests()
+
+	got := findings(t, e.svc, e.store)
+	notOffered := "event_delivery: The bridge does not offer push event delivery."
+	want := []string{"connection br: ok", "connection revoked: info: " + bridge.MessageTokenInvalid,
+		"connection push: " + notOffered,
+		"destination br-dest-21: ok", "destination br-dest-22: channel: " + fakebridge.MessageNotMember,
+		"destination br-dest-23: its Connection failed its check: info: " + bridge.MessageTokenInvalid,
+		"destination br-dest-24: its Connection failed its check: " + notOffered,
+		"destination br-dest-25: its Connection is deleted"}
+	if got != strings.Join(want, "\n") {
+		t.Fatalf("findings:\n%s\nwant:\n%s", got, strings.Join(want, "\n"))
+	}
+	var paths []string
+	for _, r := range f.Requests() {
+		paths = append(paths, r.Method+" "+r.Path)
+	}
+	wantPaths := []string{"GET /v1/info", "GET /v1/info", "GET /v1/info", "POST /v1/channels/ch-alerts/check",
+		"POST /v1/channels/ch-nobot/check"}
+	if !slices.Equal(paths, wantPaths) {
+		t.Errorf("requests %q, want %q", paths, wantPaths)
+	}
+	if n := background.Get() - before; n < 3 {
+		t.Errorf("%d background requests", n)
+	}
+	if len(e.store.audit) != audits || e.store.tx != txs || len(e.store.infos) != infos || len(e.path.subjects) != 0 {
+		t.Errorf("the doctor wrote: audit %d, transactions %d, infos %d, interactive %d", len(e.store.audit)-audits,
+			e.store.tx-txs, len(e.store.infos)-infos, len(e.path.subjects))
+	}
+
+	cfg.Channels = map[string]*string{}
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := findings(t, e.svc, e.store); !strings.Contains(got, "destination br-dest-21: channel: "+
+		fakebridge.MessageNotMember) {
+		t.Errorf("a channel the bot lost:\n%s", got)
+	}
+	e.store.rows[br.ID].row.BotTokenCiphertext = []byte("garbage")
+	if got := findings(t, e.svc, e.store); !strings.HasPrefix(got, "connection br: open the token of the connection") {
+		t.Errorf("a token that cannot be opened:\n%s", got)
+	}
+	noKeys := connections.New(connections.Config{OrgID: 1})
+	if got := findings(t, noKeys, e.store); !strings.HasPrefix(got,
+		"connection br: the bot token cannot be opened: the master keys could not be loaded\n") {
 		t.Errorf("without a keyring:\n%s", got)
 	}
 }

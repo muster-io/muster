@@ -180,6 +180,14 @@ FROM destinations
 WHERE org_id = @org_id AND type = 'telegram' AND deleted_at IS NULL
 ORDER BY id;
 
+-- ListBridgeDestinations lists the Bridge Destinations that are not deleted, in id order, with their Connection and
+-- channel, for muster doctor.
+-- name: ListBridgeDestinations :many
+SELECT id, public_id, name, connection_id, bridge_channel_id
+FROM destinations
+WHERE org_id = @org_id AND type = 'bridge' AND deleted_at IS NULL
+ORDER BY id;
+
 -- ListPollingConnections lists the Telegram Connections that are not deleted and are in the long-polling mode, with
 -- their secrets as stored and their telegram_update_offset, for the Leader's poller.
 -- name: ListPollingConnections :many

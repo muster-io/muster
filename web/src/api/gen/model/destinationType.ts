@@ -25,4 +25,5 @@ export const DestinationType = {
   mattermost: 'mattermost',
   telegram: 'telegram',
   webhook: 'webhook',
+  bridge: 'bridge',
 } as const;

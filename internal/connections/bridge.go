@@ -18,6 +18,7 @@ import (
 	"github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/proxyconf"
@@ -194,6 +195,36 @@ func (s *Service) checkBridge(ctx context.Context, row dbgen.GetConnectionRow, b
 	ok, code, message := bridge.EventDeliveryStep(info, row.BridgeEventDelivery.String)
 	return CheckResult{OK: ok, Bridge: true, Info: info.Raw, Steps: []Step{step, {Name: StepEventDelivery, OK: ok,
 		Via: c.Via(), Message: message, Code: code}}}, nil
+}
+
+// CheckBridgeChannel runs the Destination check of a Bridge Destination being saved or checked, for the Destination
+// write path (C-22.FR-3): checkChannel through the Bridge Connection that the check names, on the interactive path,
+// limited by the Destination when it exists and by the Connection otherwise, with a client built for the check. A
+// Connection that is missing, deleted or not a Bridge Connection is destinations.ErrUnknownConnection.
+func (s *Service) CheckBridgeChannel(ctx context.Context, in destinations.BridgeChannelCheck) (
+	destinations.BridgeChannelChecked, error) {
+	row, err := s.row(ctx, s.cfg.Store, in.Connection)
+	if errors.Is(err, ErrNotFound) || (err == nil && row.Type != TypeBridge) {
+		return destinations.BridgeChannelChecked{}, destinations.ErrUnknownConnection
+	}
+	if err != nil {
+		return destinations.BridgeChannelChecked{}, err
+	}
+	c, err := s.bridgeClient(row)
+	if err != nil {
+		return destinations.BridgeChannelChecked{}, err
+	}
+	conn := row.ID
+	subject := delivery.Subject{Connection: &conn}
+	if in.Destination != nil {
+		subject = delivery.Subject{Destination: &delivery.Destination{ID: *in.Destination, Type: TypeBridge,
+			Connection: &conn}}
+	}
+	res, err := bridge.CheckDestination(ctx, c, bridge.Interactive(s.cfg.Interactive, subject), in.ChannelID)
+	if err != nil {
+		return destinations.BridgeChannelChecked{}, err
+	}
+	return destinations.BridgeChannelChecked{ConnectionID: row.ID, Check: res}, nil
 }
 
 // StoredInfo is the info that a read of the Bridge Connection conn stored, with when it was read (bridge.InfoStore);

@@ -3,11 +3,12 @@
 
 // Package mentions holds the Mention settings of C-12.FR-8 and FR-12: whom a Destination mentions for each kind of
 // Loud event — nobody, everyone in the chat with the word its messenger offers, chosen Users or messenger groups —
-// validated per Destination type, and the resolution of a Loud message's symbolic Mentions into targets: the
-// Destination's setting for a kind, the Owner the lifecycle event recorded, or its previous Owner. A User is named by
-// the username of their Account link in the Destination's identity space, otherwise by the Muster display name,
-// which mentions nobody; the footer of a message names users the same way. Storing the settings is the Destination's,
-// and rendering a target in a messenger's syntax is its adapter's.
+// validated per Destination type, Telegram and Bridges taking nobody and chosen Users only (C-22.FR-3), and the
+// resolution of a Loud message's symbolic Mentions into targets: the Destination's setting for a kind, the Owner the
+// lifecycle event recorded, or its previous Owner. A User is named by the username of their Account link in the
+// Destination's identity space, otherwise by the Muster display name, which mentions nobody; the footer of a message
+// names users the same way. Storing the settings is the Destination's, and rendering a target in a messenger's syntax
+// is its adapter's.
 package mentions
 
 import (
@@ -58,6 +59,7 @@ const (
 	TypeMattermost = "mattermost"
 	TypeTelegram   = "telegram"
 	TypeWebhook    = "webhook"
+	TypeBridge     = "bridge"
 )
 
 // The kinds of a Target.
@@ -137,14 +139,34 @@ func (s *Service) q(db DBTX) Queries {
 }
 
 // everyoneOffered reports whether a Destination type takes a choice of everyone: Mattermost and outgoing webhooks take
-// every one, Telegram only nobody.
+// every one, Telegram and Bridges only nobody.
 func everyoneOffered(destinationType, everyone string) bool {
-	return everyone == EveryoneNone || destinationType != TypeTelegram
+	return everyone == EveryoneNone || !usersOnly(destinationType)
 }
 
-// Validate refuses Mention settings that a Destination of the type cannot take (C-12.FR-8): every kind is present;
-// everyone is none, channel, all or here, and only none for Telegram; user_ids name Users that exist and are not
-// deleted; groups are Mattermost group names, and none for Telegram. Outgoing webhooks take every choice, as data.
+// usersOnly reports whether a Destination type takes nobody and chosen Users only: Telegram, and a Bridge (C-22.FR-3),
+// whose protocol offers no Mention of everyone in the chat and no messenger groups.
+func usersOnly(destinationType string) bool {
+	return destinationType == TypeTelegram || destinationType == TypeBridge
+}
+
+// refusal is the detail of a choice that the users-only Destination type refuses: everyone in the chat, or groups.
+func refusal(destinationType string, groups bool) string {
+	switch {
+	case destinationType == TypeBridge && groups:
+		return "A Bridge has no messenger groups."
+	case destinationType == TypeBridge:
+		return "A Bridge has no Mention of everyone in the chat."
+	case groups:
+		return "Telegram has no groups."
+	}
+	return "Telegram has no Mention of everyone in the chat."
+}
+
+// Validate refuses Mention settings that a Destination of the type cannot take (C-12.FR-8, C-22.FR-3): every kind is
+// present; everyone is none, channel, all or here, and only none for Telegram and Bridges; user_ids name Users that
+// exist and are not deleted; groups are Mattermost group names, and none for Telegram and Bridges. Outgoing webhooks
+// take every choice, as data.
 func (s *Service) Validate(ctx context.Context, destinationType string, set Settings) error {
 	for name := range set {
 		if !slices.Contains(Kinds, name) {
@@ -170,7 +192,7 @@ func (s *Service) Validate(ctx context.Context, destinationType string, set Sett
 		}
 		if !everyoneOffered(destinationType, m.Everyone) {
 			return &FieldError{Pointer: base + "/everyone", Code: CodeUnsupported,
-				Detail: "Telegram has no Mention of everyone in the chat."}
+				Detail: refusal(destinationType, false)}
 		}
 		seen := map[string]bool{}
 		for i, id := range m.UserIDs {
@@ -185,8 +207,8 @@ func (s *Service) Validate(ctx context.Context, destinationType string, set Sett
 			seen[n] = true
 			refs = append(refs, ref{pointer: pointer, id: n})
 		}
-		if destinationType == TypeTelegram && len(m.Groups) > 0 {
-			return &FieldError{Pointer: base + "/groups", Code: CodeUnsupported, Detail: "Telegram has no groups."}
+		if usersOnly(destinationType) && len(m.Groups) > 0 {
+			return &FieldError{Pointer: base + "/groups", Code: CodeUnsupported, Detail: refusal(destinationType, true)}
 		}
 		for i, g := range m.Groups {
 			if (destinationType == TypeMattermost && !groupName.MatchString(g)) || g == "" {
@@ -255,7 +277,8 @@ func (u User) Display() string {
 }
 
 // IdentitySpace is the identity space of a Destination's messenger: every Telegram link, or the Mattermost links of
-// its Connection; an outgoing webhook has none.
+// its Connection; an outgoing webhook has none, and a Bridge none until its Account links exist (S-076), so that a
+// User is named by their display name.
 func IdentitySpace(destinationType string, connection *int64) string {
 	switch {
 	case destinationType == TypeTelegram:
@@ -342,7 +365,7 @@ func (s *Service) Resolve(ctx context.Context, db DBTX, org int64, r Request) ([
 		if st.Everyone != "" && st.Everyone != EveryoneNone && everyoneOffered(r.DestinationType, st.Everyone) {
 			add(Target{Kind: TargetEveryone, Everyone: st.Everyone})
 		}
-		if r.DestinationType != TypeTelegram {
+		if !usersOnly(r.DestinationType) {
 			for _, g := range st.Groups {
 				add(Target{Kind: TargetGroup, Group: g})
 			}

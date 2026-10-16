@@ -85,7 +85,7 @@ export const ListRoutesResponse = zod.object({
   "destinations": zod.array(zod.object({
   "id": zod.string().regex(listRoutesResponseItemsItemTwoDestinationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
-  "type": zod.enum(['mattermost', 'telegram', 'webhook']),
+  "type": zod.enum(['mattermost', 'telegram', 'webhook', 'bridge']),
   "health": zod.object({
   "state": zod.enum(['healthy', 'broken']),
   "since": zod.iso.datetime({"offset":true}).nullish(),
@@ -225,7 +225,7 @@ export const CreateRouteResponse = zod.object({
   "destinations": zod.array(zod.object({
   "id": zod.string().regex(createRouteResponseTwoDestinationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
-  "type": zod.enum(['mattermost', 'telegram', 'webhook']),
+  "type": zod.enum(['mattermost', 'telegram', 'webhook', 'bridge']),
   "health": zod.object({
   "state": zod.enum(['healthy', 'broken']),
   "since": zod.iso.datetime({"offset":true}).nullish(),
@@ -317,7 +317,7 @@ export const GetRouteResponse = zod.object({
   "destinations": zod.array(zod.object({
   "id": zod.string().regex(getRouteResponseTwoDestinationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
-  "type": zod.enum(['mattermost', 'telegram', 'webhook']),
+  "type": zod.enum(['mattermost', 'telegram', 'webhook', 'bridge']),
   "health": zod.object({
   "state": zod.enum(['healthy', 'broken']),
   "since": zod.iso.datetime({"offset":true}).nullish(),
@@ -467,7 +467,7 @@ export const UpdateRouteResponse = zod.object({
   "destinations": zod.array(zod.object({
   "id": zod.string().regex(updateRouteResponseTwoDestinationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
-  "type": zod.enum(['mattermost', 'telegram', 'webhook']),
+  "type": zod.enum(['mattermost', 'telegram', 'webhook', 'bridge']),
   "health": zod.object({
   "state": zod.enum(['healthy', 'broken']),
   "since": zod.iso.datetime({"offset":true}).nullish(),
@@ -582,7 +582,7 @@ export const ReorderRoutesResponse = zod.object({
   "destinations": zod.array(zod.object({
   "id": zod.string().regex(reorderRoutesResponseItemsItemTwoDestinationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
-  "type": zod.enum(['mattermost', 'telegram', 'webhook']),
+  "type": zod.enum(['mattermost', 'telegram', 'webhook', 'bridge']),
   "health": zod.object({
   "state": zod.enum(['healthy', 'broken']),
   "since": zod.iso.datetime({"offset":true}).nullish(),
@@ -846,7 +846,7 @@ export const AcceptRouteSuggestionResponse = zod.object({
   "destinations": zod.array(zod.object({
   "id": zod.string().regex(acceptRouteSuggestionResponseTwoDestinationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
-  "type": zod.enum(['mattermost', 'telegram', 'webhook']),
+  "type": zod.enum(['mattermost', 'telegram', 'webhook', 'bridge']),
   "health": zod.object({
   "state": zod.enum(['healthy', 'broken']),
   "since": zod.iso.datetime({"offset":true}).nullish(),

@@ -17,6 +17,7 @@
  * During 0.x breaking changes are allowed; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
  * OpenAPI spec version: 0.1.0
  */
+import type { BridgeDestination } from './bridgeDestination';
 import type { MattermostDestination } from './mattermostDestination';
 import type { TelegramDestination } from './telegramDestination';
 import type { WebhookDestination } from './webhookDestination';
@@ -24,4 +25,4 @@ import type { WebhookDestination } from './webhookDestination';
 /**
  * A Destination; `type` selects the variant.
  */
-export type Destination = MattermostDestination | TelegramDestination | WebhookDestination;
+export type Destination = MattermostDestination | TelegramDestination | WebhookDestination | BridgeDestination;

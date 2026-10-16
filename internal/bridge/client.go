@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/muster-io/muster/internal/bridge/gen"
 	"github.com/muster-io/muster/internal/clock"
@@ -226,6 +227,25 @@ func (r Result) Outcome() delivery.Outcome {
 		o.Kind = delivery.OutcomeTransient
 	}
 	return o
+}
+
+// maxChannelName is the longest channel name checkChannel answers with (api/bridge.yaml ChannelCheck).
+const maxChannelName = 200
+
+// CheckChannel calls checkChannel for channelID in class (C-22.FR-3), which posts nothing: the channel's name, masked
+// of the token and the push secret, when the bridge answers 200 with a name of 1 to 200 characters without NUL. Any
+// other answer is a failed Result; a 200 without such a name is invalid.
+func (c *Client) CheckChannel(ctx context.Context, class outbound.Class, channelID string) (string, Result) {
+	var out gen.ChannelCheck
+	_, r := c.do(ctx, class, http.MethodPost, "channels/"+Segment(channelID)+"/check", nil, nil, &out)
+	if !r.OK() {
+		return "", r
+	}
+	if n := utf8.RuneCountInString(out.Name); n < 1 || n > maxChannelName || strings.ContainsRune(out.Name, 0) {
+		return "", Result{Status: r.Status, Classification: Classification{Class: ClassInvalid},
+			Error: "POST channels/{channel_id}/check: the channel's name is not 1 to 200 characters without NUL"}
+	}
+	return c.settings.mask(out.Name), r
 }
 
 // do makes one call of method on path below `<base>/v1/` in the client class, with body as JSON unless it is nil and

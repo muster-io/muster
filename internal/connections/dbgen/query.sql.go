@@ -409,6 +409,49 @@ func (q *Queries) InsertConnection(ctx context.Context, arg InsertConnectionPara
 	return id, err
 }
 
+const listBridgeDestinations = `-- name: ListBridgeDestinations :many
+SELECT id, public_id, name, connection_id, bridge_channel_id
+FROM destinations
+WHERE org_id = $1 AND type = 'bridge' AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListBridgeDestinationsRow struct {
+	ID              int64
+	PublicID        string
+	Name            string
+	ConnectionID    pgtype.Int8
+	BridgeChannelID pgtype.Text
+}
+
+// ListBridgeDestinations lists the Bridge Destinations that are not deleted, in id order, with their Connection and
+// channel, for muster doctor.
+func (q *Queries) ListBridgeDestinations(ctx context.Context, orgID int64) ([]ListBridgeDestinationsRow, error) {
+	rows, err := q.db.Query(ctx, listBridgeDestinations, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBridgeDestinationsRow{}
+	for rows.Next() {
+		var i ListBridgeDestinationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.ConnectionID,
+			&i.BridgeChannelID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listConnections = `-- name: ListConnections :many
 
 

@@ -18,13 +18,15 @@ import { cn } from "./ui/utils";
 /** delivery.broken_probe_interval: built in, 5 minutes. */
 export const BROKEN_PROBE_INTERVAL_SECONDS = 300;
 
-/** The name of a Destination type; the messengers' names are not translated. */
+/** The name of a Destination type; the messengers' names are not translated, and a Bridge goes by the type's name. */
 export function destinationTypeName(t: TFunction, type: DestinationType): string {
   switch (type) {
     case "mattermost":
       return "Mattermost";
     case "telegram":
       return "Telegram";
+    case "bridge":
+      return t("destinations.types.bridge");
     default:
       return t("destinations.types.webhook");
   }

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// A Destination (C-13.FR-9, FR-10; C-11.FR-9; C-14.FR-2, FR-14; C-15.FR-1, FR-5, FR-10): its health with the Broken
-// banner, its Routes, and its form — Mattermost, Telegram, which shows the channel and the discussion group it found,
-// or the outgoing webhook, followed by its Secrets and its Signing secret — read-only without destinations:write;
-// "Check" with destinations:test for the types that have a Destination check, and "Delete" with destinations:write.
+// A Destination (C-13.FR-9, FR-10; C-11.FR-9; C-14.FR-2, FR-14; C-15.FR-1, FR-5, FR-10; C-22.FR-3): its health with
+// the Broken banner, its Routes, and its form — Mattermost, Telegram, which shows the channel and the discussion group
+// it found, or the outgoing webhook, followed by its Secrets and its Signing secret — read-only without
+// destinations:write; "Check" with destinations:test for the types that have a Destination check, and "Delete" with
+// destinations:write. A Bridge Destination shows its name, health and Routes, without a form, a check, a test or a
+// preview yet.
 // The form keeps the version it was read at and sends it as If-Match: when the Destination changes elsewhere an
 // untouched form takes the new version and says so, and a form with changes keeps them, and its save is refused (412)
 // with the offer to reload. A new version with the same settings — a Secret or the Signing secret changed — becomes the
@@ -349,14 +351,14 @@ function DestinationView({ destinationId }: { destinationId: string }) {
             <EditForm current={destination} kind={MATTERMOST_KIND} onDirtyChange={setDirty} />
           ) : destination.type === "telegram" ? (
             <EditForm current={destination} kind={TELEGRAM_KIND} onDirtyChange={setDirty} />
-          ) : (
+          ) : destination.type === "bridge" ? null : (
             <>
               <EditForm current={destination} kind={WEBHOOK_KIND} onDirtyChange={setDirty} />
               <DestinationSecrets destinationId={destination.id} />
               <SigningSecret destination={destination} />
             </>
           )}
-          {canTest && (
+          {canTest && destination.type !== "bridge" && (
             <TestAndPreview key={destination.id} destination={destination} dirty={dirty} />
           )}
         </>

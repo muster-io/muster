@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/connections/dbgen"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/mattermost"
@@ -50,19 +51,23 @@ type DoctorQueries interface {
 	ListConnections(ctx context.Context, arg dbgen.ListConnectionsParams) ([]dbgen.ListConnectionsRow, error)
 	ListMattermostDestinations(ctx context.Context, orgID int64) ([]dbgen.ListMattermostDestinationsRow, error)
 	ListTelegramDestinations(ctx context.Context, orgID int64) ([]dbgen.ListTelegramDestinationsRow, error)
+	ListBridgeDestinations(ctx context.Context, orgID int64) ([]dbgen.ListBridgeDestinationsRow, error)
 }
 
-// Doctor runs the checks of muster doctor (C-02.FR-14) over the Connections and the Mattermost and Telegram
-// Destinations that are not deleted, read through q, Bridge Connections apart: the Connection check of a Mattermost
-// Connection (GET /api/v4/users/me) and the steps of a Telegram one (the dry probe, getMe, getWebhookInfo), and the
-// Destination checks of mattermost.CheckDestination and telegram.CheckDestination, each request made at once in the
-// background client class, whose retries each check bounds by each. A Telegram Connection that fails names the failing
-// step with its message. It only reads: it records nothing of what it finds. It needs the Keyring and the Network of
-// the Service only; without a Keyring every check fails, for the bot tokens cannot be opened.
+// Doctor runs the checks of muster doctor (C-02.FR-14) over the Connections and the Mattermost, Telegram and Bridge
+// Destinations that are not deleted, read through q: the Connection check of a Mattermost Connection
+// (GET /api/v4/users/me), the steps of a Telegram one (the dry probe, getMe, getWebhookInfo) and of a Bridge one
+// (getInfo, then whether the info it read offers the Connection's event delivery mode, C-22.FR-2), and the Destination
+// checks of mattermost.CheckDestination, telegram.CheckDestination and bridge.CheckDestination (checkChannel,
+// C-22.FR-3), each request made at once in the background client class, whose retries each check bounds by each. A
+// Telegram or Bridge Connection that fails names the failing step with its message. It only reads: it records nothing
+// of what it finds, not even a Bridge's info. It needs the Keyring and the Network of the Service only; without a
+// Keyring every check fails, for the bot tokens cannot be opened.
 func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duration) ([]Finding, error) {
 	var out []Finding
 	clients := map[int64]*mattermost.Client{}
 	tgClients := map[int64]*telegram.Client{}
+	brClients := map[int64]*bridge.Client{}
 	failed := map[int64]string{}
 	params := dbgen.ListConnectionsParams{OrgID: s.cfg.OrgID, PageSize: doctorPage}
 	for {
@@ -71,11 +76,18 @@ func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duratio
 			return nil, fmt.Errorf("list the connections: %w", err)
 		}
 		for _, r := range rows {
-			// A Bridge Connection is not checked yet: S-080 checks it with getInfo.
+			f := Finding{Kind: FindingConnection, Name: r.Name}
 			if r.Type == TypeBridge {
+				var c *bridge.Client
+				c, f.Message = s.doctorBridge(ctx, dbgen.GetConnectionRow(r), each)
+				if f.OK() {
+					brClients[r.ID] = c
+				} else {
+					failed[r.ID] = f.Message
+				}
+				out = append(out, f)
 				continue
 			}
-			f := Finding{Kind: FindingConnection, Name: r.Name}
 			if r.Type == TypeTelegram {
 				var c *telegram.Client
 				c, f.Message = s.doctorTelegram(ctx, dbgen.GetConnectionRow(r), each)
@@ -155,6 +167,30 @@ func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duratio
 		}
 		out = append(out, f)
 	}
+	brDests, err := q.ListBridgeDestinations(ctx, s.cfg.OrgID)
+	if err != nil {
+		return nil, fmt.Errorf("list the bridge destinations: %w", err)
+	}
+	for _, d := range brDests {
+		f := Finding{Kind: FindingDestination, Name: d.Name}
+		c, ok := brClients[d.ConnectionID.Int64]
+		switch {
+		case ok:
+			checkCtx, cancel := context.WithTimeout(ctx, each)
+			// The direct runner has no error of its own.
+			res, _ := bridge.CheckDestination(checkCtx, c, bridge.Direct(delivery.Call{
+				Class: outbound.ClassBackground}), d.BridgeChannelID.String)
+			cancel()
+			if !res.OK() {
+				f.Message = bridge.ItemChannel + ": " + cmp.Or(res.Message, checkFailed)
+			}
+		case failed[d.ConnectionID.Int64] != "":
+			f.Message = "its Connection failed its check: " + failed[d.ConnectionID.Int64]
+		default:
+			f.Message = "its Connection is deleted"
+		}
+		out = append(out, f)
+	}
 	return out, nil
 }
 
@@ -186,6 +222,31 @@ func (s *Service) doctorTelegram(ctx context.Context, row dbgen.GetConnectionRow
 	}
 	if st, failed := res.Failed(); failed {
 		return nil, st.Name + ": " + cmp.Or(st.Message, checkFailed)
+	}
+	return c, ""
+}
+
+// doctorBridge runs the steps of the check of the Bridge Connection row in the background class, bounded by each:
+// getInfo, never through Muster's copy of the info, which muster doctor neither reads nor stores, then whether the
+// info it read offers the Connection's event delivery mode. It returns the client and an empty message when both
+// passed, otherwise the failing step with its message.
+func (s *Service) doctorBridge(ctx context.Context, row dbgen.GetConnectionRow, each time.Duration) (*bridge.Client,
+	string) {
+	if s.cfg.Keyring == nil {
+		return nil, errNoKeyring.Error()
+	}
+	c, err := s.bridgeClient(row)
+	if err != nil {
+		return nil, err.Error()
+	}
+	ctx, cancel := context.WithTimeout(ctx, each)
+	defer cancel()
+	info, r := c.GetInfo(ctx, outbound.ClassBackground)
+	if !r.OK() {
+		return nil, StepInfo + ": " + cmp.Or(string(r.Error), checkFailed)
+	}
+	if ok, _, message := bridge.EventDeliveryStep(info, row.BridgeEventDelivery.String); !ok {
+		return nil, StepEventDelivery + ": " + message
 	}
 	return c, ""
 }

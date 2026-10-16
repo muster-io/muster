@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/keyring"
@@ -35,7 +36,11 @@ const (
 	TypeMattermost = "mattermost"
 	TypeTelegram   = "telegram"
 	TypeWebhook    = "webhook"
+	TypeBridge     = "bridge"
 )
+
+// maxBridgeChannelLength is the longest channel id of a Bridge Destination (api/bridge.yaml ChannelId).
+const maxBridgeChannelLength = 512
 
 // The Audit log actions of saved Destinations (C-03.FR-14).
 const (
@@ -124,6 +129,13 @@ type TelegramInput struct {
 	ChannelID  string
 }
 
+// BridgeInput are the fields of a Bridge Destination (C-22.FR-3): its Connection by public_id and its channel id as its
+// messenger names it.
+type BridgeInput struct {
+	Connection string
+	ChannelID  string
+}
+
 // WebhookInput are the fields of an outgoing webhook Destination (C-15.FR-1): its mode, the request of the events
 // mode, the requests of the template mode and its proxy. Only the requests of the mode are stored: the events request
 // in the modes events and both, the request templates in the modes template and both.
@@ -143,6 +155,7 @@ type Input struct {
 	Mattermost *MattermostInput
 	Telegram   *TelegramInput
 	Webhook    *WebhookInput
+	Bridge     *BridgeInput
 }
 
 // ChannelCheck is the Destination check of a Mattermost channel through the Connection Connection (public_id): of the
@@ -189,6 +202,27 @@ type TelegramChecker interface {
 	CheckTelegramChannel(ctx context.Context, c TelegramChannelCheck) (TelegramChannelChecked, error)
 }
 
+// BridgeChannelCheck is the Destination check of a Bridge channel through the Connection Connection (public_id): of the
+// saved Destination Destination (its id) when it exists, so that its limiter applies, else of the Connection alone.
+type BridgeChannelCheck struct {
+	Connection  string
+	Destination *int64
+	ChannelID   string
+}
+
+// BridgeChannelChecked is the result of a BridgeChannelCheck: the id of the Connection and the check.
+type BridgeChannelChecked struct {
+	ConnectionID int64
+	Check        bridge.ChannelCheck
+}
+
+// BridgeChecker runs the Destination check of a Bridge channel on the interactive path (C-22.FR-3), declared by its
+// consumer next to TelegramChecker; *connections.Service implements it. A Connection that is not a Bridge Connection
+// that is not deleted is ErrUnknownConnection; no limiter token within the budget is a *delivery.LimitedError.
+type BridgeChecker interface {
+	CheckBridgeChannel(ctx context.Context, c BridgeChannelCheck) (BridgeChannelChecked, error)
+}
+
 // MentionValidator validates the Mention settings of a Destination type (C-12.FR-8), declared by its consumer;
 // *mentions.Service implements it.
 type MentionValidator interface {
@@ -213,6 +247,9 @@ type writeQueries interface {
 	LockTelegramConnection(ctx context.Context, arg dbgen.LockTelegramConnectionParams) (int64, error)
 	InsertTelegramDestination(ctx context.Context, arg dbgen.InsertTelegramDestinationParams) (int64, error)
 	UpdateTelegramDestination(ctx context.Context, arg dbgen.UpdateTelegramDestinationParams) error
+	LockBridgeConnection(ctx context.Context, arg dbgen.LockBridgeConnectionParams) (int64, error)
+	InsertBridgeDestination(ctx context.Context, arg dbgen.InsertBridgeDestinationParams) (int64, error)
+	UpdateBridgeDestination(ctx context.Context, arg dbgen.UpdateBridgeDestinationParams) error
 }
 
 // view is what the Audit log diff of a saved Destination shows: never a secret, whose change is marked apart.
@@ -232,8 +269,11 @@ type view struct {
 func viewOf(d Destination) (view, error) {
 	v := view{Name: d.Name, Connection: d.Connection, TeamID: d.MattermostTeamID, ChannelID: d.MattermostChannelID,
 		Mode: d.WebhookMode, Limiter: Limiter{Limit: d.LimiterLimit, PerSeconds: d.LimiterPerSeconds}}
-	if d.Type == TypeTelegram {
+	switch d.Type {
+	case TypeTelegram:
 		v.ChannelID = d.TelegramChannelID
+	case TypeBridge:
+		v.ChannelID = d.BridgeChannelID
 	}
 	if len(d.Mentions) > 0 {
 		if err := json.Unmarshal(d.Mentions, &v.Mentions); err != nil {
@@ -282,6 +322,10 @@ func (s *Service) validate(ctx context.Context, in *Input, stored *Destination) 
 	case in.Type == TypeTelegram && in.Telegram != nil:
 		return s.validateTelegram(ctx, in)
 	case in.Type == TypeTelegram:
+		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The fields of the type are missing."}
+	case in.Type == TypeBridge && in.Bridge != nil:
+		return s.validateBridge(ctx, in)
+	case in.Type == TypeBridge:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The fields of the type are missing."}
 	case in.Type == TypeWebhook && in.Webhook != nil:
 		if err := validateCommon(in); err != nil {
@@ -623,8 +667,9 @@ func (s *Service) check(ctx context.Context, in Input, destinationID *int64) (Ch
 // Create creates a Mattermost Destination (C-13.FR-2, FR-3, C-11.FR-18) once its Destination check passed on the
 // interactive path; the check reads the names of its team and channel, which the Destination keeps. A Telegram
 // Destination is created the same way from its channel alone, keeping the discussion group its check found
-// (C-14.FR-2). An outgoing webhook in the events mode has no check: it is created with its first Signing secret
-// (C-15.FR-1, FR-5). It is recorded as destination.created.
+// (C-14.FR-2), and a Bridge Destination from its channel id, keeping the channel's name its check read (C-22.FR-3). An
+// outgoing webhook in the events mode has no check: it is created with its first Signing secret (C-15.FR-1, FR-5). It
+// is recorded as destination.created.
 func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destination, error) {
 	if err := s.validate(ctx, &in, nil); err != nil {
 		return Destination{}, err
@@ -634,6 +679,8 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destinatio
 		return created(s.createWebhook(ctx, r, in))
 	case TypeTelegram:
 		return created(s.createTelegram(ctx, r, in))
+	case TypeBridge:
+		return created(s.createBridge(ctx, r, in))
 	}
 	checked, err := s.check(ctx, in, nil)
 	if err != nil {
@@ -682,10 +729,10 @@ func created(d Destination, err error) (Destination, error) {
 	return d, nil
 }
 
-// Update replaces the configured fields of the Destination publicID (C-13.FR-2, FR-3, C-14.FR-2); a non-nil version
-// must be its current one (If-Match). Saving runs the Destination check as Create does, limited by the Destination; a
-// passing check of a Broken Destination ends its Broken state (C-13.FR-10, C-14.FR-14). An update that changes nothing
-// writes nothing.
+// Update replaces the configured fields of the Destination publicID (C-13.FR-2, FR-3, C-14.FR-2, C-22.FR-3); a non-nil
+// version must be its current one (If-Match). Saving runs the Destination check as Create does, limited by the
+// Destination; a passing check of a Broken Destination ends its Broken state (C-13.FR-10, C-14.FR-14). An update that
+// changes nothing writes nothing.
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Destination,
 	error) {
 	before, err := s.Get(ctx, publicID)
@@ -703,6 +750,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		return s.updateWebhook(ctx, r, before, in)
 	case TypeTelegram:
 		return s.updateTelegram(ctx, r, before, in)
+	case TypeBridge:
+		return s.updateBridge(ctx, r, before, in)
 	}
 	checked, err := s.check(ctx, in, &before.ID)
 	if err != nil {
@@ -781,9 +830,10 @@ type CheckResult struct {
 	Health Health
 }
 
-// Check runs the Destination check of the Destination publicID from checkDestination (C-13.FR-10, C-14.FR-14) on the
-// interactive path, limited by the Destination: each check with its result. A passing check of a Broken Destination
-// ends its Broken state. A type without a Destination check here is a *FieldError check_not_supported.
+// Check runs the Destination check of the Destination publicID from checkDestination (C-13.FR-10, C-14.FR-14,
+// C-22.FR-3) on the interactive path, limited by the Destination: each check with its result. A passing check of a
+// Broken Destination ends its Broken state. A Bridge Destination's check keeps no channel name it reads: a save does.
+// A type without a Destination check here is a *FieldError check_not_supported.
 func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, error) {
 	d, err := s.Get(ctx, publicID)
 	if err != nil {
@@ -823,6 +873,15 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 				}
 			}
 		}
+	case d.Type == TypeBridge && d.Connection != nil:
+		res, err := s.writer.Bridge.CheckBridgeChannel(ctx, BridgeChannelCheck{Connection: *d.Connection,
+			Destination: &d.ID, ChannelID: deref(d.BridgeChannelID)})
+		if err != nil {
+			return CheckResult{}, err
+		}
+		c := res.Check
+		out = CheckResult{OK: c.OK(), Health: d.Health, Items: []CheckItem{{Name: bridge.ItemChannel, OK: c.OK(),
+			Message: c.Message, Code: c.Code}}}
 	default:
 		return CheckResult{}, &FieldError{Pointer: pointerCheckNotAllowed, Code: CodeCheckNotSupported,
 			Detail: "This type of Destination has no Destination check."}
@@ -1083,6 +1142,181 @@ func lockTelegramConnection(ctx context.Context, q TxQueries, orgID, id int64) e
 	_, err := q.LockTelegramConnection(ctx, dbgen.LockTelegramConnectionParams{OrgID: orgID, ID: id})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return unknownTelegramConnection()
+	}
+	if err != nil {
+		return fmt.Errorf("lock the connection %d: %w", id, err)
+	}
+	return nil
+}
+
+func unknownBridgeConnection() *FieldError {
+	return &FieldError{Pointer: pointerConnection, Code: CodeUnknownID, Detail: "No such Bridge Connection."}
+}
+
+// validateBridge checks the common fields of in, its channel id, trimmed, of 1 to 512 characters, and its Connection
+// (C-22.FR-3).
+func (s *Service) validateBridge(ctx context.Context, in *Input) error {
+	if err := validateCommon(in); err != nil {
+		return err
+	}
+	b := in.Bridge
+	b.ChannelID = strings.TrimSpace(b.ChannelID)
+	switch {
+	case b.ChannelID == "":
+		return &FieldError{Pointer: pointerChannel, Code: CodeRequired, Detail: "The channel is empty."}
+	case utf8.RuneCountInString(b.ChannelID) > maxBridgeChannelLength:
+		return &FieldError{Pointer: pointerChannel, Code: CodeTooLong,
+			Detail: fmt.Sprintf("The channel id is longer than %d characters.", maxBridgeChannelLength)}
+	}
+	conn, err := publicid.Parse(publicid.Connection, b.Connection)
+	if err != nil {
+		return unknownBridgeConnection()
+	}
+	b.Connection = conn
+	return s.writer.Mentions.Validate(ctx, in.Type, in.Mentions)
+}
+
+// checkBridge runs the Destination check of the Bridge channel of in for the Destination destinationID, nil before it
+// exists, and refuses a failing one with a *CheckFailedError: its item channel at /channel_id, or at /connection_id
+// when the bridge refused the token.
+func (s *Service) checkBridge(ctx context.Context, in Input, destinationID *int64) (BridgeChannelChecked, error) {
+	b := in.Bridge
+	res, err := s.writer.Bridge.CheckBridgeChannel(ctx, BridgeChannelCheck{Connection: b.Connection,
+		Destination: destinationID, ChannelID: b.ChannelID})
+	if errors.Is(err, ErrUnknownConnection) {
+		return BridgeChannelChecked{}, unknownBridgeConnection()
+	}
+	if err != nil {
+		return BridgeChannelChecked{}, err
+	}
+	if res.Check.OK() {
+		return res, nil
+	}
+	pointer := pointerChannel
+	if res.Check.Code == bridge.CodeTokenInvalid {
+		pointer = pointerConnection
+	}
+	return BridgeChannelChecked{}, &CheckFailedError{Items: []CheckItem{{Name: bridge.ItemChannel,
+		Message: res.Check.Message, Code: res.Check.Code, Pointer: pointer}}}
+}
+
+// createBridge creates a Bridge Destination from its channel id once its Destination check passed (C-22.FR-3),
+// keeping the channel's name the check read. It is recorded as destination.created.
+func (s *Service) createBridge(ctx context.Context, r Requester, in Input) (Destination, error) {
+	checked, err := s.checkBridge(ctx, in, nil)
+	if err != nil {
+		return Destination{}, err
+	}
+	set, err := json.Marshal(in.Mentions)
+	if err != nil {
+		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
+	}
+	now := s.writer.Business.Now().UTC()
+	conn, channel, name := in.Bridge.Connection, in.Bridge.ChannelID, checked.Check.Name
+	d := Destination{PublicID: publicid.New(publicid.Destination), Type: in.Type, Name: in.Name, Connection: &conn,
+		BridgeChannelID: &channel, BridgeChannelName: &name, Mentions: set, LimiterLimit: in.Limiter.Limit,
+		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
+		CreatedAt: now, Version: 1}
+	after, err := viewOf(d)
+	if err != nil {
+		return Destination{}, err
+	}
+	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+		if err := lockBridgeConnection(ctx, q, s.orgID, checked.ConnectionID); err != nil {
+			return err
+		}
+		id, err := q.InsertBridgeDestination(ctx, dbgen.InsertBridgeDestinationParams{OrgID: s.orgID,
+			PublicID: d.PublicID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
+			ChannelID: text(d.BridgeChannelID), ChannelName: text(d.BridgeChannelName), Mentions: set,
+			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
+		if err != nil {
+			return fmt.Errorf("create the destination: %w", nameTaken(err))
+		}
+		d.ID = id
+		return s.record(ctx, q, r, ActionCreated, d, audit.Created(after))
+	})
+	if err != nil {
+		return Destination{}, err
+	}
+	return d, nil
+}
+
+// updateBridge replaces the configured fields of the Bridge Destination before, already validated, once its
+// Destination check passed, limited by the Destination, and keeps the channel's name the check read; a passing check
+// of a Broken Destination ends its Broken state. An update that changes nothing, and whose check read the same name,
+// writes nothing.
+func (s *Service) updateBridge(ctx context.Context, r Requester, before Destination, in Input) (Destination, error) {
+	checked, err := s.checkBridge(ctx, in, &before.ID)
+	if err != nil {
+		return Destination{}, err
+	}
+	set, err := json.Marshal(in.Mentions)
+	if err != nil {
+		return Destination{}, fmt.Errorf("encode the mention settings: %w", err)
+	}
+	d := before
+	conn, channel, name := in.Bridge.Connection, in.Bridge.ChannelID, checked.Check.Name
+	d.Name, d.Connection, d.BridgeChannelID, d.BridgeChannelName = in.Name, &conn, &channel, &name
+	d.Mentions, d.LimiterLimit, d.LimiterPerSeconds = set, in.Limiter.Limit, in.Limiter.PerSeconds
+	old, err := viewOf(before)
+	if err != nil {
+		return Destination{}, err
+	}
+	after, err := viewOf(d)
+	if err != nil {
+		return Destination{}, err
+	}
+	diff := audit.Diff(old, after)
+	if len(diff) > 0 || deref(before.BridgeChannelName) != name {
+		err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+			lock, err := q.LockDestination(ctx, dbgen.LockDestinationParams{OrgID: s.orgID, PublicID: before.PublicID})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			if err != nil {
+				return fmt.Errorf("lock the destination %s: %w", before.PublicID, err)
+			}
+			if lock.Version != before.Version {
+				return ErrVersionMismatch
+			}
+			if err := lockBridgeConnection(ctx, q, s.orgID, checked.ConnectionID); err != nil {
+				return err
+			}
+			if err := q.UpdateBridgeDestination(ctx, dbgen.UpdateBridgeDestinationParams{OrgID: s.orgID,
+				ID: before.ID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
+				ChannelID: text(d.BridgeChannelID), ChannelName: text(d.BridgeChannelName), Mentions: set,
+				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
+				Now: s.writer.Business.Now().UTC()}); err != nil {
+				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
+			}
+			d.Version++
+			if err := s.renamed(ctx, q, before, d); err != nil {
+				return err
+			}
+			if len(diff) == 0 {
+				return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: d.PublicID})
+			}
+			return s.record(ctx, q, r, ActionUpdated, d, diff)
+		})
+		if err != nil {
+			return Destination{}, err
+		}
+	}
+	if before.Health.State == healthBroken {
+		if err := s.healthy(ctx, before.ID); err != nil {
+			return Destination{}, err
+		}
+		return s.Get(ctx, before.PublicID)
+	}
+	return d, nil
+}
+
+// lockBridgeConnection takes the Bridge Connection id in share mode; a Connection deleted since the check is
+// ErrUnknownConnection's field error.
+func lockBridgeConnection(ctx context.Context, q TxQueries, orgID, id int64) error {
+	_, err := q.LockBridgeConnection(ctx, dbgen.LockBridgeConnectionParams{OrgID: orgID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return unknownBridgeConnection()
 	}
 	if err != nil {
 		return fmt.Errorf("lock the connection %d: %w", id, err)

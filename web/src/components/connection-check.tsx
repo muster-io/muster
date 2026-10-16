@@ -88,6 +88,8 @@ export function checkCodeText(t: TFunction, code: CheckCode): string {
       return t("checks.codes.channelInOtherTeam");
     case "channel_archived":
       return t("checks.codes.channelArchived");
+    case "channel_forbidden":
+      return t("checks.codes.channelForbidden");
     case "channel_not_found":
       return t("checks.codes.channelNotFound");
     case "not_a_channel":

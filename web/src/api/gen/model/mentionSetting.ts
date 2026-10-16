@@ -24,10 +24,10 @@ import type { PublicId } from './publicId';
  * Whom to mention for one kind of Loud event. The default is nobody.
  */
 export interface MentionSetting {
-  /** `none`, or the chat-wide mention the messenger supports; Telegram has none of them. */
+  /** `none`, or the chat-wide mention the messenger supports; Telegram and Bridges have none of them. */
   everyone: MentionSettingEveryone;
   /** Muster users, rendered through their Account links. */
   user_ids: PublicId[];
-  /** Messenger groups. */
+  /** Messenger groups; Telegram and Bridges have none. */
   groups: string[];
 }

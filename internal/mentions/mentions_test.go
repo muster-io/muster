@@ -204,6 +204,52 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// TestValidateBridge covers C-22.FR-3 and AC-20: a Bridge Destination takes nobody and chosen Users for every kind,
+// and refuses everyone in the chat and messenger groups with unsupported at their pointer, in a text that names
+// Bridges; Telegram's texts are its own.
+func TestValidateBridge(t *testing.T) {
+	ctx := t.Context()
+	s := newService(newFake())
+	if err := s.Validate(ctx, TypeBridge, nobody()); err != nil {
+		t.Errorf("nobody: %v", err)
+	}
+	for _, kind := range Kinds {
+		users := with(kind, Setting{Everyone: EveryoneNone, UserIDs: []string{alice, bob}, Groups: []string{}})
+		if err := s.Validate(ctx, TypeBridge, users); err != nil {
+			t.Errorf("%s with chosen users: %v", kind, err)
+		}
+		for _, word := range []string{EveryoneChannel, EveryoneAll, EveryoneHere} {
+			err := s.Validate(ctx, TypeBridge, with(kind, Setting{Everyone: word}))
+			fe, ok := errors.AsType[*FieldError](err)
+			if !ok || fe.Pointer != "/mentions/"+kind+"/everyone" || fe.Code != CodeUnsupported ||
+				fe.Detail != "A Bridge has no Mention of everyone in the chat." {
+				t.Errorf("%s everyone %s: %v", kind, word, err)
+			}
+		}
+		err := s.Validate(ctx, TypeBridge, with(kind, Setting{Everyone: EveryoneNone, Groups: []string{"ops"}}))
+		fe, ok := errors.AsType[*FieldError](err)
+		if !ok || fe.Pointer != "/mentions/"+kind+"/groups" || fe.Code != CodeUnsupported ||
+			fe.Detail != "A Bridge has no messenger groups." {
+			t.Errorf("%s groups: %v", kind, err)
+		}
+		if err := s.Validate(ctx, TypeBridge, with(kind, Setting{Everyone: EveryoneNone,
+			UserIDs: []string{gone}})); err == nil {
+			t.Errorf("%s with a deleted user", kind)
+		}
+	}
+	for _, tc := range []struct {
+		set    Settings
+		detail string
+	}{
+		{with(KindReopen, Setting{Everyone: EveryoneAll}), "Telegram has no Mention of everyone in the chat."},
+		{with(KindReopen, Setting{Everyone: EveryoneNone, Groups: []string{"ops"}}), "Telegram has no groups."},
+	} {
+		if fe, ok := errors.AsType[*FieldError](s.Validate(ctx, TypeTelegram, tc.set)); !ok || fe.Detail != tc.detail {
+			t.Errorf("telegram: %v, want %q", fe, tc.detail)
+		}
+	}
+}
+
 func settingsJSON(t *testing.T, s Settings) []byte {
 	t.Helper()
 	b, err := json.Marshal(s)
@@ -247,6 +293,7 @@ func TestResolve(t *testing.T) {
 	conn := int64(3)
 	mm := Request{DestinationID: 10, DestinationType: TypeMattermost, ConnectionID: &conn, AlertGroupID: 5}
 	tg := Request{DestinationID: 20, DestinationType: TypeTelegram, AlertGroupID: 5}
+	br := Request{DestinationID: 20, DestinationType: TypeBridge, ConnectionID: &conn, AlertGroupID: 5}
 	f.owners[11] = dbgen.GetEventOwnersRow{OwnerUserID: pgtype.Int8{Int64: 3, Valid: true}}
 	f.owners[12] = dbgen.GetEventOwnersRow{OwnerUserID: pgtype.Int8{Int64: 2, Valid: true},
 		PreviousOwnerUserID: pgtype.Int8{Int64: 1, Valid: true}}
@@ -261,6 +308,9 @@ func TestResolve(t *testing.T) {
 		{tg, 0, []string{KindNewAlertGroup}, ""},
 		{mm, 0, []string{KindNewAlerts}, "user:alice.mm,user:Bob Jones"},
 		{tg, 0, []string{KindNewAlerts}, "user:alice_tg,user:Bob Jones"},
+		{br, 0, []string{KindNewAlertGroup}, ""},
+		{br, 0, []string{KindNewAlerts}, "user:Alice Smith,user:Bob Jones"},
+		{br, 0, []string{KindReopen}, "user:Alice Smith"},
 		{mm, 0, []string{KindReopen, KindNewAlerts}, "everyone:all,user:alice.mm,user:Bob Jones"},
 		{mm, 0, []string{KindSnoozeEnded}, ""},
 		{mm, 11, []string{Owner}, "user:Carol"},
@@ -319,7 +369,8 @@ func TestNames(t *testing.T) {
 	}
 	conn := int64(3)
 	if IdentitySpace(TypeTelegram, &conn) != "telegram" || IdentitySpace(TypeMattermost, &conn) != "mattermost:3" ||
-		IdentitySpace(TypeMattermost, nil) != "" || IdentitySpace(TypeWebhook, nil) != "" {
+		IdentitySpace(TypeMattermost, nil) != "" || IdentitySpace(TypeWebhook, nil) != "" ||
+		IdentitySpace(TypeBridge, &conn) != "" {
 		t.Error("identity spaces")
 	}
 	f := newFake()

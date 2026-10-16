@@ -71,10 +71,11 @@ type memStore struct {
 	fail      map[string]error
 	tx        int
 	committed int
-	// targets are the Mattermost Destinations by id, as GetDestinationTarget reads them, and tgTargets the Telegram
-	// ones, as GetTelegramDestinationTarget reads them.
+	// targets are the Mattermost Destinations by id, as GetDestinationTarget reads them, tgTargets the Telegram ones,
+	// as GetTelegramDestinationTarget reads them, and brTargets the Bridge ones, as muster doctor lists them.
 	targets   map[int64]memTarget
 	tgTargets map[int64]memTGTarget
+	brTargets map[int64]memBRTarget
 	// outage is what GetOutage reads.
 	outage dbgen.GetOutageRow
 }
@@ -86,6 +87,12 @@ type memTGTarget struct {
 	channelID, groupID int64
 }
 
+// memBRTarget is a Bridge Destination: its Connection and its channel id.
+type memBRTarget struct {
+	connection int64
+	channel    string
+}
+
 // memTarget is a Mattermost Destination: its Connection, team and channel.
 type memTarget struct {
 	connection                  int64
@@ -94,7 +101,7 @@ type memTarget struct {
 
 func newMemStore() *memStore {
 	return &memStore{rows: map[int64]*memRow{}, dests: map[int64]int64{}, fail: map[string]error{},
-		targets: map[int64]memTarget{}, tgTargets: map[int64]memTGTarget{}}
+		targets: map[int64]memTarget{}, tgTargets: map[int64]memTGTarget{}, brTargets: map[int64]memBRTarget{}}
 }
 
 // txHandle stands for the transaction that the Abandon hook writes through.

@@ -25,6 +25,7 @@ import (
 	"github.com/muster-io/muster/internal/connections"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
@@ -752,20 +753,136 @@ func TestEnsureDemoBridge(t *testing.T) {
 	}
 }
 
-// TestDoctorSkipsBridge is C-01.FR-13: muster doctor skips Bridge Connections until S-080 checks them with getInfo,
-// and still checks the others.
-func TestDoctorSkipsBridge(t *testing.T) {
-	e, b := newBridgeEnv(t)
-	e.createBridge(t, "br", b.srv.URL, connections.EventDeliveryPoll)
-	e.create(t, "mm")
-	found, err := e.svc.Doctor(t.Context(), e.store, time.Second)
+// startFakeBridge starts the fake bridge of `muster dev`, whose channels the Destination checks read.
+func startFakeBridge(t *testing.T) *fakebridge.Fake {
+	t.Helper()
+	f := fakebridge.New()
+	if err := f.Start(t.Context(), "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close(context.WithoutCancel(t.Context())) })
+	return f
+}
+
+// createFakeBridge creates the Bridge Connection name to the fake bridge f with the bot of token, in mode.
+func (e *env) createFakeBridge(t *testing.T, f *fakebridge.Fake, name, token, mode string) connections.Connection {
+	t.Helper()
+	in := bridgeInput(name, f.URL(), mode)
+	in.BotToken = keyring.Replace(logging.Secret(token))
+	c, err := e.svc.Create(t.Context(), by, in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(found) != 1 || found[0].Name != "mm" {
-		t.Errorf("findings %+v, want the Mattermost Connection only", found)
+	return c
+}
+
+// TestCheckBridgeChannel is the Destination check of a Bridge Destination for the Destination write path
+// (C-22.FR-3): checkChannel through the Bridge Connection, limited by the Destination once it exists and by the
+// Connection before, with the code of a refused channel; a missing, deleted, malformed or Mattermost Connection is
+// destinations.ErrUnknownConnection, and no limiter token within the budget sends nothing.
+func TestCheckBridgeChannel(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	ctx := t.Context()
+	c := e.createFakeBridge(t, f, "br", fakebridge.Token, connections.EventDeliveryPoll)
+	res, err := e.svc.CheckBridgeChannel(ctx, destinations.BridgeChannelCheck{Connection: strings.ToLower(c.PublicID),
+		ChannelID: fakebridge.ChannelAlerts})
+	if err != nil || res.ConnectionID != c.ID || !res.Check.OK() || res.Check.Name != "alerts" {
+		t.Fatalf("check = %+v, %v", res, err)
 	}
-	if len(b.seen()) != 0 {
-		t.Errorf("%d requests reached the bridge", len(b.seen()))
+	if s := e.path.subjects[len(e.path.subjects)-1]; s.Destination != nil || s.Connection == nil ||
+		*s.Connection != c.ID {
+		t.Errorf("subject %+v", s)
+	}
+	f.ResetRequests()
+	res, err = e.svc.CheckBridgeChannel(ctx, destinations.BridgeChannelCheck{Connection: c.PublicID,
+		Destination: new(int64(9)), ChannelID: fakebridge.ChannelNoBot})
+	if err != nil || res.Check.OK() || res.Check.Code != bridge.CodeChannelForbidden ||
+		res.Check.Message != fakebridge.MessageNotMember || res.Check.Outcome.Kind != delivery.OutcomeFatal {
+		t.Errorf("ch-nobot = %+v, %v", res, err)
+	}
+	if reqs := f.Requests(); len(reqs) != 1 || reqs[0].Method != http.MethodPost ||
+		!strings.HasSuffix(reqs[0].Path, "/channels/"+fakebridge.ChannelNoBot+"/check") {
+		t.Errorf("ch-nobot reached the bridge with %+v, not one channel check", reqs)
+	}
+	if s := e.path.subjects[len(e.path.subjects)-1]; s.Destination == nil || s.Destination.ID != 9 ||
+		s.Destination.Type != connections.TypeBridge || *s.Destination.Connection != c.ID {
+		t.Errorf("subject %+v", s)
+	}
+	mm := e.create(t, "mm")
+	gone := e.createFakeBridge(t, f, "gone", fakebridge.Token, connections.EventDeliveryPoll)
+	e.store.rows[gone.ID].deleted = true
+	f.ResetRequests()
+	for _, id := range []string{mm.PublicID, gone.PublicID, "CN0000000000ZZ", "not-an-id"} {
+		if _, err := e.svc.CheckBridgeChannel(ctx, destinations.BridgeChannelCheck{Connection: id,
+			ChannelID: fakebridge.ChannelAlerts}); !errors.Is(err, destinations.ErrUnknownConnection) {
+			t.Errorf("%s = %v", id, err)
+		}
+	}
+	e.path.limited = true
+	if _, err := e.svc.CheckBridgeChannel(ctx, destinations.BridgeChannelCheck{Connection: c.PublicID,
+		ChannelID: fakebridge.ChannelAlerts}); !errors.As(err, new(*delivery.LimitedError)) {
+		t.Errorf("limited = %v", err)
+	}
+	e.path.limited = false
+	if n := len(f.Requests()); n != 0 {
+		t.Errorf("%d requests reached the bridge", n)
+	}
+	e.store.fail["GetConnection"] = errors.New("down")
+	if _, err := e.svc.CheckBridgeChannel(ctx, destinations.BridgeChannelCheck{Connection: c.PublicID,
+		ChannelID: fakebridge.ChannelAlerts}); err == nil || errors.Is(err, destinations.ErrUnknownConnection) {
+		t.Errorf("a failed read = %v", err)
+	}
+	delete(e.store.fail, "GetConnection")
+	e.store.rows[c.ID].row.BotTokenCiphertext = []byte("garbage")
+	if _, err := e.svc.CheckBridgeChannel(ctx, destinations.BridgeChannelCheck{Connection: c.PublicID,
+		ChannelID: fakebridge.ChannelAlerts}); err == nil || !strings.Contains(err.Error(), "open the token") {
+		t.Errorf("a token that cannot be opened = %v", err)
+	}
+}
+
+// TestCheckBridgeChannelThroughProxy covers C-22.AC-3 for the Destination check: with an HTTP proxy on the Connection
+// its request reaches the bridge only through the proxy; with the bridge closing the connection, neither the token
+// nor the push secret is in the check or the log.
+func TestCheckBridgeChannelThroughProxy(t *testing.T) {
+	e, b := newBridgeEnv(t)
+	f := startFakeBridge(t)
+	p, err := fakeproxy.Start(t.Context(), fakeproxy.HTTP, "127.0.0.1:0", fakeproxy.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+	in := bridgeInput("br", f.URL(), connections.EventDeliveryPush)
+	in.BotToken = keyring.Replace(fakebridge.Token)
+	in.Proxy = proxyconf.Input{Enabled: true, Type: new("http"), Address: new(p.Addr())}
+	c, err := e.svc.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.svc.CheckBridgeChannel(t.Context(), destinations.BridgeChannelCheck{Connection: c.PublicID,
+		ChannelID: fakebridge.ChannelAlerts})
+	if err != nil || !res.Check.OK() {
+		t.Fatalf("check = %+v, %v", res, err)
+	}
+	reqs, targets := f.Requests(), p.Targets()
+	if len(reqs) != 1 || len(targets) != len(reqs) || "http://"+targets[0] != f.URL() {
+		t.Errorf("%d requests reached the bridge, through the proxy to %v", len(reqs), targets)
+	}
+	b.set(func(b *standIn) { b.hijack = true })
+	in = bridgeInput("cut", b.srv.URL, connections.EventDeliveryPush)
+	cut, err := e.svc.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = e.svc.CheckBridgeChannel(t.Context(), destinations.BridgeChannelCheck{Connection: cut.PublicID,
+		ChannelID: fakebridge.ChannelAlerts})
+	if err != nil || res.Check.OK() || res.Check.Code != delivery.CodeRequestFailed && res.Check.Code !=
+		delivery.CodeConnectFailed {
+		t.Fatalf("a closed connection = %+v, %v", res, err)
+	}
+	for _, s := range []string{bridgeToken, pushSecret, strings.TrimPrefix(pushSecret, "whsec_")} {
+		if strings.Contains(res.Check.Message+string(res.Check.Outcome.Error), s) {
+			t.Errorf("a secret reached the check: %+v", res.Check)
+		}
 	}
 }

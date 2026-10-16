@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Package destinations holds the Destinations (C-11.FR-18): Mattermost channels and Telegram channels reached through
-// a Connection, and outgoing webhooks. This package reads every type with its health and Routes and exports
-// muster_destination_info, and deletes them (C-11.FR-14); the type capabilities add creating and editing them (C-13 to
-// C-15). Secrets are read only as their status.
+// Package destinations holds the Destinations (C-11.FR-18): Mattermost channels, Telegram channels and channels of a
+// Bridge reached through a Connection, and outgoing webhooks. This package reads every type with its health and Routes
+// and exports muster_destination_info, and deletes them (C-11.FR-14); the type capabilities add creating and editing
+// them (C-13 to C-15, C-22). Secrets are read only as their status.
 package destinations
 
 import (
@@ -75,8 +75,9 @@ type TemplateError struct {
 }
 
 // Destination is a Destination of any type as read. The fields of the other types are empty: Mattermost has its
-// team and channel, Telegram its channel and the discussion group a Destination check found, an outgoing webhook its
-// mode, request templates, proxy and Signing secret. Mentions, EventsConfig and TemplateConfig are the stored JSON.
+// team and channel, Telegram its channel and the discussion group a Destination check found, a Bridge its channel id
+// and the channel's name its Destination check read, an outgoing webhook its mode, request templates, proxy and Signing
+// secret. Mentions, EventsConfig and TemplateConfig are the stored JSON.
 type Destination struct {
 	ID         int64
 	PublicID   string
@@ -94,6 +95,9 @@ type Destination struct {
 	TelegramDiscussionGroupID    *string
 	TelegramChannelTitle         *string
 	TelegramDiscussionGroupTitle *string
+
+	BridgeChannelID   *string
+	BridgeChannelName *string
 
 	WebhookMode    *string
 	EventsConfig   json.RawMessage
@@ -332,7 +336,8 @@ func destinationOf(r dbgen.GetDestinationRow) Destination {
 		MattermostTeamID: textOf(r.MattermostTeamID), MattermostChannelID: textOf(r.MattermostChannelID),
 		MattermostTeamName: textOf(r.MattermostTeamName), MattermostChannelName: textOf(r.MattermostChannelName),
 		TelegramChannelID: textOf(r.TelegramChannelID), TelegramChannelTitle: textOf(r.TelegramChannelTitle),
-		TelegramDiscussionGroupTitle: textOf(r.TelegramDiscussionGroupTitle), WebhookMode: textOf(r.WebhookMode),
+		TelegramDiscussionGroupTitle: textOf(r.TelegramDiscussionGroupTitle), BridgeChannelID: textOf(r.BridgeChannelID),
+		BridgeChannelName: textOf(r.BridgeChannelName), WebhookMode: textOf(r.WebhookMode),
 		EventsConfig: r.WebhookEventsConfig, TemplateConfig: r.WebhookTemplateConfig,
 		SigningSecret: SigningSecret{Set: r.SigningSecretSet, UpdatedAt: timeOf(r.SigningSecretUpdatedAt),
 			PreviousActiveSince: timeOf(r.PreviousSigningSecretSince)},
