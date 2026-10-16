@@ -27,10 +27,12 @@ FROM connections
 WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL;
 
 -- ListLinkableConnections lists the Connections that are not deleted, by messenger and name (C-18.FR-10).
+-- Bridge Connections are not linkable until their Account links exist (S-076): LinkableConnection.messenger has no
+-- bridge.
 -- name: ListLinkableConnections :many
 SELECT public_id, name, type
 FROM connections
-WHERE org_id = @org_id AND deleted_at IS NULL
+WHERE org_id = @org_id AND deleted_at IS NULL AND type <> 'bridge'
 ORDER BY type, lower(name), id;
 
 -- LockLinkUser locks the User a link is made for, so that the links of one User change one at a time.

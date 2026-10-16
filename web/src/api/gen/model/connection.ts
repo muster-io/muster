@@ -17,10 +17,11 @@
  * During 0.x breaking changes are allowed; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
  * OpenAPI spec version: 0.1.0
  */
+import type { BridgeConnection } from './bridgeConnection';
 import type { MattermostConnection } from './mattermostConnection';
 import type { TelegramConnection } from './telegramConnection';
 
 /**
  * A Connection; `type` selects the variant.
  */
-export type Connection = MattermostConnection | TelegramConnection;
+export type Connection = MattermostConnection | TelegramConnection | BridgeConnection;

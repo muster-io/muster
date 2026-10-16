@@ -17,6 +17,7 @@
  * During 0.x breaking changes are allowed; from 1.0 `/api/v1` is stable and a removal is announced one minor release in advance.
  * OpenAPI spec version: 0.1.0
  */
+import type { BridgeInfo } from './bridgeInfo';
 import type { ConnectionCheckResultWarningsItem } from './connectionCheckResultWarningsItem';
 import type { ConnectionCheckStep } from './connectionCheckStep';
 
@@ -37,4 +38,6 @@ export interface ConnectionCheckResult {
   webhook_set?: boolean | null;
   /** @nullable */
   pending_updates?: number | null;
+  /** Bridge only. The `info` that the step `info` read and stored on the Connection, with the members of `BridgeInfo`, null when that step failed; omitted for the other types. */
+  info?: BridgeInfo | null;
 }

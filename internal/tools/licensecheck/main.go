@@ -41,6 +41,7 @@ var (
 	generatedGlobs = []string{
 		"internal/*/dbgen/**",
 		"internal/api/gen/**",
+		"internal/bridge/gen/**",
 		"pkg/apiclient/**",
 		"web/src/api/gen/**",
 		"web/src/routeTree.gen.ts",

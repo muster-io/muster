@@ -31,7 +31,7 @@ export const listConnectionsQueryLimitMax = 500;
 export const ListConnectionsQueryParams = zod.object({
   "cursor": zod.string().optional().describe('Opaque cursor from `next_cursor` of the previous page. Offsets are not supported.'),
   "limit": zod.int().min(1).max(listConnectionsQueryLimitMax).default(listConnectionsQueryLimitDefault).describe('Page size (`api.page_size`).'),
-  "type": zod.enum(['mattermost', 'telegram']).optional().describe('Filter by type.')
+  "type": zod.enum(['mattermost', 'telegram', 'bridge']).optional().describe('Filter by type.')
 })
 
 
@@ -42,6 +42,35 @@ export const listConnectionsResponseItemsItemOneTwoIdRegExp = new RegExp('^[A-HJ
 
 
 export const listConnectionsResponseItemsItemTwoTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+
+export const listConnectionsResponseItemsItemThreeTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const listConnectionsResponseItemsItemThreeTwoInfoOneBridgeNameMax = 100;
+
+export const listConnectionsResponseItemsItemThreeTwoInfoOneBridgeVersionMax = 100;
+
+export const listConnectionsResponseItemsItemThreeTwoInfoOneMessengerNameMax = 100;
+
+export const listConnectionsResponseItemsItemThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin = 2;
+
+
+export const listConnectionsResponseItemsItemThreeTwoInfoOneCapabilitiesButtonsDataMaxBytesMin = 64;
+
+
+export const listConnectionsResponseItemsItemThreeTwoInfoOneLimitsMaxBodyLengthMin = 500;
+
+export const listConnectionsResponseItemsItemThreeTwoInfoOneLimitsEditMaxAgeSecondsMin = 300;
+
+export const listConnectionsResponseItemsItemThreeTwoInfoOneLimitsSendPerSecondPerChannelExclusiveMin = 0;
+
+export const listConnectionsResponseItemsItemThreeTwoInfoOneLimitsSendPerSecondExclusiveMin = 0;
+
+
+export const listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateMax = 1024;
+
+
+export const listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
 
 
 export const ListConnectionsResponse = zod.object({
@@ -108,14 +137,92 @@ export const ListConnectionsResponse = zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
   "type": zod.enum(['telegram'])
+})),zod.object({
+  "type": zod.enum(['bridge']),
+  "name": zod.string().min(1),
+  "base_url": zod.url().describe('Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.'),
+  "event_delivery": zod.enum(['poll', 'push']).describe('How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection\'s `callback_url`, signed with the push secret.'),
+  "limiter": zod.object({
+  "limit": zod.int().min(1),
+  "per_seconds": zod.int().min(1)
+}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).and(zod.object({
+  "id": zod.string().regex(listConnectionsResponseItemsItemThreeTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "bot_token_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "push_secret_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "callback_url": zod.url().describe('`bridgeEvent` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/bridge/<id>`), where a bridge in push mode posts events signed with the push secret.'),
+  "info": zod.union([zod.object({
+  "protocol_version": zod.enum(['1']).describe('The major version of this protocol the bridge speaks.'),
+  "bridge": zod.object({
+  "name": zod.string().min(1).max(listConnectionsResponseItemsItemThreeTwoInfoOneBridgeNameMax),
+  "version": zod.string().min(1).max(listConnectionsResponseItemsItemThreeTwoInfoOneBridgeVersionMax)
+}),
+  "messenger": zod.object({
+  "name": zod.string().min(1).max(listConnectionsResponseItemsItemThreeTwoInfoOneMessengerNameMax).describe('The messenger\'s name as people know it; Muster shows it on the Connection and the Destinations.')
+}),
+  "capabilities": zod.object({
+  "buttons": zod.object({
+  "max_per_message": zod.int().min(listConnectionsResponseItemsItemThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many; Snooze durations are dropped first.'),
+  "max_per_row": zod.int().min(1),
+  "data_max_bytes": zod.int().min(listConnectionsResponseItemsItemThreeTwoInfoOneCapabilitiesButtonsDataMaxBytesMin),
+  "styles": zod.array(zod.enum(['primary', 'danger', 'neutral', 'success']).describe('A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.')).describe('The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.')
+}).optional().describe('The bridge shows buttons and reports presses on them.'),
+  "thread_messages": zod.enum(['all', 'mentions_only']).optional().describe('The bridge reports people\'s messages in Threads of the bot\'s messages — every one, or only those that mention the bot. Text commands need it.'),
+  "direct_messages": zod.object({
+  "bot_can_start": zod.boolean().describe('Whether the bot can write to a person who never wrote to it.')
+}).optional().describe('The bot can send direct messages, which Account links by code need.'),
+  "private_answers": zod.array(zod.enum(['ephemeral', 'popup'])).optional().describe('How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.'),
+  "native_mentions": zod.boolean().optional().describe('Mention markers become the messenger\'s own mentions, which notify the person.'),
+  "quiet_messages": zod.boolean().optional().describe('The messenger can post a new message without notifying anyone (`notify` false).'),
+  "status_color": zod.boolean().optional().describe('The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.'),
+  "delete": zod.object({
+  "max_age_seconds": zod.int().min(1).nullable()
+}).optional().describe('The bot can delete its own messages (unused by Muster L1).'),
+  "deletion_events": zod.boolean().optional().describe('The bridge reports `message_deleted` when a message of the bot is deleted in the messenger.')
+}).describe('The optional features of the bridge. A missing member means the feature is not offered.'),
+  "limits": zod.object({
+  "max_body_length": zod.int().min(listConnectionsResponseItemsItemThreeTwoInfoOneLimitsMaxBodyLengthMin).describe('The longest `body`, in Unicode code points of the CommonMark Muster sends, that the bridge always accepts for a post and for an edit alike, after its own rendering.'),
+  "edit_max_age_seconds": zod.int().min(listConnectionsResponseItemsItemThreeTwoInfoOneLimitsEditMaxAgeSecondsMin).nullable().describe('How long after posting the bot can still edit a message; `null` when edits never expire. Muster stops editing a minute earlier.'),
+  "send_per_second_per_channel": zod.number().gt(listConnectionsResponseItemsItemThreeTwoInfoOneLimitsSendPerSecondPerChannelExclusiveMin).optional().describe('A hint for the Destination limiter; `rate_limited` stays the truth.'),
+  "send_per_second": zod.number().gt(listConnectionsResponseItemsItemThreeTwoInfoOneLimitsSendPerSecondExclusiveMin).optional().describe('A hint for the Connection limiter, over all channels of the bot.')
+}).describe('The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.'),
+  "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
+  "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
+  "link_url_template": zod.string().max(listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateMax).regex(listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
+}).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).describe('The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.'),
+  "info_read_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster read `info`; null while `info` is null.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`.'),
+  "username": zod.string().nullish(),
+  "password_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).optional().describe('What a read shows instead of a Secret. The value itself is never returned.')
+}).describe('Per-client proxy as read. The password is a Secret.'),
+  "destination_count": zod.int().describe('A Connection used by Destinations cannot be deleted.'),
+  "created_at": zod.iso.datetime({"offset":true}),
+  "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
+})).and(zod.object({
+  "type": zod.enum(['bridge'])
 }))]).describe('A Connection; `type` selects the variant.')),
   "next_cursor": zod.string().nullable()
 })
 
 /**
- * `type` selects Mattermost or Telegram. The bot token is a write-only Secret.
+ * `type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.
  * @summary Create Connection
  */
+
+
+
 
 
 
@@ -163,6 +270,27 @@ export const CreateConnectionBody = zod.union([zod.object({
 }).describe('Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.')
 })).and(zod.object({
   "type": zod.enum(['telegram'])
+})),zod.object({
+  "type": zod.enum(['bridge']),
+  "name": zod.string().min(1),
+  "base_url": zod.url().describe('Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.'),
+  "event_delivery": zod.enum(['poll', 'push']).describe('How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection\'s `callback_url`, signed with the push secret.'),
+  "limiter": zod.object({
+  "limit": zod.int().min(1),
+  "per_seconds": zod.int().min(1)
+}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).and(zod.object({
+  "bot_token": zod.string().optional().describe('Write-only Secret. Omit on update to keep the stored one; a new `base_url` needs it again.'),
+  "push_secret": zod.string().optional().describe('Write-only Secret in the Standard Webhooks form, `whsec_` and base64; required with `event_delivery` `push`. Omit on update to keep the stored one; a save in `poll` clears it.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`; the proxy\'s own address is checked by the outbound address policy.'),
+  "username": zod.string().nullish(),
+  "password": zod.string().nullish().describe('Write-only Secret. Omit to keep the stored one; `null` clears it.')
+}).describe('Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.')
+})).and(zod.object({
+  "type": zod.enum(['bridge'])
 }))]).describe('A Connection as written; `type` selects the variant and cannot change on update.')
 
 
@@ -173,6 +301,35 @@ export const createConnectionResponseOneTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-
 
 
 export const createConnectionResponseTwoTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+
+export const createConnectionResponseThreeTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const createConnectionResponseThreeTwoInfoOneBridgeNameMax = 100;
+
+export const createConnectionResponseThreeTwoInfoOneBridgeVersionMax = 100;
+
+export const createConnectionResponseThreeTwoInfoOneMessengerNameMax = 100;
+
+export const createConnectionResponseThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin = 2;
+
+
+export const createConnectionResponseThreeTwoInfoOneCapabilitiesButtonsDataMaxBytesMin = 64;
+
+
+export const createConnectionResponseThreeTwoInfoOneLimitsMaxBodyLengthMin = 500;
+
+export const createConnectionResponseThreeTwoInfoOneLimitsEditMaxAgeSecondsMin = 300;
+
+export const createConnectionResponseThreeTwoInfoOneLimitsSendPerSecondPerChannelExclusiveMin = 0;
+
+export const createConnectionResponseThreeTwoInfoOneLimitsSendPerSecondExclusiveMin = 0;
+
+
+export const createConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax = 1024;
+
+
+export const createConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
 
 
 export const CreateConnectionResponse = zod.union([zod.object({
@@ -238,6 +395,81 @@ export const CreateConnectionResponse = zod.union([zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
   "type": zod.enum(['telegram'])
+})),zod.object({
+  "type": zod.enum(['bridge']),
+  "name": zod.string().min(1),
+  "base_url": zod.url().describe('Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.'),
+  "event_delivery": zod.enum(['poll', 'push']).describe('How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection\'s `callback_url`, signed with the push secret.'),
+  "limiter": zod.object({
+  "limit": zod.int().min(1),
+  "per_seconds": zod.int().min(1)
+}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).and(zod.object({
+  "id": zod.string().regex(createConnectionResponseThreeTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "bot_token_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "push_secret_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "callback_url": zod.url().describe('`bridgeEvent` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/bridge/<id>`), where a bridge in push mode posts events signed with the push secret.'),
+  "info": zod.union([zod.object({
+  "protocol_version": zod.enum(['1']).describe('The major version of this protocol the bridge speaks.'),
+  "bridge": zod.object({
+  "name": zod.string().min(1).max(createConnectionResponseThreeTwoInfoOneBridgeNameMax),
+  "version": zod.string().min(1).max(createConnectionResponseThreeTwoInfoOneBridgeVersionMax)
+}),
+  "messenger": zod.object({
+  "name": zod.string().min(1).max(createConnectionResponseThreeTwoInfoOneMessengerNameMax).describe('The messenger\'s name as people know it; Muster shows it on the Connection and the Destinations.')
+}),
+  "capabilities": zod.object({
+  "buttons": zod.object({
+  "max_per_message": zod.int().min(createConnectionResponseThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many; Snooze durations are dropped first.'),
+  "max_per_row": zod.int().min(1),
+  "data_max_bytes": zod.int().min(createConnectionResponseThreeTwoInfoOneCapabilitiesButtonsDataMaxBytesMin),
+  "styles": zod.array(zod.enum(['primary', 'danger', 'neutral', 'success']).describe('A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.')).describe('The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.')
+}).optional().describe('The bridge shows buttons and reports presses on them.'),
+  "thread_messages": zod.enum(['all', 'mentions_only']).optional().describe('The bridge reports people\'s messages in Threads of the bot\'s messages — every one, or only those that mention the bot. Text commands need it.'),
+  "direct_messages": zod.object({
+  "bot_can_start": zod.boolean().describe('Whether the bot can write to a person who never wrote to it.')
+}).optional().describe('The bot can send direct messages, which Account links by code need.'),
+  "private_answers": zod.array(zod.enum(['ephemeral', 'popup'])).optional().describe('How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.'),
+  "native_mentions": zod.boolean().optional().describe('Mention markers become the messenger\'s own mentions, which notify the person.'),
+  "quiet_messages": zod.boolean().optional().describe('The messenger can post a new message without notifying anyone (`notify` false).'),
+  "status_color": zod.boolean().optional().describe('The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.'),
+  "delete": zod.object({
+  "max_age_seconds": zod.int().min(1).nullable()
+}).optional().describe('The bot can delete its own messages (unused by Muster L1).'),
+  "deletion_events": zod.boolean().optional().describe('The bridge reports `message_deleted` when a message of the bot is deleted in the messenger.')
+}).describe('The optional features of the bridge. A missing member means the feature is not offered.'),
+  "limits": zod.object({
+  "max_body_length": zod.int().min(createConnectionResponseThreeTwoInfoOneLimitsMaxBodyLengthMin).describe('The longest `body`, in Unicode code points of the CommonMark Muster sends, that the bridge always accepts for a post and for an edit alike, after its own rendering.'),
+  "edit_max_age_seconds": zod.int().min(createConnectionResponseThreeTwoInfoOneLimitsEditMaxAgeSecondsMin).nullable().describe('How long after posting the bot can still edit a message; `null` when edits never expire. Muster stops editing a minute earlier.'),
+  "send_per_second_per_channel": zod.number().gt(createConnectionResponseThreeTwoInfoOneLimitsSendPerSecondPerChannelExclusiveMin).optional().describe('A hint for the Destination limiter; `rate_limited` stays the truth.'),
+  "send_per_second": zod.number().gt(createConnectionResponseThreeTwoInfoOneLimitsSendPerSecondExclusiveMin).optional().describe('A hint for the Connection limiter, over all channels of the bot.')
+}).describe('The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.'),
+  "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
+  "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
+  "link_url_template": zod.string().max(createConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax).regex(createConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
+}).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).describe('The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.'),
+  "info_read_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster read `info`; null while `info` is null.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`.'),
+  "username": zod.string().nullish(),
+  "password_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).optional().describe('What a read shows instead of a Secret. The value itself is never returned.')
+}).describe('Per-client proxy as read. The password is a Secret.'),
+  "destination_count": zod.int().describe('A Connection used by Destinations cannot be deleted.'),
+  "created_at": zod.iso.datetime({"offset":true}),
+  "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
+})).and(zod.object({
+  "type": zod.enum(['bridge'])
 }))]).describe('A Connection; `type` selects the variant.')
 
 /**
@@ -258,6 +490,35 @@ export const getConnectionResponseOneTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-
 
 
 export const getConnectionResponseTwoTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+
+export const getConnectionResponseThreeTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getConnectionResponseThreeTwoInfoOneBridgeNameMax = 100;
+
+export const getConnectionResponseThreeTwoInfoOneBridgeVersionMax = 100;
+
+export const getConnectionResponseThreeTwoInfoOneMessengerNameMax = 100;
+
+export const getConnectionResponseThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin = 2;
+
+
+export const getConnectionResponseThreeTwoInfoOneCapabilitiesButtonsDataMaxBytesMin = 64;
+
+
+export const getConnectionResponseThreeTwoInfoOneLimitsMaxBodyLengthMin = 500;
+
+export const getConnectionResponseThreeTwoInfoOneLimitsEditMaxAgeSecondsMin = 300;
+
+export const getConnectionResponseThreeTwoInfoOneLimitsSendPerSecondPerChannelExclusiveMin = 0;
+
+export const getConnectionResponseThreeTwoInfoOneLimitsSendPerSecondExclusiveMin = 0;
+
+
+export const getConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax = 1024;
+
+
+export const getConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
 
 
 export const GetConnectionResponse = zod.union([zod.object({
@@ -323,6 +584,81 @@ export const GetConnectionResponse = zod.union([zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
   "type": zod.enum(['telegram'])
+})),zod.object({
+  "type": zod.enum(['bridge']),
+  "name": zod.string().min(1),
+  "base_url": zod.url().describe('Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.'),
+  "event_delivery": zod.enum(['poll', 'push']).describe('How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection\'s `callback_url`, signed with the push secret.'),
+  "limiter": zod.object({
+  "limit": zod.int().min(1),
+  "per_seconds": zod.int().min(1)
+}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).and(zod.object({
+  "id": zod.string().regex(getConnectionResponseThreeTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "bot_token_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "push_secret_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "callback_url": zod.url().describe('`bridgeEvent` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/bridge/<id>`), where a bridge in push mode posts events signed with the push secret.'),
+  "info": zod.union([zod.object({
+  "protocol_version": zod.enum(['1']).describe('The major version of this protocol the bridge speaks.'),
+  "bridge": zod.object({
+  "name": zod.string().min(1).max(getConnectionResponseThreeTwoInfoOneBridgeNameMax),
+  "version": zod.string().min(1).max(getConnectionResponseThreeTwoInfoOneBridgeVersionMax)
+}),
+  "messenger": zod.object({
+  "name": zod.string().min(1).max(getConnectionResponseThreeTwoInfoOneMessengerNameMax).describe('The messenger\'s name as people know it; Muster shows it on the Connection and the Destinations.')
+}),
+  "capabilities": zod.object({
+  "buttons": zod.object({
+  "max_per_message": zod.int().min(getConnectionResponseThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many; Snooze durations are dropped first.'),
+  "max_per_row": zod.int().min(1),
+  "data_max_bytes": zod.int().min(getConnectionResponseThreeTwoInfoOneCapabilitiesButtonsDataMaxBytesMin),
+  "styles": zod.array(zod.enum(['primary', 'danger', 'neutral', 'success']).describe('A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.')).describe('The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.')
+}).optional().describe('The bridge shows buttons and reports presses on them.'),
+  "thread_messages": zod.enum(['all', 'mentions_only']).optional().describe('The bridge reports people\'s messages in Threads of the bot\'s messages — every one, or only those that mention the bot. Text commands need it.'),
+  "direct_messages": zod.object({
+  "bot_can_start": zod.boolean().describe('Whether the bot can write to a person who never wrote to it.')
+}).optional().describe('The bot can send direct messages, which Account links by code need.'),
+  "private_answers": zod.array(zod.enum(['ephemeral', 'popup'])).optional().describe('How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.'),
+  "native_mentions": zod.boolean().optional().describe('Mention markers become the messenger\'s own mentions, which notify the person.'),
+  "quiet_messages": zod.boolean().optional().describe('The messenger can post a new message without notifying anyone (`notify` false).'),
+  "status_color": zod.boolean().optional().describe('The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.'),
+  "delete": zod.object({
+  "max_age_seconds": zod.int().min(1).nullable()
+}).optional().describe('The bot can delete its own messages (unused by Muster L1).'),
+  "deletion_events": zod.boolean().optional().describe('The bridge reports `message_deleted` when a message of the bot is deleted in the messenger.')
+}).describe('The optional features of the bridge. A missing member means the feature is not offered.'),
+  "limits": zod.object({
+  "max_body_length": zod.int().min(getConnectionResponseThreeTwoInfoOneLimitsMaxBodyLengthMin).describe('The longest `body`, in Unicode code points of the CommonMark Muster sends, that the bridge always accepts for a post and for an edit alike, after its own rendering.'),
+  "edit_max_age_seconds": zod.int().min(getConnectionResponseThreeTwoInfoOneLimitsEditMaxAgeSecondsMin).nullable().describe('How long after posting the bot can still edit a message; `null` when edits never expire. Muster stops editing a minute earlier.'),
+  "send_per_second_per_channel": zod.number().gt(getConnectionResponseThreeTwoInfoOneLimitsSendPerSecondPerChannelExclusiveMin).optional().describe('A hint for the Destination limiter; `rate_limited` stays the truth.'),
+  "send_per_second": zod.number().gt(getConnectionResponseThreeTwoInfoOneLimitsSendPerSecondExclusiveMin).optional().describe('A hint for the Connection limiter, over all channels of the bot.')
+}).describe('The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.'),
+  "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
+  "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
+  "link_url_template": zod.string().max(getConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax).regex(getConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
+}).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).describe('The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.'),
+  "info_read_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster read `info`; null while `info` is null.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`.'),
+  "username": zod.string().nullish(),
+  "password_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).optional().describe('What a read shows instead of a Secret. The value itself is never returned.')
+}).describe('Per-client proxy as read. The password is a Secret.'),
+  "destination_count": zod.int().describe('A Connection used by Destinations cannot be deleted.'),
+  "created_at": zod.iso.datetime({"offset":true}),
+  "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
+})).and(zod.object({
+  "type": zod.enum(['bridge'])
 }))]).describe('A Connection; `type` selects the variant.')
 
 /**
@@ -339,6 +675,9 @@ export const UpdateConnectionParams = zod.object({
 export const UpdateConnectionHeader = zod.object({
   "If-Match": zod.string().describe('ETag of the representation being replaced, as returned by the last read. A mismatch gets `412`; a missing header gets `428`.')
 })
+
+
+
 
 
 
@@ -387,6 +726,27 @@ export const UpdateConnectionBody = zod.union([zod.object({
 }).describe('Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.')
 })).and(zod.object({
   "type": zod.enum(['telegram'])
+})),zod.object({
+  "type": zod.enum(['bridge']),
+  "name": zod.string().min(1),
+  "base_url": zod.url().describe('Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.'),
+  "event_delivery": zod.enum(['poll', 'push']).describe('How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection\'s `callback_url`, signed with the push secret.'),
+  "limiter": zod.object({
+  "limit": zod.int().min(1),
+  "per_seconds": zod.int().min(1)
+}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).and(zod.object({
+  "bot_token": zod.string().optional().describe('Write-only Secret. Omit on update to keep the stored one; a new `base_url` needs it again.'),
+  "push_secret": zod.string().optional().describe('Write-only Secret in the Standard Webhooks form, `whsec_` and base64; required with `event_delivery` `push`. Omit on update to keep the stored one; a save in `poll` clears it.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`; the proxy\'s own address is checked by the outbound address policy.'),
+  "username": zod.string().nullish(),
+  "password": zod.string().nullish().describe('Write-only Secret. Omit to keep the stored one; `null` clears it.')
+}).describe('Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.')
+})).and(zod.object({
+  "type": zod.enum(['bridge'])
 }))]).describe('A Connection as written; `type` selects the variant and cannot change on update.')
 
 
@@ -397,6 +757,35 @@ export const updateConnectionResponseOneTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-
 
 
 export const updateConnectionResponseTwoTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+
+export const updateConnectionResponseThreeTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const updateConnectionResponseThreeTwoInfoOneBridgeNameMax = 100;
+
+export const updateConnectionResponseThreeTwoInfoOneBridgeVersionMax = 100;
+
+export const updateConnectionResponseThreeTwoInfoOneMessengerNameMax = 100;
+
+export const updateConnectionResponseThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin = 2;
+
+
+export const updateConnectionResponseThreeTwoInfoOneCapabilitiesButtonsDataMaxBytesMin = 64;
+
+
+export const updateConnectionResponseThreeTwoInfoOneLimitsMaxBodyLengthMin = 500;
+
+export const updateConnectionResponseThreeTwoInfoOneLimitsEditMaxAgeSecondsMin = 300;
+
+export const updateConnectionResponseThreeTwoInfoOneLimitsSendPerSecondPerChannelExclusiveMin = 0;
+
+export const updateConnectionResponseThreeTwoInfoOneLimitsSendPerSecondExclusiveMin = 0;
+
+
+export const updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax = 1024;
+
+
+export const updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
 
 
 export const UpdateConnectionResponse = zod.union([zod.object({
@@ -462,6 +851,81 @@ export const UpdateConnectionResponse = zod.union([zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
   "type": zod.enum(['telegram'])
+})),zod.object({
+  "type": zod.enum(['bridge']),
+  "name": zod.string().min(1),
+  "base_url": zod.url().describe('Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization: Bearer`, only to this address.'),
+  "event_delivery": zod.enum(['poll', 'push']).describe('How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection\'s `callback_url`, signed with the push secret.'),
+  "limiter": zod.object({
+  "limit": zod.int().min(1),
+  "per_seconds": zod.int().min(1)
+}).describe('A rate limit of `limit` calls per `per_seconds`.')
+}).and(zod.object({
+  "id": zod.string().regex(updateConnectionResponseThreeTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "bot_token_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "push_secret_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).describe('What a read shows instead of a Secret. The value itself is never returned.'),
+  "callback_url": zod.url().describe('`bridgeEvent` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/bridge/<id>`), where a bridge in push mode posts events signed with the push secret.'),
+  "info": zod.union([zod.object({
+  "protocol_version": zod.enum(['1']).describe('The major version of this protocol the bridge speaks.'),
+  "bridge": zod.object({
+  "name": zod.string().min(1).max(updateConnectionResponseThreeTwoInfoOneBridgeNameMax),
+  "version": zod.string().min(1).max(updateConnectionResponseThreeTwoInfoOneBridgeVersionMax)
+}),
+  "messenger": zod.object({
+  "name": zod.string().min(1).max(updateConnectionResponseThreeTwoInfoOneMessengerNameMax).describe('The messenger\'s name as people know it; Muster shows it on the Connection and the Destinations.')
+}),
+  "capabilities": zod.object({
+  "buttons": zod.object({
+  "max_per_message": zod.int().min(updateConnectionResponseThreeTwoInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many; Snooze durations are dropped first.'),
+  "max_per_row": zod.int().min(1),
+  "data_max_bytes": zod.int().min(updateConnectionResponseThreeTwoInfoOneCapabilitiesButtonsDataMaxBytesMin),
+  "styles": zod.array(zod.enum(['primary', 'danger', 'neutral', 'success']).describe('A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.')).describe('The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.')
+}).optional().describe('The bridge shows buttons and reports presses on them.'),
+  "thread_messages": zod.enum(['all', 'mentions_only']).optional().describe('The bridge reports people\'s messages in Threads of the bot\'s messages — every one, or only those that mention the bot. Text commands need it.'),
+  "direct_messages": zod.object({
+  "bot_can_start": zod.boolean().describe('Whether the bot can write to a person who never wrote to it.')
+}).optional().describe('The bot can send direct messages, which Account links by code need.'),
+  "private_answers": zod.array(zod.enum(['ephemeral', 'popup'])).optional().describe('How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.'),
+  "native_mentions": zod.boolean().optional().describe('Mention markers become the messenger\'s own mentions, which notify the person.'),
+  "quiet_messages": zod.boolean().optional().describe('The messenger can post a new message without notifying anyone (`notify` false).'),
+  "status_color": zod.boolean().optional().describe('The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.'),
+  "delete": zod.object({
+  "max_age_seconds": zod.int().min(1).nullable()
+}).optional().describe('The bot can delete its own messages (unused by Muster L1).'),
+  "deletion_events": zod.boolean().optional().describe('The bridge reports `message_deleted` when a message of the bot is deleted in the messenger.')
+}).describe('The optional features of the bridge. A missing member means the feature is not offered.'),
+  "limits": zod.object({
+  "max_body_length": zod.int().min(updateConnectionResponseThreeTwoInfoOneLimitsMaxBodyLengthMin).describe('The longest `body`, in Unicode code points of the CommonMark Muster sends, that the bridge always accepts for a post and for an edit alike, after its own rendering.'),
+  "edit_max_age_seconds": zod.int().min(updateConnectionResponseThreeTwoInfoOneLimitsEditMaxAgeSecondsMin).nullable().describe('How long after posting the bot can still edit a message; `null` when edits never expire. Muster stops editing a minute earlier.'),
+  "send_per_second_per_channel": zod.number().gt(updateConnectionResponseThreeTwoInfoOneLimitsSendPerSecondPerChannelExclusiveMin).optional().describe('A hint for the Destination limiter; `rate_limited` stays the truth.'),
+  "send_per_second": zod.number().gt(updateConnectionResponseThreeTwoInfoOneLimitsSendPerSecondExclusiveMin).optional().describe('A hint for the Connection limiter, over all channels of the bot.')
+}).describe('The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.'),
+  "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
+  "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
+  "link_url_template": zod.string().max(updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax).regex(updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
+}).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).describe('The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.'),
+  "info_read_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster read `info`; null while `info` is null.'),
+  "proxy": zod.object({
+  "enabled": zod.boolean(),
+  "type": zod.enum(['http', 'https', 'socks5']).optional(),
+  "address": zod.string().optional().describe('`host:port`.'),
+  "username": zod.string().nullish(),
+  "password_status": zod.object({
+  "set": zod.boolean(),
+  "updated_at": zod.iso.datetime({"offset":true}).nullish()
+}).optional().describe('What a read shows instead of a Secret. The value itself is never returned.')
+}).describe('Per-client proxy as read. The password is a Secret.'),
+  "destination_count": zod.int().describe('A Connection used by Destinations cannot be deleted.'),
+  "created_at": zod.iso.datetime({"offset":true}),
+  "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
+})).and(zod.object({
+  "type": zod.enum(['bridge'])
 }))]).describe('A Connection; `type` selects the variant.')
 
 /**
@@ -482,7 +946,7 @@ export const DeleteConnectionHeader = zod.object({
 export const DeleteConnectionResponse = zod.void()
 
 /**
- * Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary Check a Connection
  */
 export const checkConnectionPathConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -496,25 +960,91 @@ export const CheckConnectionBody = zod.object({
   "base_url": zod.string().nullish().describe('An unsaved Telegram Bot API base URL. When set, only the dry probe runs, and the token is never sent to that address.')
 })
 
+export const checkConnectionResponseInfoOneBridgeNameMax = 100;
+
+export const checkConnectionResponseInfoOneBridgeVersionMax = 100;
+
+export const checkConnectionResponseInfoOneMessengerNameMax = 100;
+
+export const checkConnectionResponseInfoOneCapabilitiesButtonsMaxPerMessageMin = 2;
+
+
+export const checkConnectionResponseInfoOneCapabilitiesButtonsDataMaxBytesMin = 64;
+
+
+export const checkConnectionResponseInfoOneLimitsMaxBodyLengthMin = 500;
+
+export const checkConnectionResponseInfoOneLimitsEditMaxAgeSecondsMin = 300;
+
+export const checkConnectionResponseInfoOneLimitsSendPerSecondPerChannelExclusiveMin = 0;
+
+export const checkConnectionResponseInfoOneLimitsSendPerSecondExclusiveMin = 0;
+
+
+export const checkConnectionResponseInfoOneLinkUrlTemplateMax = 1024;
+
+
+export const checkConnectionResponseInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
+
+
 export const CheckConnectionResponse = zod.object({
   "ok": zod.boolean(),
   "steps": zod.array(zod.object({
-  "name": zod.enum(['token', 'dry_probe', 'get_me', 'get_webhook_info']),
+  "name": zod.enum(['token', 'dry_probe', 'get_me', 'get_webhook_info', 'info', 'event_delivery']),
   "ok": zod.boolean(),
   "skipped": zod.boolean().optional(),
   "latency_ms": zod.int().nullish(),
   "via": zod.enum(['direct', 'proxy']).optional().describe('How the request travelled.'),
   "message": zod.string().nullish().describe('What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail.'),
-  "code": zod.union([zod.literal('token_invalid'),zod.literal('not_bot_api'),zod.literal('wrong_path_prefix'),zod.literal('unexpected_status'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal('webhook_set'),zod.literal(null)]).nullish().describe('What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names. A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.')
+  "code": zod.union([zod.literal('token_invalid'),zod.literal('not_bot_api'),zod.literal('wrong_path_prefix'),zod.literal('unexpected_status'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal('webhook_set'),zod.literal('protocol_version_unknown'),zod.literal('protocol_mismatch'),zod.literal('event_delivery_not_offered'),zod.literal(null)]).nullish().describe('What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection\'s event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem\'s masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.')
 })),
   "warnings": zod.array(zod.enum(['press_answers_in_thread'])).describe('Hints that do not fail the check. `press_answers_in_thread` (Mattermost): the bot\'s roles do not grant `create_post_ephemeral`, so the bot may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting that permission, for example with the system admin role, shows them in the channel.'),
   "bot_name": zod.string().nullish().describe('The bot\'s name or username.'),
   "webhook_set": zod.boolean().nullish().describe('Telegram only. A set webhook makes long polling fail with 409.'),
-  "pending_updates": zod.int().nullish()
+  "pending_updates": zod.int().nullish(),
+  "info": zod.union([zod.object({
+  "protocol_version": zod.enum(['1']).describe('The major version of this protocol the bridge speaks.'),
+  "bridge": zod.object({
+  "name": zod.string().min(1).max(checkConnectionResponseInfoOneBridgeNameMax),
+  "version": zod.string().min(1).max(checkConnectionResponseInfoOneBridgeVersionMax)
+}),
+  "messenger": zod.object({
+  "name": zod.string().min(1).max(checkConnectionResponseInfoOneMessengerNameMax).describe('The messenger\'s name as people know it; Muster shows it on the Connection and the Destinations.')
+}),
+  "capabilities": zod.object({
+  "buttons": zod.object({
+  "max_per_message": zod.int().min(checkConnectionResponseInfoOneCapabilitiesButtonsMaxPerMessageMin).describe('Muster sends at most this many; Snooze durations are dropped first.'),
+  "max_per_row": zod.int().min(1),
+  "data_max_bytes": zod.int().min(checkConnectionResponseInfoOneCapabilitiesButtonsDataMaxBytesMin),
+  "styles": zod.array(zod.enum(['primary', 'danger', 'neutral', 'success']).describe('A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.')).describe('The style hints the messenger can show as such; the bridge maps the others to the closest one, or shows a plain button.')
+}).optional().describe('The bridge shows buttons and reports presses on them.'),
+  "thread_messages": zod.enum(['all', 'mentions_only']).optional().describe('The bridge reports people\'s messages in Threads of the bot\'s messages — every one, or only those that mention the bot. Text commands need it.'),
+  "direct_messages": zod.object({
+  "bot_can_start": zod.boolean().describe('Whether the bot can write to a person who never wrote to it.')
+}).optional().describe('The bot can send direct messages, which Account links by code need.'),
+  "private_answers": zod.array(zod.enum(['ephemeral', 'popup'])).optional().describe('How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.'),
+  "native_mentions": zod.boolean().optional().describe('Mention markers become the messenger\'s own mentions, which notify the person.'),
+  "quiet_messages": zod.boolean().optional().describe('The messenger can post a new message without notifying anyone (`notify` false).'),
+  "status_color": zod.boolean().optional().describe('The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.'),
+  "delete": zod.object({
+  "max_age_seconds": zod.int().min(1).nullable()
+}).optional().describe('The bot can delete its own messages (unused by Muster L1).'),
+  "deletion_events": zod.boolean().optional().describe('The bridge reports `message_deleted` when a message of the bot is deleted in the messenger.')
+}).describe('The optional features of the bridge. A missing member means the feature is not offered.'),
+  "limits": zod.object({
+  "max_body_length": zod.int().min(checkConnectionResponseInfoOneLimitsMaxBodyLengthMin).describe('The longest `body`, in Unicode code points of the CommonMark Muster sends, that the bridge always accepts for a post and for an edit alike, after its own rendering.'),
+  "edit_max_age_seconds": zod.int().min(checkConnectionResponseInfoOneLimitsEditMaxAgeSecondsMin).nullable().describe('How long after posting the bot can still edit a message; `null` when edits never expire. Muster stops editing a minute earlier.'),
+  "send_per_second_per_channel": zod.number().gt(checkConnectionResponseInfoOneLimitsSendPerSecondPerChannelExclusiveMin).optional().describe('A hint for the Destination limiter; `rate_limited` stays the truth.'),
+  "send_per_second": zod.number().gt(checkConnectionResponseInfoOneLimitsSendPerSecondExclusiveMin).optional().describe('A hint for the Connection limiter, over all channels of the bot.')
+}).describe('The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.'),
+  "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
+  "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
+  "link_url_template": zod.string().max(checkConnectionResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
+}).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read and stored on the Connection, with the members of `BridgeInfo`, null when that step failed; omitted for the other types.')
 })
 
 /**
- * Mattermost Connections only; loads the team and channel pickers through the bot. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram or Bridge Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary List channels visible to the bot
  */
 export const listConnectionChannelsPathConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');

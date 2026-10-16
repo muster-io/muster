@@ -26,4 +26,6 @@ export const ConnectionCheckStepName = {
   dry_probe: 'dry_probe',
   get_me: 'get_me',
   get_webhook_info: 'get_webhook_info',
+  info: 'info',
+  event_delivery: 'event_delivery',
 } as const;

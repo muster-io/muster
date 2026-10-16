@@ -86,7 +86,11 @@ func (f *fakeConnections) Create(_ context.Context, r connections.Requester, in 
 	}
 	c := connections.Connection{ID: int64(len(f.list) + 1), PublicID: "CNAAAAAAAAAAA9", Type: in.Type, Name: in.Name,
 		ServerURL: in.ServerURL, BotAPIBaseURL: in.BotAPIBaseURL, UpdateMode: in.UpdateMode,
+		BridgeBaseURL: in.BridgeBaseURL, EventDelivery: in.EventDelivery,
 		BotToken: keyring.SecretStatus{Set: true, UpdatedAt: &t0}, Limiter: in.Limiter, CreatedAt: t0, Version: 1}
+	if in.PushSecret.Given {
+		c.PushSecret = keyring.SecretStatus{Set: true, UpdatedAt: &t0}
+	}
 	if in.Type == connections.TypeTelegram {
 		c.Warnings = []string{"base_url_uses_http"}
 	}
@@ -151,6 +155,10 @@ func (f *fakeConnections) Channels(_ context.Context, id, team, q string) ([]con
 
 func (f *fakeConnections) CallbackURL(id string) string {
 	return "http://localhost:8081" + connections.CallbackPath + id
+}
+
+func (f *fakeConnections) BridgeCallbackURL(id string) string {
+	return "http://localhost:8081/api/v1/callbacks/bridge/" + id
 }
 
 func newConnectionsAPI(t *testing.T) (*testAPI, *fakeConnections) {
@@ -534,5 +542,160 @@ func TestListConnectionChannelsAPI(t *testing.T) {
 	}
 	if a := x.as(t, connectionsReader, http.MethodGet, path, ""); a.status != http.StatusForbidden {
 		t.Errorf("by a reader = %d", a.status)
+	}
+}
+
+// pushSecretValue is the push secret of the Bridge bodies, which no answer may carry.
+const pushSecretValue = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
+
+// bridgeInfoJSON is an info as a bridge sends it, with a member Muster does not know.
+const bridgeInfoJSON = `{"protocol_version":"1","bridge":{"name":"Stand-in","version":"0.1.0"},` +
+	`"messenger":{"name":"Fake chat"},"capabilities":{"buttons":{"max_per_message":8,"max_per_row":4,` +
+	`"data_max_bytes":256,"styles":["primary","danger"]},"native_mentions":true,` +
+	`"delete":{"max_age_seconds":null}},"limits":{"max_body_length":4000,"edit_max_age_seconds":null},` +
+	`"user_lookup":"email","event_delivery":["poll","push"],"future_field":{"kept":true}}`
+
+// TestBridgeConnectionAPI covers C-22.FR-1 and FR-2 on the API: a Bridge Connection is created with its base URL,
+// event delivery mode, token and push secret, which reach the service and no answer; it reads with both secrets'
+// status, its callback_url and its info, null before the first check and for a copy that does not decode; the type
+// filter selects it; its check answers the steps info and event_delivery with their codes and the info read, null
+// when info failed, and no info for the other types; an unknown event delivery mode is refused.
+func TestBridgeConnectionAPI(t *testing.T) {
+	x, fc := newConnectionsAPI(t)
+	body := `{"type":"bridge","name":"br","base_url":"http://127.0.0.1:18094/","bot_token":"` + botTokenValue +
+		`","event_delivery":"push","push_secret":"` + pushSecretValue + `","proxy":{"enabled":false},` +
+		`"limiter":{"limit":10,"per_seconds":1}}`
+	a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections", body)
+	m := a.json(t)
+	if a.status != http.StatusCreated || m["type"] != "bridge" || m["base_url"] != "http://127.0.0.1:18094/" ||
+		m["event_delivery"] != "push" || m["bot_token_status"].(map[string]any)["set"] != true ||
+		m["push_secret_status"].(map[string]any)["set"] != true ||
+		m["callback_url"] != "http://localhost:8081/api/v1/callbacks/bridge/CNAAAAAAAAAAA9" ||
+		!strings.Contains(string(a.body), `"info":null`) || !strings.Contains(string(a.body), `"info_read_at":null`) ||
+		strings.Contains(string(a.body), pushSecretValue) || strings.Contains(string(a.body), `"push_secret"`) {
+		t.Fatalf("create = %d %s", a.status, a.body)
+	}
+	noToken(t, a)
+	in := fc.inputs[0]
+	if in.Type != connections.TypeBridge || in.Name != "br" || in.BridgeBaseURL != "http://127.0.0.1:18094/" ||
+		in.EventDelivery != connections.EventDeliveryPush || string(in.BotToken.Value) != botTokenValue ||
+		string(in.PushSecret.Value) != pushSecretValue || in.Limiter.Limit != 10 || in.ServerURL != "" {
+		t.Errorf("input %+v", in)
+	}
+	withoutSecrets := `{"type":"bridge","name":"br","base_url":"http://127.0.0.1:18094","event_delivery":"poll",` +
+		`"proxy":{"enabled":false},"limiter":{"limit":10,"per_seconds":1}}`
+	a = x.as(t, connectionsWriter, http.MethodPut, "/api/v1/connections/CNAAAAAAAAAAA9", withoutSecrets, "If-Match",
+		`"1"`)
+	if in := fc.inputs[len(fc.inputs)-1]; a.status != http.StatusOK || in.BotToken.Given || in.PushSecret.Given ||
+		in.EventDelivery != connections.EventDeliveryPoll {
+		t.Errorf("update without secrets = %d %s, %+v", a.status, a.body, in)
+	}
+	smoke := strings.Replace(withoutSecrets, `"poll"`, `"smoke"`, 1)
+	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections", smoke); a.status !=
+		http.StatusBadRequest {
+		t.Errorf("an unknown event delivery mode = %d %s", a.status, a.body)
+	}
+
+	read := t0.Add(time.Minute)
+	fc.list = append(fc.list, connections.Connection{ID: 5, PublicID: "CNAAAAAAAAAAB1", Type: connections.TypeBridge,
+		Name: "checked", BridgeBaseURL: "https://bridge.example.org/prefix", EventDelivery: connections.EventDeliveryPoll,
+		BotToken: keyring.SecretStatus{Set: true, UpdatedAt: &t0}, PushSecret: keyring.SecretStatus{UpdatedAt: &t0},
+		BridgeInfo: []byte(bridgeInfoJSON), BridgeInfoReadAt: &read,
+		Limiter: connections.Limiter{Limit: 10, PerSeconds: 1}, CreatedAt: t0, Version: 4})
+	a = x.as(t, connectionsReader, http.MethodGet, "/api/v1/connections/CNAAAAAAAAAAB1", "")
+	var b gen.BridgeConnection
+	decodeInto(t, a, &b)
+	info, err := b.Info.Get()
+	if a.status != http.StatusOK || err != nil || info.ProtocolVersion != "1" || info.Messenger.Name != "Fake chat" ||
+		!b.InfoReadAt.MustGet().Equal(read) || b.PushSecretStatus.Set || *b.Etag != `"4"` ||
+		b.BaseUrl != "https://bridge.example.org/prefix" {
+		t.Fatalf("get = %d %s", a.status, a.body)
+	}
+	a = x.as(t, connectionsReader, http.MethodGet, "/api/v1/connections?type=bridge", "")
+	var list gen.ConnectionList
+	decodeInto(t, a, &list)
+	if a.status != http.StatusOK || len(list.Items) != 2 || *fc.filters[len(fc.filters)-1].Type != "bridge" {
+		t.Fatalf("list = %d %s", a.status, a.body)
+	}
+	for _, it := range list.Items {
+		if kind, _ := it.Discriminator(); kind != "bridge" {
+			t.Errorf("listed %s", kind)
+		}
+	}
+
+	path := "/api/v1/connections/CNAAAAAAAAAAB1/checks"
+	fc.check = connections.CheckResult{OK: true, Bridge: true, Info: []byte(bridgeInfoJSON), Steps: []connections.Step{
+		{Name: connections.StepInfo, OK: true, Latency: 9 * time.Millisecond, Via: "proxy"},
+		{Name: connections.StepEventDelivery, OK: true, Via: "proxy"}}}
+	a = x.as(t, connectionsWriter, http.MethodPost, path, "")
+	var res gen.ConnectionCheckResult
+	decodeInto(t, a, &res)
+	if info, err := res.Info.Get(); a.status != http.StatusOK || !res.Ok || err != nil ||
+		info.Messenger.Name != "Fake chat" || len(res.Steps) != 2 || res.Steps[0].Name != "info" ||
+		res.Steps[0].LatencyMs.MustGet() != 9 || *res.Steps[0].Via != "proxy" || res.Steps[1].Name != "event_delivery" ||
+		!res.Steps[1].Code.IsNull() {
+		t.Fatalf("check = %d %s", a.status, a.body)
+	}
+	for _, tc := range []struct {
+		steps []connections.Step
+		info  []byte
+		code  gen.NullableConnectionCheckCode
+	}{
+		{steps: []connections.Step{{Name: connections.StepInfo, Via: "direct",
+			Message: "The bridge speaks protocol version 2; this Muster speaks 1.", Code: "protocol_version_unknown"},
+			{Name: connections.StepEventDelivery, Skipped: true, Via: "direct"}},
+			code: gen.NullableConnectionCheckCodeProtocolVersionUnknown},
+		{steps: []connections.Step{{Name: connections.StepInfo, Via: "direct",
+			Message: "The bridge's answer does not match the protocol: info is larger than 64 KiB",
+			Code:    "protocol_mismatch"}, {Name: connections.StepEventDelivery, Skipped: true, Via: "direct"}},
+			code: gen.NullableConnectionCheckCodeProtocolMismatch},
+		{steps: []connections.Step{{Name: connections.StepInfo, OK: true, Via: "direct"},
+			{Name: connections.StepEventDelivery, Via: "direct", Message: "The bridge does not offer push event delivery.",
+				Code: "event_delivery_not_offered"}}, info: []byte(bridgeInfoJSON),
+			code: gen.NullableConnectionCheckCodeEventDeliveryNotOffered},
+	} {
+		fc.check = connections.CheckResult{Bridge: true, Info: tc.info, Steps: tc.steps}
+		a = x.as(t, connectionsWriter, http.MethodPost, path, "")
+		decodeInto(t, a, &res)
+		failed := res.Steps[0]
+		if !failed.Ok {
+			if !res.Info.IsNull() || !res.Steps[1].LatencyMs.IsNull() || !*res.Steps[1].Skipped {
+				t.Errorf("a failed info: %s", a.body)
+			}
+		} else {
+			failed = res.Steps[1]
+		}
+		if a.status != http.StatusOK || res.Ok || failed.Code.MustGet() != tc.code ||
+			failed.Message.MustGet() == "" {
+			t.Errorf("%s = %d %s", tc.code, a.status, a.body)
+		}
+	}
+	fc.check = connections.CheckResult{OK: true, Steps: []connections.Step{{Name: connections.StepToken, OK: true,
+		Via: "direct"}}}
+	if a := x.as(t, connectionsWriter, http.MethodPost, "/api/v1/connections/"+connectionID+"/checks", ""); a.status !=
+		http.StatusOK || strings.Contains(string(a.body), `"info"`) {
+		t.Errorf("a Mattermost check has info: %s", a.body)
+	}
+	fc.check = connections.CheckResult{Bridge: true, Info: []byte("not json")}
+	if a := x.as(t, connectionsWriter, http.MethodPost, path, ""); a.status != http.StatusOK ||
+		!strings.Contains(string(a.body), `"info":null`) {
+		t.Errorf("an unreadable info = %d %s", a.status, a.body)
+	}
+	// A stored copy that does not decode is none, as the domain's StoredInfo reads it, and fails no list.
+	fc.list[len(fc.list)-1].BridgeInfo = []byte(`{"bridge":5}`)
+	a = x.as(t, connectionsReader, http.MethodGet, "/api/v1/connections/CNAAAAAAAAAAB1", "")
+	var unread gen.BridgeConnection
+	decodeInto(t, a, &unread)
+	if a.status != http.StatusOK || !unread.Info.IsNull() || !unread.InfoReadAt.IsNull() || unread.Name != "checked" {
+		t.Errorf("an unreadable stored info = %d %s", a.status, a.body)
+	}
+	a = x.as(t, connectionsReader, http.MethodGet, "/api/v1/connections?type=bridge", "")
+	if a.status != http.StatusOK || !strings.Contains(string(a.body), `"name":"checked"`) {
+		t.Errorf("a list with an unreadable stored info = %d %s", a.status, a.body)
+	}
+	fc.err = connections.ErrNotMattermost
+	if a := x.as(t, connectionsWriter, http.MethodGet, "/api/v1/connections/CNAAAAAAAAAAB1/channels", ""); a.status !=
+		http.StatusConflict {
+		t.Errorf("the channels of a Bridge = %d %s", a.status, a.body)
 	}
 }

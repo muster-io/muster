@@ -948,6 +948,9 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		if err := conns.EnsureDemo(ctx, devmode.TelegramDemo()); err != nil {
 			return nil, fmt.Errorf("the demo telegram connection: %w", err)
 		}
+		if err := conns.EnsureDemo(ctx, devmode.BridgeDemo()); err != nil {
+			return nil, fmt.Errorf("the demo bridge connection: %w", err)
+		}
 		if err := signIn.EnsureDemo(ctx, devmode.OIDCDemo()); err != nil {
 			return nil, fmt.Errorf("the demo OIDC configuration: %w", err)
 		}

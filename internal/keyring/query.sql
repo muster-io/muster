@@ -230,6 +230,18 @@ UPDATE connections
 SET telegram_webhook_secret_ciphertext = @ciphertext, telegram_webhook_secret_key_id = @key_id::text
 WHERE org_id = @org_id AND id = @id AND telegram_webhook_secret_key_id = @previous_key_id::text;
 
+-- name: ListRotateBridgePushSecret :many
+SELECT id, bridge_push_secret_ciphertext AS ciphertext, bridge_push_secret_key_id::text AS key_id
+FROM connections
+WHERE org_id = @org_id AND bridge_push_secret_ciphertext IS NOT NULL
+  AND bridge_push_secret_key_id <> @key_id::text
+FOR NO KEY UPDATE;
+
+-- name: ReencryptBridgePushSecret :execrows
+UPDATE connections
+SET bridge_push_secret_ciphertext = @ciphertext, bridge_push_secret_key_id = @key_id::text
+WHERE org_id = @org_id AND id = @id AND bridge_push_secret_key_id = @previous_key_id::text;
+
 -- name: ListRotateDestinationProxyPassword :many
 SELECT id, proxy_password_ciphertext AS ciphertext, proxy_password_key_id::text AS key_id
 FROM destinations

@@ -195,7 +195,7 @@ export const getCreateConnectionUrl = () => {
 }
 
 /**
- * `type` selects Mattermost or Telegram. The bot token is a write-only Secret.
+ * `type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.
  * @summary Create Connection
  */
 export const createConnection = async (connectionInput: ConnectionInput, options?: Parameters<typeof apiFetch>[1]): Promise<Connection> => {
@@ -546,7 +546,7 @@ export const useDeleteConnection = <TError = UnauthorizedResponse | ForbiddenRes
 }
 
 /**
- * Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Mattermost verifies the token and returns the bot's name. Telegram works in steps and reports the latency and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection's event delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary Check a Connection
  */
 export const checkConnection = async (connectionId: string,
@@ -643,7 +643,7 @@ export const useCheckConnection = <TError = BadRequestResponse | UnauthorizedRes
 }
 
 /**
- * Mattermost Connections only; loads the team and channel pickers through the bot. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
+ * Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram or Bridge Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, the answer is `503` with `Retry-After`.
  * @summary List channels visible to the bot
  */
 export const listConnectionChannels = async (connectionId: string,

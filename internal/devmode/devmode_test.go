@@ -23,9 +23,11 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/connections"
 	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/devmode/dbgen"
 	"github.com/muster-io/muster/internal/fakes/fakealertmanager"
+	"github.com/muster-io/muster/internal/fakes/fakebridge"
 )
 
 type mapEnv map[string]string
@@ -270,6 +272,7 @@ func get(t *testing.T, url string, headers ...string) int {
 
 var anyPort = devmode.Addresses{Alertmanager: "127.0.0.1:0", Mattermost: "127.0.0.1:0",
 	MattermostSecond: "127.0.0.1:0", Telegram: "127.0.0.1:0", OIDC: "127.0.0.1:0", Webhook: "127.0.0.1:0",
+	Bridge:    "127.0.0.1:0",
 	HTTPProxy: "127.0.0.1:0", SOCKSProxy: "127.0.0.1:0"}
 
 func TestRun(t *testing.T) {
@@ -286,7 +289,7 @@ func TestRun(t *testing.T) {
 		})
 	}()
 
-	got := waitFor(t, out, 8, done)
+	got := waitFor(t, out, 9, done)
 	<-served
 	re := regexp.MustCompile(`^muster dev: fake Alertmanager (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake Mattermost (http://127\.0\.0\.1:\d+)\n` +
@@ -295,6 +298,7 @@ func TestRun(t *testing.T) {
 		`muster dev: fake HTTP proxy (127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake SOCKS5 proxy (127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake webhook receiver (http://127\.0\.0\.1:\d+)\n` +
+		`muster dev: fake bridge (http://127\.0\.0\.1:\d+)\n` +
 		`muster dev: fake Telegram (http://127\.0\.0\.1:\d+)\n$`)
 	m := re.FindStringSubmatch(got)
 	if m == nil {
@@ -308,8 +312,8 @@ func TestRun(t *testing.T) {
 			t.Errorf("GET %s/_fake/requests = %d", proxy, status)
 		}
 	}
-	// the fake servers: Alertmanager, Mattermost, Telegram, OIDC, webhook receiver, second Mattermost
-	m = []string{m[0], m[1], m[2], m[8], m[4], m[7], m[3]}
+	// the fake servers: Alertmanager, Mattermost, Telegram, OIDC, webhook receiver, second Mattermost, bridge
+	m = []string{m[0], m[1], m[2], m[9], m[4], m[7], m[3], m[8]}
 	for _, base := range m[1:] {
 		if status := get(t, base+"/_fake/requests"); status != http.StatusOK {
 			t.Errorf("GET %s/_fake/requests = %d", base, status)
@@ -330,6 +334,14 @@ func TestRun(t *testing.T) {
 	}
 	if status := get(t, m[3]+"/bot"+devmode.TelegramSecondBotToken+"/getMe"); status != http.StatusOK {
 		t.Errorf("Telegram getMe of the second bot = %d", status)
+	}
+	for _, token := range []string{devmode.BridgeConnectionBotToken, devmode.BridgeSecondBotToken} {
+		if status := get(t, m[7]+"/v1/info", "Authorization", "Bearer "+token); status != http.StatusOK {
+			t.Errorf("bridge info with %s = %d", token, status)
+		}
+	}
+	if status := get(t, m[7]+"/v1/info", "Authorization", "Bearer nope"); status != http.StatusUnauthorized {
+		t.Errorf("bridge info with another token = %d", status)
 	}
 
 	cancel()
@@ -383,7 +395,7 @@ func TestRunServeFails(t *testing.T) {
 	if !errors.Is(err, failed) {
 		t.Errorf("Run = %v, want the error of serve", err)
 	}
-	if len(fakes) != 6 {
+	if len(fakes) != 7 {
 		t.Fatalf("the fake servers were not running while serving: %q", out.String())
 	}
 	for _, base := range fakes {
@@ -424,7 +436,8 @@ func TestStartFakes(t *testing.T) {
 	}
 	want := devmode.Addresses{Alertmanager: "127.0.0.1:19093", Mattermost: "127.0.0.1:18065",
 		MattermostSecond: "127.0.0.1:18066", Telegram: "127.0.0.1:18081", OIDC: "127.0.0.1:18090",
-		Webhook: "127.0.0.1:18093", HTTPProxy: "127.0.0.1:18091", SOCKSProxy: "127.0.0.1:18092"}
+		Webhook: "127.0.0.1:18093", Bridge: "127.0.0.1:18094", HTTPProxy: "127.0.0.1:18091",
+		SOCKSProxy: "127.0.0.1:18092"}
 	if devmode.FakeAddresses() != want {
 		t.Errorf("FakeAddresses() = %+v, want %+v", devmode.FakeAddresses(), want)
 	}
@@ -645,6 +658,33 @@ func TestConnectionDemo(t *testing.T) {
 	}
 }
 
+// TestBridgeDemo is C-01.FR-13: the demo Connection "Dev Bridge" on the fake bridge in poll mode, with the published
+// token of the fake's first bot.
+func TestBridgeDemo(t *testing.T) {
+	d := devmode.BridgeDemo()
+	if d.Type != connections.TypeBridge || d.Name != "Dev Bridge" || d.BaseURL != "http://127.0.0.1:18094" ||
+		string(d.BotToken) != "muster-dev-bridge-token" || devmode.BridgeConnectionBotToken != fakebridge.Token {
+		t.Errorf("BridgeDemo() = %+v", d)
+	}
+}
+
+// TestRunBusyBridgePort: a busy port of the fake bridge fails the start, naming it, and closes the fakes already
+// started.
+func TestRunBusyBridgePort(t *testing.T) {
+	var lc net.ListenConfig
+	busy, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	addrs := anyPort
+	addrs.Bridge = busy.Addr().String()
+	_, err = devmode.StartFakes(t.Context(), addrs)
+	if err == nil || !strings.Contains(err.Error(), "start the fake bridge on "+busy.Addr().String()) {
+		t.Errorf("StartFakes = %v, want an error naming the fake bridge and its address", err)
+	}
+}
+
 // TestStartFakesAllowsLoopback is F-022: `muster dev` lets the fake Mattermost call button presses back on loopback.
 func TestStartFakesAllowsLoopback(t *testing.T) {
 	f, err := devmode.StartFakes(t.Context(), anyPort)
@@ -689,7 +729,9 @@ func TestRunBusySecondMattermostPort(t *testing.T) {
 // TestSecondBotTokens is S-069: the published tokens of the second bots.
 func TestSecondBotTokens(t *testing.T) {
 	if devmode.MattermostSecondBotToken != "muster-dev-mattermost-token-b" ||
-		devmode.TelegramSecondBotToken != "234567:dev-telegram-token-b" {
-		t.Errorf("second bot tokens %q, %q", devmode.MattermostSecondBotToken, devmode.TelegramSecondBotToken)
+		devmode.TelegramSecondBotToken != "234567:dev-telegram-token-b" ||
+		devmode.BridgeSecondBotToken != "muster-dev-bridge-token-b" {
+		t.Errorf("second bot tokens %q, %q, %q", devmode.MattermostSecondBotToken, devmode.TelegramSecondBotToken,
+			devmode.BridgeSecondBotToken)
 	}
 }

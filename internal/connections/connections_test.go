@@ -67,6 +67,7 @@ type memStore struct {
 	hints     []db.Hint
 	updates   []dbgen.UpdateConnectionParams
 	bots      []dbgen.SetBotIdentityParams
+	infos     []dbgen.SetBridgeInfoParams
 	fail      map[string]error
 	tx        int
 	committed int
@@ -116,10 +117,11 @@ func (s *memStore) InTx(_ context.Context, f func(connections.Queries) error) er
 		c := *r
 		rows[id] = &c
 	}
-	nAudit, nHints, nUpdates, nBots, next := len(s.audit), len(s.hints), len(s.updates), len(s.bots), s.next
+	nAudit, nHints, nUpdates, nBots, nInfos, next := len(s.audit), len(s.hints), len(s.updates), len(s.bots),
+		len(s.infos), s.next
 	if err := f(s); err != nil {
-		s.rows, s.audit, s.hints, s.updates, s.bots, s.next = rows, s.audit[:nAudit], s.hints[:nHints],
-			s.updates[:nUpdates], s.bots[:nBots], next
+		s.rows, s.audit, s.hints, s.updates, s.bots, s.infos, s.next = rows, s.audit[:nAudit], s.hints[:nHints],
+			s.updates[:nUpdates], s.bots[:nBots], s.infos[:nInfos], next
 		return err
 	}
 	s.committed++
@@ -218,7 +220,10 @@ func (s *memStore) InsertConnection(_ context.Context, a dbgen.InsertConnectionP
 		Type: a.Type, Name: a.Name, MattermostServerUrl: a.ServerUrl, TelegramBotApiBaseUrl: a.BotApiBaseUrl,
 		TelegramUpdateMode: a.UpdateMode, TelegramWebhookSecretCiphertext: a.WebhookSecretCiphertext,
 		TelegramWebhookSecretKeyID: a.WebhookSecretKeyID, TelegramWebhookSecretUpdatedAt: a.WebhookSecretUpdatedAt,
-		BotTokenCiphertext: a.BotTokenCiphertext, BotTokenKeyID: a.BotTokenKeyID, BotTokenUpdatedAt: a.BotTokenUpdatedAt,
+		BridgeBaseUrl: a.BridgeBaseUrl, BridgeEventDelivery: a.EventDelivery,
+		BridgePushSecretCiphertext: a.PushSecretCiphertext, BridgePushSecretKeyID: a.PushSecretKeyID,
+		BridgePushSecretUpdatedAt: a.PushSecretUpdatedAt, BotTokenCiphertext: a.BotTokenCiphertext,
+		BotTokenKeyID: a.BotTokenKeyID, BotTokenUpdatedAt: a.BotTokenUpdatedAt,
 		Proxy: a.Proxy, ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
 		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, LimiterLimit: a.LimiterLimit,
 		LimiterPerSeconds: a.LimiterPerSeconds, CreatedAt: a.Now, Version: 1}}
@@ -238,6 +243,9 @@ func (s *memStore) UpdateConnection(_ context.Context, a dbgen.UpdateConnectionP
 	r.TelegramBotApiBaseUrl, r.TelegramUpdateMode = a.BotApiBaseUrl, a.UpdateMode
 	r.TelegramWebhookSecretCiphertext, r.TelegramWebhookSecretKeyID, r.TelegramWebhookSecretUpdatedAt =
 		a.WebhookSecretCiphertext, a.WebhookSecretKeyID, a.WebhookSecretUpdatedAt
+	r.BridgeBaseUrl, r.BridgeEventDelivery = a.BridgeBaseUrl, a.EventDelivery
+	r.BridgePushSecretCiphertext, r.BridgePushSecretKeyID, r.BridgePushSecretUpdatedAt = a.PushSecretCiphertext,
+		a.PushSecretKeyID, a.PushSecretUpdatedAt
 	r.BotTokenCiphertext, r.BotTokenKeyID, r.BotTokenUpdatedAt = a.BotTokenCiphertext, a.BotTokenKeyID,
 		a.BotTokenUpdatedAt
 	r.ProxyPasswordCiphertext, r.ProxyPasswordKeyID, r.ProxyPasswordUpdatedAt = a.ProxyPasswordCiphertext,
@@ -245,6 +253,7 @@ func (s *memStore) UpdateConnection(_ context.Context, a dbgen.UpdateConnectionP
 	r.LimiterLimit, r.LimiterPerSeconds = a.LimiterLimit, a.LimiterPerSeconds
 	if a.ForgetBot {
 		r.BotUserID, r.BotUsername = pgtype.Text{}, pgtype.Text{}
+		r.BridgeInfo, r.BridgeInfoReadAt = nil, pgtype.Timestamptz{}
 	}
 	if a.ForgetUpdates {
 		r.TelegramUpdateOffset = pgtype.Int8{}
@@ -261,6 +270,19 @@ func (s *memStore) SetBotIdentity(_ context.Context, a dbgen.SetBotIdentityParam
 	r := &s.rows[a.ID].row
 	r.BotUserID, r.BotUsername = a.BotUserID, a.BotUsername
 	return nil
+}
+
+func (s *memStore) SetBridgeInfo(_ context.Context, a dbgen.SetBridgeInfoParams) (int64, error) {
+	if err := s.fail["SetBridgeInfo"]; err != nil {
+		return 0, err
+	}
+	s.infos = append(s.infos, a)
+	r := s.rows[a.ID]
+	if r == nil || r.deleted || r.row.Type != connections.TypeBridge || r.row.Version != a.Version {
+		return 0, nil
+	}
+	r.row.BridgeInfo, r.row.BridgeInfoReadAt = a.Info, pgtype.Timestamptz{Time: a.ReadAt, Valid: true}
+	return 1, nil
 }
 
 func (s *memStore) CountConnectionDestinations(_ context.Context, a dbgen.CountConnectionDestinationsParams) (int64,
@@ -280,6 +302,7 @@ func (s *memStore) MarkConnectionDeleted(_ context.Context, a dbgen.MarkConnecti
 	r.row.BotTokenCiphertext, r.row.BotTokenKeyID = nil, pgtype.Text{}
 	r.row.ProxyPasswordCiphertext, r.row.ProxyPasswordKeyID = nil, pgtype.Text{}
 	r.row.TelegramWebhookSecretCiphertext, r.row.TelegramWebhookSecretKeyID = nil, pgtype.Text{}
+	r.row.BridgePushSecretCiphertext, r.row.BridgePushSecretKeyID = nil, pgtype.Text{}
 	r.row.Version++
 	return nil
 }

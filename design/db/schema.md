@@ -15,7 +15,9 @@
   [`0006_deliveries_published_at`](../../internal/db/migrations/0006_deliveries_published_at.up.sql)
   (`deliveries.published_at` marks a Root message that exists, S-045) and
   [`0007_alert_groups_first_published_at_backfill`](../../internal/db/migrations/0007_alert_groups_first_published_at_backfill.up.sql)
-  (`alert_groups.first_published_at` filled for Alert Groups published before S-049), in `internal/db/migrations/` — golang-migrate
+  (`alert_groups.first_published_at` filled for Alert Groups published before S-049) and
+  [`0008_bridge_connections`](../../internal/db/migrations/0008_bridge_connections.up.sql)
+  (Bridge Connections, S-073), in `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
   ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md))
@@ -87,8 +89,9 @@ state, health, counters) never touch `version`.
 Service accounts (`deleted_at`) and Users (`status = 'deleted'`, pseudonymized). Unique names are partial indexes
 `WHERE deleted_at IS NULL`, so a name can be reused. Nothing in L1 hard-deletes these rows. A deleted Destination keeps
 its row but loses its secrets once the final edits of its open Root messages are done
-([4.5](#45-connections-destinations-and-account-links)). A deleted Connection loses its bot token (and proxy password)
-at once: `connections_bot_token_check` allows a missing token only on a deleted row.
+([4.5](#45-connections-destinations-and-account-links)). A deleted Connection loses its bot token (and proxy password,
+Telegram webhook secret token and Bridge push secret) at once: `connections_bot_token_check` allows a missing token only
+on a deleted row.
 
 **One writer per table.** The architecture lint "only `groups` writes Alert Group tables" applies to `alert_groups`,
 `alert_group_alerts`, `timeline_entries`, `notes` and `alert_group_counters`. Snapshot processing (`ingest`) writes the
@@ -413,10 +416,14 @@ erDiagram
     }
     connections {
         bigint id PK
-        text type "mattermost telegram"
+        text type "mattermost telegram bridge"
         bytea bot_token_ciphertext "Secret"
         text telegram_bot_api_base_url
         bigint telegram_update_offset
+        text bridge_base_url
+        text bridge_event_delivery "poll push"
+        bytea bridge_push_secret_ciphertext "Secret"
+        jsonb bridge_info
         jsonb proxy
     }
     destinations {
@@ -663,11 +670,17 @@ Serves C-04; [ADR-0011](../adr/0011-application-level-secret-encryption.md).
 Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18; [ADR-0005](../adr/0005-delivery-as-desired-state-reconciliation.md),
 [ADR-0013](../adr/0013-account-links-from-web-session-only.md), [ADR-0015](../adr/0015-outbound-http-and-ssrf-policy.md).
 
-- **`connections`** — a Mattermost bot (server URL) or a Telegram bot (Bot API base URL, update mode). The bot token,
-  the proxy password and the Telegram webhook secret token are Secrets; the proxy settings object of C-03.FR-19 is
-  `proxy jsonb` (`{"enabled", "type", "address", "username"}`) next to the password triple — the same shape on
-  `connections`, `destinations`, `oidc_settings` and the outgoing heartbeat. `telegram_update_offset` lets a new Leader
-  resume `getUpdates` where the old one stopped. `UNIQUE (id, type)` is the target of type-checked foreign keys. A
+- **`connections`** — a Mattermost bot (server URL), a Telegram bot (Bot API base URL, update mode) or a Bridge (base
+  URL, event delivery mode `poll` or `push`; C-22). The bot token, the proxy password, the Telegram webhook secret token
+  and the Bridge push secret are Secrets; the proxy settings object of C-03.FR-19 is `proxy jsonb`
+  (`{"enabled", "type", "address", "username"}`) next to the password triple — the same shape on `connections`,
+  `destinations`, `oidc_settings` and the outgoing heartbeat. `telegram_update_offset` lets a new Leader resume
+  `getUpdates` where the old one stopped. A Bridge in push mode has a push secret until it is deleted
+  (`connections_type_fields_check`), kept with its key id by `connections_bridge_push_secret_check`; a Bridge in poll
+  mode has none. `bridge_info` is the last `info` a Connection check read, as the bridge sent it — at most 64 KiB,
+  fields Muster does not know yet included — with `bridge_info_read_at` on the business clock; `bridge_events_cursor`
+  is where the poller of the Bridge's events goes on. A new base URL or bot token forgets all three, as it forgets the
+  bot a check learned. `UNIQUE (id, type)` is the target of type-checked foreign keys. A
   Connection cannot be deleted while a Destination that is not deleted uses it; deleting it abandons the final edits
   still pending for its deleted Destinations, whose deliveries end as `not_delivered`.
 - **`destinations`** — one table for the three types, with type-specific nullable columns and a `CHECK` per type. The

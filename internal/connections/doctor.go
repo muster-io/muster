@@ -53,12 +53,12 @@ type DoctorQueries interface {
 }
 
 // Doctor runs the checks of muster doctor (C-02.FR-14) over the Connections and the Mattermost and Telegram
-// Destinations that are not deleted, read through q: the Connection check of a Mattermost Connection (GET
-// /api/v4/users/me) and the steps of a Telegram one (the dry probe, getMe, getWebhookInfo), and the Destination checks
-// of mattermost.CheckDestination and telegram.CheckDestination, each request made at once in the background client
-// class, whose retries each check bounds by each. A Telegram Connection that fails names the failing step with its
-// message. It only reads: it records nothing of what it finds. It needs the Keyring and the Network of the Service
-// only; without a Keyring every check fails, for the bot tokens cannot be opened.
+// Destinations that are not deleted, read through q, Bridge Connections apart: the Connection check of a Mattermost
+// Connection (GET /api/v4/users/me) and the steps of a Telegram one (the dry probe, getMe, getWebhookInfo), and the
+// Destination checks of mattermost.CheckDestination and telegram.CheckDestination, each request made at once in the
+// background client class, whose retries each check bounds by each. A Telegram Connection that fails names the failing
+// step with its message. It only reads: it records nothing of what it finds. It needs the Keyring and the Network of
+// the Service only; without a Keyring every check fails, for the bot tokens cannot be opened.
 func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duration) ([]Finding, error) {
 	var out []Finding
 	clients := map[int64]*mattermost.Client{}
@@ -71,6 +71,10 @@ func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duratio
 			return nil, fmt.Errorf("list the connections: %w", err)
 		}
 		for _, r := range rows {
+			// A Bridge Connection is not checked yet: S-080 checks it with getInfo.
+			if r.Type == TypeBridge {
+				continue
+			}
 			f := Finding{Kind: FindingConnection, Name: r.Name}
 			if r.Type == TypeTelegram {
 				var c *telegram.Client

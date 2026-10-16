@@ -4017,7 +4017,7 @@ paths:
       tags:
       - Connections
       summary: Create Connection
-      description: '`type` selects Mattermost or Telegram. The bot token is a write-only Secret.'
+      description: '`type` selects Mattermost, Telegram or Bridge. The bot token and the push secret are write-only Secrets.'
       x-permission: connections:write
       x-listener: app
       security:
@@ -4174,9 +4174,11 @@ paths:
       summary: Check a Connection
       description: 'Mattermost verifies the token and returns the bot''s name. Telegram works in steps and reports the latency
         and path of each: a dry probe without the token, `getMe`, `getWebhookInfo`. With `base_url` in the body only the dry
-        probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. Runs through the
-        interactive path. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`,
-        the answer is `503` with `Retry-After`.'
+        probe runs against that unsaved address; the token is never sent anywhere but the saved base URL. A Bridge Connection
+        is checked in two steps: `info` calls `getInfo` of the Bridge protocol with the token, and a passing `info` is stored
+        on the Connection and returned as `info`; `event_delivery` checks that the bridge offers the Connection''s event
+        delivery mode. Runs through the interactive path. Runs on the interactive path: when no limiter token is free within
+        `delivery.interactive_budget`, the answer is `503` with `Retry-After`.'
       x-permission: connections:write
       x-listener: app
       security:
@@ -4216,7 +4218,8 @@ paths:
       tags:
       - Connections
       summary: List channels visible to the bot
-      description: 'Mattermost Connections only; loads the team and channel pickers through the bot. Requires `connections:write`
+      description: 'Mattermost Connections only; loads the team and channel pickers through the bot. A Telegram or Bridge
+        Connection answers `409`: the Bridge protocol has no channel list, the Admin enters the channel id. Requires `connections:write`
         because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`,
         the answer is `503` with `Retry-After`.'
       x-permission: connections:write
@@ -11133,6 +11136,7 @@ components:
       enum:
       - mattermost
       - telegram
+      - bridge
     MattermostConnectionBase:
       type: object
       required:
@@ -11295,26 +11299,331 @@ components:
             description: Write-only Secret. Omit on update to keep the stored one.
           proxy:
             $ref: '#/components/schemas/ProxyConfigInput'
+    BridgeEventDelivery:
+      type: string
+      description: 'How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls
+        the bridge from the Leader; `push` — the bridge posts each event to the Connection''s `callback_url`, signed with
+        the push secret.'
+      enum:
+      - poll
+      - push
+    BridgeConnectionBase:
+      type: object
+      required:
+      - type
+      - name
+      - base_url
+      - event_delivery
+      - limiter
+      properties:
+        type:
+          type: string
+          enum:
+          - bridge
+        name:
+          type: string
+          minLength: 1
+        base_url:
+          type: string
+          format: uri
+          description: 'Absolute http(s) URL of the bridge without query, fragment or user information; a path prefix is
+            allowed and a trailing `/` is dropped. Requests go to `<base>/v1/…` with the token as `Authorization:
+            Bearer`, only to this address.'
+        event_delivery:
+          $ref: '#/components/schemas/BridgeEventDelivery'
+        limiter:
+          $ref: '#/components/schemas/Limiter'
+    BridgeConnection:
+      allOf:
+      - $ref: '#/components/schemas/BridgeConnectionBase'
+      - type: object
+        required:
+        - id
+        - bot_token_status
+        - push_secret_status
+        - callback_url
+        - info
+        - info_read_at
+        - proxy
+        - destination_count
+        - created_at
+        - etag
+        properties:
+          id:
+            $ref: '#/components/schemas/PublicId'
+          bot_token_status:
+            $ref: '#/components/schemas/SecretStatus'
+          push_secret_status:
+            $ref: '#/components/schemas/SecretStatus'
+          callback_url:
+            type: string
+            format: uri
+            readOnly: true
+            description: '`bridgeEvent` at `MUSTER_INGEST_URL` (`<MUSTER_INGEST_URL>/api/v1/callbacks/bridge/<id>`), where
+              a bridge in push mode posts events signed with the push secret.'
+          info:
+            readOnly: true
+            description: The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the
+              whole answer, and members this version does not know are not returned. Null before the first check and
+              after the base URL or the token changed.
+            oneOf:
+            - $ref: '#/components/schemas/BridgeInfo'
+            - type: 'null'
+          info_read_at:
+            type:
+            - string
+            - 'null'
+            format: date-time
+            readOnly: true
+            description: When Muster read `info`; null while `info` is null.
+          proxy:
+            $ref: '#/components/schemas/ProxyConfig'
+          destination_count:
+            type: integer
+            description: A Connection used by Destinations cannot be deleted.
+          created_at:
+            type: string
+            format: date-time
+          etag:
+            type: string
+            readOnly: true
+            description: The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update
+              an item of a list without reading it again.
+    BridgeConnectionInput:
+      allOf:
+      - $ref: '#/components/schemas/BridgeConnectionBase'
+      - type: object
+        required:
+        - proxy
+        properties:
+          bot_token:
+            type: string
+            format: password
+            writeOnly: true
+            description: Write-only Secret. Omit on update to keep the stored one; a new `base_url` needs it again.
+          push_secret:
+            type: string
+            format: password
+            writeOnly: true
+            description: Write-only Secret in the Standard Webhooks form, `whsec_` and base64; required with
+              `event_delivery` `push`. Omit on update to keep the stored one; a save in `poll` clears it.
+          proxy:
+            $ref: '#/components/schemas/ProxyConfigInput'
+    BridgeInfo:
+      x-bridge-schema: Info
+      type: object
+      description: The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).
+      required:
+      - protocol_version
+      - bridge
+      - messenger
+      - capabilities
+      - limits
+      - user_lookup
+      - event_delivery
+      properties:
+        protocol_version:
+          type: string
+          description: The major version of this protocol the bridge speaks.
+          enum:
+          - '1'
+        bridge:
+          type: object
+          required:
+          - name
+          - version
+          properties:
+            name:
+              type: string
+              minLength: 1
+              maxLength: 100
+            version:
+              type: string
+              minLength: 1
+              maxLength: 100
+        messenger:
+          type: object
+          required:
+          - name
+          properties:
+            name:
+              type: string
+              minLength: 1
+              maxLength: 100
+              description: The messenger's name as people know it; Muster shows it on the Connection and the Destinations.
+        capabilities:
+          $ref: '#/components/schemas/BridgeCapabilities'
+        limits:
+          $ref: '#/components/schemas/BridgeLimits'
+        user_lookup:
+          type: string
+          description: What a person enters to be found for an Account link by code, and what `findUsers` searches by.
+            `none` offers only the token sent to the bot.
+          enum:
+          - email
+          - login
+          - username
+          - user_id
+          - none
+        event_delivery:
+          type: array
+          description: The event delivery modes the bridge offers; each Connection chooses one.
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+            - poll
+            - push
+        link_url_template:
+          type:
+          - string
+          - 'null'
+          description: An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with
+            `{token}` where the token goes.
+          pattern: ^https?://\S*\{token\}\S*$
+          maxLength: 1024
+    BridgeCapabilities:
+      x-bridge-schema: Capabilities
+      type: object
+      description: The optional features of the bridge. A missing member means the feature is not offered.
+      properties:
+        buttons:
+          type: object
+          description: The bridge shows buttons and reports presses on them.
+          required:
+          - max_per_message
+          - max_per_row
+          - data_max_bytes
+          - styles
+          properties:
+            max_per_message:
+              type: integer
+              minimum: 2
+              description: Muster sends at most this many; Snooze durations are dropped first.
+            max_per_row:
+              type: integer
+              minimum: 1
+            data_max_bytes:
+              type: integer
+              minimum: 64
+            styles:
+              type: array
+              description: The style hints the messenger can show as such; the bridge maps the others to the closest
+                one, or shows a plain button.
+              uniqueItems: true
+              items:
+                $ref: '#/components/schemas/BridgeButtonStyle'
+        thread_messages:
+          type: string
+          description: The bridge reports people's messages in Threads of the bot's messages — every one, or only those
+            that mention the bot. Text commands need it.
+          enum:
+          - all
+          - mentions_only
+        direct_messages:
+          type: object
+          description: The bot can send direct messages, which Account links by code need.
+          required:
+          - bot_can_start
+          properties:
+            bot_can_start:
+              type: boolean
+              description: Whether the bot can write to a person who never wrote to it.
+        private_answers:
+          type: array
+          description: 'How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain
+            text), or both.'
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+            - ephemeral
+            - popup
+        native_mentions:
+          type: boolean
+          description: Mention markers become the messenger's own mentions, which notify the person.
+        quiet_messages:
+          type: boolean
+          description: The messenger can post a new message without notifying anyone (`notify` false).
+        status_color:
+          type: boolean
+          description: The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.
+        delete:
+          type: object
+          description: The bot can delete its own messages (unused by Muster L1).
+          required:
+          - max_age_seconds
+          properties:
+            max_age_seconds:
+              type:
+              - integer
+              - 'null'
+              minimum: 1
+        deletion_events:
+          type: boolean
+          description: The bridge reports `message_deleted` when a message of the bot is deleted in the messenger.
+    BridgeLimits:
+      x-bridge-schema: Limits
+      type: object
+      description: The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.
+      required:
+      - max_body_length
+      - edit_max_age_seconds
+      properties:
+        max_body_length:
+          type: integer
+          minimum: 500
+          description: The longest `body`, in Unicode code points of the CommonMark Muster sends, that the bridge always
+            accepts for a post and for an edit alike, after its own rendering.
+        edit_max_age_seconds:
+          type:
+          - integer
+          - 'null'
+          minimum: 300
+          description: How long after posting the bot can still edit a message; `null` when edits never expire. Muster
+            stops editing a minute earlier.
+        send_per_second_per_channel:
+          type: number
+          exclusiveMinimum: 0
+          description: A hint for the Destination limiter; `rate_limited` stays the truth.
+        send_per_second:
+          type: number
+          exclusiveMinimum: 0
+          description: A hint for the Connection limiter, over all channels of the bot.
+    BridgeButtonStyle:
+      x-bridge-schema: ButtonStyle
+      type: string
+      description: A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.
+      enum:
+      - primary
+      - danger
+      - neutral
+      - success
     Connection:
       description: A Connection; `type` selects the variant.
       oneOf:
       - $ref: '#/components/schemas/MattermostConnection'
       - $ref: '#/components/schemas/TelegramConnection'
+      - $ref: '#/components/schemas/BridgeConnection'
       discriminator:
         propertyName: type
         mapping:
           mattermost: '#/components/schemas/MattermostConnection'
           telegram: '#/components/schemas/TelegramConnection'
+          bridge: '#/components/schemas/BridgeConnection'
     ConnectionInput:
       description: A Connection as written; `type` selects the variant and cannot change on update.
       oneOf:
       - $ref: '#/components/schemas/MattermostConnectionInput'
       - $ref: '#/components/schemas/TelegramConnectionInput'
+      - $ref: '#/components/schemas/BridgeConnectionInput'
       discriminator:
         propertyName: type
         mapping:
           mattermost: '#/components/schemas/MattermostConnectionInput'
           telegram: '#/components/schemas/TelegramConnectionInput'
+          bridge: '#/components/schemas/BridgeConnectionInput'
     ConnectionList:
       type: object
       required:
@@ -11351,6 +11660,8 @@ components:
           - dry_probe
           - get_me
           - get_webhook_info
+          - info
+          - event_delivery
         ok:
           type: boolean
         skipped:
@@ -11376,13 +11687,17 @@ components:
       - 'null'
       description: 'What a step of the Connection check found, as a stable code that clients translate, with `message` as
         its detail in English; null when the step passed with nothing to say or was skipped. A step that failed:
-        `token_invalid` — the messenger refused the bot token (`token`, `get_me`); for the dry probe, `not_bot_api` — the
-        address answered, but not as a Bot API (not JSON), `wrong_path_prefix` — it answered 404, so the path prefix of
-        the base URL is wrong, `unexpected_status` — it answered another status than 401 with JSON; for any step,
-        `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be
-        read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy
-        refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` —
-        any other failure, such as an error answer, which `message` names. A step that passed: `webhook_set`
+        `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token
+        (`info`); for the dry probe, `not_bot_api` — the address answered, but not as a Bot API (not JSON),
+        `wrong_path_prefix` — it answered 404, so the path prefix of the base URL is wrong, `unexpected_status` — it
+        answered another status than 401 with JSON; for `info`, `protocol_version_unknown` — the bridge speaks a protocol
+        version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the
+        protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` —
+        the bridge does not offer the Connection''s event delivery mode; for any step, `dns_failed` — the host name does
+        not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake
+        failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the
+        outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer,
+        which `message` names (from a bridge, the problem''s masked `detail`). A step that passed: `webhook_set`
         (`get_webhook_info`) — a webhook is set, and `message` names its host.'
       enum:
       - token_invalid
@@ -11397,6 +11712,9 @@ components:
       - blocked
       - request_failed
       - webhook_set
+      - protocol_version_unknown
+      - protocol_mismatch
+      - event_delivery_not_offered
       - null
     ConnectionCheckResult:
       type: object
@@ -11435,6 +11753,12 @@ components:
           type:
           - integer
           - 'null'
+        info:
+          description: Bridge only. The `info` that the step `info` read and stored on the Connection, with the members
+            of `BridgeInfo`, null when that step failed; omitted for the other types.
+          oneOf:
+          - $ref: '#/components/schemas/BridgeInfo'
+          - type: 'null'
     MattermostChannel:
       type: object
       required:

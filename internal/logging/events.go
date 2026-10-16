@@ -643,6 +643,13 @@ var TelegramWebhookDeleteFailed = newEvent("telegram_webhook_delete_failed", Lev
 		"bot's updates to Muster, which answers them 401, until the webhook is removed with the bot's token elsewhere.",
 	"connection", "error")
 
+// BridgeInfoRead is logged when Muster read the info of a Bridge Connection (C-22.FR-2, FR-24).
+var BridgeInfoRead = newEvent("bridge_info_read", LevelInfo, "C-22",
+	"Muster read the info of a Bridge Connection, on a Connection check or because its copy was older than "+
+		"bridge.info_max_age: connection is the public_id of the Connection, protocol_version the version the bridge "+
+		"speaks, features the names of the optional features it declares.",
+	"connection", "protocol_version", "features")
+
 // StormStarted is logged when a Route's new Alert Groups start a Storm (C-11.FR-6).
 var StormStarted = newEvent("storm_started", LevelInfo, "C-11",
 	"The new Alert Groups of a Route exceeded route.storm_threshold within a minute and started a Storm: route is the "+

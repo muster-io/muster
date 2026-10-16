@@ -313,6 +313,19 @@ var encryptedFields = map[string]encryptedField{
 				ID: u.row.ID, Ciphertext: u.ciphertext, KeyID: u.keyID, PreviousKeyID: u.previous})
 		},
 	},
+	"connections.bridge_push_secret": {
+		list: func(ctx context.Context, q *dbgen.Queries, org int64, key string) ([]EncryptedValue, error) {
+			rows, err := q.ListRotateBridgePushSecret(ctx, dbgen.ListRotateBridgePushSecretParams{OrgID: org,
+				KeyID: key})
+			return values(rows, err, func(r dbgen.ListRotateBridgePushSecretRow) EncryptedValue {
+				return EncryptedValue{Row: RowKey{ID: r.ID}, Ciphertext: r.Ciphertext, KeyID: r.KeyID}
+			})
+		},
+		update: func(ctx context.Context, q *dbgen.Queries, org int64, u update) (int64, error) {
+			return q.ReencryptBridgePushSecret(ctx, dbgen.ReencryptBridgePushSecretParams{OrgID: org, ID: u.row.ID,
+				Ciphertext: u.ciphertext, KeyID: u.keyID, PreviousKeyID: u.previous})
+		},
+	},
 	"destinations.proxy_password": {
 		list: func(ctx context.Context, q *dbgen.Queries, org int64, key string) ([]EncryptedValue, error) {
 			rows, err := q.ListRotateDestinationProxyPassword(ctx, dbgen.ListRotateDestinationProxyPasswordParams{
@@ -374,8 +387,9 @@ var rotationOrder = []string{
 	"organizations.outgoing_heartbeat_url", "organizations.outgoing_heartbeat_proxy_password",
 	"oidc_settings.client_secret", "oidc_settings.proxy_password", "oidc_auth_requests.code_verifier",
 	"users.oidc_offline_token", "user_totp.seed", "user_totp.pending_seed", "connections.bot_token",
-	"connections.proxy_password", "connections.telegram_webhook_secret", "destinations.proxy_password",
-	"destinations.signing_secret", "destinations.previous_signing_secret", "destination_secrets.value",
+	"connections.proxy_password", "connections.telegram_webhook_secret", "connections.bridge_push_secret",
+	"destinations.proxy_password", "destinations.signing_secret", "destinations.previous_signing_secret",
+	"destination_secrets.value",
 }
 
 // EncryptedFields are the fields rotation re-encrypts, in its order: every field of the encrypted_values view.

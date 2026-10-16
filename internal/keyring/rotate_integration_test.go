@@ -135,6 +135,12 @@ func secretFixtures(t *testing.T, d *db.DB, org int64, k *keyring.Keyring) map[s
 			VALUES ($1, 'CNAAAAAAAAAAA1', 'telegram', 'tg', 'https://api.telegram.org', 'webhook', $2, $4, $5, $3, $4,
 			$5, $6, $4, $5, 30, 1, $5, $5)`, []any{org, enc("connections.telegram_webhook_secret"),
 			enc("connections.bot_token"), key, t0, enc("connections.proxy_password")}},
+		{`INSERT INTO connections (org_id, public_id, type, name, bridge_base_url, bridge_event_delivery,
+			bridge_push_secret_ciphertext, bridge_push_secret_key_id, bridge_push_secret_updated_at,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds,
+			created_at, updated_at)
+			VALUES ($1, 'CNAAAAAAAAAAA2', 'bridge', 'br', 'https://bridge.example.org', 'push', $2, $4, $5, $3, $4, $5,
+			10, 1, $5, $5)`, []any{org, enc("connections.bridge_push_secret"), enc("connections.bot_token"), key, t0}},
 		{`WITH ds AS (INSERT INTO destinations (org_id, public_id, type, name, webhook_mode, webhook_template_config,
 			proxy_password_ciphertext, proxy_password_key_id, proxy_password_updated_at, signing_secret_ciphertext,
 			signing_secret_key_id, signing_secret_updated_at, previous_signing_secret_ciphertext,
@@ -193,14 +199,14 @@ func (l *listener) next(t *testing.T) string {
 	return n.Channel + ":" + h.Type
 }
 
-// TestIntegrationRotation covers C-20.FR-7, AC-2 and C-02.FR-15 on PostgreSQL with two replicas: the activation is
-// refused while a live replica lacks the key, and rolled back by a value that does not decrypt, sending nothing; once
-// both hold it, one transaction makes it active, encrypts the canary and every field of encrypted_values with it —
-// the three outgoing webhook secret fields among them — keeping the times they last changed, records
-// keyring.key_activated and sends the organization and system-status hints and the keyring notification, received
-// after it commits; both replicas switch on the notification without a restart, each logging key_switched once; a
-// replica without the key stops; the Keyring status then shows the old key removable. The registry of rotation lists
-// exactly the fields of the encrypted_values view.
+// TestIntegrationRotation covers C-20.FR-7, AC-2, C-02.FR-15 and C-22.FR-1 on PostgreSQL with two replicas: the
+// activation is refused while a live replica lacks the key, and rolled back by a value that does not decrypt, sending
+// nothing; once both hold it, one transaction makes it active, encrypts the canary and every field of encrypted_values
+// with it — the three outgoing webhook secret fields, and a Bridge Connection's token and push secret, among them —
+// keeping the times they last changed, records keyring.key_activated and sends the organization and system-status
+// hints and the keyring notification, received after it commits; both replicas switch on the notification without a
+// restart, each logging key_switched once; a replica without the key stops; the Keyring status then shows the old key
+// removable. The registry of rotation lists exactly the fields of the encrypted_values view.
 func TestIntegrationRotation(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		ctx := t.Context()
@@ -223,7 +229,7 @@ func TestIntegrationRotation(t *testing.T) {
 		if registry := keyring.EncryptedFields(); !slices.Equal(view, registry) {
 			t.Errorf("the view lists %v, rotation %v", view, registry)
 		}
-		if n := countRows(t, d, `SELECT count(*) FROM encrypted_values WHERE key_id = $1`, a); n != 15 {
+		if n := countRows(t, d, `SELECT count(*) FROM encrypted_values WHERE key_id = $1`, a); n != 17 {
 			t.Fatalf("%d fixtures", n)
 		}
 
@@ -299,12 +305,12 @@ func TestIntegrationRotation(t *testing.T) {
 		if _, err := d.Pool.Exec(ctx, `UPDATE connections SET bot_token_ciphertext = substring(bot_token_ciphertext from 3)`); err != nil {
 			t.Fatal(err)
 		}
-		if n := countRows(t, d, `SELECT count(*) FROM encrypted_values WHERE key_id = $1`, a); n != 15 {
+		if n := countRows(t, d, `SELECT count(*) FROM encrypted_values WHERE key_id = $1`, a); n != 17 {
 			t.Fatalf("the rollback left %d values with the old key", n)
 		}
 
 		out, err := activate()
-		if err != nil || out != (keyring.Rotated{KeyID: b, Previous: a, Reencrypted: 15}) {
+		if err != nil || out != (keyring.Rotated{KeyID: b, Previous: a, Reencrypted: 17}) {
 			t.Fatalf("activation = %+v, %v", out, err)
 		}
 		// The notifications of the activation, and none of the refusals or the rollback before them.
@@ -345,9 +351,13 @@ func TestIntegrationRotation(t *testing.T) {
 			UNION ALL SELECT 'connections.bot_token', bot_token_ciphertext, bot_token_key_id, bot_token_updated_at
 				FROM connections
 			UNION ALL SELECT 'connections.proxy_password', proxy_password_ciphertext, proxy_password_key_id,
-				proxy_password_updated_at FROM connections
+				proxy_password_updated_at FROM connections WHERE proxy_password_ciphertext IS NOT NULL
 			UNION ALL SELECT 'connections.telegram_webhook_secret', telegram_webhook_secret_ciphertext,
 				telegram_webhook_secret_key_id, telegram_webhook_secret_updated_at FROM connections
+				WHERE telegram_webhook_secret_ciphertext IS NOT NULL
+			UNION ALL SELECT 'connections.bridge_push_secret', bridge_push_secret_ciphertext,
+				bridge_push_secret_key_id, bridge_push_secret_updated_at FROM connections
+				WHERE bridge_push_secret_ciphertext IS NOT NULL
 			UNION ALL SELECT 'destinations.proxy_password', proxy_password_ciphertext, proxy_password_key_id,
 				proxy_password_updated_at FROM destinations
 			UNION ALL SELECT 'destinations.signing_secret', signing_secret_ciphertext, signing_secret_key_id,
@@ -374,7 +384,7 @@ func TestIntegrationRotation(t *testing.T) {
 			}
 		}
 		values.Close()
-		if seen != 15 {
+		if seen != 17 {
 			t.Errorf("%d fields read", seen)
 		}
 
@@ -385,7 +395,7 @@ func TestIntegrationRotation(t *testing.T) {
 		}
 		if actorKind != "cli" || actorName != "ops" ||
 			diff != fmt.Sprintf(`[{"after": "%s", "before": "%s", "pointer": "/active_key_id"}]`, b, a) ||
-			details != `{"reencrypted": 15, "open_deliveries_to_resign": 0}` {
+			details != `{"reencrypted": 17, "open_deliveries_to_resign": 0}` {
 			t.Errorf("audit %s %s %s %s", actorKind, actorName, diff, details)
 		}
 		if !strings.Contains(cliLog.String(), `"event":"key_activated"`) {
@@ -435,7 +445,7 @@ func TestIntegrationRotation(t *testing.T) {
 		if k, ok := st.Key(a); !ok || k.State != keyring.KeyRemovable || !slices.Equal(k.HeldBy, []string{"r-a", "r-b2"}) {
 			t.Errorf("old key %+v", k)
 		}
-		if k, ok := st.Key(b); !ok || k.State != keyring.KeyActive || k.EncryptedValues != 15 {
+		if k, ok := st.Key(b); !ok || k.State != keyring.KeyActive || k.EncryptedValues != 17 {
 			t.Errorf("new key %+v", k)
 		}
 

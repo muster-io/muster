@@ -57,7 +57,8 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.telegram_webhook_secret_key_id, c.telegram_webhook_secret_updated_at, c.bot_token_ciphertext,
        c.bot_token_key_id, c.bot_token_updated_at, c.bot_user_id, c.bot_username, c.proxy, c.proxy_password_ciphertext,
        c.proxy_password_key_id, c.proxy_password_updated_at, c.limiter_limit, c.limiter_per_seconds, c.created_at,
-       c.version,
+       c.version, c.bridge_base_url, c.bridge_event_delivery, c.bridge_push_secret_ciphertext,
+       c.bridge_push_secret_key_id, c.bridge_push_secret_updated_at, c.bridge_info, c.bridge_info_read_at,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -98,6 +99,13 @@ type GetConnectionRow struct {
 	LimiterPerSeconds               int64
 	CreatedAt                       time.Time
 	Version                         int64
+	BridgeBaseUrl                   pgtype.Text
+	BridgeEventDelivery             pgtype.Text
+	BridgePushSecretCiphertext      []byte
+	BridgePushSecretKeyID           pgtype.Text
+	BridgePushSecretUpdatedAt       pgtype.Timestamptz
+	BridgeInfo                      []byte
+	BridgeInfoReadAt                pgtype.Timestamptz
 	DestinationCount                int64
 }
 
@@ -130,6 +138,13 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (G
 		&i.LimiterPerSeconds,
 		&i.CreatedAt,
 		&i.Version,
+		&i.BridgeBaseUrl,
+		&i.BridgeEventDelivery,
+		&i.BridgePushSecretCiphertext,
+		&i.BridgePushSecretKeyID,
+		&i.BridgePushSecretUpdatedAt,
+		&i.BridgeInfo,
+		&i.BridgeInfoReadAt,
 		&i.DestinationCount,
 	)
 	return i, err
@@ -313,16 +328,19 @@ const insertConnection = `-- name: InsertConnection :one
 INSERT INTO connections (
     org_id, public_id, type, name, mattermost_server_url, telegram_bot_api_base_url, telegram_update_mode,
     telegram_webhook_secret_ciphertext, telegram_webhook_secret_key_id, telegram_webhook_secret_updated_at,
-    bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, proxy, proxy_password_ciphertext,
-    proxy_password_key_id, proxy_password_updated_at, limiter_limit, limiter_per_seconds, created_at, updated_at
+    bridge_base_url, bridge_event_delivery, bridge_push_secret_ciphertext, bridge_push_secret_key_id,
+    bridge_push_secret_updated_at, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, proxy,
+    proxy_password_ciphertext, proxy_password_key_id, proxy_password_updated_at, limiter_limit, limiter_per_seconds,
+    created_at, updated_at
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
     $10, $11, $12,
-    $13::timestamptz, $14, $15,
-    $16, $17, $18, $19,
-    $20::timestamptz, $20::timestamptz
+    $13, $14, $15,
+    $16, $17, $18::timestamptz, $19,
+    $20, $21, $22,
+    $23, $24, $25::timestamptz, $25::timestamptz
 )
 RETURNING id
 `
@@ -338,6 +356,11 @@ type InsertConnectionParams struct {
 	WebhookSecretCiphertext []byte
 	WebhookSecretKeyID      pgtype.Text
 	WebhookSecretUpdatedAt  pgtype.Timestamptz
+	BridgeBaseUrl           pgtype.Text
+	EventDelivery           pgtype.Text
+	PushSecretCiphertext    []byte
+	PushSecretKeyID         pgtype.Text
+	PushSecretUpdatedAt     pgtype.Timestamptz
 	BotTokenCiphertext      []byte
 	BotTokenKeyID           pgtype.Text
 	BotTokenUpdatedAt       time.Time
@@ -350,8 +373,9 @@ type InsertConnectionParams struct {
 	Now                     time.Time
 }
 
-// InsertConnection creates a Connection: a Mattermost one with its server URL, or a Telegram one with its Bot API base
-// URL, its update mode and, in the webhook mode, its webhook secret token.
+// InsertConnection creates a Connection: a Mattermost one with its server URL, a Telegram one with its Bot API base
+// URL, its update mode and, in the webhook mode, its webhook secret token, or a Bridge with its base URL, its event
+// delivery mode and, in the push mode, its push secret.
 func (q *Queries) InsertConnection(ctx context.Context, arg InsertConnectionParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertConnection,
 		arg.OrgID,
@@ -364,6 +388,11 @@ func (q *Queries) InsertConnection(ctx context.Context, arg InsertConnectionPara
 		arg.WebhookSecretCiphertext,
 		arg.WebhookSecretKeyID,
 		arg.WebhookSecretUpdatedAt,
+		arg.BridgeBaseUrl,
+		arg.EventDelivery,
+		arg.PushSecretCiphertext,
+		arg.PushSecretKeyID,
+		arg.PushSecretUpdatedAt,
 		arg.BotTokenCiphertext,
 		arg.BotTokenKeyID,
 		arg.BotTokenUpdatedAt,
@@ -388,7 +417,8 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.telegram_webhook_secret_key_id, c.telegram_webhook_secret_updated_at, c.bot_token_ciphertext,
        c.bot_token_key_id, c.bot_token_updated_at, c.bot_user_id, c.bot_username, c.proxy, c.proxy_password_ciphertext,
        c.proxy_password_key_id, c.proxy_password_updated_at, c.limiter_limit, c.limiter_per_seconds, c.created_at,
-       c.version,
+       c.version, c.bridge_base_url, c.bridge_event_delivery, c.bridge_push_secret_ciphertext,
+       c.bridge_push_secret_key_id, c.bridge_push_secret_updated_at, c.bridge_info, c.bridge_info_read_at,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -432,14 +462,21 @@ type ListConnectionsRow struct {
 	LimiterPerSeconds               int64
 	CreatedAt                       time.Time
 	Version                         int64
+	BridgeBaseUrl                   pgtype.Text
+	BridgeEventDelivery             pgtype.Text
+	BridgePushSecretCiphertext      []byte
+	BridgePushSecretKeyID           pgtype.Text
+	BridgePushSecretUpdatedAt       pgtype.Timestamptz
+	BridgeInfo                      []byte
+	BridgeInfoReadAt                pgtype.Timestamptz
 	DestinationCount                int64
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
-// Connections (C-13.FR-1, FR-6, C-14.FR-1): a messenger server or bot through which Destinations post. The bot token,
-// the proxy password and the Telegram webhook secret token are read as ciphertexts only to build the Connection's
-// client or to check a webhook request; reads show their status.
+// Connections (C-13.FR-1, FR-6, C-14.FR-1, C-22.FR-1): a messenger server, bot or bridge through which Destinations
+// post. The bot token, the proxy password, the Telegram webhook secret token and the push secret of a Bridge are read
+// as ciphertexts only to build the Connection's client or to check a request to Muster; reads show their status.
 // ListConnections reads a page of the Connections that are not deleted, in id order after a cursor, filtered by type,
 // each with the count of its Destinations that are not deleted.
 func (q *Queries) ListConnections(ctx context.Context, arg ListConnectionsParams) ([]ListConnectionsRow, error) {
@@ -481,6 +518,13 @@ func (q *Queries) ListConnections(ctx context.Context, arg ListConnectionsParams
 			&i.LimiterPerSeconds,
 			&i.CreatedAt,
 			&i.Version,
+			&i.BridgeBaseUrl,
+			&i.BridgeEventDelivery,
+			&i.BridgePushSecretCiphertext,
+			&i.BridgePushSecretKeyID,
+			&i.BridgePushSecretUpdatedAt,
+			&i.BridgeInfo,
+			&i.BridgeInfoReadAt,
 			&i.DestinationCount,
 		); err != nil {
 			return nil, err
@@ -706,7 +750,8 @@ const markConnectionDeleted = `-- name: MarkConnectionDeleted :exec
 UPDATE connections
 SET deleted_at = $1::timestamptz, updated_at = $1::timestamptz, version = version + 1,
     bot_token_ciphertext = NULL, bot_token_key_id = NULL, proxy_password_ciphertext = NULL,
-    proxy_password_key_id = NULL, telegram_webhook_secret_ciphertext = NULL, telegram_webhook_secret_key_id = NULL
+    proxy_password_key_id = NULL, telegram_webhook_secret_ciphertext = NULL, telegram_webhook_secret_key_id = NULL,
+    bridge_push_secret_ciphertext = NULL, bridge_push_secret_key_id = NULL
 WHERE org_id = $2 AND id = $3
 `
 
@@ -747,6 +792,36 @@ func (q *Queries) SetBotIdentity(ctx context.Context, arg SetBotIdentityParams) 
 	return err
 }
 
+const setBridgeInfo = `-- name: SetBridgeInfo :execrows
+UPDATE connections
+SET bridge_info = $1::jsonb, bridge_info_read_at = $2::timestamptz
+WHERE org_id = $3 AND id = $4 AND type = 'bridge' AND version = $5 AND deleted_at IS NULL
+`
+
+type SetBridgeInfoParams struct {
+	Info    []byte
+	ReadAt  time.Time
+	OrgID   int64
+	ID      int64
+	Version int64
+}
+
+// SetBridgeInfo records the info that a check of a Bridge Connection read, as the bridge sent it, at read_at on the
+// business clock, unless the Connection changed since the check read it; it is not a change of the configuration.
+func (q *Queries) SetBridgeInfo(ctx context.Context, arg SetBridgeInfoParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setBridgeInfo,
+		arg.Info,
+		arg.ReadAt,
+		arg.OrgID,
+		arg.ID,
+		arg.Version,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const storeUpdateOffset = `-- name: StoreUpdateOffset :exec
 UPDATE connections
 SET telegram_update_offset = GREATEST(coalesce(telegram_update_offset, $1::bigint), $1::bigint)
@@ -781,16 +856,23 @@ SET name = $1, mattermost_server_url = $2,
     telegram_webhook_secret_ciphertext = $5,
     telegram_webhook_secret_key_id = $6,
     telegram_webhook_secret_updated_at = $7,
-    bot_token_ciphertext = $8, bot_token_key_id = $9,
-    bot_token_updated_at = $10::timestamptz,
-    bot_user_id = CASE WHEN $11::boolean THEN NULL ELSE bot_user_id END,
-    bot_username = CASE WHEN $11::boolean THEN NULL ELSE bot_username END,
-    telegram_update_offset = CASE WHEN $12::boolean THEN NULL ELSE telegram_update_offset END,
-    proxy = $13, proxy_password_ciphertext = $14,
-    proxy_password_key_id = $15,
-    proxy_password_updated_at = $16, limiter_limit = $17,
-    limiter_per_seconds = $18, updated_at = $19::timestamptz, version = version + 1
-WHERE org_id = $20 AND id = $21
+    bridge_base_url = $8, bridge_event_delivery = $9,
+    bridge_push_secret_ciphertext = $10,
+    bridge_push_secret_key_id = $11,
+    bridge_push_secret_updated_at = $12,
+    bot_token_ciphertext = $13, bot_token_key_id = $14,
+    bot_token_updated_at = $15::timestamptz,
+    bot_user_id = CASE WHEN $16::boolean THEN NULL ELSE bot_user_id END,
+    bot_username = CASE WHEN $16::boolean THEN NULL ELSE bot_username END,
+    bridge_info = CASE WHEN $16::boolean THEN NULL ELSE bridge_info END,
+    bridge_info_read_at = CASE WHEN $16::boolean THEN NULL ELSE bridge_info_read_at END,
+    bridge_events_cursor = CASE WHEN $16::boolean THEN NULL ELSE bridge_events_cursor END,
+    telegram_update_offset = CASE WHEN $17::boolean THEN NULL ELSE telegram_update_offset END,
+    proxy = $18, proxy_password_ciphertext = $19,
+    proxy_password_key_id = $20,
+    proxy_password_updated_at = $21, limiter_limit = $22,
+    limiter_per_seconds = $23, updated_at = $24::timestamptz, version = version + 1
+WHERE org_id = $25 AND id = $26
 `
 
 type UpdateConnectionParams struct {
@@ -801,6 +883,11 @@ type UpdateConnectionParams struct {
 	WebhookSecretCiphertext []byte
 	WebhookSecretKeyID      pgtype.Text
 	WebhookSecretUpdatedAt  pgtype.Timestamptz
+	BridgeBaseUrl           pgtype.Text
+	EventDelivery           pgtype.Text
+	PushSecretCiphertext    []byte
+	PushSecretKeyID         pgtype.Text
+	PushSecretUpdatedAt     pgtype.Timestamptz
 	BotTokenCiphertext      []byte
 	BotTokenKeyID           pgtype.Text
 	BotTokenUpdatedAt       time.Time
@@ -818,8 +905,9 @@ type UpdateConnectionParams struct {
 }
 
 // UpdateConnection replaces the configured fields of a Connection and its secrets as the write path computed them.
-// A changed server URL, Bot API base URL or bot token forgets the bot the last check learned; a new bot token also
-// forgets telegram_update_offset, since another bot's update ids start elsewhere.
+// A changed server URL, Bot API base URL, bridge base URL or bot token forgets the bot the last check learned, and
+// what a bridge told: its info and the cursor of its events; a new bot token also forgets telegram_update_offset,
+// since another bot's update ids start elsewhere.
 func (q *Queries) UpdateConnection(ctx context.Context, arg UpdateConnectionParams) error {
 	_, err := q.db.Exec(ctx, updateConnection,
 		arg.Name,
@@ -829,6 +917,11 @@ func (q *Queries) UpdateConnection(ctx context.Context, arg UpdateConnectionPara
 		arg.WebhookSecretCiphertext,
 		arg.WebhookSecretKeyID,
 		arg.WebhookSecretUpdatedAt,
+		arg.BridgeBaseUrl,
+		arg.EventDelivery,
+		arg.PushSecretCiphertext,
+		arg.PushSecretKeyID,
+		arg.PushSecretUpdatedAt,
 		arg.BotTokenCiphertext,
 		arg.BotTokenKeyID,
 		arg.BotTokenUpdatedAt,
