@@ -46,6 +46,8 @@ const (
 // otherwise a calm check could end the Storm before those deliveries commit, and they would stay held. The transactions
 // of the worker follow it: the record of a Thread reply's outcome locks its delivery first (LockReplyDelivery), and the
 // first Publication is marked through the dispatcher only after the outcome committed (markPublished), never inside it.
+// A Publication a bridge replayed is no exception: its outcome and the edit that follows lock the delivery row only, as
+// every outcome and every edit does, never its Alert Group before it.
 // The preparation of a Telegram reply that waits for its copy is the one exception: it holds the reply, then takes the
 // post's copy lock and the delivery, the order of the learning of a copy and of the record of a Publication
 // (copies.go). The re-render after a key rotation (rerender.go) takes the dispatcher's order — the Alert Group, SKIP
@@ -261,7 +263,8 @@ func (w *Worker) next(ctx context.Context, org int64, limit time.Duration) (time
 }
 
 // attempt is a delivery that has its tokens and is about to be called; late says that its Publication carries the
-// late note.
+// late note. idempotent says that its adapter is Idempotent, and started that its Publication had started before this
+// attempt.
 type attempt struct {
 	row         dbgen.GetLeasedDeliveryRow
 	destination Destination
@@ -270,7 +273,27 @@ type attempt struct {
 	message     Message
 	at          time.Time
 	// targets are the Mentions of a Loud Publication.
-	targets []mentions.Target
+	targets    []mentions.Target
+	idempotent bool
+	started    bool
+}
+
+// replayed reports whether the outcome out is a Publication the messenger replayed: the first result of its
+// idempotency key, posted by an earlier attempt (C-22.FR-6).
+func (a attempt) replayed(out Outcome) bool { return a.publication && out.Replayed }
+
+// keepStarted reports whether the outcome out keeps the start of the attempt's Publication for its retry (C-22.FR-6):
+// for an Idempotent adapter, a Publication that may have reached the messenger — started before this attempt, or a
+// request without an answer — so that the retry is replayed, or records a possible duplicate when it is not. A failure
+// the messenger answered stored nothing, and a refused connection sent nothing.
+func (a attempt) keepStarted(out Outcome) bool {
+	return a.idempotent && a.publication && (a.started || out.Unanswered)
+}
+
+// idempotent is the adapter of the Destination type typ when it keeps idempotency keys (C-22.FR-6).
+func (w *Worker) idempotent(typ string) (Idempotent, bool) {
+	i, ok := w.Adapters[typ].(Idempotent)
+	return i, ok
 }
 
 // kind is the kind of the attempt's call: the final edit, a call of a Storm summary, a Publication or an edit.
@@ -319,8 +342,9 @@ func (w *Worker) deliver(ctx context.Context, org, id int64) {
 // message already shows the Desired state is delivered with no call; an edit of a Telegram Root message while a press
 // of its Connection is being handled waits TelegramPressEditDelay, taking no token; one without tokens waits until they
 // are due plus TokenMargin; otherwise the tokens are taken, the lease is renewed for the call and, before a
-// Publication, a possible duplicate and the start of the Publication are recorded and its notes added. ok says whether
-// to call; logs are the lines to log now that it committed.
+// Publication, a possible duplicate and the start of the Publication are recorded and its notes added. For an
+// Idempotent adapter the start of an earlier attempt is kept and no possible duplicate is recorded here: the outcome
+// decides it (C-22.FR-6). ok says whether to call; logs are the lines to log now that it committed.
 func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, after, error) {
 	var a attempt
 	var logs after
@@ -385,19 +409,21 @@ func (w *Worker) prepare(ctx context.Context, org, id int64) (attempt, bool, aft
 		if row.DesiredRetire {
 			msg = messages.FinalEdit(msg, w.link(row.AlertGroupPublicID))
 		}
-		a = attempt{row: row, destination: d, publication: unpublished(row), message: msg, at: now}
+		_, idempotent := w.idempotent(d.Type)
+		a = attempt{row: row, destination: d, publication: unpublished(row), message: msg, at: now,
+			idempotent: idempotent, started: row.PublicationStartedAt.Valid}
 		if err := q.RenewDeliveryLease(ctx, dbgen.RenewDeliveryLeaseParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 			LeaseUntil: realNow.Add(w.Lease.Duration)}); err != nil {
 			return fmt.Errorf("renew the lease of the delivery: %w", err)
 		}
 		if a.publication {
-			if row.PublicationStartedAt.Valid {
+			if a.started && !a.idempotent {
 				if err := w.possibleDuplicate(ctx, q, org, row, now, &logs); err != nil {
 					return err
 				}
 			}
 			if err := q.StartPublication(ctx, dbgen.StartPublicationParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
-				Now: now}); err != nil {
+				Keep: a.idempotent, Now: now}); err != nil {
 				return fmt.Errorf("record the start of the publication: %w", err)
 			}
 			if a.message, a.late, err = publicationNotes(ctx, q, org, row, a.message); err != nil {
@@ -455,13 +481,18 @@ func publicationLoudness(loud pgtype.Bool, summary bool) (groups.Loudness, []gro
 }
 
 // call makes the adapter call of a prepared delivery outside any transaction and records its outcome; a markup the
-// messenger rejects is sent again without markup in the same attempt.
+// messenger rejects is sent again without markup in the same attempt. A Publication to an Idempotent adapter carries
+// the key of its number, the same for every retry of it; a replayed one observes no latency, as its message shows the
+// state of an earlier attempt.
 func (w *Worker) call(ctx context.Context, org int64, a attempt) error {
 	c := Call{Class: outbound.ClassDelivery, Destination: a.destination, Loudness: groups.Quiet}
 	kind := a.kind()
 	if a.publication {
 		c.Loudness, c.Mentions = publicationLoudness(a.row.PublicationLoud, a.row.StormID.Valid)
 		c.Targets = a.targets
+		if idem, ok := w.idempotent(a.destination.Type); ok {
+			c.Key = idem.PublicationKey(a.destination, a.row.ID, a.row.Publications+1)
+		}
 	}
 	if sendsRequests(a.destination.Type) {
 		c.Webhook = &WebhookCall{State: a.row.DesiredPayload, Response: responseValues(a.row.ResponseValues),
@@ -494,7 +525,7 @@ func (w *Worker) call(ctx context.Context, org int64, a attempt) error {
 	if err == nil {
 		logs.run(ctx, w.Log)
 	}
-	if err == nil && recorded && out.Kind == OutcomeOK && a.row.DesiredReceivedAt.Valid {
+	if err == nil && recorded && out.Kind == OutcomeOK && !a.replayed(out) && a.row.DesiredReceivedAt.Valid {
 		metrics.DeliveryLatency.With(a.destination.PublicID).Update(
 			max(a.at.Sub(a.row.DesiredReceivedAt.Time).Seconds(), 0))
 	}

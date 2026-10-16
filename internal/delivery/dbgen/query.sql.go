@@ -1093,7 +1093,7 @@ const getLeasedDelivery = `-- name: GetLeasedDelivery :one
 SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id, d.desired_version,
        d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
        d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
-       d.published_at, d.response_values, d.thread_opened, d.actual_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
+       d.published_at, d.publications, d.response_values, d.thread_opened, d.actual_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
        ds.telegram_discussion_chat_id,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
@@ -1131,6 +1131,7 @@ type GetLeasedDeliveryRow struct {
 	PublicationStartedAt     pgtype.Timestamptz
 	Attempts                 int64
 	PublishedAt              pgtype.Timestamptz
+	Publications             int64
 	ResponseValues           []byte
 	ThreadOpened             bool
 	ActualButtonKeyID        pgtype.Text
@@ -1182,6 +1183,7 @@ func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryPa
 		&i.PublicationStartedAt,
 		&i.Attempts,
 		&i.PublishedAt,
+		&i.Publications,
 		&i.ResponseValues,
 		&i.ThreadOpened,
 		&i.ActualButtonKeyID,
@@ -3091,40 +3093,47 @@ func (q *Queries) QuietStormSummaries(ctx context.Context, arg QuietStormSummari
 
 const recordDelivered = `-- name: RecordDelivered :one
 UPDATE deliveries d
-SET actual_version      = $1::bigint,
-    actual_hash         = $2,
-    actual_button_key_id = $3::text,
-    message_id          = coalesce($4::text, d.message_id),
-    message_url         = coalesce($5::text, d.message_url),
-    published_at        = CASE WHEN $6::boolean THEN coalesce(d.published_at, $7::timestamptz) ELSE d.published_at END,
-    publications        = d.publications + CASE WHEN $6::boolean THEN 1 ELSE 0 END,
+SET actual_version      = CASE WHEN $1::boolean THEN d.actual_version ELSE $2::bigint END,
+    actual_hash         = CASE WHEN $1::boolean THEN NULL ELSE $3::bytea END,
+    actual_button_key_id = $4::text,
+    message_id          = coalesce($5::text, d.message_id),
+    message_url         = coalesce($6::text, d.message_url),
+    thread_anchor_id    = coalesce($7::text, d.thread_anchor_id),
+    published_at        = CASE
+                              WHEN $8::boolean THEN coalesce(d.published_at,
+                                  CASE WHEN $1::boolean THEN d.publication_started_at END, $9::timestamptz)
+                              ELSE d.published_at
+                          END,
+    possible_duplicate  = d.possible_duplicate OR $10::boolean,
+    publications        = d.publications + CASE WHEN $8::boolean THEN 1 ELSE 0 END,
     response_values     = CASE
-                              WHEN $6::boolean THEN coalesce($8::jsonb, '{}'::jsonb)
+                              WHEN $8::boolean THEN coalesce($11::jsonb, '{}'::jsonb)
                               ELSE d.response_values
                           END,
-    thread_opened       = d.thread_opened AND NOT $6::boolean,
-    last_delivered_at   = $7::timestamptz,
+    thread_opened       = d.thread_opened AND NOT $8::boolean,
+    last_delivered_at   = $9::timestamptz,
     state               = CASE
                               WHEN f.ended AND NOT f.raced THEN d.state
                               WHEN f.raced AND d.storm_id IS NOT NULL THEN 'retired'
                               WHEN f.raced AND f.left_destination THEN 'pending'
-                              WHEN d.desired_version = $1::bigint AND NOT d.desired_retire THEN 'delivered'
+                              WHEN d.desired_version = $2::bigint AND NOT d.desired_retire
+                                  AND NOT $1::boolean THEN 'delivered'
                               ELSE 'pending'
                           END,
     desired_retire      = d.desired_retire OR (f.raced AND d.storm_id IS NULL AND f.left_destination),
-    desired_received_at = NULL,
-    next_attempt_at     = $7::timestamptz,
+    desired_received_at = CASE WHEN $1::boolean THEN d.desired_received_at END,
+    next_attempt_at     = $9::timestamptz,
     attempts            = 0,
     first_failed_at     = NULL,
     last_error_class    = NULL,
     last_error          = NULL,
     lease_owner         = NULL,
     lease_until         = NULL,
-    updated_at          = $7::timestamptz
+    updated_at          = $9::timestamptz
 FROM (SELECT x.id,
              x.state IN ('withheld', 'retired', 'deleted_in_messenger') AS ended,
              (x.state IN ('withheld', 'retired', 'deleted_in_messenger') AND x.published_at IS NULL
-              AND $6::boolean) AS raced,
+              AND $8::boolean) AS raced,
              (EXISTS (SELECT 1
                       FROM destinations ds
                       WHERE ds.org_id = x.org_id AND ds.id = x.destination_id AND ds.deleted_at IS NOT NULL)
@@ -3134,23 +3143,31 @@ FROM (SELECT x.id,
                              WHERE g.org_id = x.org_id AND g.id = x.alert_group_id
                                AND rd.destination_id = x.destination_id)) AS left_destination
       FROM deliveries x
-      WHERE x.org_id = $9 AND x.id = $11) AS f
-WHERE d.org_id = $9 AND d.id = f.id AND d.lease_owner = $10::text
-RETURNING d.state
+      WHERE x.org_id = $12 AND x.id = $14) AS f
+WHERE d.org_id = $12 AND d.id = f.id AND d.lease_owner = $13::text
+RETURNING d.state, d.published_at
 `
 
 type RecordDeliveredParams struct {
-	Version        int64
-	Hash           []byte
-	ButtonKeyID    pgtype.Text
-	MessageID      pgtype.Text
-	MessageUrl     pgtype.Text
-	Published      bool
-	Now            time.Time
-	ResponseValues []byte
-	OrgID          int64
-	Owner          string
-	ID             int64
+	Replayed          bool
+	Version           int64
+	Hash              []byte
+	ButtonKeyID       pgtype.Text
+	MessageID         pgtype.Text
+	MessageUrl        pgtype.Text
+	ThreadRef         pgtype.Text
+	Published         bool
+	Now               time.Time
+	PossibleDuplicate bool
+	ResponseValues    []byte
+	OrgID             int64
+	Owner             string
+	ID                int64
+}
+
+type RecordDeliveredRow struct {
+	State       string
+	PublishedAt pgtype.Timestamptz
 }
 
 // RecordDelivered records a successful call that brought the actual message to @version: the delivery is delivered
@@ -3165,24 +3182,31 @@ type RecordDeliveredParams struct {
 // a Storm summary is then retired with it; an Alert Group whose Destination was deleted or left its Route meanwhile
 // gets the final edit of that message (pending, desired_retire); any other row follows the rule above, so that the
 // message that now exists is kept current. The key that signed the buttons of the message sent becomes the actual one
-// (@button_key_id, none for a message without buttons).
-func (q *Queries) RecordDelivered(ctx context.Context, arg RecordDeliveredParams) (string, error) {
+// (@button_key_id, none for a message without buttons). A bridge's `thread_ref` (@thread_ref) becomes the Thread
+// anchor. A Publication the messenger @replayed (C-22.FR-6) records its message, url and `thread_ref`, is dated from
+// the start of its first attempt, when the message was really posted, and stays pending without an actual version,
+// its Snapshot's receipt time kept: the replayed message shows the state of that attempt, so the next call is an edit
+// to the latest Desired state. @possible_duplicate records a possible duplicate that the outcome decided.
+func (q *Queries) RecordDelivered(ctx context.Context, arg RecordDeliveredParams) (RecordDeliveredRow, error) {
 	row := q.db.QueryRow(ctx, recordDelivered,
+		arg.Replayed,
 		arg.Version,
 		arg.Hash,
 		arg.ButtonKeyID,
 		arg.MessageID,
 		arg.MessageUrl,
+		arg.ThreadRef,
 		arg.Published,
 		arg.Now,
+		arg.PossibleDuplicate,
 		arg.ResponseValues,
 		arg.OrgID,
 		arg.Owner,
 		arg.ID,
 	)
-	var state string
-	err := row.Scan(&state)
-	return state, err
+	var i RecordDeliveredRow
+	err := row.Scan(&i.State, &i.PublishedAt)
+	return i, err
 }
 
 const recordDeliveryRetry = `-- name: RecordDeliveryRetry :one
@@ -3190,25 +3214,29 @@ UPDATE deliveries
 SET next_attempt_at        = $1,
     attempts               = attempts + CASE WHEN $2::boolean THEN 1 ELSE 0 END,
     first_failed_at        = CASE WHEN $2::boolean THEN coalesce(first_failed_at, $3) ELSE first_failed_at END,
-    publication_started_at = CASE WHEN published_at IS NULL THEN NULL ELSE publication_started_at END,
-    last_error_class       = $4::text,
-    last_error             = $5::text,
+    publication_started_at = CASE
+                                 WHEN published_at IS NULL AND NOT $4::boolean THEN NULL
+                                 ELSE publication_started_at
+                             END,
+    last_error_class       = $5::text,
+    last_error             = $6::text,
     lease_owner            = NULL,
     lease_until            = NULL,
     updated_at             = $3
-WHERE org_id = $6 AND id = $7 AND lease_owner = $8::text
+WHERE org_id = $7 AND id = $8 AND lease_owner = $9::text
 RETURNING attempts, first_failed_at
 `
 
 type RecordDeliveryRetryParams struct {
-	At         time.Time
-	Counted    bool
-	Now        time.Time
-	ErrorClass pgtype.Text
-	Error      pgtype.Text
-	OrgID      int64
-	ID         int64
-	Owner      string
+	At          time.Time
+	Counted     bool
+	Now         time.Time
+	KeepStarted bool
+	ErrorClass  pgtype.Text
+	Error       pgtype.Text
+	OrgID       int64
+	ID          int64
+	Owner       string
 }
 
 type RecordDeliveryRetryRow struct {
@@ -3218,12 +3246,16 @@ type RecordDeliveryRetryRow struct {
 
 // RecordDeliveryRetry records an outcome that is retried at @at: a RetryAfter or a Fatal error, which leave the
 // budget untouched, or a Transient error, which is @counted: attempts grows and the time budget starts. The messenger
-// did not take a Publication, so its start is cleared. No row when the lease went to another replica.
+// did not take a Publication, so its start is cleared, unless @keep_started: for an adapter whose messenger keeps
+// idempotency keys, a Publication that may have reached it — started before this attempt, or a request without an
+// answer — keeps the start of its first attempt for the retry (C-22.FR-6). No row when the lease went to another
+// replica.
 func (q *Queries) RecordDeliveryRetry(ctx context.Context, arg RecordDeliveryRetryParams) (RecordDeliveryRetryRow, error) {
 	row := q.db.QueryRow(ctx, recordDeliveryRetry,
 		arg.At,
 		arg.Counted,
 		arg.Now,
+		arg.KeepStarted,
 		arg.ErrorClass,
 		arg.Error,
 		arg.OrgID,
@@ -3447,6 +3479,34 @@ func (q *Queries) RecordThreadOpened(ctx context.Context, arg RecordThreadOpened
 		arg.OrgID,
 		arg.ID,
 		arg.PublishedAt,
+	)
+	return err
+}
+
+const recordThreadRef = `-- name: RecordThreadRef :exec
+UPDATE deliveries
+SET thread_anchor_id = $1::text, updated_at = $2::timestamptz
+WHERE org_id = $3 AND id = $4 AND message_id = $5::text
+`
+
+type RecordThreadRefParams struct {
+	ThreadRef string
+	Now       time.Time
+	OrgID     int64
+	ID        int64
+	MessageID string
+}
+
+// RecordThreadRef stores the `thread_ref` a bridge returned for a Thread reply as the Thread anchor of its delivery,
+// which the next reply sends (C-22.FR-6); a Root message published again meanwhile, with another message id, is left
+// alone. The record of the reply locked the delivery first (LockReplyDelivery).
+func (q *Queries) RecordThreadRef(ctx context.Context, arg RecordThreadRefParams) error {
+	_, err := q.db.Exec(ctx, recordThreadRef,
+		arg.ThreadRef,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+		arg.MessageID,
 	)
 	return err
 }
@@ -4481,20 +4541,29 @@ func (q *Queries) ShareRouteMembership(ctx context.Context, arg ShareRouteMember
 
 const startPublication = `-- name: StartPublication :exec
 UPDATE deliveries
-SET publication_started_at = $1::timestamptz, updated_at = $1::timestamptz
-WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text
+SET publication_started_at = CASE
+                                 WHEN $1::boolean THEN coalesce(publication_started_at, $2::timestamptz)
+                                 ELSE $2::timestamptz
+                             END,
+    updated_at             = $2::timestamptz
+WHERE org_id = $3 AND id = $4 AND lease_owner = $5::text
 `
 
 type StartPublicationParams struct {
+	Keep  bool
 	Now   time.Time
 	OrgID int64
 	ID    int64
 	Owner string
 }
 
-// StartPublication records, before the call, that a Publication started; a retry after it publishes again.
+// StartPublication records, before the call, that a Publication started; a retry after it publishes again. With @keep,
+// for an adapter whose messenger keeps idempotency keys (C-22.FR-6), the start of an earlier attempt of the same
+// Publication is kept: it dates a Publication the messenger replays, and its retry records a possible duplicate only
+// when the answer is not replayed.
 func (q *Queries) StartPublication(ctx context.Context, arg StartPublicationParams) error {
 	_, err := q.db.Exec(ctx, startPublication,
+		arg.Keep,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,

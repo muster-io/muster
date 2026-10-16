@@ -472,11 +472,12 @@ var DestinationRecovered = newEvent("destination_recovered", LevelInfo, "C-11",
 	"destination", "broken_for_s")
 
 // DeliveryPossibleDuplicate is logged when a Publication starts again after an earlier start that was never recorded
-// (C-11.FR-12).
+// (C-11.FR-12), or, for a bridge, when such a retry was not replayed (C-22.FR-6).
 var DeliveryPossibleDuplicate = newEvent("delivery_possible_duplicate", LevelWarn, "C-11",
-	"A Publication started again after an earlier start whose outcome was never recorded, such as after a crash: "+
-		"destination is the public_id of the Destination and group the public_id of the Alert Group. The messenger "+
-		"may show the Root message twice.",
+	"A Publication started again after an earlier start whose outcome was never recorded, such as after a crash, "+
+		"or, for a bridge, after a request that got no answer, and the bridge did not replay it: destination is the "+
+		"public_id of the Destination and group the public_id of the Alert Group. The messenger may show the Root "+
+		"message twice.",
 	"destination", "group")
 
 // DeliveryNotDelivered is logged when a delivery or a Thread reply ends as Not delivered (C-11.FR-10).

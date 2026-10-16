@@ -71,6 +71,54 @@ func TestReplyOutcomeAgainstDispatcherLockOrder(t *testing.T) {
 	})
 }
 
+// TestReplayedPublicationAgainstDispatcherLockOrder (D307, C-22.FR-6): the worker retries a first Publication to an
+// Idempotent adapter whose earlier attempt got no answer, and the bridge replays it — the outcome records the message,
+// the thread_ref and the first attempt's start as published_at, and stays pending — while an acknowledgement holds the
+// Alert Group and then waits for the delivery row in Enqueue; the first Publication is then marked through the
+// dispatcher, and the edit that follows brings the Root message to the acknowledged state. Neither the outcome nor the
+// edit locks the Alert Group before the delivery: nothing ends in a deadlock, no possible duplicate is recorded, and the
+// Alert Group's first Publication is the first attempt's start.
+func TestReplayedPublicationAgainstDispatcherLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		l.fresh(t, 1000, 1)
+		l.fire(t, "lockreplay", "LockReplay/a")
+		gid := l.group(t, "LockReplay")
+		idem := idempotent(l.rec)
+		l.a.Adapters[delivery.TypeMattermost] = idem
+		l.a.Published = l.groups.MarkPublished
+		started := l.business.Now().Add(-time.Minute).UTC()
+		l.exec(t, `UPDATE deliveries SET publication_started_at = $1`, started)
+		l.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+			MessageID: "m-replayed", ThreadRef: "t-1", Replayed: true}})
+		l.againstDispatcher(t, gid)
+		if l.count(t, `SELECT count(*) FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+			WHERE g.public_id = $1 AND d.state = 'pending' AND d.actual_hash IS NULL AND d.message_id = 'm-replayed'
+			AND d.thread_anchor_id = 't-1' AND d.published_at = $2 AND g.first_published_at = $2
+			AND NOT d.possible_duplicate`, gid, started) != 1 {
+			t.Errorf("the replayed publication is not recorded from its first attempt\n%s", l.log)
+		}
+		l.round(t, l.a)
+		l.noDeadlock(t)
+		calls := l.rec.Calls()
+		if callMethods(calls) != "publish,update" || calls[1].MessageID != "m-replayed" ||
+			calls[1].Message.Colour != "acknowledged" {
+			t.Errorf("calls %s %+v", callMethods(calls), calls)
+		}
+		if keys := idem.Keys(); len(keys) != 2 || !strings.HasPrefix(keys[0], "pub-DSAAAAAAAAAAA1-") ||
+			!strings.HasSuffix(keys[0], "-1") || keys[1] != "" {
+			t.Errorf("keys %v", keys)
+		}
+		if l.count(t, `SELECT count(*) FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+			WHERE g.public_id = $1 AND g.status = 'acknowledged' AND d.state = 'delivered' AND d.desired_version >= 2
+			AND d.actual_version = d.desired_version AND d.actual_hash = d.desired_hash AND d.published_at = $2
+			AND NOT d.possible_duplicate`, gid, started) != 1 ||
+			l.count(t, `SELECT count(*) FROM delivery_events WHERE kind = 'possible_duplicate'`) != 0 {
+			t.Errorf("the edit did not bring the root message to the acknowledged state\n%s", l.log)
+		}
+	})
+}
+
 // againstDispatcher acknowledges the Alert Group publicID through the dispatcher and holds that transaction after it
 // locked the Alert Group, before Enqueue; meanwhile a round of the worker runs until it ends or waits for a lock; then
 // the acknowledgement goes on. Both must succeed, and nothing may fail with a deadlock.

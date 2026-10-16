@@ -587,8 +587,8 @@ func (f *fakeDB) GetLeasedDelivery(_ context.Context, arg dbgen.GetLeasedDeliver
 		DesiredPayload: d.payload, DesiredHash: d.hash, DesiredReceivedAt: tz(d.receivedAt), PublicationLoud: d.loud,
 		LateNote: d.lateNote, RepublishedAfterDelete: d.republished, DesiredRetire: d.desiredRetire,
 		ActualHash: d.actualHash, MessageID: txt(d.messageID), MessageUrl: txt(d.messageURL),
-		PublishedAt: tz(d.publishedAt), ResponseValues: valuesOf(d.responseValues), ThreadOpened: d.threadOpened,
-		PublicationStartedAt: tz(d.started), Attempts: d.attempts, DestinationID: ds.id,
+		PublishedAt: tz(d.publishedAt), Publications: d.publications, ResponseValues: valuesOf(d.responseValues),
+		ThreadOpened: d.threadOpened, PublicationStartedAt: tz(d.started), Attempts: d.attempts, DestinationID: ds.id,
 		DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
 		ConnectionID: nullInt(ds.connection), DestinationHealth: ds.health, GroupCreatedAt: d.updated,
 		TelegramChannelChatID: nullInt(ds.tgChannel), TelegramDiscussionChatID: nullInt(ds.tgGroup),
@@ -671,21 +671,23 @@ func (f *fakeDB) StartPublication(_ context.Context, arg dbgen.StartPublicationP
 	if err := f.call("StartPublication"); err != nil {
 		return err
 	}
-	if d := f.delivery(arg.ID); d.owner == arg.Owner {
+	// publication_started_at = CASE WHEN @keep THEN coalesce(publication_started_at, @now) ELSE @now END
+	if d := f.delivery(arg.ID); d.owner == arg.Owner && (!arg.Keep || d.started == nil) {
 		d.started = at(arg.Now)
 	}
 	return nil
 }
 
-func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredParams) (string, error) {
+func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredParams) (dbgen.RecordDeliveredRow,
+	error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.call("RecordDelivered"); err != nil {
-		return "", err
+		return dbgen.RecordDeliveredRow{}, err
 	}
 	d := f.delivery(arg.ID)
 	if d.owner != arg.Owner {
-		return "", pgx.ErrNoRows
+		return dbgen.RecordDeliveredRow{}, pgx.ErrNoRows
 	}
 	ended := endedRow(d)
 	raced := ended && d.publishedAt == nil && arg.Published
@@ -695,32 +697,46 @@ func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredPar
 	retire, err := notNull("desired_retire", sqlIs(d.desiredRetire).or(sqlIs(raced).and(sqlIs(d.storm == 0)).and(
 		sqlIs(left))))
 	if err != nil {
-		return "", err
+		return dbgen.RecordDeliveredRow{}, err
 	}
-	d.actualVersion, d.actualHash, d.actualKey = arg.Version, arg.Hash, strOf(arg.ButtonKeyID)
+	// A replayed Publication keeps the actual version, leaves actual_hash NULL and keeps the receipt time.
+	if arg.Replayed {
+		d.actualHash = nil
+	} else {
+		d.actualVersion, d.actualHash, d.receivedAt = arg.Version, arg.Hash, nil
+	}
+	d.actualKey = strOf(arg.ButtonKeyID)
 	if arg.MessageID.Valid {
 		d.messageID = strOf(arg.MessageID)
 	}
 	if arg.MessageUrl.Valid {
 		d.messageURL = strOf(arg.MessageUrl)
 	}
+	if arg.ThreadRef.Valid {
+		d.anchorID = strOf(arg.ThreadRef)
+	}
 	if arg.Published {
-		if d.publishedAt == nil {
+		// coalesce(d.published_at, CASE WHEN @replayed THEN d.publication_started_at END, @now)
+		switch {
+		case d.publishedAt != nil:
+		case arg.Replayed && d.started != nil:
+			d.publishedAt = at(*d.started)
+		default:
 			d.publishedAt = at(arg.Now)
 		}
 		d.publications++
 		d.responseValues, d.threadOpened = map[string]string{}, false
 		_ = json.Unmarshal(arg.ResponseValues, &d.responseValues)
 	}
+	d.possibleDuplicate = d.possibleDuplicate || arg.PossibleDuplicate
 	d.lastDelivered = at(arg.Now)
-	d.receivedAt = nil
 	switch { // the old desired_retire, as every SET expression reads the row before the update
 	case ended && !raced:
 	case raced && d.storm != 0:
 		d.state = "retired"
 	case raced && left:
 		d.state = "pending"
-	case d.version == arg.Version && !d.desiredRetire:
+	case d.version == arg.Version && !d.desiredRetire && !arg.Replayed:
 		d.state = "delivered"
 	default:
 		d.state = "pending"
@@ -728,7 +744,7 @@ func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredPar
 	d.desiredRetire = retire
 	d.next, d.attempts, d.errorClass, d.lastError, d.owner, d.until = arg.Now, 0, nil, nil, "", time.Time{}
 	d.firstFailed = nil
-	return d.state, nil
+	return dbgen.RecordDeliveredRow{State: d.state, PublishedAt: tz(d.publishedAt)}, nil
 }
 
 func (f *fakeDB) RecordDeliveryRetry(_ context.Context, arg dbgen.RecordDeliveryRetryParams) (
@@ -748,12 +764,24 @@ func (f *fakeDB) RecordDeliveryRetry(_ context.Context, arg dbgen.RecordDelivery
 			d.firstFailed = at(arg.Now)
 		}
 	}
-	if d.publishedAt == nil {
+	if d.publishedAt == nil && !arg.KeepStarted {
 		d.started = nil
 	}
 	d.next, d.errorClass, d.lastError, d.owner, d.until = arg.At, strOf(arg.ErrorClass), strOf(arg.Error), "",
 		time.Time{}
 	return dbgen.RecordDeliveryRetryRow{Attempts: d.attempts, FirstFailedAt: tz(d.firstFailed)}, nil
+}
+
+func (f *fakeDB) RecordThreadRef(_ context.Context, arg dbgen.RecordThreadRefParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RecordThreadRef"); err != nil {
+		return err
+	}
+	if d := f.delivery(arg.ID); arg.OrgID == orgID && d != nil && d.messageID != nil && *d.messageID == arg.MessageID {
+		d.anchorID, d.updated = &arg.ThreadRef, arg.Now
+	}
+	return nil
 }
 
 // limiterOf is the capacity and the refill per second of a bucket.
@@ -2252,5 +2280,47 @@ func TestEditWaitsForPress(t *testing.T) {
 	if e.rec.Count(deliverytest.MethodUpdate) != 1 || !strings.Contains(e.log.String(),
 		`"event":"delivery_work_failed"`) || !strings.Contains(e.log.String(), "try the update lock") {
 		t.Fatalf("a failed try: %s", e.log)
+	}
+}
+
+// TestIdempotentPublicationKey is C-22.FR-6: a Publication to an Idempotent adapter carries the key
+// pub-<Destination public_id>-<delivery id>-<publications + 1>, the same for every retry of it, and the next
+// Publication of the delivery — after its Root message was deleted — the next number; an edit carries none. Before a
+// retry of a started Publication the worker records no possible duplicate, and keeps the start of the first attempt
+// (StartPublication keep), as the outcome decides. A non-Idempotent adapter gets no key.
+func TestIdempotentPublicationKey(t *testing.T) {
+	e, d, idem := pendingBridge(t)
+	e.rec.Script(deliverytest.MethodPublish, timedOut(),
+		deliverytest.RetryAfter(time.Second, delivery.ScopeConnection), deliverytest.OK())
+	var starts []time.Time
+	for range 3 {
+		e.round(t)
+		if d.started != nil {
+			starts = append(starts, *d.started)
+		}
+		e.business.Set(d.next.Add(time.Second))
+	}
+	first := fmt.Sprintf("pub-%s-%d-1", bridgePublicID, d.id)
+	if !slices.Equal(idem.Keys(), []string{first, first, first}) || d.state != "delivered" {
+		t.Fatalf("keys %v, delivery %+v", idem.Keys(), d)
+	}
+	if e.db.calls["MarkPossibleDuplicate"] != 0 || !slices.Equal(starts, []time.Time{business0, business0, business0}) {
+		t.Errorf("before the retries: %d possible duplicates, starts %v", e.db.calls["MarkPossibleDuplicate"], starts)
+	}
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), person, groups.Recorded{Seq: 2,
+		Event: groups.EventAcknowledged, Loudness: groups.Quiet})
+	e.rec.Script(deliverytest.MethodUpdate, deliverytest.Failure(delivery.OutcomeGone, "The message no longer exists."))
+	e.round(t)
+	e.round(t)
+	second := fmt.Sprintf("pub-%s-%d-2", bridgePublicID, d.id)
+	if !slices.Equal(idem.Keys(), []string{first, first, first, "", second}) || d.publications != 2 {
+		t.Errorf("after the deletion: keys %v, publications %d", idem.Keys(), d.publications)
+	}
+	mm, _ := pending(t)
+	keys := &keyRecorder{Recorder: mm.rec}
+	mm.w.Adapters[delivery.TypeMattermost] = keys
+	mm.round(t)
+	if !slices.Equal(keys.Keys(), []string{""}) || mm.rec.Count(deliverytest.MethodPublish) != 1 {
+		t.Errorf("mattermost keys %v", keys.Keys())
 	}
 }

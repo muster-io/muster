@@ -4,8 +4,11 @@
 package delivery_test
 
 import (
+	"context"
+	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +16,114 @@ import (
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
 )
+
+// keyRecorder is the recording adapter that also records the idempotency key of each call, in order.
+type keyRecorder struct {
+	*deliverytest.Recorder
+	mu   sync.Mutex
+	keys []string
+}
+
+func (r *keyRecorder) key(c delivery.Call) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.keys = append(r.keys, c.Key)
+}
+
+// Keys are the keys of the calls so far, in order.
+func (r *keyRecorder) Keys() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.keys)
+}
+
+// forget forgets the keys recorded so far.
+func (r *keyRecorder) forget() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.keys = nil
+}
+
+func (r *keyRecorder) Publish(ctx context.Context, c delivery.Call, m delivery.Message) delivery.Outcome {
+	r.key(c)
+	return r.Recorder.Publish(ctx, c, m)
+}
+
+func (r *keyRecorder) Update(ctx context.Context, c delivery.Call, messageID string, m delivery.Message) delivery.Outcome {
+	r.key(c)
+	return r.Recorder.Update(ctx, c, messageID, m)
+}
+
+func (r *keyRecorder) Reply(ctx context.Context, c delivery.Call, root delivery.Root, m delivery.Message) delivery.Outcome {
+	r.key(c)
+	return r.Recorder.Reply(ctx, c, root, m)
+}
+
+// idempotentRecorder is the key recorder as an Idempotent adapter with the keys of the Bridge protocol, as a bridge's
+// delivery is (C-22.FR-6).
+type idempotentRecorder struct{ *keyRecorder }
+
+var _ delivery.Idempotent = idempotentRecorder{}
+
+func (idempotentRecorder) PublicationKey(d delivery.Destination, deliveryID, publication int64) string {
+	return fmt.Sprintf("pub-%s-%d-%d", d.PublicID, deliveryID, publication)
+}
+
+func (idempotentRecorder) ReplyKey(d delivery.Destination, replyID int64) string {
+	return fmt.Sprintf("reply-%s-%d", d.PublicID, replyID)
+}
+
+// idempotent is rec as an Idempotent adapter.
+func idempotent(rec *deliverytest.Recorder) idempotentRecorder {
+	return idempotentRecorder{&keyRecorder{Recorder: rec}}
+}
+
+// bridgePublicID is the public_id of Destination 11 as a Bridge, its own so that its metrics are its own.
+const bridgePublicID = "DSAAAAAAAAAB11"
+
+// bridged is newEnv with Destination 11 a Bridge whose adapter is Idempotent, with a limiter that never runs dry and the
+// jitter of delivery.transient_backoff fixed at half the bound.
+func bridged(t *testing.T) (*env, idempotentRecorder) {
+	t.Helper()
+	e := newEnv(t)
+	ds := e.db.dests[destMM]
+	ds.typ, ds.publicID, ds.limit = delivery.TypeBridge, bridgePublicID, 600
+	e.w.Random = func() float64 { return 0.5 }
+	idem := idempotent(e.rec)
+	e.w.Adapters[delivery.TypeBridge] = idem
+	return e, idem
+}
+
+// pendingBridge is a bridged env whose Alert Group waits for its first Publication.
+func pendingBridge(t *testing.T) (*env, *fakeDelivery, idempotentRecorder) {
+	t.Helper()
+	e, idem := bridged(t)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	return e, e.only(t), idem
+}
+
+// publishedBridge is a bridged env whose Alert Group has its Root message, published with the answer given, and
+// nothing recorded yet.
+func publishedBridge(t *testing.T, answer deliverytest.Answer) (*env, *fakeDelivery, idempotentRecorder) {
+	t.Helper()
+	e, d, idem := pendingBridge(t)
+	e.rec.Script(deliverytest.MethodPublish, answer)
+	e.round(t)
+	if d.state != "delivered" {
+		t.Fatalf("not published %+v", d)
+	}
+	e.rec.Reset()
+	idem.forget()
+	return e, d, idem
+}
+
+// timedOut is a Transient failure whose request may have reached the messenger without its answer, as after a
+// timeout or a connection lost after the request was sent.
+func timedOut() deliverytest.Answer {
+	a := deliverytest.Failure(delivery.OutcomeTransient, "timeout")
+	a.Outcome.Unanswered = true
+	return a
+}
 
 // resolve resolves the Alert Group of the fixtures by the system at now, as the dispatcher does.
 func (e *env) resolve(t *testing.T) {
@@ -380,5 +491,90 @@ func TestDeletedRootFailures(t *testing.T) {
 	e.round(t)
 	if d.state != "withheld" || len(e.db.events) != 1 {
 		t.Errorf("an ended row %+v %v", d, e.eventKinds())
+	}
+}
+
+// TestIdempotentPossibleDuplicate is C-22.FR-6 and C-11.FR-12 for a Bridge: a worker stopped after the bridge took a
+// Publication and before its outcome was recorded leaves publication_started_at set; the retry carries the same key,
+// and its possible duplicate is decided by the outcome, not before the call — none when the answer is replayed, one,
+// with its delivery event before the publication event and a WARN line, when it is not. Mattermost keeps recording it
+// before the retry (TestPossibleDuplicate).
+func TestIdempotentPossibleDuplicate(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		replayed bool
+		events   []string
+		state    string
+	}{
+		{"replayed", true, []string{"publication"}, "pending"},
+		{"not replayed", false, []string{"possible_duplicate", "publication"}, "delivered"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, d, idem := pendingBridge(t)
+			calls := e.recordPublished()
+			first := e.business.Now()
+			e.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{
+				Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, MessageID: "m-1"},
+				Then:    func() { e.db.fail["RecordDelivered"] = errBoom }})
+			e.round(t)
+			if d.started == nil || !d.started.Equal(first) || d.messageID != nil || d.owner == "" {
+				t.Fatalf("after the stop %+v", d)
+			}
+			delete(e.db.fail, "RecordDelivered")
+			e.real.Advance(delivery.Lease)
+			e.business.Advance(time.Minute)
+			retried := e.business.Now()
+			var before []string
+			e.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{
+				Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, MessageID: "m-1", Replayed: tc.replayed},
+				Then: func() {
+					if d.possibleDuplicate {
+						before = append(before, "possible_duplicate")
+					}
+					before = append(before, e.eventKinds()...)
+				}})
+			e.round(t)
+			key := fmt.Sprintf("pub-%s-%d-1", bridgePublicID, d.id)
+			if !slices.Equal(idem.Keys(), []string{key, key}) {
+				t.Errorf("keys %v", idem.Keys())
+			}
+			if len(before) != 0 || e.db.calls["MarkPossibleDuplicate"] != 0 {
+				t.Errorf("recorded before the call: %v, %d", before, e.db.calls["MarkPossibleDuplicate"])
+			}
+			if d.possibleDuplicate == tc.replayed || !slices.Equal(e.eventKinds(), tc.events) || d.state != tc.state {
+				t.Errorf("delivery %+v, events %v", d, e.eventKinds())
+			}
+			logged := strings.Contains(e.log.String(), `"event":"delivery_possible_duplicate"`)
+			if logged == tc.replayed {
+				t.Errorf("possible duplicate logged %v: %s", logged, e.log)
+			}
+			states, _ := e.svc.States(t.Context(), "AGAAAAAAAAAA21")
+			if states[0].PossibleDuplicate == tc.replayed {
+				t.Errorf("states %+v", states)
+			}
+			published := retried
+			if tc.replayed {
+				published = first
+			}
+			if d.publishedAt == nil || !d.publishedAt.Equal(published) || len(*calls) != 1 ||
+				!(*calls)[0].at.Equal(published) {
+				t.Errorf("published at %v, marked %+v", d.publishedAt, *calls)
+			}
+			if !tc.replayed {
+				return
+			}
+			e.round(t)
+			if callMethods(e.rec.Calls()) != "publish,publish,update" || d.state != "delivered" || d.possibleDuplicate {
+				t.Errorf("after the replay %s %+v", callMethods(e.rec.Calls()), d)
+			}
+		})
+	}
+	// A failed record of the possible duplicate is logged; the row waits for its lease.
+	e, d, _ := pendingBridge(t)
+	d.started = at(business0.Add(-time.Minute))
+	e.db.before["RecordDelivered"] = func() { e.db.fail["InsertDeliveryEvent"] = errBoom }
+	e.round(t)
+	if !strings.Contains(e.log.String(), `"error":"record the possible_duplicate delivery event: boom"`) {
+		t.Errorf("a failed record: log %s", e.log)
 	}
 }

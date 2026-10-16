@@ -592,3 +592,114 @@ func TestReplyRecordLocksItsDeliveryFirst(t *testing.T) {
 		t.Errorf("again: reply %s", rp.state)
 	}
 }
+
+// takeover queues a Takeover reply of the Alert Group of the fixtures, which goes at once.
+func (e *env) takeover(t *testing.T, seq int64) {
+	t.Helper()
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, groups.Recorded{Seq: seq,
+		Event: groups.EventTakeover, Loudness: groups.Loud})
+}
+
+// TestBridgeThreadRef is C-22.FR-6 and AC-4 through the recorder: the first Thread reply of a Bridge goes with the
+// thread_ref its post returned — none here, null — then each reply's returned thread_ref is stored as the delivery's
+// Thread anchor and sent with the next reply; a reply that returns none keeps the stored one; a Root message published
+// again while a reply was in flight keeps its new Thread. A post that returns a thread_ref sends it with the first
+// reply.
+func TestBridgeThreadRef(t *testing.T) {
+	e, d, _ := publishedBridge(t, deliverytest.OK())
+	if d.anchorID != nil {
+		t.Fatalf("a post without a thread_ref anchored %+v", d)
+	}
+	ref := func(r string) deliverytest.Answer {
+		return deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, ThreadRef: r}}
+	}
+	e.rec.Script(deliverytest.MethodReply, ref("t-1"), ref("t-2"), deliverytest.OK(), ref("t-4"))
+	for seq := int64(2); seq <= 5; seq++ {
+		e.takeover(t, seq)
+		e.round(t)
+	}
+	var sent []string
+	for _, r := range e.replies() {
+		sent = append(sent, r.Root.ThreadAnchorID)
+		if r.Root.MessageID != "m1" || r.Root.ChainLastID != "" {
+			t.Errorf("reply %+v", r)
+		}
+	}
+	if !slices.Equal(sent, []string{"", "t-1", "t-2", "t-2"}) || d.anchorID == nil || *d.anchorID != "t-4" {
+		t.Errorf("sent %q, anchor %v", sent, d.anchorID)
+	}
+	// The Root message was published again while the reply was in flight: its new Thread is left alone.
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Answer{
+		Outcome: delivery.Outcome{Kind: delivery.OutcomeOK, ThreadRef: "t-old"},
+		Then:    func() { d.messageID, d.anchorID = at2("m9"), nil }})
+	e.takeover(t, 6)
+	e.round(t)
+	if d.anchorID != nil {
+		t.Errorf("the old thread_ref anchored the new root message: %q", *d.anchorID)
+	}
+
+	e, d, _ = publishedBridge(t, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		MessageID: "m-1", ThreadRef: "t-m-1"}})
+	e.takeover(t, 2)
+	e.round(t)
+	if r := e.replies(); len(r) != 1 || r[0].Root.ThreadAnchorID != "t-m-1" || *d.anchorID != "t-m-1" {
+		t.Errorf("replies %+v", r)
+	}
+	// A failed record of the thread_ref is logged; the reply waits for its lease.
+	e.rec.Script(deliverytest.MethodReply, ref("t-2"))
+	e.db.fail["RecordThreadRef"] = errBoom
+	e.takeover(t, 3)
+	e.round(t)
+	if !strings.Contains(e.log.String(), `"error":"record the thread_ref of the thread reply: boom"`) {
+		t.Errorf("log %s", e.log)
+	}
+}
+
+// TestBridgeReplyKey is C-22.FR-6 and AC-4: each Thread reply to a Bridge carries its own key,
+// reply-<Destination public_id>-<thread reply id>, the same for every retry of it.
+func TestBridgeReplyKey(t *testing.T) {
+	e, _, idem := publishedBridge(t, deliverytest.OK())
+	e.rec.Script(deliverytest.MethodReply, timedOut())
+	e.takeover(t, 2)
+	e.round(t)
+	e.business.Set(e.db.replies[0].next)
+	e.round(t)
+	e.takeover(t, 3)
+	e.round(t)
+	r1 := fmt.Sprintf("reply-%s-%d", bridgePublicID, e.db.replies[0].id)
+	r2 := fmt.Sprintf("reply-%s-%d", bridgePublicID, e.db.replies[1].id)
+	if !slices.Equal(idem.Keys(), []string{r1, r1, r2}) || r1 == r2 || e.db.replies[1].state != "sent" {
+		t.Errorf("keys %v", idem.Keys())
+	}
+}
+
+// TestBridgeReplyGone is C-22.FR-8 and C-11.FR-13 for a Bridge: gone on a Thread reply starts the deleted Root message
+// flow once — the Root message published again, Quietly, its Thread starting over from the new post's thread_ref — and
+// gone again marks the pair deleted in the messenger.
+func TestBridgeReplyGone(t *testing.T) {
+	e, d, _ := publishedBridge(t, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		MessageID: "m-1", ThreadRef: "t-m-1"}})
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Failure(delivery.OutcomeGone, "The message no longer exists."))
+	e.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK,
+		MessageID: "m-2", ThreadRef: "t-m-2"}})
+	e.takeover(t, 2)
+	e.round(t)
+	if !d.republished || d.anchorID != nil || d.messageID != nil {
+		t.Fatalf("after gone %+v", d)
+	}
+	e.round(t)
+	cs := e.rec.Calls()
+	if callMethods(cs) != "reply,publish,reply" || cs[1].Loudness != groups.Quiet || cs[2].Root.MessageID != "m-2" ||
+		cs[2].Root.ThreadAnchorID != "t-m-2" {
+		t.Fatalf("calls %s %+v", callMethods(cs), cs)
+	}
+	if n := strings.Count(strings.Join(e.eventKinds(), ","), "republished"); n != 1 {
+		t.Errorf("republished %d times: %v", n, e.eventKinds())
+	}
+	e.rec.Script(deliverytest.MethodReply, deliverytest.Failure(delivery.OutcomeGone, "The message no longer exists."))
+	e.takeover(t, 3)
+	e.round(t)
+	if d.state != "deleted_in_messenger" || e.rec.Count(deliverytest.MethodPublish) != 1 {
+		t.Errorf("gone again %+v", d)
+	}
+}

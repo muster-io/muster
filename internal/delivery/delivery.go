@@ -345,7 +345,7 @@ type queries interface {
 	RescheduleDelivery(ctx context.Context, arg dbgen.RescheduleDeliveryParams) error
 	TryShareUpdateLock(ctx context.Context, arg dbgen.TryShareUpdateLockParams) (bool, error)
 	StartPublication(ctx context.Context, arg dbgen.StartPublicationParams) error
-	RecordDelivered(ctx context.Context, arg dbgen.RecordDeliveredParams) (string, error)
+	RecordDelivered(ctx context.Context, arg dbgen.RecordDeliveredParams) (dbgen.RecordDeliveredRow, error)
 	RecordDeliveryRetry(ctx context.Context, arg dbgen.RecordDeliveryRetryParams) (dbgen.RecordDeliveryRetryRow, error)
 	EnsureBuckets(ctx context.Context, arg dbgen.EnsureBucketsParams) error
 	TakeTokens(ctx context.Context, arg dbgen.TakeTokensParams) (dbgen.TakeTokensRow, error)
