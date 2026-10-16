@@ -80,6 +80,7 @@ nav:
       - messengers/mattermost.md
       - messengers/telegram.md
       - messengers/telegram-restricted-networks.md
+      - messengers/bridge.md
       - messengers/account-links.md
   - Outgoing webhooks:
       - outgoing-webhooks/events.md
