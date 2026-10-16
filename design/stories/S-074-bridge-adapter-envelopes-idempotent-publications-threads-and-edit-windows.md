@@ -252,6 +252,7 @@ None.
   `info`.
 - `published_at` from the first attempt matters only for bridges with an edit window: a replay found after a crash
   must not move the window later than the real post.
+- The style hints of the buttons (D329) come from `buttons.StyleOf` of S-082, which Mattermost and Telegram already use.
 
 ## Coverage
 

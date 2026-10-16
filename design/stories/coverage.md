@@ -31,7 +31,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-09 Alert Group lifecycle | Observation | 49 | S-028, S-029, S-030, S-031, S-065 | yes | 49 of 49 |
 | C-10 Commands | Observation | 35 | S-032, S-063, S-033 | yes | 35 of 35 |
 | C-11 Delivery engine | Shadow | 35 | S-034, S-035 | yes | 35 of 35 |
-| C-12 Messages | Shadow | 19 | S-036, S-037, S-038 | yes | 19 of 19 |
+| C-12 Messages | Shadow | 19 | S-036, S-037, S-038, S-082 | yes | 19 of 19 |
 | C-13 Mattermost | Shadow | 28 | S-039, S-061, S-040, S-064 | yes | 28 of 28 |
 | C-14 Telegram | Shadow | 35 | S-041, S-042, S-066, S-067, S-043 | yes | 35 of 35 |
 | C-15 Outgoing webhook | Shadow | 25 | S-044, S-045, S-046 | yes | 25 of 25 |
@@ -460,7 +460,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-12
 
-[Messages](../prd/l1/C-12-messages.md) · Shadow · stories: S-036, S-037, S-038
+[Messages](../prd/l1/C-12-messages.md) · Shadow · stories: S-036, S-037, S-038, S-082
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
