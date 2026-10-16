@@ -15,10 +15,13 @@ files_touched:
   - internal/tools/refgen/main.go
   - internal/tools/refgen/refgen_test.go
   - .gitignore
+  - .github/workflows/ci.yml
 acceptance:
   - "[C-22.FR-23] Messengers → Write a bridge covers every topic C-22.FR-23 lists for it — the protocol step by step, required and optional features, the envelope and its CommonMark, Mention markers, idempotency keys, confirming presses within 3 seconds, `thread_ref`, error classes and who decides `gone`, safe truncation, both event delivery modes with their signatures, testing with `muster bridge check` and the fake bridge, the example bridge and the MIT licence — with a Mermaid diagram of a press from the messenger to the answer, checked against the list in Verification."
   - "[C-22.FR-20, C-22.AC-24] `make docs` renders `api/bridge.yaml` with Redocly into the site as Reference → Bridge protocol, beside the API reference, and fails when the rendered file is missing; `refgen` writes its page, which links to the rendered reference and to `api/bridge.yaml` on `master` (`refgen_test.go`); both pages and Write a bridge are in the navigation, and `make docs-check` passes with no broken link or anchor."
   - "[C-22.FR-23] The home page lists Bridges among the messengers, and Messengers → Bridge links to Write a bridge and to the protocol reference."
+  - "[C-22.FR-20] The rendered reference loads Redoc from the site's vendored copy and carries the Content-Security-Policy of the API reference, so the remote-asset check of `make docs` passes; `docs/reference/bridge/spec/` is ignored by git."
+  - "[C-22.FR-20] The `oasdiff` job of CI fails a pull request that breaks `api/bridge.yaml` against its base branch, with its report in the step summary; the report on `api/openapi.yaml` stays non-blocking (a scratch branch that removes a required field of `api/bridge.yaml` fails the step; this branch passes it)."
 verify: "make ci docs-check"
 operator_attention: false
 issue: 237
@@ -32,6 +35,7 @@ issue: 237
 
 - The page Messengers → Write a bridge, for people who write a bridge.
 - The protocol reference rendered from `api/bridge.yaml`, its page in Reference, and the navigation.
+- The CI check that refuses a breaking change of `api/bridge.yaml`, from the publication of the protocol on.
 
 **OUT**
 
@@ -54,19 +58,31 @@ issue: 237
   bridge of `muster dev` and the example bridge; running a bridge — its token and push secret, logs without secrets,
   monitoring through the Destination's health; the licence — the protocol and the example are MIT, a bridge may stay
   closed, and contributions to them fall under the CLA.
-- **Reference** (`Makefile`, `internal/tools/refgen`): `make docs` builds `docs/reference/bridge/spec/index.html` from
-  `api/bridge.yaml` with the same Redocly command as the API reference (ignored by git like it), and fails when that
-  file is missing afterwards, so a skipped render cannot publish a page that links nowhere; `refgen` writes
-  `docs/reference/bridge-protocol.md` — the protocol version, the link to the rendered reference and to the raw
+- **Reference** (`Makefile`, `.gitignore`, `internal/tools/refgen`): `make docs` builds
+  `docs/reference/bridge/spec/index.html` from `api/bridge.yaml` with the same Redocly command as the API reference and
+  the same rewrite that `docs-api` applies since the documentation site stopped loading third-party scripts: Redoc from
+  the vendored copy at `../../../assets/vendor/redoc/redoc.standalone.js`, which holds because the page lies as deep as
+  `docs/reference/api/spec/index.html`, and the Content-Security-Policy that keeps images on the site, so the check of
+  `make docs` that fails on a page loading a script or a stylesheet from another host passes;
+  `/docs/reference/bridge/spec/` joins the ignored paths of `.gitignore` beside the API reference's. `make docs` fails
+  when the rendered file is missing afterwards, so a skipped render cannot publish a page that links nowhere; `refgen`
+  writes `docs/reference/bridge-protocol.md` — the protocol version, the link to the rendered reference and to the raw
   `api/bridge.yaml` on `master`, since no release tag exists before L1 is released — and lists it in the Reference
   index; `generate-check` covers the page.
 - **Navigation** (`mkdocs.yml`): Messengers gains Bridge (from S-074) and Write a bridge; Reference gains Bridge
   protocol.
+- **Protocol compatibility** (`.github/workflows/ci.yml`, ADR-0017): the `oasdiff` job gains a blocking step
+  `oasdiff breaking --fail-on ERR` from `origin/<base branch>:api/bridge.yaml` to `api/bridge.yaml`, with its report in
+  the step summary; the report on `api/openapi.yaml` stays non-blocking (ADR-0008). From this story on, the protocol is
+  published and frozen: a breaking change is a new major path, so the step needs no override. Before it, the Bridge
+  stories could still correct the protocol they implemented for the first time.
 
 ## Steps
 
 1. Render the reference and write its page. Check: `refgen_test.go`, `make docs`.
 2. Write Write a bridge, then link it from the home page and Messengers → Bridge. Check: Verification.
+3. Add the blocking `oasdiff` step. Check: a scratch branch that removes a required field of `api/bridge.yaml` fails
+   the step; this branch passes it.
 
 ## Verification
 
@@ -77,7 +93,12 @@ for t in "getInfo" "checkChannel" "Idempotency-Key" "thread_ref" "answerEvent" "
   "max_body_length" "webhook-signature" "muster bridge check" "example bridge" "MIT" "muster-mention:"; do
   grep -q -- "$t" docs/messengers/write-a-bridge.md || echo "missing: $t"; done                         # (nothing)
 grep -c '```mermaid' docs/messengers/write-a-bridge.md                # 1 or more
+grep -c 'assets/vendor/redoc/redoc.standalone.js' site/reference/bridge/spec/index.html   # 1
+git check-ignore -q docs/reference/bridge/spec/index.html && echo ignored              # ignored
 ```
+
+The blocking `oasdiff` step is checked on the pull request itself and on a scratch branch that removes a required
+field of `api/bridge.yaml`, whose run fails at that step.
 
 ## Open questions
 
@@ -88,11 +109,14 @@ None.
 - Suggested commit: `docs: add the write a bridge guide and the bridge protocol reference`.
 - The page names no real messenger as the target of an example; its error mapping uses a fictional one, so that the
   guide does not age with any vendor's API.
+- The blocking compatibility check of `api/bridge.yaml` moved here from S-073 after the second plan review of the
+  Bridge phase (D335): the protocol is frozen once it is published, not while S-073 to S-078 implement it for the first
+  time, when a defect they find would otherwise need a new major path although nothing is released.
 
 ## Coverage
 
 | ID | Covered | Note |
 |---|---|---|
-| C-22.FR-20 | partial | the published reference; the spec and its generated models are S-073 |
+| C-22.FR-20 | partial | the published reference and the compatibility check; the spec's generated models and copied schemas are S-073 |
 | C-22.FR-23 | partial | Write a bridge; Messengers → Bridge is S-074 and S-081, Account links S-076 |
 | C-22.AC-24 | full | |

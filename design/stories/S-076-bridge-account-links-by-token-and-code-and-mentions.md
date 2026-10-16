@@ -42,9 +42,9 @@ files_touched:
 acceptance:
   - "[C-22.FR-15, C-22.AC-18] `startBridgeLink` for a Bridge Connection returns a single-use token of 43 base64url characters, valid for `account_link.bridge_token_ttl`, and `link_url` built from the bridge's `link_url_template` when it is an `http` or `https` URL (null without one); it accepts the web session only (403 `session_required` with an API token); the operation is in the implemented operations of `internal/api/server.go`, so it no longer answers 501."
   - "[C-22.FR-15, C-22.FR-13, C-22.AC-18] When the fake bridge reports an `account_link` event with that token, the sender's account is linked to the User — `external_id`, `display_name` and the handle the bridge reported — and the event is answered \"Linked to Muster user {name} ({login})\" in the User's profile language; the same token again, an expired one and a token of another Connection link nothing, are answered \"This link is invalid or expired. Start again from your Muster profile.\", in English, and are recorded as `account_link.link_rejected`."
-  - "[C-22.FR-15, C-22.AC-19] With `user_lookup` `email` and `direct_messages.bot_can_start`, `startBridgeCodeLink` with a known address sends the code through `sendDirectMessage` with \"You requested a link to Muster. Do not share this code.\", and `confirmBridgeLink` with it links the account; after five wrong codes the sixth attempt is refused even with the right code; an address the bridge does not find is refused with 422 `handle_not_found` at `/handle`; code requests follow `account_link.bridge_code_requests`."
+  - "[C-22.FR-15, C-22.AC-19] With `user_lookup` `email` and `direct_messages.bot_can_start`, `startBridgeCodeLink` with a known address sends the code through `sendDirectMessage` with \"You requested a link to Muster. Do not share this code.\" and answers 202 with `request_id`, `expires_at` and `attempts_remaining` 5, and `confirmBridgeLink` with that `request_id` and the code links the account; a wrong code is refused with 422 `link_code_invalid` at `/code` and `attempts_remaining` one lower, and after five wrong codes the sixth attempt is refused even with the right code; an address the bridge does not find is refused with 422 `handle_not_found` at `/handle`, and one the bridge answers `forbidden` for when sending the code with 422 `direct_message_refused` at `/handle`; code requests follow `account_link.bridge_code_requests`, and one more is refused with 429 `link_code_requests_exceeded` and `retry_after_seconds`."
   - "[C-22.FR-15, C-22.AC-19] A Bridge Connection whose `info` has `user_lookup` `none`, or no `direct_messages` with `bot_can_start`, refuses a code request with 409 `code_not_offered`; `listLinkableConnections` now returns Bridge Connections, each with its link methods (`token`, and `code` where offered) and the lookup kind, and only `token` with no lookup kind while Muster has not read the Connection's `info`; `TestSeveralConnectionsRoute` lists the demo Connection \"Dev Bridge\" among them."
-  - "[C-22.FR-15] Linking rules of C-18 hold for Bridges: one account per User per Bridge Connection, an account linked to another User refused, unlinking in the profile and by an Admin, the Audit log with the messenger `bridge`, and the Identity space `bridge:<connection>`; two Bridge Connections to the same bridge need two links; `AccountLink` returns `display_name`."
+  - "[C-22.FR-15] Linking rules of C-18 hold for Bridges: one account per User per Bridge Connection, an account linked to another User refused, unlinking in the profile and by an Admin, the Audit log with the messenger `bridge`, and the Identity space `bridge:<connection>`; two Bridge Connections to the same bridge need two links; `AccountLink` returns `display_name`, an optional member like `LinkableConnection.link_methods` and `handle_kind`, so the SPA's fixtures of Mattermost and Telegram links still type-check and the key check of `account_links_test.go` admits them on Bridge rows only."
   - "[C-22.FR-16, C-22.AC-20] A Bridge Destination that mentions Alice for new Alert Groups posts a Loud Root message whose `mentions` hold `ref`, the `external_id` and the `display_name` of her link, and whose body starts with `[@Alice Smith](muster-mention:<ref>)`; Bob, without a link, is named as text with no marker; the footer of an Alert Group Alice acknowledged names her by her link's `display_name`, also when the link has no username."
   - "[C-22.FR-23] The page Messengers → Account links explains linking through a Bridge by token and by code, the lookup kind the bridge declares, and that Bridge links are per Connection; `make docs-check` passes."
 verify: "make ci test-integration e2e docs-check"
@@ -76,13 +76,19 @@ issue: 234
 
 - **Spec** (`api/openapi.yaml`): `startBridgeLink` (`POST /me/account-links/bridge`, `{connection_id}` →
   `{token, link_url, expires_at}`), `startBridgeCodeLink` (`POST /me/account-links/bridge/codes`,
-  `{connection_id, handle}` → `202 {expires_at}`) and `confirmBridgeLink` (`POST /me/account-links/bridge/confirmation`,
-  `{connection_id, code}` → `AccountLink`), web session only (C-03.FR-27), named like `startTelegramLink`,
-  `startMattermostLink` and `confirmMattermostLink`; `Messenger`, `AccountLink.messenger` and
+  `{connection_id, handle}` → `202 {request_id, expires_at, attempts_remaining}`, the members of
+  `MattermostLinkStarted`) and `confirmBridgeLink` (`POST /me/account-links/bridge/confirmation`, `{request_id, code}`
+  → `201 AccountLink`), web session only (C-03.FR-27), named like `startTelegramLink`, `startMattermostLink` and
+  `confirmMattermostLink`, whose code flow they mirror; `Messenger`, `AccountLink.messenger` and
   `LinkableConnection.messenger` gain `bridge`; `AccountLink` gains `display_name`; `LinkableConnection` gains, for a
-  Bridge, `link_methods` (`token`, `code`) and `handle_kind` (`email`, `login`, `username`, `user_id`, or null); problem
-  codes `handle_not_found` and `code_not_offered`. The three operations join the implemented operations of
-  `internal/api/server.go`.
+  Bridge, `link_methods` (`token`, `code`) and `handle_kind` (`email`, `login`, `username`, `user_id`, or null); the
+  three new members are optional, not required, so the SPA's fixtures of the other messengers' links stay valid and
+  the key check of `test/e2e/account_links_test.go` admits them on Bridge rows only. Problem codes: the new
+  `handle_not_found` and `direct_message_refused` (422 at `/handle`) and `code_not_offered` (409); the existing
+  `link_code_invalid` with `attempts_remaining` (422 at `/code`) and `link_code_requests_exceeded` (429 with
+  `retry_after_seconds`), whose descriptions, and that of `attempts_remaining`, name `confirmBridgeLink`,
+  `startBridgeCodeLink` and `account_link.bridge_code_requests` beside the Mattermost ones. The three operations join
+  the implemented operations of `internal/api/server.go`.
 - **Schema** (migration `0012_bridge_account_link_requests`, expand only, `schema.md`): `account_link_requests.messenger`
   accepts `bridge`, with the type-checked foreign key to `connections`; `account_link_requests` gains `method`
   (`token`, `code`), nullable, because old replicas write Telegram and Mattermost requests without it, with a check
@@ -100,9 +106,12 @@ issue: 234
   implements, so neither package imports the other's internals; `account_link` events from S-075's handler link and are
   answered through `answerEvent`, in the profile language of the User the token is bound to, and in English when no
   User is found; `findUsers` and `sendDirectMessage` (key `dm-<request public_id>`) go through the interactive path
-  (C-18.FR-11); a bridge answering `forbidden` to the direct message is reported to the person as "The bot cannot send
-  you a direct message. Send it the token instead." The link URL is `link_url_template` with the token in place of
-  `{token}`, kept only when `messages.SafeURL` accepts the result.
+  (C-18.FR-11); a bridge answering `forbidden` to the direct message refuses the code request with
+  `direct_message_refused`, which the SPA shows as "The bot cannot send you a direct message. Send it the token
+  instead." A code request is a row of `account_link_requests` found by its `public_id` (`request_id`), as for
+  Mattermost: its attempts count down on each wrong code, and a request without attempts left refuses the right code
+  too. The link URL is `link_url_template` with the token in place of `{token}`, kept only when `messages.SafeURL`
+  accepts the result.
 - **Mentions and footers** (`internal/mentions`, `internal/accountlinks/lookup.go`, `internal/bridge/envelope.go`):
   `mentions.IdentitySpace("bridge", connection)` is `bridge:<connection>`; `ListMentionUsers` returns the link's
   `display_name`, and `ListFooterUsernames` names a linked User by `coalesce(username, display_name)`, so a Bridge link
@@ -160,12 +169,20 @@ curl -s "${H[@]}" -X POST $API/connections/$C/checks > /dev/null
 # C-22.AC-19: a code by direct message, for bob (session "jarb")
 curl -s -b jarb -H "X-CSRF-Token: $(cat csrfb)" $API/me/account-links/bridge/codes \
   -d "{\"connection_id\":\"$C\",\"handle\":\"nobody@example.org\"}" | jq -c '[.status, .errors[0].code]'   # [422,"handle_not_found"]
+curl -s -X PUT $FB/config -d '{"dm_blocked":["u-bob"]}' > /dev/null
 curl -s -b jarb -H "X-CSRF-Token: $(cat csrfb)" $API/me/account-links/bridge/codes \
-  -d "{\"connection_id\":\"$C\",\"handle\":\"bob@example.org\"}" -o /dev/null -w '%{http_code}\n'   # 202
+  -d "{\"connection_id\":\"$C\",\"handle\":\"bob@example.org\"}" | jq -c '[.status, .errors[0].code]'   # [422,"direct_message_refused"]
+curl -s -X PUT $FB/config -d '{"dm_blocked":[]}' > /dev/null
+REQ=$(curl -s -b jarb -H "X-CSRF-Token: $(cat csrfb)" $API/me/account-links/bridge/codes \
+  -d "{\"connection_id\":\"$C\",\"handle\":\"bob@example.org\"}")
+jq -c '{r: (.request_id | test("^[A-Z]{1,2}[0-9A-Z]{12}$")), a: .attempts_remaining}' <<<"$REQ"   # {"r":true,"a":5}
 CODE=$(curl -s $FB/direct-messages | jq -r '.[-1].body' | grep -oE '[A-Z2-9]{8}')
 curl -s $FB/direct-messages | jq -r '.[-1] | .user_external_id, (.body | test("Do not share this code"))'   # u-bob true
 curl -s -b jarb -H "X-CSRF-Token: $(cat csrfb)" $API/me/account-links/bridge/confirmation \
-  -d "{\"connection_id\":\"$C\",\"code\":\"$CODE\"}" | jq -c '{messenger, external_id, display_name}'
+  -d "{\"request_id\":\"$(jq -r .request_id <<<"$REQ")\",\"code\":\"22222222\"}" | jq -c '[.status, .errors[0].code, .attempts_remaining]'
+# [422,"link_code_invalid",4]
+curl -s -b jarb -H "X-CSRF-Token: $(cat csrfb)" $API/me/account-links/bridge/confirmation \
+  -d "{\"request_id\":\"$(jq -r .request_id <<<"$REQ")\",\"code\":\"$CODE\"}" | jq -c '{messenger, external_id, display_name}'
 # {"messenger":"bridge","external_id":"u-bob","display_name":"Bob Brown"}
 curl -s -X PUT $FB/config -d '{"user_lookup":"none"}' > /dev/null; curl -s "${H[@]}" -X POST $API/connections/$C/checks > /dev/null
 curl -s "${H[@]}" $API/me/account-links/bridge/codes -d "{\"connection_id\":\"$C\",\"handle\":\"x\"}" | jq -c '[.status, .code]'

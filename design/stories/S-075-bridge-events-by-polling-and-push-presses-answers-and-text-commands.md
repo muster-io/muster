@@ -29,6 +29,7 @@ files_touched:
   - internal/accountlinks/lookup.go
   - internal/delivery/presses.go
   - internal/delivery/presses_test.go
+  - internal/delivery/publication.go
   - internal/delivery/interactive.go
   - internal/delivery/query.sql
   - internal/delivery/lockorder_integration_test.go
@@ -46,8 +47,8 @@ files_touched:
   - internal/archlint/secretleak.go
   - test/e2e/bridge_test.go
 acceptance:
-  - "[C-22.FR-11, C-22.AC-13] In poll mode the Leader's task `bridge_polling` calls `pollEvents` with the stored cursor and `wait` `bridge.poll_wait`, gives each call `bridge.poll_wait` plus 15 s, handles the batch, then stores `next_cursor`; a press queued in the fake bridge is handled within one poll; an event returned again by an overlapping poll is handled once; a cursor refused as `invalid` is dropped; a failing poll backs off from 1 s to 1 min per call in the background client class, logs `bridge_poll_failed` and makes no Destination Broken."
-  - "[C-22.FR-11, C-22.AC-14] `bridgeEvent` at `MUSTER_INGEST_URL/api/v1/callbacks/bridge/{connection_id}` handles an event with a valid Standard Webhooks signature and answers 204, and the same `webhook-id` again 204 without handling it twice; a wrong signature, a `webhook-timestamp` 6 minutes from the real clock, an unknown Connection and a Connection in poll mode are each answered 401 and change nothing, logged as `bridge_event_rejected`; a body that is no event is answered 400."
+  - "[C-22.FR-11, C-22.AC-13] In poll mode the Leader's task `bridge_polling` calls `pollEvents` with the stored cursor and `wait` `bridge.poll_wait`, gives each call `bridge.poll_wait` plus 15 s, handles the batch, then stores `next_cursor`; a press queued in the fake bridge is handled within one poll; an event returned again by an overlapping poll is handled once; a cursor refused as `invalid` is dropped; a failing poll backs off from 1 s to 1 min per call in the background client class, logs `bridge_poll_failed` and makes no Destination Broken; losing leadership or stopping the replica cancels a poll in flight at once (`poller_test.go`)."
+  - "[C-22.FR-11, C-22.AC-14] `bridgeEvent` at `MUSTER_INGEST_URL/api/v1/callbacks/bridge/{connection_id}` handles an event with a valid Standard Webhooks signature and answers 204, and the same `webhook-id` again 204 without handling it twice; a wrong signature, a `webhook-timestamp` 6 minutes from the real clock, an unknown Connection and a Connection in poll mode are each answered 401 and change nothing, logged as `bridge_event_rejected`; a body that is no event is answered 400, and an event whose handling fails is answered 500 and is not recorded as seen."
   - "[C-22.FR-11] Two copies of one event handled at the same time — a push retried while the first is running — run one after the other under the claim's advisory lock and dispatch one Command; a crash between the Command and the record of the id is simulated in `events_test.go` and runs the Command a second time on redelivery, which the dispatcher answers as a refusal or a no-op; an event of a type the Connection's `info` does not declare is handled like any other."
   - "[C-22.FR-12, C-22.AC-15] A press from an account linked to a Responder (the link row set up directly; S-076 makes links) runs its Command with the Transport `bridge`, recorded in the Timeline and the Audit log, and is not answered; a press with tampered data, or with data issued for another message, changes nothing and is answered \"This button could not be verified; nothing was changed.\"; a press from an account without a link changes nothing and is answered \"Your account is not linked to Muster. Link it in your profile: {link}\"; a press older than `bridge.event_max_age` changes nothing, is not answered and logs `bridge_press_dropped`; a press on a message Muster did not post through this Connection changes nothing and is not answered; a press on the older Root message of a delivery republished past its edit window runs its Command."
   - "[C-22.FR-13] Answers go through `answerEvent` on the interactive path with the key `answer-<event id>`, take a token of the Connection's limiter ahead of deliveries and fail fast within `delivery.interactive_budget`; a failed answer is logged and not retried; an answer is in the profile language of the linked User, and in English for an account without a link (`presses_test.go`, a Russian-speaking User)."
@@ -89,8 +90,11 @@ issue: 233
 
 - **Spec** (`api/openapi.yaml`): the operation `bridgeEvent` (`POST /callbacks/bridge/{connection_id}`, tag Messenger
   callbacks, `x-listener: ingest`, `x-permission: none`, `security: []`, the three Standard Webhooks headers, the body
-  `BridgeEvent` copied from `api/bridge.yaml`'s `Event` with `x-bridge-schema: Event`, so the test of S-073 checks the
-  copy, answers `204`, `400`, `401`), mounted on the callback mux of the ingest listener (`internal/runtime`) and
+  `BridgeEvent` copied from `api/bridge.yaml`'s `Event` with `x-bridge-schema: Event`, together with the schemas it
+  refers to — `BridgeEventBase`, `BridgePressEvent`, `BridgeThreadMessageEvent`, `BridgeAccountLinkEvent`,
+  `BridgeMessageDeletedEvent` and `BridgePerson`, each with the `x-bridge-schema` of its original and the
+  discriminator mapping naming the copies — so the test of S-073 checks them; answers `204`, `400`, `401`, `500`),
+  mounted on the callback mux of the ingest listener (`internal/runtime`) and
   excluded from request validation like `mattermostAction`, so that the handler decides every answer; `Transport`
   gains `bridge`.
 - **Schema** (migration `0011_bridge_events`, `schema.md`):
@@ -107,8 +111,14 @@ issue: 233
   - `account_links` gains `display_name` (nullable), which Bridge links fill;
   - a short-lived table `bridge_events_seen` (`org_id`, `connection_id`, `event_id`, `seen_at`, primary key on the
     first three), pruned by the Leader's `short_lived_pruning` after `bridge.event_dedup_window` on the business clock
-    (S-020's clock table).
+    (S-020's clock table). Its claim, insert and prune queries live in `internal/connections/query.sql`, beside the
+    cursor's, since the table belongs to the Connection; the prune joins `short_lived_pruning` as a field of
+    `internal/leader/tasks.go` for the domain, and the table's name joins `metrics.ShortLivedTables`.
   Old replicas never write a Bridge row, and every row they write satisfies the widened checks.
+- **Package boundary**: `internal/connections` imports `internal/bridge` since S-073, so `internal/bridge` never imports
+  `internal/connections`. The poller, the push handler and the claim reach the Connection — its push secret and mode,
+  its cursor, the claim and record of an event id — through an interface `internal/bridge` declares, which
+  `internal/connections/bridge.go` implements and `internal/runtime` wires.
 - **Events** (`internal/bridge/events.go`): decoding with the generated models; one handler for both modes. Each event
   is claimed in a transaction that takes `pg_advisory_xact_lock` on the Connection and the event id and looks the id up
   in `bridge_events_seen`; an id already there is acknowledged without handling. Otherwise the handler dispatches the
@@ -127,7 +137,9 @@ issue: 233
   and a deadline of `bridge.poll_wait` plus 15 s per call, and a client whose call timeout is no shorter, so a long poll
   is never cut off; the background class's own retries stay within that deadline. After the batch is handled,
   `bridge_events_cursor` is written; `invalid` drops the cursor; a failed call backs off from 1 s to 1 min, counted per
-  call, and logs `bridge_poll_failed` at the first failure and every tenth.
+  call, and logs `bridge_poll_failed` at the first failure and every tenth. Each call runs under the task's context, so
+  losing leadership or stopping the replica cancels a poll in flight at once, as `telegram_polling` does, and a
+  replica of `muster dev`, which polls "Dev Bridge", stops within the end-to-end harness's stop timeout.
 - **Push** (`push.go`, `internal/connections/bridge.go`): the handler on the ingest listener reads the Connection by
   its `public_id`, verifies `webhook-signature` (`v1,` HMAC-SHA256 over `id.timestamp.body` with the decoded push
   secret, any of several space-separated signatures) in constant time, checks `webhook-timestamp` against the real
@@ -154,8 +166,9 @@ issue: 233
   is dropped and logged; durations must be one of the Route's (`route.snooze_durations`); `still on it` calls
   `answerReminder` (C-17.FR-10); answers as C-22.FR-14 says; `bridge_text_command` (info: the Connection, the command,
   the outcome).
-- **Deleted messages**: `message_deleted` for a Root message calls the deleted Root message flow of S-035
-  (`delivery.RootDeleted`) at once; other messages are ignored.
+- **Deleted messages**: `message_deleted` for a Root message calls the deleted Root message flow of S-035 at once
+  through `delivery.RootDeleted`, a new exported entry in `internal/delivery/publication.go` to the flow `rootGone`
+  that a `gone` answer starts; other messages are ignored.
 - **Lock order** (D307; `lockorder_integration_test.go`): `RootDeleted` from an event locks the delivery row only, as
   the flow does after a `gone`, never the Alert Group before it; the test gains a `message_deleted` event against an
   acknowledgement that holds the Alert Group and then waits for the delivery in `Enqueue`.
@@ -164,7 +177,8 @@ issue: 233
 - **Fake bridge** (`events.go`): `pollEvents` with a cursor that is the index of the next event, `wait` honoured;
   push mode with a target and a secret set through `/_fake/config`, retrying until `204`; `/_fake/press` `{message_id,
   user_id, button}` (presses the button of that message, with its data unchanged), `/_fake/thread-message` `{message_id,
-  user_id, text}`, `DELETE /_fake/messages/{id}` emitting `message_deleted` when `deletion_events` is on,
+  user_id, text}`, both with an optional `occurred_at` for the checks of `bridge.event_max_age`,
+  `DELETE /_fake/messages/{id}` emitting `message_deleted` when `deletion_events` is on,
   `/_fake/events` (the queue), `/_fake/answers` (each answer and where it was shown); the users `alice` (`u-alice`,
   "Alice Smith"), `bob` (`u-bob`, "Bob Brown") and `vera` (`u-vera`, "Vera Viewer").
 - **Secrets** (lint 5): probe `bridge_events`.
@@ -178,8 +192,8 @@ issue: 233
 
 1. Add the migration, the Transport `bridge`, and event decoding with the claim. Check: `events_test.go`,
    `connections/bridge_test.go`, `make test-integration`.
-2. Write the poller as a Leader task and the push handler. Check: `poller_test.go`, `push_test.go` (signatures,
-   tolerance, the 401 cases).
+2. Write the poller as a Leader task and the push handler. Check: `poller_test.go` (the cancelled poll included),
+   `push_test.go` (signatures, tolerance, the 401 cases).
 3. Write presses and answers. Check: `presses_test.go`, `delivery/presses_test.go`.
 4. Write Text commands and `message_deleted`. Check: `commands_test.go`,
    `go test -tags integration -run LockOrder ./internal/delivery/`.
@@ -273,6 +287,8 @@ None.
   in the dispatcher for one transport, and a repeated Command is already harmless.
 - The `account_links` changes come here rather than with Account links (S-076), because the presses and Text commands
   of this story map accounts through them; the changes to `account_link_requests` stay in S-076.
+- S-075 lists 39 files. If it grows past about 40 while it is worked, Text commands — `commands.go`,
+  `delivery.BridgeThreadBinding` and their texts — become a story of their own after it.
 
 ## Coverage
 

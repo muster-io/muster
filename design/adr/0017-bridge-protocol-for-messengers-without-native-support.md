@@ -7,6 +7,9 @@
   claimed before its Command runs, and a crash can repeat that Command once; `muster bridge check` is the one sender
   outside delivery; a deep-link template is an `http` or `https` URL; CI fails on a breaking change of the
   specification
+- Amended: 2026-10-16 — after the second review of the Bridge stories (journal D335): lint 3 checks calls of the
+  delivery adapter's methods, not the protocol client, so `muster bridge check` needs no lint entry; CI fails on a
+  breaking change of the specification once it is published on the documentation site, not before
 
 ## Context
 
@@ -48,7 +51,9 @@ Mattermost and Telegram stay native.
 **Versioning.** Every path is under `/v1/`. `GET /v1/info` returns `protocol_version` (`"1"`), the bridge's name and
 version, the messenger's name, the optional features the bridge offers and its limits. Additive changes — a new
 optional field or feature — keep version `1`; a change that breaks existing bridges is a new major path, and CI
-compares every change of `api/bridge.yaml` with its base and fails on a breaking one. Muster refuses
+compares every change of `api/bridge.yaml` with its base and fails on a breaking one. That check starts when the
+protocol reference is published on the documentation site: until then nothing is released, no bridge depends on the
+protocol, and the stories that implement it for the first time may still correct it. Muster refuses
 a Connection whose bridge speaks no version it knows, and re-reads `info` on every Connection check and when its copy
 is older than a few minutes.
 
@@ -162,16 +167,16 @@ command in its Thread act on the Alert Group as before. An edit refused as `gone
 
 **Placement in Muster.** Bridge delivery implements the delivery adapter interface, so posts, edits and Thread replies
 through a bridge are made only by the delivery worker and the interactive path; answers and direct messages are
-interactive calls; lint 3 (ADR-0016) names them with the other messenger calls. The one exception is
-`muster bridge check`: a person runs it against a bridge they name, outside any Muster installation and without a
-database, Desired state or delivery row, so the rule of ADR-0005 that only delivery and the interactive path send has
-nothing to protect there. The command posts, edits and replies through the protocol client directly, and lint 3 allows
-its one file, `internal/bridge/conformance.go`, by name. All requests go
-through the outbound package (ADR-0015) — the delivery class for deliveries and the Broken probe, the interactive class
-for checks started by a person, answers and messages during linking, the background class for polling — under the
-outbound address policy and the Connection's proxy, with the token sent only to the saved base URL. Polling a bridge
-joins the closed list of Leader tasks (ADR-0007): it is safe to run twice, because an event polled twice is handled once
-by its id.
+interactive calls. As for Mattermost and Telegram, lint 3 (ADR-0016) checks the calls of the adapter's methods, not the
+protocol client beneath them. The one exception is `muster bridge check`: a person runs it against a bridge they name,
+outside any Muster installation and without a database, Desired state or delivery row, so the rule of ADR-0005 that only
+delivery and the interactive path send has nothing to protect there. The command posts, edits and replies through the
+protocol client directly, which this decision permits; since lint 3 does not check the client, it needs no entry for it.
+All requests go through the outbound package (ADR-0015) — the delivery class for deliveries and the Broken probe, the
+interactive class for checks started by a person, answers and messages during linking, the background class for polling
+— under the outbound address policy and the Connection's proxy, with the token sent only to the saved base URL. Polling
+a bridge joins the closed list of Leader tasks (ADR-0007): it is safe to run twice, because an event polled twice is
+handled once by its id.
 
 **Licensing.** The repository ships an example bridge — a small chat server in Go with its own web page that offers
 every feature of the protocol — and the protocol specification, `api/bridge.yaml`. **Both are licensed MIT**, as an

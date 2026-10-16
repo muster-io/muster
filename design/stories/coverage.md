@@ -746,7 +746,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-22.FR-14 | S-075 | complete |  |
 | C-22.FR-15 | S-076 (part), S-077 (part) | complete |  |
 | C-22.FR-16 | S-076 | complete |  |
-| C-22.FR-17 | S-074 (part), S-075 (part) | complete |  |
+| C-22.FR-17 | S-074 (part), S-075 (part), S-077 (part) | complete |  |
 | C-22.FR-18 | S-077 | complete |  |
 | C-22.FR-19 | S-074 | complete |  |
 | C-22.FR-20 | S-073 (part), S-079 (part) | complete |  |
@@ -756,7 +756,7 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 | C-22.FR-24 | S-073 (part), S-081 (part), S-075 (part) | complete |  |
 | C-22.AC-1 | S-073 | complete |  |
 | C-22.AC-2 | S-080 | complete |  |
-| C-22.AC-3 | S-073 (part), S-080 (part), S-075 (part) | complete |  |
+| C-22.AC-3 | S-073 (part), S-080 (part), S-074 (part), S-075 (part) | complete |  |
 | C-22.AC-4 | S-074 | complete |  |
 | C-22.AC-5 | S-074 | complete |  |
 | C-22.AC-6 | S-074 | complete |  |
