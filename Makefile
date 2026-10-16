@@ -98,6 +98,29 @@ DOCS_DEPS := $(DOCS_VENV)/.installed
 ZENSICAL := $(DOCS_VENV)/bin/zensical
 API_REFERENCE := docs/reference/api/spec/index.html
 
+# The third-party scripts of the site, served from the site itself so that a page loads nothing from another host but
+# GitHub (NFR-7): Mermaid, which the theme otherwise loads from unpkg.com on a page with a diagram, and Redoc, which the
+# API reference otherwise loads from cdn.redocly.com, each with its licence. make docs fetches every file once into
+# bin/docs-vendor/, named by its SHA-256, which it checks, and copies it under docs/assets/vendor/, where git ignores it.
+# MERMAID_VERSION stays on the major the theme asks for (mermaid@11); REDOC_VERSION is the Redoc that the Redocly CLI
+# of web/package.json links, and docs-api fails when the CLI links another.
+MERMAID_VERSION := 11.17.2
+REDOC_VERSION := 2.5.4
+DOCS_VENDOR := docs/assets/vendor
+DOCS_VENDOR_CACHE := $(BIN)/docs-vendor
+SHA256SUM ?= $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
+define DOCS_VENDOR_FILES
+mermaid/mermaid.min.js https://cdn.jsdelivr.net/npm/mermaid@$(MERMAID_VERSION)/dist/mermaid.min.js 581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8
+mermaid/LICENSE https://cdn.jsdelivr.net/npm/mermaid@$(MERMAID_VERSION)/LICENSE ec9fb67dcb25eccc416ed56e1aab819222c805a2a4bfe4cb19e7556bf2ffde80
+redoc/redoc.standalone.js https://cdn.jsdelivr.net/npm/redoc@$(REDOC_VERSION)/bundles/redoc.standalone.js dcaf76612bc4a3fbcc923a8966dee2f6146a5f32e5ce1b6f02dd60cbbf89500b
+redoc/redoc.standalone.js.LICENSE.txt https://cdn.jsdelivr.net/npm/redoc@$(REDOC_VERSION)/bundles/redoc.standalone.js.LICENSE.txt eed602ec32e00b2b9df1984fbcc26a687b1b3193ec01961389c4b8439e6edf73
+redoc/LICENSE https://cdn.jsdelivr.net/npm/redoc@$(REDOC_VERSION)/LICENSE d3026d549cf68ab7355bcfa85877bf8f845b3334a7efbfdc63936432fb34ff0e
+endef
+export DOCS_VENDOR_FILES
+# A script or a stylesheet of a built page that comes from another host.
+REMOTE_ASSET_RE := <script[^>]* src="(https?:)?//|<link[^>]* rel="(stylesheet|preconnect)"[^>]* href="(https?:)?//
+REMOTE_ASSET_RE := $(REMOTE_ASSET_RE)|<link[^>]* href="(https?:)?//[^"]*"[^>]* rel="(stylesheet|preconnect)"
+
 # make compose-check needs the Docker CLI with the compose plugin, not a running daemon; make dev-db and make dev
 # need the daemon too.
 DOCKER ?= docker
@@ -112,7 +135,7 @@ LOAD_TEST_FLAGS ?=
 
 .PHONY: help fmt lint lint-arch test test-race test-web test-integration generate generate-check build licenses \
 	vulncheck mutation helm-check rules-test compose-check dev-db dev e2e e2e-go e2e-web load-test ci clean web-browsers docs \
-	docs-serve docs-check docs-api demo
+	docs-serve docs-check docs-api docs-vendor demo
 
 help: ## List the targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z0-9-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -415,11 +438,36 @@ demo: dev-db build web-browsers ## Record the README demo into docs/assets/demo.
 	echo "$(DEMO_GIF): $$size bytes"
 
 # The API reference, rendered by the Redocly CLI that make lint runs; .redocly.yaml keeps its telemetry off, the
-# environment its update check quiet, and --disableGoogleFont the page from loading fonts from Google (NFR-7).
+# environment its update check quiet, and --disableGoogleFont the page from loading fonts from Google (NFR-7). The
+# page then loads Redoc from docs-vendor's copy instead of cdn.redocly.com, with the CLI's integrity hash unchanged,
+# and takes a Content-Security-Policy that allows images only from the site, so that Redoc's sidebar does not load the
+# Redocly logo from cdn.redoc.ly; the logo hides itself when it cannot load.
 docs-api: $(WEB_DEPS)
 	@mkdir -p $(dir $(API_REFERENCE))
 	REDOCLY_SUPPRESS_UPDATE_NOTICE=true $(PNPM) --dir web exec redocly build-docs ../api/openapi.yaml \
 		--config ../.redocly.yaml --disableGoogleFont --output ../$(API_REFERENCE)
+	@cdn='<script src="https://cdn.redocly.com/redoc/v$(REDOC_VERSION)/bundles/redoc.standalone.js"'; \
+	grep -qF "$$cdn" $(API_REFERENCE) || \
+		{ echo "$(API_REFERENCE) does not load Redoc $(REDOC_VERSION): update REDOC_VERSION and its SHA-256"; exit 1; }; \
+	sed -e "s|$$cdn|<script src=\"../../../assets/vendor/redoc/redoc.standalone.js\"|" \
+		-e "s|<meta charset=\"utf8\" />|&<meta http-equiv=\"Content-Security-Policy\" content=\"img-src 'self' data:\">|" \
+		$(API_REFERENCE) >$(API_REFERENCE).tmp && mv $(API_REFERENCE).tmp $(API_REFERENCE); \
+	grep -qF 'http-equiv="Content-Security-Policy"' $(API_REFERENCE) || \
+		{ echo "$(API_REFERENCE): the Content-Security-Policy could not be added"; exit 1; }
+
+# Fetches each file of DOCS_VENDOR_FILES into the cache unless it is there, fails on a SHA-256 other than the pinned
+# one, and copies it under docs/.
+docs-vendor:
+	@printf '%s\n' "$$DOCS_VENDOR_FILES" | while read -r file url sum; do \
+		cached="$(DOCS_VENDOR_CACHE)/$$sum"; \
+		if [ ! -f "$$cached" ]; then \
+			mkdir -p $(DOCS_VENDOR_CACHE) && curl -fsSL --retry 3 -o "$$cached.tmp" "$$url" || exit 1; \
+			got=$$($(SHA256SUM) "$$cached.tmp" | cut -d ' ' -f 1); \
+			[ "$$got" = "$$sum" ] || { echo "$$url: SHA-256 $$got, expected $$sum"; rm -f "$$cached.tmp"; exit 1; }; \
+			mv "$$cached.tmp" "$$cached"; \
+		fi; \
+		mkdir -p "$$(dirname "$(DOCS_VENDOR)/$$file")" && cp "$$cached" "$(DOCS_VENDOR)/$$file" || exit 1; \
+	done
 
 # Before the build, runbookcheck fails when the runbook pages under docs/operations/runbooks/ differ from the Internal
 # alerts, the chart rules of reference.md and the rules of the chart rendered with its all-options values, when a
@@ -427,8 +475,9 @@ docs-api: $(WEB_DEPS)
 # echoed, so that its own lines come first. Zensical checks the links to pages and their anchors, but not those to other
 # files and not the navigation, so after the build the rendered API reference is checked, then that every page the nav
 # of mkdocs.yml names exists under docs/ and that every page under docs/, except those exclude_docs names, is in the
-# nav.
-docs: generate docs-api $(DOCS_DEPS) $(HELM) ## Generate, render the API reference and build the site strictly into site/
+# nav, and last that no page loads a script or a stylesheet from another host and every page with a diagram loads
+# Mermaid from the site.
+docs: generate docs-api docs-vendor $(DOCS_DEPS) $(HELM) ## Generate, render the API reference and build the site strictly into site/
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
 		$(HELM) template muster $(CHART) -f $(CHART)/ci/all-options-values.yaml >"$$tmp/chart.yaml" && \
 		$(GO) run ./internal/tools/runbookcheck -manifest "$$tmp/chart.yaml"
@@ -446,8 +495,13 @@ docs: generate docs-api $(DOCS_DEPS) $(HELM) ## Generate, render the API referen
 		echo "$$nav" | grep -qxF "$$p" || { echo "docs/$$p is not in the nav of mkdocs.yml"; failed=1; }; \
 	done; \
 	exit $$failed
+	@remote=$$(grep -rlE --include='*.html' '$(REMOTE_ASSET_RE)' site); \
+	test -z "$$remote" || { echo "these pages load a script or a stylesheet from another host:"; echo "$$remote"; exit 1; }; \
+	for f in $$(grep -rlF --include='*.html' 'class="mermaid"' site); do \
+		grep -qF 'assets/vendor/mermaid/mermaid.min.js' "$$f" || { echo "$$f has a diagram but loads no Mermaid of the site"; exit 1; }; \
+	done
 
-docs-serve: generate docs-api $(DOCS_DEPS) ## Build the site and serve it on localhost:8000, rebuilding on changes
+docs-serve: generate docs-api docs-vendor $(DOCS_DEPS) ## Build the site and serve it on localhost:8000, rebuilding on changes
 	$(ZENSICAL) serve --config-file mkdocs.yml
 
 # generate-check runs first and on its own, so that the generate step of docs cannot hide a stale page.
