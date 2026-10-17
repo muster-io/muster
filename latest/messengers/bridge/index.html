@@ -1,0 +1,2070 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Alert grouping and on-call after Alertmanager">
+      
+      
+      
+        <link rel="canonical" href="https://muster-io.github.io/muster/messengers/bridge/">
+      
+      
+      
+        <link rel="prev" href="../telegram-restricted-networks/">
+      
+      
+        <link rel="next" href="../account-links/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../brand/muster-mark-tile.svg">
+      <meta name="generator" content="zensical-0.0.70">
+    
+    
+      
+        <title>Connect a messenger through a bridge - Muster</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.e442bf79.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Muster" class="md-header__button md-logo" aria-label="Muster" data-md-component="logo">
+      
+  <img src="../../brand/muster-mark.svg" alt="Muster">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Muster
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Connect a messenger through a bridge
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/muster-io/muster" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    muster-io/muster
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Muster" class="md-nav__button md-logo" aria-label="Muster" data-md-component="logo">
+      
+  <img src="../../brand/muster-mark.svg" alt="Muster">
+
+    </a>
+    Muster
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/muster-io/muster" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    muster-io/muster
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Alertmanager
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_2">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Alertmanager
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/alertmanager/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Alertmanager
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integrations/heartbeat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Heartbeat
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Messengers
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Messengers
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mattermost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Mattermost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telegram/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect Telegram
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telegram-restricted-networks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect a messenger through a bridge
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect a messenger through a bridge
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#create-the-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create the Connection
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-check-shows" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What the check shows
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-a-destination" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Add a Destination
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-muster-posts" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What Muster posts
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-messages-and-previews" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Test messages and previews
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#broken-destinations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Broken Destinations
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#account-links" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Account links
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check-from-the-command-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Check from the command line
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../account-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Link your messenger accounts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhooks
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Outgoing webhooks
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhook: events mode
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../outgoing-webhooks/templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Outgoing webhook: template mode
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_5">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Sign-in
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sign-in/oidc-keycloak/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Sign-in with Keycloak
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Operations
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_6">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Operations
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../operations/runbooks/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Runbooks
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6_1" id="__nav_6_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_1_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_6_1">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Runbooks
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDown/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDown
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterNoLeader/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterNoLeader
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDeliveryFailing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDeliveryFailing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDestinationBroken/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDestinationBroken
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterHeartbeatLost/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterHeartbeatLost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDeliverySlow/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDeliverySlow
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterDeliveryQueueGrowing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterDeliveryQueueGrowing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterIngestBacklog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterIngestBacklog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterIngestRejected/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterIngestRejected
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterTemplateError/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterTemplateError
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterClockSkew/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterClockSkew
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterLoginFailures/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterLoginFailures
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterSnapshotTruncated/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterSnapshotTruncated
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterOIDCSecretExpiring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterOIDCSecretExpiring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_7">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/metrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Metrics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/log-events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Log events
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/internal-alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Internal alerts
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Environment variables
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/chart-values/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Chart values
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#create-the-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create the Connection
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-check-shows" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What the check shows
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-a-destination" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Add a Destination
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-muster-posts" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What Muster posts
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-messages-and-previews" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Test messages and previews
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#broken-destinations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Broken Destinations
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#account-links" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Account links
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check-from-the-command-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Check from the command line
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+  
+
+
+<h1 id="connect-a-messenger-through-a-bridge">Connect a messenger through a bridge<a class="headerlink" href="#connect-a-messenger-through-a-bridge" title="Permanent link">&para;</a></h1>
+<p>A <strong>bridge</strong> connects Muster to a messenger that Muster does not support natively. It is a separate service that
+speaks the Bridge protocol with Muster on one side and talks to your messenger on the other: Muster sends it every
+message as an <strong>envelope</strong> — the status, the title, a link, the text and the buttons — and the bridge renders the
+envelope in its messenger. A <strong>Bridge Connection</strong> is one bot of your messenger behind one bridge: one token is one
+bot. Muster posts one <strong>Root message</strong> per Alert Group to a channel of that messenger, edits it as the Alert Group
+changes, and replies in its <strong>Thread</strong> for what happens later, as it does for Mattermost and Telegram.</p>
+<p>In the examples, <code>MUSTER_PUBLIC_URL</code> is <code>https://muster.example.org</code>, <code>MUSTER_INGEST_URL</code> is
+<code>https://ingest.muster.example.org</code> and the bridge listens on <code>https://bridge.example.org</code>. The web UI has no form for
+Bridge Connections and Bridge Destinations yet, so the examples create them through the <a href="../../reference/api/">API</a>,
+with a Personal access token of an Admin in <code>MUSTER_TOKEN</code>.</p>
+<h2 id="create-the-connection">Create the Connection<a class="headerlink" href="#create-the-connection" title="Permanent link">&para;</a></h2>
+<p>From your bridge, you need:</p>
+<ul>
+<li>its <strong>base URL</strong>, an <code>http</code> or <code>https</code> address with an optional path prefix, such as
+  <code>https://bridge.example.org/muster</code>. Muster sends every request to <code>&lt;base URL&gt;/v1/…</code>, and only there;</li>
+<li>the <strong>token</strong> it gave your bot. Muster sends it as <code>Authorization: Bearer</code> on every request, stores it encrypted and
+  never shows it again.</li>
+</ul>
+<p>Choose how the bridge reports <strong>events</strong> — the presses of buttons and the messages people write in a Thread — with the
+<strong>event delivery</strong> mode:</p>
+<ul>
+<li><strong><code>poll</code></strong> when the bridge cannot reach Muster. The replica that leads asks the bridge for new events, so the bridge
+  needs no address of Muster.</li>
+<li><strong><code>push</code></strong> when the bridge can reach <code>MUSTER_INGEST_URL</code>. The bridge posts each event to the Connection's callback
+  address, <code>https://ingest.muster.example.org/api/v1/callbacks/bridge/CN…</code>, which the Connection shows in
+  <code>callback_url</code>, signed with a <strong>push secret</strong> that you configure on both sides. The push secret has the Standard
+  Webhooks form, <code>whsec_</code> followed by base64, and is write-only like the token.</li>
+</ul>
+<p>A Connection also has a <strong>proxy</strong>, for a bridge that Muster reaches only through one, and a <strong>limiter</strong>: 10 requests
+per second by default, shared by all its Destinations. When the bridge answers that it is rate-limited, Muster waits
+as long as it asks, whatever the limiter allows.</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://muster.example.org/api/v1/connections<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$MUSTER_TOKEN</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"type":"bridge","name":"Team chat","base_url":"https://bridge.example.org/muster",</span>
+<span class="s1">       "bot_token":"the-token-of-the-bot","event_delivery":"poll","proxy":{"enabled":false},</span>
+<span class="s1">       "limiter":{"limit":10,"per_seconds":1}}'</span>
+</code></pre></div>
+<p>For <code>push</code>, set <code>"event_delivery":"push"</code> and add <code>"push_secret":"whsec_…"</code>.</p>
+<h2 id="what-the-check-shows">What the check shows<a class="headerlink" href="#what-the-check-shows" title="Permanent link">&para;</a></h2>
+<p>Check the Connection after you create it, and after every change of the bridge:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://muster.example.org/api/v1/connections/CNK7M3QX9P2RTA/checks<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$MUSTER_TOKEN</span><span class="s2">"</span>
+</code></pre></div>
+<p>The check calls the bridge's <code>getInfo</code> and shows two steps, each with its latency and whether it went through the
+proxy:</p>
+<ol>
+<li><strong><code>info</code></strong>: the bridge's name and version, the messenger's name, the protocol version — Muster speaks <code>1</code> — what
+   the bridge offers, such as buttons and Thread messages, its limits, such as the longest text of a message, how it
+   finds people for Account links, and its event delivery modes. Muster keeps this copy on the
+   Connection and reads it again before a call that depends on it once it is older than 10 minutes, so a change in the
+   bridge reaches Muster without a restart.</li>
+<li><strong><code>event_delivery</code></strong>: whether the bridge offers the Connection's event delivery mode.</li>
+</ol>
+<p>A failed step names its cause with a code:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>token_invalid</code></td>
+<td>The bridge refused the token.</td>
+</tr>
+<tr>
+<td><code>protocol_version_unknown</code></td>
+<td>The bridge speaks a protocol version that this Muster does not speak.</td>
+</tr>
+<tr>
+<td><code>protocol_mismatch</code></td>
+<td>The answer does not match the protocol, or is larger than 64 KiB.</td>
+</tr>
+<tr>
+<td><code>event_delivery_not_offered</code></td>
+<td>The bridge does not offer the Connection's event delivery mode.</td>
+</tr>
+<tr>
+<td><code>proxy_refused</code></td>
+<td>The Connection's proxy refused its credentials (<code>407</code>).</td>
+</tr>
+<tr>
+<td><code>timeout</code>, <code>connect_failed</code>, <code>dns_failed</code>, <code>tls_failed</code></td>
+<td>Muster got no answer from the bridge.</td>
+</tr>
+<tr>
+<td><code>blocked</code></td>
+<td>The outbound address policy does not allow the bridge's address.</td>
+</tr>
+<tr>
+<td><code>request_failed</code></td>
+<td>The bridge answered with another error; the message names its class and the bridge's text.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="add-a-destination">Add a Destination<a class="headerlink" href="#add-a-destination" title="Permanent link">&para;</a></h2>
+<p>A <strong>Bridge Destination</strong> is one channel of the messenger, named by its <strong>channel id</strong> — the channel as your messenger
+names it, which the bridge's documentation explains how to find. Its <strong>Mention settings</strong> take nobody or chosen
+users; everyone in the chat and messenger groups are not available through a bridge. Its limiter allows 30 requests
+per minute by default, sends and edits together.</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://muster.example.org/api/v1/destinations<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$MUSTER_TOKEN</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"type":"bridge","name":"alerts","connection_id":"CNK7M3QX9P2RTA","channel_id":"C024BE91L",</span>
+<span class="s1">       "mentions":{"new_alert_group":{"everyone":"none","user_ids":[],"groups":[]},</span>
+<span class="s1">                   "new_alerts":{"everyone":"none","user_ids":[],"groups":[]},</span>
+<span class="s1">                   "reopen":{"everyone":"none","user_ids":[],"groups":[]},</span>
+<span class="s1">                   "ack_timeout":{"everyone":"none","user_ids":[],"groups":[]},</span>
+<span class="s1">                   "snooze_ended":{"everyone":"none","user_ids":[],"groups":[]},</span>
+<span class="s1">                   "rise_to_urgent":{"everyone":"none","user_ids":[],"groups":[]}},</span>
+<span class="s1">       "limiter":{"limit":30,"per_seconds":60}}'</span>
+</code></pre></div>
+<p>Saving the Destination runs its <strong>Destination check</strong>, the one item <code>channel</code>: the bridge's <code>checkChannel</code>, which
+posts nothing. It passes when the bot can post, edit and reply in the channel, and the Destination then shows the
+channel's name as the bridge reports it. It fails with the bridge's own text when the bridge refuses the channel —
+it does not exist, or the bot is not in it — with <code>proxy_refused</code> when the Connection's proxy refuses its credentials,
+and with the class of the bridge's answer otherwise; a Destination that fails the check is not saved.
+<code>POST /api/v1/destinations/DS…/checks</code> runs the same check at any time.</p>
+<h2 id="what-muster-posts">What Muster posts<a class="headerlink" href="#what-muster-posts" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>The envelope.</strong> Every Root message carries its status with a colour and an emoji, the title <code>#N</code> and the Alert
+  Group's title, the link "Open in Muster" to the Alert Group page, and its text in CommonMark: the labels, the
+  summary, one line per Alert, the links, the notices and the footer. A Thread reply carries its text in CommonMark.
+  Alert data are escaped, so a label value cannot format the message, link anywhere or mention anyone. A Loud message
+  asks the bridge to notify; a Quiet one does not.</li>
+<li><strong>The length.</strong> The text fits the longest text the bridge declares, read from the Connection's copy of its info: a
+  long Root message drops its Alert lines first, then the label sections, but always keeps its title, its status, its
+  footer, its buttons and its link to Muster. The bridge may still shorten what it renders, and says so.</li>
+<li><strong>Buttons.</strong> When the bridge offers buttons, a Root message carries the buttons of its status — Ack, Resolve and one
+  per Snooze duration, for example — with a style hint for each, at most as many as the bridge allows; the Snooze
+  buttons of the longest durations go first. Without buttons, a bridge that forwards the messages of a Thread gets a
+  last line in each Root message that is not resolved, such as "Reply in the Thread: ack · resolve · snooze 1h".</li>
+<li><strong>Edits and Thread replies.</strong> An edit sends the whole envelope of the new state, Quiet and without Mentions. A Thread
+  reply goes under the Root message with the Thread reference the bridge returned last.</li>
+<li><strong>Posts are not repeated.</strong> Every new message carries an idempotency key, the same for every retry of it. When an
+  answer is lost — a timeout, or a connection cut after the request — Muster retries with the same key, the bridge
+  answers with the message it posted already, and Muster edits it to the current state. When the bridge did not know
+  the key, the retry may have posted a second message: the Timeline records a <strong>possible duplicate</strong>.</li>
+<li><strong>The token never shows</strong> in a log line, an error, the Timeline or a metric; a test shows it as <code>[redacted]</code>.</li>
+</ul>
+<h2 id="test-messages-and-previews">Test messages and previews<a class="headerlink" href="#test-messages-and-previews" title="Permanent link">&para;</a></h2>
+<p>A <strong>test message</strong> checks how a Destination looks without touching any Alert Group:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://muster.example.org/api/v1/destinations/DSK7M3QX9P2RTA/tests<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$MUSTER_TOKEN</span><span class="s2">"</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"source":{"kind":"example"}}'</span>
+</code></pre></div>
+<p>It posts one message of the kind <code>test</code>, Quiet, marked "🧪 Test message" before its text, with the buttons of its
+status, whose presses change nothing. It goes through the same limiters as delivery, and the result shows the step
+<code>message</code> with the request — the token masked — the bridge's answer and its error class. Use
+<code>{"source":{"kind":"alert_group","alert_group_id":"AG…"}}</code> to render a recent Alert Group of one of the
+Destination's Routes instead of the example. <code>POST …/previews</code> with the same body returns, without posting anything,
+the envelope the test would post, as JSON in the item <code>message</code>.</p>
+<h2 id="broken-destinations">Broken Destinations<a class="headerlink" href="#broken-destinations" title="Permanent link">&para;</a></h2>
+<p>A Bridge Destination becomes <strong>Broken</strong> when the bridge refuses it — it answers <code>forbidden</code>, for example because the
+bot was removed from the channel — with the bridge's text as the reason, or when the bridge keeps failing or does not
+answer for the whole Transient budget: 10 attempts within 30 minutes. A bridge that asks Muster to wait does not make
+a Destination Broken unless it asks for more than 15 minutes; an answer the bridge calls <code>invalid</code> ends that one
+delivery as Not delivered and leaves the Destination healthy. When the bridge answers that a Root message is gone,
+Muster publishes the Alert Group again, once.</p>
+<p>While a Destination is Broken, Muster tries again every 5 minutes: with the oldest waiting delivery, or, when nothing
+waits, with the Destination check, which posts nothing. The first success ends the Broken state, and so does a
+successful check or test message. See <a href="../../operations/runbooks/MusterDestinationBroken/">MusterDestinationBroken</a>.
+A Bridge Connection whose bridge cannot be reached does not become Broken itself: its Destinations do, and its
+Connection check shows the cause.</p>
+<h2 id="account-links">Account links<a class="headerlink" href="#account-links" title="Permanent link">&para;</a></h2>
+<p>A press or a Mention through a bridge names a person through their Account link for that Connection; see
+<a href="../account-links/">Link your messenger accounts</a>.</p>
+<h2 id="check-from-the-command-line">Check from the command line<a class="headerlink" href="#check-from-the-command-line" title="Permanent link">&para;</a></h2>
+<p><code>muster doctor</code> prints one line per Bridge Connection, with the result of <code>getInfo</code>, and one line per Bridge
+Destination, with the result of <code>checkChannel</code>, without posting anything.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright The Muster Authors
+    </div>
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["navigation.sections","navigation.indexes","navigation.top","search.suggest","search.highlight","content.code.copy"],"redirect":null,"search":"../../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"provider":"mike"}}</script>
+    
+    
+  
+  
+      <script src="../../assets/javascripts/bundle.a2388154.min.js"></script>
+      
+    
+
+  </body>
+</html>

@@ -349,6 +349,8 @@
       
         
       
+        
+      
     
     
     
@@ -462,6 +464,33 @@
     
   
   Telegram in restricted networks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/bridge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Connect a messenger through a bridge
 
     
   </span>
@@ -3864,7 +3893,7 @@ the event.</p>
 <p>A delivery ended as Not delivered after an answer the adapter could not classify, because no adapter serves the Destination type, or because the Connection of its deleted Destination was deleted: destination is the public_id of the Destination, group the public_id of the Alert Group, empty for a Storm summary, kind what was sent (publication, update, thread_reply, storm_summary or final_edit) and error_class unknown. The next change of the Alert Group starts a new delivery.</p>
 <h3 id="delivery_possible_duplicate"><code>delivery_possible_duplicate</code><a class="headerlink" href="#delivery_possible_duplicate" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>destination</code>, <code>group</code> · C-11</p>
-<p>A Publication started again after an earlier start whose outcome was never recorded, such as after a crash: destination is the public_id of the Destination and group the public_id of the Alert Group. The messenger may show the Root message twice.</p>
+<p>A Publication started again after an earlier start whose outcome was never recorded, such as after a crash, or, for a bridge, after a request that got no answer, and the bridge did not replay it: destination is the public_id of the Destination and group the public_id of the Alert Group. The messenger may show the Root message twice.</p>
 <h3 id="delivery_work_failed"><code>delivery_work_failed</code><a class="headerlink" href="#delivery_work_failed" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>work</code>, <code>error</code> · C-11</p>
 <p>The delivery worker could not attempt a delivery or a Thread reply, or probe a Broken Destination (work is delivery, thread_reply or probe), or mark the first Publication of an Alert Group once its outcome committed (work is mark_published), because of error, such as a lost database connection. Any replica attempts it again once its lease runs out, or at the next probe; a first Publication is marked again by the next delivered call or event of the Alert Group.</p>
