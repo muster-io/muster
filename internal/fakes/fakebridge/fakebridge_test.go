@@ -10,9 +10,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +32,7 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/webhooks"
 )
 
 // allFeatures are the features of the default info, as bridge.Info names them.
@@ -1010,4 +1013,663 @@ func TestTruncated(t *testing.T) {
 		!ms[1].Replies[0].Truncated || ms[1].Replies[0].Input.Body != in.Body {
 		t.Errorf("messages %+v", ms)
 	}
+}
+
+// poll sends pollEvents with the query, checked as getInfo is.
+func (s *spec) poll(t *testing.T, token, query string) answer {
+	t.Helper()
+	return s.exchange(t, request{method: http.MethodGet, path: "/v1/events?" + query, token: token})
+}
+
+// pollBroken sends pollEvents with a query that breaks api/bridge.yaml on purpose.
+func (s *spec) pollBroken(t *testing.T, token, query string) answer {
+	t.Helper()
+	return s.exchange(t, request{method: http.MethodGet, path: "/v1/events?" + query, token: token, broken: true})
+}
+
+// batch is a pollEvents answer that matches the protocol: its events, each of which Muster decodes, and next_cursor.
+func (a answer) batch(t *testing.T) ([]bridge.Event, string) {
+	t.Helper()
+	var b struct {
+		Events     []json.RawMessage `json:"events"`
+		NextCursor string            `json:"next_cursor"`
+	}
+	a.ok(t, http.StatusOK, &b)
+	if b.Events == nil {
+		t.Fatalf("events is not a list: %s", a.body)
+	}
+	out := make([]bridge.Event, 0, len(b.Events))
+	for _, raw := range b.Events {
+		ev, err := bridge.DecodeEvent(raw)
+		if err != nil {
+			t.Fatalf("Muster refuses the event %s: %v", raw, err)
+		}
+		out = append(out, ev)
+	}
+	return out, b.NextCursor
+}
+
+// ids are the ids of events.
+func ids(events []bridge.Event) []string {
+	out := []string{}
+	for _, ev := range events {
+		out = append(out, ev.ID)
+	}
+	return out
+}
+
+// press sends POST /_fake/press with body and returns the event it queued.
+func (s *spec) press(t *testing.T, body string) fakebridge.Event {
+	t.Helper()
+	status, out := s.control(t, http.MethodPost, "/_fake/press", body)
+	var ev fakebridge.Event
+	if err := json.Unmarshal([]byte(out), &ev); err != nil || status != http.StatusOK {
+		t.Fatalf("POST /_fake/press %s = %d %s", body, status, out)
+	}
+	return ev
+}
+
+// said sends POST /_fake/thread-message with body and returns the event it queued.
+func (s *spec) said(t *testing.T, body string) fakebridge.Event {
+	t.Helper()
+	status, out := s.control(t, http.MethodPost, "/_fake/thread-message", body)
+	var ev fakebridge.Event
+	if err := json.Unmarshal([]byte(out), &ev); err != nil || status != http.StatusOK {
+		t.Fatalf("POST /_fake/thread-message %s = %d %s", body, status, out)
+	}
+	return ev
+}
+
+// decoded is the queued event as Muster decodes it.
+func decoded(t *testing.T, ev fakebridge.Event) bridge.Event {
+	t.Helper()
+	out, err := bridge.DecodeEvent(ev.Event)
+	if err != nil {
+		t.Fatalf("Muster refuses the event %s: %v", ev.Event, err)
+	}
+	return out
+}
+
+// waitHeld waits until n requests to path are being answered, held by the fake.
+func (s *spec) waitHeld(t *testing.T, path string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		held := 0
+		for _, r := range s.fake.Requests() {
+			if r.Path == path && r.Status == 0 {
+				held++
+			}
+		}
+		if held >= n {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("no %d held requests to %s", n, path)
+}
+
+// TestPollEvents is pollEvents of the fake (C-22.FR-11), checked against api/bridge.yaml and decoded by Muster: the
+// events of the token's bot after the cursor, the index of the next event, all of them without a cursor, and the
+// same events again for an older cursor; an empty batch at once with wait 0; a long poll held while there is nothing
+// and answered as soon as the bot has an event, and left alone by the other bot's events; a held poll whose client
+// gives up ends without an answer; a cursor the fake never gave and a wait outside 0…60 are invalid; Muster's client
+// reads the batches.
+func TestPollEvents(t *testing.T) {
+	s := start(t)
+	if evs, next := s.poll(t, fakebridge.Token, "wait=0").batch(t); len(evs) != 0 || next != "0" {
+		t.Fatalf("an empty queue = %v, %q", ids(evs), next)
+	}
+	s.post(t, fakebridge.Token, "k1", envelope(fakebridge.ChannelAlerts)).posted(t)
+	s.post(t, fakebridge.SecondToken, "k2", envelope(fakebridge.ChannelAlerts)).posted(t)
+	s.press(t, `{"message_id":"m1","user_id":"u-bob","button":"Ack"}`)
+	s.press(t, `{"message_id":"m2","user_id":"u-bob","button":"Ack"}`)
+	s.said(t, `{"message_id":"m1","user_id":"u-alice","text":"ack"}`)
+
+	evs, next := s.poll(t, fakebridge.Token, "wait=0").batch(t)
+	if !slices.Equal(ids(evs), []string{"e1", "e3"}) || next != "2" || evs[0].Type != bridge.TypePress ||
+		evs[1].Type != bridge.TypeThreadMessage {
+		t.Fatalf("all events of bot 1 = %+v, %q", evs, next)
+	}
+	if evs, next := s.poll(t, fakebridge.Token, "cursor=1&wait=0").batch(t); !slices.Equal(ids(evs),
+		[]string{"e3"}) || next != "2" {
+		t.Errorf("after the cursor 1 = %v, %q", ids(evs), next)
+	}
+	if evs, next := s.poll(t, fakebridge.Token, "cursor=2&wait=0").batch(t); len(evs) != 0 || next != "2" {
+		t.Errorf("after the last event = %v, %q", ids(evs), next)
+	}
+	if evs, next := s.poll(t, fakebridge.SecondToken, "wait=0").batch(t); !slices.Equal(ids(evs),
+		[]string{"e2"}) || next != "1" {
+		t.Errorf("the events of bot 2 = %v, %q", ids(evs), next)
+	}
+
+	for _, bad := range []string{"cursor=3", "cursor=x", "cursor=-1", "cursor=%2B1", "cursor="} {
+		s.poll(t, fakebridge.Token, bad+"&wait=0").refused(t, http.StatusBadRequest, gen.ErrorClassInvalid)
+	}
+	for _, bad := range []string{"wait=61", "wait=-1", "wait=x"} {
+		s.pollBroken(t, fakebridge.Token, bad).problem(t, http.StatusBadRequest, gen.ErrorClassInvalid)
+	}
+
+	type polled struct {
+		evs  []bridge.Event
+		next string
+	}
+	held := make(chan polled, 1)
+	go func() {
+		a := s.poll(t, fakebridge.Token, "cursor=2&wait=60")
+		var b struct {
+			Events     []json.RawMessage `json:"events"`
+			NextCursor string            `json:"next_cursor"`
+		}
+		_ = json.Unmarshal(a.body, &b)
+		var p polled
+		for _, raw := range b.Events {
+			ev, _ := bridge.DecodeEvent(raw)
+			p.evs = append(p.evs, ev)
+		}
+		p.next = b.NextCursor
+		held <- p
+	}()
+	s.waitHeld(t, "/v1/events", 1)
+	s.press(t, `{"message_id":"m2","user_id":"u-vera","button":"Ack"}`)
+	select {
+	case p := <-held:
+		t.Fatalf("an event of the other bot ended the long poll: %v", ids(p.evs))
+	default:
+	}
+	s.said(t, `{"message_id":"m1","user_id":"u-vera","text":"resolve"}`)
+	select {
+	case p := <-held:
+		if !slices.Equal(ids(p.evs), []string{"e5"}) || p.next != "3" || p.evs[0].User.ExternalId != fakebridge.VeraID {
+			t.Errorf("the long poll = %+v, %q", p.evs, p.next)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the long poll did not end with the event")
+	}
+
+	c := s.client(t, fakebridge.Token)
+	cursor := "3"
+	ctx, cancel := context.WithCancel(t.Context())
+	ended := make(chan bridge.Result, 1)
+	go func() {
+		_, r := c.PollEvents(ctx, &cursor, 60*time.Second)
+		ended <- r
+	}()
+	s.waitHeld(t, "/v1/events", 1)
+	cancel()
+	select {
+	case r := <-ended:
+		if r.OK() {
+			t.Errorf("a cancelled poll = %+v", r)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cancelled poll did not end")
+	}
+	b, r := c.PollEvents(t.Context(), nil, 0)
+	if !r.OK() || len(b.Events) != 3 || b.NextCursor != "3" {
+		t.Errorf("Muster's poll = %+v, %+v", b, r)
+	}
+	start := time.Now()
+	if evs, next := s.poll(t, fakebridge.SecondToken, "cursor=2&wait=1").batch(t); len(evs) != 0 || next != "2" ||
+		time.Since(start) < 900*time.Millisecond {
+		t.Errorf("a wait of 1 s = %v, %q after %v", ids(evs), next, time.Since(start))
+	}
+}
+
+// TestPress is POST /_fake/press: a press of the button of a label in the latest content of a Root message — its last
+// edit, or what was posted — or of a Thread reply, with the data unchanged, by one of the fake's people, queued as
+// e<N> for the message's bot with occurred_at now or as given; data given is sent as it is for any message id, to bot 1
+// unless the message or bot names another; GET /_fake/events lists the events with their bots; Muster decodes them.
+func TestPress(t *testing.T) {
+	s := start(t)
+	s.post(t, fakebridge.Token, "k1", envelope(fakebridge.ChannelAlerts)).posted(t)
+	before := time.Now().UTC()
+	ev := s.press(t, `{"message_id":"m1","user_id":"u-bob","button":"Ack"}`)
+	if got := decoded(t, ev); ev.Bot != 1 || got.ID != "e1" || got.Type != bridge.TypePress || got.MessageID != "m1" ||
+		got.Data != "a1.k1.c2ln" || got.User.ExternalId != fakebridge.BobID || got.User.DisplayName != "Bob Brown" ||
+		got.User.Handle.MustGet() != "bob" || got.OccurredAt.Before(before.Add(-time.Second)) ||
+		got.OccurredAt.After(time.Now().Add(time.Second)) {
+		t.Errorf("the press = %+v", got)
+	}
+
+	edit := content(gen.Acknowledged)
+	edit.Buttons = []gen.Button{{Label: "Resolve", Style: gen.Danger, Data: "a1.k1.cmVz"}}
+	var e gen.MessageEdited
+	s.edit(t, fakebridge.Token, "m1", edit).ok(t, http.StatusOK, &e)
+	reply := replyOf(nil)
+	reply.Buttons = []gen.Button{{Label: "Still on it", Style: gen.Primary, Data: "r1.k1.c3RpbGw"}}
+	s.reply(t, fakebridge.Token, "m1", "k2", reply).replied(t)
+	s.post(t, fakebridge.SecondToken, "k3", envelope(fakebridge.ChannelAlerts)).posted(t)
+
+	at := "2026-10-14T12:00:00Z"
+	for _, c := range []struct {
+		body, id, message, data, user string
+		bot                           int
+	}{
+		{`{"message_id":"m1","user_id":"u-alice","button":"Resolve","occurred_at":"` + at + `"}`, "e2", "m1",
+			"a1.k1.cmVz", fakebridge.AliceID, 1},
+		{`{"message_id":"r1","user_id":"u-vera","button":"Still on it"}`, "e3", "r1", "r1.k1.c3RpbGw",
+			fakebridge.VeraID, 1},
+		{`{"message_id":"m2","user_id":"u-bob","button":"Ack"}`, "e4", "m2", "a1.k1.c2ln", fakebridge.BobID, 2},
+		{`{"message_id":"m1","user_id":"u-bob","button":"Resolve","data":"a9.k1.AAAAAAAAAAAA"}`, "e5", "m1",
+			"a9.k1.AAAAAAAAAAAA", fakebridge.BobID, 1},
+		{`{"message_id":"nope","user_id":"u-bob","data":"x"}`, "e6", "nope", "x", fakebridge.BobID, 1},
+		{`{"message_id":"nope","user_id":"u-bob","data":"x","bot":2}`, "e7", "nope", "x", fakebridge.BobID, 2},
+	} {
+		ev := s.press(t, c.body)
+		if got := decoded(t, ev); ev.Bot != c.bot || got.ID != c.id || got.MessageID != c.message ||
+			got.Data != c.data || got.User.ExternalId != c.user {
+			t.Errorf("%s = bot %d %+v", c.body, ev.Bot, got)
+		}
+	}
+	if got := decoded(t, s.fake.Events()[1]); !got.OccurredAt.Equal(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)) {
+		t.Errorf("occurred_at %v", got.OccurredAt)
+	}
+
+	if status, body := s.control(t, http.MethodDelete, "/_fake/messages/m2", ""); status != http.StatusNoContent {
+		t.Fatalf("DELETE m2 = %d %s", status, body)
+	}
+	for _, bad := range []string{`{"message_id":"m1","user_id":"u-carol","button":"Resolve"}`,
+		`{"user_id":"u-bob","button":"Resolve"}`, `{"message_id":"m9","user_id":"u-bob","button":"Ack"}`,
+		`{"message_id":"m1","user_id":"u-bob","button":"Ack"}`, `{"message_id":"m2","user_id":"u-bob","button":"Ack"}`,
+		`{"message_id":"m1","user_id":"u-bob","data":"x","bot":3}`, `{"message_id":"m1","user_id":"u-bob","x":1}`,
+		`{"message_id":"m1","user_id":"u-bob","button":"Resolve","occurred_at":"yesterday"}`} {
+		if status, body := s.control(t, http.MethodPost, "/_fake/press", bad); status != http.StatusBadRequest {
+			t.Errorf("POST /_fake/press %s = %d %s", bad, status, body)
+		}
+	}
+	if _, body := s.control(t, http.MethodPost, "/_fake/press", `{"message_id":"m1","user_id":"u-bob",
+		"button":"Ack"}`); !strings.Contains(body, `[\"Resolve\"]`) {
+		t.Errorf("an unknown button names %s", body)
+	}
+
+	status, body := s.control(t, http.MethodGet, "/_fake/events", "")
+	var listed []fakebridge.Event
+	if err := json.Unmarshal([]byte(body), &listed); err != nil || status != http.StatusOK || len(listed) != 8 ||
+		listed[3].Bot != 2 || decoded(t, listed[3]).ID != "e4" || decoded(t, listed[7]).Type != bridge.TypeMessageDeleted {
+		t.Errorf("GET /_fake/events = %d %s", status, body)
+	}
+	if evs, _ := s.poll(t, fakebridge.SecondToken, "wait=0").batch(t); !slices.Equal(ids(evs),
+		[]string{"e4", "e7", "e8"}) {
+		t.Errorf("the events of bot 2 = %v", ids(evs))
+	}
+}
+
+// TestThreadMessage is POST /_fake/thread-message: a person's message in the Thread of a message of either bot,
+// queued for that bot with the message's id, the text as written and the thread_ref t-<message id> once the message
+// has a Thread reply, null before; a reply id, an unknown or deleted message, an unknown person and a text longer than
+// 4000 code points are refused; Muster decodes the events.
+func TestThreadMessage(t *testing.T) {
+	s := start(t)
+	s.post(t, fakebridge.Token, "k1", envelope(fakebridge.ChannelAlerts)).posted(t)
+	s.post(t, fakebridge.SecondToken, "k2", envelope(fakebridge.ChannelAlerts)).posted(t)
+	ev := s.said(t, `{"message_id":"m1","user_id":"u-bob","text":"/Snooze 4h"}`)
+	if got := decoded(t, ev); ev.Bot != 1 || got.ID != "e1" || got.Type != bridge.TypeThreadMessage ||
+		got.MessageID != "m1" || got.ThreadRef != nil || got.Text != "/Snooze 4h" ||
+		got.User.ExternalId != fakebridge.BobID || !strings.Contains(string(ev.Event), `"thread_ref":null`) {
+		t.Errorf("the thread message = %+v %s", got, ev.Event)
+	}
+	s.reply(t, fakebridge.Token, "m1", "k3", replyOf(nil)).replied(t)
+	long := strings.Repeat("ё", fakebridge.MaxText)
+	ev = s.said(t, `{"message_id":"m1","user_id":"u-vera","text":"`+long+`","occurred_at":"2026-10-14T12:00:00Z"}`)
+	if got := decoded(t, ev); got.ThreadRef == nil || *got.ThreadRef != "t-m1" || got.Text != long ||
+		!got.OccurredAt.Equal(time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)) {
+		t.Errorf("the thread message after a reply = %+v", got)
+	}
+	if ev := s.said(t, `{"message_id":"m2","user_id":"u-alice","text":"решено"}`); ev.Bot != 2 ||
+		decoded(t, ev).Text != "решено" {
+		t.Errorf("a thread message of bot 2 = %+v", ev)
+	}
+	if status, body := s.control(t, http.MethodDelete, "/_fake/messages/m2", ""); status != http.StatusNoContent {
+		t.Fatalf("DELETE m2 = %d %s", status, body)
+	}
+	for _, bad := range []string{`{"message_id":"r1","user_id":"u-bob","text":"ack"}`,
+		`{"message_id":"m9","user_id":"u-bob","text":"ack"}`, `{"message_id":"m2","user_id":"u-bob","text":"ack"}`,
+		`{"message_id":"m1","user_id":"u-carol","text":"ack"}`,
+		`{"message_id":"m1","user_id":"u-bob","text":"` + long + `!"}`} {
+		if status, body := s.control(t, http.MethodPost, "/_fake/thread-message", bad); status != http.StatusBadRequest {
+			t.Errorf("POST /_fake/thread-message %.80s = %d %s", bad, status, body)
+		}
+	}
+	if evs, next := s.poll(t, fakebridge.Token, "wait=0").batch(t); !slices.Equal(ids(evs), []string{"e1", "e2"}) ||
+		next != "2" {
+		t.Errorf("the events of bot 1 = %v, %q", ids(evs), next)
+	}
+}
+
+// TestDeletionEvent is C-22.FR-10 at the fake: the first DELETE /_fake/messages/{id} of a message queues
+// message_deleted for its bot while capabilities.deletion_events is on, a second one queues nothing, and with
+// deletion_events off or absent a deletion queues nothing; Muster decodes the events.
+func TestDeletionEvent(t *testing.T) {
+	s := start(t)
+	for i, token := range []string{fakebridge.Token, fakebridge.Token, fakebridge.SecondToken, fakebridge.Token} {
+		s.post(t, token, "k"+strconv.Itoa(i), envelope(fakebridge.ChannelAlerts)).posted(t)
+	}
+	del := func(id string) {
+		t.Helper()
+		if status, body := s.control(t, http.MethodDelete, "/_fake/messages/"+id, ""); status != http.StatusNoContent {
+			t.Fatalf("DELETE %s = %d %s", id, status, body)
+		}
+	}
+	del("m1")
+	del("m1")
+	del("m3")
+	evs := s.fake.Events()
+	if len(evs) != 2 || evs[0].Bot != 1 || evs[1].Bot != 2 {
+		t.Fatalf("events %+v", evs)
+	}
+	if got := decoded(t, evs[0]); got.ID != "e1" || got.Type != bridge.TypeMessageDeleted || got.MessageID != "m1" ||
+		time.Since(got.OccurredAt) > time.Minute {
+		t.Errorf("the deletion = %+v", got)
+	}
+	if got := decoded(t, evs[1]); got.Type != bridge.TypeMessageDeleted || got.MessageID != "m3" {
+		t.Errorf("the deletion of bot 2 = %+v", got)
+	}
+	s.configure(t, `{"capabilities":{"buttons":{"max_per_message":10,"max_per_row":5,"data_max_bytes":64},
+		"deletion_events":false}}`)
+	del("m2")
+	s.configure(t, `{"capabilities":{"delete":{}}}`)
+	del("m4")
+	if evs := s.fake.Events(); len(evs) != 2 {
+		t.Errorf("deletions without deletion events queued %+v", evs)
+	}
+	if ms := s.fake.Messages(); !ms[0].Deleted || !ms[1].Deleted || !ms[2].Deleted || !ms[3].Deleted {
+		t.Errorf("messages %+v", ms)
+	}
+}
+
+// answerOf sends answerEvent with the token and the key, checked as getInfo is.
+func (s *spec) answerOf(t *testing.T, token, key string, in any, broken bool) answer {
+	t.Helper()
+	return s.exchange(t, request{method: http.MethodPost, path: "/v1/answers", token: token, key: key, body: in,
+		broken: broken})
+}
+
+func (a answer) shown(t *testing.T) gen.AnswerShown {
+	t.Helper()
+	var out gen.AnswerShown
+	a.ok(t, http.StatusOK, &out)
+	return out
+}
+
+// TestAnswers is answerEvent of the fake (C-22.FR-13): an answer to a press is shown privately, as ephemeral while
+// private_answers has it, else as popup, else in the Thread; an answer to a Thread message in the Thread; a repeated
+// Idempotency-Key answers its first result, replayed, and records nothing; an event the bot does not know, another
+// bot's and a message_deleted event are gone; a request that breaks the protocol is invalid; GET /_fake/answers lists
+// each answer with its event, its message, its person and where it was shown; Muster's client reads the answers.
+func TestAnswers(t *testing.T) {
+	s := start(t)
+	s.post(t, fakebridge.Token, "k1", envelope(fakebridge.ChannelAlerts)).posted(t)
+	s.press(t, `{"message_id":"m1","user_id":"u-alice","button":"Ack"}`)
+	s.said(t, `{"message_id":"m1","user_id":"u-bob","text":"snooze 2h"}`)
+	if status, body := s.control(t, http.MethodDelete, "/_fake/messages/m1", ""); status != http.StatusNoContent {
+		t.Fatalf("DELETE m1 = %d %s", status, body)
+	}
+
+	if a := s.answerOf(t, fakebridge.Token, "answer-e1", gen.AnswerInput{EventId: "e1", Text: "Not linked"},
+		false).shown(t); a.ShownAs != gen.AnswerShownShownAsEphemeral || a.Replayed {
+		t.Errorf("the answer to the press = %+v", a)
+	}
+	if a := s.answerOf(t, fakebridge.Token, "answer-e1", gen.AnswerInput{EventId: "e1", Text: "Other"},
+		false).shown(t); a.ShownAs != gen.AnswerShownShownAsEphemeral || !a.Replayed {
+		t.Errorf("the repeated answer = %+v", a)
+	}
+	if a := s.answerOf(t, fakebridge.Token, "answer-e2", gen.AnswerInput{EventId: "e2",
+		Text: "Snooze for one of: 1h, 4h, 24h"}, false).shown(t); a.ShownAs != gen.AnswerShownShownAsThread {
+		t.Errorf("the answer to the thread message = %+v", a)
+	}
+	s.answerOf(t, fakebridge.Token, "answer-e3", gen.AnswerInput{EventId: "e3", Text: "x"}, false).refused(t,
+		http.StatusNotFound, gen.ErrorClassGone)
+	s.answerOf(t, fakebridge.Token, "answer-e9", gen.AnswerInput{EventId: "e9", Text: "x"}, false).refused(t,
+		http.StatusNotFound, gen.ErrorClassGone)
+	s.answerOf(t, fakebridge.SecondToken, "answer-e1", gen.AnswerInput{EventId: "e1", Text: "x"}, false).refused(t,
+		http.StatusNotFound, gen.ErrorClassGone)
+	for _, bad := range []any{gen.AnswerInput{EventId: "e1", Text: ""},
+		gen.AnswerInput{EventId: "e1", Text: strings.Repeat("я", fakebridge.MaxAnswer+1)},
+		gen.AnswerInput{EventId: "e 1", Text: "x"}, map[string]any{"event_id": "e1"}} {
+		s.answerOf(t, fakebridge.Token, "answer-bad", bad, true).refused(t, http.StatusBadRequest,
+			gen.ErrorClassInvalid)
+	}
+	s.exchange(t, request{method: http.MethodPost, path: "/v1/answers", token: fakebridge.Token,
+		body: gen.AnswerInput{EventId: "e1", Text: "x"}, broken: true}).refused(t, http.StatusBadRequest,
+		gen.ErrorClassInvalid)
+
+	s.post(t, fakebridge.Token, "k2", envelope(fakebridge.ChannelAlerts)).posted(t)
+	c := s.client(t, fakebridge.Token)
+	for _, private := range []string{`["popup"]`, `[]`} {
+		s.configure(t, `{"capabilities":{"private_answers":`+private+`}}`)
+		ev := decoded(t, s.press(t, `{"message_id":"m2","user_id":"u-vera","button":"Ack"}`))
+		out, r := c.AnswerEvent(t.Context(), outbound.ClassInteractive, ev.ID, "You are not permitted to do this")
+		want := gen.AnswerShownShownAsPopup
+		if private == `[]` {
+			want = gen.AnswerShownShownAsThread
+		}
+		if !r.OK() || out.ShownAs != want || out.Replayed {
+			t.Errorf("Muster's answer with private_answers %s = %+v, %+v", private, out, r)
+		}
+	}
+
+	status, body := s.control(t, http.MethodGet, "/_fake/answers", "")
+	var listed []fakebridge.Answer
+	if err := json.Unmarshal([]byte(body), &listed); err != nil || status != http.StatusOK {
+		t.Fatalf("GET /_fake/answers = %d %s", status, body)
+	}
+	want := []fakebridge.Answer{
+		{Bot: 1, EventID: "e1", EventType: "press", MessageID: "m1", UserID: fakebridge.AliceID, Text: "Not linked",
+			ShownAs: "ephemeral"},
+		{Bot: 1, EventID: "e2", EventType: "thread_message", MessageID: "m1", UserID: fakebridge.BobID,
+			Text: "Snooze for one of: 1h, 4h, 24h", ShownAs: "thread"},
+		{Bot: 1, EventID: "e4", EventType: "press", MessageID: "m2", UserID: fakebridge.VeraID,
+			Text: "You are not permitted to do this", ShownAs: "popup"},
+		{Bot: 1, EventID: "e5", EventType: "press", MessageID: "m2", UserID: fakebridge.VeraID,
+			Text: "You are not permitted to do this", ShownAs: "thread"},
+	}
+	if !slices.Equal(listed, want) || !slices.Equal(s.fake.Answers(), want) {
+		t.Errorf("answers %+v", listed)
+	}
+}
+
+// receiver is a push target that records the events it receives and answers each with the next status of its
+// script, the last one again once the script ends.
+type receiver struct {
+	mu       sync.Mutex
+	statuses []int
+	got      []fakeserver.Request
+	arrived  chan struct{}
+}
+
+func newReceiver(t *testing.T, statuses ...int) (*receiver, string) {
+	t.Helper()
+	rc := &receiver{statuses: statuses, arrived: make(chan struct{}, 100)}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		rc.mu.Lock()
+		rc.got = append(rc.got, fakeserver.Request{Method: r.Method, Path: r.URL.Path, Headers: r.Header.Clone(),
+			Body: string(body)})
+		status := rc.statuses[min(len(rc.got), len(rc.statuses))-1]
+		rc.mu.Unlock()
+		w.WriteHeader(status)
+		rc.arrived <- struct{}{}
+	}))
+	t.Cleanup(srv.Close)
+	return rc, srv.URL
+}
+
+// wait waits for n pushes in all.
+func (rc *receiver) wait(t *testing.T, n int) []fakeserver.Request {
+	t.Helper()
+	timeout := time.After(10 * time.Second)
+	for {
+		rc.mu.Lock()
+		got := slices.Clone(rc.got)
+		rc.mu.Unlock()
+		if len(got) >= n {
+			return got
+		}
+		select {
+		case <-rc.arrived:
+		case <-timeout:
+			t.Fatalf("%d pushes, want %d", len(got), n)
+		}
+	}
+}
+
+// pushSecret is the push secret of the tests, in the Standard Webhooks form.
+const pushSecret = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"
+
+// signedBy checks that the push r carries the event ev, signed with secret as Standard Webhooks does, at about now.
+func signedBy(t *testing.T, r fakeserver.Request, ev fakebridge.Event, secret string) {
+	t.Helper()
+	h := http.Header(r.Headers)
+	id, ts, sig := h.Get("Webhook-Id"), h.Get("Webhook-Timestamp"), h.Get("Webhook-Signature")
+	at, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil || r.Method != http.MethodPost || r.Path != "/api/v1/callbacks/bridge/CN0000000000B3" ||
+		id != decoded(t, ev).ID || r.Body != string(ev.Event) || h.Get("Content-Type") != "application/json" ||
+		time.Since(time.Unix(at, 0)).Abs() > time.Minute ||
+		!webhooks.Verify(logging.Secret(secret), id, ts, []byte(r.Body), sig) {
+		t.Errorf("the push %+v of %s", r, ev.Event)
+	}
+}
+
+// TestPushSignsAndRetriesUntil204 is push mode of the fake (C-22.FR-11): with push set in /_fake/config, every later
+// event of either bot is posted to the one target in order, signed with the push secret as Standard Webhooks does —
+// which Muster's verifier accepts — and retried with the same webhook-id after a 500 and a 401 until it is answered
+// 204; the events stay in the poll queues; events from before the target was set are not pushed; push null stops
+// pushing; a target the fake cannot push to is refused.
+func TestPushSignsAndRetriesUntil204(t *testing.T) {
+	s := start(t)
+	rc, url := newReceiver(t, http.StatusInternalServerError, http.StatusUnauthorized, http.StatusNoContent)
+	target := url + "/api/v1/callbacks/bridge/CN0000000000B3"
+	s.post(t, fakebridge.Token, "k1", envelope(fakebridge.ChannelAlerts)).posted(t)
+	s.post(t, fakebridge.SecondToken, "k2", envelope(fakebridge.ChannelAlerts)).posted(t)
+	s.press(t, `{"message_id":"m1","user_id":"u-bob","button":"Ack"}`)
+
+	for _, bad := range []string{`{"push":{"url":"ftp://x/y","secret":"` + pushSecret + `"}}`,
+		`{"push":{"url":"/relative","secret":"` + pushSecret + `"}}`, `{"push":{"url":"http://x","secret":"nope"}}`,
+		`{"push":{"url":"http://x","secret":"whsec_!!"}}`, `{"push":{"url":"http://x"}}`, `{"push":"http://x"}`} {
+		if status, body := s.control(t, http.MethodPut, "/_fake/config", bad); status != http.StatusBadRequest {
+			t.Errorf("PUT %s = %d %s", bad, status, body)
+		}
+	}
+	c := fakebridge.DefaultConfig()
+	c.Push = &fakebridge.PushTarget{URL: target, Secret: "whsec_"}
+	if err := s.fake.SetConfig(c); err == nil {
+		t.Error("SetConfig with a push secret without a key")
+	}
+	s.configure(t, `{"push":{"url":"`+target+`","secret":"`+pushSecret+`"}}`)
+	if got := s.fake.Config().Push; got == nil || got.URL != target || got.Secret != pushSecret {
+		t.Fatalf("push %+v", got)
+	}
+	first := s.press(t, `{"message_id":"m1","user_id":"u-alice","button":"Ack"}`)
+	second := s.said(t, `{"message_id":"m2","user_id":"u-bob","text":"ack"}`)
+	got := rc.wait(t, 4)
+	if len(got) != 4 {
+		t.Fatalf("pushes %+v", got)
+	}
+	for i, ev := range []fakebridge.Event{first, first, first, second} {
+		signedBy(t, got[i], ev, pushSecret)
+	}
+	if evs, _ := s.poll(t, fakebridge.Token, "wait=0").batch(t); !slices.Equal(ids(evs), []string{"e1", "e2"}) {
+		t.Errorf("the poll queue of bot 1 = %v", ids(evs))
+	}
+	if evs, _ := s.poll(t, fakebridge.SecondToken, "wait=0").batch(t); !slices.Equal(ids(evs), []string{"e3"}) {
+		t.Errorf("the poll queue of bot 2 = %v", ids(evs))
+	}
+
+	s.configure(t, `{"push":null}`)
+	s.press(t, `{"message_id":"m1","user_id":"u-vera","button":"Ack"}`)
+	other := fakebridge.DefaultConfig()
+	other.Push = &fakebridge.PushTarget{URL: target, Secret: "whsec_c2Vjb25k"}
+	if err := s.fake.SetConfig(other); err != nil {
+		t.Fatal(err)
+	}
+	third := s.press(t, `{"message_id":"m1","user_id":"u-vera","button":"Ack"}`)
+	got = rc.wait(t, 5)
+	if len(got) != 5 {
+		t.Fatalf("pushes %+v", got)
+	}
+	signedBy(t, got[4], third, "whsec_c2Vjb25k")
+	if s.fake.Config().Push == nil {
+		t.Error("SetConfig dropped the push target")
+	}
+}
+
+// TestPushDropsOn400 is the 400 answer of the push (C-22.FR-11): an event answered 400 can never be handled and is
+// dropped after one attempt, and the next event is pushed.
+func TestPushDropsOn400(t *testing.T) {
+	s := start(t)
+	rc, url := newReceiver(t, http.StatusBadRequest, http.StatusNoContent)
+	s.post(t, fakebridge.Token, "k1", envelope(fakebridge.ChannelAlerts)).posted(t)
+	s.configure(t, `{"push":{"url":"`+url+`/api/v1/callbacks/bridge/CN0000000000B3","secret":"`+pushSecret+`"}}`)
+	first := s.press(t, `{"message_id":"m1","user_id":"u-bob","button":"Ack"}`)
+	second := s.said(t, `{"message_id":"m1","user_id":"u-bob","text":"unack"}`)
+	got := rc.wait(t, 2)
+	signedBy(t, got[0], first, pushSecret)
+	signedBy(t, got[1], second, pushSecret)
+	third := s.said(t, `{"message_id":"m1","user_id":"u-bob","text":"ack"}`)
+	if got = rc.wait(t, 3); len(got) != 3 {
+		t.Fatalf("pushes %+v", got)
+	}
+	signedBy(t, got[2], third, pushSecret)
+}
+
+// held is a push target that holds every push until the request ends, and reports each push and each end; it reads
+// the body first, so that the server notices the client leaving.
+func held(t *testing.T) (url string, arrived, ended chan struct{}) {
+	t.Helper()
+	arrived, ended = make(chan struct{}, 10), make(chan struct{}, 10)
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		arrived <- struct{}{}
+		<-r.Context().Done()
+		ended <- struct{}{}
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, arrived, ended
+}
+
+func within(t *testing.T, what string, ch chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("no %s", what)
+	}
+}
+
+// TestCloseStopsThePusher: Close ends a push in flight and the pusher before it returns, and a later event is never
+// pushed; closing the fake's server alone, as `muster dev` does, ends the push in flight too.
+func TestCloseStopsThePusher(t *testing.T) {
+	s := start(t)
+	url, arrived, ended := held(t)
+	s.post(t, fakebridge.Token, "k1", envelope(fakebridge.ChannelAlerts)).posted(t)
+	s.configure(t, `{"push":{"url":"`+url+`/api/v1/callbacks/bridge/CN0000000000B3","secret":"`+pushSecret+`"}}`)
+	s.press(t, `{"message_id":"m1","user_id":"u-bob","button":"Ack"}`)
+	within(t, "push", arrived)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := s.fake.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	within(t, "end of the push in flight", ended)
+	if _, err := s.fake.Press(t.Context(), fakebridge.Press{MessageID: "m1", UserID: fakebridge.BobID,
+		Button: "Ack"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-arrived:
+		t.Error("an event was pushed after Close")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	s2 := start(t)
+	url2, arrived2, ended2 := held(t)
+	s2.post(t, fakebridge.Token, "k1", envelope(fakebridge.ChannelAlerts)).posted(t)
+	s2.configure(t, `{"push":{"url":"`+url2+`/api/v1/callbacks/bridge/CN0000000000B3","secret":"`+pushSecret+`"}}`)
+	s2.press(t, `{"message_id":"m1","user_id":"u-bob","button":"Ack"}`)
+	within(t, "push", arrived2)
+	if err := s2.fake.Server.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	within(t, "end of the push in flight after the server closed", ended2)
 }

@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -111,6 +112,7 @@ var registry = []Probe{
 	{Name: "mattermost_connections", Run: probeMattermost},
 	{Name: "telegram_connections", Run: probeTelegram},
 	{Name: "bridge_connections", Run: probeBridge},
+	{Name: "bridge_events", Run: probeBridgeEvents},
 	{Name: "outgoing_webhooks", Run: probeWebhooks},
 	{Name: "account_links", Run: probeAccountLinks},
 	{Name: "outgoing_heartbeat", Run: probeOutgoingHeartbeat},
@@ -1861,10 +1863,192 @@ func probeBridgeAdapter(ctx context.Context, svc *connections.Service, clocks cl
 	return errors.Join(errs...)
 }
 
-// probeConnections is the one Connection of probeMattermost in memory.
+// probeBridgeEvents pushes the secrets through the event paths of a Bridge Connection (C-22.AC-3): the token, the push
+// secret and a third secret as a forged signature. Pushed events with a wrong signature — the third secret — a stale
+// timestamp, an unknown Connection, a body that is no event and carries the secrets, and a signed press from an
+// account without an Account link, whose answer the stand-in bridge refuses with a 401 problem that echoes the token,
+// the push secret and the Authorization header; then, in poll mode, the Leader's poller against the same stand-in,
+// whose pollEvents fails with that problem, then answers a batch with such a press, then fails with a 403 echo, until
+// the poll is stopped. Neither the log nor the push answers may carry a secret.
+func probeBridgeEvents(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Now().UTC()
+	clocks := clock.Clocks{Business: clock.NewManual(now), Real: clock.Real{}}
+	k, err := keyring.Load(ctx, keyring.Env{Keys: logging.Secret(masterKey("probe")), Source: keyring.SecretKeysVar},
+		false)
+	if err != nil {
+		return err
+	}
+	st, err := k.Establish(ctx, &probeStore{}, now)
+	if err != nil {
+		return err
+	}
+	if err := k.Open(ctx, logger, st); err != nil {
+		return err
+	}
+	data, _, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectRoot, PublicID: "AGAAAAAAAAAAA1",
+		Command: buttons.CommandAcknowledge})
+	if err != nil {
+		return err
+	}
+	pushSecret := "whsec_" + base64.StdEncoding.EncodeToString([]byte(secrets[1]))
+	press := func(id string) []byte {
+		return fmt.Appendf(nil, `{"id":%q,"type":"press","occurred_at":%q,"message_id":"m1",`+
+			`"user":{"external_id":"u-unlinked","display_name":"probe"},"data":%q}`, id,
+			time.Now().UTC().Format(time.RFC3339Nano), data)
+	}
+	var polls, answers atomic.Int32
+	var polling atomic.Bool
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			// In poll mode the Connection holds no push secret, which Muster therefore cannot recognize.
+			echo := "invalid token " + secrets[0] + " " + r.Header.Get("Authorization")
+			if !polling.Load() {
+				echo += " push secret " + pushSecret
+			}
+			status, class := http.StatusUnauthorized, "forbidden"
+			switch r.URL.Path {
+			case "/v1/events":
+				switch polls.Add(1) {
+				case 1:
+				case 2:
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = fmt.Fprintf(w, `{"events":[%s],"next_cursor":"1"}`, press("ev-polled"))
+					return
+				default:
+					status = http.StatusForbidden
+				}
+			case "/v1/answers":
+				answers.Add(1)
+			}
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": status, "detail": echo, "title": echo,
+				"type": "urn:" + secrets[0], "class": class})
+		})}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	network := mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}}
+	store := &probeConnections{}
+	svc := connections.New(connections.Config{OrgID: 1, Store: store, Keyring: k,
+		Audit: audit.NewWriter(logger, clocks.Business), Clocks: clocks, Network: network,
+		Interactive: deliverytest.Unlimited(1, clocks), IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081"},
+		Log: logger})
+	by := connections.Requester{Actor: audit.System, Transport: audit.TransportUI}
+	in := connections.Input{Type: connections.TypeBridge, Name: "probe", BridgeBaseURL: "http://" + ln.Addr().String(),
+		EventDelivery: connections.EventDeliveryPush, BotToken: keyring.Replace(logging.Secret(secrets[0])),
+		PushSecret: keyring.Replace(logging.Secret(pushSecret)), Limiter: connections.Limiter{Limit: 10, PerSeconds: 1},
+		Proxy: proxyconf.Input{Enabled: false}}
+	c, err := svc.Create(ctx, by, in)
+	if err != nil {
+		return err
+	}
+	events := &bridge.Events{Store: svc, Bindings: probeBridgeBindings{}, Links: probeLinks{},
+		Commands: probeCommands{}, Keys: k, Path: deliverytest.Unlimited(1, clocks), Budget: 5 * time.Second,
+		PublicURL: "http://localhost:8080", Clocks: clocks, Log: logger}
+	mux := http.NewServeMux()
+	mux.Handle(bridge.PushPattern, bridge.NewPush(bridge.PushConfig{Connections: svc, Events: events,
+		Real: clocks.Real, Log: logger}))
+	var errs []error
+	statuses := []int{}
+	send := func(connection, id string, at time.Time, body []byte, signature string) {
+		if signature == "" {
+			var err error
+			if signature, err = webhooks.Sign([]logging.Secret{logging.Secret(pushSecret)}, id, at, body); err != nil {
+				errs = append(errs, err)
+				return
+			}
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, bridge.CallbackPath+connection,
+			bytes.NewReader(body))
+		if err != nil {
+			errs = append(errs, err)
+			return
+		}
+		req.Header.Set(webhooks.HeaderID, id)
+		req.Header.Set(webhooks.HeaderTimestamp, strconv.FormatInt(at.Unix(), 10))
+		req.Header.Set(webhooks.HeaderSignature, signature)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		statuses = append(statuses, rec.Code)
+		errs = append(errs, errors.New(rec.Body.String()))
+	}
+	forged := "v1," + base64.StdEncoding.EncodeToString([]byte(secrets[2]))
+	notAnEvent := []byte(`{"id":"ev-2","token":"` + secrets[0] + `","secret":"` + pushSecret + `"}`)
+	send(c.PublicID, "ev-1", time.Now(), press("ev-1"), forged)
+	send(c.PublicID, "ev-1", time.Now().Add(-6*time.Minute), press("ev-1"), "")
+	send("CNAAAAAAAAAAA9", "ev-1", time.Now(), press("ev-1"), "")
+	send(c.PublicID, "ev-2", time.Now(), notAnEvent, "")
+	send(c.PublicID, "ev-3", time.Now(), press("ev-3"), "")
+	if want := []int{http.StatusUnauthorized, http.StatusUnauthorized, http.StatusUnauthorized,
+		http.StatusBadRequest, http.StatusNoContent}; !slices.Equal(statuses, want) || answers.Load() != 1 {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("the pushes were answered %v with %d answers, want %v and 1",
+			statuses, answers.Load(), want)})
+	}
+
+	polling.Store(true)
+	in.EventDelivery, in.PushSecret, in.BotToken = connections.EventDeliveryPoll, keyring.Keep, keyring.Keep
+	_, err = svc.Update(ctx, by, c.PublicID, nil, in)
+	errs = append(errs, err)
+	pollCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	poller := &bridge.Poller{Source: svc, Events: events, Log: logger, Wait: time.Second}
+	ran := make(chan error, 1)
+	go func() { ran <- poller.Run(pollCtx) }()
+	deadline := time.After(10 * time.Second)
+	for polls.Load() < 3 {
+		select {
+		case <-deadline:
+			errs = append(errs, &probeIncomplete{fmt.Sprintf("the poller called pollEvents %d times", polls.Load())})
+			polls.Store(3)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	stop()
+	errs = append(errs, <-ran)
+	if answers.Load() != 2 || store.cursor == nil {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("the polled press was answered %d times, cursor stored %v",
+			answers.Load()-1, store.cursor != nil)})
+	}
+	return errors.Join(errs...)
+}
+
+// probeBridgeBindings bind every Bridge press and Thread message to the Root message of the Alert Group
+// AGAAAAAAAAAAA1, and find no Root message to delete.
+type probeBridgeBindings struct{}
+
+func (probeBridgeBindings) BridgePressBinding(context.Context, int64, string) (delivery.BridgeBinding, error) {
+	conn := int64(1)
+	return delivery.BridgeBinding{Kind: buttons.SubjectRoot, Destination: delivery.Destination{ID: 2,
+		PublicID: "DSAAAAAAAAAAA2", Type: delivery.TypeBridge, Connection: &conn}, GroupPublicID: "AGAAAAAAAAAAA1",
+		GroupNumber: 1, SnoozeSeconds: []int64{3600}}, nil
+}
+
+func (b probeBridgeBindings) BridgeThreadBinding(ctx context.Context, conn int64, message string) (
+	delivery.BridgeBinding, error) {
+	return b.BridgePressBinding(ctx, conn, message)
+}
+
+func (probeBridgeBindings) RootDeleted(context.Context, int64, string) (bool, error) {
+	return false, nil
+}
+
+// probeConnections is the one Connection of probeMattermost in memory, with the cursor of its Bridge events and the
+// ids of the events it handled.
 type probeConnections struct {
 	connections.Queries
-	row *cdb.GetConnectionRow
+	row    *cdb.GetConnectionRow
+	cursor *string
+	seen   map[string]bool
 }
 
 func (s *probeConnections) InTx(_ context.Context, f func(connections.Queries) error) error {
@@ -1885,8 +2069,10 @@ func (s *probeConnections) InsertConnection(_ context.Context, a cdb.InsertConne
 	return 1, nil
 }
 
-func (s *probeConnections) GetConnection(context.Context, cdb.GetConnectionParams) (cdb.GetConnectionRow, error) {
-	if s.row == nil {
+// GetConnection is the Connection, read by its id or its public_id; another public_id is none.
+func (s *probeConnections) GetConnection(_ context.Context, a cdb.GetConnectionParams) (cdb.GetConnectionRow,
+	error) {
+	if s.row == nil || (a.PublicID.Valid && a.PublicID.String != s.row.PublicID) {
 		return cdb.GetConnectionRow{}, pgx.ErrNoRows
 	}
 	return *s.row, nil
@@ -2044,6 +2230,48 @@ func (s *probeConnections) GetOutage(context.Context) (cdb.GetOutageRow, error) 
 }
 
 func (s *probeConnections) StoreUpdateOffset(context.Context, cdb.StoreUpdateOffsetParams) error {
+	return nil
+}
+
+// ListBridgePollingConnections is the Connection when it is a Bridge one in poll mode.
+func (s *probeConnections) ListBridgePollingConnections(context.Context, int64) (
+	[]cdb.ListBridgePollingConnectionsRow, error) {
+	r := s.row
+	if r == nil || r.Type != connections.TypeBridge || r.BridgeEventDelivery.String != connections.EventDeliveryPoll {
+		return nil, nil
+	}
+	row := cdb.ListBridgePollingConnectionsRow{ID: r.ID, PublicID: r.PublicID, BridgeBaseUrl: r.BridgeBaseUrl,
+		BotTokenCiphertext: r.BotTokenCiphertext, BotTokenKeyID: r.BotTokenKeyID, BotTokenUpdatedAt: r.BotTokenUpdatedAt,
+		Proxy: r.Proxy, ProxyPasswordCiphertext: r.ProxyPasswordCiphertext, ProxyPasswordKeyID: r.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt, Version: r.Version}
+	if s.cursor != nil {
+		row.BridgeEventsCursor = pgtype.Text{String: *s.cursor, Valid: true}
+	}
+	return []cdb.ListBridgePollingConnectionsRow{row}, nil
+}
+
+func (s *probeConnections) StoreBridgeEventsCursor(_ context.Context, a cdb.StoreBridgeEventsCursorParams) (int64,
+	error) {
+	s.cursor = nil
+	if a.Cursor.Valid {
+		s.cursor = &a.Cursor.String
+	}
+	return 1, nil
+}
+
+func (s *probeConnections) LockBridgeEvent(context.Context, cdb.LockBridgeEventParams) error {
+	return nil
+}
+
+func (s *probeConnections) BridgeEventSeen(_ context.Context, a cdb.BridgeEventSeenParams) (bool, error) {
+	return s.seen[a.EventID], nil
+}
+
+func (s *probeConnections) RecordBridgeEvent(_ context.Context, a cdb.RecordBridgeEventParams) error {
+	if s.seen == nil {
+		s.seen = map[string]bool{}
+	}
+	s.seen[a.EventID] = true
 	return nil
 }
 
