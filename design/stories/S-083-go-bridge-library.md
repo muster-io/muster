@@ -58,7 +58,7 @@ acceptance:
   - "[C-22.FR-25] CI runs `lint`, `test` with the race detector on the two supported Go releases and a coverage gate of 90 %, `generate`, `spec`, `licenses`, `vulncheck` and `conformance`, joined in the check `ci`; release-please keeps a release pull request with `0.x` versions; Renovate, CodeQL and OpenSSF Scorecard run as in Muster's repository; every Action is pinned by commit SHA."
 verify: "make ci conformance"
 operator_attention: true
-issue: null
+issue: 256
 ---
 
 # S-083. The Go bridge library `muster-bridge-go` with its CI and releases (BE)

@@ -17,7 +17,7 @@ acceptance:
   - "[C-22.FR-22] CONTRIBUTING.md says that `make e2e-go` pulls the example's image from GitHub Container Registry and runs it with host networking, so it needs Docker on Linux, as on the CI runners and the development VM."
 verify: "make ci e2e-go"
 operator_attention: false
-issue: null
+issue: 259
 ---
 
 # S-086. End-to-end test against the released image of the example bridge

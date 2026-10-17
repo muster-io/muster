@@ -36,7 +36,7 @@ acceptance:
   - "[C-22.FR-22] The repository's README and the example's README show how to run the image next to `muster dev`, create a Bridge Connection and a Destination for it, and that the page has no authentication of its own; the example runs on the test environment as the maintainer deploys it, and a Muster there delivers to it, takes presses from its page and links an account by token (Notes)."
 verify: "make ci conformance"
 operator_attention: true
-issue: null
+issue: 258
 ---
 
 # S-085. The example bridge on the Go bridge library, with its chat page and image (BE)

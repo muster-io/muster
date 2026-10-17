@@ -60,7 +60,7 @@ acceptance:
   - "[C-22.FR-25] After the maintainer's PyPI setup, merging the first release pull request publishes `muster-bridge` 0.1.0, and `pip install muster-bridge==0.1.0` in a fresh virtual environment imports `muster_bridge` with `__version__` `0.1.0` (Notes)."
 verify: "make ci conformance"
 operator_attention: true
-issue: null
+issue: 257
 ---
 
 # S-084. The Python bridge library `muster-bridge` with its CI and PyPI releases (BE)
