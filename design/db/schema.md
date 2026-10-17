@@ -21,7 +21,10 @@
   [`0009_bridge_destinations`](../../internal/db/migrations/0009_bridge_destinations.up.sql)
   (Bridge Destinations, S-080) and
   [`0010_bridge_edit_windows`](../../internal/db/migrations/0010_bridge_edit_windows.up.sql)
-  (the edit windows of Bridge Root messages, S-081), in `internal/db/migrations/` — golang-migrate
+  (the edit windows of Bridge Root messages, S-081) and
+  [`0011_bridge_events`](../../internal/db/migrations/0011_bridge_events.up.sql)
+  (Bridge events: the Transport `bridge`, Bridge Account links, `bridge_events_seen`, S-075), in
+  `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
   ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md))
@@ -113,7 +116,8 @@ writer, creates it with the first Alert Group ([4.2](#42-organization)).
 
 ## 2. Inventory
 
-57 tables (5 of them partitioned) and 1 view; 90 explicit indexes in the migration.
+57 tables (5 of them partitioned) and 1 view; 90 explicit indexes in the migration. Later migrations add columns,
+indexes and one short-lived table, `bridge_events_seen` (0011), which makes 58 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -122,7 +126,7 @@ writer, creates it with the first Alert Group ([4.2](#42-organization)).
 | Organization | `organizations`, `outbound_policies`, `alert_group_counters` | organization; `alert_group_counters` only `groups` | — |
 | Users and sign-in | `users`, `user_totp`, `user_recovery_codes`, `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests`, `oidc_settings`, `oidc_checks` | users / auth | expired rows pruned |
 | API tokens | `service_accounts`, `api_tokens`, `api_token_permissions` | users / auth | — |
-| Messengers | `connections`, `destinations`, `destination_secrets`, `account_links`, `account_link_requests` | destinations, account links | expired requests pruned |
+| Messengers | `connections`, `destinations`, `destination_secrets`, `account_links`, `account_link_requests`, `bridge_events_seen` | destinations, account links, connections | expired requests and handled Bridge event ids pruned |
 | Ingestion | `integrations`, `integration_tokens`, `ingest_claims`, **`stored_snapshots`**, **`snapshot_bodies`** | integrations, ingest | 14 days, daily partitions |
 | Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences` | ingest, routing | 90 days after resolution, batched delete |
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing | — |
@@ -214,10 +218,11 @@ erDiagram
     account_links {
         bigint id PK
         bigint user_id FK
-        text messenger "telegram mattermost"
+        text messenger "telegram mattermost bridge"
         bigint connection_id FK
-        text identity_space "generated"
+        text identity_space "generated: telegram, or messenger:connection_id"
         text external_id "UK with identity_space"
+        text display_name "Bridge links"
     }
     account_link_requests {
         bigint id PK
@@ -406,6 +411,7 @@ erDiagram
     destinations ||..o{ delivery_events : records
     alert_groups |o..o{ delivery_events : "merged into Timeline"
     connections ||--o{ telegram_post_copies : buffers
+    connections ||--o{ bridge_events_seen : "handled events"
 
     routes {
         bigint id PK
@@ -426,6 +432,7 @@ erDiagram
         bigint telegram_update_offset
         text bridge_base_url
         text bridge_event_delivery "poll push"
+        text bridge_events_cursor "poll mode"
         bytea bridge_push_secret_ciphertext "Secret"
         jsonb bridge_info
         jsonb proxy
@@ -484,6 +491,11 @@ erDiagram
         bigint channel_chat_id PK
         bigint channel_message_id PK
         bigint copy_message_id
+    }
+    bridge_events_seen {
+        bigint connection_id PK
+        text event_id PK
+        timestamptz seen_at "pruned after the dedup window"
     }
 ```
 
@@ -684,8 +696,10 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18; [ADR-0005](../adr/0005-del
   (`connections_type_fields_check`), kept with its key id by `connections_bridge_push_secret_check`; a Bridge in poll
   mode has none. `bridge_info` is the last `info` a Connection check read, as the bridge sent it — at most 64 KiB,
   fields Muster does not know yet included — with `bridge_info_read_at` on the business clock; `bridge_events_cursor`
-  is where the poller of the Bridge's events goes on. A new base URL or bot token forgets all three, as it forgets the
-  bot a check learned. `UNIQUE (id, type)` is the target of type-checked foreign keys. A
+  is where the poller of the Bridge's events goes on, written by the Leader task `bridge_polling` after each batch it
+  handled, and only for the version of the Connection the poller read, so that a poller of an earlier version or of a
+  frozen old Leader writes nothing; it is not a change of the configuration. A new base URL or bot token forgets all
+  three, as it forgets the bot a check learned. `UNIQUE (id, type)` is the target of type-checked foreign keys. A
   Connection cannot be deleted while a Destination that is not deleted uses it; deleting it abandons the final edits
   still pending for its deleted Destinations, whose deliveries end as `not_delivered`.
 - **`destinations`** — one table for the four types, with type-specific nullable columns and a `CHECK` per type. The
@@ -711,11 +725,19 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18; [ADR-0005](../adr/0005-del
 - **`destination_secrets`** — the named Secrets of an outgoing webhook, referenced as `{{ .Secrets.<name> }}`; the name
   is checked to be a template identifier.
 - **`account_links`** — the identity space is a stored generated column: `'telegram'` for every Telegram link,
-  `'mattermost:<connection_id>'` for a Mattermost one. Two unique constraints carry the rules of ADR-0013:
-  `(org_id, identity_space, external_id)` — one messenger account belongs to one User — and
-  `(org_id, user_id, identity_space)` — one account per space per User; a new link replaces the old one in one
-  transaction (delete, insert, Audit log). The composite foreign key `(connection_id, messenger)` makes a Telegram link
-  name a Telegram Connection.
+  `'<messenger>:<connection_id>'` for the others — `'mattermost:<connection_id>'` for a Mattermost link,
+  `'bridge:<connection_id>'` for a Bridge one (migration 0011, C-22.FR-15). Two unique constraints carry the rules of
+  ADR-0013: `account_links_account_key` `(org_id, identity_space, external_id)` — one messenger account belongs to one
+  User — and `account_links_user_space_key` `(org_id, user_id, identity_space)` — one account per space per User; a
+  new link replaces the old one in one transaction (delete, insert, Audit log). The composite foreign key
+  `(connection_id, messenger)` makes a Telegram link name a Telegram Connection, a Mattermost one a Mattermost
+  Connection and a Bridge one a Bridge Connection. `display_name` (nullable) is the account's name as a bridge
+  reported it, which Bridge links store for Mentions and the footer. A generated column cannot change its expression
+  before PostgreSQL 17, so migration 0011 adds the new column, drops the two unique constraints and the old column,
+  renames the new one and adds the constraints again under their old names, under one exclusive lock of the small
+  table; the values of Mattermost and Telegram links do not change, so an earlier binary reads and writes the column and
+  catches the unique violations by name as before. Its down migration deletes the Bridge links and swaps the column
+  back the same way.
 - **`account_link_requests`** — pending links started from the web session: the hashed Telegram token (looked up by
   hash alone when `/start` arrives, so it has a unique partial index) or the hashed Mattermost code with its target
   account and `attempts` (`account_link.mattermost_code`). Two indexes back the request limits per requesting User and
@@ -943,7 +965,8 @@ are not copied: they are the identity of the Alert and stay on `alerts`.
 `event`, `event_seq` (position among the Alert Group's lifecycle events, the webhook `sequence`), `loudness` and
 symbolic `mentions`; and system entries without a lifecycle event (`muster_unavailable`, `fallback_template_used`,
 `template_value_missing`). The actor (`user`, `service_account` or `system` with `transport = 'system'`), the token used
-and the Transport are recorded. `CHECK` constraints encode the lifecycle event tables: every event has its Timeline kind
+and the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `cli`, `system`) are recorded; the Transport CHECK
+is widened as the one of `audit_log` is ([4.13](#413-audit-log)). `CHECK` constraints encode the lifecycle event tables: every event has its Timeline kind
 (`x-event-kinds` of the API specification), a lifecycle event always carries loudness and a sequence number, an entry
 without an event is a `system` entry, `moved_to_default_route` is both, and `mentions` only uses the eight symbolic
 names. Delivery events are not stored here; the Timeline endpoint merges `delivery_events` by time as the kind
@@ -1029,11 +1052,19 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7; [ADR-0005](../adr/0005-delivery-
   `thread_anchor_id` indexes resolve incoming Telegram updates and button presses to their delivery;
   `actual_button_key_id` answers "does an open Root message still depend on this key" on the Keyring page;
   `deliveries_superseded_idx` finds the delivery of an older Bridge Root message.
+  `superseded_button_key_ids` (`text[]`, default empty; migration 0011) lists the keys that signed the buttons of the
+  older Root messages a republication past the edit window replaced, one element per such message that carried
+  buttons, appended by the republication's record; those messages still accept presses, so their keys stay needed
+  while the Alert Group is open. The partial GIN index `deliveries_superseded_keys_idx ...
+  WHERE superseded_button_key_ids <> '{}'` finds the deliveries that still depend on a key; a lookup repeats
+  `superseded_button_key_ids <> '{}'` beside `@>`, as for `superseded_message_ids`.
 - **`thread_replies`** — follow-ups under a Root message. A `collecting` row is the open batch of new Alerts (at most
   one per delivery), due at the end of the Thread batching window; other replies (notices, Reminders, Takeovers,
   Reopens, Snooze ended, resolution by the system, the release of a disabled or deleted Owner) are `pending` at once. `event_seqs` lists the lifecycle events a
   reply carries; Reminders keep `message_id` and `button_key_id` so that a press on "Still on it" or "Unack" can be
-  checked against its message. Replies that came due while the Destination was Broken become `dropped` (C-11.FR-19).
+  checked against its message; the partial index `thread_replies_reminder_message_idx` `(destination_id, message_id)
+  WHERE event = 'reminder' AND message_id IS NOT NULL` (migration 0011) finds a sent Reminder by the message id of a
+  Bridge press, before its data is verified. Replies that came due while the Destination was Broken become `dropped` (C-11.FR-19).
   Within one delivery, replies are sent in `id` order (head-of-line, as below); `thread_replies_pending_idx`
   `(delivery_id, id) WHERE state = 'pending'` (migration 0004) answers "an earlier reply of this delivery is pending"
   for every candidate of a claim, so that a backlog of replies does not make each claim scan all pending ones.
@@ -1059,6 +1090,15 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7; [ADR-0005](../adr/0005-delivery-
   discussion group, keyed by `(connection_id, channel_chat_id, channel_message_id)`, written by whichever replica sees
   the update (the Leader's poller or the webhook) — before or after the send call returns — and learned from the copy or
   from the first comment under the post. Pruned after a day.
+- **`bridge_events_seen`** (migration 0011, C-22.FR-11) — the ids of the Bridge events a Connection handled, keyed by
+  `(org_id, connection_id, event_id)` (`event_id` checked as 1 to 200 printable ASCII characters), with `seen_at` on
+  the business clock. An event is claimed in a transaction that takes the claim's advisory lock (section 5) and looks
+  its id up here; an id found is acknowledged without handling; otherwise the event is handled — its Command runs
+  through the dispatcher in its own transaction — and its id inserted before the claim commits, so an event whose
+  handling fails is not recorded and comes again. A short-lived table: `short_lived_pruning` deletes a row
+  `bridge.event_dedup_window` after `seen_at` (index `(org_id, seen_at)`), so an id stays handled at least that long.
+  Its foreign key to `connections` takes `FOR KEY SHARE`, which a save of the Connection (`FOR NO KEY UPDATE`) does not
+  wait for. Written by `internal/connections`, whose table it is, like the cursor.
 - **`rate_limit_buckets`** — token buckets of the limiters per Destination and per Connection, shared by all replicas
   so that two replicas do not double a messenger's rate; the interactive path takes its token from the same bucket,
   ahead of waiting deliveries. Limiter settings themselves are columns of `destinations` and `connections`.
@@ -1081,8 +1121,14 @@ Serves C-03.FR-14–15, C-04.FR-6, C-10.FR-12, C-18.FR-9, C-20.FR-8.
 **`audit_log`** (partitioned by month on `at`) — every configuration change with a before/after `diff` (Secrets appear
 only as `secret_changed`), security events and every command of people and automation: actor (`user`,
 `service_account`, `system`, `bootstrap`, or `cli` with the `--actor` name), the token used (`api_token_id`,
-`token_name`), the Transport, a stable `action` (`<resource>.<verb>`, checked by pattern), the resource and `details`.
-Users are referenced by id and shown by their current name, so pseudonymization never rewrites a row.
+`token_name`), the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `cli`, `system`), a stable `action`
+(`<resource>.<verb>`, checked by pattern), the resource and `details`. Users are referenced by id and shown by their
+current name, so pseudonymization never rewrites a row. Migration 0011 adds `bridge` to the Transport CHECKs of
+`audit_log` and `timeline_entries`: each new CHECK (`..._transport_v2_check`) is added to the partitioned parent
+`NOT VALID`, which adds it to every partition, validated in a second transaction, which recurses to every partition
+on PostgreSQL 14 and 17 alike, and the old one is dropped in a third. Its down migration never deletes or rewrites a
+row with the Transport `bridge` — the Audit log is append-only and the Timeline is history: it restores the old CHECKs
+`NOT VALID`, which hold every new row, and validates them only when no such row exists.
 
 **Append-only** is enforced by triggers, not by privileges: a `BEFORE UPDATE OR DELETE` row trigger and a
 `BEFORE TRUNCATE` statement trigger raise `insufficient_privilege`. Row triggers on a partitioned table are cloned to
@@ -1173,6 +1219,23 @@ SELECT e.id FROM webhook_events e
 bumping `next_probe_at` by `delivery.broken_probe_interval` as the lease. **OIDC re-checks**: the timer claim over
 `oidc_checks`, also with `org_id = $1`. All of these were checked to use their indexes (section 8).
 
+**Bridge events** (C-22.FR-11) are claimed rather than queued: the poller and the push callback hand each event to
+one handler, which runs it in a transaction that holds a transaction advisory lock of the class `0x6d75_0007`, keyed by
+`hashtext` of the Connection's id and the event id, then looks the id up in `bridge_events_seen`:
+
+```sql
+SELECT pg_advisory_xact_lock(1836384263, hashtext(format('%s/%s', $connection_id, $event_id)));  -- 0x6d75_0007
+SELECT EXISTS (SELECT 1 FROM bridge_events_seen
+                WHERE org_id = $1 AND connection_id = $2 AND event_id = $3);
+-- not seen: the event's Command runs through the dispatcher in its own transaction, then
+INSERT INTO bridge_events_seen (org_id, connection_id, event_id, seen_at) VALUES ($1, $2, $3, $business_now)
+    ON CONFLICT DO NOTHING;
+```
+
+A second copy of the event — a push retried while the first runs, or an overlapping poll — waits on the lock and then
+finds the id. The claim holds no row lock the dispatcher takes; a crash between the Command and the insert repeats the
+Command once on redelivery, which the dispatcher's preconditions turn into a refusal or a no-op (ADR-0017).
+
 ## 6. Partitions and retention
 
 | Data | Table | Partitioning | Kept | Removed by |
@@ -1186,7 +1249,7 @@ bumping `next_probe_at` by `delivery.broken_probe_interval` as the lease. **OIDC
 | Alert Group summary rows | `alert_groups` | — | `retention.alert_group_summaries`, 2 years after resolution | batched `DELETE` (cascades Notes, deliveries, timers, queues) |
 | Notes | `notes` | — | as long as their summary row | the cascade from the summary row; never the details purge |
 | Queue rows | `thread_replies`, `webhook_events`, `deliveries` of long-resolved Alert Groups | — | while needed, then `retention.alert_details` | batched `DELETE` |
-| Short-lived state | sessions, OIDC requests, setup links, link requests, throttles, Telegram copies, stale replicas | — | until expiry; sessions `auth.session_prune_after` after they ended, throttles `auth.signin_throttle_prune_after` after the last failure, setup links `auth.password_setup_prune_after` after they expired, Account link requests `account_link.request_prune_after` after they expired | batched `DELETE`; the hourly Leader task `short_lived_pruning` for sessions, throttles and setup links, each later short-lived table added by its story |
+| Short-lived state | sessions, OIDC requests, setup links, link requests, throttles, Telegram copies, handled Bridge event ids, stale replicas | — | until expiry; sessions `auth.session_prune_after` after they ended, throttles `auth.signin_throttle_prune_after` after the last failure, setup links `auth.password_setup_prune_after` after they expired, Account link requests `account_link.request_prune_after` after they expired, `bridge_events_seen` `bridge.event_dedup_window` after `seen_at` | batched `DELETE`; the hourly Leader task `short_lived_pruning` for sessions, throttles and setup links, each later short-lived table added by its story |
 
 **Partition maintenance** is runtime work, never a migration ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md),
 C-02.FR-11). At startup, under the migration advisory lock and before serving, and then hourly on the Leader, Muster

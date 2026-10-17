@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/connections"
@@ -48,12 +49,13 @@ func TestMain(m *testing.M) {
 // liveEnv is the Connections, the Destination write path and delivery against PostgreSQL, with the fake Mattermost
 // server and the real interactive path.
 type liveEnv struct {
-	d     *db.DB
-	orgID int64
-	log   *bytes.Buffer
-	fake  *fakemattermost.Fake
-	conns *connections.Service
-	dests *destinations.Service
+	d        *db.DB
+	orgID    int64
+	log      *bytes.Buffer
+	fake     *fakemattermost.Fake
+	business *clock.Manual
+	conns    *connections.Service
+	dests    *destinations.Service
 }
 
 func setupLiveEnv(t *testing.T, s dbtest.Server) *liveEnv {
@@ -111,7 +113,7 @@ func setupLiveEnv(t *testing.T, s dbtest.Server) *liveEnv {
 	w := audit.NewWriter(logger, business)
 	svc := delivery.New(delivery.Config{OrgID: org.ID, Store: delivery.NewStore(d.Pool, d.Pool), Business: business,
 		Log: logger})
-	e := &liveEnv{d: d, orgID: org.ID, log: &log, fake: f}
+	e := &liveEnv{d: d, orgID: org.ID, log: &log, fake: f, business: business}
 	e.conns = connections.New(connections.Config{OrgID: org.ID, Store: connections.NewStore(d.Pool), Keyring: keys,
 		Audit: w, Clocks: clocks, Log: logger, IngestURL: &url.URL{Scheme: "http", Host: "localhost:8081"},
 		Network:     mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}},
@@ -157,7 +159,149 @@ func TestLive(t *testing.T) {
 		t.Run("demo", e.demo)
 		t.Run("telegram", e.telegram)
 		t.Run("telegramDestinations", e.telegramDestinations)
+		t.Run("bridge_event_claim", e.bridgeEventClaim)
 	})
+}
+
+// bridgeEventClaim is the claim of Bridge events on the real store (C-22.FR-11): two copies of one event handled at
+// the same time run one after the other under the transaction advisory lock of the Connection and the event id, and
+// only the first runs f; an error of f records nothing; the records are pruned once bridge.event_dedup_window passed on
+// the business clock; the poller's list carries the cursor, which a poller of an earlier version cannot store; the push
+// callback reads the Connection with its mode.
+func (e *liveEnv) bridgeEventClaim(t *testing.T) {
+	ctx := t.Context()
+	in := connections.Input{Type: connections.TypeBridge, Name: "live-br", BridgeBaseURL: "http://127.0.0.1:1",
+		EventDelivery: connections.EventDeliveryPoll, BotToken: keyring.Replace("live-bridge-token"),
+		Limiter: connections.Limiter{Limit: 10, PerSeconds: 1}}
+	c, err := e.conns.Create(ctx, by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := func() bool {
+		t.Helper()
+		var free bool
+		if err := e.d.Pool.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1::int,
+			hashtext(format('%s/%s', $2::bigint, $3::text)))`, 0x6d75_0007, c.ID, "ev-1").Scan(&free); err != nil {
+			t.Fatal(err)
+		}
+		return !free
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		_, err := e.conns.HandleEventOnce(ctx, c.ID, "ev-1", func(context.Context) error {
+			close(entered)
+			<-release
+			return nil
+		})
+		first <- err
+	}()
+	<-entered
+	second := make(chan bool, 1)
+	go func() {
+		ran, _ := e.conns.HandleEventOnce(ctx, c.ID, "ev-1", func(context.Context) error { return nil })
+		second <- ran
+	}()
+	select {
+	case <-second:
+		t.Fatal("the second copy did not wait for the first")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if !locked() {
+		t.Fatal("the claim lock is free while the event is handled")
+	}
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	if <-second {
+		t.Fatal("the same event was handled twice")
+	}
+	if locked() {
+		t.Fatal("the claim lock is held while no event is handled")
+	}
+	failed := errors.New("the dispatcher is down")
+	if ran, err := e.conns.HandleEventOnce(ctx, c.ID, "ev-2", func(context.Context) error { return failed }); ran ||
+		!errors.Is(err, failed) {
+		t.Fatalf("a failing event = %v, %v", ran, err)
+	}
+	if n := e.count(t, `SELECT count(*) FROM bridge_events_seen WHERE connection_id = $1 AND event_id = 'ev-2'`,
+		c.ID); n != 0 {
+		t.Fatal("a failed event was recorded")
+	}
+	if ran, err := e.conns.HandleEventOnce(ctx, c.ID, "ev-2", func(context.Context) error { return nil }); !ran ||
+		err != nil {
+		t.Fatalf("the event again = %v, %v", ran, err)
+	}
+	if n := e.count(t, `SELECT count(*) FROM bridge_events_seen WHERE org_id = $1 AND connection_id = $2
+		AND seen_at = $3`, e.orgID, c.ID, e.business.Now()); n != 2 {
+		t.Fatalf("%d events recorded at the business clock's now", n)
+	}
+	if n, err := e.conns.PruneEventsSeen(ctx, e.business.Now().Add(bridge.EventDedupWindow), 1000); n != 0 ||
+		err != nil {
+		t.Errorf("prune within the window = %d, %v", n, err)
+	}
+	if n, err := e.conns.PruneEventsSeen(ctx, e.business.Now().Add(bridge.EventDedupWindow+time.Second), 1); n != 1 ||
+		err != nil {
+		t.Errorf("prune past the window, limit 1 = %d, %v", n, err)
+	}
+	if n, err := e.conns.PruneEventsSeen(ctx, e.business.Now().Add(bridge.EventDedupWindow+time.Second), 1000); n != 1 ||
+		err != nil {
+		t.Errorf("prune the rest = %d, %v", n, err)
+	}
+
+	polled := func(t *testing.T) (bridge.Polled, bool) {
+		t.Helper()
+		list, err := e.conns.PollingConnections(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range list {
+			if p.Conn.ID == c.ID {
+				return p, true
+			}
+		}
+		return bridge.Polled{}, false
+	}
+	p, ok := polled(t)
+	if !ok || p.Cursor != nil || p.Conn.Version != c.Version {
+		t.Fatalf("polling = %+v, %v", p, ok)
+	}
+	next := "cursor-1"
+	if err := e.conns.StoreEventsCursor(ctx, p.Conn, &next); err != nil {
+		t.Fatal(err)
+	}
+	in.Name, in.BotToken = "live-br-renamed", keyring.Keep
+	if _, err := e.conns.Update(ctx, by, c.PublicID, nil, in); err != nil {
+		t.Fatal(err)
+	}
+	stale := "cursor-stale"
+	if err := e.conns.StoreEventsCursor(ctx, p.Conn, &stale); err != nil {
+		t.Fatal(err)
+	}
+	if p, ok = polled(t); !ok || p.Cursor == nil || *p.Cursor != "cursor-1" || p.Conn.Version != c.Version+1 {
+		t.Fatalf("polling after a save = %+v, %v", p, ok)
+	}
+	if err := e.conns.StoreEventsCursor(ctx, p.Conn, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.count(t, `SELECT count(*) FROM connections WHERE id = $1 AND bridge_events_cursor IS NULL`,
+		c.ID); n != 1 {
+		t.Error("the cursor was not dropped")
+	}
+	if conn, mode, err := e.conns.PushConnection(ctx, c.PublicID); err != nil || conn.ID != c.ID ||
+		mode != connections.EventDeliveryPoll {
+		t.Errorf("push connection = %+v, %q, %v", conn, mode, err)
+	}
+	if err := e.conns.Delete(ctx, by, c.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.conns.PushConnection(ctx, c.PublicID); !errors.Is(err, bridge.ErrNoConnection) {
+		t.Errorf("a deleted Connection = %v", err)
+	}
+	if _, ok := polled(t); ok {
+		t.Error("a deleted Connection is polled")
+	}
 }
 
 // telegramDestinations is C-14.FR-2 and FR-14 on the real store: a Telegram Destination saved from its channel alone

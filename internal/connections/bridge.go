@@ -31,8 +31,8 @@ const TypeBridge = "bridge"
 
 // The event delivery modes of a Bridge Connection (C-22.FR-1); connection.bridge.event_delivery is poll.
 const (
-	EventDeliveryPoll = "poll"
-	EventDeliveryPush = "push"
+	EventDeliveryPoll = bridge.EventDeliveryPoll
+	EventDeliveryPush = bridge.EventDeliveryPush
 )
 
 // The default limiter of a Bridge Connection (connection.bridge.limiter): 10 requests per second.
@@ -52,6 +52,12 @@ const (
 	// pushSecretPrefix starts a push secret in the Standard Webhooks form, followed by base64.
 	pushSecretPrefix = "whsec_"
 )
+
+// bridgeEventLockClass is the first key of the transaction advisory lock of the claim of one Bridge event, whose second
+// key is hashtext of the Connection's id and the event id: HandleEventOnce holds it while the event is handled, so
+// that a second copy of the event waits for the first and then finds its id recorded. The classes 0x6d75_0001 to
+// 0x6d75_0006 are taken (internal/auth, internal/db, internal/delivery).
+const bridgeEventLockClass int32 = 0x6d75_0007
 
 // BridgeCallbackURL is where a bridge in push mode posts the events of the Connection publicID: MUSTER_INGEST_URL
 // followed by /api/v1/callbacks/bridge/<public_id> (C-22.FR-1).
@@ -131,7 +137,21 @@ func storedPushSecret(r dbgen.GetConnectionRow) keyring.StoredSecret {
 	return s
 }
 
-var _ bridge.Targets = (*Service)(nil)
+var (
+	_ bridge.Targets     = (*Service)(nil)
+	_ bridge.Connections = (*Service)(nil)
+)
+
+// bridgeEventQueries are the queries of the events of Bridge Connections, part of Queries: the Connections to poll,
+// the cursor of their events, and the claim, the record and the pruning of event ids.
+type bridgeEventQueries interface {
+	ListBridgePollingConnections(ctx context.Context, orgID int64) ([]dbgen.ListBridgePollingConnectionsRow, error)
+	StoreBridgeEventsCursor(ctx context.Context, arg dbgen.StoreBridgeEventsCursorParams) (int64, error)
+	LockBridgeEvent(ctx context.Context, arg dbgen.LockBridgeEventParams) error
+	BridgeEventSeen(ctx context.Context, arg dbgen.BridgeEventSeenParams) (bool, error)
+	RecordBridgeEvent(ctx context.Context, arg dbgen.RecordBridgeEventParams) error
+	PruneBridgeEventsSeen(ctx context.Context, arg dbgen.PruneBridgeEventsSeenParams) (int64, error)
+}
 
 // cachedBridge is the Bridge client of a version of a Connection.
 type cachedBridge struct {
@@ -331,4 +351,118 @@ func (s *Service) StoreInfo(ctx context.Context, conn bridge.Conn, i bridge.Info
 		}
 		return q.Notify(ctx, db.Hint{OrgID: s.cfg.OrgID, Type: Hint, ID: conn.PublicID})
 	})
+}
+
+// PushConnection is the Bridge Connection publicID for the push callback (bridge.Connections): its client, kept until
+// the Connection changes, whose settings hold the push secret, and its event delivery mode. A Connection that is
+// unknown, deleted or not a Bridge Connection is bridge.ErrNoConnection.
+func (s *Service) PushConnection(ctx context.Context, publicID string) (bridge.Conn, string, error) {
+	row, err := s.row(ctx, s.cfg.Store, publicID)
+	if errors.Is(err, ErrNotFound) || (err == nil && row.Type != TypeBridge) {
+		return bridge.Conn{}, "", bridge.ErrNoConnection
+	}
+	if err != nil {
+		return bridge.Conn{}, "", err
+	}
+	c, err := s.cachedBridgeClient(row.ID, row.Version, func() (*bridge.Client, error) { return s.bridgeClient(row) })
+	if err != nil {
+		return bridge.Conn{}, "", err
+	}
+	return bridge.Conn{ID: row.ID, PublicID: row.PublicID, Version: row.Version, Client: c},
+		row.BridgeEventDelivery.String, nil
+}
+
+// PollingConnections lists the Bridge Connections in poll mode for the Leader's poller (bridge.Connections), each with
+// its client, kept until the Connection changes, and its stored cursor. A Connection whose client cannot be built is
+// left out, with bridge_poll_failed.
+func (s *Service) PollingConnections(ctx context.Context) ([]bridge.Polled, error) {
+	rows, err := s.cfg.Store.ListBridgePollingConnections(ctx, s.cfg.OrgID)
+	if err != nil {
+		return nil, fmt.Errorf("list the bridge connections to poll: %w", err)
+	}
+	out := make([]bridge.Polled, 0, len(rows))
+	for _, r := range rows {
+		row := dbgen.GetConnectionRow{ID: r.ID, PublicID: r.PublicID, Type: TypeBridge, BridgeBaseUrl: r.BridgeBaseUrl,
+			BotTokenCiphertext: r.BotTokenCiphertext, BotTokenKeyID: r.BotTokenKeyID,
+			BotTokenUpdatedAt: r.BotTokenUpdatedAt, Proxy: r.Proxy, ProxyPasswordCiphertext: r.ProxyPasswordCiphertext,
+			ProxyPasswordKeyID: r.ProxyPasswordKeyID, ProxyPasswordUpdatedAt: r.ProxyPasswordUpdatedAt,
+			Version: r.Version}
+		c, err := s.cachedBridgeClient(r.ID, r.Version, func() (*bridge.Client, error) { return s.bridgeClient(row) })
+		if err != nil {
+			s.cfg.Log.Log(ctx, logging.BridgePollFailed, logging.F("connection", r.PublicID),
+				logging.F("error", err.Error()))
+			continue
+		}
+		p := bridge.Polled{Conn: bridge.Conn{ID: r.ID, PublicID: r.PublicID, Version: r.Version, Client: c}}
+		if r.BridgeEventsCursor.Valid {
+			p.Cursor = &r.BridgeEventsCursor.String
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// StoreEventsCursor stores the cursor of the events of the Bridge Connection c, or drops it when cursor is nil
+// (bridge.Connections); it stores nothing once the Connection changed since c was read, or was deleted. It is not a
+// change of the configuration.
+func (s *Service) StoreEventsCursor(ctx context.Context, c bridge.Conn, cursor *string) error {
+	arg := dbgen.StoreBridgeEventsCursorParams{OrgID: s.cfg.OrgID, ID: c.ID, Version: c.Version}
+	if cursor != nil {
+		arg.Cursor = pgtype.Text{String: *cursor, Valid: true}
+	}
+	if _, err := s.cfg.Store.StoreBridgeEventsCursor(ctx, arg); err != nil {
+		return fmt.Errorf("store the events cursor of the connection %s: %w", c.PublicID, err)
+	}
+	return nil
+}
+
+// HandleEventOnce runs f for the event eventID of the Bridge Connection connectionID unless its id was recorded
+// within bridge.event_dedup_window (bridge.Connections), in one transaction that holds the claim's advisory lock — of
+// the class bridgeEventLockClass, keyed by the Connection and the event id — so that a second copy of the event waits
+// for the first and then finds its id recorded; once f succeeded, the id is recorded at the business clock's now and
+// the transaction commits. f runs its own transactions on other connections of the pool: the claim holds no row lock
+// that the dispatcher takes. An error of f records nothing, so that the event comes again; a crash after f and before
+// the commit repeats f once on redelivery, which the dispatcher's preconditions turn into a refusal or a no-op
+// (ADR-0017).
+func (s *Service) HandleEventOnce(ctx context.Context, connectionID int64, eventID string,
+	f func(context.Context) error) (bool, error) {
+	ran := false
+	err := s.cfg.Store.InTx(ctx, func(q Queries) error {
+		if err := q.LockBridgeEvent(ctx, dbgen.LockBridgeEventParams{LockClass: bridgeEventLockClass,
+			ConnectionID: connectionID, EventID: eventID}); err != nil {
+			return fmt.Errorf("lock the event: %w", err)
+		}
+		seen, err := q.BridgeEventSeen(ctx, dbgen.BridgeEventSeenParams{OrgID: s.cfg.OrgID,
+			ConnectionID: connectionID, EventID: eventID})
+		if err != nil {
+			return fmt.Errorf("read the record of the event: %w", err)
+		}
+		if seen {
+			return nil
+		}
+		if err := f(ctx); err != nil {
+			return err
+		}
+		if err := q.RecordBridgeEvent(ctx, dbgen.RecordBridgeEventParams{OrgID: s.cfg.OrgID,
+			ConnectionID: connectionID, EventID: eventID, SeenAt: s.cfg.Clocks.Business.Now()}); err != nil {
+			return fmt.Errorf("record the event: %w", err)
+		}
+		ran = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return ran, nil
+}
+
+// PruneEventsSeen deletes at most limit records of Bridge event ids seen bridge.event_dedup_window before now, on the
+// business clock, for short-lived pruning, and returns how many it deleted.
+func (s *Service) PruneEventsSeen(ctx context.Context, now time.Time, limit int32) (int64, error) {
+	n, err := s.cfg.Store.PruneBridgeEventsSeen(ctx, dbgen.PruneBridgeEventsSeenParams{OrgID: s.cfg.OrgID,
+		Before: now.Add(-bridge.EventDedupWindow), BatchSize: limit})
+	if err != nil {
+		return 0, fmt.Errorf("prune the bridge events seen: %w", err)
+	}
+	return n, nil
 }

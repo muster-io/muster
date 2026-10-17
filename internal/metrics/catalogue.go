@@ -73,7 +73,7 @@ var ClockSkew = newGauge(Definition{
 // ShortLivedTables are the table values of muster_short_lived_rows_pruned_total: the short-lived tables that the
 // short_lived_pruning Leader task prunes. A story that adds a table to the task adds it here.
 var ShortLivedTables = []string{"sessions", "sign_in_throttles", "password_setups", "oidc_auth_requests",
-	"telegram_post_copies", "account_link_requests"}
+	"telegram_post_copies", "account_link_requests", "bridge_events_seen"}
 
 // ShortLivedRowsPruned counts the rows the short_lived_pruning Leader task deleted, by table.
 var ShortLivedRowsPruned = newCounter(Definition{
@@ -337,7 +337,8 @@ var Commands = newCounter(Definition{
 	Help: "Commands run on Alert Groups, one per Alert Group, by command, Transport and outcome.",
 	Labels: []Label{
 		closed("command", "the Command", CommandNames...),
-		closed("transport", "how the Command reached Muster", "ui", "api", "mattermost", "telegram", "system"),
+		closed("transport", "how the Command reached Muster", "ui", "api", "mattermost", "telegram", "bridge",
+			"system"),
 		closed("outcome", "done changed the Alert Group, unchanged was an idempotent repeat, refused a refusal or a "+
 			"missing Permission, skipped an Alert Group a bulk Acknowledge left to its Owner, failed an Alert Group "+
 			"that was not found", "done", "unchanged", "refused", "skipped", "failed"),

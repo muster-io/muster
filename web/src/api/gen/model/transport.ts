@@ -19,7 +19,7 @@
  */
 
 /**
- * How a Command or change reached Muster. `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+ * How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
  */
 export type Transport = typeof Transport[keyof typeof Transport];
 
@@ -29,6 +29,7 @@ export const Transport = {
   api: 'api',
   mattermost: 'mattermost',
   telegram: 'telegram',
+  bridge: 'bridge',
   cli: 'cli',
   system: 'system',
 } as const;

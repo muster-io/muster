@@ -1020,3 +1020,225 @@ func TestBridgeInfoForDelivery(t *testing.T) {
 		t.Errorf("a failed read = %+v, %+v, %d reads", i.Limits, r, infoReads())
 	}
 }
+
+// TestBridgePushConnection is the Connection of a pushed Bridge event (C-22.FR-11): a Bridge Connection in either
+// mode, by its public_id in any case, with its mode and a client whose settings hold the push secret, kept while the
+// Connection is unchanged; a Connection that is unknown, deleted, malformed or not a Bridge is bridge.ErrNoConnection;
+// a failed read or a secret that cannot be opened is another error.
+func TestBridgePushConnection(t *testing.T) {
+	e, b := newBridgeEnv(t)
+	ctx := t.Context()
+	push := e.createBridge(t, "br-push", b.srv.URL, connections.EventDeliveryPush)
+	poll := e.createBridge(t, "br-poll", b.srv.URL, connections.EventDeliveryPoll)
+	c, mode, err := e.svc.PushConnection(ctx, strings.ToLower(push.PublicID))
+	if err != nil || mode != bridge.EventDeliveryPush || c.ID != push.ID || c.PublicID != push.PublicID ||
+		c.Version != push.Version || c.Client == nil {
+		t.Fatalf("push = %+v, %q, %v", c, mode, err)
+	}
+	if again, _, err := e.svc.PushConnection(ctx, push.PublicID); err != nil || again.Client != c.Client {
+		t.Errorf("the client of an unchanged Connection was built again: %v", err)
+	}
+	if c, mode, err := e.svc.PushConnection(ctx, poll.PublicID); err != nil || mode != bridge.EventDeliveryPoll ||
+		c.ID != poll.ID {
+		t.Errorf("poll = %+v, %q, %v", c, mode, err)
+	}
+	mm := e.create(t, "mm")
+	gone := e.createBridge(t, "gone", b.srv.URL, connections.EventDeliveryPush)
+	if err := e.svc.Delete(ctx, by, gone.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{mm.PublicID, gone.PublicID, "CN0000000000ZZ", "not-an-id", ""} {
+		if _, _, err := e.svc.PushConnection(ctx, id); !errors.Is(err, bridge.ErrNoConnection) {
+			t.Errorf("%q = %v", id, err)
+		}
+	}
+	e.store.fail["GetConnection"] = errors.New("down")
+	if _, _, err := e.svc.PushConnection(ctx, push.PublicID); err == nil || errors.Is(err, bridge.ErrNoConnection) {
+		t.Errorf("a failed read = %v", err)
+	}
+	delete(e.store.fail, "GetConnection")
+	e.store.rows[push.ID].row.BridgePushSecretCiphertext = []byte("garbage")
+	e.store.rows[push.ID].row.Version++
+	if _, _, err := e.svc.PushConnection(ctx, push.PublicID); err == nil ||
+		!strings.Contains(err.Error(), "open the push secret") {
+		t.Errorf("a push secret that cannot be opened = %v", err)
+	}
+}
+
+// TestBridgePollingConnections is the list of the Leader's poller (C-22.FR-11): the Bridge Connections in poll mode
+// that are not deleted, in id order, each with its client, kept while the Connection is unchanged and built again after
+// it changed, and its stored cursor; a Connection whose client cannot be built is left out with bridge_poll_failed, and
+// a failed read is an error.
+func TestBridgePollingConnections(t *testing.T) {
+	e, b := newBridgeEnv(t)
+	ctx := t.Context()
+	first := e.createBridge(t, "br-1", b.srv.URL, connections.EventDeliveryPoll)
+	e.createBridge(t, "br-push", b.srv.URL, connections.EventDeliveryPush)
+	e.create(t, "mm")
+	second := e.createBridge(t, "br-2", b.srv.URL, connections.EventDeliveryPoll)
+	gone := e.createBridge(t, "gone", b.srv.URL, connections.EventDeliveryPoll)
+	if err := e.svc.Delete(ctx, by, gone.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	cursor := "c-17"
+	e.store.rows[second.ID].cursor = &cursor
+	list, err := e.svc.PollingConnections(ctx)
+	if err != nil || len(list) != 2 || list[0].Conn.ID != first.ID || list[0].Cursor != nil ||
+		list[0].Conn.PublicID != first.PublicID || list[0].Conn.Version != first.Version || list[0].Conn.Client == nil ||
+		list[1].Conn.ID != second.ID || list[1].Cursor == nil || *list[1].Cursor != "c-17" {
+		t.Fatalf("polling = %+v, %v", list, err)
+	}
+	again, err := e.svc.PollingConnections(ctx)
+	if err != nil || again[0].Conn.Client != list[0].Conn.Client {
+		t.Errorf("the client of an unchanged Connection was built again: %v", err)
+	}
+	in := bridgeInput("br-1", b.srv.URL, connections.EventDeliveryPoll)
+	in.BotToken = keyring.Replace("bridge-token-secret-replaced-42")
+	if err := e.update(t, first.PublicID, in); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := e.svc.PollingConnections(ctx)
+	if err != nil || moved[0].Conn.Version != first.Version+1 || moved[0].Conn.Client == list[0].Conn.Client {
+		t.Errorf("the client after a new token = %+v, %v", moved, err)
+	}
+	e.store.rows[second.ID].row.BotTokenCiphertext = []byte("garbage")
+	e.store.rows[second.ID].row.Version++
+	e.log.Reset()
+	left, err := e.svc.PollingConnections(ctx)
+	if err != nil || len(left) != 1 || left[0].Conn.ID != first.ID {
+		t.Errorf("a token that cannot be opened = %+v, %v", left, err)
+	}
+	if !strings.Contains(e.log.String(), `"event":"bridge_poll_failed","connection":"`+second.PublicID+`"`) {
+		t.Errorf("logged %s", e.log.String())
+	}
+	e.store.fail["ListBridgePollingConnections"] = errors.New("down")
+	if _, err := e.svc.PollingConnections(ctx); err == nil {
+		t.Error("a failed read listed Connections")
+	}
+}
+
+// TestBridgeEventsCursor is the cursor of the poller (C-22.FR-11): stored and dropped for the version of the Connection
+// it was read for, ignored once the Connection changed or was deleted, and forgotten by a new token.
+func TestBridgeEventsCursor(t *testing.T) {
+	e, b := newBridgeEnv(t)
+	ctx := t.Context()
+	c := e.createBridge(t, "br", b.srv.URL, connections.EventDeliveryPoll)
+	cursor := func() *string {
+		list, err := e.svc.PollingConnections(ctx)
+		if err != nil || len(list) != 1 {
+			t.Fatalf("polling = %+v, %v", list, err)
+		}
+		return list[0].Cursor
+	}
+	conn := bridge.Conn{ID: c.ID, PublicID: c.PublicID, Version: c.Version}
+	next := "c-1"
+	if err := e.svc.StoreEventsCursor(ctx, conn, &next); err != nil || cursor() == nil || *cursor() != "c-1" {
+		t.Fatalf("stored %v, %v", cursor(), err)
+	}
+	in := bridgeInput("br-renamed", b.srv.URL, connections.EventDeliveryPoll)
+	in.BotToken = keyring.Keep
+	if err := e.update(t, c.PublicID, in); err != nil {
+		t.Fatal(err)
+	}
+	stale := "c-2"
+	if err := e.svc.StoreEventsCursor(ctx, conn, &stale); err != nil || *cursor() != "c-1" {
+		t.Errorf("a poller of an earlier version stored %v, %v", *cursor(), err)
+	}
+	conn.Version++
+	if err := e.svc.StoreEventsCursor(ctx, conn, nil); err != nil || cursor() != nil {
+		t.Errorf("dropped %v, %v", cursor(), err)
+	}
+	if err := e.svc.StoreEventsCursor(ctx, conn, &stale); err != nil || *cursor() != "c-2" {
+		t.Errorf("stored again %v, %v", cursor(), err)
+	}
+	in.BotToken = keyring.Replace("bridge-token-secret-replaced-42")
+	if err := e.update(t, c.PublicID, in); err != nil {
+		t.Fatal(err)
+	}
+	if got := cursor(); got != nil {
+		t.Errorf("a new token kept the cursor %s", *got)
+	}
+	e.store.fail["StoreBridgeEventsCursor"] = errors.New("down")
+	if err := e.svc.StoreEventsCursor(ctx, conn, &next); err == nil ||
+		!strings.Contains(err.Error(), "store the events cursor of the connection "+c.PublicID) {
+		t.Errorf("a failed store = %v", err)
+	}
+}
+
+// TestBridgeHandleEventOnce is the claim of a Bridge event (C-22.FR-11): f runs under the claim lock of the
+// Connection and the event id, and the id is recorded once f succeeded, at the business clock's now; an id recorded
+// before runs nothing; an error of f, of the lock, of the read or of the record records nothing, so that the event runs
+// again; the ids of each Connection are apart.
+func TestBridgeHandleEventOnce(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	runs := 0
+	f := func(context.Context) error {
+		runs++
+		return nil
+	}
+	if ran, err := e.svc.HandleEventOnce(ctx, 7, "ev-1", f); !ran || err != nil || runs != 1 {
+		t.Fatalf("first = %v, %v, %d runs", ran, err, runs)
+	}
+	if at, ok := e.store.seen[memEvent{connection: 7, id: "ev-1"}]; !ok || !at.Equal(t0) {
+		t.Errorf("recorded %v at %s", ok, at)
+	}
+	if len(e.store.locks) != 1 || e.store.locks[0].ConnectionID != 7 || e.store.locks[0].EventID != "ev-1" {
+		t.Errorf("locks %+v", e.store.locks)
+	}
+	if ran, err := e.svc.HandleEventOnce(ctx, 7, "ev-1", f); ran || err != nil || runs != 1 {
+		t.Errorf("again = %v, %v, %d runs", ran, err, runs)
+	}
+	if ran, err := e.svc.HandleEventOnce(ctx, 8, "ev-1", f); !ran || err != nil || runs != 2 {
+		t.Errorf("another Connection = %v, %v, %d runs", ran, err, runs)
+	}
+	failed := errors.New("the dispatcher is down")
+	if ran, err := e.svc.HandleEventOnce(ctx, 7, "ev-2", func(context.Context) error { return failed }); ran ||
+		!errors.Is(err, failed) {
+		t.Errorf("a failing f = %v, %v", ran, err)
+	}
+	if _, ok := e.store.seen[memEvent{connection: 7, id: "ev-2"}]; ok {
+		t.Error("a failed event was recorded")
+	}
+	for _, query := range []string{"LockBridgeEvent", "BridgeEventSeen", "RecordBridgeEvent"} {
+		e.store.fail[query] = errors.New("down")
+		before := runs
+		if ran, err := e.svc.HandleEventOnce(ctx, 7, "ev-2", f); ran || err == nil {
+			t.Errorf("%s failing = %v, %v", query, ran, err)
+		}
+		if _, ok := e.store.seen[memEvent{connection: 7, id: "ev-2"}]; ok {
+			t.Errorf("%s failing recorded the event", query)
+		}
+		if query != "RecordBridgeEvent" && runs != before {
+			t.Errorf("%s failing ran f", query)
+		}
+		delete(e.store.fail, query)
+	}
+	if ran, err := e.svc.HandleEventOnce(ctx, 7, "ev-2", f); !ran || err != nil {
+		t.Errorf("the event again = %v, %v", ran, err)
+	}
+}
+
+// TestBridgePruneEventsSeen is the short-lived pruning of bridge_events_seen: the ids recorded more than
+// bridge.event_dedup_window before now, at most limit of them; a failed delete is an error.
+func TestBridgePruneEventsSeen(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	for i, id := range []string{"ev-1", "ev-2", "ev-3"} {
+		e.store.seen[memEvent{connection: 7, id: id}] = t0.Add(time.Duration(i) * time.Hour)
+	}
+	if n, err := e.svc.PruneEventsSeen(ctx, t0.Add(bridge.EventDedupWindow), 10); n != 0 || err != nil {
+		t.Errorf("within the window = %d, %v", n, err)
+	}
+	if n, err := e.svc.PruneEventsSeen(ctx, t0.Add(bridge.EventDedupWindow+90*time.Minute), 1); n != 1 || err != nil {
+		t.Errorf("one past the window, limit 1 = %d, %v", n, err)
+	}
+	if n, err := e.svc.PruneEventsSeen(ctx, t0.Add(bridge.EventDedupWindow+90*time.Minute), 10); n != 1 ||
+		err != nil || len(e.store.seen) != 1 {
+		t.Errorf("the rest past the window = %d, %v, %d left", n, err, len(e.store.seen))
+	}
+	e.store.fail["PruneBridgeEventsSeen"] = errors.New("down")
+	if _, err := e.svc.PruneEventsSeen(ctx, t0.Add(48*time.Hour), 10); err == nil {
+		t.Error("a failed delete pruned")
+	}
+}

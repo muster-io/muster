@@ -250,6 +250,7 @@ type Queries interface {
 		dbgen.GetTelegramDestinationTargetRow, error)
 	GetBridgeDestinationTarget(ctx context.Context, arg dbgen.GetBridgeDestinationTargetParams) (
 		dbgen.GetBridgeDestinationTargetRow, error)
+	bridgeEventQueries
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the pool or transaction the queries run in, which the Abandon hook writes through.

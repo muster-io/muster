@@ -80,17 +80,53 @@ WARN · no fields · C-03
 
 The Organization has no Admin and the bootstrap variables are not set, so nobody can sign in to administer Muster: set MUSTER_BOOTSTRAP_ADMIN_EMAIL and MUSTER_BOOTSTRAP_ADMIN_PASSWORD (or _FILE) and restart, or run muster admin reset-password.
 
+### `bridge_event_failed`
+
+WARN · fields: `connection`, `event_id`, `type`, `error` · C-22
+
+The handling of a Bridge event failed — its claim, the read of the message it names or of the Account link, or the deleted Root message flow — so its id was not recorded as handled: connection is the public_id of the Connection, event_id the event's id, type its type and error what failed. In poll mode the cursor stays and the batch is polled again; in push mode the answer is 500 and the bridge sends the event again. Lines that keep coming for one event mean that the database or the dispatcher refuses it.
+
+### `bridge_event_rejected`
+
+INFO · fields: `connection`, `reason` · C-22
+
+A Bridge event was refused and changed nothing: connection is the public_id the request named, empty when it is not a well-formed public_id, and reason why — unknown_connection (no Bridge Connection with this id, or a deleted one), poll_mode (the Connection receives its events by polling), signature (a webhook header is missing or no signature matches the push secret), timestamp (webhook-timestamp is further than bridge.push_tolerance from Muster's real clock), each answered 401; not_an_event (the body is no event of the Bridge protocol), id_mismatch (the event's id is not webhook-id) or too_large, each answered 400. A polled event that is no event is skipped with not_an_event, and the batch goes on. Never carries the signature, the push secret, the headers or the body.
+
 ### `bridge_info_read`
 
 INFO · fields: `connection`, `protocol_version`, `features` · C-22
 
 Muster read the info of a Bridge Connection, on a Connection check or because its copy was older than bridge.info_max_age: connection is the public_id of the Connection, protocol_version the version the bridge speaks, features the names of the optional features it declares.
 
+### `bridge_poll_failed`
+
+WARN · fields: `connection`, `failures`, `error` · C-22
+
+A call of pollEvents of a Bridge Connection failed after the retries of the background client class, the cursor after a batch could not be stored, or the Connection's client could not be built: connection is the public_id of the Connection, failures how many calls in a row failed, and error what failed, masked of the token and the push secret. Logged at the first failure and every tenth; the poller backs off from 1 s to 1 min per call and polls again from the stored cursor. A failed poll makes no Destination Broken.
+
+### `bridge_press`
+
+INFO · fields: `connection`, `group`, `command`, `outcome`, `external_id`, `error` · C-22
+
+A press event of a Bridge Connection — a button press the bridge had already confirmed to its messenger — was handled, once its id was recorded: connection is the public_id of the Connection, external_id the messenger account that pressed; group the public_id of the Alert Group and command the Command, once the button data is verified against the pressed message; outcome done or unchanged for a Command that ran, which is not answered; refused, forbidden, not_linked, disabled or not_verified for a press that changed nothing; expired for a press on a Reminder whose button was signed by a key that is no longer in the Keyring; test for a press of a test message; unknown_message for a press on a message Muster did not post through the Connection, which is not answered; failed when the Command failed. Every outcome but done, unchanged and unknown_message is answered through answerEvent; error, when present, says why the press failed or why its answer was not made — no limiter token within the interactive budget, or the bridge refusing it — masked of the token. An answer that failed is not sent again.
+
+### `bridge_press_dropped`
+
+INFO · fields: `connection`, `external_id`, `age_seconds` · C-22
+
+A press event of a Bridge Connection arrived more than bridge.event_max_age after its occurred_at, by Muster's real clock, and was dropped without an answer: acting on it now could undo what people did since. connection is the public_id of the Connection, external_id the messenger account that pressed and age_seconds how old the press was. Nothing changed; the person can press again.
+
 ### `bridge_republished_past_edit_window`
 
 INFO · fields: `destination`, `group`, `old_message_id`, `new_message_id` · C-22
 
 The status of an Alert Group changed while its Bridge Root message was past the bridge's edit window, so Muster posted a new Root message Quietly and replied under the old one with a link to it: destination is the public_id of the Destination, group the public_id of the Alert Group, old_message_id and new_message_id the bridge's ids of the old and the new Root message. Later Thread replies go under the new one; the old one keeps working. Logged once the republication was recorded.
+
+### `bridge_text_command`
+
+INFO · fields: `connection`, `group`, `command`, `outcome`, `external_id`, `error` · C-22
+
+A thread_message event of a Bridge Connection was a Text command — one of the words of bridge.text_commands — and was handled once its id was recorded: connection is the public_id of the Connection, external_id the messenger account that wrote it, group the public_id of the Alert Group of the message whose Thread it is in, command the Command; outcome done or unchanged for a Command that ran, answered "Done: {command} #N"; refused, forbidden, not_linked, disabled or unknown_duration — a Snooze duration that is not one of the Route's — for a Text command that changed nothing; unknown_message for one in the Thread of a message Muster did not post through the Connection, which is not answered; dropped for one older than bridge.event_max_age, which is not answered; failed when the Command failed. error, when present, says why the Command failed or why its answer was not made, masked of the token. Any other text in a Thread is neither answered nor logged.
 
 ### `clock_skew`
 

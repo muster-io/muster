@@ -5,9 +5,9 @@
 -- requests started from the web session — a hashed Telegram deep-link token or a hashed Mattermost code.
 
 -- LookupAccountLink reads the User that the messenger account external_id of the identity space is linked to, with
--- the link's id and last use; a deleted User has no links (C-18.FR-8).
+-- their profile language, the link's id and last use; a deleted User has no links (C-18.FR-8).
 -- name: LookupAccountLink :one
-SELECT u.id, u.public_id, u.login, u.name, u.role, u.status, al.id AS link_id, al.last_used_at
+SELECT u.id, u.public_id, u.login, u.name, u.role, u.status, u.language, al.id AS link_id, al.last_used_at
 FROM account_links al
 JOIN users u ON u.org_id = al.org_id AND u.id = al.user_id
 WHERE al.org_id = @org_id AND al.identity_space = @identity_space AND al.external_id = @external_id

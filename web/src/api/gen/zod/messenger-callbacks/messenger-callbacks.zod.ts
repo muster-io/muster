@@ -68,3 +68,111 @@ export const TelegramWebhookBody = zod.object({
 
 export const TelegramWebhookResponse = zod.unknown()
 
+/**
+ * Used only when the Bridge Connection's event delivery mode is `push`: the bridge posts each event, one per request, signed as Standard Webhooks specifies with the Connection's push secret. Muster verifies `webhook-signature` — `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` with the decoded secret, any of several signatures separated by spaces — in constant time, refuses a `webhook-timestamp` further than `bridge.push_tolerance` from its real clock, and requires `webhook-id` to equal the event's `id`. It handles each event `id` of a Connection once within `bridge.event_dedup_window`, answers the person behind the event, when it does, before it answers `204`, and answers `204` also for an `id` it handled before. A bad signature, a timestamp out of range, an unknown or deleted Connection and a Connection in poll mode are all answered `401` and change nothing, so the endpoint reveals nothing about which Connections exist; a body that is no event of the Bridge protocol, or whose `id` is not `webhook-id`, is answered `400`, and the bridge drops it; an event whose handling failed is answered `500`, is not recorded as handled, and the bridge sends it again. Request validation does not answer `400` here: the handler decides every answer.
+ * @summary Receive a Bridge event (push event delivery)
+ */
+export const bridgeEventPathConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const BridgeEventParams = zod.object({
+  "connection_id": zod.string().regex(bridgeEventPathConnectionIdRegExp).describe('Connection `public_id`.')
+})
+
+export const bridgeEventHeaderWebhookIdRegExp = new RegExp('^[!-~]{1,200}$');
+export const bridgeEventHeaderWebhookTimestampRegExp = new RegExp('^[0-9]{1,12}$');
+export const bridgeEventHeaderWebhookSignatureMin = 4;
+
+
+
+export const BridgeEventHeader = zod.object({
+  "webhook-id": zod.string().regex(bridgeEventHeaderWebhookIdRegExp).describe('The event\'s `id`, kept across retries.'),
+  "webhook-timestamp": zod.string().regex(bridgeEventHeaderWebhookTimestampRegExp).describe('Unix time of this attempt, in seconds.'),
+  "webhook-signature": zod.string().min(bridgeEventHeaderWebhookSignatureMin).describe('`v1,<base64 HMAC-SHA256>`; several signatures separated by spaces are allowed while a secret is rotated.')
+})
+
+export const bridgeEventBodyOneOneIdRegExp = new RegExp('^[!-~]{1,200}$');
+export const bridgeEventBodyOneTwoUserExternalIdMax = 512;
+
+export const bridgeEventBodyOneTwoUserDisplayNameMax = 200;
+
+export const bridgeEventBodyOneTwoUserHandleMax = 320;
+
+export const bridgeEventBodyTwoOneIdRegExp = new RegExp('^[!-~]{1,200}$');
+export const bridgeEventBodyTwoTwoUserExternalIdMax = 512;
+
+export const bridgeEventBodyTwoTwoUserDisplayNameMax = 200;
+
+export const bridgeEventBodyTwoTwoUserHandleMax = 320;
+
+export const bridgeEventBodyTwoTwoTextMax = 4000;
+
+export const bridgeEventBodyThreeOneIdRegExp = new RegExp('^[!-~]{1,200}$');
+export const bridgeEventBodyThreeTwoTokenRegExp = new RegExp('^[A-Za-z0-9_-]{43}$');
+export const bridgeEventBodyThreeTwoUserExternalIdMax = 512;
+
+export const bridgeEventBodyThreeTwoUserDisplayNameMax = 200;
+
+export const bridgeEventBodyThreeTwoUserHandleMax = 320;
+
+export const bridgeEventBodyFourOneIdRegExp = new RegExp('^[!-~]{1,200}$');
+
+
+export const BridgeEventBody = zod.union([zod.object({
+  "id": zod.string().regex(bridgeEventBodyOneOneIdRegExp).describe('Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.'),
+  "type": zod.string(),
+  "occurred_at": zod.iso.datetime({"offset":true}).describe('When it happened in the messenger, or when the bridge learned of it.')
+}).describe('The members of every Bridge event, a copy of the schema `EventBase` of the Bridge protocol.').and(zod.object({
+  "type": zod.literal("press"),
+  "message_id": zod.string().describe('The message the button belongs to, a Root message or a Thread reply.'),
+  "user": zod.object({
+  "external_id": zod.string().min(1).max(bridgeEventBodyOneTwoUserExternalIdMax).describe('The account\'s stable id in the messenger.'),
+  "display_name": zod.string().min(1).max(bridgeEventBodyOneTwoUserDisplayNameMax),
+  "handle": zod.string().max(bridgeEventBodyOneTwoUserHandleMax).nullish().describe('The account\'s handle of the kind `user_lookup` declares, when the bridge knows it.')
+}).describe('A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.'),
+  "data": zod.string().describe('The button\'s `data`, unchanged.')
+}).describe('A press of a button of a message of the bot, already confirmed to the messenger.')).and(zod.object({
+  "type": zod.enum(['press'])
+})),zod.object({
+  "id": zod.string().regex(bridgeEventBodyTwoOneIdRegExp).describe('Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.'),
+  "type": zod.string(),
+  "occurred_at": zod.iso.datetime({"offset":true}).describe('When it happened in the messenger, or when the bridge learned of it.')
+}).describe('The members of every Bridge event, a copy of the schema `EventBase` of the Bridge protocol.').and(zod.object({
+  "type": zod.literal("thread_message"),
+  "message_id": zod.string().describe('The message whose Thread it is in, usually a Root message, never the id of a reply.'),
+  "thread_ref": zod.string().nullable(),
+  "user": zod.object({
+  "external_id": zod.string().min(1).max(bridgeEventBodyTwoTwoUserExternalIdMax).describe('The account\'s stable id in the messenger.'),
+  "display_name": zod.string().min(1).max(bridgeEventBodyTwoTwoUserDisplayNameMax),
+  "handle": zod.string().max(bridgeEventBodyTwoTwoUserHandleMax).nullish().describe('The account\'s handle of the kind `user_lookup` declares, when the bridge knows it.')
+}).describe('A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.'),
+  "text": zod.string().max(bridgeEventBodyTwoTwoTextMax).describe('The message as plain text, mentions of the bot removed.')
+}).describe('A person\'s message in the Thread of a message of the bot, sent when `capabilities.thread_messages` is declared; a Text command when its whole text is one.')).and(zod.object({
+  "type": zod.enum(['thread_message'])
+})),zod.object({
+  "id": zod.string().regex(bridgeEventBodyThreeOneIdRegExp).describe('Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.'),
+  "type": zod.string(),
+  "occurred_at": zod.iso.datetime({"offset":true}).describe('When it happened in the messenger, or when the bridge learned of it.')
+}).describe('The members of every Bridge event, a copy of the schema `EventBase` of the Bridge protocol.').and(zod.object({
+  "type": zod.literal("account_link"),
+  "token": zod.string().regex(bridgeEventBodyThreeTwoTokenRegExp),
+  "user": zod.object({
+  "external_id": zod.string().min(1).max(bridgeEventBodyThreeTwoUserExternalIdMax).describe('The account\'s stable id in the messenger.'),
+  "display_name": zod.string().min(1).max(bridgeEventBodyThreeTwoUserDisplayNameMax),
+  "handle": zod.string().max(bridgeEventBodyThreeTwoUserHandleMax).nullish().describe('The account\'s handle of the kind `user_lookup` declares, when the bridge knows it.')
+}).describe('A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.')
+}).describe('Someone sent the bot an Account link token in a direct message, or opened the `link_url_template` link.')).and(zod.object({
+  "type": zod.enum(['account_link'])
+})),zod.object({
+  "id": zod.string().regex(bridgeEventBodyFourOneIdRegExp).describe('Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.'),
+  "type": zod.string(),
+  "occurred_at": zod.iso.datetime({"offset":true}).describe('When it happened in the messenger, or when the bridge learned of it.')
+}).describe('The members of every Bridge event, a copy of the schema `EventBase` of the Bridge protocol.').and(zod.object({
+  "type": zod.literal("message_deleted"),
+  "message_id": zod.string()
+}).describe('A message of the bot was deleted in the messenger; sent when `capabilities.deletion_events` is declared.')).and(zod.object({
+  "type": zod.enum(['message_deleted'])
+}))]).describe('An event of a bridge, pushed by `bridgeEvent`; a copy of the schema `Event` of the Bridge protocol (`api/bridge.yaml`). `type` selects the variant.')
+
+export const BridgeEventResponse = zod.void()
+

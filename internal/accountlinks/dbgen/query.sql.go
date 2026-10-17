@@ -685,7 +685,7 @@ func (q *Queries) LockLinkUser(ctx context.Context, arg LockLinkUserParams) (Loc
 const lookupAccountLink = `-- name: LookupAccountLink :one
 
 
-SELECT u.id, u.public_id, u.login, u.name, u.role, u.status, al.id AS link_id, al.last_used_at
+SELECT u.id, u.public_id, u.login, u.name, u.role, u.status, u.language, al.id AS link_id, al.last_used_at
 FROM account_links al
 JOIN users u ON u.org_id = al.org_id AND u.id = al.user_id
 WHERE al.org_id = $1 AND al.identity_space = $2 AND al.external_id = $3
@@ -705,6 +705,7 @@ type LookupAccountLinkRow struct {
 	Name       string
 	Role       string
 	Status     string
+	Language   pgtype.Text
 	LinkID     int64
 	LastUsedAt pgtype.Timestamptz
 }
@@ -714,7 +715,7 @@ type LookupAccountLinkRow struct {
 // Account links (C-18): the messenger accounts linked to Users, one per identity space and User, and the link
 // requests started from the web session — a hashed Telegram deep-link token or a hashed Mattermost code.
 // LookupAccountLink reads the User that the messenger account external_id of the identity space is linked to, with
-// the link's id and last use; a deleted User has no links (C-18.FR-8).
+// their profile language, the link's id and last use; a deleted User has no links (C-18.FR-8).
 func (q *Queries) LookupAccountLink(ctx context.Context, arg LookupAccountLinkParams) (LookupAccountLinkRow, error) {
 	row := q.db.QueryRow(ctx, lookupAccountLink, arg.OrgID, arg.IdentitySpace, arg.ExternalID)
 	var i LookupAccountLinkRow
@@ -725,6 +726,7 @@ func (q *Queries) LookupAccountLink(ctx context.Context, arg LookupAccountLinkPa
 		&i.Name,
 		&i.Role,
 		&i.Status,
+		&i.Language,
 		&i.LinkID,
 		&i.LastUsedAt,
 	)

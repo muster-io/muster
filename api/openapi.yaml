@@ -2631,6 +2631,73 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /callbacks/bridge/{connection_id}:
+    post:
+      operationId: bridgeEvent
+      tags:
+      - Messenger callbacks
+      summary: Receive a Bridge event (push event delivery)
+      description: 'Used only when the Bridge Connection''s event delivery mode is `push`: the bridge posts each event, one
+        per request, signed as Standard Webhooks specifies with the Connection''s push secret. Muster verifies
+        `webhook-signature` — `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>`
+        with the decoded secret, any of several signatures separated by spaces — in constant time, refuses a
+        `webhook-timestamp` further than `bridge.push_tolerance` from its real clock, and requires `webhook-id` to equal
+        the event''s `id`. It handles each event `id` of a Connection once within `bridge.event_dedup_window`, answers the
+        person behind the event, when it does, before it answers `204`, and answers `204` also for an `id` it handled
+        before. A bad signature, a timestamp out of range, an unknown or deleted Connection and a Connection in poll mode
+        are all answered `401` and change nothing, so the endpoint reveals nothing about which Connections exist; a body
+        that is no event of the Bridge protocol, or whose `id` is not `webhook-id`, is answered `400`, and the bridge drops
+        it; an event whose handling failed is answered `500`, is not recorded as handled, and the bridge sends it again.
+        Request validation does not answer `400` here: the handler decides every answer.'
+      x-permission: none
+      x-listener: ingest
+      servers:
+      - url: '{ingest_url}/api/v1'
+        description: Ingest listener (`MUSTER_INGEST_URL`), the address for machines.
+        variables:
+          ingest_url:
+            default: https://ingest.muster.example.org
+        x-listener: ingest
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/ConnectionId'
+      - name: webhook-id
+        in: header
+        required: true
+        description: The event's `id`, kept across retries.
+        schema:
+          type: string
+          pattern: ^[!-~]{1,200}$
+      - name: webhook-timestamp
+        in: header
+        required: true
+        description: Unix time of this attempt, in seconds.
+        schema:
+          type: string
+          pattern: ^[0-9]{1,12}$
+      - name: webhook-signature
+        in: header
+        required: true
+        description: '`v1,<base64 HMAC-SHA256>`; several signatures separated by spaces are allowed while a secret is
+          rotated.'
+        schema:
+          type: string
+          minLength: 4
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BridgeEvent'
+      responses:
+        '204':
+          description: Handled, now or before.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /routes:
     get:
       operationId: listRoutes
@@ -7850,13 +7917,14 @@ components:
       - system-status:read
     Transport:
       type: string
-      description: How a Command or change reached Muster. `cli` marks audited CLI commands (`--actor`); `system` marks transitions
-        Muster starts on its own.
+      description: How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge
+        Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
       enum:
       - ui
       - api
       - mattermost
       - telegram
+      - bridge
       - cli
       - system
     SeverityLevel:
@@ -11628,6 +11696,146 @@ components:
       - danger
       - neutral
       - success
+    BridgeEvent:
+      x-bridge-schema: Event
+      description: An event of a bridge, pushed by `bridgeEvent`; a copy of the schema `Event` of the Bridge protocol
+        (`api/bridge.yaml`). `type` selects the variant.
+      oneOf:
+      - $ref: '#/components/schemas/BridgePressEvent'
+      - $ref: '#/components/schemas/BridgeThreadMessageEvent'
+      - $ref: '#/components/schemas/BridgeAccountLinkEvent'
+      - $ref: '#/components/schemas/BridgeMessageDeletedEvent'
+      discriminator:
+        propertyName: type
+        mapping:
+          press: '#/components/schemas/BridgePressEvent'
+          thread_message: '#/components/schemas/BridgeThreadMessageEvent'
+          account_link: '#/components/schemas/BridgeAccountLinkEvent'
+          message_deleted: '#/components/schemas/BridgeMessageDeletedEvent'
+    BridgeEventBase:
+      x-bridge-schema: EventBase
+      type: object
+      description: The members of every Bridge event, a copy of the schema `EventBase` of the Bridge protocol.
+      required:
+      - id
+      - type
+      - occurred_at
+      properties:
+        id:
+          type: string
+          description: Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII
+            without spaces, so that it can travel as the `webhook-id` header.
+          pattern: ^[!-~]{1,200}$
+        type:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+          description: When it happened in the messenger, or when the bridge learned of it.
+    BridgePressEvent:
+      x-bridge-schema: PressEvent
+      allOf:
+      - $ref: '#/components/schemas/BridgeEventBase'
+      - type: object
+        description: A press of a button of a message of the bot, already confirmed to the messenger.
+        required:
+        - message_id
+        - user
+        - data
+        properties:
+          type:
+            const: press
+          message_id:
+            type: string
+            description: The message the button belongs to, a Root message or a Thread reply.
+          user:
+            $ref: '#/components/schemas/BridgePerson'
+          data:
+            type: string
+            description: The button's `data`, unchanged.
+    BridgeThreadMessageEvent:
+      x-bridge-schema: ThreadMessageEvent
+      allOf:
+      - $ref: '#/components/schemas/BridgeEventBase'
+      - type: object
+        description: A person's message in the Thread of a message of the bot, sent when `capabilities.thread_messages`
+          is declared; a Text command when its whole text is one.
+        required:
+        - message_id
+        - thread_ref
+        - user
+        - text
+        properties:
+          type:
+            const: thread_message
+          message_id:
+            type: string
+            description: The message whose Thread it is in, usually a Root message, never the id of a reply.
+          thread_ref:
+            type:
+            - string
+            - 'null'
+          user:
+            $ref: '#/components/schemas/BridgePerson'
+          text:
+            type: string
+            description: The message as plain text, mentions of the bot removed.
+            maxLength: 4000
+    BridgeAccountLinkEvent:
+      x-bridge-schema: AccountLinkEvent
+      allOf:
+      - $ref: '#/components/schemas/BridgeEventBase'
+      - type: object
+        description: Someone sent the bot an Account link token in a direct message, or opened the `link_url_template`
+          link.
+        required:
+        - token
+        - user
+        properties:
+          type:
+            const: account_link
+          token:
+            type: string
+            pattern: ^[A-Za-z0-9_-]{43}$
+          user:
+            $ref: '#/components/schemas/BridgePerson'
+    BridgeMessageDeletedEvent:
+      x-bridge-schema: MessageDeletedEvent
+      allOf:
+      - $ref: '#/components/schemas/BridgeEventBase'
+      - type: object
+        description: A message of the bot was deleted in the messenger; sent when `capabilities.deletion_events` is
+          declared.
+        required:
+        - message_id
+        properties:
+          type:
+            const: message_deleted
+          message_id:
+            type: string
+    BridgePerson:
+      x-bridge-schema: Person
+      type: object
+      description: A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.
+      required:
+      - external_id
+      - display_name
+      properties:
+        external_id:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: The account's stable id in the messenger.
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        handle:
+          type:
+          - string
+          - 'null'
+          maxLength: 320
+          description: The account's handle of the kind `user_lookup` declares, when the bridge knows it.
     Connection:
       description: A Connection; `type` selects the variant.
       oneOf:

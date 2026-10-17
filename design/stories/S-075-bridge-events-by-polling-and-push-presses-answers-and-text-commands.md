@@ -10,6 +10,8 @@ files_touched:
   - api/openapi.yaml
   - internal/db/migrations/0011_bridge_events.up.sql
   - internal/db/migrations/0011_bridge_events.down.sql
+  - internal/db/db_test.go
+  - internal/db/migrate_test.go
   - design/db/schema.md
   - design/architecture.md
   - internal/bridge/events.go
@@ -26,7 +28,12 @@ files_touched:
   - internal/connections/bridge.go
   - internal/connections/bridge_test.go
   - internal/connections/query.sql
+  - internal/connections/connections.go
+  - internal/connections/connections_test.go
+  - internal/connections/live_test.go
   - internal/accountlinks/lookup.go
+  - internal/accountlinks/query.sql
+  - internal/delivery/delivery.go
   - internal/delivery/presses.go
   - internal/delivery/presses_test.go
   - internal/delivery/publication.go
@@ -40,8 +47,11 @@ files_touched:
   - design/prd/l1/reference.md
   - internal/messages/texts/en.json
   - internal/messages/texts/ru.json
+  - internal/messages/message.go
   - internal/runtime/runtime.go
   - internal/fakes/fakebridge/events.go
+  - internal/fakes/fakebridge/fakebridge.go
+  - internal/fakes/fakebridge/messages.go
   - internal/fakes/fakebridge/fakebridge_test.go
   - internal/logging/events.go
   - internal/archlint/secretleak.go
@@ -238,12 +248,12 @@ curl -s -X POST $FB/thread-message -d "{\"message_id\":\"$ROOT\",\"user_id\":\"u
 sleep 2; curl -s $FB/answers | jq -r '.[-4:][] | .text'
 # Done: Unacknowledged #1
 # Snooze for one of: 1h, 4h, 24h
-# Done: Snoozed #1 until …
-# You are not permitted to do this.
+# Done: Snoozed #1
+# You are not permitted to do this
 curl -s -b jar $API/alert-groups/$G | jq -c '{status, s: (.snooze_until != null)}'   # {"status":"snoozed","s":true}
 curl -s -X POST $FB/thread-message -d "{\"message_id\":\"$ROOT\",\"user_id\":\"u-bob\",\"text\":\"Решено\"}" > /dev/null; sleep 2
 curl -s -b jar $API/alert-groups/$G | jq -r .status                              # resolved
-grep -c 'bridge_text_command' dev.log                                             # 6 or more
+grep -c 'bridge_text_command' dev.log                                             # 5
 
 # C-22.AC-14: push mode
 SECRET=whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw; CB=localhost:8081/api/v1/callbacks/bridge/$C

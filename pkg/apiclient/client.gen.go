@@ -2680,6 +2680,7 @@ func (e TotpPolicy) Valid() bool {
 // Defines values for Transport.
 const (
 	TransportApi        Transport = "api"
+	TransportBridge     Transport = "bridge"
 	TransportCli        Transport = "cli"
 	TransportMattermost Transport = "mattermost"
 	TransportSystem     Transport = "system"
@@ -2691,6 +2692,8 @@ const (
 func (e Transport) Valid() bool {
 	switch e {
 	case TransportApi:
+		return true
+	case TransportBridge:
 		return true
 	case TransportCli:
 		return true
@@ -3458,7 +3461,7 @@ type AuditEntry struct {
 	TokenId   nullable.Nullable[NullablePublicId] `json:"token_id,omitempty"`
 	TokenName nullable.Nullable[string]           `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport Transport `json:"transport"`
 }
 
@@ -3466,6 +3469,20 @@ type AuditEntry struct {
 type AuditEntryList struct {
 	Items      []AuditEntry              `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// BridgeAccountLinkEvent defines model for BridgeAccountLinkEvent.
+type BridgeAccountLinkEvent struct {
+	// Id Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.
+	Id string `json:"id"`
+
+	// OccurredAt When it happened in the messenger, or when the bridge learned of it.
+	OccurredAt time.Time   `json:"occurred_at"`
+	Token      string      `json:"token"`
+	Type       interface{} `json:"type"`
+
+	// User A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.
+	User BridgePerson `json:"user"`
 }
 
 // BridgeButtonStyle A hint; the bridge maps it to the closest style its messenger has, or shows a plain button.
@@ -3662,6 +3679,21 @@ type BridgeDestinationInput struct {
 // BridgeDestinationInputType defines model for BridgeDestinationInput.Type.
 type BridgeDestinationInputType string
 
+// BridgeEvent An event of a bridge, pushed by `bridgeEvent`; a copy of the schema `Event` of the Bridge protocol (`api/bridge.yaml`). `type` selects the variant.
+type BridgeEvent struct {
+	union json.RawMessage
+}
+
+// BridgeEventBase The members of every Bridge event, a copy of the schema `EventBase` of the Bridge protocol.
+type BridgeEventBase struct {
+	// Id Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.
+	Id string `json:"id"`
+
+	// OccurredAt When it happened in the messenger, or when the bridge learned of it.
+	OccurredAt time.Time `json:"occurred_at"`
+	Type       string    `json:"type"`
+}
+
 // BridgeEventDelivery How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection's `callback_url`, signed with the push secret.
 type BridgeEventDelivery string
 
@@ -3717,6 +3749,67 @@ type BridgeLimits struct {
 
 	// SendPerSecondPerChannel A hint for the Destination limiter; `rate_limited` stays the truth.
 	SendPerSecondPerChannel *float32 `json:"send_per_second_per_channel,omitempty"`
+}
+
+// BridgeMessageDeletedEvent defines model for BridgeMessageDeletedEvent.
+type BridgeMessageDeletedEvent struct {
+	// Id Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.
+	Id        string `json:"id"`
+	MessageId string `json:"message_id"`
+
+	// OccurredAt When it happened in the messenger, or when the bridge learned of it.
+	OccurredAt time.Time   `json:"occurred_at"`
+	Type       interface{} `json:"type"`
+}
+
+// BridgePerson A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.
+type BridgePerson struct {
+	DisplayName string `json:"display_name"`
+
+	// ExternalId The account's stable id in the messenger.
+	ExternalId string `json:"external_id"`
+
+	// Handle The account's handle of the kind `user_lookup` declares, when the bridge knows it.
+	Handle nullable.Nullable[string] `json:"handle,omitempty"`
+}
+
+// BridgePressEvent defines model for BridgePressEvent.
+type BridgePressEvent struct {
+	// Data The button's `data`, unchanged.
+	Data string `json:"data"`
+
+	// Id Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.
+	Id string `json:"id"`
+
+	// MessageId The message the button belongs to, a Root message or a Thread reply.
+	MessageId string `json:"message_id"`
+
+	// OccurredAt When it happened in the messenger, or when the bridge learned of it.
+	OccurredAt time.Time   `json:"occurred_at"`
+	Type       interface{} `json:"type"`
+
+	// User A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.
+	User BridgePerson `json:"user"`
+}
+
+// BridgeThreadMessageEvent defines model for BridgeThreadMessageEvent.
+type BridgeThreadMessageEvent struct {
+	// Id Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.
+	Id string `json:"id"`
+
+	// MessageId The message whose Thread it is in, usually a Root message, never the id of a reply.
+	MessageId string `json:"message_id"`
+
+	// OccurredAt When it happened in the messenger, or when the bridge learned of it.
+	OccurredAt time.Time `json:"occurred_at"`
+
+	// Text The message as plain text, mentions of the bot removed.
+	Text      string                    `json:"text"`
+	ThreadRef nullable.Nullable[string] `json:"thread_ref"`
+	Type      interface{}               `json:"type"`
+
+	// User A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.
+	User BridgePerson `json:"user"`
 }
 
 // BrokenDestination defines model for BrokenDestination.
@@ -4750,7 +4843,7 @@ type Note struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
-	// Transport How a Command or change reached Muster. `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport Transport `json:"transport"`
 }
 
@@ -6129,7 +6222,7 @@ type TimelineActor struct {
 	Reason    nullable.Nullable[string] `json:"reason,omitempty"`
 	TokenName nullable.Nullable[string] `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport *Transport `json:"transport,omitempty"`
 }
 
@@ -6374,7 +6467,7 @@ type TotpStatus struct {
 	RecoveryCodesRemaining int                          `json:"recovery_codes_remaining"`
 }
 
-// Transport How a Command or change reached Muster. `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 type Transport string
 
 // User defines model for User.
@@ -6485,7 +6578,7 @@ type WebhookActor struct {
 	Reason    nullable.Nullable[string] `json:"reason,omitempty"`
 	TokenName nullable.Nullable[string] `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport *Transport `json:"transport,omitempty"`
 }
 
@@ -7038,6 +7131,18 @@ type ListAuditLogParams struct {
 	ResourceId *string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
 }
 
+// BridgeEventParams defines parameters for BridgeEvent.
+type BridgeEventParams struct {
+	// WebhookId The event's `id`, kept across retries.
+	WebhookId string `json:"webhook-id"`
+
+	// WebhookTimestamp Unix time of this attempt, in seconds.
+	WebhookTimestamp string `json:"webhook-timestamp"`
+
+	// WebhookSignature `v1,<base64 HMAC-SHA256>`; several signatures separated by spaces are allowed while a secret is rotated.
+	WebhookSignature string `json:"webhook-signature"`
+}
+
 // ListConnectionsParams defines parameters for ListConnections.
 type ListConnectionsParams struct {
 	// Cursor Opaque cursor from `next_cursor` of the previous page. Offsets are not supported.
@@ -7376,6 +7481,9 @@ type ResolveAlertGroupJSONRequestBody = ResolveRequest
 
 // SnoozeAlertGroupJSONRequestBody defines body for SnoozeAlertGroup for application/json ContentType.
 type SnoozeAlertGroupJSONRequestBody = SnoozeRequest
+
+// BridgeEventJSONRequestBody defines body for BridgeEvent for application/json ContentType.
+type BridgeEventJSONRequestBody = BridgeEvent
 
 // MattermostActionJSONRequestBody defines body for MattermostAction for application/json ContentType.
 type MattermostActionJSONRequestBody = MattermostActionRequest
@@ -8119,6 +8227,179 @@ func (a TelegramUpdate) MarshalJSON() ([]byte, error) {
 		}
 	}
 	return json.Marshal(object)
+}
+
+// AsBridgePressEvent returns the union data inside the BridgeEvent as a BridgePressEvent
+func (t BridgeEvent) AsBridgePressEvent() (BridgePressEvent, error) {
+	var body BridgePressEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgePressEvent overwrites any union data inside the BridgeEvent as the provided BridgePressEvent
+func (t *BridgeEvent) FromBridgePressEvent(v BridgePressEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"press"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgePressEvent performs a merge with any union data inside the BridgeEvent, using the provided BridgePressEvent
+func (t *BridgeEvent) MergeBridgePressEvent(v BridgePressEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"press"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBridgeThreadMessageEvent returns the union data inside the BridgeEvent as a BridgeThreadMessageEvent
+func (t BridgeEvent) AsBridgeThreadMessageEvent() (BridgeThreadMessageEvent, error) {
+	var body BridgeThreadMessageEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeThreadMessageEvent overwrites any union data inside the BridgeEvent as the provided BridgeThreadMessageEvent
+func (t *BridgeEvent) FromBridgeThreadMessageEvent(v BridgeThreadMessageEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"thread_message"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeThreadMessageEvent performs a merge with any union data inside the BridgeEvent, using the provided BridgeThreadMessageEvent
+func (t *BridgeEvent) MergeBridgeThreadMessageEvent(v BridgeThreadMessageEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"thread_message"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBridgeAccountLinkEvent returns the union data inside the BridgeEvent as a BridgeAccountLinkEvent
+func (t BridgeEvent) AsBridgeAccountLinkEvent() (BridgeAccountLinkEvent, error) {
+	var body BridgeAccountLinkEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeAccountLinkEvent overwrites any union data inside the BridgeEvent as the provided BridgeAccountLinkEvent
+func (t *BridgeEvent) FromBridgeAccountLinkEvent(v BridgeAccountLinkEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"account_link"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeAccountLinkEvent performs a merge with any union data inside the BridgeEvent, using the provided BridgeAccountLinkEvent
+func (t *BridgeEvent) MergeBridgeAccountLinkEvent(v BridgeAccountLinkEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"account_link"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBridgeMessageDeletedEvent returns the union data inside the BridgeEvent as a BridgeMessageDeletedEvent
+func (t BridgeEvent) AsBridgeMessageDeletedEvent() (BridgeMessageDeletedEvent, error) {
+	var body BridgeMessageDeletedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeMessageDeletedEvent overwrites any union data inside the BridgeEvent as the provided BridgeMessageDeletedEvent
+func (t *BridgeEvent) FromBridgeMessageDeletedEvent(v BridgeMessageDeletedEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"message_deleted"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeMessageDeletedEvent performs a merge with any union data inside the BridgeEvent, using the provided BridgeMessageDeletedEvent
+func (t *BridgeEvent) MergeBridgeMessageDeletedEvent(v BridgeMessageDeletedEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"message_deleted"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t BridgeEvent) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t BridgeEvent) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "account_link":
+		return t.AsBridgeAccountLinkEvent()
+	case "message_deleted":
+		return t.AsBridgeMessageDeletedEvent()
+	case "press":
+		return t.AsBridgePressEvent()
+	case "thread_message":
+		return t.AsBridgeThreadMessageEvent()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t BridgeEvent) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *BridgeEvent) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
 }
 
 // AsMattermostConnection returns the union data inside the Connection as a MattermostConnection
@@ -9232,6 +9513,24 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /audit-log (the `ListAuditLog` operationId).
 	ListAuditLog(ctx context.Context, params *ListAuditLogParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// BridgeEventWithBody Receive a Bridge event (push event delivery)
+	//
+	// Used only when the Bridge Connection's event delivery mode is `push`: the bridge posts each event, one per request, signed as Standard Webhooks specifies with the Connection's push secret. Muster verifies `webhook-signature` — `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` with the decoded secret, any of several signatures separated by spaces — in constant time, refuses a `webhook-timestamp` further than `bridge.push_tolerance` from its real clock, and requires `webhook-id` to equal the event's `id`. It handles each event `id` of a Connection once within `bridge.event_dedup_window`, answers the person behind the event, when it does, before it answers `204`, and answers `204` also for an `id` it handled before. A bad signature, a timestamp out of range, an unknown or deleted Connection and a Connection in poll mode are all answered `401` and change nothing, so the endpoint reveals nothing about which Connections exist; a body that is no event of the Bridge protocol, or whose `id` is not `webhook-id`, is answered `400`, and the bridge drops it; an event whose handling failed is answered `500`, is not recorded as handled, and the bridge sends it again. Request validation does not answer `400` here: the handler decides every answer.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /callbacks/bridge/{connection_id} (the `BridgeEvent` operationId).
+	BridgeEventWithBody(ctx context.Context, connectionId ConnectionId, params *BridgeEventParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// BridgeEvent Receive a Bridge event (push event delivery)
+	//
+	// Used only when the Bridge Connection's event delivery mode is `push`: the bridge posts each event, one per request, signed as Standard Webhooks specifies with the Connection's push secret. Muster verifies `webhook-signature` — `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` with the decoded secret, any of several signatures separated by spaces — in constant time, refuses a `webhook-timestamp` further than `bridge.push_tolerance` from its real clock, and requires `webhook-id` to equal the event's `id`. It handles each event `id` of a Connection once within `bridge.event_dedup_window`, answers the person behind the event, when it does, before it answers `204`, and answers `204` also for an `id` it handled before. A bad signature, a timestamp out of range, an unknown or deleted Connection and a Connection in poll mode are all answered `401` and change nothing, so the endpoint reveals nothing about which Connections exist; a body that is no event of the Bridge protocol, or whose `id` is not `webhook-id`, is answered `400`, and the bridge drops it; an event whose handling failed is answered `500`, is not recorded as handled, and the bridge sends it again. Request validation does not answer `400` here: the handler decides every answer.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /callbacks/bridge/{connection_id} (the `BridgeEvent` operationId).
+	BridgeEvent(ctx context.Context, connectionId ConnectionId, params *BridgeEventParams, body BridgeEventJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// MattermostActionWithBody Receive a Mattermost button press
 	//
@@ -10962,6 +11261,44 @@ func (c *Client) UnsnoozeAlertGroup(ctx context.Context, alertGroupId AlertGroup
 // Corresponds with GET /audit-log (the `ListAuditLog` operationId).
 func (c *Client) ListAuditLog(ctx context.Context, params *ListAuditLogParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListAuditLogRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// BridgeEventWithBody Receive a Bridge event (push event delivery)
+//
+// Used only when the Bridge Connection's event delivery mode is `push`: the bridge posts each event, one per request, signed as Standard Webhooks specifies with the Connection's push secret. Muster verifies `webhook-signature` — `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` with the decoded secret, any of several signatures separated by spaces — in constant time, refuses a `webhook-timestamp` further than `bridge.push_tolerance` from its real clock, and requires `webhook-id` to equal the event's `id`. It handles each event `id` of a Connection once within `bridge.event_dedup_window`, answers the person behind the event, when it does, before it answers `204`, and answers `204` also for an `id` it handled before. A bad signature, a timestamp out of range, an unknown or deleted Connection and a Connection in poll mode are all answered `401` and change nothing, so the endpoint reveals nothing about which Connections exist; a body that is no event of the Bridge protocol, or whose `id` is not `webhook-id`, is answered `400`, and the bridge drops it; an event whose handling failed is answered `500`, is not recorded as handled, and the bridge sends it again. Request validation does not answer `400` here: the handler decides every answer.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /callbacks/bridge/{connection_id} (the `BridgeEvent` operationId).
+func (c *Client) BridgeEventWithBody(ctx context.Context, connectionId ConnectionId, params *BridgeEventParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewBridgeEventRequestWithBody(c.Server, connectionId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// BridgeEvent Receive a Bridge event (push event delivery)
+//
+// Used only when the Bridge Connection's event delivery mode is `push`: the bridge posts each event, one per request, signed as Standard Webhooks specifies with the Connection's push secret. Muster verifies `webhook-signature` — `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` with the decoded secret, any of several signatures separated by spaces — in constant time, refuses a `webhook-timestamp` further than `bridge.push_tolerance` from its real clock, and requires `webhook-id` to equal the event's `id`. It handles each event `id` of a Connection once within `bridge.event_dedup_window`, answers the person behind the event, when it does, before it answers `204`, and answers `204` also for an `id` it handled before. A bad signature, a timestamp out of range, an unknown or deleted Connection and a Connection in poll mode are all answered `401` and change nothing, so the endpoint reveals nothing about which Connections exist; a body that is no event of the Bridge protocol, or whose `id` is not `webhook-id`, is answered `400`, and the bridge drops it; an event whose handling failed is answered `500`, is not recorded as handled, and the bridge sends it again. Request validation does not answer `400` here: the handler decides every answer.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /callbacks/bridge/{connection_id} (the `BridgeEvent` operationId).
+func (c *Client) BridgeEvent(ctx context.Context, connectionId ConnectionId, params *BridgeEventParams, body BridgeEventJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewBridgeEventRequest(c.Server, connectionId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -15543,6 +15880,84 @@ func NewListAuditLogRequest(server string, params *ListAuditLogParams) (*http.Re
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewBridgeEventRequest calls the generic BridgeEvent builder with application/json body
+func NewBridgeEventRequest(server string, connectionId ConnectionId, params *BridgeEventParams, body BridgeEventJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewBridgeEventRequestWithBody(server, connectionId, params, "application/json", bodyReader)
+}
+
+// NewBridgeEventRequestWithBody constructs an http.Request for the BridgeEvent method, with any body, and a specified content type
+func NewBridgeEventRequestWithBody(server string, connectionId ConnectionId, params *BridgeEventParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "connection_id", connectionId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/callbacks/bridge/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "webhook-id", params.WebhookId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("webhook-id", headerParam0)
+
+		var headerParam1 string
+
+		headerParam1, err = runtime.StyleParamWithOptions("simple", false, "webhook-timestamp", params.WebhookTimestamp, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("webhook-timestamp", headerParam1)
+
+		var headerParam2 string
+
+		headerParam2, err = runtime.StyleParamWithOptions("simple", false, "webhook-signature", params.WebhookSignature, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("webhook-signature", headerParam2)
+
 	}
 
 	return req, nil
@@ -21408,6 +21823,24 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /audit-log (the `ListAuditLog` operationId).
 	ListAuditLogWithResponse(ctx context.Context, params *ListAuditLogParams, reqEditors ...RequestEditorFn) (*ListAuditLogResponse, error)
 
+	// BridgeEventWithBodyWithResponse Receive a Bridge event (push event delivery)
+	//
+	// Used only when the Bridge Connection's event delivery mode is `push`: the bridge posts each event, one per request, signed as Standard Webhooks specifies with the Connection's push secret. Muster verifies `webhook-signature` — `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` with the decoded secret, any of several signatures separated by spaces — in constant time, refuses a `webhook-timestamp` further than `bridge.push_tolerance` from its real clock, and requires `webhook-id` to equal the event's `id`. It handles each event `id` of a Connection once within `bridge.event_dedup_window`, answers the person behind the event, when it does, before it answers `204`, and answers `204` also for an `id` it handled before. A bad signature, a timestamp out of range, an unknown or deleted Connection and a Connection in poll mode are all answered `401` and change nothing, so the endpoint reveals nothing about which Connections exist; a body that is no event of the Bridge protocol, or whose `id` is not `webhook-id`, is answered `400`, and the bridge drops it; an event whose handling failed is answered `500`, is not recorded as handled, and the bridge sends it again. Request validation does not answer `400` here: the handler decides every answer.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /callbacks/bridge/{connection_id} (the `BridgeEvent` operationId).
+	BridgeEventWithBodyWithResponse(ctx context.Context, connectionId ConnectionId, params *BridgeEventParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BridgeEventResponse, error)
+
+	// BridgeEventWithResponse Receive a Bridge event (push event delivery)
+	//
+	// Used only when the Bridge Connection's event delivery mode is `push`: the bridge posts each event, one per request, signed as Standard Webhooks specifies with the Connection's push secret. Muster verifies `webhook-signature` — `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` with the decoded secret, any of several signatures separated by spaces — in constant time, refuses a `webhook-timestamp` further than `bridge.push_tolerance` from its real clock, and requires `webhook-id` to equal the event's `id`. It handles each event `id` of a Connection once within `bridge.event_dedup_window`, answers the person behind the event, when it does, before it answers `204`, and answers `204` also for an `id` it handled before. A bad signature, a timestamp out of range, an unknown or deleted Connection and a Connection in poll mode are all answered `401` and change nothing, so the endpoint reveals nothing about which Connections exist; a body that is no event of the Bridge protocol, or whose `id` is not `webhook-id`, is answered `400`, and the bridge drops it; an event whose handling failed is answered `500`, is not recorded as handled, and the bridge sends it again. Request validation does not answer `400` here: the handler decides every answer.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /callbacks/bridge/{connection_id} (the `BridgeEvent` operationId).
+	BridgeEventWithResponse(ctx context.Context, connectionId ConnectionId, params *BridgeEventParams, body BridgeEventJSONRequestBody, reqEditors ...RequestEditorFn) (*BridgeEventResponse, error)
+
 	// MattermostActionWithBodyWithResponse Receive a Mattermost button press
 	//
 	// Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and a JSON object, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included; request validation does not answer `400` here. Whatever the person who pressed must read — a refusal, a failure, "not linked", or "not verified" for a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the Root message and which needs no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.
@@ -24506,6 +24939,61 @@ func (r ListAuditLogResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListAuditLogResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type BridgeEventResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON500 the response for an HTTP 500 `application/problem+json` response
+	ApplicationproblemJSON500 *InternalError
+}
+
+// GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r BridgeEventResponse) GetApplicationproblemJSON400() *BadRequest {
+	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r BridgeEventResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON500 returns the response for an HTTP 500 `application/problem+json` response
+func (r BridgeEventResponse) GetApplicationproblemJSON500() *InternalError {
+	return r.ApplicationproblemJSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r BridgeEventResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r BridgeEventResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r BridgeEventResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r BridgeEventResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -35442,6 +35930,36 @@ func (c *ClientWithResponses) ListAuditLogWithResponse(ctx context.Context, para
 	return ParseListAuditLogResponse(rsp)
 }
 
+// BridgeEventWithBodyWithResponse Receive a Bridge event (push event delivery)
+//
+// Used only when the Bridge Connection's event delivery mode is `push`: the bridge posts each event, one per request, signed as Standard Webhooks specifies with the Connection's push secret. Muster verifies `webhook-signature` — `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` with the decoded secret, any of several signatures separated by spaces — in constant time, refuses a `webhook-timestamp` further than `bridge.push_tolerance` from its real clock, and requires `webhook-id` to equal the event's `id`. It handles each event `id` of a Connection once within `bridge.event_dedup_window`, answers the person behind the event, when it does, before it answers `204`, and answers `204` also for an `id` it handled before. A bad signature, a timestamp out of range, an unknown or deleted Connection and a Connection in poll mode are all answered `401` and change nothing, so the endpoint reveals nothing about which Connections exist; a body that is no event of the Bridge protocol, or whose `id` is not `webhook-id`, is answered `400`, and the bridge drops it; an event whose handling failed is answered `500`, is not recorded as handled, and the bridge sends it again. Request validation does not answer `400` here: the handler decides every answer.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /callbacks/bridge/{connection_id} (the `BridgeEvent` operationId).
+func (c *ClientWithResponses) BridgeEventWithBodyWithResponse(ctx context.Context, connectionId ConnectionId, params *BridgeEventParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*BridgeEventResponse, error) {
+	rsp, err := c.BridgeEventWithBody(ctx, connectionId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseBridgeEventResponse(rsp)
+}
+
+// BridgeEventWithResponse Receive a Bridge event (push event delivery)
+//
+// Used only when the Bridge Connection's event delivery mode is `push`: the bridge posts each event, one per request, signed as Standard Webhooks specifies with the Connection's push secret. Muster verifies `webhook-signature` — `v1,` followed by the base64 of HMAC-SHA256 over `<webhook-id>.<webhook-timestamp>.<body>` with the decoded secret, any of several signatures separated by spaces — in constant time, refuses a `webhook-timestamp` further than `bridge.push_tolerance` from its real clock, and requires `webhook-id` to equal the event's `id`. It handles each event `id` of a Connection once within `bridge.event_dedup_window`, answers the person behind the event, when it does, before it answers `204`, and answers `204` also for an `id` it handled before. A bad signature, a timestamp out of range, an unknown or deleted Connection and a Connection in poll mode are all answered `401` and change nothing, so the endpoint reveals nothing about which Connections exist; a body that is no event of the Bridge protocol, or whose `id` is not `webhook-id`, is answered `400`, and the bridge drops it; an event whose handling failed is answered `500`, is not recorded as handled, and the bridge sends it again. Request validation does not answer `400` here: the handler decides every answer.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /callbacks/bridge/{connection_id} (the `BridgeEvent` operationId).
+func (c *ClientWithResponses) BridgeEventWithResponse(ctx context.Context, connectionId ConnectionId, params *BridgeEventParams, body BridgeEventJSONRequestBody, reqEditors ...RequestEditorFn) (*BridgeEventResponse, error) {
+	rsp, err := c.BridgeEvent(ctx, connectionId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseBridgeEventResponse(rsp)
+}
+
 // MattermostActionWithBodyWithResponse Receive a Mattermost button press
 //
 // Sent by the Mattermost server. Mattermost does not sign the request: Muster verifies the signed action id with the key it names, checks that `post_id` and `channel_id` belong to the post the id was issued for, maps `user_id` to a User through the Account link of this Connection and dispatches the Command with the Transport `mattermost`. Every request is answered with `200` and a JSON object, an unknown or deleted Connection, a bad signature and a body that is not JSON or does not match `MattermostActionRequest` included; request validation does not answer `400` here. Whatever the person who pressed must read — a refusal, a failure, "not linked", or "not verified" for a press on a post Muster delivered in that channel — goes first as a separate ephemeral post, shown in the channel view, and the answer is then an empty object. That post needs the `create_post_ephemeral` permission, which a bot with the role Member lacks; when it is refused, or fails in any other way, the answer carries the text as `ephemeral_text`, which Mattermost shows to that person alone in the Thread of the Root message and which needs no permission. Every other answer is an empty object, so the endpoint tells a caller nothing about which Connection ids exist. The answer never carries `update`: only the delivery worker edits the Root message.
@@ -39407,6 +39925,49 @@ func ParseListAuditLogResponse(rsp *http.Response) (*ListAuditLogResponse, error
 			headers.RetryAfter = &value
 		}
 		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseBridgeEventResponse parses an HTTP response from a BridgeEventWithResponse call
+func ParseBridgeEventResponse(rsp *http.Response) (*BridgeEventResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &BridgeEventResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
+
 	}
 
 	return response, nil
